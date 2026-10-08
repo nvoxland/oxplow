@@ -8,13 +8,17 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use oxplow_domain::agent::harness::{
-    AgentHarness, Gate, HarnessError, HarnessSetting, Input, Interact, Launch, LaunchInput,
-    LaunchSpec, Transcript,
+    AgentHarness, HarnessError, HarnessSetting, Interact, Launch, LaunchInput, LaunchSpec,
+    Transcript,
 };
-use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, TokenReading, Turn};
+use oxplow_domain::agent::observe::HookAnswer;
 use oxplow_domain::agent::text::AgentText;
+use oxplow_domain::agent::tool::ToolUse;
 
-use super::shared::{in_shell, program_and_guard, runtime, shell_escape, write_skills};
+use super::shared::{
+    claude_shaped_tool_use, in_shell, program_and_guard, resume_or_fresh, runtime, shell_escape,
+    write_skills, Resume,
+};
 use super::Named;
 
 pub(super) struct Opencode(pub(super) Named);
@@ -36,8 +40,6 @@ impl AgentHarness for Opencode {
     fn interact(&self) -> Interact {
         Interact {
             transcript: Transcript::Terminal,
-            input: Input::Keystrokes,
-            gate: Gate::Harness,
         }
     }
 
@@ -87,10 +89,6 @@ impl AgentHarness for Opencode {
         &["CLAUDE.md"]
     }
 
-    fn env_markers(&self) -> &[&str] {
-        &[]
-    }
-
     fn settings(&self) -> &[HarnessSetting] {
         &[HarnessSetting {
             key: "model",
@@ -110,18 +108,13 @@ impl AgentHarness for Opencode {
 
     /// As its hook bridge names them (`opencode-hooks.js` maps `patch` to
     /// `Edit`).
+    /// Its bridge posts Claude Code's shape (`assets/opencode-hooks.js`).
+    fn tool_use(&self, body: &serde_json::Value) -> Option<ToolUse> {
+        claude_shaped_tool_use(body)
+    }
+
     fn writing_tools(&self) -> &[&str] {
         &["write", "edit", "bash", "task"]
-    }
-
-    /// Its session format isn't read yet.
-    fn turns(&self, _: &str) -> Vec<Turn> {
-        Vec::new()
-    }
-
-    /// It exports no token telemetry.
-    fn token_readings(&self, _: &OtlpRecord<'_>) -> Vec<TokenReading> {
-        Vec::new()
     }
 
     fn render(&self, answer: &HookAnswer) -> serde_json::Value {
@@ -212,20 +205,19 @@ fn split_frontmatter_description(asset: &str) -> (Option<String>, String) {
     (description, body.trim().to_string())
 }
 
-/// `opencode -m <model>`, resuming `resume` with a fallback to a fresh
-/// session when the id is stale.
+/// `opencode -m <model>`, resuming `resume` — which it can't check on
+/// disk, so a fresh session stands in when it fails to start.
 fn command(cwd: &str, resume: Option<&str>, program: Option<&str>, model: &str) -> String {
     let (prog, guard) = program_and_guard(program, "opencode");
     let base = format!("{prog} -m {}", shell_escape(model));
-    let fresh = format!("exec {base}");
-    let command = match resume {
-        None => fresh,
-        Some(id) => format!(
-            "{base} -s {} || {{ echo '[oxplow] saved resume id was stale; starting a fresh opencode session' >&2; {fresh}; }}",
-            shell_escape(id)
-        ),
+    let resume = match resume {
+        None => Resume::Fresh,
+        Some(id) => Resume::Unchecked {
+            args: format!("-s {}", shell_escape(id)),
+            harness: "opencode",
+        },
     };
-    in_shell(cwd, &guard, &command)
+    in_shell(cwd, &guard, &resume_or_fresh(&base, resume))
 }
 
 /// The inline opencode config carried per spawn (merged on top of the

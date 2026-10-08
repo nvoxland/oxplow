@@ -1965,8 +1965,9 @@ design, so building it is filling in, not deciding:
 `effects:` (stable since P11, tsk956 — a shared or bundled extension's
 too; `effects.rs`) are scripts that react
 to a logged event by composing commands, run as
-`Actor::Effect { effect: "<extension>/<id>" }` — an agent's invoker
-rights, no thread, never a confirmation (commands.md "Only a person
+`Actor::Effect { effect: "<extension>/<id>" }` for the event's thread and
+stream — an agent's rights and gates there (the writer gate, its own
+stream's VCS), never a confirmation (commands.md "Only a person
 confirms"):
 
 ```yaml

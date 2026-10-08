@@ -116,6 +116,7 @@ mod tests {
                 .to_string(),
                 prompt: None,
                 decision: None::<ToolDecision>,
+                tool: None,
             })
             .await
             .unwrap();
@@ -172,6 +173,7 @@ mod tests {
                     payload_json: "{}".into(),
                     prompt: Some(text.into()),
                     decision: None,
+                    tool: None,
                 })
                 .await
                 .unwrap();

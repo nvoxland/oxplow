@@ -6,13 +6,13 @@
 //! - `tool_call.project` (sync) — the `agent_tool_call` row, a projection
 //!   of the event (`v_tool_call`, `v_context_read`, `v_struggle`); one row
 //!   per event however often it is delivered.
-//! - `effort.claim` (async) — a structured edit (Edit / Write / MultiEdit /
-//!   NotebookEdit) claims its file for the effort that was open when it
-//!   happened (the event's effort anchor), falling back to target scoring
-//!   when several were open. `Bash` / formatter writes stay for snapshot
-//!   reconciliation.
+//! - `effort.claim` (async) — an edit (`kind: edit`, whatever its harness
+//!   calls it) claims every file it names for the effort that was open
+//!   when it happened (the event's effort anchor), falling back to target
+//!   scoring when several were open. Shell and formatter writes stay for
+//!   snapshot reconciliation.
 //!
-//! The ingest already made `path` relative to the thread's worktree, so
+//! The ingest already made `paths` relative to the thread's worktree, so
 //! these read the payload as it is.
 
 use std::path::{Path, PathBuf};
@@ -28,13 +28,16 @@ use crate::event_pump::{AsyncEventConsumer, EventConsumer};
 pub const TOOL_CALL_PROJECTION: &str = "tool_call.project";
 pub const EFFORT_CLAIM: &str = "effort.claim";
 
-/// Tools that write the file they name.
-fn is_structured_write(tool: &str) -> bool {
-    matches!(tool, "Edit" | "Write" | "MultiEdit" | "NotebookEdit")
-}
-
 fn str_field<'a>(event: &'a StoredEvent, key: &str) -> Option<&'a str> {
     event.envelope.payload.get(key).and_then(|v| v.as_str())
+}
+
+/// The files the call names (`paths`).
+fn paths(event: &StoredEvent) -> Vec<&str> {
+    event.envelope.payload["paths"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|p| p.as_str()).collect())
+        .unwrap_or_default()
 }
 
 /// Projects each `agent.tool.finished` into `agent_tool_call`.
@@ -59,7 +62,8 @@ impl EventConsumer for ToolCallProjection {
             effort_id: env.anchors.effort_id.map(|e| e.value()),
             turn_id: env.anchors.turn_id,
             tool: str_field(event, "tool").unwrap_or_default().to_string(),
-            path: str_field(event, "path").map(str::to_string),
+            // A row per call: its first file.
+            path: paths(event).first().map(|p| p.to_string()),
             detail: str_field(event, "detail").map(str::to_string),
             ok: env.payload.get("ok").and_then(|v| v.as_bool()),
             event_id: Some(env.id.as_str().to_string()),
@@ -121,27 +125,32 @@ impl AsyncEventConsumer for EffortClaimConsumer {
     }
 
     async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError> {
-        let (Some(thread), Some(tool), Some(path)) = (
-            event.envelope.anchors.thread_id,
-            str_field(event, "tool"),
-            str_field(event, "path"),
-        ) else {
+        let Some(thread) = event.envelope.anchors.thread_id else {
             return Ok(());
         };
+        if str_field(event, "kind") != Some("edit") {
+            return Ok(());
+        }
         // An absolute path is outside the thread's worktree: no effort's file.
-        if !is_structured_write(tool) || Path::new(path).is_absolute() {
+        let files: Vec<&str> = paths(event)
+            .into_iter()
+            .filter(|p| !Path::new(p).is_absolute())
+            .collect();
+        if files.is_empty() {
             return Ok(());
         }
         let worktree = self.worktree(thread).await?;
-        self.efforts
-            .claim_effort_file(
-                &thread,
-                event.envelope.anchors.effort_id,
-                path,
-                Some(&worktree),
-            )
-            .await
-            .map(|_| ())
+        for path in files {
+            self.efforts
+                .claim_effort_file(
+                    &thread,
+                    event.envelope.anchors.effort_id,
+                    path,
+                    Some(&worktree),
+                )
+                .await?;
+        }
+        Ok(())
     }
 }
 
@@ -171,6 +180,7 @@ mod tests {
                 allowed: true,
                 reason: None,
             }),
+            tool: None,
         }
     }
 

@@ -6,14 +6,11 @@
 //! answers have a shape of its own (`{"fake": …}`) and its binary fails on
 //! any other, so a pass shows core let the harness render every answer.
 
-use std::path::Path;
-
 use oxplow_domain::agent::harness::{
-    AgentHarness, Gate, HarnessError, HarnessSetting, Input, Interact, Launch, LaunchInput,
-    LaunchSpec, Transcript,
+    AgentHarness, HarnessError, Interact, Launch, LaunchInput, LaunchSpec, Transcript,
 };
-use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, TokenReading, Turn};
-use oxplow_domain::agent::text::AgentText;
+use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, TokenReading};
+use oxplow_domain::agent::tool::{ToolKind, ToolUse};
 use oxplow_domain::events::schema::TokenKind;
 
 /// Its registry key.
@@ -47,8 +44,6 @@ impl AgentHarness for FakeHarness {
     fn interact(&self) -> Interact {
         Interact {
             transcript: Transcript::Terminal,
-            input: Input::Keystrokes,
-            gate: Gate::Harness,
         }
     }
 
@@ -76,28 +71,31 @@ impl AgentHarness for FakeHarness {
         })
     }
 
-    fn instruction_files(&self) -> &[&str] {
-        &[]
-    }
-
-    fn env_markers(&self) -> &[&str] {
-        &[]
-    }
-
-    fn settings(&self) -> &[HarnessSetting] {
-        &[]
-    }
-
-    fn refresh_text(&self, _: &Path, _: &AgentText) -> Result<(), HarnessError> {
-        Ok(())
+    /// Its scripted session posts one edit, `{"tool_name": "Edit",
+    /// "tool_input": {"file_path": …}}`.
+    fn tool_use(&self, body: &serde_json::Value) -> Option<ToolUse> {
+        let name = body.get("tool_name")?.as_str()?.to_string();
+        let kind = if name == "Edit" {
+            ToolKind::Edit
+        } else {
+            ToolKind::Other
+        };
+        Some(ToolUse {
+            paths: body["tool_input"]["file_path"]
+                .as_str()
+                .map(|p| vec![p.to_string()])
+                .unwrap_or_default(),
+            ok: body
+                .get("tool_response")
+                .map(|r| r["success"].as_bool().unwrap_or(false)),
+            name,
+            kind,
+            ..ToolUse::default()
+        })
     }
 
     fn writing_tools(&self) -> &[&str] {
         &["edit"]
-    }
-
-    fn turns(&self, _: &str) -> Vec<Turn> {
-        Vec::new()
     }
 
     fn token_readings(&self, record: &OtlpRecord<'_>) -> Vec<TokenReading> {

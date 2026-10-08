@@ -2,15 +2,14 @@
 //! Its launch is the ACP agent's program — what its adapter declares, as
 //! resolved for this project (`acp::agents`) and handed in as the config.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use oxplow_domain::agent::harness::{
-    AgentHarness, Gate, HarnessError, HarnessSetting, Input, Interact, Launch, LaunchInput,
-    LaunchSpec, Transcript,
+    AgentHarness, HarnessError, Interact, Launch, LaunchInput, LaunchSpec, Transcript,
 };
 
-use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, TokenReading, Turn};
-use oxplow_domain::agent::text::AgentText;
+use oxplow_domain::agent::observe::HookAnswer;
+use oxplow_domain::agent::tool::ToolUse;
 
 use super::Named;
 
@@ -41,8 +40,6 @@ impl AgentHarness for Acp {
     fn interact(&self) -> Interact {
         Interact {
             transcript: Transcript::Structured,
-            input: Input::Prompt,
-            gate: Gate::Oxplow,
         }
     }
 
@@ -64,34 +61,16 @@ impl AgentHarness for Acp {
         &["CLAUDE.md"]
     }
 
-    fn env_markers(&self) -> &[&str] {
-        &[]
-    }
-
-    fn settings(&self) -> &[HarnessSetting] {
-        &[]
-    }
-
-    /// An ACP agent has no runtime on disk: its skills ride its system
-    /// prompt, read at each session's start.
-    fn refresh_text(&self, _: &Path, _: &AgentText) -> Result<(), HarnessError> {
-        Ok(())
-    }
-
     /// The canonical names its tool calls are recorded under
     /// (`acp::mapping::canonical_name`).
+    /// An ACP agent's calls arrive already mapped, by the protocol's tool
+    /// kinds (`oxplow_app::acp::mapping`); it posts no hook bodies.
+    fn tool_use(&self, _: &serde_json::Value) -> Option<ToolUse> {
+        None
+    }
+
     fn writing_tools(&self) -> &[&str] {
         &["write", "edit", "bash"]
-    }
-
-    /// Its turns and their counts ride the protocol, not a transcript.
-    fn turns(&self, _: &str) -> Vec<Turn> {
-        Vec::new()
-    }
-
-    /// Its token counts ride the protocol, not telemetry.
-    fn token_readings(&self, _: &OtlpRecord<'_>) -> Vec<TokenReading> {
-        Vec::new()
     }
 
     /// It posts no hooks (its tool gate answers in-process); one naming its

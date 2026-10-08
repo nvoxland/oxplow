@@ -6,6 +6,7 @@
 //! waits on tracked work (`.context/work-tracking.md`). See
 //! `.context/agent-model.md`.
 
+use oxplow_domain::agent::tool::{ToolKind, ToolUse};
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::ThreadId;
 use oxplow_runtime::policy::{decide_tool, IntentKind, PolicyDecision, PolicyFacts, ToolIntent};
@@ -16,36 +17,24 @@ use crate::Services;
 #[derive(Default)]
 pub struct AgentPolicy;
 
-/// A Claude-shaped tool call (the hook payload, or an opencode call its
-/// bridge mapped onto Claude's names) as a policy intent.
-#[derive(Debug, Clone)]
-pub struct ClaudeIntent {
-    pub label: String,
-    pub kind: IntentKind,
-    pub paths: Vec<String>,
+/// A tool call as the policy sees it: an edit names the worktree files it
+/// writes; every other kind is one neither rule refuses.
+pub fn intent_of(tool: &ToolUse) -> ToolIntent<'_> {
+    ToolIntent {
+        label: &tool.name,
+        kind: if tool.kind == ToolKind::Edit {
+            IntentKind::WorktreeWrite
+        } else {
+            IntentKind::Other
+        },
+        paths: &tool.paths,
+    }
 }
 
-/// Map a Claude-shaped `{tool_name, tool_input}` to an intent. `None` for a
-/// tool neither rule can refuse (Read, Grep, Bash, MCP, Task, …), so
-/// callers skip the policy's I/O entirely.
-pub fn claude_intent(body: &serde_json::Value) -> Option<ClaudeIntent> {
-    use oxplow_runtime::write_guard::WORKTREE_MUTATING_TOOLS;
-    let tool_name = body.get("tool_name").and_then(|v| v.as_str()).unwrap_or("");
-    if !WORKTREE_MUTATING_TOOLS.contains(&tool_name) {
-        return None;
-    }
-    // The first key holding a string: a null `file_path` mustn't hide a
-    // `notebook_path` (tsk371).
-    let path = body.get("tool_input").and_then(|t| {
-        ["file_path", "notebook_path", "path"]
-            .iter()
-            .find_map(|k| t.get(k).and_then(|v| v.as_str()))
-    });
-    Some(ClaudeIntent {
-        label: tool_name.to_string(),
-        kind: IntentKind::WorktreeWrite,
-        paths: path.map(|p| vec![p.to_string()]).unwrap_or_default(),
-    })
+/// Whether the policy could refuse `tool`: only an edit. A caller skips
+/// the policy's lookups for anything else.
+pub fn may_refuse(tool: &ToolUse) -> bool {
+    tool.kind == ToolKind::Edit
 }
 
 impl AgentPolicy {
@@ -119,65 +108,44 @@ impl AgentPolicy {
     }
 }
 
-/// The tool names that start a subagent. One list, shared with the status
-/// derivation.
-pub const SUBAGENT_TOOLS: &[&str] = &["Task", "Agent"];
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn claude_intent_takes_the_first_string_path() {
-        let i = claude_intent(&serde_json::json!({
-            "tool_name": "NotebookEdit",
-            "tool_input": {"file_path": null, "notebook_path": "nb.ipynb"}
-        }))
-        .unwrap();
-        assert_eq!(i.paths, vec!["nb.ipynb".to_string()]);
+    fn call(kind: ToolKind, paths: &[&str]) -> ToolUse {
+        ToolUse {
+            name: "apply_patch".into(),
+            kind,
+            paths: paths.iter().map(|p| p.to_string()).collect(),
+            ..ToolUse::default()
+        }
     }
 
+    /// An edit is a worktree write of every file it names, whatever its
+    /// harness calls it; nothing else can be refused.
     #[test]
-    fn claude_intent_gates_exactly_the_guarded_tools() {
-        // Only the four structured edits can be refused; everything else
-        // skips the policy's lookups (tsk: pre_tool_check fast path).
-        for t in ["Write", "Edit", "MultiEdit", "NotebookEdit"] {
-            let i = claude_intent(
-                &serde_json::json!({"tool_name": t, "tool_input": {"file_path": "src/a.rs"}}),
+    fn only_an_edit_is_a_worktree_write_of_every_file_it_names() {
+        let edit = call(ToolKind::Edit, &["src/a.rs", "src/b.rs"]);
+        assert!(may_refuse(&edit));
+        let i = intent_of(&edit);
+        assert_eq!(
+            (i.label, i.kind, i.paths.to_vec()),
+            (
+                "apply_patch",
+                IntentKind::WorktreeWrite,
+                vec!["src/a.rs".to_string(), "src/b.rs".to_string()]
             )
-            .unwrap();
-            assert_eq!(
-                (i.label.as_str(), i.kind, i.paths.clone()),
-                (t, IntentKind::WorktreeWrite, vec!["src/a.rs".to_string()])
-            );
-        }
-        for t in [
-            "Read",
-            "Grep",
-            "Glob",
-            "Bash",
-            "Task",
-            "WebFetch",
-            "WebSearch",
-            "TodoWrite",
-            "mcp__oxplow__run_command",
-            "",
+        );
+        for kind in [
+            ToolKind::Read,
+            ToolKind::Shell,
+            ToolKind::Subagent,
+            ToolKind::Search,
+            ToolKind::Mcp,
+            ToolKind::Other,
         ] {
-            assert!(
-                claude_intent(&serde_json::json!({"tool_name": t})).is_none(),
-                "{t} must short-circuit"
-            );
+            assert!(!may_refuse(&call(kind, &["x"])), "{kind:?}");
+            assert_eq!(intent_of(&call(kind, &["x"])).kind, IntentKind::Other);
         }
-        // The gate admits exactly the write guard's tool set.
-        use oxplow_runtime::write_guard::WORKTREE_MUTATING_TOOLS;
-        for t in WORKTREE_MUTATING_TOOLS {
-            assert!(
-                claude_intent(&serde_json::json!({"tool_name": t})).is_some(),
-                "gate must admit {t}"
-            );
-        }
-        // notebook_path / path are read when file_path is absent.
-        let nb = claude_intent(&serde_json::json!({"tool_name": "NotebookEdit", "tool_input": {"notebook_path": "n.ipynb"}})).unwrap();
-        assert_eq!(nb.paths, vec!["n.ipynb".to_string()]);
     }
 }

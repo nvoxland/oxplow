@@ -238,25 +238,31 @@ async fn an_acp_edit_is_recorded_like_a_hooked_one() {
     })
     .await;
 
-    // The tool-call row, as v_tool_call reads it (written by a pump reactor).
+    // The tool-call row, as v_tool_call reads it (written by a pump
+    // reactor): the agent's own name for the call, its file.
     svc.event_pump.run_once().await.unwrap();
     let layer = svc.sql.clone();
     let rows = layer
         .query_sql(
-            "SELECT tool, path FROM v_tool_call WHERE thread_id = ?1",
+            "SELECT path FROM v_tool_call WHERE thread_id = ?1",
             vec![SqlCell::Int(thread.value())],
             None,
         )
         .await
         .unwrap()
         .rows;
-    assert_eq!(
-        rows,
-        vec![vec![
-            SqlCell::Text("Edit".into()),
-            SqlCell::Text("src/x.rs".into())
-        ]]
-    );
+    assert_eq!(rows, vec![vec![SqlCell::Text("src/x.rs".into())]]);
+    // In oxplow's vocabulary it's an edit, whatever the agent called it.
+    let kinds = layer
+        .query_sql(
+            "SELECT json_extract(payload, '$.kind') FROM v_event WHERE type = 'agent.tool.finished'",
+            vec![],
+            None,
+        )
+        .await
+        .unwrap()
+        .rows;
+    assert_eq!(kinds, vec![vec![SqlCell::Text("edit".into())]]);
     // The effort claimed the file.
     let files = layer
         .query_sql("SELECT path FROM v_effort_file", vec![], None)

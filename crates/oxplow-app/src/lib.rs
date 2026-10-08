@@ -878,11 +878,25 @@ impl Services {
         );
         let threads = ThreadService::new(thread_store.clone());
 
+        // The agent harnesses, by key; filled from the declarations below.
+        // A new session's default is the project's first enabled agent,
+        // else the first declared.
+        let harnesses = {
+            let config = config_arc.clone();
+            oxplow_domain::agent::registry::HarnessRegistry::new(Arc::new(move || {
+                config_service::read_config(&config)
+                    .agents
+                    .first()
+                    .cloned()
+                    .unwrap_or_default()
+            }))
+        };
         let hook_ingest = HookIngestService::new(
             db.clone(),
             vocabulary.clone(),
             layout.project_dir.clone(),
             event_bus.clone(),
+            harnesses.clone(),
         )
         .with_event_pump(event_pump.clone());
         let recovery_svc = recovery::RecoveryService::new(agent_turn_store.clone());
@@ -1170,18 +1184,8 @@ impl Services {
         // None as a work list: the sink every verb reaches while no list is
         // active (`work_items::none_provider`).
         work_items.register(work_items::none_provider());
-        // The agent harnesses foundation declares; a new session's default
-        // is the project's first enabled agent, else the first declared.
-        let harnesses = {
-            let config = config_arc.clone();
-            oxplow_domain::agent::registry::HarnessRegistry::new(Arc::new(move || {
-                config_service::read_config(&config)
-                    .agents
-                    .first()
-                    .cloned()
-                    .unwrap_or_default()
-            }))
-        };
+        // The agent harnesses foundation declares (the registry is made
+        // before the hook ingest, which maps tool calls with them).
         harnesses::register_built_ins(&harnesses, &declared);
         // The ACP adapters foundation declares.
         let acp_adapters = oxplow_domain::agent::registry::AcpAdapterRegistry::default();

@@ -41,6 +41,7 @@ use oxplow_app::session_auth::Principal;
 use oxplow_app::{HookEnvelope, Services, ToolDecision};
 use oxplow_domain::agent::observe::HookAnswer;
 use oxplow_domain::agent::registry::HarnessRegistry;
+use oxplow_domain::agent::tool::ToolUse;
 use oxplow_domain::{HookKind, ThreadId};
 
 #[derive(Debug, Error)]
@@ -407,6 +408,7 @@ async fn handle_hook_inner(
             payload_json: body_str,
             prompt: None,
             decision: None,
+            tool: None,
         };
         let harness = match ctx.services.hook_ingest.ingest(envelope).await {
             Ok(outcome) => outcome.harness,
@@ -441,10 +443,22 @@ async fn handle_hook_inner(
         None
     };
 
+    // A tool hook's call in oxplow's vocabulary, as the bearer's harness
+    // maps its body: what the policy, the ingest and the context read.
+    let tool = match (kind, body_value.as_ref()) {
+        (HookKind::PreToolUse | HookKind::PostToolUse, Some(body)) => ctx
+            .services
+            .harnesses
+            .get(&principal.harness)
+            .ok()
+            .and_then(|h| h.tool_use(body)),
+        _ => None,
+    };
+
     // PreToolUse — runs BEFORE ingest so denial returns immediately
     // and the persisted record reflects what actually happened.
     if kind == HookKind::PreToolUse {
-        if let Some(reason) = pre_tool_check(&ctx, thread_id.as_ref(), body_value.as_ref()).await {
+        if let Some(reason) = pre_tool_check(&ctx, principal.thread, tool.as_ref()).await {
             // Logged with the policy's decision, so the record shows what
             // the runtime did.
             let envelope = HookEnvelope {
@@ -459,6 +473,7 @@ async fn handle_hook_inner(
                     allowed: false,
                     reason: Some(reason.clone()),
                 }),
+                tool: tool.clone(),
             };
             let harness = match ctx.services.hook_ingest.ingest(envelope).await {
                 Ok(outcome) => outcome.harness,
@@ -487,6 +502,7 @@ async fn handle_hook_inner(
             allowed: true,
             reason: None,
         }),
+        tool: tool.clone(),
     };
 
     let envelope_for_resume = envelope.clone();
@@ -506,12 +522,10 @@ async fn handle_hook_inner(
 
     // PostToolUse: record the call (wiki attribution, effort claim, tool
     // call, collection — pump reactors on the event the ingest logged) and
-    // hand back any context for the agent (the ROLE CHANGE banner after
-    // ExitPlanMode, else the thread's undelivered nudges).
+    // hand back any context for the agent (the ROLE CHANGE banner after a
+    // plan settles, else the thread's undelivered nudges).
     if kind == HookKind::PostToolUse {
-        if let (Some(thread_id), Some(body)) =
-            (envelope_for_resume.thread_id.as_ref(), body_value.as_ref())
-        {
+        if let Some(thread_id) = envelope_for_resume.thread_id.as_ref() {
             if let Some(context) = ctx
                 .services
                 .agent_context
@@ -519,7 +533,7 @@ async fn handle_hook_inner(
                     &ctx.services,
                     thread_id,
                     envelope_for_resume.session_id.as_deref(),
-                    body,
+                    tool.as_ref(),
                 )
                 .await
             {
@@ -582,28 +596,19 @@ fn respond(harnesses: &HarnessRegistry, harness: Option<&str>, answer: &HookAnsw
     (StatusCode::OK, Json(body)).into_response()
 }
 
-/// Run the shared agent policy (the write guard) against the
-/// PreToolUse payload. `Some(reason)` refuses; `None` allows. Tools
-/// neither rule can refuse skip the policy's I/O (`claude_intent`
-/// returns `None` for them).
-async fn pre_tool_check(
-    ctx: &AppCtx,
-    thread_id: Option<&ThreadId>,
-    body: Option<&serde_json::Value>,
-) -> Option<String> {
-    use oxplow_runtime::policy::{PolicyDecision, ToolIntent};
-    let intent = oxplow_app::agent_policy::claude_intent(body?)?;
+/// Run the shared agent policy (the write guard) against the call.
+/// `Some(reason)` refuses; `None` allows. A call the policy can't refuse
+/// (anything but an edit) skips its I/O.
+async fn pre_tool_check(ctx: &AppCtx, thread: ThreadId, tool: Option<&ToolUse>) -> Option<String> {
+    use oxplow_runtime::policy::PolicyDecision;
+    let tool = tool.filter(|t| oxplow_app::agent_policy::may_refuse(t))?;
     let decision = ctx
         .services
         .agent_policy
         .check_tool(
             &ctx.services,
-            thread_id?,
-            &ToolIntent {
-                label: &intent.label,
-                kind: intent.kind,
-                paths: &intent.paths,
-            },
+            &thread,
+            &oxplow_app::agent_policy::intent_of(tool),
         )
         .await;
     match decision {

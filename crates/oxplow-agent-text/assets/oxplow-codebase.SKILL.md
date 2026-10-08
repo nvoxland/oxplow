@@ -29,9 +29,9 @@ every stream. `v_model_column` documents each column.
   `head_sha`, `is_default`, and the `stream_id` that has it checked
   out); **`v_tag`** — tags and their commits.
 
-Changing history (commit, merge, rebase, push) is a person's, in the
-app: agents have no VCS commands. Use `git` in your terminal for your
-own worktree's commits as usual.
+Changing history (commit, merge, rebase, push, checkout) is the
+`oxplow.vcs.*` commands (`list_commands` shows them) or `git` in your
+terminal.
 
 ## Code (`v_symbol`, `v_diagnostic`, the `code_*` tools)
 

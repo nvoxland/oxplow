@@ -662,7 +662,7 @@ schema in [data-model.md](./data-model.md), migration `V33`).
   `crates/oxplow-tauri-ipc/src/commands/effort.rs`, registered in the
   `rpc_dispatch!` registry and the surface-parity manifest as `ui()`).
   There are no write IPCs — nudges are written exclusively by the service
-  inside `on_post_tool_use`, best-effort (a persistence error is logged,
+  inside `on_shell_run`, best-effort (a persistence error is logged,
   never fails the hook).
 - **Change**: a view of `v_agent_nudge` re-runs on `ModelsChanged` when a
   record commits (P8.A2: the bespoke `AgentNudgesChanged` had no listener

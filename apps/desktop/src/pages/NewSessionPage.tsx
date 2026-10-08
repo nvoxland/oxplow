@@ -15,8 +15,8 @@ interface NewSessionPageProps {
 }
 
 /**
- * The session picker: what a thread with no agent session shows, and
- * where "New session…" lands. Starting one only opens its slot — the new
+ * The session picker: what a thread with no agent session shows.
+ * Starting one only opens its slot — the new
  * tab starts its process when it mounts, and nothing is typed into it.
  * It offers no prompts to hand an agent: there is no agent here yet.
  */

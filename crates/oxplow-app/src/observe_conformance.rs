@@ -76,11 +76,9 @@ pub async fn suite(svc: &crate::Services, expect: &Expect<'_>) -> Vec<Finding> {
     let requested = payloads("agent.tool.requested");
     check(
         "tool_requested",
-        requested
-            .iter()
-            .any(|p| p["tool"] == "Edit" && p["path"] == expect.edited),
+        requested.iter().any(|p| edits(p, expect.edited)),
         format!(
-            "no agent.tool.requested for an Edit of {}: {requested:?}",
+            "no agent.tool.requested for an edit of {}: {requested:?}",
             expect.edited
         ),
     );
@@ -89,9 +87,9 @@ pub async fn suite(svc: &crate::Services, expect: &Expect<'_>) -> Vec<Finding> {
         "tool_finished",
         finished
             .iter()
-            .any(|p| p["tool"] == "Edit" && p["path"] == expect.edited && p["ok"] == true),
+            .any(|p| edits(p, expect.edited) && p["ok"] == true),
         format!(
-            "no successful agent.tool.finished for the Edit of {}: {finished:?}",
+            "no successful agent.tool.finished for the edit of {}: {finished:?}",
             expect.edited
         ),
     );
@@ -120,4 +118,13 @@ pub async fn suite(svc: &crate::Services, expect: &Expect<'_>) -> Vec<Finding> {
         ),
     );
     findings
+}
+
+/// Whether a tool event is an edit (in oxplow's vocabulary, whatever the
+/// harness calls it) naming `path`.
+fn edits(payload: &serde_json::Value, path: &str) -> bool {
+    payload["kind"] == "edit"
+        && payload["paths"]
+            .as_array()
+            .is_some_and(|ps| ps.iter().any(|p| p == path))
 }

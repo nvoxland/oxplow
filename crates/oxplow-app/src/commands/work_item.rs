@@ -1010,6 +1010,8 @@ mod tests {
             (
                 Actor::Effect {
                     effect: "acme/notify".into(),
+                    thread_id: None,
+                    stream_id: None,
                 },
                 "effect:acme/notify",
             ),

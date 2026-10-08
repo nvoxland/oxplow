@@ -1541,7 +1541,8 @@ impl OxplowMcp {
     // agent inspects the worktree through the same path the UI does (consistent
     // results, snapshot/event hooks) instead of shelling out to raw `git`.
     // `stream_id` is optional — omit to target the current/primary worktree.
-    // Mutations (commit/push/merge/…) intentionally stay on the Bash tool.
+    // Mutations (commit/push/merge/…) are the `oxplow.vcs.*` commands
+    // (`run_command`), not tools.
 
     #[tool(
         description = "Git working-tree status: per-file change scopes for the \
@@ -1861,8 +1862,8 @@ impl OxplowMcp {
 
     // ---------- UI selection ----------
     //
-    // Selection pointers are off the bus (ipc-and-stores.md). Stream-branch
-    // checkout stays on Bash (the agent's worktree shell can `git checkout`).
+    // Selection pointers are off the bus (ipc-and-stores.md). A stream's
+    // branch checkout is `oxplow.vcs.checkout_branch`.
 
     #[tool(description = "Select (focus) a thread on a stream, or clear the selection.")]
     async fn select_thread(

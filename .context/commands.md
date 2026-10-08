@@ -381,11 +381,17 @@ policy and can never confirm, exactly like the agent.
 (P8.D8). `Actor::may_confirm()` is true for `Human` and a lens acting for
 one — never an agent, an effect or `System` (step 4 drops a `confirmed`
 from anyone else). `Actor::proposes()` — an agent's or an
-`Actor::Effect { effect: "<extension>/<id>" }`'s run, directly or through
-a lens — turns a run that asks into a proposal; `System` is asked
-(`NeedsConfirmation`). An effect's invoker is `Agent` (a person-only
-command is `Denied`), it has no thread (no write gate, nothing
-thread-scoped), its source is `effect:<extension>/<id>`, and only a
+`Actor::Effect { effect: "<extension>/<id>", thread_id, stream_id }`'s
+run, directly or through a lens — turns a run that asks into a
+proposal; `System` is asked (`NeedsConfirmation`). An effect's invoker is
+`Agent` (a person-only command is `Denied`), and it carries the
+triggering event's thread and stream (`CommandBus::run_effect` takes the
+event's anchors), so an agent's gates apply to it there
+(`Actor::gated_thread`): the writer gate on that thread (a `Write`
+command reacting to a non-writer thread's event is refused), and VCS
+commands on that stream only (`Actor::confined_to_own_stream`; an event
+with no stream reaches no worktree). Its source is
+`effect:<extension>/<id>`, and only a
 `Human` approves or declines a proposal. The audit and events say so:
 `actor_kind = 'effect'` (V147 rebuilds `command_audit`'s CHECK, keeping
 proposals' `audit_id`), carried by `command.executed@2` and

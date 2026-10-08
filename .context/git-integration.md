@@ -530,9 +530,9 @@ nudge of their own".
 `NON_WRITER_PROMPT_BLOCK` (`crates/oxplow-runtime/src/write_guard.rs`) explicitly
 forbids git mutations for non-writer threads — they share the
 worktree with the writer and any ref/index change corrupts the
-writer's in-progress work. The write-guard hook denies Write/Edit/
-MultiEdit/NotebookEdit in those threads, and the prompt block covers
-Bash (which the hook can't classify reliably).
+writer's in-progress work. The write-guard hook denies edits (`kind:
+edit`) in those threads, and the prompt block covers shell commands
+(which the hook can't classify reliably).
 
 ## Commit indexer
 

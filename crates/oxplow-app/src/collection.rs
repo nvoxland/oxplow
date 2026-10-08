@@ -307,38 +307,11 @@ fn heredoc_delimiter(line: &str) -> Option<(String, bool)> {
 /// analysis) is recorded with: what an effort's runs are read by.
 const RUN_TRIGGER: &str = "on-report";
 
-/// The Bash command + best-effort exit code pulled out of a PostToolUse
-/// envelope. `None` when the tool wasn't Bash or no command was present.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BashInvocation {
-    pub command: String,
+/// A shell command an agent ran, and its exit code when the harness said.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShellRun<'a> {
+    pub command: &'a str,
     pub exit_code: Option<i64>,
-}
-
-/// Parse a PostToolUse `payload_json` for a Bash invocation. Tolerant of
-/// shape drift: returns `None` unless `tool_name == "Bash"` and a
-/// `tool_input.command` string is present. Exit code is best-effort
-/// (Claude Code's Bash `tool_response` doesn't always carry one).
-pub fn parse_bash_post_tool(payload_json: &str) -> Option<BashInvocation> {
-    let v: serde_json::Value = serde_json::from_str(payload_json).ok()?;
-    let tool_name = v.get("tool_name").and_then(|t| t.as_str())?;
-    if tool_name != "Bash" {
-        return None;
-    }
-    let command = v
-        .get("tool_input")
-        .and_then(|i| i.get("command"))
-        .and_then(|c| c.as_str())?
-        .to_string();
-    if command.trim().is_empty() {
-        return None;
-    }
-    let exit_code = v.get("tool_response").and_then(|r| {
-        ["exit_code", "exitCode", "returnCode", "code"]
-            .iter()
-            .find_map(|k| r.get(*k).and_then(|x| x.as_i64()))
-    });
-    Some(BashInvocation { command, exit_code })
 }
 
 /// Diff-coverage thresholds (tsk220), stored as the `oxplow.coverage.diff_pct`
@@ -2280,29 +2253,29 @@ impl CollectionService {
         Ok(())
     }
 
-    /// PostToolUse entry point: detect a test and/or static-analysis run,
-    /// record it, and ride along to coverage / findings. The collection
-    /// reactor runs it (P3.6) with `cause`, the `agent.tool.finished`
-    /// event — every capture and nudge
+    /// A finished shell call's entry point: detect a test and/or
+    /// static-analysis run, record it, and ride along to coverage /
+    /// findings. The collection reactor runs it (P3.6) with `cause`, the
+    /// `agent.tool.finished` event of a `shell` call — every capture and nudge
     /// is keyed by it and anchored to its turn, and the effort the command
     /// ran in owns what it records. The nudge is persisted (the hook
     /// response picks it up); the returned text is for callers that want it.
-    pub async fn on_post_tool_use(
+    pub async fn on_shell_run(
         &self,
         thread: &ThreadId,
-        payload_json: &str,
+        bash: ShellRun<'_>,
         origin: RunOrigin<'_>,
     ) -> Result<Option<String>, DomainError> {
         let cause = origin.cause();
-        let Some(bash) = parse_bash_post_tool(payload_json) else {
+        if bash.command.trim().is_empty() {
             return Ok(None);
-        };
+        }
         let cfg = self.testing_cfg();
         let test_patterns = self.test_patterns();
-        let is_test = detect_test_run(&bash.command, &test_patterns);
-        let is_analysis = detect_analysis_run(&bash.command, &cfg.analysis_patterns);
-        let is_commit = detect_git_commit(&bash.command);
-        let is_revert = detect_git_revert(&bash.command);
+        let is_test = detect_test_run(bash.command, &test_patterns);
+        let is_analysis = detect_analysis_run(bash.command, &cfg.analysis_patterns);
+        let is_commit = detect_git_commit(bash.command);
+        let is_revert = detect_git_revert(bash.command);
         if !is_test && !is_analysis && !is_commit && !is_revert {
             return Ok(None);
         }
@@ -2359,7 +2332,7 @@ impl CollectionService {
             if let Err(e) = self
                 .record_static_analysis_caused(
                     thread,
-                    &bash.command,
+                    bash.command,
                     report.as_ref(),
                     &analyzers,
                     &source,
@@ -2394,7 +2367,7 @@ impl CollectionService {
         if let Err(e) = self
             .record_test_run_caused(
                 thread,
-                &bash.command,
+                bash.command,
                 bash.exit_code,
                 (None, None, None, None),
                 "observed",
@@ -2448,7 +2421,7 @@ impl CollectionService {
         // again adds nothing, so that run spends no nudge.
         let produced_report = report.is_some() || coverage.is_some();
         let ran_the_runner = reads.unread.is_empty()
-            && test_run_segment(&bash.command, &test_patterns)
+            && test_run_segment(bash.command, &test_patterns)
                 .is_some_and(|run| names_configured_runner(&cfg, &run));
         if !produced_report && !ran_the_runner && self.mark_nudged(&effort).await {
             let msg = if reads.unread.is_empty() {
@@ -2459,7 +2432,7 @@ impl CollectionService {
             self.persist_nudge(
                 thread,
                 Some(&effort),
-                Raised::agent("report-less-run", &msg, &bash.command),
+                Raised::agent("report-less-run", &msg, bash.command),
                 origin,
             )
             .await;
@@ -4154,29 +4127,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_bash_post_tool_extracts_command_and_exit() {
-        let payload = r#"{
-            "tool_name": "Bash",
-            "tool_input": {"command": "cargo test", "description": "run tests"},
-            "tool_response": {"exit_code": 0, "stdout": "ok"}
-        }"#;
-        let got = parse_bash_post_tool(payload).unwrap();
-        assert_eq!(got.command, "cargo test");
-        assert_eq!(got.exit_code, Some(0));
-    }
-
-    #[test]
-    fn parse_bash_post_tool_ignores_non_bash_and_missing_command() {
-        assert!(parse_bash_post_tool(r#"{"tool_name":"Edit","tool_input":{}}"#).is_none());
-        assert!(parse_bash_post_tool(r#"{"tool_name":"Bash","tool_input":{}}"#).is_none());
-        assert!(parse_bash_post_tool("not json").is_none());
-        // Missing exit code is tolerated.
-        let got = parse_bash_post_tool(r#"{"tool_name":"Bash","tool_input":{"command":"pytest"}}"#)
-            .unwrap();
-        assert_eq!(got.exit_code, None);
-    }
-
-    #[test]
     fn diff_new_side_lines_flags_inserts_and_replacements() {
         // old: a,b,c  new: a,B,c,d  → line 2 replaced, line 4 inserted.
         let old = "a\nb\nc\n";
@@ -4671,9 +4621,9 @@ mod tests {
                 started: None,
             };
             h.service
-                .on_post_tool_use(
+                .on_shell_run(
                     &h.thread,
-                    &bash_payload("bun test", 0),
+                    bash_payload("bun test", 0),
                     crate::collection::RunOrigin::Event(&cause),
                 )
                 .await
@@ -4742,9 +4692,9 @@ mod tests {
                     started: None,
                 };
                 h.service
-                    .on_post_tool_use(
+                    .on_shell_run(
                         &h.thread,
-                        &bash_payload(command, 0),
+                        bash_payload(command, 0),
                         crate::collection::RunOrigin::Event(&cause),
                     )
                     .await
@@ -5107,9 +5057,9 @@ mod tests {
                 ],
             );
             h.service
-                .on_post_tool_use(
+                .on_shell_run(
                     &h.thread,
-                    &bash_payload(&format!("git revert {bad_sha}"), 0),
+                    bash_payload(&format!("git revert {bad_sha}"), 0),
                     crate::collection::RunOrigin::Command { turn: None },
                 )
                 .await
@@ -5132,9 +5082,9 @@ mod tests {
 
             // Re-firing (same revert seen again) is idempotent per effort.
             h.service
-                .on_post_tool_use(
+                .on_shell_run(
                     &h.thread,
-                    &bash_payload(&format!("git revert {bad_sha}"), 0),
+                    bash_payload(&format!("git revert {bad_sha}"), 0),
                     crate::collection::RunOrigin::Command { turn: None },
                 )
                 .await
@@ -5152,9 +5102,9 @@ mod tests {
             let h = build(Some("<coverage this is not xml")).await;
             let out = h
                 .service
-                .on_post_tool_use(
+                .on_shell_run(
                     &h.thread,
-                    &bash_payload("bun test --watch false", 0),
+                    bash_payload("bun test --watch false", 0),
                     crate::collection::RunOrigin::Command { turn: None },
                 )
                 .await
@@ -5291,9 +5241,9 @@ mod tests {
                 started: None,
             };
             h.service
-                .on_post_tool_use(
+                .on_shell_run(
                     &h.thread,
-                    &bash_payload("bun test", 0),
+                    bash_payload("bun test", 0),
                     crate::collection::RunOrigin::Event(&cause),
                 )
                 .await
@@ -7113,10 +7063,11 @@ mod tests {
         }
 
         /// Build a PostToolUse payload for a Bash command.
-        fn bash_payload(cmd: &str, exit_code: i64) -> String {
-            format!(
-                r#"{{"tool_name":"Bash","tool_input":{{"command":"{cmd}"}},"tool_response":{{"exit_code":{exit_code}}}}}"#
-            )
+        fn bash_payload(cmd: &str, exit_code: i64) -> ShellRun<'_> {
+            ShellRun {
+                command: cmd,
+                exit_code: Some(exit_code),
+            }
         }
 
         /// Run a git subcommand in `dir`, asserting success.
@@ -7161,9 +7112,9 @@ mod tests {
             }
             let result = h
                 .service
-                .on_post_tool_use(
+                .on_shell_run(
                     &h.thread,
-                    &bash_payload("bun test --watch false", 0),
+                    bash_payload("bun test --watch false", 0),
                     crate::collection::RunOrigin::Command { turn: None },
                 )
                 .await
@@ -7239,9 +7190,9 @@ mod tests {
                 let svc = h.service.clone();
                 let thread = h.thread;
                 async move {
-                    svc.on_post_tool_use(
+                    svc.on_shell_run(
                         &thread,
-                        &bash_payload(cmd, 101),
+                        bash_payload(cmd, 101),
                         crate::collection::RunOrigin::Command { turn: None },
                     )
                     .await
@@ -7321,9 +7272,9 @@ mod tests {
             };
             let result = h
                 .service
-                .on_post_tool_use(
+                .on_shell_run(
                     &h.thread,
-                    &bash_payload("bun test --watch false", 0),
+                    bash_payload("bun test --watch false", 0),
                     crate::collection::RunOrigin::Event(&cause),
                 )
                 .await
@@ -7364,9 +7315,9 @@ mod tests {
             );
             let msg = h
                 .service
-                .on_post_tool_use(
+                .on_shell_run(
                     &h.thread,
-                    &bash_payload("bun test", 0),
+                    bash_payload("bun test", 0),
                     crate::collection::RunOrigin::Command { turn: None },
                 )
                 .await
@@ -7402,9 +7353,9 @@ mod tests {
             let payload = bash_payload("bun test", 0);
             let first = h
                 .service
-                .on_post_tool_use(
+                .on_shell_run(
                     &h.thread,
-                    &payload,
+                    payload,
                     crate::collection::RunOrigin::Command { turn: None },
                 )
                 .await
@@ -7412,9 +7363,9 @@ mod tests {
             assert!(first.is_some(), "first report-less run should nudge");
             let second = h
                 .service
-                .on_post_tool_use(
+                .on_shell_run(
                     &h.thread,
-                    &payload,
+                    payload,
                     crate::collection::RunOrigin::Command { turn: None },
                 )
                 .await
@@ -7437,9 +7388,9 @@ mod tests {
             }
             let payload = bash_payload("bun test --watch false", 0);
             h.service
-                .on_post_tool_use(
+                .on_shell_run(
                     &h.thread,
-                    &payload,
+                    payload,
                     crate::collection::RunOrigin::Command { turn: None },
                 )
                 .await
@@ -7472,9 +7423,9 @@ mod tests {
             // Second run is deduped (returns None) and stores nothing more.
             let second = h
                 .service
-                .on_post_tool_use(
+                .on_shell_run(
                     &h.thread,
-                    &payload,
+                    payload,
                     crate::collection::RunOrigin::Command { turn: None },
                 )
                 .await
@@ -7490,9 +7441,9 @@ mod tests {
             let h = build(None).await;
             let result = h
                 .service
-                .on_post_tool_use(
+                .on_shell_run(
                     &h.thread,
-                    &bash_payload("cargo build", 0),
+                    bash_payload("cargo build", 0),
                     crate::collection::RunOrigin::Command { turn: None },
                 )
                 .await
@@ -7512,9 +7463,9 @@ mod tests {
             // No test command and no report collectors by default.
             let result = h
                 .service
-                .on_post_tool_use(
+                .on_shell_run(
                     &h.thread,
-                    &bash_payload("bun test", 0),
+                    bash_payload("bun test", 0),
                     crate::collection::RunOrigin::Command { turn: None },
                 )
                 .await
@@ -8043,9 +7994,9 @@ mod tests {
             let h = build(None).await;
             let result = h
                 .service
-                .on_post_tool_use(
+                .on_shell_run(
                     &h.thread,
-                    &bash_payload("cargo clippy --workspace --all-targets", 0),
+                    bash_payload("cargo clippy --workspace --all-targets", 0),
                     crate::collection::RunOrigin::Command { turn: None },
                 )
                 .await

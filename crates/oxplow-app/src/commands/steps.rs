@@ -266,7 +266,7 @@ fn check_tree(
                 reason: format!("`{}` is not open to {:?} callers", spec.id, actor.invoker()),
             });
         }
-        if let Some(thread_id) = actor.agent_thread() {
+        if let Some(thread_id) = actor.gated_thread() {
             let gated = may_write.filter(|_| spec.access.needs_writer());
             if let PolicyDecision::Deny { reason, .. } =
                 policy.check_command(thread_id.as_ref(), spec, gated)

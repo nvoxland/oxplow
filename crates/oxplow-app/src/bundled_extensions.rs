@@ -495,6 +495,7 @@ mod tests {
             payload_json: payload.to_string(),
             prompt: Some("go".into()),
             decision: None,
+            tool: None,
         };
         use oxplow_domain::hook::HookKind;
         f.svc
@@ -1115,6 +1116,7 @@ mod tests {
                             payload_json: "{}".into(),
                             prompt: Some(prompt.into()),
                             decision: None,
+                            tool: None,
                         })
                         .await
                         .unwrap();

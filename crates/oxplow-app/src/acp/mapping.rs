@@ -1,11 +1,13 @@
-//! ACP tool calls in oxplow's terms: the policy intent the gate checks and
-//! the canonical (Claude-shaped) events `AgentContext` records. Pure.
+//! ACP tool calls in oxplow's vocabulary (`oxplow_domain::agent::tool`):
+//! the protocol's own tool kinds map onto oxplow's, so the policy gate and
+//! the recorders read an ACP agent's calls the way they read any harness's.
+//! Pure.
 //!
-//! Edit, delete and move are worktree writes. Their paths come from
-//! `locations`, the diffs, and the path-like keys adapters put in
-//! `rawInput`, so an agent that fills only one of them is still covered.
+//! Edit, delete and move are edits. Their paths come from `locations`, the
+//! diffs, and the path-like keys adapters put in `rawInput`, so an agent
+//! that fills only one of them is still covered.
 
-use oxplow_runtime::policy::{IntentKind, ToolIntent};
+use oxplow_domain::agent::tool::{ToolKind as Kind, ToolUse};
 
 use super::model::{ToolCall, ToolKind, ToolStatus};
 
@@ -21,43 +23,92 @@ const PATH_KEYS: &[&str] = &[
     "new_path",
 ];
 
-/// An owned [`ToolIntent`].
-#[derive(Debug, Clone, PartialEq)]
-pub struct AcpIntent {
-    pub label: String,
-    pub kind: IntentKind,
-    pub paths: Vec<String>,
-}
-
-impl AcpIntent {
-    pub fn as_intent(&self) -> ToolIntent<'_> {
-        ToolIntent {
-            label: &self.label,
-            kind: self.kind,
-            paths: &self.paths,
-        }
-    }
-}
-
+/// Whether an ACP call writes files (edit, delete, move).
 pub fn is_write(kind: ToolKind) -> bool {
     matches!(kind, ToolKind::Edit | ToolKind::Delete | ToolKind::Move)
 }
 
-pub fn intent_for(t: &ToolCall) -> AcpIntent {
-    let label = match t.kind {
+/// The call in oxplow's vocabulary; `None` for calls oxplow doesn't record
+/// (thinking, mode switches).
+pub fn tool_use(t: &ToolCall) -> Option<ToolUse> {
+    let mcp = mcp_name(t);
+    let kind = match t.kind {
+        ToolKind::Think | ToolKind::SwitchMode => return None,
+        _ if mcp.is_some() => Kind::Mcp,
+        ToolKind::Read => Kind::Read,
+        ToolKind::Edit | ToolKind::Delete | ToolKind::Move => Kind::Edit,
+        ToolKind::Search => Kind::Search,
+        ToolKind::Execute => Kind::Shell,
+        ToolKind::Fetch => Kind::Fetch,
+        ToolKind::Other => Kind::Other,
+    };
+    let input = |keys: &[&str]| {
+        t.raw_input.as_ref().and_then(|v| {
+            keys.iter()
+                .find_map(|k| v.get(*k).and_then(|x| x.as_str()))
+                .map(str::to_string)
+        })
+    };
+    let command = (kind == Kind::Shell)
+        .then(|| input(&["command", "cmd"]).unwrap_or_else(|| t.title.clone()));
+    let detail = match kind {
+        Kind::Shell => command.clone(),
+        Kind::Search => input(&["pattern", "query", "regex"]),
+        Kind::Fetch => input(&["url", "uri"]),
+        _ => None,
+    }
+    .or_else(|| Some(t.title.clone()).filter(|s| !s.is_empty()));
+    let (ok, exit_code) = match t.status {
+        ToolStatus::Completed | ToolStatus::Failed => (
+            Some(t.status == ToolStatus::Completed),
+            t.raw_output.as_ref().and_then(|o| {
+                ["exit_code", "exitCode", "code"]
+                    .iter()
+                    .find_map(|k| o.get(*k).and_then(|x| x.as_i64()))
+            }),
+        ),
+        _ => (None, None),
+    };
+    Some(ToolUse {
+        name: label(t),
+        kind,
+        paths: paths(t),
+        command,
+        detail,
+        call_id: Some(t.id.clone()).filter(|id| !id.is_empty()),
+        ok,
+        exit_code,
+        question: None,
+    })
+}
+
+/// What the call is called where a person reads it: its MCP tool, `Delete`
+/// / `Move`, else the agent's name or title for it.
+pub fn label(t: &ToolCall) -> String {
+    if let Some(mcp) = mcp_name(t) {
+        return mcp;
+    }
+    match t.kind {
         ToolKind::Delete => "Delete".to_string(),
         ToolKind::Move => "Move".to_string(),
-        _ => canonical_name(t).unwrap_or_else(|| display_name(t)),
-    };
-    AcpIntent {
-        label,
-        kind: if is_write(t.kind) {
-            IntentKind::WorktreeWrite
-        } else {
-            IntentKind::Other
-        },
-        paths: paths(t),
+        _ => t
+            .name
+            .clone()
+            .filter(|n| !n.is_empty())
+            .unwrap_or_else(|| t.title.clone()),
     }
+}
+
+/// What the ingest stores of the call by hash: its input as the agent sent
+/// it, and once it finished, its output with whether it failed.
+pub fn content(t: &ToolCall) -> serde_json::Value {
+    let mut v = serde_json::json!({
+        "tool_input": t.raw_input.clone().unwrap_or_else(|| serde_json::json!({})),
+    });
+    if let Some(r) = tool_response(t) {
+        v["tool_response"] = r;
+    }
+    v
 }
 
 /// Every path the call names, in first-seen order.
@@ -84,34 +135,6 @@ pub fn paths(t: &ToolCall) -> Vec<String> {
     out
 }
 
-/// The Claude tool name recorders key on, or `None` for calls oxplow
-/// doesn't record (thinking, mode switches).
-pub fn canonical_name(t: &ToolCall) -> Option<String> {
-    if let Some(mcp) = mcp_name(t) {
-        return Some(mcp);
-    }
-    Some(
-        match t.kind {
-            ToolKind::Think | ToolKind::SwitchMode => return None,
-            ToolKind::Read => "Read",
-            ToolKind::Edit => {
-                if !t.diffs.is_empty() && t.diffs.iter().all(|d| d.old_text.is_none()) {
-                    "Write"
-                } else {
-                    "Edit"
-                }
-            }
-            // Recorded as edits of each path so effort claims see them.
-            ToolKind::Delete | ToolKind::Move => "Edit",
-            ToolKind::Search => "Grep",
-            ToolKind::Execute => "Bash",
-            ToolKind::Fetch => "WebFetch",
-            ToolKind::Other => return Some(display_name(t)),
-        }
-        .to_string(),
-    )
-}
-
 fn mcp_name(t: &ToolCall) -> Option<String> {
     [t.name.as_deref(), Some(t.title.as_str())]
         .into_iter()
@@ -119,98 +142,6 @@ fn mcp_name(t: &ToolCall) -> Option<String> {
         .filter_map(|s| s.split_whitespace().next())
         .find(|s| s.starts_with("mcp__"))
         .map(str::to_string)
-}
-
-fn display_name(t: &ToolCall) -> String {
-    t.name
-        .clone()
-        .filter(|n| !n.is_empty())
-        .unwrap_or_else(|| t.title.clone())
-}
-
-/// A tool call in the canonical (Claude-shaped) vocabulary, for transports
-/// whose agents don't speak it natively. [`Self::to_payload`] is the one
-/// place that shape is built.
-#[derive(Debug, Clone, PartialEq)]
-pub struct CanonicalToolEvent {
-    /// `Edit`, `Write`, `Read`, `Grep`, `Bash`, `WebFetch`, `mcp__…`, …
-    pub tool_name: String,
-    /// `{file_path}`, `{command}`, `{pattern}`, `{url}`, …
-    pub tool_input: serde_json::Value,
-    /// `{is_error: bool, …}` once the call finished.
-    pub tool_response: Option<serde_json::Value>,
-    pub session_id: Option<String>,
-}
-
-impl CanonicalToolEvent {
-    /// The hook-payload shape every recorder reads.
-    pub fn to_payload(&self) -> serde_json::Value {
-        let mut v = serde_json::json!({
-            "tool_name": self.tool_name,
-            "tool_input": self.tool_input,
-        });
-        if let Some(r) = &self.tool_response {
-            v["tool_response"] = r.clone();
-        }
-        if let Some(s) = &self.session_id {
-            v["session_id"] = serde_json::Value::String(s.clone());
-        }
-        v
-    }
-}
-
-/// The canonical events for a call: one per path for writes (recorders
-/// read a single `file_path`), one otherwise, none for unrecorded kinds.
-pub fn canonical_events(t: &ToolCall, session_id: Option<&str>) -> Vec<CanonicalToolEvent> {
-    let Some(tool_name) = canonical_name(t) else {
-        return Vec::new();
-    };
-    let base = match &t.raw_input {
-        Some(serde_json::Value::Object(m)) => m.clone(),
-        _ => serde_json::Map::new(),
-    };
-    let response = tool_response(t);
-    let event = |input: serde_json::Map<String, serde_json::Value>| CanonicalToolEvent {
-        tool_name: tool_name.clone(),
-        tool_input: serde_json::Value::Object(input),
-        tool_response: response.clone(),
-        session_id: session_id.map(str::to_string),
-    };
-    let fill = |mut m: serde_json::Map<String, serde_json::Value>, key: &str, alts: &[&str]| {
-        if !m.contains_key(key) {
-            let v = alts
-                .iter()
-                .find_map(|k| m.get(*k).and_then(|v| v.as_str()).map(str::to_string))
-                .unwrap_or_else(|| t.title.clone());
-            m.insert(key.into(), v.into());
-        }
-        m
-    };
-
-    if is_write(t.kind) && mcp_name(t).is_none() {
-        return paths(t)
-            .into_iter()
-            .map(|p| {
-                let mut m = base.clone();
-                m.insert("file_path".into(), p.into());
-                event(m)
-            })
-            .collect();
-    }
-    let input = match tool_name.as_str() {
-        "Read" => {
-            let mut m = base;
-            if let Some(p) = paths(t).into_iter().next() {
-                m.entry("file_path").or_insert(p.into());
-            }
-            m
-        }
-        "Bash" => fill(base, "command", &["cmd"]),
-        "Grep" => fill(base, "pattern", &["query", "regex"]),
-        "WebFetch" => fill(base, "url", &["uri"]),
-        _ => base,
-    };
-    vec![event(input)]
 }
 
 /// `{is_error, …raw_output}` once the call finished; `None` while running.
@@ -235,29 +166,6 @@ fn tool_response(t: &ToolCall) -> Option<serde_json::Value> {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn a_canonical_event_renders_the_hook_payload_shape() {
-        let ev = CanonicalToolEvent {
-            tool_name: "Edit".into(),
-            tool_input: serde_json::json!({"file_path": "src/a.rs"}),
-            tool_response: Some(serde_json::json!({"is_error": false})),
-            session_id: Some("s1".into()),
-        };
-        assert_eq!(
-            ev.to_payload(),
-            serde_json::json!({"tool_name": "Edit", "tool_input": {"file_path": "src/a.rs"}, "tool_response": {"is_error": false}, "session_id": "s1"})
-        );
-        // What the ingest reads: the tool, its path and outcome.
-        let body = ev.to_payload();
-        let parts =
-            crate::tool_calls::parse_tool_call(&body.to_string(), std::path::Path::new("/p"))
-                .unwrap();
-        assert_eq!(
-            (parts.tool.as_str(), parts.path.as_deref()),
-            ("Edit", Some("src/a.rs"))
-        );
-    }
-
     use super::*;
     use crate::acp::model::ToolDiff;
     use serde_json::json;
@@ -280,141 +188,84 @@ mod tests {
     }
 
     #[test]
-    fn writes_are_worktree_writes_with_every_path() {
+    fn writes_are_edits_of_every_path() {
         let mut t = call(ToolKind::Edit);
         t.locations = vec!["/w/a.rs".into()];
         t.diffs = vec![diff("/w/b.rs", Some("o"))];
         t.raw_input = Some(json!({"file_path": "/w/a.rs", "notebook_path": "/w/n.ipynb"}));
-        let i = intent_for(&t);
-        assert_eq!(i.kind, IntentKind::WorktreeWrite);
-        assert_eq!(i.label, "Edit");
-        assert_eq!(i.paths, vec!["/w/a.rs", "/w/b.rs", "/w/n.ipynb"]);
+        let u = tool_use(&t).unwrap();
+        assert_eq!(u.kind, Kind::Edit);
+        assert_eq!(u.paths, vec!["/w/a.rs", "/w/b.rs", "/w/n.ipynb"]);
+        assert_eq!(u.call_id.as_deref(), Some("c1"));
 
         let mut mv = call(ToolKind::Move);
         mv.raw_input = Some(json!({"source": "/w/a", "destination": "/w/b"}));
-        let i = intent_for(&mv);
-        assert_eq!(i.kind, IntentKind::WorktreeWrite);
-        assert_eq!(i.label, "Move");
-        assert_eq!(i.paths, vec!["/w/a", "/w/b"]);
-
-        assert_eq!(intent_for(&call(ToolKind::Delete)).label, "Delete");
-        assert_eq!(
-            intent_for(&call(ToolKind::Delete)).kind,
-            IntentKind::WorktreeWrite
-        );
+        let u = tool_use(&mv).unwrap();
+        assert_eq!((u.kind, u.name.as_str()), (Kind::Edit, "Move"));
+        assert_eq!(u.paths, vec!["/w/a", "/w/b"]);
+        assert_eq!(tool_use(&call(ToolKind::Delete)).unwrap().name, "Delete");
     }
 
     #[test]
-    fn non_writes_are_other() {
-        for k in [
-            ToolKind::Read,
-            ToolKind::Execute,
-            ToolKind::Search,
-            ToolKind::Fetch,
-            ToolKind::Other,
+    fn the_protocols_kinds_map_onto_oxplows() {
+        for (k, want) in [
+            (ToolKind::Read, Kind::Read),
+            (ToolKind::Search, Kind::Search),
+            (ToolKind::Execute, Kind::Shell),
+            (ToolKind::Fetch, Kind::Fetch),
+            (ToolKind::Other, Kind::Other),
         ] {
-            assert_eq!(intent_for(&call(k)).kind, IntentKind::Other, "{k:?}");
+            assert_eq!(tool_use(&call(k)).unwrap().kind, want, "{k:?}");
         }
-        assert_eq!(intent_for(&call(ToolKind::Execute)).label, "Bash");
-    }
-
-    #[test]
-    fn canonical_names() {
-        assert_eq!(
-            canonical_name(&call(ToolKind::Read)).as_deref(),
-            Some("Read")
-        );
-        assert_eq!(
-            canonical_name(&call(ToolKind::Edit)).as_deref(),
-            Some("Edit")
-        );
-        let mut w = call(ToolKind::Edit);
-        w.diffs = vec![diff("/w/new.rs", None)];
-        assert_eq!(canonical_name(&w).as_deref(), Some("Write"));
-        assert_eq!(
-            canonical_name(&call(ToolKind::Search)).as_deref(),
-            Some("Grep")
-        );
-        assert_eq!(
-            canonical_name(&call(ToolKind::Execute)).as_deref(),
-            Some("Bash")
-        );
-        assert_eq!(
-            canonical_name(&call(ToolKind::Fetch)).as_deref(),
-            Some("WebFetch")
-        );
-        assert_eq!(canonical_name(&call(ToolKind::Think)), None);
-        assert_eq!(canonical_name(&call(ToolKind::SwitchMode)), None);
+        assert_eq!(tool_use(&call(ToolKind::Think)), None);
+        assert_eq!(tool_use(&call(ToolKind::SwitchMode)), None);
         let mut mcp = call(ToolKind::Other);
         mcp.title = "mcp__oxplow__list_work_items (MCP)".into();
+        let u = tool_use(&mcp).unwrap();
         assert_eq!(
-            canonical_name(&mcp).as_deref(),
-            Some("mcp__oxplow__list_work_items")
+            (u.kind, u.name.as_str()),
+            (Kind::Mcp, "mcp__oxplow__list_work_items")
         );
         let mut named = call(ToolKind::Other);
         named.name = Some("custom".into());
-        assert_eq!(canonical_name(&named).as_deref(), Some("custom"));
+        assert_eq!(tool_use(&named).unwrap().name, "custom");
     }
 
     #[test]
-    fn write_events_one_per_path_with_file_path() {
-        let mut t = call(ToolKind::Move);
-        t.status = ToolStatus::Completed;
-        t.raw_input = Some(json!({"source": "/w/a", "destination": "/w/b"}));
-        let ev = canonical_events(&t, Some("s1"));
-        assert_eq!(ev.len(), 2);
-        assert_eq!(
-            ev[0].to_payload(),
-            json!({
-                "tool_name": "Edit",
-                "tool_input": {"source": "/w/a", "destination": "/w/b", "file_path": "/w/a"},
-                "tool_response": {"is_error": false},
-                "session_id": "s1"
-            })
-        );
-        assert_eq!(ev[1].tool_input["file_path"], "/w/b");
-    }
-
-    #[test]
-    fn bash_event_keeps_exit_code_and_fills_command() {
+    fn a_shell_call_keeps_its_command_and_exit_code() {
         let mut t = call(ToolKind::Execute);
         t.title = "cargo test".into();
         t.status = ToolStatus::Failed;
         t.raw_output = Some(json!({"exit_code": 101}));
-        let ev = canonical_events(&t, None);
+        let u = tool_use(&t).unwrap();
+        assert_eq!(u.command.as_deref(), Some("cargo test"));
+        assert_eq!((u.ok, u.exit_code), (Some(false), Some(101)));
         assert_eq!(
-            ev[0].to_payload(),
-            json!({
-                "tool_name": "Bash",
-                "tool_input": {"command": "cargo test"},
-                "tool_response": {"exit_code": 101, "is_error": true}
-            })
+            content(&t),
+            json!({"tool_input": {}, "tool_response": {"exit_code": 101, "is_error": true}})
         );
         let mut given = call(ToolKind::Execute);
         given.raw_input = Some(json!({"command": "ls"}));
         given.raw_output = Some(json!("out"));
         given.status = ToolStatus::Completed;
-        let ev = canonical_events(&given, None);
-        assert_eq!(ev[0].tool_input, json!({"command": "ls"}));
+        let u = tool_use(&given).unwrap();
+        assert_eq!(u.command.as_deref(), Some("ls"));
+        assert_eq!((u.ok, u.exit_code), (Some(true), None));
         assert_eq!(
-            ev[0].tool_response,
-            Some(json!({"output": "out", "is_error": false}))
+            content(&given)["tool_response"],
+            json!({"output": "out", "is_error": false})
         );
     }
 
     #[test]
-    fn running_calls_have_no_response_and_think_has_no_event() {
+    fn a_running_call_has_no_outcome_and_a_search_its_pattern() {
         let mut r = call(ToolKind::Read);
         r.locations = vec!["/w/a.rs".into()];
-        let ev = canonical_events(&r, None);
-        assert_eq!(ev[0].tool_input, json!({"file_path": "/w/a.rs"}));
-        assert_eq!(ev[0].tool_response, None);
-        assert!(canonical_events(&call(ToolKind::Think), None).is_empty());
+        let u = tool_use(&r).unwrap();
+        assert_eq!(u.ok, None);
+        assert!(content(&r).get("tool_response").is_none());
         let mut g = call(ToolKind::Search);
         g.raw_input = Some(json!({"query": "fn main"}));
-        assert_eq!(
-            canonical_events(&g, None)[0].tool_input["pattern"],
-            "fn main"
-        );
+        assert_eq!(tool_use(&g).unwrap().detail.as_deref(), Some("fn main"));
     }
 }

@@ -398,6 +398,7 @@ mod tests {
                             payload_json: body.into(),
                             prompt: Some("go".into()),
                             decision: None,
+                            tool: None,
                         })
                         .await
                         .unwrap();
