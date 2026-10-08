@@ -7,7 +7,8 @@ import { keepLensSpec, querySql, type LensRun, type LensViz } from "../api.js";
 import { LensResultView } from "../lens/LensResultView.js";
 import { ModelLineage } from "./ModelLineage.js";
 import { PinToDashboard } from "../components/Dashboard/PinToDashboard.js";
-import { adHocLens, KEPT_IN_STREAM, NEW_LENS_PROMPT, slugify } from "../lens/lensModel.js";
+import { adHocLens, KEPT_IN_STREAM, NEW_LENS_COMMAND, slugify } from "../lens/lensModel.js";
+import { useCommandDraft } from "../commandDraft.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
 import { recordOpError } from "../components/opErrorsStore.js";
@@ -71,6 +72,7 @@ const CHART_ROLES: Partial<Record<LensViz, { key: keyof LensChart; label: string
  * `.context/semantic-layer.md` and `.context/extensions.md`.
  */
 export function ExploreDataPage({ stream, onOpenPage }: ExploreDataPageProps) {
+  const newLensPrompt = useCommandDraft(NEW_LENS_COMMAND);
   const [catalog, setCatalog] = useState<ModelRow[]>([]);
   const [catalogReads, setCatalogReads] = useState<Reads>(NO_READS);
   const [selected, setSelected] = useState<string | null>(null);
@@ -218,7 +220,12 @@ export function ExploreDataPage({ stream, onOpenPage }: ExploreDataPageProps) {
         Everything oxplow knows, as read-only SQL views. Pick one on the right, tweak the query, and save it as a
         lens to keep it as a page. Metrics read as columns of a grid:{" "}
         <code>SELECT bucket, MEASURE('oxplow.coverage.abs_pct') FROM metric_grid('week')</code>. Or{" "}
-        <button type="button" data-testid="explore-new-lens" onClick={() => insertIntoAgent(NEW_LENS_PROMPT)}>
+        <button
+          type="button"
+          data-testid="explore-new-lens"
+          disabled={!newLensPrompt}
+          onClick={() => newLensPrompt && insertIntoAgent(newLensPrompt)}
+        >
           ask your agent to build one…
         </button>
       </p>

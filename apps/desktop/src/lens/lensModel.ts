@@ -606,8 +606,8 @@ export function childParams(child: Lens, params: Record<string, SqlCell>): Recor
 export const KEPT_IN_STREAM =
   "Saved in this stream's worktree. It shows in the app once the stream is merged.";
 
-/** The starter prompt "New Lens with Your Agent…" puts in the agent's
- *  input for the person to finish and send (it's never sent for them).
- *  The agent's oxplow-extension skill takes it from there (tsk373). */
-export const NEW_LENS_PROMPT =
-  "Build me an oxplow lens (a page I can open with Cmd+P) that shows ";
+/** The command whose draft starts a lens with the agent: "New Lens with
+ *  Your Agent…" (oxplow-foundation; its prompt is its `ui.input.text`,
+ *  `useCommandDraft`). The agent's oxplow-extension skill takes it from
+ *  there (tsk373). */
+export const NEW_LENS_COMMAND = "oxplow.lens.draft_with_agent";

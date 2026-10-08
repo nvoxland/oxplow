@@ -1383,6 +1383,7 @@ impl Services {
             .into_iter()
             .chain(commands::effect::ops(effect_services.clone()))
             .chain(client_host::ops(&client_host))
+            .chain([commands::file::save_op(workspace_files.clone())])
         {
             commands.add_op(op).expect("core ops register");
         }
@@ -1808,6 +1809,7 @@ mod tests {
                 // A clone into a stream's worktree, a person's call (P8.A9).
                 "oxplow.extension.install",
                 "oxplow.extension.update",
+                "oxplow.file.save",
                 "oxplow.git.cherry_pick",
                 "oxplow.git.ignore",
                 "oxplow.git.rebase",

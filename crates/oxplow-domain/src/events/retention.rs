@@ -49,6 +49,8 @@ pub const CORE_WINDOWS: &[(&str, RetentionWindow)] = &[
     ("collector", RetentionWindow::new(90, 30)),
     ("effect", RetentionWindow::new(90, 30)),
     ("ui", RetentionWindow::new(30, 14)),
+    // A save is frequent and only read back by what reacts to it.
+    ("file", RetentionWindow::new(30, 14)),
 ];
 
 /// A plugin namespace's window, unless its extension declares a shorter

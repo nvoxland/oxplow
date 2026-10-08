@@ -32,7 +32,8 @@ import {
   type ExtensionReview,
   type CollectorListing,
 } from "../api.js";
-import { NEW_LENS_PROMPT } from "../lens/lensModel.js";
+import { NEW_LENS_COMMAND } from "../lens/lensModel.js";
+import { useCommandDraft } from "../commandDraft.js";
 import { enableAgain, healthLine, healthOf, repairWithAgent, usePluginHealth, type PluginHealth } from "../pluginHealth.js";
 import { collectorRan, extensionCredentials, extensionRowModel, reviewModel } from "./extensionRowModel.js";
 import { extensionsChanged } from "../lens/lensRerun.js";
@@ -43,6 +44,7 @@ import { showToast } from "./toastStore.js";
 import { EmptyState } from "./Prompts/EmptyState.js";
 
 export function ExtensionsSection() {
+  const newLensPrompt = useCommandDraft(NEW_LENS_COMMAND);
   const [exts, setExts] = useState<Extension[] | null>(null);
   /** What each project extension's check found (bundled ones are checked
    *  where they're built). */
@@ -155,7 +157,7 @@ export function ExtensionsSection() {
           testId="extensions-empty"
           title="No extensions yet"
           text="An extension adds lenses, data and checks. Have the agent build one, or install one below."
-          prompts={[NEW_LENS_PROMPT]}
+          prompts={newLensPrompt ? [newLensPrompt] : []}
         />
       ) : (
         <ul style={{ listStyle: "none", margin: "0 0 12px", padding: 0 }}>

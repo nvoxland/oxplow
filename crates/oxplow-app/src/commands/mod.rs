@@ -23,6 +23,7 @@ pub mod effect;
 pub mod effort;
 pub mod effort_report;
 pub mod extension_install;
+pub mod file;
 pub mod hint;
 pub mod lens;
 pub mod lsp;
@@ -1741,7 +1742,7 @@ impl CommandBus {
             actor_kind: actor.kind(),
             actor_id: actor.id(),
             thread_id: actor.thread_id(),
-            input: input.clone(),
+            input: spec.recorded_input(input),
             outcome,
             error,
             result: None,
@@ -2057,7 +2058,7 @@ fn record_tx(
             actor_kind: actor.kind(),
             actor_id: actor.id(),
             thread_id: actor.thread_id(),
-            input: input.clone(),
+            input: spec.recorded_input(input),
             outcome,
             error: failed,
             result: Some(out.result.clone()),
@@ -2259,6 +2260,7 @@ mod tests {
             needs: Vec::new(),
             ui: None,
             op: None,
+            unrecorded: Vec::new(),
         }
     }
 
@@ -3510,6 +3512,7 @@ mod tests {
             needs: Vec::new(),
             ui: None,
             op: None,
+            unrecorded: Vec::new(),
         };
         let compose: Arc<Composer> = Arc::new(|_conn, _trace, input: &Value| {
             Ok(Composition {

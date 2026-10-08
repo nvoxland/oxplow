@@ -738,6 +738,7 @@ pub fn extension_command(
         needs: decl.needs.clone(),
         ui: decl.ui.clone(),
         op: None,
+        unrecorded: Vec::new(),
     };
     let script = match &decl.handler {
         CommandHandler::Capability { capability, op } => {
@@ -1516,6 +1517,7 @@ mod tests {
                         needs: Vec::new(),
                         ui: None,
                         op: None,
+                        unrecorded: Vec::new(),
                     },
                     crate::commands::Handler::Tx(std::sync::Arc::new(|_, _| {
                         Ok(crate::commands::HandlerOutput::default())
@@ -2141,6 +2143,7 @@ mod tests {
                     needs: Vec::new(),
                     ui: None,
                     op: None,
+                    unrecorded: Vec::new(),
                 },
                 crate::commands::Handler::Tx(std::sync::Arc::new(|_, _| {
                     Ok(crate::commands::HandlerOutput::default())

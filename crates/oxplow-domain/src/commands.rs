@@ -141,6 +141,31 @@ pub struct CommandSpec {
     /// runs (a window capability's runs in the window) and what it does.
     #[serde(default)]
     pub op: Option<OpRef>,
+    /// Top-level input fields its record leaves out — a file's content —
+    /// kept as their size (`{ "omitted_bytes": n }`): the run is still
+    /// audited, the audit log doesn't grow by every file saved.
+    #[serde(default)]
+    pub unrecorded: Vec<String>,
+}
+
+impl CommandSpec {
+    /// `input` as its record keeps it: each [`Self::unrecorded`] field
+    /// replaced by its size.
+    pub fn recorded_input(&self, input: &Value) -> Value {
+        let mut out = input.clone();
+        if let Some(o) = out.as_object_mut() {
+            for field in &self.unrecorded {
+                if let Some(v) = o.get_mut(field) {
+                    let bytes = match &*v {
+                        Value::String(s) => s.len(),
+                        other => other.to_string().len(),
+                    };
+                    *v = serde_json::json!({ "omitted_bytes": bytes });
+                }
+            }
+        }
+        out
+    }
 }
 
 /// An operation of a host capability (`capability: tabs.write`, `op:

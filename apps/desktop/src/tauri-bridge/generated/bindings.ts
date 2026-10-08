@@ -1885,6 +1885,12 @@ export type CommandSpec = {
 	 *  runs (a window capability's runs in the window) and what it does.
 	 */
 	op?: OpRef | null,
+	/**
+	 *  Top-level input fields its record leaves out — a file's content —
+	 *  kept as their size (`{ "omitted_bytes": n }`): the run is still
+	 *  audited, the audit log doesn't grow by every file saved.
+	 */
+	unrecorded?: string[],
 };
 
 /**

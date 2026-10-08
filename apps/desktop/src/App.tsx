@@ -29,8 +29,8 @@ import {
   recordUsage,
   reorderThreads,
   switchStream,
+  runCommand,
   runCommandInBackground,
-  writeWorkspaceFile,
   type ThreadState,
   type AgentKind,
   type SqlCell,
@@ -672,9 +672,12 @@ export function App() {
     if (current.isLoading) throw new Error(`\`${path}\` is still loading`);
     mutateFileSession(streamId, (s) => setOpenFileLoading(s, path, true));
     try {
-      const saved = await writeWorkspaceFile(streamId, path, current.draftContent);
-      mutateFileSession(streamId, (s) => markFileSaved(s, saved.path, saved.content));
-      logUi("info", "saved file", { streamId, path: saved.path });
+      // An audited write that logs `file.saved` (its content isn't kept
+      // in the record).
+      const content = current.draftContent;
+      await runCommand("oxplow.file.save", { stream: streamId, path, content });
+      mutateFileSession(streamId, (s) => markFileSaved(s, path, content));
+      logUi("info", "saved file", { streamId, path });
     } catch (e) {
       mutateFileSession(streamId, (s) => setOpenFileLoading(s, path, false));
       logUi("error", "failed to save file", { streamId, path, error: String(e) });

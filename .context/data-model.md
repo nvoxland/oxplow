@@ -1239,7 +1239,8 @@ payload_expired_at IS NULL`, V103, read as a `type` range because a `LIKE`
 can't use a BINARY index; windows in `oxplow_domain::events::retention`'s
 `CORE_WINDOWS`: `agent` 30 d payload / 14 d body,
 `test`, `code`, `collector` and `effect` 90 / 30, `ui` (op errors the
-person saw, tsk1072) 30 / 14, and every namespace core
+person saw, tsk1072) 30 / 14, `file` (`file.saved`, each editor save,
+`oxplow.file.save`) 30 / 14, and every namespace core
 doesn't own — a plugin's, found by skipping through that index one
 namespace per probe, and in `event_content` — `PLUGIN_DEFAULT` 30 / 14
 (P7.B7), or the shorter window its extension declares

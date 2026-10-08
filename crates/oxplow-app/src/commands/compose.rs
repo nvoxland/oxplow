@@ -135,6 +135,7 @@ pub fn sequence_spec() -> CommandSpec {
         needs: Vec::new(),
         ui: None,
         op: None,
+        unrecorded: Vec::new(),
     }
 }
 

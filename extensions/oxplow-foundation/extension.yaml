@@ -202,6 +202,11 @@ commands:
     capability: files.write
     op: restore_file
     confirm: destructive
+  - name: file.save
+    summary: "Write a file of a stream's worktree with the content saved (what the editor's Save writes); logs `file.saved`. Its content isn't kept in the record, its size is."
+    capability: files.write
+    op: save
+    invokers: { human: true, agent: false, lens: false }
   # hints.write
   - name: hint.dismiss
     summary: "Dismiss a hint raised to the person (a `v_agent_nudge` row with audience `person`)."

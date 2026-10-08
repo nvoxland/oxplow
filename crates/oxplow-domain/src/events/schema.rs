@@ -48,6 +48,7 @@ pub const CORE_NAMESPACES: &[&str] = &[
     "provider",
     "plugin",
     "ui",
+    "file",
 ];
 
 /// One event type at one schema version. `Payload` is the Rust shape
@@ -131,6 +132,7 @@ impl EventSchemaRegistry {
         r.register::<CapabilitySwitched>()
             .expect("core type registers");
         r.register::<ConfigChanged>().expect("core type registers");
+        r.register::<FileSaved>().expect("core type registers");
         r.register::<EffectResultAtV1>()
             .expect("core type registers");
         r.register::<EffectResultAtV2>()
@@ -664,6 +666,27 @@ impl EventType for ConfigChanged {
     const TYPE: &'static str = "config.changed";
     const V: u32 = 2;
     type Payload = ConfigChangedV2;
+}
+
+/// `file.saved@1`: a person saved a file of a stream's worktree from the
+/// editor (`oxplow.file.save`) — what something that should happen on save
+/// reacts to (an effect `on: [file.saved]`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FileSavedV1 {
+    /// The stream (`str2`).
+    pub stream: String,
+    /// Its path in the worktree.
+    pub path: String,
+    /// How many bytes it holds now.
+    pub bytes: u64,
+}
+
+pub struct FileSaved;
+impl EventType for FileSaved {
+    const TYPE: &'static str = "file.saved";
+    const V: u32 = 1;
+    type Payload = FileSavedV1;
 }
 
 /// `capability.switched@1`: a capability's active implementation changed
@@ -2226,6 +2249,7 @@ mod tests {
                 ("effort.linked", 1),
                 ("effort.opened", 2),
                 ("effort.retitled", 1),
+                ("file.saved", 1),
                 ("knowledge.comment.deleted", 1),
                 ("knowledge.comment.written", 1),
                 ("knowledge.note.deleted", 2),

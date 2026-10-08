@@ -33,6 +33,8 @@ pub struct Op {
     pub handler: Handler,
     confirm_for: Option<Arc<ConfirmFor>>,
     precheck: Option<Arc<Precheck>>,
+    /// Input fields its runs' records leave out (`CommandSpec::unrecorded`).
+    unrecorded: Vec<String>,
 }
 
 impl Op {
@@ -51,6 +53,7 @@ impl Op {
             handler,
             confirm_for: None,
             precheck: None,
+            unrecorded: Vec::new(),
         }
     }
 
@@ -62,6 +65,13 @@ impl Op {
     }
 
     /// Its check before the transaction (`super::Precheck`).
+    /// Its runs' records leave out `fields` of the input (a file's
+    /// content), keeping their size.
+    pub fn with_unrecorded(mut self, fields: &[&str]) -> Self {
+        self.unrecorded = fields.iter().map(|f| f.to_string()).collect();
+        self
+    }
+
     pub fn with_precheck(mut self, f: Arc<Precheck>) -> Self {
         self.precheck = Some(f);
         self
@@ -84,6 +94,7 @@ impl Op {
             Handler::Compose(_) => Atomicity::Dispatch,
         };
         spec.effect = effect_of(class);
+        spec.unrecorded = self.unrecorded.clone();
         spec.op = Some(oxplow_domain::OpRef {
             capability: self.capability.clone(),
             op: self.name.clone(),

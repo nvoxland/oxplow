@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`file.saved@1`: a person saved a file of a stream's worktree from the\neditor (`oxplow.file.save`) — what something that should happen on save\nreacts to (an effect `on: [file.saved]`).",
+  "properties": {
+    "bytes": {
+      "description": "How many bytes it holds now.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "path": {
+      "description": "Its path in the worktree.",
+      "type": "string"
+    },
+    "stream": {
+      "description": "The stream (`str2`).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "stream",
+    "path",
+    "bytes"
+  ],
+  "title": "FileSavedV1",
+  "type": "object"
+}
