@@ -232,6 +232,7 @@ pub fn open_op(work_items: WorkItemsRegistry) -> Op {
                 "effort": effort_ref(effort),
                 "thread": thread_ref(thread),
                 "work_item": input.work_item,
+                "title": input.title,
             }),
             None,
         ))
@@ -378,7 +379,14 @@ mod tests {
     async fn an_effort_opens_unlinked_and_is_linked_titled_and_closed() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let bus = &fx.svc.commands;
-        let opened = bus.run(&agent(&fx), OPEN, json!({}), false).await.unwrap();
+        let opened = bus
+            .run(&agent(&fx), OPEN, json!({ "title": "Parser" }), false)
+            .await
+            .unwrap();
+        assert_eq!(
+            opened.result["title"], "Parser",
+            "the result says what it set"
+        );
         let effort: EffortId =
             oxplow_domain::refs::build::effort_of_ref(opened.result["effort"].as_str().unwrap())
                 .unwrap();

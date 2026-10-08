@@ -225,6 +225,11 @@ pub fn create_op(config: Arc<RwLock<OxplowConfig>>) -> Op {
             let input: CreateInput = parse(input)?;
             let stream: StreamId = ref_id(&input.stream, "stream", "/stream")?;
             on_own_stream(ctx, stream)?;
+            // Only a stream that's there — not archived — takes a thread.
+            oxplow_db::stream_store::get_tx(ctx.conn, stream)
+                .map_err(sql)?
+                .filter(|s| s.archived_at.is_none())
+                .ok_or_else(|| invalid("/stream", format!("no stream `{}`", input.stream)))?;
             let config = crate::config_service::read_config(&config);
             let (agent, acp_agent) = match &input.from {
                 Some(from) => {
@@ -702,6 +707,21 @@ mod tests {
     #[tokio::test]
     async fn a_new_thread_queues_behind_the_writer_and_a_fork_runs_its_sources_agent() {
         let fx = services_with_effort().await;
+        // Only a stream that's there takes a thread.
+        for stream in ["stream:str99"] {
+            let err = run(
+                &fx,
+                &Actor::Human,
+                CREATE,
+                json!({ "stream": stream, "title": "x" }),
+            )
+            .await
+            .unwrap_err();
+            assert!(
+                matches!(&err, CommandError::Invalid { field: Some(f), .. } if f == "/stream"),
+                "{stream}: {err:?}"
+            );
+        }
         let second = create(&fx, "second").await;
         let t = thread(&fx, second).await;
         assert_eq!((t.status, t.sort_index), (ThreadStatus::Queued, 1));
