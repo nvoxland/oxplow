@@ -29,8 +29,6 @@ interface NavigatorProps {
   onSwitchStream(id: string): void | Promise<void>;
   onSelectThread(streamId: string, threadId: string): void | Promise<void>;
   onCreateThread(streamId: string, title: string): Promise<void>;
-  /// Open the session picker on a thread ("New session…").
-  onNewSession?(streamId: string, threadId: string): void | Promise<void>;
   onOpenNewStreamPage?(): void;
   onRenameStream?(streamId: string, title: string): void | Promise<void>;
   onRenameThread?(threadId: string, title: string): void | Promise<void>;
@@ -104,7 +102,6 @@ export function Navigator({
   onRenameThread,
   onPromoteThread,
   onCloseThread,
-  onNewSession,
   onOpenStreamSettings,
   onOpenThreadSettings,
   vcsEnabled,
@@ -263,12 +260,6 @@ export function Navigator({
       });
     }
     items.push(
-      {
-        id: "thread.new-session",
-        label: "New session…",
-        enabled: !!onNewSession,
-        run: () => onNewSession?.(thread.stream_id, thread.id),
-      },
       {
         id: "thread.rename",
         label: "Rename…",
@@ -672,7 +663,7 @@ function StripRow({
           : undefined
       }
       style={{
-        height: ROW_HEIGHT,
+        height: isStream ? ROW_HEIGHT : THREAD_ROW_HEIGHT,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -687,7 +678,14 @@ function StripRow({
       }}
     >
       <IconColumn guide={guide}>
-        <IconCell letter={letter} isStream={isStream} isWriter={isWriter} status={status} question={question} />
+        <IconCell
+          letter={letter}
+          isStream={isStream}
+          isLast={guide === "last"}
+          isWriter={isWriter}
+          status={status}
+          question={question}
+        />
       </IconColumn>
       {cm.menu}
     </div>
@@ -749,7 +747,7 @@ function OverlayRow({
       }
       title={label}
       style={{
-        height: ROW_HEIGHT,
+        height: isStream ? ROW_HEIGHT : THREAD_ROW_HEIGHT,
         display: "flex",
         alignItems: "center",
         gap: 8,
@@ -764,7 +762,14 @@ function OverlayRow({
       }}
     >
       <IconColumn guide={guide}>
-        <IconCell letter={letter} isStream={isStream} isWriter={isWriter} status={status} question={question} />
+        <IconCell
+          letter={letter}
+          isStream={isStream}
+          isLast={guide === "last"}
+          isWriter={isWriter}
+          status={status}
+          question={question}
+        />
       </IconColumn>
       {renaming ? (
         <RenameInput
@@ -857,26 +862,28 @@ function RenameInput({
 type Guide = "none" | "stream" | "mid" | "last";
 
 /** A row's icon column, the same in the strip and the panel so their rows
- *  line up: the glyph, and the guide line that ties a stream's threads to
- *  it — down the column's left from under the stream's tile, with a tick
- *  into each thread's tab, ending at the last one. */
+ *  line up: the glyph, flush with the column's right edge like a tab, and
+ *  the guide line that ties a stream's threads to it — down the column's
+ *  left from under the stream's tile, with a tick into each thread's tab,
+ *  ending at the last one. */
 function IconColumn({ guide, children }: { guide: Guide; children: ReactNode }) {
   const line = (style: CSSProperties) => (
     <span aria-hidden style={{ position: "absolute", background: "var(--text-muted)", ...style }} />
   );
-  const mid = ROW_HEIGHT / 2;
   const isThread = guide === "mid" || guide === "last";
+  const height = isThread ? THREAD_ROW_HEIGHT : ROW_HEIGHT;
+  const mid = height / 2;
   return (
     <span
       style={{
         position: "relative",
         flexShrink: 0,
         width: ICON_COLUMN,
-        height: ROW_HEIGHT,
+        height,
         display: "flex",
         alignItems: "center",
-        justifyContent: isThread ? "flex-start" : "center",
-        paddingLeft: isThread ? THREAD_LEFT : 0,
+        justifyContent: "flex-start",
+        paddingLeft: isThread ? THREAD_LEFT : STREAM_LEFT,
         boxSizing: "border-box",
       }}
     >
@@ -885,7 +892,7 @@ function IconColumn({ guide, children }: { guide: Guide; children: ReactNode }) 
           {guide === "stream"
             ? line({ left: GUIDE_X, width: 2, top: (ROW_HEIGHT + ICON_BOX) / 2, bottom: 0 })
             : null}
-          {isThread ? line({ left: GUIDE_X, width: 2, top: 0, height: guide === "last" ? mid + 1 : ROW_HEIGHT }) : null}
+          {isThread ? line({ left: GUIDE_X, width: 2, top: 0, height: guide === "last" ? mid + 1 : height }) : null}
           {isThread ? line({ left: GUIDE_X, height: 2, top: mid - 1, width: THREAD_LEFT - GUIDE_X }) : null}
         </span>
       ) : null}
@@ -897,39 +904,42 @@ function IconColumn({ guide, children }: { guide: Guide; children: ReactNode }) 
 function IconCell({
   letter,
   isStream,
+  isLast,
   isWriter,
   status,
   question,
 }: {
   letter: string;
   isStream: boolean;
+  /** The last of its stream's threads: its tab closes the stack. */
+  isLast: boolean;
   isWriter: boolean;
   status: AgentStatusDotState | undefined;
   question?: string;
 }) {
   // A stream is an inverted tile (light, dark letters) heading its
-  // threads; a thread is a tab, indented off the stream's guide line — a
-  // faint fill, the writer's in the accent.
+  // threads; its threads are tabs indented off the stream's guide line and
+  // butted up against each other — each fills its row, drawing its top
+  // edge, and the last one also the bottom — a faint fill, the writer's in
+  // the accent. Both are rounded on the left only and run to the column's
+  // right edge, like tabs.
   const shape: CSSProperties = isStream
     ? {
-        width: ICON_BOX,
+        width: ICON_COLUMN - STREAM_LEFT,
         height: ICON_BOX,
-        borderRadius: 6,
+        borderRadius: "6px 0 0 6px",
         background: "var(--surface-stream-tile)",
         color: "var(--text-on-stream-tile)",
-        borderWidth: 1,
-        borderStyle: "solid",
-        borderColor: "transparent",
         fontSize: LETTER_FONT,
         fontWeight: 700,
       }
     : {
-        width: THREAD_BOX,
-        height: THREAD_BOX,
-        borderRadius: 5,
+        width: ICON_COLUMN - THREAD_LEFT,
+        height: THREAD_ROW_HEIGHT,
+        borderRadius: "4px 0 0 4px",
         background: isWriter ? "var(--accent-soft-bg)" : "var(--surface-thread-tab)",
         color: "var(--text-primary)",
-        borderWidth: 1,
+        borderWidth: isLast ? "1px 0 1px 1px" : "1px 0 0 1px",
         borderStyle: "solid",
         borderColor: isWriter ? "var(--accent)" : "var(--border-strong)",
         fontSize: THREAD_LETTER_FONT,
@@ -958,8 +968,11 @@ function IconCell({
         <span
           style={{
             position: "absolute",
-            top: -2,
-            right: -2,
+            // On the tab's left edge, where the guide's tick meets it.
+            top: "50%",
+            left: -5,
+            transform: "translateY(-50%)",
+            display: "flex",
           }}
         >
           <AgentStatusDot status={status ?? "waiting"} size={8} question={question} />
@@ -1075,15 +1088,17 @@ function InlineNewThread({
 // cell sits comfortably with breathing room on both sides.
 const LETTER_FONT = 15;
 const ICON_BOX = 30;
-// A thread's tab sits right of its stream's guide line, a touch smaller
-// than the stream's tile so the two read as parent and child.
-const THREAD_BOX = 25;
+// A thread's row is its tab: the tabs of a stream's threads touch, a touch
+// shorter than the stream's tile so the two read as parent and child.
+const THREAD_ROW_HEIGHT = 28;
 const THREAD_LETTER_FONT = 13;
 const STRIP_WIDTH = 40;
 // The icon column: the strip's width less the selection line's 3px.
 const ICON_COLUMN = STRIP_WIDTH - 3;
-// The guide line's x, and where a thread's tab starts.
-// (The tab and its status dot stay clear of the panel's right edge.)
+// Where a stream's tile starts (over the guide line's top), the guide
+// line's x, and where a thread's tab starts. Both run to the column's
+// right edge.
+const STREAM_LEFT = 2;
 const GUIDE_X = 5;
 const THREAD_LEFT = 9;
 const STRIP_PADDING_Y = 6;
@@ -1096,17 +1111,12 @@ const ADD_ROW_HEIGHT = 40;
 const OVERLAY_WIDTH = 240;
 
 // Each stream + its threads renders inside this box: a surface-card panel
-// flush along the left window edge, rounded on the right, with a gap below
-// it (matching the main rail's panel look). Shared by the strip and the
-// slide-over overlay.
+// flush along the left window edge, square-cornered so the tabs inside it
+// keep their square right edges, with a gap below it. Shared by the strip
+// and the slide-over overlay.
 const STREAM_PANEL_STYLE: CSSProperties = {
   background: "var(--surface-card)",
-  // Same bordered-card treatment as the left rail's RailSection panels
-  // (--surface-card + --border-subtle + radius 6). Flush along the left
-  // window edge, so only the right corners round.
   border: "1px solid var(--border-subtle)",
-  borderTopRightRadius: 6,
-  borderBottomRightRadius: 6,
   marginBottom: 6,
   overflow: "hidden",
 };
