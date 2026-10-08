@@ -57,6 +57,8 @@ pub(super) struct Plan {
     result: Option<Value>,
     /// The composite's own events, recorded with the run.
     events: Vec<oxplow_domain::Envelope>,
+    /// The host capabilities composing it called.
+    capabilities: BTreeMap<String, u32>,
 }
 
 /// Steps 3 and 4's answers for a run, and what it is: what its steps run
@@ -138,7 +140,11 @@ impl Router<'_> {
                 ),
             });
         }
-        let composition = (compose.compose)(conn, input)?;
+        // What composing calls is the run's when it runs as steps (this
+        // composition is the one that runs); a nested composite composes
+        // again in its step's transaction, counted there.
+        let trace = crate::host_capabilities::CapabilityTrace::default();
+        let composition = (compose.compose)(conn, &trace, input)?;
         let mut steps = Vec::with_capacity(composition.calls.len());
         let mut outside = false;
         for (i, call) in composition.calls.into_iter().enumerate() {
@@ -211,6 +217,7 @@ impl Router<'_> {
                 steps,
                 result: composition.result,
                 events: composition.events,
+                capabilities: trace.summary(),
             })
         } else {
             Routed::Tx
@@ -366,6 +373,7 @@ impl CommandBus {
         let mut landed: Vec<NestedChild> = Vec::with_capacity(plan.steps.len());
         let mut events = Vec::new();
         let mut failure: Option<(&Step, CommandError)> = None;
+        let mut capabilities = plan.capabilities.clone();
         for (index, step) in plan.steps.iter().enumerate() {
             let ran = match &step.run {
                 StepRun::Tx(handler) => {
@@ -385,11 +393,12 @@ impl CommandBus {
                     let key = invocation.idempotency_key.clone();
                     handler(invocation, step.call.input.clone())
                         .await
-                        .map(|out| same_events_once(out, key.as_deref()))
+                        .map(|out| (same_events_once(out, key.as_deref()), BTreeMap::new()))
                 }
             };
             match ran {
-                Ok(mut out) => {
+                Ok((mut out, used)) => {
+                    crate::host_capabilities::add_counts(&mut capabilities, used);
                     if let Some(after) = out.after_commit.take() {
                         after();
                     }
@@ -463,6 +472,7 @@ impl CommandBus {
                         id: executed_id.clone(),
                         failed: failed_c.clone(),
                         cause: origin.cause(),
+                        capabilities: capabilities.clone(),
                     },
                 )?;
                 match &origin {
@@ -527,13 +537,14 @@ impl CommandBus {
         cause: &oxplow_domain::EventId,
         confirmed: bool,
         gates: Gates,
-    ) -> Result<HandlerOutput, CommandError> {
+    ) -> Result<(HandlerOutput, BTreeMap<String, u32>), CommandError> {
         let (actor, input, cause) = (actor.clone(), input.clone(), cause.clone());
         let vocabulary = self.log.vocabulary().clone();
         let failed: Arc<parking_lot::Mutex<Option<CommandError>>> = Arc::default();
         let failed_c = failed.clone();
         self.db
             .transaction(move |tx| {
+                let trace = crate::host_capabilities::CapabilityTrace::default();
                 let ctx = TxCtx {
                     conn: tx,
                     actor: &actor,
@@ -545,9 +556,10 @@ impl CommandBus {
                     confirmed,
                     may_write: gates.may_write,
                     depth: 1,
+                    trace: &trace,
                 };
                 match handler(&ctx, input.clone()) {
-                    Ok(out) => Ok(out),
+                    Ok(out) => Ok((out, trace.summary())),
                     Err(CommandError::Busy { message }) => {
                         Err(oxplow_domain::DomainError::Busy(message))
                     }

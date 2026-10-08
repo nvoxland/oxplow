@@ -28,6 +28,7 @@ async-trait = { workspace = true }
 oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
 
 [dev-dependencies]
+oxplow-tasks = { workspace = true }
 tempfile = { workspace = true }
 oxplow-ai-fake = { workspace = true }
 git2 = { workspace = true }

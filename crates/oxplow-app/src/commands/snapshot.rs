@@ -3,16 +3,15 @@
 //! worktree) and destructive — it overwrites what's there now — so a
 //! person confirms it and an agent's run becomes a proposal.
 
+use crate::commands::ops::Op;
 use std::sync::Arc;
 
-use oxplow_domain::{
-    Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, Invokers, Lifecycle,
-};
+use oxplow_domain::CommandError;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::{Command, Handler, HandlerOutput, Invocation};
+use super::{Handler, HandlerOutput, Invocation};
 use crate::snapshot_files::{SnapshotFileError, SnapshotFiles};
 
 pub const RESTORE_FILE: &str = "oxplow.snapshot.restore_file";
@@ -25,24 +24,12 @@ pub struct RestoreInput {
 }
 
 /// `snapshot.restore_file { file_snapshot }`.
-pub fn restore_file_command(files: SnapshotFiles) -> Command {
-    Command::new(
-        CommandSpec {
-            id: RESTORE_FILE.into(),
-            summary: "Restore a captured file (a `file_snapshot` id) into its stream's \
-                      worktree, overwriting what's at its path now. A person confirms it."
-                .into(),
-            input_schema: serde_json::to_value(schemars::schema_for!(RestoreInput))
-                .expect("schema serializes"),
-            invokers: Invokers::ALL,
-            confirm: Confirm::Destructive,
-            undoable: false,
-            lifecycle: Lifecycle::Stable,
-            atomicity: Atomicity::External,
-            effect: CommandEffect::Write,
-            needs: Vec::new(),
-            ui: None,
-        },
+pub fn restore_file_op(files: SnapshotFiles) -> Op {
+    Op::new(
+        "files.write",
+        "restore_file",
+        serde_json::to_value(schemars::schema_for!(RestoreInput)).expect("schema serializes"),
+        false,
         Handler::External(Arc::new(move |_: Invocation, input: Value| {
             let files = files.clone();
             Box::pin(async move {
@@ -70,7 +57,6 @@ pub fn restore_file_command(files: SnapshotFiles) -> Command {
             })
         })),
     )
-    .expect("oxplow.snapshot.restore_file is a valid command")
 }
 
 #[cfg(test)]

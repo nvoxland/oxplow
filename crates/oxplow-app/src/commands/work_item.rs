@@ -30,6 +30,7 @@
 //! or closes an effort here; the effort policy reacts to
 //! `work_item.state_changed` (`crate::effort_policy`).
 
+use crate::commands::ops::Op;
 use crate::link_check::LinkDeps;
 use oxplow_domain::events::schema::{
     EventType as _, WorkItemCommented, WorkItemCommentedV2, WorkItemCreated, WorkItemCreatedV2,
@@ -37,114 +38,17 @@ use oxplow_domain::events::schema::{
     WorkItemLinkedV2, WorkItemRecorded, WorkItemStateChanged, WorkItemStateChangedV1,
 };
 use oxplow_domain::events::Envelope;
-use oxplow_domain::refs::build::{task_of_work_item_ref, work_item_ref};
 use oxplow_domain::work_items::{
-    provider_of, CanonicalState, WorkItemsProvider, WorkItemsRegistry, OXPLOW, VERBS,
+    provider_of, CanonicalState, WorkItemCommentInput, WorkItemCreateInput, WorkItemDeleteInput,
+    WorkItemLinkInput, WorkItemMoveInput, WorkItemReorderInput, WorkItemTransitionInput,
+    WorkItemUpdateInput, WorkItemsProvider, WorkItemsRegistry, VERBS,
 };
-use oxplow_domain::{
-    Atomicity, CommandCall, CommandError, CommandSpec, Confirm, Invokers, Lifecycle, Task, TaskId,
-    TaskLinkType, TaskPriority, TaskStatus, ThreadId, Timestamp,
-};
+use oxplow_domain::{CommandCall, CommandError, ThreadId};
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-use super::{Command, Dispatch, Handler, HandlerOutput, Invocation, Route, TxCtx, TxHandler};
-
-/// oxplow's status for a canonical state.
-pub fn native_status(state: CanonicalState) -> TaskStatus {
-    match state {
-        CanonicalState::Todo => TaskStatus::Ready,
-        CanonicalState::InProgress => TaskStatus::InProgress,
-        CanonicalState::Blocked => TaskStatus::Blocked,
-        CanonicalState::Done => TaskStatus::Done,
-        CanonicalState::Canceled => TaskStatus::Canceled,
-    }
-}
-
-/// The canonical state of an oxplow task: `ready` is `todo`; `archived`
-/// is `done` when it was completed, else `canceled` (the same mapping the
-/// `work_item` row is projected with).
-pub fn canonical_of(task: &Task) -> CanonicalState {
-    state_pair(task.status, task.completed_at.is_some()).0
-}
-
-/// The `state` / `native_state` pair that names oxplow `status`:
-/// `archived` rides on `done` when the task was completed (`completed`),
-/// else on `canceled`.
-pub fn state_pair(status: TaskStatus, completed: bool) -> (CanonicalState, String) {
-    let state = match status {
-        TaskStatus::Ready => CanonicalState::Todo,
-        TaskStatus::InProgress => CanonicalState::InProgress,
-        TaskStatus::Blocked => CanonicalState::Blocked,
-        TaskStatus::Done => CanonicalState::Done,
-        TaskStatus::Canceled => CanonicalState::Canceled,
-        TaskStatus::Archived if completed => CanonicalState::Done,
-        TaskStatus::Archived => CanonicalState::Canceled,
-    };
-    (state, status_str(status))
-}
-
-/// oxplow's status for a `state` / `native_state` pair (either or both;
-/// `None` when neither is given). A `native_state` must be an oxplow
-/// status and, with a `state`, map to it — `archived` to `done` or
-/// `canceled`, the rest by name — else `Invalid` at `/native_state`.
-pub fn oxplow_status(
-    state: Option<CanonicalState>,
-    native_state: Option<&str>,
-) -> Result<Option<TaskStatus>, CommandError> {
-    let invalid = |message: String| CommandError::Invalid {
-        field: Some("/native_state".into()),
-        message,
-    };
-    match (state, native_state) {
-        (None, None) => Ok(None),
-        (Some(state), None) => Ok(Some(native_status(state))),
-        (state, Some(raw)) => {
-            let status: TaskStatus =
-                serde_json::from_value(Value::String(raw.into())).map_err(|_| {
-                    invalid(format!(
-                        "`{raw}` isn't an oxplow status (ready, in_progress, blocked, done, \
-                         canceled, archived)"
-                    ))
-                })?;
-            if let Some(state) = state {
-                let fits = match status {
-                    TaskStatus::Archived => {
-                        matches!(state, CanonicalState::Done | CanonicalState::Canceled)
-                    }
-                    other => native_status(state) == other,
-                };
-                if !fits {
-                    return Err(invalid(format!(
-                        "`{raw}` isn't an oxplow status for `{}`",
-                        state.as_str()
-                    )));
-                }
-            }
-            Ok(Some(status))
-        }
-    }
-}
-
-/// oxplow's own fields, under `native`: a task's priority.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct OxplowNative {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub priority: Option<TaskPriority>,
-}
-
-fn oxplow_native(native: Option<&Value>) -> Result<OxplowNative, CommandError> {
-    match native {
-        None => Ok(OxplowNative::default()),
-        Some(v) => serde_json::from_value(v.clone()).map_err(|e| CommandError::Invalid {
-            field: Some("/native".into()),
-            message: format!("oxplow's native field is `priority`: {e}"),
-        }),
-    }
-}
+use super::{Dispatch, Handler, HandlerOutput, Invocation, Route, TxCtx, TxHandler};
 
 fn parse_thread(raw: &str, field: &str) -> Result<ThreadId, CommandError> {
     raw.parse::<ThreadId>().map_err(|e| CommandError::Invalid {
@@ -172,70 +76,6 @@ fn agent_thread(actor: &oxplow_domain::Actor) -> Option<ThreadId> {
         Actor::Agent { thread_id, .. } => *thread_id,
         Actor::Lens { on_behalf_of, .. } => agent_thread(on_behalf_of),
         _ => None,
-    }
-}
-
-/// The oxplow task `item_ref` names. Refused (an `Invalid` at `field`)
-/// when it isn't a work-item ref, its provider isn't registered (the
-/// message names the registered ones), or it is another provider's.
-pub fn oxplow_task(
-    registry: &WorkItemsRegistry,
-    item_ref: &str,
-    field: &str,
-) -> Result<TaskId, CommandError> {
-    let invalid = |message: String| CommandError::Invalid {
-        field: Some(field.into()),
-        message,
-    };
-    let canonical;
-    let item_ref = if item_ref.starts_with("work_item:") {
-        item_ref
-    } else {
-        canonical = canonical_ref(registry, item_ref).map_err(invalid)?;
-        canonical.as_str()
-    };
-    let provider = provider_of(item_ref).map_err(|e| invalid(e.to_string()))?;
-    registry.get(provider).map_err(|e| invalid(e.to_string()))?;
-    if provider != OXPLOW {
-        return Err(invalid(format!(
-            "`{item_ref}` is {provider}'s; this command places oxplow's own tasks"
-        )));
-    }
-    task_of_work_item_ref(item_ref).ok_or_else(|| {
-        invalid(format!(
-            "`{item_ref}` names no oxplow task (work_item:oxplow:tsk<n>)"
-        ))
-    })
-}
-
-/// `task` is a live task: a deleted one takes no comments or links.
-fn live_task_tx(
-    conn: &rusqlite::Connection,
-    task: TaskId,
-    item_ref: &str,
-    field: &str,
-) -> Result<(), CommandError> {
-    use rusqlite::OptionalExtension;
-    let live: Option<bool> = conn
-        .query_row(
-            "SELECT deleted_at IS NULL FROM task WHERE id = ?1",
-            [task.value()],
-            |r| r.get(0),
-        )
-        .optional()
-        .map_err(|e| CommandError::Failed {
-            message: e.to_string(),
-        })?;
-    match live {
-        Some(true) => Ok(()),
-        Some(false) => Err(CommandError::Invalid {
-            field: Some(field.into()),
-            message: format!("`{item_ref}` was deleted"),
-        }),
-        None => Err(CommandError::Invalid {
-            field: Some(field.into()),
-            message: format!("no work item `{item_ref}`"),
-        }),
     }
 }
 
@@ -532,12 +372,12 @@ pub(crate) fn provider_for(
 /// provider's inverse (a verb) is renamed back to `oxplow.work_item.<verb>`, so
 /// an undo dispatches again.
 fn dispatching(
-    spec: CommandSpec,
+    shape: Shape,
     registry: WorkItemsRegistry,
     verb: &'static str,
     target: Target,
     tx: Arc<TxHandler>,
-) -> Command {
+) -> Op {
     let tx = logging_canonical(verb, tx);
     // A loose id is the active list's, on every path (route, inside the
     // transaction, through the provider).
@@ -616,15 +456,17 @@ fn dispatching(
             })
         }) as super::ExternalFuture
     });
-    Command::new(
-        spec,
+    Op::new(
+        "work_items.write",
+        verb,
+        shape.schema,
+        shape.undoable,
         Handler::Dispatch(Dispatch {
             route,
             tx,
             external,
         }),
     )
-    .expect("a work_item command registers")
 }
 
 /// The verbs that can put an item in a state.
@@ -828,37 +670,11 @@ fn spec_name(verb: &str) -> String {
     format!("oxplow.work_item.{verb}")
 }
 
-fn spec(
-    name: &str,
-    summary: &str,
-    schema: Value,
-    confirm: Confirm,
-    undoable: bool,
-    atomicity: Atomicity,
-) -> CommandSpec {
-    // The feature its verb is, if any: every work list (none included, a
-    // sink with every feature) takes the rest.
-    let needs = match name {
-        LINK => vec!["work_items.links".to_string()],
-        COMMENT => vec!["work_items.comments".to_string()],
-        DELETE => vec!["work_items.delete".to_string()],
-        REORDER => vec!["work_items.ordering".to_string()],
-        MOVE => vec!["work_items.lists".to_string()],
-        _ => Vec::new(),
-    };
-    CommandSpec {
-        id: name.into(),
-        summary: summary.into(),
-        input_schema: schema,
-        invokers: Invokers::ALL,
-        confirm,
-        undoable,
-        lifecycle: Lifecycle::Stable,
-        atomicity,
-        effect: oxplow_domain::CommandEffect::Record,
-        needs,
-        ui: None,
-    }
+/// What a `work_items.write` operation is beyond its handler: the input
+/// its handler reads, and whether it returns an inverse.
+pub struct Shape {
+    pub schema: Value,
+    pub undoable: bool,
 }
 
 fn schema_of<T: JsonSchema>() -> Value {
@@ -869,107 +685,45 @@ fn schema_of<T: JsonSchema>() -> Value {
 
 pub const NAME: &str = "oxplow.work_item.transition";
 
-/// Move an item to a canonical state, and optionally to one of its
-/// provider's own states that maps to it.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct WorkItemTransitionInput {
-    /// The item's ref (`work_item:oxplow:tsk42`, `work_item:issues:ENG-12`).
-    #[serde(rename = "ref")]
-    pub item_ref: String,
-    pub to: CanonicalState,
-    /// The provider's own state, which must map to `to` (oxplow:
-    /// `archived` with `done` or `canceled`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native_state: Option<String>,
+pub fn transition_shape() -> Shape {
+    Shape {
+        schema: schema_of::<WorkItemTransitionInput>(),
+        undoable: true,
+    }
 }
 
-pub fn spec_transition() -> CommandSpec {
-    spec(
-        NAME,
-        "Move a work item to a canonical state (todo, in_progress, blocked, done, canceled), \
-         optionally naming the provider's own state.",
-        schema_of::<WorkItemTransitionInput>(),
-        Confirm::Never,
-        true,
-        Atomicity::Dispatch,
-    )
-}
-
-/// oxplow's core: `set_status_tx`. The handler is pure: it runs inside a
-/// transaction the bus may retry.
-fn tx_transition(registry: WorkItemsRegistry) -> Arc<TxHandler> {
-    Arc::new(move |ctx: &TxCtx<'_>, input| {
-        let input: WorkItemTransitionInput = parse(input)?;
-        let id = oxplow_task(&registry, &input.item_ref, "/ref")?;
-        let to =
-            oxplow_status(Some(input.to), input.native_state.as_deref())?.ok_or_else(|| {
-                CommandError::Invalid {
-                    field: Some("/to".into()),
-                    message: "a transition needs a state".into(),
-                }
-            })?;
-        let now = Timestamp::now();
-        let set = |status: TaskStatus| {
-            oxplow_db::task_store::set_status_tx(ctx.conn, id, status, now).map_err(|e| match e {
-                oxplow_domain::DomainError::NotFound => CommandError::Failed {
-                    message: format!("task {id} not found"),
-                },
-                other => CommandError::from(other),
-            })
-        };
-        // An archive keeps whether the task was completed; archiving it
-        // as `done` (or `canceled`) when it isn't (or is) passes through
-        // that state first, so the item reads as asked.
-        let through = (to == TaskStatus::Archived)
-            .then(|| native_status(input.to))
-            .filter(|&status| {
-                let completed = oxplow_db::task_store::get_task_tx(ctx.conn, id)
-                    .ok()
-                    .flatten()
-                    .is_some_and(|t| t.completed_at.is_some());
-                completed != (status == TaskStatus::Done)
-            });
-        let before = match through {
-            Some(status) => Some(set(status)?.before),
-            None => None,
-        };
-        let mut change = set(to)?;
-        if let Some(before) = before {
-            change.before = before;
-        }
-        Ok(HandlerOutput {
-            result: serde_json::to_value(&change.after).expect("Task serializes"),
-            inverse: Some(CommandCall {
-                name: NAME.into(),
-                input: serde_json::to_value(WorkItemTransitionInput {
-                    item_ref: input.item_ref,
-                    to: canonical_of(&change.before),
-                    native_state: Some(status_str(change.before.status)),
-                })
-                .expect("input serializes"),
-            }),
-            events: Vec::new(),
-            after_commit: None,
-            unchanged: false,
-        })
+/// oxplow's core for a verb, in the bus's transaction: the list's own
+/// answer (`oxplow_tasks::verbs`), its inverse named as the command that
+/// runs it again.
+fn answered(
+    answer: Result<oxplow_tasks::verbs::Answer, CommandError>,
+) -> Result<HandlerOutput, CommandError> {
+    let answer = answer?;
+    Ok(HandlerOutput {
+        result: answer.result,
+        inverse: answer.inverse.map(|c| CommandCall {
+            name: spec_name(&c.name),
+            input: c.input,
+        }),
+        events: Vec::new(),
+        after_commit: None,
+        unchanged: false,
     })
 }
 
-fn status_str(status: TaskStatus) -> String {
-    serde_json::to_value(status)
-        .ok()
-        .and_then(|v| v.as_str().map(str::to_string))
-        .expect("a status serializes as a string")
+fn tx_transition() -> Arc<TxHandler> {
+    Arc::new(|ctx: &TxCtx<'_>, input| {
+        answered(oxplow_tasks::verbs::transition_tx(ctx.conn, parse(input)?))
+    })
 }
 
-pub fn command(registry: WorkItemsRegistry) -> Command {
+pub fn transition_op(registry: WorkItemsRegistry) -> Op {
     dispatching(
-        spec_transition(),
+        transition_shape(),
         registry.clone(),
         "transition",
         ref_target,
-        tx_transition(registry),
+        tx_transition(),
     )
 }
 
@@ -977,264 +731,72 @@ pub fn command(registry: WorkItemsRegistry) -> Command {
 
 pub const CREATE: &str = "oxplow.work_item.create";
 
-/// A new item on the active tracker (tsk1058), optionally straight into
-/// a state.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct WorkItemCreateInput {
-    pub title: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub body: Option<String>,
-    /// The parent's ref, on the same provider (needs `hierarchy`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_ref: Option<String>,
-    /// `todo` when absent.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub state: Option<CanonicalState>,
-    /// The provider's own state, which must map to `state` when both are
-    /// given.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native_state: Option<String>,
-    /// The tracker's own fields (oxplow: `{ priority? }`), as its
-    /// `create` declares them.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native: Option<Value>,
-    /// The thread it's filed on (`thr3`): absent, an agent's own, or none
-    /// for a person (oxplow's backlog).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub thread: Option<String>,
-}
-
-pub fn create_spec() -> CommandSpec {
-    spec(
-        CREATE,
-        "File a work item on the active tracker (the one the person chose), optionally \
-         straight into a state. `thread` is the thread it's filed on: absent, an agent's own \
-         (a person's lands on the backlog). `native` is the tracker's own fields as its create \
-         declares them (oxplow: { priority }). On oxplow the result carries `link_warnings`: \
-         the `[[…]]` links in the body that don't resolve.",
-        schema_of::<WorkItemCreateInput>(),
-        Confirm::Never,
+pub fn create_shape() -> Shape {
+    Shape {
+        schema: schema_of::<WorkItemCreateInput>(),
         // Undoing a filing would be deleting an item — not what undo is for.
-        false,
-        Atomicity::Dispatch,
-    )
-}
-
-/// Who authored a task an actor files: a person (`user`), an agent
-/// (`agent`, a lens acting for one included), or neither — an effect or
-/// oxplow itself: the creating actor is on the run's audit and its
-/// `work_item.created`, and the task isn't shown as the person's.
-fn task_author(actor: &oxplow_domain::Actor) -> Option<oxplow_domain::TaskAuthor> {
-    use oxplow_domain::Actor;
-    match actor {
-        Actor::Human => Some(oxplow_domain::TaskAuthor::User),
-        Actor::Agent { .. } => Some(oxplow_domain::TaskAuthor::Agent),
-        Actor::Lens { on_behalf_of, .. } => task_author(on_behalf_of),
-        Actor::Effect { .. } | Actor::System => None,
+        undoable: false,
     }
 }
 
-/// Who a comment's `task_note.author` names (tsk1000), as [`task_author`]
-/// does for a task: `user` (a person), `agent` (a lens acting for one
-/// included), `effect:<extension>/<id>` or `oxplow` — never the person's
-/// for what an effect or oxplow wrote.
-fn note_author(actor: &oxplow_domain::Actor) -> String {
-    use oxplow_domain::Actor;
-    match actor {
-        Actor::Human => "user".into(),
-        Actor::Agent { .. } => "agent".into(),
-        Actor::Lens { on_behalf_of, .. } => note_author(on_behalf_of),
-        Actor::Effect { effect } => format!("effect:{effect}"),
-        Actor::System => "oxplow".into(),
-    }
-}
-
-/// oxplow's core: the row, at the end of its list. An agent's task is
-/// authored `agent`. The result carries the body's `link_warnings`.
-fn tx_create(registry: WorkItemsRegistry, links: LinkDeps) -> Arc<TxHandler> {
+/// oxplow's core: the list's `create`, filed on the thread core resolves
+/// ([`filing_thread`]). The result carries the body's `link_warnings`.
+fn tx_create(links: LinkDeps) -> Arc<TxHandler> {
     Arc::new(move |ctx: &TxCtx<'_>, input| {
-        let input: WorkItemCreateInput = parse(input)?;
-        let parent_id = input
-            .parent_ref
-            .as_deref()
-            .map(|r| oxplow_task(&registry, r, "/parent_ref"))
-            .transpose()?;
-        let native = oxplow_native(input.native.as_ref())?;
+        let mut input: WorkItemCreateInput = parse(input)?;
         let thread = filing_thread(ctx.actor, input.thread.as_deref())?;
-        let now = Timestamp::now();
-        let status =
-            oxplow_status(input.state, input.native_state.as_deref())?.unwrap_or(TaskStatus::Ready);
-        let item = Task {
-            id: TaskId::placeholder(),
-            thread_id: thread,
-            parent_id,
-            title: input.title,
-            description: input.body.unwrap_or_default(),
-            status,
-            priority: native.priority.unwrap_or(TaskPriority::Medium),
-            sort_index: oxplow_db::task_store::next_sort_index_tx(ctx.conn, thread)
-                .map_err(CommandError::from)?,
-            created_by: oxplow_domain::TaskActorKind::User,
-            created_at: now,
-            updated_at: now,
-            completed_at: (status == TaskStatus::Done).then_some(now),
-            deleted_at: None,
-            note_count: 0,
-            author: task_author(ctx.actor),
-        };
-        let id = oxplow_db::task_store::insert_tx(ctx.conn, &item).map_err(CommandError::from)?;
-        let row = oxplow_db::task_store::get_task_tx(ctx.conn, id)
-            .map_err(CommandError::from)?
-            .ok_or_else(|| CommandError::Failed {
-                message: format!("task {id} vanished"),
-            })?;
-        let mut result = serde_json::to_value(&row).expect("Task serializes");
-        result["ref"] = Value::String(work_item_ref(id));
-        result["link_warnings"] = json!(links.warnings(ctx, &row.description, row.thread_id));
-        Ok(HandlerOutput {
-            result,
-            inverse: None,
-            events: Vec::new(),
-            after_commit: None,
-            unchanged: false,
-        })
+        input.thread = thread.map(|t| t.to_string());
+        let body = input.body.clone().unwrap_or_default();
+        let mut out = answered(oxplow_tasks::verbs::create_tx(ctx.conn, ctx.actor, input))?;
+        out.result["link_warnings"] = json!(links.warnings(ctx, &body, thread));
+        Ok(out)
     })
 }
 
-pub fn create_command(registry: WorkItemsRegistry, links: LinkDeps) -> Command {
+pub fn create_op(registry: WorkItemsRegistry, links: LinkDeps) -> Op {
     dispatching(
-        create_spec(),
+        create_shape(),
         registry.clone(),
         "create",
         create_target,
-        tx_create(registry, links),
+        tx_create(links),
     )
-    .with_ui(oxplow_domain::CommandUi {
-        label: "New Task…".into(),
-        group: Some("Tasks".into()),
-        keywords: vec!["work item".into()],
-        form: Some("page:new-task".into()),
-        ..Default::default()
-    })
 }
 
 // ---- oxplow.work_item.update ----
 
 pub const UPDATE: &str = "oxplow.work_item.update";
 
-/// Edit an item's fields and, optionally, its state — one run. Absent
-/// fields are left alone.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct WorkItemUpdateInput {
-    #[serde(rename = "ref")]
-    pub item_ref: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub body: Option<String>,
-    /// The parent's ref on the same provider, or `""` to detach.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_ref: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub state: Option<CanonicalState>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native_state: Option<String>,
-    /// The provider's own fields to change (oxplow: `{ priority? }`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native: Option<Value>,
+pub fn update_shape() -> Shape {
+    Shape {
+        schema: schema_of::<WorkItemUpdateInput>(),
+        undoable: true,
+    }
 }
 
-pub fn update_spec() -> CommandSpec {
-    spec(
-        UPDATE,
-        "Edit a work item's title, body, parent or native fields and, optionally, move it to \
-         a state — all in one run (see oxplow.work_item.transition for the state's effects). On \
-         oxplow the result carries `link_warnings` for the body's `[[…]]` links.",
-        schema_of::<WorkItemUpdateInput>(),
-        Confirm::Never,
-        true,
-        Atomicity::Dispatch,
-    )
-}
-
-/// oxplow's core: `update_with_status_tx` — the fields, then the status
-/// move. The inverse restores exactly what was given. The result carries
-/// the body's `link_warnings`.
-fn tx_update(registry: WorkItemsRegistry, links: LinkDeps) -> Arc<TxHandler> {
+/// oxplow's core: the list's `update`. The result carries the body's
+/// `link_warnings`.
+fn tx_update(links: LinkDeps) -> Arc<TxHandler> {
     Arc::new(move |ctx: &TxCtx<'_>, input| {
-        let input: WorkItemUpdateInput = parse(input)?;
-        let id = oxplow_task(&registry, &input.item_ref, "/ref")?;
-        let parent = match input.parent_ref.as_deref() {
-            None => None,
-            Some("") => Some(None),
-            Some(r) => Some(Some(oxplow_task(&registry, r, "/parent_ref")?)),
-        };
-        let native = oxplow_native(input.native.as_ref())?;
-        let status = oxplow_status(input.state, input.native_state.as_deref())?;
-        let not_found = |e: oxplow_domain::DomainError| match e {
-            oxplow_domain::DomainError::NotFound => CommandError::Failed {
-                message: format!("task {id} not found"),
-            },
-            other => CommandError::from(other),
-        };
-        let before = oxplow_db::task_store::get_task_tx(ctx.conn, id)
-            .map_err(not_found)?
-            .ok_or_else(|| not_found(oxplow_domain::DomainError::NotFound))?;
-        let now = Timestamp::now();
-        let mut item = before.clone();
-        if let Some(t) = &input.title {
-            item.title = t.clone();
-        }
-        if let Some(b) = &input.body {
-            item.description = b.clone();
-        }
-        if let Some(p) = native.priority {
-            item.priority = p;
-        }
-        if let Some(p) = parent {
-            item.parent_id = p;
-        }
-        item.updated_at = now;
-        let after = oxplow_db::task_store::update_with_status_tx(ctx.conn, &item, status, now)
-            .map_err(not_found)?;
-        let inverse = WorkItemUpdateInput {
-            item_ref: input.item_ref.clone(),
-            title: input.title.as_ref().map(|_| before.title.clone()),
-            body: input.body.as_ref().map(|_| before.description.clone()),
-            parent_ref: input
-                .parent_ref
-                .as_ref()
-                .map(|_| before.parent_id.map(work_item_ref).unwrap_or_default()),
-            state: input.state.map(|_| canonical_of(&before)),
-            native_state: input.native_state.map(|_| status_str(before.status)),
-            native: native
-                .priority
-                .map(|_| json!({ "priority": before.priority })),
-        };
-        let mut result = serde_json::to_value(&after).expect("Task serializes");
-        result["link_warnings"] = json!(links.warnings(ctx, &after.description, after.thread_id));
-        Ok(HandlerOutput {
-            result,
-            inverse: Some(CommandCall {
-                name: UPDATE.into(),
-                input: serde_json::to_value(inverse).expect("input serializes"),
-            }),
-            events: Vec::new(),
-            after_commit: None,
-            unchanged: false,
-        })
+        let mut out = answered(oxplow_tasks::verbs::update_tx(ctx.conn, parse(input)?))?;
+        let body = out.result["description"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        let thread: Option<ThreadId> =
+            serde_json::from_value(out.result["thread_id"].clone()).unwrap_or(None);
+        out.result["link_warnings"] = json!(links.warnings(ctx, &body, thread));
+        Ok(out)
     })
 }
 
-pub fn update_command(registry: WorkItemsRegistry, links: LinkDeps) -> Command {
+pub fn update_op(registry: WorkItemsRegistry, links: LinkDeps) -> Op {
     dispatching(
-        update_spec(),
+        update_shape(),
         registry.clone(),
         "update",
         update_target,
-        tx_update(registry, links),
+        tx_update(links),
     )
 }
 
@@ -1242,84 +804,26 @@ pub fn update_command(registry: WorkItemsRegistry, links: LinkDeps) -> Command {
 
 pub const LINK: &str = "oxplow.work_item.link";
 
-/// A typed link from one item to another of the same provider.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct WorkItemLinkInput {
-    /// The item linked from.
-    #[serde(rename = "ref")]
-    pub item_ref: String,
-    /// The item linked to (the same provider's).
-    pub target: String,
-    /// The provider names its own types (oxplow: blocks, relates_to,
-    /// discovered_from, duplicates, supersedes, replies_to).
-    pub link_type: String,
-}
-
-/// oxplow's core: `task_satellite::create_link_tx`. The link belongs to a
-/// thread: the caller's, else the linked task's, else the target's.
-fn tx_link(registry: WorkItemsRegistry) -> Arc<TxHandler> {
-    Arc::new(move |ctx: &TxCtx<'_>, input| {
-        let input: WorkItemLinkInput = parse(input)?;
-        let from = oxplow_task(&registry, &input.item_ref, "/ref")?;
-        let to = oxplow_task(&registry, &input.target, "/target")?;
-        live_task_tx(ctx.conn, from, &input.item_ref, "/ref")?;
-        live_task_tx(ctx.conn, to, &input.target, "/target")?;
-        let link_type: TaskLinkType =
-            serde_json::from_value(Value::String(input.link_type.clone())).map_err(|_| {
-                invalid_at(
-                    "/link_type",
-                    format!(
-                        "`{}` isn't an oxplow link type (blocks, relates_to, discovered_from, \
-                         duplicates, supersedes, replies_to)",
-                        input.link_type
-                    ),
-                )
-            })?;
-        let thread = match ctx.actor.thread_id() {
-            Some(t) => t,
-            None => {
-                let on = |id: TaskId| -> Result<Option<ThreadId>, CommandError> {
-                    Ok(oxplow_db::task_store::get_task_tx(ctx.conn, id)
-                        .map_err(CommandError::from)?
-                        .and_then(|t| t.thread_id))
-                };
-                on(from)?.or(on(to)?).ok_or_else(|| {
-                    invalid_at(
-                        "/ref",
-                        "a link between two backlog tasks needs a thread: run it from one".into(),
-                    )
-                })?
-            }
-        };
-        let link = oxplow_db::task_satellite::create_link_tx(ctx.conn, thread, from, to, link_type)
-            .map_err(CommandError::from)?;
-        Ok(HandlerOutput {
-            result: serde_json::to_value(&link).expect("TaskLink serializes"),
-            inverse: None,
-            events: Vec::new(),
-            after_commit: None,
-            unchanged: false,
-        })
+fn tx_link() -> Arc<TxHandler> {
+    Arc::new(|ctx: &TxCtx<'_>, input| {
+        answered(oxplow_tasks::verbs::link_tx(
+            ctx.conn,
+            ctx.actor,
+            parse(input)?,
+        ))
     })
 }
 
-pub fn link_command(registry: WorkItemsRegistry) -> Command {
+pub fn link_op(registry: WorkItemsRegistry) -> Op {
     dispatching(
-        spec(
-            LINK,
-            "Link one work item to another of the same provider, by a link type the provider \
-             names (oxplow: blocks, relates_to, discovered_from, duplicates, supersedes, \
-             replies_to).",
-            schema_of::<WorkItemLinkInput>(),
-            Confirm::Never,
-            false,
-            Atomicity::Dispatch,
-        ),
+        Shape {
+            schema: schema_of::<WorkItemLinkInput>(),
+            undoable: false,
+        },
         registry.clone(),
         "link",
         link_target,
-        tx_link(registry),
+        tx_link(),
     )
 }
 
@@ -1327,61 +831,26 @@ pub fn link_command(registry: WorkItemsRegistry) -> Command {
 
 pub const COMMENT: &str = "oxplow.work_item.comment";
 
-/// A comment on an item (oxplow: a task note).
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct WorkItemCommentInput {
-    #[serde(rename = "ref")]
-    pub item_ref: String,
-    /// Markdown.
-    pub body: String,
-}
-
-/// oxplow's core: `task_satellite::add_task_note_tx`; the note is
-/// authored by the actor's kind. The result names it as `comment`, the
-/// list's own id for it.
-fn tx_comment(registry: WorkItemsRegistry) -> Arc<TxHandler> {
-    Arc::new(move |ctx: &TxCtx<'_>, input| {
-        let input: WorkItemCommentInput = parse(input)?;
-        let task = oxplow_task(&registry, &input.item_ref, "/ref")?;
-        live_task_tx(ctx.conn, task, &input.item_ref, "/ref")?;
-        if input.body.trim().is_empty() {
-            return Err(invalid_at("/body", "a comment needs a body".into()));
-        }
-        let note = oxplow_db::task_satellite::add_task_note_tx(
+fn tx_comment() -> Arc<TxHandler> {
+    Arc::new(|ctx: &TxCtx<'_>, input| {
+        answered(oxplow_tasks::verbs::comment_tx(
             ctx.conn,
-            &ctx.events.vocabulary.kinds,
-            task,
-            &input.body,
-            &note_author(ctx.actor),
-        )
-        .map_err(CommandError::from)?;
-        let mut result = serde_json::to_value(&note).expect("TaskNote serializes");
-        result["comment"] = Value::String(note.id.to_string());
-        Ok(HandlerOutput {
-            result,
-            inverse: None,
-            events: Vec::new(),
-            after_commit: None,
-            unchanged: false,
-        })
+            ctx.actor,
+            parse(input)?,
+        ))
     })
 }
 
-pub fn comment_command(registry: WorkItemsRegistry) -> Command {
+pub fn comment_op(registry: WorkItemsRegistry) -> Op {
     dispatching(
-        spec(
-            COMMENT,
-            "Comment on a work item (oxplow: a note shown with the task).",
-            schema_of::<WorkItemCommentInput>(),
-            Confirm::Never,
-            false,
-            Atomicity::Dispatch,
-        ),
+        Shape {
+            schema: schema_of::<WorkItemCommentInput>(),
+            undoable: false,
+        },
         registry.clone(),
         "comment",
         comment_target,
-        tx_comment(registry),
+        tx_comment(),
     )
 }
 
@@ -1389,53 +858,24 @@ pub fn comment_command(registry: WorkItemsRegistry) -> Command {
 
 pub const DELETE: &str = "oxplow.work_item.delete";
 
-/// Remove an item (oxplow: soft — the row stays, marked deleted).
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct WorkItemDeleteInput {
-    #[serde(rename = "ref")]
-    pub item_ref: String,
-}
-
-/// oxplow's core: `soft_delete_tx`.
-fn tx_delete(registry: WorkItemsRegistry) -> Arc<TxHandler> {
-    Arc::new(move |ctx: &TxCtx<'_>, input| {
-        let input: WorkItemDeleteInput = parse(input)?;
-        let id = oxplow_task(&registry, &input.item_ref, "/ref")?;
-        oxplow_db::task_store::soft_delete_tx(ctx.conn, id, Timestamp::now()).map_err(
-            |e| match e {
-                oxplow_domain::DomainError::NotFound => {
-                    invalid_at("/ref", format!("no work item `{}`", input.item_ref))
-                }
-                other => CommandError::from(other),
-            },
-        )?;
-        Ok(HandlerOutput {
-            result: json!({ "ref": input.item_ref }),
-            inverse: None,
-            events: Vec::new(),
-            after_commit: None,
-            unchanged: false,
-        })
+fn tx_delete() -> Arc<TxHandler> {
+    Arc::new(|ctx: &TxCtx<'_>, input| {
+        answered(oxplow_tasks::verbs::delete_tx(ctx.conn, parse(input)?))
     })
 }
 
 /// Destructive (asks first) and not undoable; only on a provider that
 /// declares `delete`.
-pub fn delete_command(registry: WorkItemsRegistry) -> Command {
+pub fn delete_op(registry: WorkItemsRegistry) -> Op {
     dispatching(
-        spec(
-            DELETE,
-            "Delete a work item.",
-            schema_of::<WorkItemDeleteInput>(),
-            Confirm::Destructive,
-            false,
-            Atomicity::Dispatch,
-        ),
+        Shape {
+            schema: schema_of::<WorkItemDeleteInput>(),
+            undoable: false,
+        },
         registry.clone(),
         "delete",
         delete_target,
-        tx_delete(registry),
+        tx_delete(),
     )
 }
 
@@ -1444,204 +884,24 @@ pub fn delete_command(registry: WorkItemsRegistry) -> Command {
 pub const REORDER: &str = "oxplow.work_item.reorder";
 pub const MOVE: &str = "oxplow.work_item.move";
 
-/// `oxplow.work_item.reorder`: put an item before or after another in its own
-/// list (neither: at its end).
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct WorkItemReorderInput {
-    /// The task's ref (`work_item:oxplow:tsk42`).
-    #[serde(rename = "ref")]
-    pub item_ref: String,
-    /// Put it just before this item of the same list.
-    #[serde(default)]
-    pub before: Option<String>,
-    /// Put it just after this item of the same list.
-    #[serde(default)]
-    pub after: Option<String>,
-}
-
-/// Which list `oxplow.work_item.move` takes an item to.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum MoveTo {
-    /// The project-wide backlog.
-    Backlog,
-    /// A thread's list (`thr3`).
-    Thread(String),
-}
-
-impl MoveTo {
-    fn thread(&self) -> Result<Option<ThreadId>, CommandError> {
-        match self {
-            MoveTo::Backlog => Ok(None),
-            MoveTo::Thread(raw) => parse_thread(raw, "/to/thread").map(Some),
-        }
-    }
-
-    fn of(thread: Option<ThreadId>) -> Self {
-        thread.map_or(MoveTo::Backlog, |t| MoveTo::Thread(t.to_string()))
-    }
-}
-
-/// `oxplow.work_item.move`: take an item to another list — its end, or next to
-/// an item there.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct WorkItemMoveInput {
-    #[serde(rename = "ref")]
-    pub item_ref: String,
-    pub to: MoveTo,
-    #[serde(default)]
-    pub before: Option<String>,
-    #[serde(default)]
-    pub after: Option<String>,
-}
-
-/// The place `before` / `after` name (at most one).
-fn placement(
-    registry: &WorkItemsRegistry,
-    before: &Option<String>,
-    after: &Option<String>,
-) -> Result<oxplow_db::task_store::Placement, CommandError> {
-    use oxplow_db::task_store::Placement;
-    match (before, after) {
-        (Some(_), Some(_)) => Err(invalid_at(
-            "/after",
-            "give `before` or `after`, not both".into(),
-        )),
-        (Some(b), None) => Ok(Placement::Before(oxplow_task(registry, b, "/before")?)),
-        (None, Some(a)) => Ok(Placement::After(oxplow_task(registry, a, "/after")?)),
-        (None, None) => Ok(Placement::End),
-    }
-}
-
-/// `before` / `after` for a place (the inverse's input).
-fn neighbour(place: oxplow_db::task_store::Placement) -> (Option<String>, Option<String>) {
-    use oxplow_db::task_store::Placement;
-    match place {
-        Placement::End => (None, None),
-        Placement::Before(t) => (Some(work_item_ref(t)), None),
-        Placement::After(t) => (None, Some(work_item_ref(t))),
-    }
-}
-
-/// Place the task in `dest`'s list, refusing a thread that doesn't exist.
-fn place(
-    ctx: &TxCtx<'_>,
-    id: TaskId,
-    dest: Option<ThreadId>,
-    at: oxplow_db::task_store::Placement,
-) -> Result<oxplow_db::task_store::Placed, CommandError> {
-    if let Some(thread) = dest {
-        use rusqlite::OptionalExtension;
-        let exists: Option<i64> = ctx
-            .conn
-            .query_row(
-                "SELECT 1 FROM threads WHERE id = ?1",
-                [thread.value()],
-                |r| r.get(0),
-            )
-            .optional()
-            .map_err(|e| CommandError::Failed {
-                message: e.to_string(),
-            })?;
-        if exists.is_none() {
-            return Err(invalid_at("/to", format!("no thread `{thread}`")));
-        }
-    }
-    let placed = oxplow_db::task_store::place_task_tx(ctx.conn, id, dest, at, Timestamp::now())
-        .map_err(|e| match e {
-            oxplow_domain::DomainError::NotFound => {
-                invalid_at("/ref", format!("no work item {}", work_item_ref(id)))
-            }
-            oxplow_domain::DomainError::Invalid(message) => CommandError::Invalid {
-                field: None,
-                message,
-            },
-            other => CommandError::from(other),
-        })?;
-    Ok(placed)
-}
-
-pub fn reorder_command(registry: WorkItemsRegistry) -> Command {
-    let spec = spec(
-        REORDER,
-        "Put a work item before or after another on its list (neither: at its end).",
-        schema_of::<WorkItemReorderInput>(),
-        Confirm::Never,
-        true,
-        Atomicity::Dispatch,
-    );
-    let core_registry = registry.clone();
-    let tx: Arc<TxHandler> = Arc::new(move |ctx: &TxCtx<'_>, input| {
-        let registry = &core_registry;
-        let input: WorkItemReorderInput = parse(input)?;
-        let id = oxplow_task(registry, &input.item_ref, "/ref")?;
-        let at = placement(registry, &input.before, &input.after)?;
-        let current = oxplow_db::task_store::get_task_tx(ctx.conn, id)
-            .map_err(CommandError::from)?
-            .map(|t| t.thread_id);
-        let Some(list) = current else {
-            return Err(invalid_at(
-                "/ref",
-                format!("no work item `{}`", input.item_ref),
-            ));
-        };
-        let placed = place(ctx, id, list, at)?;
-        let (before, after) = neighbour(placed.from_place);
-        Ok(HandlerOutput {
-            result: serde_json::to_value(&placed.task).expect("Task serializes"),
-            inverse: Some(CommandCall {
-                name: REORDER.into(),
-                input: serde_json::to_value(WorkItemReorderInput {
-                    item_ref: input.item_ref,
-                    before,
-                    after,
-                })
-                .expect("input serializes"),
-            }),
-            events: Vec::new(),
-            after_commit: None,
-            unchanged: false,
-        })
+pub fn reorder_op(registry: WorkItemsRegistry) -> Op {
+    let spec = Shape {
+        schema: schema_of::<WorkItemReorderInput>(),
+        undoable: true,
+    };
+    let tx: Arc<TxHandler> = Arc::new(|ctx: &TxCtx<'_>, input| {
+        answered(oxplow_tasks::verbs::reorder_tx(ctx.conn, parse(input)?))
     });
     dispatching(spec, registry, "reorder", reorder_target, tx)
 }
 
-pub fn move_command(registry: WorkItemsRegistry) -> Command {
-    let spec = spec(
-        MOVE,
-        "Move a work item to a thread's list or the backlog (at the end, or before/after an \
-         item there).",
-        schema_of::<WorkItemMoveInput>(),
-        Confirm::Never,
-        true,
-        Atomicity::Dispatch,
-    );
-    let core_registry = registry.clone();
-    let tx: Arc<TxHandler> = Arc::new(move |ctx: &TxCtx<'_>, input| {
-        let registry = &core_registry;
-        let input: WorkItemMoveInput = parse(input)?;
-        let id = oxplow_task(registry, &input.item_ref, "/ref")?;
-        let at = placement(registry, &input.before, &input.after)?;
-        let placed = place(ctx, id, input.to.thread()?, at)?;
-        let (before, after) = neighbour(placed.from_place);
-        Ok(HandlerOutput {
-            result: serde_json::to_value(&placed.task).expect("Task serializes"),
-            inverse: Some(CommandCall {
-                name: MOVE.into(),
-                input: serde_json::to_value(WorkItemMoveInput {
-                    item_ref: input.item_ref,
-                    to: MoveTo::of(placed.from_thread),
-                    before,
-                    after,
-                })
-                .expect("input serializes"),
-            }),
-            events: Vec::new(),
-            after_commit: None,
-            unchanged: false,
-        })
+pub fn move_op(registry: WorkItemsRegistry) -> Op {
+    let spec = Shape {
+        schema: schema_of::<WorkItemMoveInput>(),
+        undoable: true,
+    };
+    let tx: Arc<TxHandler> = Arc::new(|ctx: &TxCtx<'_>, input| {
+        answered(oxplow_tasks::verbs::move_tx(ctx.conn, parse(input)?))
     });
     dispatching(spec, registry, "move", move_target, tx)
 }
@@ -1652,6 +912,8 @@ mod tests {
     use oxplow_db::EffortStore as _;
     use oxplow_domain::Actor;
     use oxplow_domain::StreamId;
+    use oxplow_domain::TaskId;
+    use oxplow_tasks::{work_item_ref, TaskPriority, TaskStatus};
 
     /// tsk775: filing or editing an oxplow task answers with the
     /// `[[…]]` links in its body that don't resolve, as a note does, so an
@@ -1820,7 +1082,7 @@ mod tests {
             .undo(&Actor::Human, out.audit_id.unwrap(), false)
             .await
             .unwrap();
-        use oxplow_domain::stores::TaskStore as _;
+        use oxplow_tasks::TaskStore as _;
         let back = fx.svc.task_store.get(fx.task).await.unwrap().unwrap();
         assert_eq!(back.status, TaskStatus::InProgress);
     }
@@ -1879,7 +1141,7 @@ mod tests {
     #[tokio::test]
     async fn a_comment_is_recorded_as_whoever_made_it() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
-        let item = oxplow_domain::refs::build::work_item_ref(fx.task);
+        let item = oxplow_tasks::work_item_ref(fx.task);
         for (actor, author) in [
             (Actor::Human, "user"),
             (
@@ -2141,7 +1403,7 @@ mod tests {
     /// tsk572: a deleted task takes no comments or links.
     #[tokio::test]
     async fn a_deleted_task_takes_no_comments_or_links() {
-        use oxplow_domain::stores::TaskStore as _;
+        use oxplow_tasks::TaskStore as _;
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let other = fx
             .svc
@@ -2251,6 +1513,37 @@ mod tests {
                 .collect();
             assert_eq!(caused, vec![event_type]);
         }
+        // Both are the item's page refs once the pump restates it from
+        // the interface.
+        fx.svc.event_pump.run_once().await.unwrap();
+        let id = from.strip_prefix("work_item:").unwrap().to_string();
+        let edges: Vec<(String, String)> = fx
+            .svc
+            .db
+            .read(move |tx| {
+                let mut stmt = tx
+                    .prepare(
+                        "SELECT ref_type, target_id FROM page_ref
+                         WHERE source_kind = 'work_item' AND source_id = ?1 ORDER BY ref_type",
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = stmt
+                    .query_map([id], |r| Ok((r.get(0)?, r.get(1)?)))
+                    .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+                    .map_err(oxplow_db::map_sql_err);
+                rows
+            })
+            .await
+            .unwrap();
+        let other_id = other.strip_prefix("work_item:").unwrap();
+        assert!(
+            edges.contains(&("comment_file_ref".into(), "src/lib.rs".into())),
+            "{edges:?}"
+        );
+        assert!(
+            edges.contains(&("work_item_link:blocks".into(), other_id.into())),
+            "{edges:?}"
+        );
         let err = fx
             .svc
             .commands
@@ -2271,7 +1564,6 @@ mod tests {
             thread_id: Some(fx.thread),
             stream_id: Some(StreamId::new(1)),
         };
-        assert_eq!(spec_transition().atomicity, Atomicity::Dispatch);
         let outcome = fx
             .svc
             .commands
@@ -2364,7 +1656,7 @@ mod tests {
         bus.undo(&agent, out.audit_id.unwrap(), false)
             .await
             .unwrap();
-        use oxplow_domain::stores::TaskStore as _;
+        use oxplow_tasks::TaskStore as _;
         let back = fx.svc.task_store.get(fx.task).await.unwrap().unwrap();
         assert_eq!(back.title, "t");
         assert_eq!(back.status, TaskStatus::InProgress);
@@ -2404,7 +1696,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(out.result["status"], "done");
-        use oxplow_domain::stores::TaskStore as _;
+        use oxplow_tasks::TaskStore as _;
         let row = fx.svc.task_store.get(fx.task).await.unwrap().unwrap();
         assert_eq!(
             (row.title.as_str(), row.status),
@@ -2509,7 +1801,7 @@ mod tests {
             .page_ref_store
             .list_outbound(
                 oxplow_db::page_ref_projections::KIND_WORK_ITEM,
-                &oxplow_db::page_ref_projections::work_item_id(id),
+                &oxplow_tasks::work_item_id(id),
                 None,
             )
             .await

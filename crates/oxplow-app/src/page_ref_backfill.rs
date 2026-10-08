@@ -4,8 +4,9 @@
 //! `page_ref` on every save, so between boots the graph follows its
 //! sources. A migration that resets `page_ref` (V92 rewrote its kinds
 //! and cleared it) leaves every unsaved row without its edges, and a
-//! writer's bug leaves drift. This restates every task, link, effort,
-//! finding and note slice from its row on boot, so the graph is its
+//! writer's bug leaves drift. This restates every work item (from the
+//! work-item interface, the same core its pump consumer runs), effort,
+//! finding and thread-note slice from its row on boot, so the graph is its
 //! sources' again — which is why it stays (tsk920): it is the graph's
 //! one repair path.
 //!
@@ -27,28 +28,23 @@
 //! Wiki bodies and recent commits are NOT re-projected here —
 //! the wiki watcher's initial scan and the commit indexer's boot
 //! pass already hit those paths. This module only covers the
-//! kinds whose data lives entirely in SQLite (tasks, links,
-//! efforts, findings).
+//! kinds whose data lives entirely in SQLite (work items, efforts,
+//! findings, thread notes).
 
 use std::sync::Arc;
 
-use oxplow_db::page_ref_projections::{
-    finding_edges, link_edge, note_edges, task_body_ref_types, task_edges, task_link_ref_types,
-    work_item_id, KIND_FINDING, KIND_TASK_NOTE, KIND_THREAD_NOTE, KIND_WORK_ITEM,
-};
+use oxplow_db::page_ref_projections::{finding_edges, note_edges, KIND_FINDING, KIND_THREAD_NOTE};
 use oxplow_db::{
     SourceSlice, SqliteCodeQualityStore, SqliteEffortStore, SqlitePageRefStore,
-    SqliteTaskLinkStore, SqliteTaskNoteStore, SqliteTaskStore, SqliteThreadNoteStore,
+    SqliteThreadNoteStore,
 };
-use oxplow_domain::stores::TaskLinkStore as _;
 use oxplow_domain::vocabulary::VocabularyHandle;
 
 /// Counts of rows touched per kind. Logged at INFO so the boot
 /// trail makes the backfill observable.
 #[derive(Debug, Default)]
 pub struct BackfillCounts {
-    pub tasks: usize,
-    pub links: usize,
+    pub work_items: usize,
     pub efforts: usize,
     pub findings: usize,
     pub notes: usize,
@@ -166,13 +162,12 @@ pub async fn record_repair(db: &oxplow_db::Database, elapsed_ms: i64) {
     }
 }
 
-/// The stores whose rows the backfill projects.
+/// What the backfill projects: the work-item interface (in `db`) and the
+/// stores of the other kinds.
 pub struct Sources {
-    pub tasks: Arc<SqliteTaskStore>,
-    pub links: Arc<SqliteTaskLinkStore>,
+    pub db: oxplow_db::Database,
     pub efforts: Arc<SqliteEffortStore>,
     pub findings: Arc<SqliteCodeQualityStore>,
-    pub task_comments: Arc<SqliteTaskNoteStore>,
     pub thread_notes: Arc<SqliteThreadNoteStore>,
 }
 
@@ -183,31 +178,43 @@ pub async fn run(
     sources: Sources,
 ) -> BackfillCounts {
     let Sources {
-        tasks,
-        links,
+        db,
         efforts,
         findings: findings_store,
-        task_comments,
         thread_notes,
     } = sources;
     let mut counts = BackfillCounts::default();
     let vocabulary = vocabulary.current();
     let kinds = &vocabulary.kinds;
 
-    // 1. task body slice + touched-file slice.
-    if let Ok(items) = tasks.list_all_for_backfill().await {
-        let slices = items
-            .iter()
-            .map(|item| {
-                slice(
-                    KIND_WORK_ITEM,
-                    work_item_id(item.id),
-                    Some(task_body_ref_types()),
-                    task_edges(kinds, item),
-                )
-            })
-            .collect();
-        counts.tasks = write_batched(&page_refs, "tasks", slices).await;
+    // 1. Every work item's body, link and comment slices, from the
+    //    interface — whichever list it's on.
+    match db
+        .read(|tx| oxplow_db::work_item_refs::all_refs_tx(tx))
+        .await
+    {
+        Err(e) => tracing::warn!(?e, "page-ref backfill: reading the work items failed"),
+        Ok(refs) => {
+            for batch in refs.chunks(BATCH) {
+                let batch = batch.to_vec();
+                let n = batch.len();
+                let restated = db
+                    .transaction({
+                        let vocabulary = vocabulary.clone();
+                        move |tx| {
+                            for item in &batch {
+                                oxplow_db::work_item_refs::restate_tx(tx, &vocabulary.kinds, item)?;
+                            }
+                            Ok(())
+                        }
+                    })
+                    .await;
+                match restated {
+                    Ok(()) => counts.work_items += n,
+                    Err(e) => tracing::warn!(?e, "page-ref backfill: a work-item batch failed"),
+                }
+            }
+        }
     }
 
     // 1b. The effort-owned slice (touched files, summary mentions,
@@ -222,42 +229,19 @@ pub async fn run(
         }
     }
 
-    // 2. Link slice — re-project the union of outgoing links per
-    //    distinct from-item. (Each link contributes one edge; we
-    //    write the whole slice owned by the source in one shot so
-    //    deletions on the live path stay clean too.)
-    if let Ok(from_items) = links.list_distinct_from_items().await {
-        let mut slices = Vec::new();
-        for from in from_items {
-            let Ok(outgoing) = links.list_outgoing(from).await else {
-                continue;
-            };
-            slices.push(slice(
-                KIND_WORK_ITEM,
-                work_item_id(from),
-                Some(task_link_ref_types()),
-                outgoing.iter().map(link_edge).collect(),
-            ));
-        }
-        counts.links = write_batched(&page_refs, "links", slices).await;
+    // 2. Thread notes — one source per row, parsed from its body.
+    if let Ok(rows) = thread_notes.list_all_for_backfill().await {
+        let slices = rows
+            .into_iter()
+            .map(|(id, body)| {
+                let edges = note_edges(kinds, KIND_THREAD_NOTE, &id, &body);
+                slice(KIND_THREAD_NOTE, id, None, edges)
+            })
+            .collect();
+        counts.notes = write_batched(&page_refs, "notes", slices).await;
     }
 
-    // 3. Task comments and thread notes — one source per row, parsed
-    //    from its body.
-    let mut slices = Vec::new();
-    for (kind, rows) in [
-        (KIND_TASK_NOTE, task_comments.list_all_for_backfill().await),
-        (KIND_THREAD_NOTE, thread_notes.list_all_for_backfill().await),
-    ] {
-        let Ok(rows) = rows else { continue };
-        slices.extend(rows.into_iter().map(|(id, body)| {
-            let edges = note_edges(kinds, kind, &id, &body);
-            slice(kind, id, None, edges)
-        }));
-    }
-    counts.notes = write_batched(&page_refs, "notes", slices).await;
-
-    // 4. Findings — one edge per row.
+    // 3. Findings — one edge per row.
     if let Ok(rows) = findings_store.list_all_findings_for_backfill().await {
         let slices = rows
             .into_iter()
@@ -277,11 +261,12 @@ pub async fn run(
 mod tests {
     use super::*;
     use oxplow_db::Database;
-    use oxplow_domain::stores::{StreamStore, TaskStore, ThreadStore};
+    use oxplow_domain::stores::{StreamStore, ThreadStore};
     use oxplow_domain::{
-        Stream, StreamId, StreamKind, Task, TaskActorKind, TaskAuthor, TaskId, TaskPriority,
-        TaskStatus, Thread, ThreadId, ThreadStatus, Timestamp,
+        Stream, StreamId, StreamKind, TaskId, Thread, ThreadId, ThreadStatus, Timestamp,
     };
+    use oxplow_tasks::TaskStore;
+    use oxplow_tasks::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
 
     fn ts() -> Timestamp {
         Timestamp::from_unix_ms(1_700_000_000_000)
@@ -348,11 +333,9 @@ mod tests {
             VocabularyHandle::core(),
             page_refs.clone(),
             Sources {
-                tasks: Arc::new(SqliteTaskStore::new(db.clone())),
-                links: Arc::new(SqliteTaskLinkStore::new(db.clone())),
+                db: db.clone(),
                 efforts: Arc::new(SqliteEffortStore::new(db.clone())),
                 findings: findings_store,
-                task_comments: Arc::new(SqliteTaskNoteStore::new(db.clone())),
                 thread_notes: Arc::new(SqliteThreadNoteStore::new(db.clone())),
             },
         )
@@ -382,8 +365,11 @@ mod tests {
         );
     }
 
+    /// Every work item is restated from the interface, whichever list
+    /// it's on: its body, its links (the list's own types) and its
+    /// comments; and the effort slices survive.
     #[tokio::test]
-    async fn backfill_picks_up_pre_existing_task_refs() {
+    async fn backfill_restates_every_work_item_from_the_interface() {
         let db = Database::in_memory();
 
         // Every store mirrors into the ref graph at write time now —
@@ -391,7 +377,7 @@ mod tests {
         // inserting normally, then clearing the projected slice below.
         let streams = oxplow_db::SqliteStreamStore::new(db.clone());
         let threads = oxplow_db::SqliteThreadStore::new(db.clone());
-        let bare_items = SqliteTaskStore::new(db.clone());
+        let bare_items = oxplow_tasks::SqliteTaskStore::new(db.clone());
 
         streams
             .upsert(&Stream {
@@ -461,7 +447,7 @@ mod tests {
         let effort_writer = SqliteEffortStore::new(db.clone());
         let own = effort_writer
             .start(
-                &oxplow_domain::refs::build::work_item_ref(task_id),
+                &oxplow_tasks::work_item_ref(task_id),
                 &ThreadId::new(1),
                 None,
             )
@@ -487,9 +473,25 @@ mod tests {
             .await
             .unwrap();
 
+        // Another list's item, as its records left it in the interface.
+        db.transaction(|tx| {
+            for sql in [
+                "INSERT INTO work_item (ref, provider, title, body, state, native_state, created_at, updated_at)
+                 VALUES ('work_item:issues:ENG-12', 'issues', 'Theirs', '', 'todo', 'Todo', 't', 't')",
+                "INSERT INTO work_item_link (from_ref, to_ref, link_type, created_at)
+                 VALUES ('work_item:issues:ENG-12', 'work_item:issues:ENG-7', 'parent_of', 't')",
+                "INSERT INTO work_item_comment (id, ref, body, created_at)
+                 VALUES ('work_item:issues:ENG-12#c1', 'work_item:issues:ENG-12', 'see [[src/c.rs]]', 't')",
+            ] {
+                tx.execute(sql, []).map_err(oxplow_db::map_sql_err)?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
         let page_refs = Arc::new(SqlitePageRefStore::new(db.clone()));
         // Wipe the slices the writes just projected so the table looks
-        // like a DB written before ref mirroring existed.
+        // like a DB whose graph was reset.
         for source in [format!("oxplow:{task_id}"), "issues:ENG-12".to_string()] {
             page_refs
                 .replace_source("work_item", &source, Vec::new())
@@ -502,27 +504,18 @@ mod tests {
             .unwrap();
         assert!(pre.is_empty());
 
-        // Build the attached stores the backfill consumes.
-        let items_attached = Arc::new(SqliteTaskStore::new(db.clone()));
-        let links = Arc::new(SqliteTaskLinkStore::new(db.clone()));
-        let efforts = Arc::new(SqliteEffortStore::new(db.clone()));
-        let findings_store = Arc::new(SqliteCodeQualityStore::new(db.clone()));
-        let notes = Arc::new(SqliteTaskNoteStore::new(db.clone()));
-
         let counts = run(
             VocabularyHandle::core(),
             page_refs.clone(),
             Sources {
-                tasks: items_attached,
-                links,
-                efforts,
-                findings: findings_store,
-                task_comments: notes,
+                db: db.clone(),
+                efforts: Arc::new(SqliteEffortStore::new(db.clone())),
+                findings: Arc::new(SqliteCodeQualityStore::new(db.clone())),
                 thread_notes: Arc::new(SqliteThreadNoteStore::new(db.clone())),
             },
         )
         .await;
-        assert!(counts.tasks >= 1);
+        assert_eq!(counts.work_items, 2);
 
         let post = page_refs
             .list_backlinks("file", "src/app.rs", None)
@@ -530,18 +523,22 @@ mod tests {
             .unwrap();
         assert_eq!(post.len(), 1, "got {post:?}");
         assert_eq!(post[0].source_id, format!("oxplow:{task_id}"));
-        // Another provider's work item is backfilled too …
-        let foreign_refs = page_refs
-            .list_backlinks("file", "src/lib.rs", None)
-            .await
-            .unwrap();
-        assert_eq!(
-            foreign_refs
-                .iter()
-                .map(|r| r.source_id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["issues:ENG-12"]
-        );
+        // Another provider's work item is backfilled too — its effort's
+        // summary, its link and its comment …
+        for (kind, id, ref_type) in [
+            ("file", "src/lib.rs", "summary_file_ref"),
+            ("work_item", "issues:ENG-7", "work_item_link:parent_of"),
+            ("file", "src/c.rs", "comment_file_ref"),
+        ] {
+            let refs = page_refs.list_backlinks(kind, id, None).await.unwrap();
+            assert_eq!(
+                refs.iter()
+                    .map(|r| (r.source_id.as_str(), r.ref_type.as_str()))
+                    .collect::<Vec<_>>(),
+                vec![("issues:ENG-12", ref_type)],
+                "{kind}:{id}"
+            );
+        }
         // … and a declared impact survives the backfill.
         let impacts = page_refs
             .list_backlinks("wiki", "auth-flow", None)

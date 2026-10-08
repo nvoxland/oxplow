@@ -3267,9 +3267,9 @@ mod tests {
     )]
 
     use super::*;
-    use oxplow_domain::stores::TaskStore;
-    use oxplow_domain::task::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
     use oxplow_domain::time::Timestamp;
+    use oxplow_tasks::TaskStore;
+    use oxplow_tasks::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
 
     /// tsk203: every registered tool must be classified read XOR write, so a new
     /// tool can't slip in un-annotated (a write mis-marked read is a safety bug;
@@ -4498,11 +4498,7 @@ mod tests {
             .unwrap();
         let effort = services
             .effort_store
-            .start(
-                &oxplow_domain::refs::build::work_item_ref(task_id),
-                &thread.id,
-                None,
-            )
+            .start(&oxplow_tasks::work_item_ref(task_id), &thread.id, None)
             .await
             .unwrap();
         let row = |kind: &str, value: f64| oxplow_db::EffortObservation {
@@ -4564,11 +4560,7 @@ mod tests {
             .unwrap();
         let effort = services
             .effort_store
-            .start(
-                &oxplow_domain::refs::build::work_item_ref(task_id),
-                &thread.id,
-                None,
-            )
+            .start(&oxplow_tasks::work_item_ref(task_id), &thread.id, None)
             .await
             .unwrap();
 
@@ -4582,10 +4574,7 @@ mod tests {
         assert_eq!(parsed["open"], true);
         assert_eq!(parsed["effortId"], effort.id.to_string());
         // The effort's work item, as a ref: no oxplow task id.
-        assert_eq!(
-            parsed["workItem"],
-            oxplow_domain::refs::build::work_item_ref(task_id)
-        );
+        assert_eq!(parsed["workItem"], oxplow_tasks::work_item_ref(task_id));
         assert!(parsed.get("taskId").is_none());
         assert!(parsed["startedAt"].is_string());
         // start() with None records no start snapshot.

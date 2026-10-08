@@ -10,21 +10,20 @@
 //! The claim and the decision are named by ref (`claim:7`,
 //! `decision:3`), whatever effort they belong to.
 
+use crate::commands::ops::Op;
 use std::sync::Arc;
 
 use oxplow_domain::events::schema::{
     EffortClaimVerified, EffortClaimVerifiedV1, EffortDecisionReviewed, EffortDecisionReviewedV1,
 };
 use oxplow_domain::refs::build::{claim_ref, decision_ref, effort_ref};
-use oxplow_domain::{
-    Atomicity, CommandCall, CommandEffect, CommandError, CommandSpec, Confirm, Invokers, Lifecycle,
-};
+use oxplow_domain::{CommandCall, CommandError};
 use rusqlite::OptionalExtension;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use super::{Command, Handler, HandlerOutput, TxCtx};
+use super::{Handler, HandlerOutput, TxCtx};
 
 pub const VERIFY_CLAIM: &str = "oxplow.effort.verify_claim";
 pub const UNVERIFY_CLAIM: &str = "oxplow.effort.unverify_claim";
@@ -34,16 +33,6 @@ pub const REOPEN_DECISION: &str = "oxplow.effort.reopen_decision";
 
 /// What a claim cites when a person verified it by looking.
 pub const REVIEWER: &str = "reviewer";
-
-/// A person, or a lens acting for one: never an agent — nor a lens acting
-/// for an agent, which the agent policy denies like the agent itself
-/// (`agent_policy::check_command`, on every agent-driven run, nested
-/// ones included).
-const REVIEWERS: Invokers = Invokers {
-    human: true,
-    agent: false,
-    lens: true,
-};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -89,22 +78,6 @@ fn id_of(item: &str, kind: &str, field: &str) -> Result<i64, CommandError> {
     item.strip_prefix(&format!("{kind}:"))
         .and_then(|n| n.parse().ok())
         .ok_or_else(|| invalid(field, format!("`{item}` isn't a {kind} ref ({kind}:<id>)")))
-}
-
-fn spec(name: &str, summary: &str, schema: serde_json::Value) -> CommandSpec {
-    CommandSpec {
-        id: name.into(),
-        summary: summary.into(),
-        input_schema: schema,
-        invokers: REVIEWERS,
-        confirm: Confirm::Never,
-        undoable: true,
-        lifecycle: Lifecycle::Stable,
-        atomicity: Atomicity::Tx,
-        effect: CommandEffect::Record,
-        needs: Vec::new(),
-        ui: None,
-    }
 }
 
 fn effort_ref_of(effort: Option<i64>) -> Option<String> {
@@ -164,14 +137,12 @@ fn set_evidence(
 }
 
 /// `effort.verify_claim { claim, evidence? }`.
-pub fn verify_claim_command() -> Command {
-    Command::new(
-        spec(
-            VERIFY_CLAIM,
-            "Verify a claim an agent made about its work (`claim:<id>`), citing what backs it \
-             (`reviewer` when you checked it yourself). A person's review.",
-            serde_json::to_value(schemars::schema_for!(VerifyClaimInput)).expect("schema"),
-        ),
+pub fn verify_claim_op() -> Op {
+    Op::new(
+        "efforts.write",
+        "verify_claim",
+        serde_json::to_value(schemars::schema_for!(VerifyClaimInput)).expect("schema"),
+        true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: VerifyClaimInput = parse(input)?;
             let id = id_of(&input.claim, "claim", "/claim")?;
@@ -195,17 +166,15 @@ pub fn verify_claim_command() -> Command {
             )
         })),
     )
-    .expect("effort.verify_claim registers")
 }
 
 /// `effort.unverify_claim { claim }`: take a verification back.
-pub fn unverify_claim_command() -> Command {
-    Command::new(
-        spec(
-            UNVERIFY_CLAIM,
-            "Take back a claim's verification (`claim:<id>`): it cites nothing again.",
-            serde_json::to_value(schemars::schema_for!(ClaimInput)).expect("schema"),
-        ),
+pub fn unverify_claim_op() -> Op {
+    Op::new(
+        "efforts.write",
+        "unverify_claim",
+        serde_json::to_value(schemars::schema_for!(ClaimInput)).expect("schema"),
+        true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: ClaimInput = parse(input)?;
             let id = id_of(&input.claim, "claim", "/claim")?;
@@ -228,7 +197,6 @@ pub fn unverify_claim_command() -> Command {
             )
         })),
     )
-    .expect("effort.unverify_claim registers")
 }
 
 /// Move a decision's provenance from `from` to `to`, logging the
@@ -295,64 +263,42 @@ fn review_decision(
     })
 }
 
-fn decision_command(
-    name: &'static str,
-    summary: &str,
-    from: &'static [&'static str],
-    to: &'static str,
-) -> Command {
-    Command::new(
-        spec(
-            name,
-            summary,
-            serde_json::to_value(schemars::schema_for!(DecisionInput)).expect("schema"),
-        ),
+/// The `efforts.write` operation `op`: a decision in `from` moves to
+/// `to`; undone by moving it back.
+fn decision_op(op: &'static str, from: &'static [&'static str], to: &'static str) -> Op {
+    Op::new(
+        "efforts.write",
+        op,
+        serde_json::to_value(schemars::schema_for!(DecisionInput)).expect("schema"),
+        true,
         Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
             review_decision(ctx, parse(input)?, from, to)
         })),
     )
-    .expect("a review command registers")
 }
 
 /// `effort.confirm_decision { decision }`: an inferred decision is right.
-pub fn confirm_decision_command() -> Command {
-    decision_command(
-        CONFIRM_DECISION,
-        "Confirm a decision oxplow inferred from an effort (`decision:<id>`): it was made, as \
-         stated. A person's review.",
-        &["inferred"],
-        "confirmed",
-    )
+pub fn confirm_decision_op() -> Op {
+    decision_op("confirm_decision", &["inferred"], "confirmed")
 }
 
 /// `effort.dismiss_decision { decision }`: an inferred decision is wrong.
-pub fn dismiss_decision_command() -> Command {
-    decision_command(
-        DISMISS_DECISION,
-        "Dismiss a decision oxplow inferred from an effort (`decision:<id>`): it wasn't made, \
-         or not like that. A person's review.",
-        &["inferred"],
-        "dismissed",
-    )
+pub fn dismiss_decision_op() -> Op {
+    decision_op("dismiss_decision", &["inferred"], "dismissed")
 }
 
 /// `effort.reopen_decision { decision }`: take a review back.
-pub fn reopen_decision_command() -> Command {
-    decision_command(
-        REOPEN_DECISION,
-        "Take back a review of an inferred decision (`decision:<id>`): it is unconfirmed again.",
-        &["confirmed", "dismissed"],
-        "inferred",
-    )
+pub fn reopen_decision_op() -> Op {
+    decision_op("reopen_decision", &["confirmed", "dismissed"], "inferred")
 }
 
-pub fn commands() -> Vec<Command> {
+pub fn ops() -> Vec<Op> {
     vec![
-        verify_claim_command(),
-        unverify_claim_command(),
-        confirm_decision_command(),
-        dismiss_decision_command(),
-        reopen_decision_command(),
+        verify_claim_op(),
+        unverify_claim_op(),
+        confirm_decision_op(),
+        dismiss_decision_op(),
+        reopen_decision_op(),
     ]
 }
 
@@ -374,7 +320,7 @@ mod tests {
                     tx,
                     &NewClaim {
                         thread_id: thread.value(),
-                        work_item: Some(oxplow_domain::refs::build::work_item_ref(task)),
+                        work_item: Some(oxplow_tasks::work_item_ref(task)),
                         effort_id: Some(effort),
                         statement: "no behavior change".into(),
                         kind: "no_behavior_change".into(),
@@ -390,7 +336,7 @@ mod tests {
                 effort,
                 vec![NewDecision {
                     thread_id: fx.thread.value(),
-                    work_item: Some(oxplow_domain::refs::build::work_item_ref(fx.task)),
+                    work_item: Some(oxplow_tasks::work_item_ref(fx.task)),
                     effort_id: Some(effort),
                     question: "Which store?".into(),
                     choice: "SQLite".into(),

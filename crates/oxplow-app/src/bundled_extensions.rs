@@ -8,6 +8,17 @@
 pub struct BundledExtension {
     pub name: &'static str,
     pub files: &'static [(&'static str, &'static str)],
+    /// oxplow itself relies on it (`oxplow-foundation`, its own
+    /// commands): it can't be disabled, and its commands are registered
+    /// when services are built rather than by the reconciler.
+    pub required: bool,
+}
+
+impl BundledExtension {
+    /// The file at `path` in it.
+    pub fn file(&self, path: &str) -> Option<&'static str> {
+        self.files.iter().find(|(p, _)| *p == path).map(|(_, f)| *f)
+    }
 }
 
 macro_rules! ext_file {
@@ -19,94 +30,110 @@ macro_rules! ext_file {
     };
 }
 
-pub const BUNDLED: &[BundledExtension] = &[BundledExtension {
-    name: "oxplow-bundled",
-    files: &[
-        ext_file!("oxplow-bundled", "README.md"),
-        ext_file!("oxplow-bundled", "collectors/effort_churn.star"),
-        ext_file!("oxplow-bundled", "commands/work-next.md"),
-        ext_file!("oxplow-bundled", "effects/verify_unchecked.star"),
-        ext_file!("oxplow-bundled", "event_types/accepted.v1.json"),
-        ext_file!("oxplow-bundled", "event_types/changes_requested.v1.json"),
-        ext_file!("oxplow-bundled", "event_types/finished_cleared.v1.json"),
-        ext_file!("oxplow-bundled", "extension.yaml"),
-        ext_file!("oxplow-bundled", "handlers/accept.star"),
-        ext_file!("oxplow-bundled", "handlers/clear_finished.star"),
-        ext_file!("oxplow-bundled", "handlers/request_changes.star"),
-        ext_file!("oxplow-bundled", "lenses/backlog-tasks.yaml"),
-        ext_file!("oxplow-bundled", "lenses/change-co-change.yaml"),
-        ext_file!("oxplow-bundled", "lenses/change-cross-zone-imports.yaml"),
-        ext_file!("oxplow-bundled", "lenses/change-duplicates.yaml"),
-        ext_file!("oxplow-bundled", "lenses/change-functions.yaml"),
-        ext_file!("oxplow-bundled", "lenses/change-look-here.yaml"),
-        ext_file!("oxplow-bundled", "lenses/change-review.yaml"),
-        ext_file!("oxplow-bundled", "lenses/change-summary.yaml"),
-        ext_file!("oxplow-bundled", "lenses/change-test-files.yaml"),
-        ext_file!("oxplow-bundled", "lenses/change-treemap.yaml"),
-        ext_file!("oxplow-bundled", "lenses/comments.yaml"),
-        ext_file!("oxplow-bundled", "lenses/context-read.yaml"),
-        ext_file!("oxplow-bundled", "lenses/decisions.yaml"),
-        ext_file!("oxplow-bundled", "lenses/duplicate-blocks.yaml"),
-        ext_file!("oxplow-bundled", "lenses/effort-analysis-findings.yaml"),
-        ext_file!("oxplow-bundled", "lenses/effort-coverage.yaml"),
-        ext_file!("oxplow-bundled", "lenses/effort-failed-tests.yaml"),
-        ext_file!("oxplow-bundled", "lenses/effort-metric-deltas.yaml"),
-        ext_file!("oxplow-bundled", "lenses/effort-nudges.yaml"),
-        ext_file!("oxplow-bundled", "lenses/effort-test-runs.yaml"),
-        ext_file!("oxplow-bundled", "lenses/effort-tests.yaml"),
-        ext_file!("oxplow-bundled", "lenses/effort-untested-files.yaml"),
-        ext_file!("oxplow-bundled", "lenses/file-co-change.yaml"),
-        ext_file!("oxplow-bundled", "lenses/findings.yaml"),
-        ext_file!("oxplow-bundled", "lenses/go-to-bookmarks.yaml"),
-        ext_file!("oxplow-bundled", "lenses/go-to.yaml"),
-        ext_file!("oxplow-bundled", "lenses/inferred-decisions.yaml"),
-        ext_file!("oxplow-bundled", "lenses/page-visits-by-day.yaml"),
-        ext_file!("oxplow-bundled", "lenses/planning.yaml"),
-        ext_file!("oxplow-bundled", "lenses/quality.yaml"),
-        ext_file!("oxplow-bundled", "lenses/ready-tasks.yaml"),
-        ext_file!("oxplow-bundled", "lenses/recent-decisions.yaml"),
-        ext_file!("oxplow-bundled", "lenses/recent-notes.yaml"),
-        ext_file!("oxplow-bundled", "lenses/recent-snapshots.yaml"),
-        ext_file!("oxplow-bundled", "lenses/review-prompt.yaml"),
-        ext_file!("oxplow-bundled", "lenses/review.yaml"),
-        ext_file!("oxplow-bundled", "lenses/struggled.yaml"),
-        ext_file!("oxplow-bundled", "lenses/task-token-summary.yaml"),
-        ext_file!("oxplow-bundled", "lenses/task-tokens.yaml"),
-        ext_file!("oxplow-bundled", "lenses/task-turns.yaml"),
-        ext_file!("oxplow-bundled", "lenses/tests-weakened.yaml"),
-        ext_file!("oxplow-bundled", "lenses/thread-activity.yaml"),
-        ext_file!("oxplow-bundled", "lenses/thread-tokens.yaml"),
-        ext_file!("oxplow-bundled", "lenses/token-total.yaml"),
-        ext_file!("oxplow-bundled", "lenses/tokens-by-agent.yaml"),
-        ext_file!("oxplow-bundled", "lenses/tokens-by-day.yaml"),
-        ext_file!("oxplow-bundled", "lenses/top-pages.yaml"),
-        ext_file!("oxplow-bundled", "lenses/unbacked-claims.yaml"),
-        ext_file!("oxplow-bundled", "lenses/uncommitted-count.yaml"),
-        ext_file!("oxplow-bundled", "lenses/uncommitted-line.yaml"),
-        ext_file!("oxplow-bundled", "lenses/uncommitted.yaml"),
-        ext_file!("oxplow-bundled", "lenses/unverified-claims.yaml"),
-        ext_file!("oxplow-bundled", "lenses/usage.yaml"),
-        ext_file!("oxplow-bundled", "lenses/verify-claim-with-evidence.yaml"),
-        ext_file!("oxplow-bundled", "lenses/waiting-on-me.yaml"),
-        ext_file!("oxplow-bundled", "lenses/what-deviated.yaml"),
-        ext_file!("oxplow-bundled", "lenses/work-count.yaml"),
-        ext_file!("oxplow-bundled", "lenses/work-line.yaml"),
-        ext_file!("oxplow-bundled", "lenses/work.yaml"),
-        ext_file!("oxplow-bundled", "models/change_co_change.sql"),
-        ext_file!("oxplow-bundled", "models/change_interest.sql"),
-        ext_file!("oxplow-bundled", "models/co_change_pair.sql"),
-        ext_file!("oxplow-bundled", "models/deviation.sql"),
-        ext_file!("oxplow-bundled", "models/finished_cleared.sql"),
-        ext_file!("oxplow-bundled", "models/thread_work.sql"),
-        ext_file!("oxplow-bundled", "models/verdict.sql"),
-        ext_file!("oxplow-bundled", "models/verdicts.sql"),
-        ext_file!("oxplow-bundled", "questions.yaml"),
-        ext_file!("oxplow-bundled", "skills/work-items/SKILL.md"),
-    ],
-}];
+pub const BUNDLED: &[BundledExtension] = &[
+    BundledExtension {
+        name: "oxplow-foundation",
+        files: &[
+            ext_file!("oxplow-foundation", "README.md"),
+            ext_file!("oxplow-foundation", "extension.yaml"),
+        ],
+        required: true,
+    },
+    BundledExtension {
+        name: "oxplow-bundled",
+        required: false,
+        files: &[
+            ext_file!("oxplow-bundled", "README.md"),
+            ext_file!("oxplow-bundled", "collectors/effort_churn.star"),
+            ext_file!("oxplow-bundled", "commands/work-next.md"),
+            ext_file!("oxplow-bundled", "effects/verify_unchecked.star"),
+            ext_file!("oxplow-bundled", "event_types/accepted.v1.json"),
+            ext_file!("oxplow-bundled", "event_types/changes_requested.v1.json"),
+            ext_file!("oxplow-bundled", "event_types/finished_cleared.v1.json"),
+            ext_file!("oxplow-bundled", "extension.yaml"),
+            ext_file!("oxplow-bundled", "handlers/accept.star"),
+            ext_file!("oxplow-bundled", "handlers/clear_finished.star"),
+            ext_file!("oxplow-bundled", "handlers/request_changes.star"),
+            ext_file!("oxplow-bundled", "lenses/backlog-tasks.yaml"),
+            ext_file!("oxplow-bundled", "lenses/change-co-change.yaml"),
+            ext_file!("oxplow-bundled", "lenses/change-cross-zone-imports.yaml"),
+            ext_file!("oxplow-bundled", "lenses/change-duplicates.yaml"),
+            ext_file!("oxplow-bundled", "lenses/change-functions.yaml"),
+            ext_file!("oxplow-bundled", "lenses/change-look-here.yaml"),
+            ext_file!("oxplow-bundled", "lenses/change-review.yaml"),
+            ext_file!("oxplow-bundled", "lenses/change-summary.yaml"),
+            ext_file!("oxplow-bundled", "lenses/change-test-files.yaml"),
+            ext_file!("oxplow-bundled", "lenses/change-treemap.yaml"),
+            ext_file!("oxplow-bundled", "lenses/comments.yaml"),
+            ext_file!("oxplow-bundled", "lenses/context-read.yaml"),
+            ext_file!("oxplow-bundled", "lenses/decisions.yaml"),
+            ext_file!("oxplow-bundled", "lenses/duplicate-blocks.yaml"),
+            ext_file!("oxplow-bundled", "lenses/effort-analysis-findings.yaml"),
+            ext_file!("oxplow-bundled", "lenses/effort-coverage.yaml"),
+            ext_file!("oxplow-bundled", "lenses/effort-failed-tests.yaml"),
+            ext_file!("oxplow-bundled", "lenses/effort-metric-deltas.yaml"),
+            ext_file!("oxplow-bundled", "lenses/effort-nudges.yaml"),
+            ext_file!("oxplow-bundled", "lenses/effort-test-runs.yaml"),
+            ext_file!("oxplow-bundled", "lenses/effort-tests.yaml"),
+            ext_file!("oxplow-bundled", "lenses/effort-untested-files.yaml"),
+            ext_file!("oxplow-bundled", "lenses/file-co-change.yaml"),
+            ext_file!("oxplow-bundled", "lenses/findings.yaml"),
+            ext_file!("oxplow-bundled", "lenses/go-to-bookmarks.yaml"),
+            ext_file!("oxplow-bundled", "lenses/go-to.yaml"),
+            ext_file!("oxplow-bundled", "lenses/inferred-decisions.yaml"),
+            ext_file!("oxplow-bundled", "lenses/page-visits-by-day.yaml"),
+            ext_file!("oxplow-bundled", "lenses/planning.yaml"),
+            ext_file!("oxplow-bundled", "lenses/quality.yaml"),
+            ext_file!("oxplow-bundled", "lenses/ready-tasks.yaml"),
+            ext_file!("oxplow-bundled", "lenses/recent-decisions.yaml"),
+            ext_file!("oxplow-bundled", "lenses/recent-notes.yaml"),
+            ext_file!("oxplow-bundled", "lenses/recent-snapshots.yaml"),
+            ext_file!("oxplow-bundled", "lenses/review-prompt.yaml"),
+            ext_file!("oxplow-bundled", "lenses/review.yaml"),
+            ext_file!("oxplow-bundled", "lenses/struggled.yaml"),
+            ext_file!("oxplow-bundled", "lenses/task-token-summary.yaml"),
+            ext_file!("oxplow-bundled", "lenses/task-tokens.yaml"),
+            ext_file!("oxplow-bundled", "lenses/task-turns.yaml"),
+            ext_file!("oxplow-bundled", "lenses/tests-weakened.yaml"),
+            ext_file!("oxplow-bundled", "lenses/thread-activity.yaml"),
+            ext_file!("oxplow-bundled", "lenses/thread-tokens.yaml"),
+            ext_file!("oxplow-bundled", "lenses/token-total.yaml"),
+            ext_file!("oxplow-bundled", "lenses/tokens-by-agent.yaml"),
+            ext_file!("oxplow-bundled", "lenses/tokens-by-day.yaml"),
+            ext_file!("oxplow-bundled", "lenses/top-pages.yaml"),
+            ext_file!("oxplow-bundled", "lenses/unbacked-claims.yaml"),
+            ext_file!("oxplow-bundled", "lenses/uncommitted-count.yaml"),
+            ext_file!("oxplow-bundled", "lenses/uncommitted-line.yaml"),
+            ext_file!("oxplow-bundled", "lenses/uncommitted.yaml"),
+            ext_file!("oxplow-bundled", "lenses/unverified-claims.yaml"),
+            ext_file!("oxplow-bundled", "lenses/usage.yaml"),
+            ext_file!("oxplow-bundled", "lenses/verify-claim-with-evidence.yaml"),
+            ext_file!("oxplow-bundled", "lenses/waiting-on-me.yaml"),
+            ext_file!("oxplow-bundled", "lenses/what-deviated.yaml"),
+            ext_file!("oxplow-bundled", "lenses/work-count.yaml"),
+            ext_file!("oxplow-bundled", "lenses/work-line.yaml"),
+            ext_file!("oxplow-bundled", "lenses/work.yaml"),
+            ext_file!("oxplow-bundled", "models/change_co_change.sql"),
+            ext_file!("oxplow-bundled", "models/change_interest.sql"),
+            ext_file!("oxplow-bundled", "models/co_change_pair.sql"),
+            ext_file!("oxplow-bundled", "models/deviation.sql"),
+            ext_file!("oxplow-bundled", "models/finished_cleared.sql"),
+            ext_file!("oxplow-bundled", "models/thread_work.sql"),
+            ext_file!("oxplow-bundled", "models/verdict.sql"),
+            ext_file!("oxplow-bundled", "models/verdicts.sql"),
+            ext_file!("oxplow-bundled", "questions.yaml"),
+            ext_file!("oxplow-bundled", "skills/work-items/SKILL.md"),
+        ],
+    },
+];
 
 pub fn find(name: &str) -> Option<&'static BundledExtension> {
     BUNDLED.iter().find(|b| b.name == name)
+}
+
+/// Whether oxplow relies on extension `name` (it can't be disabled).
+pub fn is_required(name: &str) -> bool {
+    find(name).is_some_and(|b| b.required)
 }
 
 pub fn is_reserved(name: &str) -> bool {
@@ -276,11 +303,6 @@ mod tests {
                     s.input
                         .clone()
                         .map(|q| (format!("collector {} input", s.id), q))
-                }))
-                .chain(ext.commands.iter().filter_map(|c| {
-                    c.input
-                        .clone()
-                        .map(|q| (format!("command {} input", c.name), q))
                 }));
             for (what, sql) in queries {
                 let reads = f
@@ -384,7 +406,7 @@ mod tests {
             .unwrap();
         store.record(turn(None, "chat", 9)).await.unwrap();
 
-        let item = oxplow_domain::refs::build::work_item_ref(f.task);
+        let item = oxplow_tasks::work_item_ref(f.task);
         assert_eq!(
             run_bundled_lens_with(
                 &f,
@@ -512,7 +534,7 @@ mod tests {
     #[tokio::test]
     async fn what_deviated_lists_files_outside_the_tasks_stated_area() {
         use oxplow_db::EffortStore as _;
-        use oxplow_domain::stores::TaskStore as _;
+        use oxplow_tasks::TaskStore as _;
         let f = crate::test_fixtures::services_with_task_effort().await;
         f.svc.extension_models.sync().await.unwrap();
         let describe = |text: &'static str| {
@@ -621,7 +643,7 @@ mod tests {
     #[tokio::test]
     async fn review_prompt_names_the_task_and_what_changed() {
         use oxplow_db::EffortStore as _;
-        use oxplow_domain::stores::TaskStore as _;
+        use oxplow_tasks::TaskStore as _;
         let f = crate::test_fixtures::services_with_task_effort().await;
         let mut t = f.svc.task_store.get(f.task).await.unwrap().unwrap();
         t.title = "Fix the hover state".into();
@@ -703,7 +725,7 @@ mod tests {
                     tx,
                     &oxplow_db::NewDecision {
                         thread_id: thread,
-                        work_item: Some(oxplow_domain::refs::build::work_item_ref(task)),
+                        work_item: Some(oxplow_tasks::work_item_ref(task)),
                         effort_id: Some(effort.value()),
                         question: "Where does export live?".into(),
                         choice: "src/export".into(),
@@ -722,7 +744,7 @@ mod tests {
                         tx,
                         &oxplow_db::NewClaim {
                             thread_id: thread,
-                            work_item: Some(oxplow_domain::refs::build::work_item_ref(task)),
+                            work_item: Some(oxplow_tasks::work_item_ref(task)),
                             effort_id: Some(effort.value()),
                             statement: statement.into(),
                             kind: "tests_pass".into(),
@@ -1358,7 +1380,7 @@ mod tests {
         assert!(!alert(run).firing);
         f.svc
             .task_store
-            .set_status(f.task, oxplow_domain::TaskStatus::Blocked)
+            .set_status(f.task, oxplow_tasks::TaskStatus::Blocked)
             .await
             .unwrap();
         let run = crate::extensions::run_lens(
@@ -1381,7 +1403,7 @@ mod tests {
     /// `crates/db/store.rs` outside it; oxplow-bundled's commands registered.
     async fn review_fixture() -> crate::test_fixtures::TaskEffortFixture {
         use oxplow_db::EffortStore as _;
-        use oxplow_domain::stores::TaskStore as _;
+        use oxplow_tasks::TaskStore as _;
         let f = crate::test_fixtures::services_with_task_effort().await;
         let mut t = f.svc.task_store.get(f.task).await.unwrap().unwrap();
         t.description = "Fix the hover state in [[src/ui/button.ts]].".into();
@@ -1410,7 +1432,7 @@ mod tests {
                     tx,
                     &oxplow_db::NewClaim {
                         thread_id: thread.value(),
-                        work_item: Some(oxplow_domain::refs::build::work_item_ref(task)),
+                        work_item: Some(oxplow_tasks::work_item_ref(task)),
                         effort_id: Some(effort.value()),
                         statement: "no behavior change".into(),
                         kind: "no_behavior_change".into(),
@@ -1426,7 +1448,7 @@ mod tests {
                 f.effort.value(),
                 vec![oxplow_db::NewDecision {
                     thread_id: f.thread.value(),
-                    work_item: Some(oxplow_domain::refs::build::work_item_ref(f.task)),
+                    work_item: Some(oxplow_tasks::work_item_ref(f.task)),
                     effort_id: Some(f.effort.value()),
                     question: "Which store?".into(),
                     choice: "SQLite".into(),
@@ -1476,7 +1498,7 @@ mod tests {
     }
 
     async fn task_status(f: &crate::test_fixtures::TaskEffortFixture) -> String {
-        use oxplow_domain::stores::TaskStore as _;
+        use oxplow_tasks::TaskStore as _;
         let t = f.svc.task_store.get(f.task).await.unwrap().unwrap();
         serde_json::to_value(t.status)
             .unwrap()
@@ -1568,7 +1590,7 @@ mod tests {
         assert_eq!(task_status(&f).await, "in_progress");
         assert!(task_notes(&f).await.is_empty());
 
-        review(
+        let ran = review(
             &f,
             &human,
             "oxplow.review.accept",
@@ -1577,6 +1599,16 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(task_status(&f).await, "done");
+        // The run's audit row says what it used: one read of the models.
+        let audit_id = ran.audit_id.unwrap();
+        let audit = f
+            .svc
+            .db
+            .read(move |c| oxplow_db::command_audit_store::get_tx(c, audit_id))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(audit.capabilities, [("sql.read".to_string(), 1)].into());
         let notes = task_notes(&f).await;
         assert_eq!(notes.len(), 1, "{notes:?}");
         assert!(notes[0].starts_with("Review accepted"), "{}", notes[0]);
@@ -1833,7 +1865,7 @@ mod tests {
                     tx,
                     &oxplow_db::NewClaim {
                         thread_id: thread.value(),
-                        work_item: Some(oxplow_domain::refs::build::work_item_ref(task)),
+                        work_item: Some(oxplow_tasks::work_item_ref(task)),
                         effort_id: Some(effort.value()),
                         statement: format!(
                             "first line\n- [x] forged item [link](https://evil.example) {}",
@@ -2258,7 +2290,7 @@ mod tests {
                 .unwrap();
             serde_json::to_value(out.rows).unwrap()
         };
-        let item = oxplow_domain::refs::build::work_item_ref(f.task);
+        let item = oxplow_tasks::work_item_ref(f.task);
 
         review(
             &f,

@@ -245,7 +245,8 @@ fn excerpt(body: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CreateTaskInput, Services};
+    use crate::Services;
+    use oxplow_tasks::CreateTaskInput;
 
     /// A tempdir holding a real git repo with a single configured commit
     /// touching `a.rs`, so commit resolution has something to find.
@@ -291,7 +292,7 @@ mod tests {
                     title: "Fix the flaky test".into(),
                     description: Some("It fails on CI only.\nSecond line.".into()),
                     parent_id: None,
-                    status: Some(oxplow_domain::task::TaskStatus::InProgress),
+                    status: Some(oxplow_tasks::TaskStatus::InProgress),
                     priority: None,
                     author: None,
                 },

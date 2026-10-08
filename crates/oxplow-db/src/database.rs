@@ -663,13 +663,13 @@ impl Database {
 /// produces, so lexicographic `ORDER BY` / `BETWEEN` on a timestamp column
 /// is chronological. Every store goes through this one helper (tsk387);
 /// V95 normalized the rows written before the serializer was fixed.
-pub(crate) fn ts_to_string(ts: Timestamp) -> String {
+pub fn ts_to_string(ts: Timestamp) -> String {
     ts.to_text()
 }
 
 /// The inverse of [`ts_to_string`]; accepts any RFC 3339 text (rows from
 /// before V95, other producers).
-pub(crate) fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
+pub fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
     Timestamp::parse(s).map_err(|e| DomainError::Invalid(format!("bad timestamp `{s}`: {e}")))
 }
 

@@ -2,15 +2,14 @@
 
 #![cfg(test)]
 
-use oxplow_domain::refs::build::work_item_ref;
+use oxplow_tasks::work_item_ref;
 use std::path::Path;
 use std::sync::Arc;
 
 use oxplow_db::EffortStore as _;
-use oxplow_domain::stores::TaskStore as _;
-use oxplow_domain::{
-    EffortId, Task, TaskActorKind, TaskAuthor, TaskId, TaskPriority, TaskStatus, ThreadId,
-};
+use oxplow_domain::{EffortId, TaskId, ThreadId};
+use oxplow_tasks::TaskStore as _;
+use oxplow_tasks::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
 
 /// A git repo with one empty commit (stream setup refuses non-git dirs).
 pub fn init_git_repo(dir: &Path) {

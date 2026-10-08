@@ -1,10 +1,32 @@
 # oxplow-bundled/verify-unchecked: after an acceptance that left claims
 # unverified or decisions inferred (a forced one), file one item to verify
 # them — a checklist naming each, on the active tracker like every new
-# item. Its
-# `input` reads the acceptance's subject (the effort, its item, what was
-# accepted unchecked) and is empty when nothing was, or when this effect
-# already followed up an earlier acceptance of the same effort.
+# item.
+
+# The acceptance's subject: the effort, its item, and each claim and
+# decision accepted unchecked — still unverified or inferred now. None
+# when this effect already filed (or proposed) a follow-up for an earlier
+# acceptance of the effort; an earlier one it never reacted to (before its
+# approval) or that skipped or failed doesn't count.
+_ACCEPTED = """
+SELECT CAST(json_extract(e.subject, '$[0]') AS TEXT) AS effort,
+       CAST(json_extract(e.subject, '$[1]') AS TEXT) AS work_item,
+       (SELECT json_group_array(json_object('claim', s.value, 'statement', c.statement))
+          FROM json_each(e.subject) s JOIN v_claim c ON s.value = 'claim:' || c.id
+         WHERE c.verified = 0) AS claims,
+       (SELECT json_group_array(json_object('decision', s.value, 'question', d.question, 'choice', d.choice))
+          FROM json_each(e.subject) s JOIN v_decision d ON s.value = 'decision:' || d.id
+         WHERE d.provenance = 'inferred') AS decisions
+FROM v_event e
+WHERE e.id = :event_id
+  AND NOT EXISTS (
+    SELECT 1 FROM v_event p
+      JOIN v_effect_run r ON r.event_id = p.id
+     WHERE p.type = 'oxplow_bundled.accepted' AND p.seq < :event_seq
+       AND json_extract(p.subject, '$[0]') = json_extract(e.subject, '$[0]')
+       AND r.effect = 'oxplow-bundled/verify-unchecked' AND r.latest = 1
+       AND r.state IN ('ok', 'proposed'))
+"""
 
 def _list(text):
     return json.decode(text) if text else []
@@ -24,9 +46,14 @@ def _text(value):
     return s
 
 def transform(x):
-    if not x["rows"]:
+    event = x["event"]
+    rows = capability("sql.read", {
+        "sql": _ACCEPTED,
+        "params": {"event_id": event["id"], "event_seq": event["seq"]},
+    })
+    if not rows:
         return {"skip": "nothing new was accepted unchecked"}
-    row = x["rows"][0]
+    row = rows[0]
     claims = _list(row["claims"])
     decisions = _list(row["decisions"])
     if not claims and not decisions:

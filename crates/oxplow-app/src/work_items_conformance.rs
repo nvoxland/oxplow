@@ -14,8 +14,8 @@ use std::sync::Arc;
 use oxplow_domain::work_items::{CanonicalState, ExternalVerbs, WorkItemRecord, WorkItemsFeatures};
 use oxplow_domain::Actor;
 
-use crate::commands::work_item::WorkItemUpdateInput;
 use crate::work_items::{NewItem, WorkItems};
+use oxplow_domain::work_items::WorkItemUpdateInput;
 
 /// A failed check.
 #[derive(Debug, Clone, PartialEq, Eq)]

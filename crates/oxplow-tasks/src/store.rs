@@ -1,26 +1,19 @@
-use oxplow_domain::vocabulary::VocabularyHandle;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use rusqlite::params;
 
-use oxplow_domain::stores::TaskStore;
-use oxplow_domain::{
-    DomainError, Task, TaskActorKind, TaskAuthor, TaskId, TaskPriority, TaskStatus, ThreadId,
-    Timestamp,
-};
+use oxplow_db::{map_sql_err, string_to_ts, ts_to_string, Database};
+use oxplow_domain::{DomainError, TaskId, ThreadId, Timestamp};
 
-use crate::database::Database;
-use crate::database::{string_to_ts, ts_to_string};
-use crate::page_ref_projections::{task_body_ref_types, task_edges, work_item_id, KIND_WORK_ITEM};
-use crate::page_ref_store::SqlitePageRefStore;
+use crate::model::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
 
+/// oxplow's task rows. It writes nothing of core's but the `work_item`
+/// row it restates ([`project_work_item_tx`]): a work item's events and
+/// page refs are core's, for every list alike.
 #[derive(Clone)]
 pub struct SqliteTaskStore {
     db: Database,
-    page_refs: SqlitePageRefStore,
-    /// The ref kinds a task body's mentions may name.
-    vocabulary: VocabularyHandle,
 }
 
 /// A status change made by [`set_status_tx`]: the row before and after.
@@ -33,34 +26,8 @@ pub struct StatusChange {
 }
 
 impl SqliteTaskStore {
-    /// A store with its own core schema registry. `Services` shares one
-    /// registry across stores via [`Self::with_vocabulary`].
     pub fn new(db: Database) -> Self {
-        Self::with_vocabulary(db, VocabularyHandle::core())
-    }
-
-    pub fn with_vocabulary(db: Database, vocabulary: VocabularyHandle) -> Self {
-        Self {
-            page_refs: SqlitePageRefStore::new(db.clone()),
-            db,
-            vocabulary,
-        }
-    }
-
-    /// Re-project a task's body mentions into `page_ref` (the task-body
-    /// slice; the effort slice is the effort store's).
-    async fn project_body_refs(&self, item: &Task, id: TaskId) -> Result<(), DomainError> {
-        let mut placed = item.clone();
-        placed.id = id;
-        let vocabulary = self.vocabulary.current();
-        self.page_refs
-            .replace_source_for_ref_types(
-                KIND_WORK_ITEM,
-                &work_item_id(id),
-                task_body_ref_types(),
-                task_edges(&vocabulary.kinds, &placed),
-            )
-            .await
+        Self { db }
     }
 
     /// Move a task to another thread (or the backlog, `None`) at the end
@@ -103,7 +70,6 @@ impl SqliteTaskStore {
             .db
             .transaction(move |tx| update_with_status_tx(tx, &owned, status, Timestamp::now()))
             .await?;
-        self.project_body_refs(&after, after.id).await?;
         Ok(after)
     }
 }
@@ -123,11 +89,11 @@ fn write_status_tx(conn: &rusqlite::Connection, item: &Task) -> Result<(), Domai
                 ts_to_string(item.updated_at),
             ],
         )
-        .map_err(crate::database::map_sql_err)?;
+        .map_err(map_sql_err)?;
     if rows == 0 {
         return Err(DomainError::NotFound);
     }
-    project_work_item_tx(conn, item.id).map_err(crate::database::map_sql_err)?;
+    project_work_item_tx(conn, item.id).map_err(map_sql_err)?;
     Ok(())
 }
 
@@ -141,7 +107,7 @@ pub fn update_with_status_tx(
     status: Option<TaskStatus>,
     now: Timestamp,
 ) -> Result<Task, DomainError> {
-    if update_task_tx(conn, item).map_err(crate::database::map_sql_err)? == 0 {
+    if update_task_tx(conn, item).map_err(map_sql_err)? == 0 {
         return Err(DomainError::NotFound);
     }
     if let Some(to) = status {
@@ -153,7 +119,7 @@ pub fn update_with_status_tx(
 /// Insert `item` (its `id` ignored) in the caller's transaction. Returns
 /// its id.
 pub fn insert_tx(conn: &rusqlite::Connection, item: &Task) -> Result<TaskId, DomainError> {
-    insert_task_tx(conn, item).map_err(crate::database::map_sql_err)
+    insert_task_tx(conn, item).map_err(map_sql_err)
 }
 
 /// The next `sort_index` at the end of `thread`'s list (or the backlog's),
@@ -168,7 +134,7 @@ pub fn next_sort_index_tx(
         params![thread.map(|t| t.value())],
         |r| r.get(0),
     )
-    .map_err(crate::database::map_sql_err)
+    .map_err(map_sql_err)
 }
 
 /// Soft-delete task `id` at `now` in the caller's transaction — the core
@@ -189,16 +155,9 @@ pub fn soft_delete_tx(
         |r| r.get::<_, Option<i64>>(0),
     )
     .optional()
-    .map_err(crate::database::map_sql_err)?
+    .map_err(map_sql_err)?
     .ok_or(DomainError::NotFound)?;
-    project_work_item_tx(conn, id).map_err(crate::database::map_sql_err)?;
-    crate::page_ref_store::replace_source_for_ref_types_tx(
-        conn,
-        KIND_WORK_ITEM,
-        &work_item_id(id),
-        &task_body_ref_types(),
-        vec![],
-    )?;
+    project_work_item_tx(conn, id).map_err(map_sql_err)?;
     Ok(())
 }
 
@@ -229,12 +188,12 @@ fn list_ids_tx(
             "SELECT id FROM task WHERE thread_id IS ?1 AND deleted_at IS NULL
              ORDER BY sort_index ASC, created_at ASC",
         )
-        .map_err(crate::database::map_sql_err)?;
+        .map_err(map_sql_err)?;
     let ids = stmt
         .query_map(params![thread.map(|t| t.value())], |r| r.get::<_, i64>(0))
-        .map_err(crate::database::map_sql_err)?
+        .map_err(map_sql_err)?
         .collect::<rusqlite::Result<Vec<i64>>>()
-        .map_err(crate::database::map_sql_err)?;
+        .map_err(map_sql_err)?;
     Ok(ids.into_iter().map(TaskId::new).collect())
 }
 
@@ -283,18 +242,18 @@ pub fn place_task_tx(
                     "UPDATE task SET sort_index = ?2 WHERE id = ?1 AND sort_index != ?2",
                     params![t.value(), i as i64],
                 )
-                .map_err(crate::database::map_sql_err)?;
+                .map_err(map_sql_err)?;
             // Its work_item row carries `sort_index` in `native`: restate
             // it with the task row, so `v_work_item` never disagrees.
             if renumbered > 0 {
-                project_work_item_tx(conn, *t).map_err(crate::database::map_sql_err)?;
+                project_work_item_tx(conn, *t).map_err(map_sql_err)?;
             }
         }
     }
     item.thread_id = dest;
     item.sort_index = index as i64;
     item.updated_at = now;
-    if update_task_tx(conn, &item).map_err(crate::database::map_sql_err)? == 0 {
+    if update_task_tx(conn, &item).map_err(map_sql_err)? == 0 {
         return Err(DomainError::NotFound);
     }
     Ok(Placed {
@@ -405,7 +364,7 @@ pub fn get_task_tx(conn: &rusqlite::Connection, id: TaskId) -> Result<Option<Tas
     let sql = format!("{} WHERE t.id = ?1 AND t.deleted_at IS NULL", SELECT_BASE);
     conn.query_row(&sql, params![id.value()], row_to_task)
         .optional()
-        .map_err(crate::database::map_sql_err)
+        .map_err(map_sql_err)
 }
 
 /// Sync core for the task-row UPDATE of everything but the status:
@@ -578,35 +537,39 @@ const SELECT_BASE: &str =
     "SELECT t.*, COALESCE((SELECT COUNT(*) FROM task_note wn WHERE wn.task_id = t.id), 0) AS note_count
      FROM task t";
 
-impl SqliteTaskStore {
-    pub async fn list_all_for_backfill(&self) -> Result<Vec<Task>, DomainError> {
-        self.db
-            .call(move |conn| {
-                let sql = format!("{} ORDER BY t.created_at ASC", SELECT_BASE);
-                let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map([], row_to_task)?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .await
-    }
+/// The task rows, read and written.
+#[async_trait]
+pub trait TaskStore: Send + Sync {
+    async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<Task>, DomainError>;
+    async fn list_by_status_for_thread(
+        &self,
+        thread: &ThreadId,
+        status: TaskStatus,
+    ) -> Result<Vec<Task>, DomainError>;
+    async fn list_backlog(&self) -> Result<Vec<Task>, DomainError>;
+    async fn get(&self, id: TaskId) -> Result<Option<Task>, DomainError>;
+    /// Insert a new task; assigns and returns the autoincrement id.
+    async fn insert(&self, item: &Task) -> Result<TaskId, DomainError>;
+    /// Update an existing task by id.
+    async fn update(&self, item: &Task) -> Result<(), DomainError>;
+    async fn soft_delete(&self, id: TaskId) -> Result<(), DomainError>;
 }
 
 #[async_trait]
 impl TaskStore for SqliteTaskStore {
     async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<Task>, DomainError> {
         let thread = *thread;
-        self.db
-            .call(move |conn| {
-                let sql = format!(
-                    "{} WHERE t.thread_id = ?1 AND t.deleted_at IS NULL \
+        crate::db::read(&self.db, move |conn| {
+            let sql = format!(
+                "{} WHERE t.thread_id = ?1 AND t.deleted_at IS NULL \
                      ORDER BY t.sort_index ASC, t.created_at ASC",
-                    SELECT_BASE
-                );
-                let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map(params![thread.value()], row_to_task)?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .await
+                SELECT_BASE
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(params![thread.value()], row_to_task)?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .await
     }
 
     async fn list_by_status_for_thread(
@@ -616,80 +579,60 @@ impl TaskStore for SqliteTaskStore {
     ) -> Result<Vec<Task>, DomainError> {
         let thread = *thread;
         let status_str = status_to_str(status);
-        self.db
-            .call(move |conn| {
-                let sql = format!(
-                    "{} WHERE t.thread_id = ?1 AND t.status = ?2 AND t.deleted_at IS NULL \
+        crate::db::read(&self.db, move |conn| {
+            let sql = format!(
+                "{} WHERE t.thread_id = ?1 AND t.status = ?2 AND t.deleted_at IS NULL \
                      ORDER BY t.sort_index ASC, t.created_at ASC",
-                    SELECT_BASE
-                );
-                let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map(params![thread.value(), status_str], row_to_task)?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .await
+                SELECT_BASE
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(params![thread.value(), status_str], row_to_task)?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .await
     }
 
     async fn list_backlog(&self) -> Result<Vec<Task>, DomainError> {
-        self.db
-            .call(move |conn| {
-                let sql = format!(
-                    "{} WHERE t.thread_id IS NULL AND t.deleted_at IS NULL \
+        crate::db::read(&self.db, move |conn| {
+            let sql = format!(
+                "{} WHERE t.thread_id IS NULL AND t.deleted_at IS NULL \
                      ORDER BY t.sort_index ASC, t.created_at ASC",
-                    SELECT_BASE
-                );
-                let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map([], row_to_task)?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .await
+                SELECT_BASE
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map([], row_to_task)?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .await
     }
 
     async fn get(&self, id: TaskId) -> Result<Option<Task>, DomainError> {
-        self.db
-            .call(move |conn| {
-                let sql = format!("{} WHERE t.id = ?1", SELECT_BASE);
-                let mut stmt = conn.prepare(&sql)?;
-                let mut rows = stmt.query_map(params![id.value()], row_to_task)?;
-                match rows.next() {
-                    Some(r) => Ok(Some(r?)),
-                    None => Ok(None),
-                }
-            })
-            .await
+        crate::db::read(&self.db, move |conn| {
+            let sql = format!("{} WHERE t.id = ?1", SELECT_BASE);
+            let mut stmt = conn.prepare(&sql)?;
+            let mut rows = stmt.query_map(params![id.value()], row_to_task)?;
+            match rows.next() {
+                Some(r) => Ok(Some(r?)),
+                None => Ok(None),
+            }
+        })
+        .await
     }
 
     async fn insert(&self, item: &Task) -> Result<TaskId, DomainError> {
         let owned = item.clone();
-        let new_id = self
-            .db
-            .call(move |conn| insert_task_tx(conn, &owned))
-            .await?;
-        self.project_body_refs(item, new_id).await?;
+        let new_id = crate::db::write(&self.db, move |conn| insert_task_tx(conn, &owned)).await?;
         Ok(new_id)
     }
 
     /// Write the row's fields; status is never written here.
     async fn update(&self, item: &Task) -> Result<(), DomainError> {
         let item = item.clone();
-        let edges_item = item.clone();
         self.db
             .transaction(move |tx| {
                 update_with_status_tx(tx, &item, None, Timestamp::now()).map(|_| ())
             })
             .await?;
-        {
-            let refs = &self.page_refs;
-            let vocabulary = self.vocabulary.current();
-            let edges = task_edges(&vocabulary.kinds, &edges_item);
-            refs.replace_source_for_ref_types(
-                KIND_WORK_ITEM,
-                &work_item_id(edges_item.id),
-                task_body_ref_types(),
-                edges,
-            )
-            .await?;
-        }
         Ok(())
     }
 
@@ -711,9 +654,8 @@ impl TaskStore for SqliteTaskStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stream_store::SqliteStreamStore;
-    use crate::thread_store::SqliteThreadStore;
-    use oxplow_domain::refs::build::work_item_ref;
+    use crate::refs::work_item_ref;
+    use oxplow_db::{SqliteStreamStore, SqliteThreadStore};
     use oxplow_domain::stores::{StreamStore, ThreadStore};
     use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadStatus};
 
@@ -797,20 +739,18 @@ mod tests {
         let child = store.insert(&child).await.unwrap();
         store.soft_delete(epic).await.unwrap();
         let child_ref = work_item_ref(child);
-        let (parent, dangling): (Option<String>, i64) = store
-            .db
-            .call(move |c| {
-                c.query_row(
-                    "SELECT (SELECT parent_ref FROM v_work_item WHERE ref = ?1),
+        let (parent, dangling): (Option<String>, i64) = crate::db::read(&store.db, move |c| {
+            c.query_row(
+                "SELECT (SELECT parent_ref FROM v_work_item WHERE ref = ?1),
                             (SELECT count(*) FROM v_work_item w WHERE w.parent_ref IS NOT NULL
                                AND NOT EXISTS (SELECT 1 FROM v_work_item p
                                                WHERE p.ref = w.parent_ref))",
-                    [child_ref],
-                    |r| Ok((r.get(0)?, r.get(1)?)),
-                )
-            })
-            .await
-            .unwrap();
+                [child_ref],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+        })
+        .await
+        .unwrap();
         assert_eq!(parent, None);
         assert_eq!(dangling, 0);
     }
@@ -848,33 +788,31 @@ mod tests {
             .await
             .unwrap();
 
-        let rows = store
-            .db
-            .call(|c| {
-                let mut stmt = c.prepare(
-                    "SELECT ref, provider, title, body, state, native_state, parent_ref,
+        let rows = crate::db::read(&store.db, |c| {
+            let mut stmt = c.prepare(
+                "SELECT ref, provider, title, body, state, native_state, parent_ref,
                             deleted_at IS NOT NULL
                      FROM work_item ORDER BY ref",
-                )?;
-                let rows = stmt
-                    .query_map([], |r| {
-                        Ok(format!(
-                            "{}|{}|{}|{}|{}|{}|{}|{}",
-                            r.get::<_, String>(0)?,
-                            r.get::<_, String>(1)?,
-                            r.get::<_, String>(2)?,
-                            r.get::<_, String>(3)?,
-                            r.get::<_, String>(4)?,
-                            r.get::<_, String>(5)?,
-                            r.get::<_, Option<String>>(6)?.unwrap_or_default(),
-                            r.get::<_, bool>(7)?,
-                        ))
-                    })?
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(rows)
-            })
-            .await
-            .unwrap();
+            )?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok(format!(
+                        "{}|{}|{}|{}|{}|{}|{}|{}",
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                        r.get::<_, String>(3)?,
+                        r.get::<_, String>(4)?,
+                        r.get::<_, String>(5)?,
+                        r.get::<_, Option<String>>(6)?.unwrap_or_default(),
+                        r.get::<_, bool>(7)?,
+                    ))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(rows)
+        })
+        .await
+        .unwrap();
         let r = |id: TaskId| work_item_ref(id);
         let mut expected = vec![
             format!("{}|oxplow|ship it||in_progress|in_progress||false", r(epic)),
@@ -892,22 +830,18 @@ mod tests {
 
         // A cascade (the stream or thread deleted outright) takes the
         // work item with the task.
-        store
-            .db
-            .call(|c| c.execute("DELETE FROM threads", []))
+        crate::db::write(&store.db, |c| c.execute("DELETE FROM threads", []))
             .await
             .unwrap();
-        let left: (i64, i64) = store
-            .db
-            .call(|c| {
-                c.query_row(
-                    "SELECT (SELECT count(*) FROM task), (SELECT count(*) FROM work_item)",
-                    [],
-                    |r| Ok((r.get(0)?, r.get(1)?)),
-                )
-            })
-            .await
-            .unwrap();
+        let left: (i64, i64) = crate::db::read(&store.db, |c| {
+            c.query_row(
+                "SELECT (SELECT count(*) FROM task), (SELECT count(*) FROM work_item)",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+        })
+        .await
+        .unwrap();
         assert_eq!(left, (0, 0), "the backlog child went with its parent");
     }
 
@@ -930,11 +864,11 @@ mod tests {
             store.update_with_status(&edit, None).await,
             Err(DomainError::NotFound)
         ));
-        let logged: i64 = store
-            .db
-            .call(|c| c.query_row("SELECT count(*) FROM event_log", [], |r| r.get(0)))
-            .await
-            .unwrap();
+        let logged: i64 = crate::db::read(&store.db, |c| {
+            c.query_row("SELECT count(*) FROM event_log", [], |r| r.get(0))
+        })
+        .await
+        .unwrap();
         assert_eq!(logged, 0);
         let live = store
             .db
@@ -1125,74 +1059,5 @@ mod tests {
         latest.title = "ressurected".into();
         let err = store.update(&latest).await.unwrap_err();
         assert!(matches!(err, DomainError::NotFound));
-    }
-
-    #[tokio::test]
-    async fn insert_with_page_refs_projects_body_mentions() {
-        use crate::page_ref_store::SqlitePageRefStore;
-        let db = Database::in_memory();
-        let streams = SqliteStreamStore::new(db.clone());
-        let threads = SqliteThreadStore::new(db.clone());
-        let s = Stream {
-            id: StreamId::new(1),
-            kind: StreamKind::Primary,
-            title: "oxplow".into(),
-            branch: "main".into(),
-            branch_ref: "refs/heads/main".into(),
-            branch_source: "main".into(),
-            worktree_path: "/repo".into(),
-            working_pane: String::new(),
-            talking_pane: String::new(),
-            working_session_id: String::new(),
-            talking_session_id: String::new(),
-            custom_prompt: None,
-            created_at: ts(),
-            updated_at: ts(),
-            archived_at: None,
-        };
-        streams.upsert(&s).await.unwrap();
-        let t = Thread {
-            id: ThreadId::new(1),
-            stream_id: s.id,
-            title: "x".into(),
-            status: ThreadStatus::Active,
-            sort_index: 0,
-            pane_target: "working".into(),
-            agent: oxplow_domain::AgentKind::Claude,
-            acp_agent: None,
-            resume_session_id: String::new(),
-            summary: String::new(),
-            summary_updated_at: None,
-            closed_at: None,
-            custom_prompt: None,
-            created_at: ts(),
-            updated_at: ts(),
-            archived_at: None,
-        };
-        threads.upsert(&t).await.unwrap();
-
-        let page_refs = SqlitePageRefStore::new(db.clone());
-        let store = SqliteTaskStore::new(db.clone());
-
-        let mut it = item(Some(t.id));
-        it.description = "see [[src/app.rs]] and blocks tsk99".into();
-        let new_id = store.insert(&it).await.unwrap();
-
-        let inbound = page_refs
-            .list_backlinks("file", "src/app.rs", None)
-            .await
-            .unwrap();
-        assert!(inbound
-            .iter()
-            .any(|e| e.source_id == format!("oxplow:{new_id}")));
-
-        let mut latest = store.get(new_id).await.unwrap().unwrap();
-        latest.description = "no refs anymore".into();
-        store.update(&latest).await.unwrap();
-        let inbound = page_refs
-            .list_backlinks("file", "src/app.rs", None)
-            .await
-            .unwrap();
-        assert!(inbound.is_empty(), "expected no backlinks; got {inbound:?}");
     }
 }

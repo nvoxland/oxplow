@@ -1730,32 +1730,14 @@ pub struct SyncInput {
     pub thread: Option<String>,
 }
 
-pub fn sync_command(sync: CollectorRunner) -> crate::commands::Command {
-    use crate::commands::{Command, Handler, HandlerOutput, Invocation};
-    use oxplow_domain::{
-        Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, Invokers, Lifecycle,
-    };
-    Command::new(
-        CommandSpec {
-            id: SYNC.into(),
-            summary: "Run an approved collector now, refreshing what it collects (runs the \
-                      collector's program or script, which the bus doesn't own). It never \
-                      approves: an unapproved exec collector is refused. A project report \
-                      collector (`records:`) reads its report now and records what it parses \
-                      in `thread` (an agent's own): point at the report, never report numbers \
-                      yourself."
-                .into(),
-            input_schema: serde_json::to_value(schemars::schema_for!(SyncInput))
-                .expect("schema serializes"),
-            invokers: Invokers::ALL,
-            confirm: Confirm::Never,
-            undoable: false,
-            lifecycle: Lifecycle::Stable,
-            atomicity: Atomicity::External,
-            effect: CommandEffect::Write,
-            needs: Vec::new(),
-            ui: None,
-        },
+pub fn sync_op(sync: CollectorRunner) -> crate::commands::ops::Op {
+    use crate::commands::{Handler, HandlerOutput, Invocation};
+    use oxplow_domain::CommandError;
+    crate::commands::ops::Op::new(
+        "collectors.sync",
+        "sync",
+        serde_json::to_value(schemars::schema_for!(SyncInput)).expect("schema serializes"),
+        false,
         Handler::External(std::sync::Arc::new(
             move |Invocation { actor, .. }, input| {
                 let sync = sync.clone();
@@ -1833,7 +1815,6 @@ pub fn sync_command(sync: CollectorRunner) -> crate::commands::Command {
             },
         )),
     )
-    .expect("collector.sync registers")
 }
 
 /// Run an approved exec collector and parse its output.

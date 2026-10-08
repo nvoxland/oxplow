@@ -257,8 +257,31 @@ async fn lens_example(
     }
 }
 
+/// A fixture's `answers`: per capability, its calls' answers in call order,
+/// standing in for the capabilities' own (none: each is served for real);
+/// `None`, with the error reported, when they aren't that shape.
+fn answers(
+    ex: &Example<'_>,
+    what: &str,
+    report: &mut TestReport,
+) -> Option<std::collections::BTreeMap<String, Vec<Value>>> {
+    match ex.input.get("answers").cloned().map(serde_json::from_value) {
+        None => Some(Default::default()),
+        Some(Ok(answers)) => Some(answers),
+        Some(Err(e)) => {
+            report.errors.push(format!(
+                "{}:1: {what}: `answers` must map each capability to its answers in call \
+                 order: {e}",
+                ex.shown
+            ));
+            None
+        }
+    }
+}
+
 /// Dry-run one of the extension's own `commands:` on the fixture's
-/// `input` (and `rows`): what it composes, checked against the throwaway's
+/// `input` (and `answers`, standing in for its capability calls' — per
+/// capability, in call order): what it composes, checked against the throwaway's
 /// registry, against `expect` — `{ commands: [names] }`, or `{ refuses:
 /// <part of the reason> }`. Nothing runs.
 async fn command_example(
@@ -269,13 +292,18 @@ async fn command_example(
 ) {
     use oxplow_app::extension_commands::{call_names, dry_run, Composed};
     let shown = ex.shown;
-    let rows = ex
-        .input
-        .get("rows")
-        .and_then(Value::as_array)
-        .map(|r| r.to_vec());
+    let Some(answers) = answers(ex, &format!("command `{}`", cmd.name), report) else {
+        return;
+    };
     let input = ex.input.get("input").cloned().unwrap_or_else(|| json!({}));
-    let decided = dry_run(&host.svc.sql, cmd, &input, rows, host.svc.commands.as_ref()).await;
+    let decided = dry_run(
+        &host.svc.sql,
+        cmd,
+        &input,
+        &answers,
+        host.svc.commands.as_ref(),
+    )
+    .await;
     let problem = match (decided, ex.expect.get("refuses").and_then(Value::as_str)) {
         (Err(e), _) => Some(format!("failed: {e}")),
         (Ok(Composed::Refused(why)), Some(want)) if why.contains(want) => None,
@@ -359,17 +387,15 @@ async fn effect_example(
         "subject": event.get("subject").cloned().unwrap_or_else(|| json!([])),
         "payload": payload,
     });
-    let rows = ex
-        .input
-        .get("rows")
-        .and_then(Value::as_array)
-        .map(|r| r.to_vec());
+    let Some(answers) = answers(ex, &format!("effect `{id}`"), report) else {
+        return;
+    };
     let decided = dry_run(
         &host.svc.sql,
         decl,
         &decl.script,
         event,
-        rows,
+        &answers,
         Some(host.svc.commands.as_ref()),
     )
     .await;

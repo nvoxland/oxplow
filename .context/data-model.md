@@ -123,7 +123,7 @@ handler (which runs in the bus's transaction).
 
 **Lifecycle invariant.** At most one effort is open per thread (the
 V5 unique index `idx_effort_open_per_thread`), and a task's status never
-opens or closes one: `task_store::write_status_tx` (the core of
+opens or closes one: `oxplow_tasks::store::write_status_tx` (the core of
 `set_status_tx` / `update_with_status_tx`, behind
 `oxplow.work_item.transition` / `update` / `create`), `soft_delete` and
 `move_task` touch the task alone — `get_task_tx` sees live rows only, so
@@ -368,7 +368,7 @@ running an older DB get the columns/tables dropped on first launch with
 the new binary; existing rows are not migrated forward (no surface
 reads them).
 
-### `task` — `SqliteTaskStore` (`crates/oxplow-db/src/task_store.rs`)
+### `task` — `SqliteTaskStore` (`crates/oxplow-tasks/src/store.rs`)
 
 The actual TODO list. Singular table name, `id INTEGER PRIMARY KEY
 AUTOINCREMENT` — stored as a plain integer, surfaced as `tsk<int>` (see
@@ -450,13 +450,16 @@ the interface's links and comments, published as `v_work_item_link` /
 `v_work_item_comment` over the active list's items. oxplow's follow
 `task_link` / `task_note` (a task's notes) by triggers, however those are
 written (V17 backfilled them; a comment's id is `task_note:<id>`).
+`link_type` is the list's own (V28 dropped V17's CHECK naming oxplow's
+six). An item's page refs are restated from these and `work_item`
+(`work_item_refs::restate_tx`, "page_ref" below).
 `capability_provider.fields_json` (V18) is an implementation's declared
 fields. Capability rows are published when services are built
 (`CapabilityRegistry::publish_now`), so the first read sees the active
 list.
 
 The oxplow provider's rows (`work_item:oxplow:tsk<n>`) are restated from
-the `task` row by `task_store::project_work_item_tx`, which every task
+the `task` row by `oxplow_tasks::store::project_work_item_tx`, which every task
 write calls in its own transaction (insert, field update, status,
 soft delete) — the two never disagree. Mapping: `ready` → `todo`;
 `archived` → `done` when `completed_at` is set, else `canceled`; the rest
@@ -492,7 +495,7 @@ concurrent duplicate keeps the first (`ON CONFLICT DO NOTHING`). The
 same migration adds `ai_call.input_hash`. Read as `v_ai_result`; see
 [ai-providers.md](./ai-providers.md) "Recorded computations".
 
-### `thread_note` and `task_note` (`thread_note_store.rs`, `task_satellite.rs`)
+### `thread_note` and `task_note` (`thread_note_store.rs`, `oxplow-tasks` `satellite.rs`)
 
 **`thread_note`** is a thread's capture pad: what an agent records as it
 works (a finding, why it paused) and what an Explore subagent fills in
@@ -1043,21 +1046,20 @@ is a canonical ref's `(kind, id)` (see `.context/refs.md`, tsk404), so
 `format!("{kind}:{id}")` is the ref and nothing needs a per-kind id
 scheme:
 - `wiki` — the slug
-- `work_item` — `oxplow:tsk<n>` (`page_ref_projections::work_item_id`)
+- `work_item` — `<provider>:<id>` (`oxplow:tsk<n>`, `issues:ENG-12`)
 - `file` — the repo-relative path
 - `dir` — the repo-relative path, no trailing slash
 - `commit` — the full sha
 - `finding` — the rowid as a string
-- `task_note` — `not<n>` (a comment on an oxplow task)
 - `thread_note` — `not<n>`
 
 V92 wiped the pre-canonical rows; the boot backfill regenerates them.
 
 **Writers own slices by `ref_type`.** A single `(source_kind,
-source_id)` can have rows from multiple owners — a task's
-body-mention edges (from `task_store`), link edges (from the
-link store), and touched-file edges (from the effort store) all
-land under `(work_item, oxplow:tskN)` but with distinct `ref_type`s.
+source_id)` can have rows from multiple owners — a work item's body,
+link and comment edges (restated from the work-item interface) and its
+effort edges (from the effort store) all land under
+`(work_item, <provider>:<id>)` but with distinct `ref_type`s.
 `SqlitePageRefStore::replace_source_for_ref_types` lets each
 writer wipe + re-insert only the rows whose `ref_type` it owns,
 so other owners' rows survive.
@@ -1071,9 +1073,10 @@ renamed the `task_…` spellings: a mention is `work_item_mention` /
 | Owner | Source | Slice (`ref_type`s) |
 |---|---|---|
 | `wiki_pages.rs` (`oxplow-app`) | `wiki:<slug>` | full source — uses `replace_source` |
-| `task_store::upsert` | `work_item:oxplow:<id>` body slice | `work_item_mention`, `wikilink`, `wiki_file_ref`, `wiki_dir_ref`, `finding_mention`, `commit_mention` |
-| `work_satellite::SqliteTaskLinkStore` create/delete | `work_item:oxplow:<id>` link slice | `work_item_link:blocks` / `relates_to` / … |
-| `effort_store::record_file` + `effort_store::finish` + `set_impacts` | `work_item:oxplow:<id>` effort slice | `touched_file`, `summary_wikilink`, `summary_file_ref`, `summary_dir_ref`, `summary_work_item_mention`, `summary_finding_mention`, `summary_commit_mention`, `impact` |
+| `work_item_refs::restate_tx` (`oxplow-db`), run by the `page_ref.work_item` consumer on an item's events and by the boot repair — any list's item, from `work_item` / `work_item_link` / `work_item_comment` | `work_item:<provider>:<id>` body slice | `work_item_mention`, `wikilink`, `wiki_file_ref`, `wiki_dir_ref`, `finding_mention`, `commit_mention` |
+| (the same) | link slice | `work_item_link:<type>` — every type with the prefix, the list's own (V28 dropped the CHECK naming oxplow's six) |
+| (the same) | comment slice: the comments' mentions, as the item's own edges (V28 dropped the old `task_note` sources) | `comment_file_ref`, `comment_dir_ref`, `comment_wikilink`, `comment_work_item_mention`, `comment_finding_mention`, `comment_commit_mention` |
+| `effort_store::record_file` + `effort_store::finish` + `set_impacts` | `work_item:<provider>:<id>` effort slice | `touched_file`, `summary_wikilink`, `summary_file_ref`, `summary_dir_ref`, `summary_work_item_mention`, `summary_finding_mention`, `summary_commit_mention`, `impact` |
 | `analytics_stores::SqliteCodeQualityStore::append_finding` | `finding:<id>` | full source |
 | `commit_indexer.rs` (`oxplow-app`) | `commit:<sha>` | full source — diff yields `touched_file`, message yields the same body-mention set |
 
@@ -1090,7 +1093,8 @@ which decorate each row with a best-effort `source_label` from
 the source store) and as MCP tools of the same names.
 
 Boot-time restate: `oxplow_app::page_ref_backfill::run(...)` re-
-projects every existing task body, link and finding into the table,
+projects every work item (`work_item_refs::all_refs_tx`, deleted ones
+included — restating one clears it), effort, finding and thread note into the table,
 idempotently — the graph's repair path after a migration that resets
 `page_ref` (V92) or a writer's drift. It runs at boot only when the
 schema version or the build changed since its last run
@@ -1287,8 +1291,7 @@ still advances, so one poison event never stalls the pump. Events a
 consumer doesn't `handle` are skipped but checkpointed. Renaming a
 consumer restarts it from the beginning of the log. `Services.event_pump`
 is spawned by `boot.rs` (catches up on boot, then runs on `wake()` — which
-producers call after their commit — or every 5s); `TaskService` wakes it
-after a transition. A handler error that is retryable (`DomainError::
+producers call after their commit — or every 5s). A handler error that is retryable (`DomainError::
 Busy`) is not a poison event: the delivery transaction fails and retries,
 and if the database stays busy the event waits, checkpoint unmoved
 (tsk437 review).
@@ -1353,8 +1356,8 @@ events that trigger it, and `after()` still orders consumers in `settle`.
 `EventPump::settle(&[names], timeout)` spawns a catch-up of just the named
 consumers — side by side within a level, a consumer in a level after those
 it runs `after` — and waits for it, for callers whose answer needs their
-effect (`effort_lifecycle::settle`, which `EffortService` and
-`TaskService` call, settles `effort.lifecycle`).
+effect (`effort_lifecycle::settle`, which `EffortService` calls,
+settles `effort.lifecycle`).
 
 The one async consumer so far is **`effort.lifecycle`**
 (`crates/oxplow-app/src/effort_lifecycle.rs`), on `effort.opened` /
@@ -1386,7 +1389,7 @@ decisions — a model call; failures logged). (`effort.gauges` is gone:
 `{ on: [effort.finished] }` fact collectors run from `collector.triggers`.)
 They hold `Services` weakly (the pump is part
 of it).
-`TaskService::update` / `create`, `oxplow.effort.report`, and MCP / IPC
+`oxplow.effort.report` and MCP / IPC
 `run_command` after any write call `settle` on `effort.lifecycle` (up to 10 min; a
 start baseline on a huge repo waits for the startup sweep) so a report
 lands on the effort a close just before it closed and a batch's opens
@@ -1409,7 +1412,8 @@ checkpointed and dead-lettered like any other consumer. The task
 store's own insert/update (not the commands') still project inline.
 
 `command_audit` (who ran which command, the input, outcome, the undo as
-`inverse_json`, and `undone_by`) is written by the command bus through
+`inverse_json`, `undone_by`, and `capabilities_json` — V27, the host
+capabilities the run called and how often, NULL for none) is written by the command bus through
 `command_audit_store::insert_tx` / `set_event_id_tx` / `mark_undone_tx`
 inside the run's transaction; `SqliteCommandAuditStore` reads it. See
 [commands.md](./commands.md). V147 rebuilt it (an `effect` actor kind in

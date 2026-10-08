@@ -28,6 +28,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod ai;
 pub mod builtin_metrics;
+pub mod capability;
 pub mod helpers;
 pub mod runtime;
 pub use ai::{AiHost, AiOracle};

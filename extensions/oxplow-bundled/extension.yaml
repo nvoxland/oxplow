@@ -269,29 +269,7 @@ effects:
     summary: After an acceptance that left claims unverified or decisions inferred, file one item to verify them.
     on: [oxplow_bundled.accepted]
     entry: effects/verify_unchecked.star
-    # The acceptance's subject: the effort, its item, and each claim and
-    # decision accepted unchecked — still unverified or inferred now. None
-    # when this effect already filed (or proposed) a follow-up for an
-    # earlier acceptance of the effort; an earlier one it never reacted to
-    # (before its approval) or that skipped or failed doesn't count.
-    input: |
-      SELECT CAST(json_extract(e.subject, '$[0]') AS TEXT) AS effort,
-             CAST(json_extract(e.subject, '$[1]') AS TEXT) AS work_item,
-             (SELECT json_group_array(json_object('claim', s.value, 'statement', c.statement))
-                FROM json_each(e.subject) s JOIN v_claim c ON s.value = 'claim:' || c.id
-               WHERE c.verified = 0) AS claims,
-             (SELECT json_group_array(json_object('decision', s.value, 'question', d.question, 'choice', d.choice))
-                FROM json_each(e.subject) s JOIN v_decision d ON s.value = 'decision:' || d.id
-               WHERE d.provenance = 'inferred') AS decisions
-      FROM v_event e
-      WHERE e.id = :event_id
-        AND NOT EXISTS (
-          SELECT 1 FROM v_event p
-            JOIN v_effect_run r ON r.event_id = p.id
-           WHERE p.type = 'oxplow_bundled.accepted' AND p.seq < :event_seq
-             AND json_extract(p.subject, '$[0]') = json_extract(e.subject, '$[0]')
-             AND r.effect = 'oxplow-bundled/verify-unchecked' AND r.latest = 1
-             AND r.state IN ('ok', 'proposed'))
+    needs: [sql.read]
 commands:
   - name: review.accept
     summary: Accept an effort's work — comment the review on its work item and mark it done. Refuses while a claim is unverified or an inferred decision unreviewed, unless forced.
@@ -303,38 +281,29 @@ commands:
         force: { type: boolean, description: "Accept even with unverified claims or unreviewed decisions; they're listed in the comment." }
       additionalProperties: false
     entry: handlers/accept.star
-    input: |
-      SELECT e.work_item,
-             (SELECT json_group_array(json_object('claim', 'claim:' || c.id, 'statement', c.statement))
-                FROM v_claim c WHERE c.effort_id = e.id AND c.verified = 0) AS unverified,
-             (SELECT json_group_array(json_object('decision', 'decision:' || d.id, 'question', d.question, 'choice', d.choice))
-                FROM v_decision d WHERE d.effort_id = e.id AND d.provenance = 'inferred') AS inferred,
-             (SELECT json_group_array(v.path)
-                FROM v_oxplow_bundled_deviation v WHERE v.effort_id = e.id) AS deviated
-      FROM v_effort e
-      WHERE 'effort:eff' || e.id = :ref
+    needs: [sql.read]
     confirm: always
     invokers: { human: true, agent: false, lens: true }
     examples:
       - name: reviewed
         input: { ref: "effort:eff1" }
-        rows: [{ work_item: "work_item:oxplow:tsk1", unverified: "[]", inferred: "[]", deviated: "[]" }]
+        answers: { sql.read: [[{ work_item: "work_item:oxplow:tsk1", unverified: "[]", inferred: "[]", deviated: "[]" }]] }
         expect_commands: [oxplow.work_item.comment, oxplow.work_item.transition]
       - name: an unverified claim
         input: { ref: "effort:eff1" }
-        rows: [{ work_item: "work_item:oxplow:tsk1", unverified: '[{"claim":"claim:1","statement":"tests pass"}]', inferred: "[]", deviated: "[]" }]
+        answers: { sql.read: [[{ work_item: "work_item:oxplow:tsk1", unverified: '[{"claim":"claim:1","statement":"tests pass"}]', inferred: "[]", deviated: "[]" }]] }
         refuses: 1 unverified claim
       - name: forced
         input: { ref: "effort:eff1", force: true }
-        rows: [{ work_item: "work_item:oxplow:tsk1", unverified: '[{"claim":"claim:1","statement":"tests pass"}]', inferred: "[]", deviated: "[]" }]
+        answers: { sql.read: [[{ work_item: "work_item:oxplow:tsk1", unverified: '[{"claim":"claim:1","statement":"tests pass"}]', inferred: "[]", deviated: "[]" }]] }
         expect_commands: [oxplow.work_item.comment, oxplow.work_item.transition]
       - name: another provider's item
         input: { ref: "effort:eff2" }
-        rows: [{ work_item: "work_item:issues:ENG-12", unverified: "[]", inferred: "[]", deviated: "[]" }]
+        answers: { sql.read: [[{ work_item: "work_item:issues:ENG-12", unverified: "[]", inferred: "[]", deviated: "[]" }]] }
         expect_commands: [oxplow.work_item.comment, oxplow.work_item.transition]
       - name: no work item
         input: { ref: "effort:eff3" }
-        rows: [{ work_item: null, unverified: "[]", inferred: "[]", deviated: "[]" }]
+        answers: { sql.read: [[{ work_item: null, unverified: "[]", inferred: "[]", deviated: "[]" }]] }
         refuses: has no work item
   - name: review.request_changes
     summary: Send an effort's work back — comment a checklist of its unverified claims, inferred decisions and files outside its work item's area (and your note) on the item, and move it back to todo.
@@ -346,34 +315,25 @@ commands:
         note: { type: string, description: "What else to change." }
       additionalProperties: false
     entry: handlers/request_changes.star
-    input: |
-      SELECT e.work_item,
-             (SELECT json_group_array(json_object('claim', 'claim:' || c.id, 'statement', c.statement))
-                FROM v_claim c WHERE c.effort_id = e.id AND c.verified = 0) AS unverified,
-             (SELECT json_group_array(json_object('decision', 'decision:' || d.id, 'question', d.question, 'choice', d.choice))
-                FROM v_decision d WHERE d.effort_id = e.id AND d.provenance = 'inferred') AS inferred,
-             (SELECT json_group_array(v.path)
-                FROM v_oxplow_bundled_deviation v WHERE v.effort_id = e.id) AS deviated
-      FROM v_effort e
-      WHERE 'effort:eff' || e.id = :ref
+    needs: [sql.read]
     confirm: always
     invokers: { human: true, agent: false, lens: true }
     examples:
       - name: a file outside the area
         input: { ref: "effort:eff1" }
-        rows: [{ work_item: "work_item:oxplow:tsk1", unverified: "[]", inferred: "[]", deviated: '["crates/db/store.rs"]' }]
+        answers: { sql.read: [[{ work_item: "work_item:oxplow:tsk1", unverified: "[]", inferred: "[]", deviated: '["crates/db/store.rs"]' }]] }
         expect_commands: [oxplow.work_item.comment, oxplow.work_item.transition]
       - name: nothing to ask for
         input: { ref: "effort:eff1" }
-        rows: [{ work_item: "work_item:oxplow:tsk1", unverified: "[]", inferred: "[]", deviated: "[]" }]
+        answers: { sql.read: [[{ work_item: "work_item:oxplow:tsk1", unverified: "[]", inferred: "[]", deviated: "[]" }]] }
         refuses: nothing to ask for
       - name: another provider's item
         input: { ref: "effort:eff2", note: "Add the migration." }
-        rows: [{ work_item: "work_item:issues:ENG-12", unverified: "[]", inferred: "[]", deviated: "[]" }]
+        answers: { sql.read: [[{ work_item: "work_item:issues:ENG-12", unverified: "[]", inferred: "[]", deviated: "[]" }]] }
         expect_commands: [oxplow.work_item.comment, oxplow.work_item.transition]
       - name: no work item
         input: { ref: "effort:eff3", note: "x" }
-        rows: [{ work_item: null, unverified: "[]", inferred: "[]", deviated: "[]" }]
+        answers: { sql.read: [[{ work_item: null, unverified: "[]", inferred: "[]", deviated: "[]" }]] }
         refuses: has no work item
   - name: work.clear_finished
     summary: Clear a thread's Finished list in the Work panel — what finished before now stops showing there.

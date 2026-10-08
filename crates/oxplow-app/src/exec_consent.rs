@@ -974,6 +974,7 @@ mod tests {
             Box::leak(Box::new(crate::bundled_extensions::BundledExtension {
                 name: "acme",
                 files: Box::leak(files.into_boxed_slice()),
+                required: false,
             }))
         };
         let before = leak(vec![

@@ -536,3 +536,148 @@ mod tests {
         assert!(!f.delete);
     }
 }
+
+// ---- The verbs' inputs: one shape for every list ----
+//
+// What a `oxplow.work_item.<verb>` command takes, and what a list's verb
+// receives (`ExternalVerbs::invoke`): the `v_work_item` columns, a
+// canonical `state` with the list's `native_state`, and `native` for its
+// own fields.
+
+/// Move an item to a canonical state, and optionally to one of its
+/// provider's own states that maps to it.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemTransitionInput {
+    /// The item's ref (`work_item:oxplow:tsk42`, `work_item:issues:ENG-12`).
+    #[serde(rename = "ref")]
+    pub item_ref: String,
+    pub to: CanonicalState,
+    /// The provider's own state, which must map to `to` (oxplow:
+    /// `archived` with `done` or `canceled`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_state: Option<String>,
+}
+
+/// A new item on the active tracker, optionally straight into
+/// a state.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemCreateInput {
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    /// The parent's ref, on the same provider (needs `hierarchy`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_ref: Option<String>,
+    /// `todo` when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<CanonicalState>,
+    /// The provider's own state, which must map to `state` when both are
+    /// given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_state: Option<String>,
+    /// The tracker's own fields (oxplow: `{ priority? }`), as its
+    /// `create` declares them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native: Option<Value>,
+    /// The thread it's filed on (`thr3`): absent, an agent's own, or none
+    /// for a person (oxplow's backlog).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread: Option<String>,
+}
+
+/// Edit an item's fields and, optionally, its state — one run. Absent
+/// fields are left alone.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemUpdateInput {
+    #[serde(rename = "ref")]
+    pub item_ref: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    /// The parent's ref on the same provider, or `""` to detach.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<CanonicalState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_state: Option<String>,
+    /// The provider's own fields to change (oxplow: `{ priority? }`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native: Option<Value>,
+}
+
+/// A typed link from one item to another of the same provider.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemLinkInput {
+    /// The item linked from.
+    #[serde(rename = "ref")]
+    pub item_ref: String,
+    /// The item linked to (the same provider's).
+    pub target: String,
+    /// The provider names its own types (oxplow: blocks, relates_to,
+    /// discovered_from, duplicates, supersedes, replies_to).
+    pub link_type: String,
+}
+
+/// A comment on an item (oxplow: a task note).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemCommentInput {
+    #[serde(rename = "ref")]
+    pub item_ref: String,
+    /// Markdown.
+    pub body: String,
+}
+
+/// Remove an item (oxplow: soft — the row stays, marked deleted).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemDeleteInput {
+    #[serde(rename = "ref")]
+    pub item_ref: String,
+}
+
+/// `oxplow.work_item.reorder`: put an item before or after another in its own
+/// list (neither: at its end).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemReorderInput {
+    /// The task's ref (`work_item:oxplow:tsk42`).
+    #[serde(rename = "ref")]
+    pub item_ref: String,
+    /// Put it just before this item of the same list.
+    #[serde(default)]
+    pub before: Option<String>,
+    /// Put it just after this item of the same list.
+    #[serde(default)]
+    pub after: Option<String>,
+}
+
+/// Which list `oxplow.work_item.move` takes an item to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MoveTo {
+    /// The project-wide backlog.
+    Backlog,
+    /// A thread's list (`thr3`).
+    Thread(String),
+}
+
+/// `oxplow.work_item.move`: take an item to another list — its end, or next to
+/// an item there.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemMoveInput {
+    #[serde(rename = "ref")]
+    pub item_ref: String,
+    pub to: MoveTo,
+    #[serde(default)]
+    pub before: Option<String>,
+    #[serde(default)]
+    pub after: Option<String>,
+}

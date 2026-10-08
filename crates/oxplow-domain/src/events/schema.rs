@@ -26,7 +26,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::{validate_type_name, Envelope};
-use crate::task::TaskStatus;
 use crate::DomainError;
 
 /// The namespaces core owns (§5.3). Plugin types may not use them.
@@ -461,6 +460,20 @@ impl Envelope {
 // ---------------------------------------------------------------------------
 // Core types, v1
 // ---------------------------------------------------------------------------
+
+// oxplow's task statuses as the v1 work-item events published them (in
+// their schemas, as `TaskStatus`): frozen here with those payloads. The
+// task list's own type lives with its implementation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskStatus {
+    Ready,
+    InProgress,
+    Blocked,
+    Done,
+    Canceled,
+    Archived,
+}
 
 /// `work_item.transitioned@1`: a task changed status.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -2666,9 +2679,9 @@ mod tests {
         assert_eq!(
             up(
                 "work_item.commented",
-                json!({ "work_item": item, "comment": "task_note:note3" })
+                json!({ "work_item": item, "comment": "task_note:not3" })
             ),
-            json!({ "work_item": item, "comment": "note3" })
+            json!({ "work_item": item, "comment": "not3" })
         );
         let linked =
             json!({ "work_item": item, "target": "work_item:oxplow:tsk7", "link_type": "blocks" });

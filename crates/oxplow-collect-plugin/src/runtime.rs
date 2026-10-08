@@ -578,10 +578,11 @@ pub fn run_starlark_with_ai(
 }
 
 /// What a run's `Evaluator::extra` holds.
-enum Host<'a> {
+pub(crate) enum Host<'a> {
     None,
     Tree(&'a TreeHost),
     Ai(&'a crate::ai::AiHost),
+    Capability(&'a crate::capability::CapabilityHost),
 }
 
 /// Like [`run_starlark`] but with a [`TreeHost`] in scope, so the script's
@@ -595,7 +596,11 @@ pub fn run_starlark_with_host(
     run_starlark_inner(script, input, Host::Tree(host))
 }
 
-fn run_starlark_inner(script: &str, input: &Value, host: Host<'_>) -> Result<Value, CollectError> {
+pub(crate) fn run_starlark_inner(
+    script: &str,
+    input: &Value,
+    host: Host<'_>,
+) -> Result<Value, CollectError> {
     use starlark::environment::{GlobalsBuilder, LibraryExtension, Module};
     use starlark::eval::Evaluator;
     use starlark::syntax::{AstModule, Dialect};
@@ -614,6 +619,7 @@ fn run_starlark_inner(script: &str, input: &Value, host: Host<'_>) -> Result<Val
     let globals = GlobalsBuilder::extended_by(&[LibraryExtension::Json])
         .with(collect_helpers)
         .with(crate::ai::ai_builtins)
+        .with(crate::capability::capability_builtins)
         .build();
 
     Module::with_temp_heap(|module| {
@@ -622,6 +628,7 @@ fn run_starlark_inner(script: &str, input: &Value, host: Host<'_>) -> Result<Val
             Host::None => {}
             Host::Tree(h) => eval.extra = Some(h),
             Host::Ai(h) => eval.extra = Some(h),
+            Host::Capability(h) => eval.extra = Some(h),
         }
         let result = eval
             .eval_module(ast, &globals)

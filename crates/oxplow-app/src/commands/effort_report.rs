@@ -9,22 +9,20 @@
 //! An agent reports only on its own thread. The result carries
 //! `link_warnings`.
 
+use crate::commands::ops::Op;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use oxplow_db::{Database, EffortStore as _, SqliteEffortStore};
 use oxplow_domain::refs::build::thread_ref;
 use oxplow_domain::vcs::Vcs;
-use oxplow_domain::{
-    Actor, Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, Invokers, Lifecycle,
-    TaskImpact, ThreadId,
-};
+use oxplow_domain::{Actor, CommandError, TaskImpact, ThreadId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::thread::parse_thread_ref;
-use super::{Command, Handler, HandlerOutput, Invocation};
+use super::{Handler, HandlerOutput, Invocation};
 use crate::effort_service::EffortService;
 use crate::sql_gateway::SqlGateway;
 
@@ -112,22 +110,6 @@ fn schema<T: JsonSchema>() -> Value {
     serde_json::to_value(schemars::schema_for!(T)).expect("schema serializes")
 }
 
-fn spec(name: &str, summary: &str, schema: Value) -> CommandSpec {
-    CommandSpec {
-        id: name.into(),
-        summary: summary.into(),
-        input_schema: schema,
-        invokers: Invokers::ALL,
-        confirm: Confirm::Never,
-        undoable: false,
-        lifecycle: Lifecycle::Stable,
-        atomicity: Atomicity::External,
-        effect: CommandEffect::Record,
-        needs: Vec::new(),
-        ui: None,
-    }
-}
-
 async fn report(
     deps: &EffortDeps,
     actor: Actor,
@@ -206,16 +188,12 @@ async fn report(
 }
 
 /// `effort.report { thread?, summary?, impacts? }`.
-pub fn report_command(deps: EffortDeps) -> Command {
-    Command::new(
-        spec(
-            REPORT,
-            "Optional: describe the thread's current (else latest) effort — a `summary` of \
-             what shipped, and any `impacts` beyond the edits (a wiki page, a work item, a commit, \
-             a finding). Without one, the summary is your last turn's final message; files \
-             and test runs are observed. Returns `{ effort, link_warnings }`.",
-            schema::<ReportInput>(),
-        ),
+pub fn report_op(deps: EffortDeps) -> Op {
+    Op::new(
+        "efforts.write",
+        "report",
+        schema::<ReportInput>(),
+        false,
         Handler::External(Arc::new(move |Invocation { actor, .. }, input| {
             let deps = deps.clone();
             Box::pin(async move {
@@ -227,12 +205,11 @@ pub fn report_command(deps: EffortDeps) -> Command {
             })
         })),
     )
-    .expect("oxplow.effort.report is a valid command")
 }
 
 /// The reporting commands, for the bus.
-pub fn commands(deps: EffortDeps) -> Vec<Command> {
-    vec![report_command(deps)]
+pub fn ops(deps: EffortDeps) -> Vec<Op> {
+    vec![report_op(deps)]
 }
 
 #[cfg(test)]
@@ -240,8 +217,8 @@ mod tests {
     use super::*;
     use crate::test_fixtures::{new_thread, services_with_effort, EffortFixture};
     use oxplow_db::SqliteCommandAuditStore;
-    use oxplow_domain::refs::build::work_item_ref;
     use oxplow_domain::StreamId;
+    use oxplow_tasks::work_item_ref;
 
     fn agent(fx: &EffortFixture) -> Actor {
         Actor::Agent {

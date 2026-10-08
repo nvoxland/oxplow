@@ -14,7 +14,7 @@ use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use oxplow_domain::{DomainError, EffortId, TaskId, TaskImpact, ThreadId, Timestamp};
+use oxplow_domain::{DomainError, EffortId, TaskImpact, ThreadId, Timestamp};
 
 use crate::database::map_sql_err;
 use crate::database::Database;
@@ -30,8 +30,7 @@ use oxplow_domain::events::schema::{
     EffortRetitled, EffortRetitledV1,
 };
 use oxplow_domain::refs::build::{
-    effort_ref, snapshot_ref, task_of_work_item_ref, thread_ref, validate_work_item_ref,
-    work_item_id_of_ref,
+    effort_ref, snapshot_ref, thread_ref, validate_work_item_ref, work_item_id_of_ref,
 };
 use oxplow_domain::{Anchors, StreamId};
 
@@ -61,14 +60,6 @@ pub struct Effort {
     pub end_snapshot_id: Option<i64>,
     /// The effort's summary prose — the canonical text.
     pub summary: Option<String>,
-}
-
-impl Effort {
-    /// The oxplow task this effort is on; `None` for another provider's
-    /// work item.
-    pub fn task_id(&self) -> Option<TaskId> {
-        task_of_work_item_ref(self.work_item.as_deref()?)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
@@ -1497,14 +1488,10 @@ impl EffortStore for SqliteEffortStore {
 mod tests {
     use super::*;
     use crate::stream_store::SqliteStreamStore;
-    use crate::task_store::SqliteTaskStore;
+    use crate::test_tasks::{a_task, work_item_ref};
     use crate::thread_store::SqliteThreadStore;
-    use oxplow_domain::refs::build::work_item_ref;
-    use oxplow_domain::stores::{StreamStore, TaskStore, ThreadStore};
-    use oxplow_domain::{
-        Stream, StreamId, StreamKind, Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus,
-        Thread, ThreadStatus,
-    };
+    use oxplow_domain::stores::{StreamStore, ThreadStore};
+    use oxplow_domain::{Stream, StreamId, StreamKind, TaskId, Thread, ThreadStatus};
 
     async fn fixture() -> (SqliteEffortStore, TaskId, ThreadId) {
         let (store, _db, tid, thread) = fixture_with_db().await;
@@ -1782,26 +1769,7 @@ mod tests {
             archived_at: None,
         };
         SqliteThreadStore::new(db.clone()).upsert(&t).await.unwrap();
-        let tid = SqliteTaskStore::new(db.clone())
-            .insert(&Task {
-                id: TaskId::placeholder(),
-                thread_id: Some(t.id),
-                parent_id: None,
-                title: "x".into(),
-                description: String::new(),
-                status: TaskStatus::Ready,
-                priority: TaskPriority::Medium,
-                sort_index: 0,
-                created_by: TaskActorKind::User,
-                created_at: now,
-                updated_at: now,
-                completed_at: None,
-                deleted_at: None,
-                note_count: 0,
-                author: Some(TaskAuthor::User),
-            })
-            .await
-            .unwrap();
+        let tid = a_task(&db, Some(t.id)).await;
         (SqliteEffortStore::new(db.clone()), db, tid, t.id)
     }
 
@@ -1813,12 +1781,10 @@ mod tests {
         let ours = work_item_ref(tid);
         let eff = store.start(&ours, &t, None).await.unwrap();
         assert_eq!(eff.work_item.as_deref(), Some(ours.as_str()));
-        assert_eq!(eff.task_id(), Some(tid));
 
         let foreign = "work_item:issues:ENG-12";
         store.finish(&eff.id, None, None).await.unwrap();
         let other = store.start(foreign, &t, None).await.unwrap();
-        assert_eq!(other.task_id(), None);
         assert_eq!(
             store
                 .find_open_for_work_item(foreign)
@@ -1950,26 +1916,6 @@ mod tests {
         );
     }
 
-    /// A task's status is the task's: moving it in and out of progress
-    /// opens and closes no effort (efforts are a policy's business).
-    #[tokio::test]
-    async fn a_status_change_leaves_efforts_alone() {
-        let (store, db, tid, _t) = fixture_with_db().await;
-        let tasks = SqliteTaskStore::new(db.clone());
-        tasks.set_status(tid, TaskStatus::InProgress).await.unwrap();
-        assert!(store
-            .find_open_for_work_item(&work_item_ref(tid))
-            .await
-            .unwrap()
-            .is_none());
-        tasks.set_status(tid, TaskStatus::Done).await.unwrap();
-        assert!(store
-            .find_open_for_work_item(&work_item_ref(tid))
-            .await
-            .unwrap()
-            .is_none());
-    }
-
     /// Every effort open and close is logged in the write's own
     /// transaction.
     #[tokio::test]
@@ -2018,30 +1964,6 @@ mod tests {
             events[1].envelope.payload["effort"],
             format!("effort:{}", eff.id)
         );
-    }
-
-    #[tokio::test]
-    async fn transition_on_missing_task_rolls_back_effort_open() {
-        let (store, db, _tid, _t) = fixture_with_db().await;
-        let tasks = SqliteTaskStore::new(db.clone());
-        let ghost = TaskId::new(9999);
-        let err = tasks
-            .set_status(ghost, TaskStatus::InProgress)
-            .await
-            .unwrap_err();
-        assert!(matches!(err, DomainError::NotFound), "got {err:?}");
-        // The whole action rolled back — no effort row for the ghost,
-        // and nothing in the event log either.
-        assert!(store
-            .find_open_for_work_item(&work_item_ref(ghost))
-            .await
-            .unwrap()
-            .is_none());
-        let events = db
-            .call_mut(|c| crate::event_log_store::read_after_tx(c, 0, 10))
-            .await
-            .unwrap();
-        assert!(events.is_empty(), "{events:#?}");
     }
 
     #[tokio::test]
@@ -2328,26 +2250,7 @@ mod tests {
             archived_at: None,
         };
         SqliteThreadStore::new(db.clone()).upsert(&t).await.unwrap();
-        let tid = SqliteTaskStore::new(db.clone())
-            .insert(&Task {
-                id: TaskId::placeholder(),
-                thread_id: Some(t.id),
-                parent_id: None,
-                title: "x".into(),
-                description: String::new(),
-                status: TaskStatus::Ready,
-                priority: TaskPriority::Medium,
-                sort_index: 0,
-                created_by: TaskActorKind::User,
-                created_at: now,
-                updated_at: now,
-                completed_at: None,
-                deleted_at: None,
-                note_count: 0,
-                author: Some(TaskAuthor::User),
-            })
-            .await
-            .unwrap();
+        let tid = a_task(&db, Some(t.id)).await;
         // effort.end_snapshot_id references snapshot(id), not
         // file_snapshot(id). Build real snapshot grouping rows so the
         // FK validates.
@@ -2429,26 +2332,7 @@ mod tests {
             archived_at: None,
         };
         SqliteThreadStore::new(db.clone()).upsert(&t).await.unwrap();
-        let tid = SqliteTaskStore::new(db.clone())
-            .insert(&Task {
-                id: TaskId::placeholder(),
-                thread_id: Some(t.id),
-                parent_id: None,
-                title: "x".into(),
-                description: String::new(),
-                status: TaskStatus::Ready,
-                priority: TaskPriority::Medium,
-                sort_index: 0,
-                created_by: TaskActorKind::User,
-                created_at: now,
-                updated_at: now,
-                completed_at: None,
-                deleted_at: None,
-                note_count: 0,
-                author: Some(TaskAuthor::User),
-            })
-            .await
-            .unwrap();
+        let tid = a_task(&db, Some(t.id)).await;
         let snap_store = crate::SqliteSnapshotStore::new(db.clone());
         let s1 = snap_store.create_snapshot(s.id).await.unwrap();
         let s2 = snap_store.create_snapshot(s.id).await.unwrap();
@@ -2549,26 +2433,7 @@ mod tests {
             archived_at: None,
         };
         SqliteThreadStore::new(db.clone()).upsert(&t).await.unwrap();
-        let tid = SqliteTaskStore::new(db.clone())
-            .insert(&Task {
-                id: TaskId::placeholder(),
-                thread_id: Some(t.id),
-                parent_id: None,
-                title: format!("task{n}"),
-                description: String::new(),
-                status: TaskStatus::Ready,
-                priority: TaskPriority::Medium,
-                sort_index: 0,
-                created_by: TaskActorKind::User,
-                created_at: now,
-                updated_at: now,
-                completed_at: None,
-                deleted_at: None,
-                note_count: 0,
-                author: Some(TaskAuthor::User),
-            })
-            .await
-            .unwrap();
+        let tid = a_task(db, Some(t.id)).await;
         (s.id, t.id, tid)
     }
 

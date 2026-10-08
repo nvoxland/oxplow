@@ -1792,14 +1792,27 @@ export type CommandExample = {
 	name: string,
 	input: unknown,
 	/**
-	 *  Rows standing in for the `input` query's (so the example doesn't
-	 *  depend on the project's data); `None` runs the query.
+	 *  Answers standing in for the capabilities' own, per capability in
+	 *  call order (so the example doesn't depend on the project's data);
+	 *  a capability without any is served for real.
 	 */
-	rows: unknown[] | null,
+	answers: { [key in string]: unknown[] },
 	expectCommands: string[],
 	// A part of the reason the script should refuse with.
 	refuses: string | null,
 };
+
+// What runs an extension's command.
+export type CommandHandler = 
+// A Starlark script composing commands (`entry:`).
+{ kind: "script"; 
+// The script, relative to the extension folder.
+entry: string } | 
+/**
+ *  One operation of a host capability (`capability:` + `op:`,
+ *  `commands::ops`).
+ */
+{ kind: "capability"; capability: string; op: string };
 
 // A completed run.
 export type CommandOutcome = {
@@ -2250,8 +2263,11 @@ export type EffectDecl = {
 	 *  `where`).
 	 */
 	filter: { [key in string]: string },
-	// SQL whose rows the script gets, the event's payload fields bound.
-	input: string | null,
+	/**
+	 *  The host capabilities its script calls (`capability(id, args)`,
+	 *  `.context/commands.md` "Host capabilities"): `sql.read`.
+	 */
+	needs: string[],
 	// The script's path in the folder.
 	entry: string,
 	// Its source.
@@ -2314,7 +2330,8 @@ export type EffectTrigger = {
 	on: string[],
 	// Its `where`.
 	filter: { [key in string]: string },
-	input: string | null,
+	// The host capabilities its script calls.
+	needs: string[],
 };
 
 // One setting as the Settings view shows it.
@@ -2551,20 +2568,20 @@ export type ExtensionCommand = {
 	// Its name on the bus: `<namespace>.<name>`.
 	name: string,
 	summary: string,
-	inputSchema: unknown,
-	// The script, relative to the extension folder.
-	entry: string,
 	/**
-	 *  A read-only SQL query whose rows the script gets (`:field` binds
-	 *  the input's top-level fields).
+	 *  Its input's schema; `None` for one backed by a capability's
+	 *  operation (the operation's).
 	 */
-	input: string | null,
+	inputSchema: unknown | null,
+	// What runs it.
+	handler: CommandHandler,
 	confirm: Confirm,
 	effect: CommandEffect,
 	invokers: Invokers,
 	/**
-	 *  The capabilities (or features) it needs active, as core's commands
-	 *  declare them (`oxplow_domain::capability::check_need`).
+	 *  The host capabilities its script calls, and the capabilities (or
+	 *  features) it needs active, as core's commands declare them
+	 *  (`oxplow_domain::capability::check_need`).
 	 */
 	needs: string[],
 	// How a person meets it (label, group, …), as core's commands do.

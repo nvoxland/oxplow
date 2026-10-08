@@ -73,6 +73,7 @@ pub mod extensions;
 pub mod file_ref_version;
 pub mod followup;
 pub mod hook_ingest;
+pub mod host_capabilities;
 pub mod indexer;
 pub mod inferred_decisions;
 pub mod kind_search;
@@ -124,7 +125,6 @@ pub mod sql_gateway;
 #[cfg(test)]
 mod stream_service_tests;
 pub mod symbol_collector;
-pub mod task_service;
 pub mod terminal_sessions;
 #[cfg(test)]
 pub(crate) mod test_fixtures;
@@ -162,7 +162,7 @@ pub use hook_ingest::{
     HookEnvelope, HookIngestError, HookIngestService, IngestOutcome, ToolDecision,
 };
 pub use oxplow_lsp::{LspError, LspProxy};
-pub use task_service::{CreateTaskInput, TaskService, TaskServiceError, UpdateTaskChanges};
+use oxplow_tasks::{SqliteTaskLinkStore, SqliteTaskStore, TaskService};
 
 use oxplow_domain::vocabulary::VocabularyHandle;
 use std::path::PathBuf;
@@ -189,9 +189,8 @@ use oxplow_db::{
     Database, SqliteAgentNudgeStore, SqliteAgentTurnStore, SqliteCodeQualityStore,
     SqliteCommentStore, SqliteEffortStore, SqliteEventLogStore, SqliteFactStore,
     SqlitePageRefStore, SqlitePageVisitStore, SqliteSearchStore, SqliteSnapshotStore,
-    SqliteStreamStore, SqliteTaskLinkStore, SqliteTaskStore, SqliteThreadNoteStore,
-    SqliteThreadStore, SqliteTokenUsageStore, SqliteUsageStore, SqliteWikiPageStore,
-    SqliteWikiPageThreadUpdateStore,
+    SqliteStreamStore, SqliteThreadNoteStore, SqliteThreadStore, SqliteTokenUsageStore,
+    SqliteUsageStore, SqliteWikiPageStore, SqliteWikiPageThreadUpdateStore,
 };
 use oxplow_domain::stores::AgentStatusStore;
 use oxplow_session::{StreamService, ThreadService, WorkspaceLayout};
@@ -514,6 +513,9 @@ pub struct Services {
     pub providers: Arc<providers::ProviderRegistry>,
     /// Enabled extensions' `commands:` on the bus (P6b).
     pub extension_commands: Arc<extension_commands::ExtensionCommands>,
+    /// Filled at boot (`effect_triggers::register`): the services the
+    /// effect operations run against.
+    pub effect_services: commands::effect::ServicesSlot,
     /// The knowledge provider: oxplow's wiki (`.context/knowledge.md`).
     pub knowledge: Arc<dyn oxplow_domain::knowledge::KnowledgeProvider>,
     pub wiki_page_store: Arc<SqliteWikiPageStore>,
@@ -758,10 +760,7 @@ impl Services {
         let page_ref_store = Arc::new(SqlitePageRefStore::new(db.clone()));
         let vocabulary = VocabularyHandle::core();
         let comment_store = Arc::new(SqliteCommentStore::new(db.clone(), vocabulary.clone()));
-        let task_store = Arc::new(SqliteTaskStore::with_vocabulary(
-            db.clone(),
-            vocabulary.clone(),
-        ));
+        let task_store = Arc::new(SqliteTaskStore::new(db.clone()));
         let thread_note_store = Arc::new(SqliteThreadNoteStore::new(db.clone()));
         let task_link_store = Arc::new(SqliteTaskLinkStore::new(db.clone()));
         let event_log_store = Arc::new(SqliteEventLogStore::new(db.clone(), vocabulary.clone()));
@@ -772,10 +771,12 @@ impl Services {
             db.clone(),
             (*event_log_store).clone(),
             vec![
+                // A list's records reach the interface before an item's
+                // page refs are restated from it.
+                Arc::new(work_items::WorkItemsProjection),
                 Arc::new(page_ref_consumers::PageRefWorkItemConsumer {
                     vocabulary: vocabulary.clone(),
                 }),
-                Arc::new(work_items::WorkItemsProjection),
                 Arc::new(tool_call_reactors::ToolCallProjection),
                 Arc::new(knowledge::WikiAttribution),
                 // The log's facts the renderer hears (P7.B6).
@@ -1167,14 +1168,14 @@ impl Services {
             config: config_arc.clone(),
             capabilities: capabilities.clone(),
         }));
-        for command in commands::vcs::commands(commands::vcs::VcsTarget {
+        for command in commands::vcs::ops(commands::vcs::VcsTarget {
             vcs: vcs.clone(),
             git: vcs::GitProvider,
             worktrees: worktrees.clone(),
             events: event_bus.clone(),
             ref_moves: ref_moves.clone(),
         }) {
-            commands.register(command).expect("vcs commands register");
+            commands.add_op(command).expect("vcs ops register");
         }
         let acp = Arc::new(acp::manager::AcpManager::new());
         let link_deps = link_check::LinkDeps {
@@ -1182,26 +1183,25 @@ impl Services {
             vcs: vcs.clone(),
         };
         for command in [
-            commands::work_item::command(work_items.clone()),
-            commands::work_item::update_command(work_items.clone(), link_deps.clone()),
-            commands::work_item::create_command(work_items.clone(), link_deps.clone()),
-            commands::work_item::link_command(work_items.clone()),
-            commands::work_item::comment_command(work_items.clone()),
-            commands::work_item::reorder_command(work_items.clone()),
-            commands::work_item::move_command(work_items.clone()),
-            commands::work_item::delete_command(work_items.clone()),
+            commands::work_item::transition_op(work_items.clone()),
+            commands::work_item::update_op(work_items.clone(), link_deps.clone()),
+            commands::work_item::create_op(work_items.clone(), link_deps.clone()),
+            commands::work_item::link_op(work_items.clone()),
+            commands::work_item::comment_op(work_items.clone()),
+            commands::work_item::reorder_op(work_items.clone()),
+            commands::work_item::move_op(work_items.clone()),
+            commands::work_item::delete_op(work_items.clone()),
         ]
         .into_iter()
-        .chain(commands::review::commands())
-        .chain(commands::thread::commands(config_arc.clone(), acp.clone()))
-        .chain(commands::effort::commands(work_items.clone()))
-        .chain(commands::bookmark::commands())
-        .chain(commands::hint::commands())
-        .chain(commands::dashboard::commands(db.clone(), sql.clone()))
-        .chain(commands::comment::commands())
-        .chain(commands::reasoning::commands())
-        .chain(commands::ui::commands())
-        .chain(commands::effort_report::commands(
+        .chain(commands::review::ops())
+        .chain(commands::thread::ops(config_arc.clone(), acp.clone()))
+        .chain(commands::effort::ops(work_items.clone()))
+        .chain(commands::hint::ops())
+        .chain(commands::dashboard::ops(db.clone(), sql.clone()))
+        .chain(commands::comment::ops())
+        .chain(commands::reasoning::ops())
+        .chain(commands::ui::ops())
+        .chain(commands::effort_report::ops(
             commands::effort_report::EffortDeps {
                 lifecycle: efforts.clone(),
                 efforts: effort_store.clone(),
@@ -1212,8 +1212,8 @@ impl Services {
                 vcs: vcs.clone(),
             },
         ))
-        .chain(commands::note::commands(link_deps.clone()))
-        .chain(commands::stream::commands(commands::stream::StreamDeps {
+        .chain(commands::note::ops(link_deps.clone()))
+        .chain(commands::stream::ops(commands::stream::StreamDeps {
             streams: streams.clone(),
             snapshot_captures: snapshot_captures.clone(),
             ref_moves: ref_moves.clone(),
@@ -1223,7 +1223,7 @@ impl Services {
             worktrees: worktrees.clone(),
             efforts: effort_store.clone(),
         })) {
-            commands.register(command).expect("core commands register");
+            commands.add_op(command).expect("core ops register");
         }
         let providers = providers::ProviderRegistry::new(
             providers::HostDeps {
@@ -1249,14 +1249,14 @@ impl Services {
         let plugin_health =
             plugin_health::PluginHealth::new(db.clone(), event_log_store.vocabulary().clone());
         commands
-            .register(plugin_health::enable_command(
+            .add_op(plugin_health::enable_op(
                 plugin_health.clone(),
                 Arc::downgrade(&providers),
             ))
-            .expect("plugin.enable registers");
+            .expect("plugin.enable's op registers");
         commands
-            .register(providers::sync::sync_command(&providers))
-            .expect("provider.sync registers");
+            .add_op(providers::sync::sync_op(&providers))
+            .expect("provider.sync's op registers");
         let extension_commands = Arc::new(extension_commands::ExtensionCommands::new(
             &commands,
             extension_catalog.clone(),
@@ -1297,15 +1297,15 @@ impl Services {
             collection: collection.clone(),
         };
         commands
-            .register(collector_runner::sync_command(collector_runner.clone()))
-            .expect("collector.sync registers");
-        for command in commands::lens::commands(commands::lens::LensTarget {
+            .add_op(collector_runner::sync_op(collector_runner.clone()))
+            .expect("collector.sync's op registers");
+        for command in commands::lens::ops(commands::lens::LensTarget {
             project_dir: layout.project_dir.clone(),
             catalog: extension_catalog.clone(),
             db: db.clone(),
             sql: sql.clone(),
         }) {
-            commands.register(command).expect("lens commands register");
+            commands.add_op(command).expect("lens ops register");
         }
         let thread_answer_store = oxplow_db::SqliteThreadAnswerStore::new(db.clone());
         let panel_layout_store = oxplow_db::SqlitePanelLayoutStore::new(db.clone());
@@ -1321,13 +1321,11 @@ impl Services {
             fields: serde_json::Value::Array(Vec::new()),
             id_pattern: None,
         });
-        for command in knowledge::commands(knowledge::KnowledgeTarget {
+        for command in knowledge::ops(knowledge::KnowledgeTarget {
             project_dir: layout.project_dir.clone(),
             vcs: vcs.clone(),
         }) {
-            commands
-                .register(command)
-                .expect("knowledge commands register");
+            commands.add_op(command).expect("knowledge ops register");
         }
         let config_applied = Arc::new(tokio::sync::Notify::new());
         let config_target = commands::config_commands::ConfigTarget {
@@ -1336,25 +1334,25 @@ impl Services {
             events: event_bus.clone(),
             applied: config_applied.clone(),
         };
-        for command in commands::config_commands::commands(config_target.clone())
+        for command in commands::config_commands::ops(config_target.clone())
             .into_iter()
-            .chain(commands::metric::commands(commands::metric::MetricTarget {
+            .chain(commands::metric::ops(commands::metric::MetricTarget {
                 config: config_target,
                 metrics: metrics.clone(),
                 facts: fact_store.clone(),
                 primary_stream: primary_stream.id,
             }))
         {
-            commands.register(command).expect("core commands register");
+            commands.add_op(command).expect("core ops register");
         }
-        for command in commands::test_runs::commands(collection.clone())
+        for command in commands::test_runs::ops(collection.clone())
             .into_iter()
-            .chain(commands::extension_install::commands(
+            .chain(commands::extension_install::ops(
                 commands::extension_install::InstallDeps {
                     worktrees: worktrees.clone(),
                 },
             ))
-            .chain([commands::snapshot::restore_file_command(
+            .chain([commands::snapshot::restore_file_op(
                 snapshot_files::SnapshotFiles {
                     snapshots: snapshot_store.clone(),
                     streams: stream_store.clone(),
@@ -1362,14 +1360,24 @@ impl Services {
                     project_dir: layout.project_dir.clone(),
                 },
             )])
-            .chain(commands::lsp::commands(commands::lsp::LspDeps {
+            .chain(commands::lsp::ops(commands::lsp::LspDeps {
                 installer: lsp_installer_svc.clone(),
                 background: background_tasks.clone(),
                 events: event_bus.clone(),
             }))
         {
-            commands.register(command).expect("core commands register");
+            commands.add_op(command).expect("core ops register");
         }
+        let effect_services = commands::effect::ServicesSlot::default();
+        // oxplow's own commands are declared in its required extensions
+        // over these operations (`commands/ops.rs`).
+        for op in commands::bookmark::ops()
+            .into_iter()
+            .chain(commands::effect::ops(effect_services.clone()))
+        {
+            commands.add_op(op).expect("core ops register");
+        }
+        extension_commands::register_required(&commands).expect("oxplow's own commands register");
         let token_usage_store = Arc::new(SqliteTokenUsageStore::new(db.clone()));
         let token_usage = token_usage::TokenUsageService::new(
             token_usage_store.clone(),
@@ -1455,6 +1463,7 @@ impl Services {
             extension_catalog,
             component_bundles: Arc::new(component_bundles::ComponentBundles::new()),
             extension_commands,
+            effect_services,
             commands,
             work_items,
             capabilities,
@@ -1784,6 +1793,8 @@ mod tests {
                 "oxplow.dashboard.update_item",
                 // The worktree and the snapshot diff a report is checked
                 // against (P8.A7).
+                "oxplow.effect.backfill",
+                "oxplow.effect.retry",
                 "oxplow.effort.report",
                 // A clone into a stream's worktree, a person's call (P8.A9).
                 "oxplow.extension.install",

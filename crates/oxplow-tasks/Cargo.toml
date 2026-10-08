@@ -1,0 +1,24 @@
+[package]
+name = "oxplow-tasks"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+oxplow-domain = { workspace = true }
+oxplow-db = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+schemars = { workspace = true }
+thiserror = { workspace = true }
+rusqlite = { workspace = true }
+async-trait = { workspace = true }
+oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[lints]
+workspace = true

@@ -48,7 +48,7 @@ cascade trigger are in [data-model.md](./data-model.md) "`work_item`".
 There are two writers, one schema:
 
 - **oxplow's rows** are restated from the task row by the task cores in
-  the same transaction (`task_store::project_work_item_tx`), so they
+  the same transaction (`oxplow_tasks::store::project_work_item_tx`), so they
   never disagree with `v_task`; their links and comments follow
   `task_link` / `task_note` by trigger.
   That includes every row a core touches on the side: `place_task_tx`
@@ -67,6 +67,23 @@ There are two writers, one schema:
   `created` / `edited` / `state_changed`: the "what happened" events stay
   small and the same for every list, and the projection is one upsert
   from one event type.
+
+**oxplow's tasks are their own crate**, `crates/oxplow-tasks`: the
+store, the links and notes, the service, the task types, the mapping of
+statuses and priority onto the interface (`mapping.rs`) and its answers
+to the verbs (`verbs.rs`: `create_tx`, `update_tx`, `transition_tx`,
+`link_tx`, `comment_tx`, `delete_tx`, `reorder_tx`, `move_tx`, each over a
+connection, the interface's input and the actor, answering with its
+result and the verb that undoes it). Core's `commands/work_item.rs`
+calls them in the bus's transaction and names their inverses as the
+commands; nothing else names the crate.
+
+**Page refs** for every list's item come from the interface: its body's
+mentions, its links (`work_item_link:<type>`, the list's own types) and
+its comments' mentions (`comment_*`, keyed by the item), restated by
+`work_item_refs::restate_tx` on the item's events (the
+`page_ref.work_item` consumer, after `work_items.project`) and by the
+boot repair. A list writes no page refs of its own.
 
 ## Reading them in the UI
 

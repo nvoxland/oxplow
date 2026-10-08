@@ -3312,7 +3312,7 @@ mod tests {
         }
     }
     use super::*;
-    use oxplow_domain::refs::build::work_item_ref;
+    use oxplow_tasks::work_item_ref;
 
     /// A distinct count's buckets don't add up, so its points aren't
     /// stored as a `sum` (the detail page would total them) (tsk367).
@@ -4723,8 +4723,9 @@ def transform(input):
         // `record_collector_facts` stamps the capture's `effort_id` so the T-D
         // attribution spine (`captures_for_effort`) sees the run. Snapshot scans
         // (the other fixtures, `effort_id: None`) stay unstamped.
-        use oxplow_domain::stores::TaskStore as _;
-        use oxplow_domain::{Task, TaskActorKind, TaskAuthor, TaskId, TaskPriority, TaskStatus};
+        use oxplow_domain::TaskId;
+        use oxplow_tasks::TaskStore as _;
+        use oxplow_tasks::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
         let (svc, dir) = fixture().await;
         // A real effort row (the capture's effort_id is a foreign key).
         let now = oxplow_domain::Timestamp::now();
@@ -4798,8 +4799,9 @@ def transform(input):
         // Effort-triggered collectors run from the `collector.triggers` pump
         // consumer on `effort.finished` (P7.B3), not a direct call from
         // TaskService.
-        use oxplow_domain::stores::TaskStore as _;
-        use oxplow_domain::{Task, TaskActorKind, TaskAuthor, TaskId, TaskPriority, TaskStatus};
+        use oxplow_domain::TaskId;
+        use oxplow_tasks::TaskStore as _;
+        use oxplow_tasks::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
         let (svc, dir) = fixture().await;
         let now = oxplow_domain::Timestamp::now();
         let thread = ThreadId::new(1);
