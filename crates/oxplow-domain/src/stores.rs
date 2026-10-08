@@ -9,9 +9,10 @@
 
 use async_trait::async_trait;
 
+use crate::agent_session::{AgentSession, NewAgentSession};
 use crate::comment::{CommentTarget, CommentThread};
 use crate::hook::{AgentStatus, AgentTurn};
-use crate::ids::{AgentTurnId, CommentId, StreamId, ThreadId};
+use crate::ids::{AgentSessionId, AgentTurnId, CommentId, StreamId, ThreadId};
 use crate::stream::Stream;
 use crate::thread::{Thread, ThreadNote};
 use crate::DomainError;
@@ -64,6 +65,20 @@ pub trait ThreadStore: Send + Sync {
         stream: &StreamId,
         thread: Option<&ThreadId>,
     ) -> Result<(), DomainError>;
+}
+
+/// A thread's agent sessions (`agent_session`). Closing, renaming and
+/// resume ids are written in their commands' and the ingest's own
+/// transactions (`oxplow_db::agent_session_store`'s `_tx` functions).
+#[async_trait]
+pub trait AgentSessionStore: Send + Sync {
+    async fn get(&self, id: &AgentSessionId) -> Result<Option<AgentSession>, DomainError>;
+    /// The thread's open sessions, oldest first.
+    async fn list_open_for_thread(
+        &self,
+        thread: &ThreadId,
+    ) -> Result<Vec<AgentSession>, DomainError>;
+    async fn open(&self, new: &NewAgentSession) -> Result<AgentSession, DomainError>;
 }
 
 #[async_trait]

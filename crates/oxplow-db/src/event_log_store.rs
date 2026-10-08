@@ -21,7 +21,8 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use oxplow_domain::{
-    Anchors, DomainError, EffortId, Envelope, EventId, StoredEvent, StreamId, ThreadId, Timestamp,
+    AgentSessionId, Anchors, DomainError, EffortId, Envelope, EventId, StoredEvent, StreamId,
+    ThreadId, Timestamp,
 };
 
 use crate::database::{map_sql_err, Database};
@@ -135,8 +136,8 @@ fn insert_tx(
             &format!(
             "INSERT INTO event_log
                (id, type, v, at, source, stream_id, thread_id, effort_id, turn_id, snapshot_id,
-                subject, payload, payload_hash, cause, dedupe_key)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15){on_conflict}"
+                agent_session_id, subject, payload, payload_hash, cause, dedupe_key)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16){on_conflict}"
         ),
             params![
                 env.id.as_str(),
@@ -149,6 +150,7 @@ fn insert_tx(
                 env.anchors.effort_id.map(|i| i.value()),
                 env.anchors.turn_id,
                 env.anchors.snapshot_id,
+                env.anchors.agent_session_id.map(|i| i.value()),
                 subject,
                 payload,
                 env.payload_hash,
@@ -187,6 +189,9 @@ fn row_to_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredEvent> {
                 effort_id: row.get::<_, Option<i64>>("effort_id")?.map(EffortId::new),
                 turn_id: row.get("turn_id")?,
                 snapshot_id: row.get("snapshot_id")?,
+                agent_session_id: row
+                    .get::<_, Option<i64>>("agent_session_id")?
+                    .map(AgentSessionId::new),
             },
             subject: serde_json::from_str(&subject)
                 .map_err(|e| conv(DomainError::Storage(format!("subject json: {e}"))))?,

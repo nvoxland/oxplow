@@ -6,6 +6,7 @@
 //! no IO, no async runtime usage, and no platform-specific code.
 
 pub mod agent;
+pub mod agent_session;
 pub mod capability;
 pub mod code_intel;
 pub mod commands;
@@ -45,8 +46,9 @@ pub use events::schema::{EventSchemaRegistry, EventType};
 pub use events::{Anchors, Envelope, EventId, StoredEvent};
 pub use hook::{AgentStatus, AgentStatusState, AgentTurn, HookKind};
 pub use ids::{
-    AgentTurnId, AnyId, CommentId, CommentMessageId, DashboardId, DashboardItemId, EffortId,
-    EntityKind, FollowupId, IdParseError, NoteId, PageVisitId, StreamId, ThreadId, UsageEventId,
+    AgentSessionId, AgentTurnId, AnyId, CommentId, CommentMessageId, DashboardId, DashboardItemId,
+    EffortId, EntityKind, FollowupId, IdParseError, NoteId, PageVisitId, StreamId, ThreadId,
+    UsageEventId,
 };
 pub use json::Json;
 pub use stream::{Stream, StreamKind};

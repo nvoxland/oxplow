@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use crate::ids::{AgentTurnId, ThreadId};
+use crate::ids::{AgentSessionId, AgentTurnId, ThreadId};
 use crate::time::Timestamp;
 
 /// Discriminant for hook events: the kinds the harnesses post, plus
@@ -65,8 +65,12 @@ pub struct AgentStatus {
 pub struct AgentTurn {
     pub id: AgentTurnId,
     pub thread_id: ThreadId,
+    /// The agent session it ran in; `None` for a turn no session claims
+    /// (a hook from an agent oxplow didn't start).
+    pub agent_session_id: Option<AgentSessionId>,
     pub prompt: String,
     pub answer: Option<String>,
+    /// The harness's own session id, when it reported one.
     pub session_id: Option<String>,
     pub started_at: Timestamp,
     pub ended_at: Option<Timestamp>,

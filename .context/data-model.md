@@ -152,7 +152,8 @@ errors to `Invalid` in new store code.
 Every externally-visible entity id is a SQLite **autoincrement INTEGER**
 rendered with a fixed **3-letter type prefix** at the application boundary,
 e.g. `str5` (stream), `thr21` (thread), `tsk38` (task), `eff7` (effort),
-`not3` (note), `trn9` (agent-turn), `cmt2` (comment), `fup1` (follow-up).
+`not3` (note), `trn9` (agent-turn), `ses4` (agent session), `cmt2` (comment),
+`fup1` (follow-up).
 The prefix lives only in Rust (`Display`/serde) and in the TypeScript
 bindings (each id type is a `string`); **DB columns and the FKs that point
 at them are plain `INTEGER`**. The single source of truth is
@@ -290,17 +291,19 @@ streams cannot be archived.
 
 ### `threads` — `BatchStore` (`crates/oxplow-db/src/thread_store.rs`)
 
-Units of work *within* a stream. Statuses: `active` (writer — may mutate
-the worktree) and `queued` (read-only, agents can run but writes are
-denied — see [agent-model.md](./agent-model.md)'s write-guard section).
-Exactly one thread per stream is `active`; the rest are `queued`. A
-newly-seeded stream ships with one thread titled `Thread`, running the
-project's default agent — `oxplow_config::default_thread_agent`, the
-same rule `oxplow.thread.create` uses when no agent is named: the first enabled
-agent, and for `acp` the project's first `acpAgents:` entry, else the
-first preset (tsk970). `StreamService` reads it through the source
-`Services` gives it, so it's the config as it is when the thread is
-made.
+Lines of the person's work *within* a stream. A thread needs no agent and
+may have several: its agent slots are `agent_session`
+rows. Statuses: `active` (writer — may mutate the worktree) and `queued`
+(read-only, agents can run but writes are denied — see
+[agent-model.md](./agent-model.md)'s write-guard section). Writer status
+is the thread's: every session in the writer thread may write. Exactly
+one thread per stream is `active`; the rest are `queued`. A newly-seeded
+stream ships with one thread titled `Thread` and one session on it running
+the project's default agent — `oxplow_config::default_thread_agent`, the
+same rule `oxplow.thread.create` uses when no agent is named: the first
+enabled agent, and for `acp` the project's first `acpAgents:` entry, else
+the first preset. `StreamService` reads it through the source `Services`
+gives it, so it's the config as it is when the thread is made.
 The rolling `summary` field + `record_batch_summary` MCP tool were
 removed in v13 — use the task log as the source of truth instead.
 
@@ -334,35 +337,48 @@ IPC-exposed as `setBatchPrompt(streamId, threadId, prompt)`. Emits a
 `thread.changed` event (kind: "prompt-changed") so the UI refreshes thread
 state.
 
-`agent` (migration V30, non-null TEXT) — the agent implementation assigned
-to the thread at creation time. Values are `claude`, `codex`, or
-`opencode` (V32 widened the CHECK; because migrations run with
-`foreign_keys=ON`, V32 swaps the column — ADD/copy/DROP/RENAME —
-instead of rebuilding the table, since `DROP TABLE threads` would
-cascade-delete child rows). Project
-config (`.oxplow/project.yaml` `agents: [...]`) controls which values can be selected
-for new threads and the first configured agent is the default. Existing
-threads migrated at V30 default to `claude`; the assignment is immutable in
-v1 so resume/session history stays unambiguous.
+The thread's agent columns (`agent`, `acp_agent`, `resume_session_id`,
+`pane_target`) moved onto `agent_session` in V32.
 
-`agent = 'acp'` (V90, tsk335) is an agent spoken to over the Agent Client
-Protocol.
+### `agent_session` — `SqliteAgentSessionStore` (`crates/oxplow-db/src/agent_session_store.rs`)
 
-- **Which agent:** `acp_agent` (nullable TEXT, V90) names it, a preset
-  (`claude`, `gemini`, `codex`) or a project `acpAgents` entry.
-  `ThreadService::create_with_acp` enforces that an ACP thread names one
-  and only an ACP thread does.
-- **Migration:** V90 is the same column swap as V32, and it drops and
-  recreates `v_thread` around it (a view reading the column blocks
-  `DROP COLUMN`). The recreated `v_thread` adds `acp_agent`.
-- **Test:** `v90_keeps_thread_children_and_accepts_acp` migrates a real DB
-  to V89, adds children, then finishes; the children must survive.
-- **Session state:** `threads.resume_session_id` holds the ACP session id
-  (`session/load` on the next open). The conversation itself has **no
-  table**: it lives in memory (`acp::transcript::Transcript`) and a load
-  replay rebuilds it. What an ACP turn records lands in the same tables as
-  a hooked turn (hook events, agent turns, tool calls, effort files,
-  token usage).
+One agent slot a person opened on a thread (V32; `ses<n>`, ref
+`agent_session:ses<n>`, model `v_agent_session`).
+
+- **Columns:** `thread_id` (cascade), `kind` (`terminal` — a harness in
+  a PTY; `chat` — an ACP agent; `action` — a one-shot session, not built
+  yet), `harness` (a registry key: TEXT with no CHECK on purpose),
+  `acp_agent` (for an `acp` session, a preset or a project `acpAgents`
+  name), `title` (empty until renamed), `resume_session_id` (the
+  harness's own session id: `claude --resume`, ACP `session/load`), `host`
+  (reserved; NULL is the local machine), `opened_at`, `closed_at`,
+  `closed_reason` (`closed`, `thread_closed`, `stream_archived`),
+  `updated_at`.
+- **Lifecycle: the row is the slot, not the process.** `closed_at` is set
+  only by closing the session, its thread or its stream's archive. A
+  harness process ending (a PTY exit, `/clear`, an ACP close) logs
+  `agent.session.ended` and leaves the row open, so its tab keeps the
+  ended notice and the resume id.
+- **Resume id:** the hook ingest records the harness's session id on its
+  first sighting (`set_resume_tx`) and forgets it on a `/clear` of exactly
+  that session; a launch that finds the transcript gone forgets it too
+  (`resume_check::forget_missing`). Forgetting is conditional
+  (`forget_resume_tx`): a newer id that replaced it stays.
+- **Turns and events carry it.** `agent_turn.agent_session_id` (nullable:
+  a hook from an agent oxplow didn't start claims none) and the
+  `event_log.agent_session_id` anchor (`Anchors.agent_session_id`, named
+  apart from `agent_turn.session_id`, the harness's string). V32
+  backfilled one session per existing thread (a `chat` for an ACP thread,
+  else a `terminal`; closed with the thread, or `stream_archived` with its
+  archive) and anchored its turns and `agent.*` events to it.
+- **Migration:** V32 drops the thread columns with `DROP COLUMN`, never by
+  rebuilding `threads` (`foreign_keys=ON` would cascade-delete its
+  children); `migrate_and_compile` drops the model views first, so no
+  `v_thread` blocks the drop. `v32_moves_agent_columns_onto_one_session_per_thread`
+  checks rows, anchors, the dropped columns and the children.
+- **ACP:** the conversation itself has **no table**: it lives in memory
+  (`acp::transcript::Transcript`) and a `session/load` replay rebuilds it.
+  What an ACP turn records lands in the same tables as a hooked turn.
 
 **Removed in v42:** the `auto_commit` column (added in v15) and the
 `commit_point` / `wait_point` tables (added in v6/v7). Commits are now

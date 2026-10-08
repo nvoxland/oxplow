@@ -100,7 +100,8 @@ import { GitHistoryPage } from "./pages/GitHistoryPage.js";
 import { GitDashboardPage } from "./pages/GitDashboardPage.js";
 import { UncommittedChangesPage } from "./pages/UncommittedChangesPage.js";
 import { AgentPage } from "./pages/AgentPage.js";
-import { agentLabel, threadAgentLabel } from "./agentKinds.js";
+import { agentLabel, sessionLabel } from "./agentKinds.js";
+import { useThreadSessions } from "./agentSessions.js";
 import { TerminalPage } from "./pages/TerminalPage.js";
 import { HookEventsPage } from "./pages/HookEventsPage.js";
 import { FilesPage } from "./pages/FilesPage.js";
@@ -930,6 +931,9 @@ export function App() {
     [threadStates, stream],
   );
   const selectedThread = currentThreadState.threads.find((thread) => thread.id === currentThreadState.selectedThreadId) ?? null;
+  // The selected thread's agent session: the first one open.
+  const selectedThreadSessions = useThreadSessions(selectedThread?.id ?? null);
+  const selectedSession = selectedThreadSessions?.[0] ?? null;
   const selectedThreadId = selectedThread?.id ?? null;
   // Derived from the per-thread map. When no thread is selected, fall back to
   // a sentinel that keeps existing UI selectors happy (they all default to
@@ -2292,12 +2296,13 @@ export function App() {
     const tabs: CenterTab[] = [
       {
         id: AGENT_TAB_ID,
-        label: selectedThread ? threadAgentLabel(selectedThread) : "Agent",
+        label: selectedSession ? sessionLabel(selectedSession) : "Agent",
         closable: false,
         agentStatus: agentThreadStatus,
         render: () => (
           <AgentPage
             thread={selectedThread}
+            session={selectedSession}
             stream={stream}
             visible={effectiveCenterActive === AGENT_TAB_ID}
             onOpenFile={(absPath, line, column) => {

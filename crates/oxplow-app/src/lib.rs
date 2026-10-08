@@ -187,11 +187,11 @@ use std::sync::RwLock;
 
 use oxplow_config::OxplowConfig;
 use oxplow_db::{
-    Database, SqliteAgentNudgeStore, SqliteAgentTurnStore, SqliteCodeQualityStore,
-    SqliteCommentStore, SqliteEffortStore, SqliteEventLogStore, SqliteFactStore,
-    SqlitePageRefStore, SqlitePageVisitStore, SqliteSearchStore, SqliteSnapshotStore,
-    SqliteStreamStore, SqliteThreadNoteStore, SqliteThreadStore, SqliteTokenUsageStore,
-    SqliteUsageStore, SqliteWikiPageStore, SqliteWikiPageThreadUpdateStore,
+    Database, SqliteAgentNudgeStore, SqliteAgentSessionStore, SqliteAgentTurnStore,
+    SqliteCodeQualityStore, SqliteCommentStore, SqliteEffortStore, SqliteEventLogStore,
+    SqliteFactStore, SqlitePageRefStore, SqlitePageVisitStore, SqliteSearchStore,
+    SqliteSnapshotStore, SqliteStreamStore, SqliteThreadNoteStore, SqliteThreadStore,
+    SqliteTokenUsageStore, SqliteUsageStore, SqliteWikiPageStore, SqliteWikiPageThreadUpdateStore,
 };
 use oxplow_domain::stores::AgentStatusStore;
 use oxplow_session::{StreamService, ThreadService, WorkspaceLayout};
@@ -471,6 +471,8 @@ pub struct Services {
     pub efforts: effort_service::EffortService,
     pub stream_store: Arc<SqliteStreamStore>,
     pub thread_store: Arc<SqliteThreadStore>,
+    /// A thread's agent sessions (`agent_session`).
+    pub agent_session_store: Arc<SqliteAgentSessionStore>,
     pub task_store: Arc<SqliteTaskStore>,
     pub thread_note_store: Arc<SqliteThreadNoteStore>,
     pub task_link_store: Arc<SqliteTaskLinkStore>,
@@ -759,6 +761,7 @@ impl Services {
     ) -> Result<Self, AppInitError> {
         let stream_store = Arc::new(SqliteStreamStore::new(db.clone()));
         let thread_store = Arc::new(SqliteThreadStore::new(db.clone()));
+        let agent_session_store = Arc::new(SqliteAgentSessionStore::new(db.clone()));
         let page_ref_store = Arc::new(SqlitePageRefStore::new(db.clone()));
         let vocabulary = VocabularyHandle::core();
         let comment_store = Arc::new(SqliteCommentStore::new(db.clone(), vocabulary.clone()));
@@ -853,6 +856,7 @@ impl Services {
             vcs.clone(),
             stream_store.clone(),
             thread_store.clone(),
+            agent_session_store.clone(),
             {
                 let config = config_arc.clone();
                 Arc::new(move || {
@@ -1392,6 +1396,7 @@ impl Services {
             token_usage_store.clone(),
             effort_store.clone(),
             thread_store.clone(),
+            agent_session_store.clone(),
             fact_store.clone(),
         );
         let otlp_ingest =
@@ -1457,6 +1462,7 @@ impl Services {
             snapshot_captures,
             stream_store,
             thread_store,
+            agent_session_store,
             task_store,
             thread_note_store,
             task_link_store,

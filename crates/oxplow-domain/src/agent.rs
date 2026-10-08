@@ -35,6 +35,18 @@ impl AgentKind {
         !matches!(self, AgentKind::Acp)
     }
 
+    /// The kind [`AgentKind::as_str`] names.
+    pub fn parse(s: &str) -> Option<Self> {
+        [
+            AgentKind::Claude,
+            AgentKind::Codex,
+            AgentKind::Opencode,
+            AgentKind::Acp,
+        ]
+        .into_iter()
+        .find(|k| k.as_str() == s)
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             AgentKind::Claude => "claude",

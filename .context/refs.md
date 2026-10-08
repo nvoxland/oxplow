@@ -65,6 +65,10 @@ edges). Only
 `issues:ENG-12`); `wiki`, `commit` and `symbol` keep bare ids and use the
 capability's active provider.
 
+`agent_session` (an agent slot on a thread, `agent_session:ses3`,
+`build::agent_session_ref`) is registered with the `ses` id. It isn't
+`agent:` — that name is kept for the harness registry.
+
 `config` (a config key, `config:zones`) is registered too (P2.4b, tsk450).
 A `page` id is a shell route (`page:settings`) or an extension's page
 (`page:ext.<extension>.<page>`, P6.G2): its id pattern is exactly those

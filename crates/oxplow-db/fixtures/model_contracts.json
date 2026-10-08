@@ -211,6 +211,61 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Turn id."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread the turn ran in."
+        },
+        {
+          "name": "agent_session_id",
+          "type": "INTEGER",
+          "doc": "The agent session it ran in (v_agent_session.id); NULL for a turn no session claims (a hook from an agent oxplow didn't start)."
+        },
+        {
+          "name": "prompt",
+          "type": "TEXT",
+          "doc": "What the human typed."
+        },
+        {
+          "name": "answer",
+          "type": "TEXT",
+          "doc": "The agent's final answer, once the turn ended."
+        },
+        {
+          "name": "session_id",
+          "type": "TEXT",
+          "doc": "The harness session id, when it reported one."
+        },
+        {
+          "name": "started_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "ended_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp; NULL while running."
+        },
+        {
+          "name": "start_snapshot_id",
+          "type": "INTEGER",
+          "doc": "Snapshot the worktree was at when the turn opened (v_snapshot.id); NULL if the stream had none yet."
+        },
+        {
+          "name": "snapshot_id",
+          "type": "INTEGER",
+          "doc": "Snapshot the worktree was at when the turn ended (v_snapshot.id); NULL while running."
+        }
+      ],
+      "key": []
     }
   },
   "ai_call": {
@@ -2527,6 +2582,101 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "seq",
+          "type": "INTEGER",
+          "doc": "Insert order — the delivery order consumers checkpoint on."
+        },
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "Public identity (UUIDv7; sorts by time)."
+        },
+        {
+          "name": "type",
+          "type": "TEXT",
+          "doc": "`namespace.name`, e.g. `work_item.state_changed`."
+        },
+        {
+          "name": "v",
+          "type": "INTEGER",
+          "doc": "Schema version of `type`."
+        },
+        {
+          "name": "at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "doc": "What emitted it: `human`, `agent:thr3`, `task_service`, …"
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "Anchor, when known."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Anchor, when known."
+        },
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "Anchor, when known."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "Anchor (agent_turn), when known."
+        },
+        {
+          "name": "snapshot_id",
+          "type": "INTEGER",
+          "doc": "Anchor, when known."
+        },
+        {
+          "name": "agent_session_id",
+          "type": "INTEGER",
+          "doc": "Anchor (v_agent_session.id): the agent session it happened in, when known."
+        },
+        {
+          "name": "subject",
+          "type": "TEXT",
+          "doc": "JSON array of the canonical refs the event is about."
+        },
+        {
+          "name": "payload",
+          "type": "TEXT",
+          "doc": "JSON, validated against `type@v`'s schema."
+        },
+        {
+          "name": "payload_hash",
+          "type": "TEXT",
+          "doc": "Content hash when the body lives in the content store."
+        },
+        {
+          "name": "payload_expired_at",
+          "type": "TEXT",
+          "doc": "When retention replaced the payload with `{}` (the envelope stays); NULL while it's kept."
+        },
+        {
+          "name": "cause",
+          "type": "TEXT",
+          "doc": "The event id that caused this one."
+        },
+        {
+          "name": "dedupe_key",
+          "type": "TEXT",
+          "doc": "Emitter-derived key; unique."
+        }
+      ],
+      "key": []
     }
   },
   "event_checkpoint": {
@@ -4237,6 +4387,56 @@
           "name": "acp_agent",
           "type": "TEXT",
           "doc": "For an `acp` thread, which ACP agent it runs (`claude`, `gemini`, a project `acpAgents` name); NULL otherwise."
+        }
+      ],
+      "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Thread id."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "Owning stream (v_stream.id)."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Display name."
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "doc": "`active` (the stream's writer), `queued` (read-only) or `closed`."
+        },
+        {
+          "name": "sort_index",
+          "type": "INTEGER",
+          "doc": "Order within the stream."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "closed_at",
+          "type": "TEXT",
+          "doc": "Set when the thread was closed."
+        },
+        {
+          "name": "archived_at",
+          "type": "TEXT",
+          "doc": "Set when the thread was archived."
         }
       ],
       "key": []
@@ -6412,6 +6612,73 @@
         },
         {
           "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        }
+      ],
+      "key": []
+    }
+  },
+  "agent_session": {
+    "1": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Session id (its ref is `agent_session:ses<id>`)."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread it's on (v_thread.id)."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`terminal` (a harness in a PTY), `chat` (an ACP agent) or `action` (a one-shot session)."
+        },
+        {
+          "name": "harness",
+          "type": "TEXT",
+          "doc": "What runs in it: `claude`, `codex`, `opencode`, or `acp` (an Agent Client Protocol agent)."
+        },
+        {
+          "name": "acp_agent",
+          "type": "TEXT",
+          "doc": "For an `acp` session, which ACP agent it runs (`claude`, `gemini`, a project `acpAgents` name); NULL otherwise."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "What the person called it; empty until renamed."
+        },
+        {
+          "name": "resume_session_id",
+          "type": "TEXT",
+          "doc": "The harness's own session id, to resume it; empty when unknown."
+        },
+        {
+          "name": "host",
+          "type": "TEXT",
+          "doc": "The host it runs on; NULL is the local machine."
+        },
+        {
+          "name": "opened_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "closed_at",
+          "type": "TEXT",
+          "doc": "When its slot was closed; NULL while open."
+        },
+        {
+          "name": "closed_reason",
+          "type": "TEXT",
+          "doc": "`closed` (closed itself), `thread_closed` or `stream_archived`; NULL while open."
+        },
+        {
+          "name": "updated_at",
           "type": "TEXT",
           "doc": "RFC 3339 timestamp."
         }

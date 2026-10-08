@@ -93,6 +93,7 @@ pub struct StreamService {
     vcs: Arc<dyn Vcs>,
     streams: Arc<dyn StreamStore>,
     threads: Arc<dyn oxplow_domain::stores::ThreadStore>,
+    sessions: Arc<dyn oxplow_domain::stores::AgentSessionStore>,
     default_agent: DefaultAgent,
 }
 
@@ -108,6 +109,7 @@ impl StreamService {
         vcs: Arc<dyn Vcs>,
         streams: Arc<dyn StreamStore>,
         threads: Arc<dyn oxplow_domain::stores::ThreadStore>,
+        sessions: Arc<dyn oxplow_domain::stores::AgentSessionStore>,
         default_agent: DefaultAgent,
     ) -> Self {
         Self {
@@ -115,6 +117,7 @@ impl StreamService {
             vcs,
             streams,
             threads,
+            sessions,
             default_agent,
         }
     }
@@ -136,28 +139,20 @@ impl StreamService {
         if !existing.is_empty() {
             return;
         }
-        let now = Timestamp::now();
         let (agent, acp_agent) = (self.default_agent)();
-        let thread = oxplow_domain::Thread {
-            id: oxplow_domain::ThreadId::placeholder(),
-            stream_id: *stream_id,
-            title: DEFAULT_THREAD_TITLE.into(),
-            status: oxplow_domain::ThreadStatus::Active,
-            sort_index: 0,
-            pane_target: "working".into(),
-            agent,
-            acp_agent,
-            resume_session_id: String::new(),
-            summary: String::new(),
-            summary_updated_at: None,
-            closed_at: None,
-            custom_prompt: None,
-            created_at: now,
-            updated_at: now,
-            archived_at: None,
+        let thread =
+            oxplow_domain::Thread::seed(*stream_id, DEFAULT_THREAD_TITLE, Timestamp::now());
+        let thread_id = match self.threads.upsert(&thread).await {
+            Ok(id) => id,
+            Err(e) => {
+                tracing::warn!(stream_id = %stream_id, error = %e, "default thread create failed");
+                return;
+            }
         };
-        if let Err(e) = self.threads.upsert(&thread).await {
-            tracing::warn!(stream_id = %stream_id, error = %e, "default thread create failed");
+        let session =
+            oxplow_domain::agent_session::NewAgentSession::of(thread_id, agent, acp_agent);
+        if let Err(e) = self.sessions.open(&session).await {
+            tracing::warn!(stream_id = %stream_id, error = %e, "default thread's session failed");
         }
     }
 

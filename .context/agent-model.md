@@ -103,8 +103,8 @@ oxplow agent:
 
 - **Where the agent runs.** Each thread's terminal agent runs directly in
   a PTY (there is no terminal multiplexer, tsk1018), rendered in the
-  first center-area tab. The renderer is `TerminalPane` attached to
-  `selectedBatch.pane_target`; UI-side, it's an xterm.js inside
+  first center-area tab. The renderer is `TerminalPane` attached to the
+  `working` pane target; UI-side, it's an xterm.js inside
   `.xterm`. Click that element to focus, type with regular keystrokes;
   xterm pipes them through the PTY to the thread's assigned agent.
 - **When a turn is done.** `derive_thread_status`
@@ -373,7 +373,7 @@ to `runtime.handleHookEnvelope`, which:
    **Session tracking is part of it.** A session id seen for the first time
    on a thread (on any hook — Claude posts no HTTP SessionStart) logs
    `agent.session.started` once (dedupe key `session:<id>:started`) and
-   becomes `thread.resume_session_id`, so a later restart relaunches with
+   becomes its agent session's `resume_session_id`, so a later restart relaunches with
    `--resume <id>`. **A `SessionStart` is a process start** (tsk500):
    every one except `source: "compact"` (a compaction inside a running
    turn) closes the turns the previous process left open as interrupted,
@@ -466,8 +466,8 @@ site, so a timed-out PreToolUse deny is still caught there.
 
 ## ACP agents: configuration (tsk335)
 
-**Threads.** `AgentKind::Acp` threads name an ACP agent in
-`thread.acp_agent`. `AgentKind::is_terminal()` is false for them:
+**Sessions.** `AgentKind::Acp` sessions name an ACP agent in
+`agent_session.acp_agent`. `AgentKind::is_terminal()` is false for them:
 `open_terminal_session` refuses them, and `write_agent_runtime` returns
 `PluginError::NotTerminal`.
 
@@ -486,7 +486,8 @@ resolved path (`agent_path::resolve_program`). Presets may always start;
 a project entry needs a person's approval in Settings → Data → Programs
 (`exec_consent`, `ProgramKind::AcpAgent`).
 
-**Creating threads.** `oxplow.thread.create` takes `acp_agent`. It's required for
+**Creating threads.** `oxplow.thread.create` takes `acp_agent` (stored on the
+thread's agent session). It's required for
 `agent: acp`, refused otherwise, and must name a known agent. The
 new-thread picker lists "ACP · <name>" per agent when ACP is enabled in
 `agents:`, flagged "not installed" or "needs approval" (`agentChoices` in
@@ -547,7 +548,7 @@ the same JSON.
   - `open` reserves the thread's slot under one lock before spawning anything, so concurrent opens start one agent.
   - `close` marks the handle closed at once.
   - A closed session still winding down is replaced and marked not current; its actor then records no Interrupt over the new session's status.
-- **Thread lifecycle.** Closing a thread (`oxplow.thread.close`) closes its open effort in the same transaction; closing an ACP thread also stops its session and agent process once the close commits. A fork (`oxplow.thread.create { from }`) keeps the source's `acp_agent`.
+- **Thread lifecycle.** Closing a thread (`oxplow.thread.close`) closes its open effort in the same transaction; closing a thread whose session runs ACP also stops its session and agent process once the close commits. A fork (`oxplow.thread.create { from }`) keeps the source session's harness and `acp_agent`.
 - The agent runs via `tokio::process` with `kill_on_drop` and an augmented `PATH`; its stderr's last lines are kept for a failed start.
 
 **Host.** `acp/host.rs` `AcpHost` is the seam (tests use a recording double). `ServicesAcpHost` holds `Weak<Services>` (sessions live in Services) and records exactly what a hooked turn records:
@@ -561,7 +562,7 @@ the same JSON.
 **Starting.**
 - `initialize` offers fs read/write and no terminal.
 - **MCP:** oxplow's MCP rides `session/new|load` as an HTTP MCP entry. An agent without HTTP MCP support is refused with a clear error.
-- **Resume:** `thread.resume_session_id` is `session/load`ed when the agent supports it. The replay rebuilds the transcript and records nothing: no hooks, no tool rows, no bypass checks, and fs writes are refused.
+- **Resume:** the agent session's `resume_session_id` is `session/load`ed when the agent supports it. The replay rebuilds the transcript and records nothing: no hooks, no tool rows, no bypass checks, and fs writes are refused.
 - **System prompt:** it goes in `_meta.systemPrompt.append` when `system_prompt_via_meta` (the Claude adapter). Otherwise it is a block ahead of the first prompt of a new session.
 - **Skills (tsk376):** an ACP agent discovers no skill files, so its system prompt ends with an `# oxplow skills` index (`AgentText::skill_index` of what's offered now, `capabilities::agent_text`: name + frontmatter description) and it reads a body with the read-only, agent-only MCP tool `get_skill(name)`. Terminal runtimes still ship the files; boot (`boot.rs`, once services are up), an extension change and a `capability.switched` call `capabilities::refresh_agent_text` to rewrite the skills and commands of runtimes already on disk (never creating one), so an agent outliving an upgrade or a switch reads the current ones.
 
@@ -667,6 +668,19 @@ The write guard is one policy that every agent transport asks, not logic
 in the hook route. It is isolation only; nothing waits on tracked work
 ([work-tracking.md](./work-tracking.md)).
 
+**The one rule (confirmed 2026-10-08):** the guard keeps agents off
+worktree files, nothing more. A non-writer thread may not change its
+own stream's worktree, and no thread may change another stream's.
+Everything else is open to every thread, writer or not: files outside
+every stream, the shared wiki (through `oxplow.knowledge.write_page`),
+and oxplow's own objects — filing, editing, starting and finishing work
+items, opening and closing efforts, notes, comments. A task's state and
+an effort are records, not claims on the worktree
+(`commands/work_item.rs`, `commands/effort.rs`), so a research or review
+thread can say what it's working on and get its own effort bucket. The
+bus's `WriteGate` applies to `Write` commands only; `Record` commands
+skip it ([commands.md](./commands.md) "Agent policy").
+
 - **Pure rules** live in `crates/oxplow-runtime/src/policy.rs`.
   `decide_tool(ToolIntent{label, kind, paths}, PolicyFacts)` returns
   `Allow`, or `Deny { layer: WriteGuard, reason }`.
@@ -754,10 +768,10 @@ the endpoint URL for Codex); `oxplow_mcp::caller_of` turns it into the
 `Actor::Agent` the command bus audits to. Writes that are commands go
 through `run_command` (`list_commands` shows what the agent may run);
 an anonymous connection may read but not run commands. Any thread in
-the stream may file, edit and finish tasks (`work_item.*` are `Record`
-commands); claiming — moving a task to `in_progress`, or `oxplow.effort.open` —
-takes the stream's writer thread (tsk466). Per-harness plumbing and the
-rule live in [commands.md](./commands.md).
+the stream may file, edit, start and finish tasks and open efforts
+(`work_item.*` and `effort.*` are `Record` commands: a record, not a
+claim on the worktree — see "Agent policy" below). Per-harness plumbing
+and the rule live in [commands.md](./commands.md).
 
 `buildTaskMcpTools` (`crates/oxplow-mcp/src/lib.rs`) registers the agent's
 tool surface. Internally each `ToolDef.name` carries an `oxplow__`

@@ -85,7 +85,7 @@ mod tests {
     use super::*;
     use oxplow_db::{Database, SqliteStreamStore, SqliteThreadStore};
     use oxplow_domain::stores::StreamStore;
-    use oxplow_domain::{AgentKind, Stream, StreamKind, Timestamp};
+    use oxplow_domain::{Stream, StreamKind, Timestamp};
 
     struct Fixture {
         svc: ThreadService,
@@ -130,10 +130,6 @@ mod tests {
             title: title.into(),
             status,
             sort_index: at,
-            pane_target: "working".into(),
-            agent: AgentKind::Claude,
-            acp_agent: None,
-            resume_session_id: String::new(),
             summary: String::new(),
             summary_updated_at: None,
             closed_at: (status == ThreadStatus::Closed).then(|| Timestamp::from_unix_ms(at + 1)),

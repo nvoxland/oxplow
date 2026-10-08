@@ -128,9 +128,9 @@ mod tests {
                 params![stream_id],
             )?;
             c.execute(
-                "INSERT INTO threads (id, stream_id, title, status, sort_index, pane_target,
-                                      resume_session_id, summary, created_at, updated_at)
-                 VALUES (?,?,'t','active',0,'working','','','2026-01-01T00:00:00.000Z',
+                "INSERT INTO threads (id, stream_id, title, status, sort_index, summary,
+                                      created_at, updated_at)
+                 VALUES (?,?,'t','active',0,'','2026-01-01T00:00:00.000Z',
                          '2026-01-01T00:00:00.000Z')",
                 params![thread_id, stream_id],
             )?;

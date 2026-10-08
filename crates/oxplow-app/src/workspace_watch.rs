@@ -422,12 +422,13 @@ mod tests {
         let layout = WorkspaceLayout::for_project(&project);
         let db = Database::in_memory();
         let stream_store = Arc::new(SqliteStreamStore::new(db.clone()));
-        let thread_store = Arc::new(SqliteThreadStore::new(db));
+        let thread_store = Arc::new(SqliteThreadStore::new(db.clone()));
         let svc = StreamService::new(
             layout,
             Arc::new(crate::vcs::GitProvider),
             stream_store,
             thread_store,
+            Arc::new(oxplow_db::SqliteAgentSessionStore::new(db.clone())),
             Arc::new(|| (oxplow_domain::AgentKind::Claude, None)),
         );
         svc.ensure_primary().await.unwrap();
@@ -517,12 +518,13 @@ mod tests {
         let layout = WorkspaceLayout::for_project(&project);
         let db = Database::in_memory();
         let stream_store = Arc::new(SqliteStreamStore::new(db.clone()));
-        let thread_store = Arc::new(SqliteThreadStore::new(db));
+        let thread_store = Arc::new(SqliteThreadStore::new(db.clone()));
         let svc = StreamService::new(
             layout,
             Arc::new(crate::vcs::GitProvider),
             stream_store,
             thread_store,
+            Arc::new(oxplow_db::SqliteAgentSessionStore::new(db.clone())),
             Arc::new(|| (oxplow_domain::AgentKind::Claude, None)),
         );
         svc.ensure_primary().await.unwrap();

@@ -273,7 +273,12 @@ pub fn create_op(config: Arc<RwLock<OxplowConfig>>) -> Op {
                     if source.stream_id != stream {
                         return Err(invalid("/from", format!("`{from}` is on another stream")));
                     }
-                    (source.agent, source.acp_agent)
+                    let session =
+                        oxplow_db::agent_session_store::newest_for_thread_tx(ctx.conn, source.id)?;
+                    (
+                        session.as_ref().map(|s| s.harness).unwrap_or_default(),
+                        session.and_then(|s| s.acp_agent),
+                    )
                 }
                 None => {
                     // Named or not, one rule for the default (tsk970).
@@ -334,10 +339,6 @@ pub fn create_op(config: Arc<RwLock<OxplowConfig>>) -> Op {
                     ThreadStatus::Active
                 },
                 sort_index: next_sort,
-                pane_target: "working".into(),
-                agent,
-                acp_agent,
-                resume_session_id: String::new(),
                 summary: String::new(),
                 summary_updated_at: None,
                 closed_at: None,
@@ -347,6 +348,11 @@ pub fn create_op(config: Arc<RwLock<OxplowConfig>>) -> Op {
                 archived_at: None,
             };
             thread.id = save(ctx, &thread)?;
+            oxplow_db::agent_session_store::insert_tx(
+                ctx.conn,
+                &oxplow_domain::agent_session::NewAgentSession::of(thread.id, agent, acp_agent),
+                now,
+            )?;
             Ok(result(&thread))
         })),
     )
@@ -519,14 +525,15 @@ pub fn close_op(acp: Arc<crate::acp::manager::AcpManager>) -> Op {
                 )
                 .map_err(CommandError::from)?;
             }
-            let after_commit: Option<Box<dyn FnOnce() + Send + Sync>> =
-                (thread.agent == AgentKind::Acp).then(|| {
-                    let acp = acp.clone();
-                    // Not open is fine: there's nothing to stop.
-                    Box::new(move || {
-                        let _ = acp.close(&id);
-                    }) as Box<dyn FnOnce() + Send + Sync>
-                });
+            let runs_acp = oxplow_db::agent_session_store::newest_for_thread_tx(ctx.conn, id)?
+                .is_some_and(|s| s.harness == AgentKind::Acp);
+            let after_commit: Option<Box<dyn FnOnce() + Send + Sync>> = runs_acp.then(|| {
+                let acp = acp.clone();
+                // Not open is fine: there's nothing to stop.
+                Box::new(move || {
+                    let _ = acp.close(&id);
+                }) as Box<dyn FnOnce() + Send + Sync>
+            });
             Ok(HandlerOutput {
                 inverse: call(REOPEN, json!({ "thread": input.thread })),
                 after_commit,
@@ -677,6 +684,19 @@ mod tests {
         fx.svc.thread_store.get(&id).await.unwrap().unwrap()
     }
 
+    /// The thread's agent session.
+    async fn session(
+        fx: &EffortFixture,
+        id: ThreadId,
+    ) -> oxplow_domain::agent_session::AgentSession {
+        fx.svc
+            .agent_session_store
+            .newest_for_thread(id)
+            .await
+            .unwrap()
+            .expect("the thread has a session")
+    }
+
     async fn create(fx: &EffortFixture, title: &str) -> ThreadId {
         let stream = thread(fx, fx.thread).await.stream_id;
         let out = run(
@@ -708,7 +728,10 @@ mod tests {
         .await
         .unwrap();
         let fork: Thread = serde_json::from_value(fork.result).unwrap();
-        assert_eq!(fork.agent, thread(&fx, fx.thread).await.agent);
+        assert_eq!(
+            session(&fx, fork.id).await.harness,
+            session(&fx, fx.thread).await.harness
+        );
         assert_eq!(fork.status, ThreadStatus::Queued);
     }
 
@@ -981,8 +1004,9 @@ mod tests {
         .await
         .unwrap();
         let fork: Thread = serde_json::from_value(fork.result).unwrap();
+        let fork = session(&fx, fork.id).await;
         assert_eq!(
-            (fork.agent, fork.acp_agent.as_deref()),
+            (fork.harness, fork.acp_agent.as_deref()),
             (AgentKind::Acp, Some("gemini"))
         );
     }

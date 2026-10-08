@@ -5,6 +5,7 @@
 //! plain SQL and are applied at startup via `refinery`.
 
 pub mod agent_nudge_store;
+pub mod agent_session_store;
 pub mod agent_stores;
 pub mod ai_call_store;
 pub mod ai_result_store;
@@ -59,6 +60,7 @@ pub mod work_item_refs;
 pub use agent_nudge_store::{
     AgentNudge, Audience, NewAgentNudge, OnceScope, SqliteAgentNudgeStore,
 };
+pub use agent_session_store::SqliteAgentSessionStore;
 pub use agent_stores::{SqliteAgentStatusStore, SqliteAgentTurnStore};
 pub use ai_call_store::{NewAiCall, SqliteAiCallStore};
 pub use ai_result_store::{AiResult, NewAiResult, SqliteAiResultStore};

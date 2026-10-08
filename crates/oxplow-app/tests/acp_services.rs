@@ -16,7 +16,7 @@ use oxplow_app::acp::session::{AcpEventBody, AcpStatus, SessionSpec};
 use oxplow_app::acp::transcript::ItemBody;
 use oxplow_app::Services;
 use oxplow_db::semantic_layer::SqlCell;
-use oxplow_domain::stores::{AgentTurnStore, StreamStore, ThreadStore};
+use oxplow_domain::stores::{AgentSessionStore, AgentTurnStore, StreamStore, ThreadStore};
 use oxplow_domain::{
     AgentKind, Stream, StreamId, StreamKind, Thread, ThreadId, ThreadStatus, Timestamp,
 };
@@ -69,10 +69,6 @@ async fn seed(svc: &Services, root: &std::path::Path, status: ThreadStatus) -> T
         title: "t".into(),
         status,
         sort_index: 0,
-        pane_target: "working".into(),
-        agent: AgentKind::Acp,
-        acp_agent: Some("fake".into()),
-        resume_session_id: String::new(),
         summary: String::new(),
         summary_updated_at: None,
         closed_at: None,
@@ -82,6 +78,14 @@ async fn seed(svc: &Services, root: &std::path::Path, status: ThreadStatus) -> T
         archived_at: None,
     };
     svc.thread_store.upsert(&thread).await.unwrap();
+    svc.agent_session_store
+        .open(&oxplow_domain::agent_session::NewAgentSession::of(
+            thread.id,
+            AgentKind::Acp,
+            Some("fake".into()),
+        ))
+        .await
+        .unwrap();
     thread.id
 }
 
@@ -259,8 +263,13 @@ async fn an_acp_edit_is_recorded_like_a_hooked_one() {
         .unwrap()
         .is_empty());
     // The session is remembered for the next resume.
-    let t = svc.thread_store.get(&thread).await.unwrap().unwrap();
-    assert!(t.resume_session_id.starts_with("fake-session-"));
+    let s = svc
+        .agent_session_store
+        .newest_for_thread(thread)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(s.resume_session_id.starts_with("fake-session-"));
 }
 
 #[tokio::test]

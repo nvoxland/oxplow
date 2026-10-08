@@ -16,7 +16,7 @@ use oxplow_domain::hook::TurnOutcome;
 use oxplow_domain::refs::build::{thread_ref, turn_ref};
 use oxplow_domain::stores::{AgentStatusStore, AgentTurnStore};
 use oxplow_domain::{
-    AgentStatus, AgentTurn, AgentTurnId, DomainError, StreamId, ThreadId, Timestamp,
+    AgentSessionId, AgentStatus, AgentTurn, AgentTurnId, DomainError, StreamId, ThreadId, Timestamp,
 };
 
 use crate::database::{map_sql_err, Database};
@@ -40,6 +40,9 @@ fn row_to_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurn> {
     Ok(AgentTurn {
         id: AgentTurnId::new(id),
         thread_id: ThreadId::new(thread_id),
+        agent_session_id: row
+            .get::<_, Option<i64>>("agent_session_id")?
+            .map(AgentSessionId::new),
         prompt,
         answer,
         session_id,
@@ -54,9 +57,12 @@ fn row_to_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurn> {
 }
 
 /// The anchors agent activity on `thread` carries (P3.3): the thread, its
-/// stream, the thread's open turn and its open effort (at most one).
+/// stream, its agent session, the thread's open turn and its open effort
+/// (at most one).
 pub fn activity_anchors_tx(conn: &Connection, thread: ThreadId) -> Result<Anchors, DomainError> {
     let mut anchors = anchors_for_thread_tx(conn, thread)?;
+    anchors.agent_session_id =
+        crate::agent_session_store::newest_for_thread_tx(conn, thread)?.map(|s| s.id);
     anchors.turn_id = open_turn_ids_tx(conn, thread)?.first().map(|t| t.value());
     anchors.effort_id = crate::effort_store::open_for_thread_tx(conn, thread)
         .map_err(crate::database::map_sql_err)?;
@@ -217,13 +223,20 @@ pub fn open_turn_tx(
     session: Option<&str>,
     started_at: Timestamp,
 ) -> Result<AgentTurnId, DomainError> {
+    let anchors = activity_anchors_tx(conn, thread)?;
     conn.execute(
-        "INSERT INTO agent_turn (thread_id, prompt, session_id, started_at) VALUES (?1, ?2, ?3, ?4)",
-        params![thread.value(), prompt, session, ts_to_string(started_at)],
+        "INSERT INTO agent_turn (thread_id, agent_session_id, prompt, session_id, started_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            thread.value(),
+            anchors.agent_session_id.map(|s| s.value()),
+            prompt,
+            session,
+            ts_to_string(started_at)
+        ],
     )
     .map_err(map_sql_err)?;
     let id = AgentTurnId::new(conn.last_insert_rowid());
-    let anchors = activity_anchors_tx(conn, thread)?;
     if let Some(stream) = anchors.stream_id {
         // Its diff runs from here to the snapshot it ends at.
         let start =
@@ -465,14 +478,16 @@ impl AgentTurnStore for SqliteAgentTurnStore {
                 }
                 // Re-writing an existing id is an update, not a new turn.
                 tx.execute(
-                    "INSERT INTO agent_turn (id, thread_id, prompt, answer, session_id, started_at, ended_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                    "INSERT INTO agent_turn
+                       (id, thread_id, agent_session_id, prompt, answer, session_id, started_at, ended_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                      ON CONFLICT(id) DO UPDATE SET
                         prompt = excluded.prompt,
                         session_id = excluded.session_id",
                     params![
                         turn.id.value(),
                         turn.thread_id.value(),
+                        turn.agent_session_id.map(|s| s.value()),
                         turn.prompt,
                         turn.answer,
                         turn.session_id,
@@ -608,10 +623,6 @@ mod tests {
             title: "x".into(),
             status: ThreadStatus::Active,
             sort_index: 0,
-            pane_target: "working".into(),
-            agent: oxplow_domain::AgentKind::Claude,
-            acp_agent: None,
-            resume_session_id: String::new(),
             summary: String::new(),
             summary_updated_at: None,
             closed_at: None,
@@ -676,10 +687,26 @@ mod tests {
     #[tokio::test]
     async fn agent_turn_open_then_close() {
         let (db, tid) = fixture().await;
+        let session = db
+            .transaction(move |tx| {
+                crate::agent_session_store::insert_tx(
+                    tx,
+                    &oxplow_domain::agent_session::NewAgentSession::of(
+                        tid,
+                        oxplow_domain::AgentKind::Claude,
+                        None,
+                    ),
+                    Timestamp::from_unix_ms(1),
+                )
+            })
+            .await
+            .unwrap()
+            .id;
         let store = SqliteAgentTurnStore::new(db.clone());
         let turn = AgentTurn {
             id: AgentTurnId::placeholder(),
             thread_id: tid,
+            agent_session_id: None,
             prompt: "do the thing".into(),
             answer: None,
             session_id: Some("s1".into()),
@@ -705,28 +732,32 @@ mod tests {
         let got = store.get(&id).await.unwrap().unwrap();
         assert!(got.ended_at.is_some());
         assert_eq!(got.answer.as_deref(), Some("done"));
+        // The turn ran in its thread's session.
+        assert_eq!(got.agent_session_id, Some(session));
 
         let stream = StreamId::new(r_stream(&db, tid));
         assert!(!store.stream_has_open_turn(stream).await.unwrap());
 
-        // Both edges are in the log, anchored to the turn, thread and stream.
+        // Both edges are in the log, anchored to the turn, thread, stream
+        // and session.
         let conn = db.conn().unwrap();
         let mut stmt = conn
             .prepare(
-                "SELECT type, payload, turn_id, thread_id, stream_id FROM event_log ORDER BY seq",
+                "SELECT type, payload, turn_id, thread_id, stream_id, agent_session_id
+                   FROM event_log ORDER BY seq",
             )
             .unwrap();
         struct Logged {
             ty: String,
             payload: serde_json::Value,
-            anchors: [Option<i64>; 3],
+            anchors: [Option<i64>; 4],
         }
         let rows: Vec<Logged> = stmt
             .query_map([], |r| {
                 Ok(Logged {
                     ty: r.get(0)?,
                     payload: serde_json::from_str(&r.get::<_, String>(1)?).unwrap(),
-                    anchors: [r.get(2)?, r.get(3)?, r.get(4)?],
+                    anchors: [r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?],
                 })
             })
             .unwrap()
@@ -739,10 +770,11 @@ mod tests {
         assert_eq!(rows[1].ty, "agent.turn.ended");
         assert_eq!(rows[1].payload["outcome"], "completed");
         for r in &rows {
-            let [turn, thread, stream_anchor] = r.anchors;
+            let [turn, thread, stream_anchor, session_anchor] = r.anchors;
             assert_eq!(turn, Some(id.value()));
             assert_eq!(thread, Some(tid.value()));
             assert_eq!(stream_anchor, Some(stream.value()));
+            assert_eq!(session_anchor, Some(session.value()));
         }
     }
 
@@ -777,6 +809,7 @@ mod tests {
             .open(&AgentTurn {
                 id: AgentTurnId::placeholder(),
                 thread_id: ThreadId::new(1),
+                agent_session_id: None,
                 prompt: "p".into(),
                 answer: None,
                 session_id: None,
