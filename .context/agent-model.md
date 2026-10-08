@@ -340,7 +340,9 @@ its outcome (`ok`, `exit_code`) and an `ask`'s `question`.
 - **What reads it.** The write guard (`kind == edit`, every path), the
   status derivation (`subagent`, `ask`, `plan`), the ROLE CHANGE banner
   (`plan`), effort claims (`edit`), test-run collection (`shell`, its
-  `command` and `exit_code`), and the events: `agent.tool.requested@2` /
+  `command` and `exit_code`), a turn's writing calls
+  (`thread.checkpoint`, by `v_tool_call.kind`), `v_struggle` and
+  `v_context_read`, and the events: `agent.tool.requested@2` /
   `agent.tool.finished@2` carry `tool` (the harness's name), `kind` and
   `paths`; a v1 event upcasts its kind from the Claude Code name it
   carried — the one place core keeps those names

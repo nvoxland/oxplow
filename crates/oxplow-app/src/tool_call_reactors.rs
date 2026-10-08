@@ -62,6 +62,7 @@ impl EventConsumer for ToolCallProjection {
             effort_id: env.anchors.effort_id.map(|e| e.value()),
             turn_id: env.anchors.turn_id,
             tool: str_field(event, "tool").unwrap_or_default().to_string(),
+            kind: str_field(event, "kind").unwrap_or("other").to_string(),
             // A row per call: its first file.
             path: paths(event).first().map(|p| p.to_string()),
             detail: str_field(event, "detail").map(str::to_string),

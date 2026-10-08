@@ -20,7 +20,7 @@ use oxplow_domain::refs::build::{snapshot_ref, system_source, thread_ref, turn_r
 use oxplow_domain::snapshot::SnapshotTrigger;
 use oxplow_domain::{AgentTurnId, DomainError, Envelope, StoredEvent, ThreadId};
 
-use oxplow_domain::agent::registry::HarnessRegistry;
+use oxplow_domain::agent::tool::ToolKind;
 
 use crate::event_pump::AsyncEventConsumer;
 use crate::sql_gateway::SqlGateway;
@@ -28,22 +28,20 @@ use crate::sql_gateway::SqlGateway;
 /// The consumer's name (its checkpoint key; what callers settle on).
 pub const NAME: &str = "thread.checkpoint";
 
-/// Whether a call to `tool` could have changed the worktree: oxplow's own
-/// commands, or a tool a registered harness says writes
-/// (`AgentHarness::writing_tools`), in any case.
-pub fn can_write(harnesses: &HarnessRegistry, tool: &str) -> bool {
-    let tool = tool.to_ascii_lowercase();
-    tool == "mcp__oxplow__run_command"
-        || harnesses
-            .all()
-            .iter()
-            .any(|h| h.writing_tools().contains(&tool.as_str()))
+/// Whether a call could have changed the worktree: an edit, a shell
+/// command or a subagent (`ToolKind::changes_worktree`), whatever its
+/// harness calls it, or oxplow's own `run_command` (a command may write).
+pub fn can_write(kind: &str, tool: &str) -> bool {
+    match serde_json::from_value::<ToolKind>(serde_json::Value::String(kind.to_string())) {
+        Ok(ToolKind::Mcp) => tool.ends_with("run_command"),
+        Ok(k) => k.changes_worktree(),
+        Err(_) => false,
+    }
 }
 
 pub struct ThreadCheckpointConsumer {
     pub log: SqliteEventLogStore,
     pub sql: SqlGateway,
-    pub harnesses: HarnessRegistry,
 }
 
 impl ThreadCheckpointConsumer {
@@ -77,7 +75,7 @@ impl ThreadCheckpointConsumer {
         let rows = self
             .sql
             .query_sql(
-                "SELECT tool FROM v_tool_call WHERE turn_id = ?1",
+                "SELECT kind, tool FROM v_tool_call WHERE turn_id = ?1",
                 vec![SqlCell::Int(turn.value())],
                 None,
             )
@@ -85,7 +83,7 @@ impl ThreadCheckpointConsumer {
             .rows;
         let n = rows
             .iter()
-            .filter(|row| matches!(row.first(), Some(SqlCell::Text(t)) if can_write(&self.harnesses, t)))
+            .filter(|row| matches!(&row[..], [SqlCell::Text(kind), SqlCell::Text(tool)] if can_write(kind, tool)))
             .count();
         Ok(u32::try_from(n).unwrap_or(u32::MAX))
     }
@@ -166,7 +164,8 @@ pub(crate) mod tests {
     }
 
     /// Run one turn on the fixture's thread: `edit` writes a file before it
-    /// ends, `tools` are the calls it made. The checkpoint it logged.
+    /// ends, `tools` are the kinds of the calls it made (`edit`, `shell`,
+    /// …). The checkpoint it logged.
     pub(crate) async fn turn(
         f: &EffortFixture,
         edit: Option<(&str, &str)>,
@@ -184,6 +183,7 @@ pub(crate) mod tests {
                     thread_id: f.thread.value(),
                     turn_id: Some(turn.value()),
                     tool: tool.to_string(),
+                    kind: tool.to_string(),
                     ..Default::default()
                 })
                 .await
@@ -241,7 +241,7 @@ pub(crate) mod tests {
         let edited = turn(
             &f,
             Some(("made.txt", "by the agent")),
-            &["Read", "Edit", "Bash"],
+            &["read", "edit", "shell"],
         )
         .await;
         assert!(edited.changed);
@@ -249,33 +249,32 @@ pub(crate) mod tests {
         assert_eq!(edited.reason, CheckpointReason::TurnEnd);
         assert_eq!(edited.thread, thread_ref(f.thread));
 
-        let asked = turn(&f, None, &["Read", "WebSearch"]).await;
+        let asked = turn(&f, None, &["read", "fetch"]).await;
         assert!(!asked.changed);
         assert_eq!(asked.writing_tools, 0);
     }
 
-    /// A tool counts as writing when any registered harness says it
-    /// writes — one only Codex declares too — in any case; oxplow's own
-    /// commands always do. With no harness registered, only they do.
+    /// A call counts as writing by its kind, whatever its harness calls
+    /// it; of the MCP calls, oxplow's own `run_command`.
     #[test]
-    fn writing_tools_are_the_registered_harnesses_union() {
-        let r = HarnessRegistry::new(std::sync::Arc::new(|| "claude".into()));
-        for (entry, id) in [
-            ("oxplow:claude-code", "claude"),
-            ("oxplow:codex-cli", "codex"),
+    fn writing_calls_are_read_by_kind() {
+        for (kind, tool) in [
+            ("edit", "apply_patch"),
+            ("shell", "Bash"),
+            ("subagent", "Task"),
+            ("mcp", "mcp__oxplow__run_command"),
         ] {
-            r.register(oxplow_harnesses::built_in(entry, id, id).unwrap());
+            assert!(can_write(kind, tool), "{kind} {tool}");
         }
-        for tool in ["Edit", "bash", "apply_patch", "mcp__oxplow__run_command"] {
-            assert!(can_write(&r, tool), "{tool}");
+        for (kind, tool) in [
+            ("read", "Read"),
+            ("search", "Grep"),
+            ("fetch", "WebFetch"),
+            ("mcp", "mcp__oxplow__query_sql"),
+            ("other", "TodoWrite"),
+            ("nonsense", "Edit"),
+        ] {
+            assert!(!can_write(kind, tool), "{kind} {tool}");
         }
-        for tool in ["Read", "Grep", "WebFetch", "mcp__oxplow__query_sql"] {
-            assert!(!can_write(&r, tool), "{tool}");
-        }
-        r.unregister("codex");
-        assert!(!can_write(&r, "apply_patch"));
-        let none = HarnessRegistry::new(std::sync::Arc::new(String::new));
-        assert!(!can_write(&none, "Edit"));
-        assert!(can_write(&none, "mcp__oxplow__run_command"));
     }
 }

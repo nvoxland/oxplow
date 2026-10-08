@@ -340,6 +340,7 @@ mod tests {
                 thread_id: f.thread.value(),
                 turn_id: Some(turn.value()),
                 tool: "Bash".into(),
+                kind: "shell".into(),
                 ..Default::default()
             })
             .await

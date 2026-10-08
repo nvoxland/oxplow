@@ -113,10 +113,6 @@ impl AgentHarness for Opencode {
         claude_shaped_tool_use(body)
     }
 
-    fn writing_tools(&self) -> &[&str] {
-        &["write", "edit", "bash", "task"]
-    }
-
     fn render(&self, answer: &HookAnswer) -> serde_json::Value {
         super::shared::render(answer)
     }

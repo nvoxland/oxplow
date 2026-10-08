@@ -649,7 +649,7 @@ mod tests {
     async fn a_turn_that_changed_the_worktree_opens_an_effort() {
         let fx = crate::thread_checkpoint::tests::with_baseline().await;
         close_fixture_effort(&fx).await;
-        crate::thread_checkpoint::tests::turn(&fx, Some(("made.txt", "x")), &["Edit"]).await;
+        crate::thread_checkpoint::tests::turn(&fx, Some(("made.txt", "x")), &["edit"]).await;
         settle(&fx).await;
         let open: Vec<_> = efforts(&fx)
             .await
@@ -662,7 +662,7 @@ mod tests {
             .svc
             .sql
             .query_sql(
-                "SELECT count(*) FROM v_tool_call WHERE tool = 'Edit' AND effort_id = ?1",
+                "SELECT count(*) FROM v_tool_call WHERE kind = 'edit' AND effort_id = ?1",
                 vec![SqlCell::Int(open[0].0)],
                 None,
             )
@@ -684,13 +684,13 @@ mod tests {
         let fx = crate::thread_checkpoint::tests::with_baseline().await;
         close_fixture_effort(&fx).await;
         let before = efforts(&fx).await;
-        crate::thread_checkpoint::tests::turn(&fx, Some(("theirs.txt", "x")), &["Read"]).await;
-        crate::thread_checkpoint::tests::turn(&fx, None, &["Bash"]).await;
+        crate::thread_checkpoint::tests::turn(&fx, Some(("theirs.txt", "x")), &["read"]).await;
+        crate::thread_checkpoint::tests::turn(&fx, None, &["shell"]).await;
         settle(&fx).await;
         assert_eq!(efforts(&fx).await, before);
 
         let fx = crate::thread_checkpoint::tests::with_baseline().await;
-        crate::thread_checkpoint::tests::turn(&fx, Some(("made.txt", "x")), &["Edit"]).await;
+        crate::thread_checkpoint::tests::turn(&fx, Some(("made.txt", "x")), &["edit"]).await;
         settle(&fx).await;
         assert_eq!(
             efforts(&fx).await,

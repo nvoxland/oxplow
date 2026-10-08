@@ -170,12 +170,6 @@ pub trait AgentHarness: Send + Sync {
     fn refresh_text(&self, _project_dir: &Path, _text: &AgentText) -> Result<(), HarnessError> {
         Ok(())
     }
-    /// Its tools that can change the worktree, lowercased: file edits,
-    /// shell commands, subagents (which run their own tools). Every other
-    /// call only reads or talks.
-    fn writing_tools(&self) -> &[&str] {
-        &[]
-    }
     /// The recordable turns in a chunk of its transcript; none when it
     /// keeps no transcript core reads.
     fn turns(&self, _transcript: &str) -> Vec<Turn> {

@@ -4094,6 +4094,36 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "Effort."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread."
+        },
+        {
+          "name": "kind",
+          "type": "",
+          "doc": "`repeated_edits` or `failed_commands`."
+        },
+        {
+          "name": "subject",
+          "type": "TEXT",
+          "doc": "The file path, or `shell` (failed shell commands, whatever the harness)."
+        },
+        {
+          "name": "count",
+          "type": "",
+          "doc": "How many edits / failures."
+        }
+      ],
+      "key": []
     }
   },
   "symbol": {
@@ -5800,6 +5830,66 @@
           "name": "ok",
           "type": "INTEGER",
           "doc": "1 succeeded, 0 failed, NULL unknown (Bash often reports no exit code)."
+        },
+        {
+          "name": "at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "event_id",
+          "type": "TEXT",
+          "doc": "The `agent.tool.finished` event (v_event.id) this row records; NULL for rows written before the event log carried tool calls."
+        }
+      ],
+      "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Row id."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread."
+        },
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "Effort open at the time, if any."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "Turn it happened in (v_agent_turn.id), when known."
+        },
+        {
+          "name": "tool",
+          "type": "TEXT",
+          "doc": "The harness's own name for the tool (`Edit`, `apply_patch`, an ACP agent's title, …)."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "What it does, the same for every harness: `read`, `edit`, `shell`, `subagent`, `ask`, `plan`, `search`, `fetch`, `mcp` or `other`."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "File it touched, repo-relative when inside the project."
+        },
+        {
+          "name": "detail",
+          "type": "TEXT",
+          "doc": "Short context: a shell command (truncated), a search pattern, …"
+        },
+        {
+          "name": "ok",
+          "type": "INTEGER",
+          "doc": "1 succeeded, 0 failed, NULL unknown (a shell call often reports no exit code)."
         },
         {
           "name": "at",

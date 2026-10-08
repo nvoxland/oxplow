@@ -12,7 +12,10 @@ pub struct NewToolCall {
     pub effort_id: Option<i64>,
     /// The turn it ran in (`agent_turn.id`).
     pub turn_id: Option<i64>,
+    /// The harness's own name for the tool.
     pub tool: String,
+    /// What it does, in oxplow's vocabulary (`ToolKind::as_str`).
+    pub kind: String,
     pub path: Option<String>,
     pub detail: Option<String>,
     pub ok: Option<bool>,
@@ -47,8 +50,8 @@ pub fn record_tx(conn: &rusqlite::Connection, call: &NewToolCall) -> Result<bool
     let n = conn
         .execute(
             "INSERT INTO agent_tool_call
-               (thread_id, effort_id, turn_id, tool, path, detail, ok, at, event_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+               (thread_id, effort_id, turn_id, tool, path, detail, ok, at, event_id, kind)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
              ON CONFLICT (event_id) WHERE event_id IS NOT NULL DO NOTHING",
             rusqlite::params![
                 call.thread_id,
@@ -60,6 +63,7 @@ pub fn record_tx(conn: &rusqlite::Connection, call: &NewToolCall) -> Result<bool
                 call.ok.map(i64::from),
                 at,
                 call.event_id,
+                call.kind,
             ],
         )
         .map_err(crate::database::map_sql_err)?;
@@ -90,11 +94,13 @@ mod tests {
         (SqliteToolCallStore::new(db.clone()), SemanticLayer::new(db))
     }
 
-    fn call(tool: &str, path: Option<&str>, ok: Option<bool>) -> NewToolCall {
+    /// A call of `kind` (oxplow's vocabulary), named by its kind.
+    fn call(kind: &str, path: Option<&str>, ok: Option<bool>) -> NewToolCall {
         NewToolCall {
             thread_id: 1,
             effort_id: Some(1),
-            tool: tool.into(),
+            tool: kind.into(),
+            kind: kind.into(),
             path: path.map(str::to_string),
             detail: None,
             ok,
@@ -110,7 +116,7 @@ mod tests {
         let call = NewToolCall {
             event_id: Some("evt-1".into()),
             turn_id: None,
-            ..call("Read", Some("src/a.rs"), Some(true))
+            ..call("read", Some("src/a.rs"), Some(true))
         };
         let first = store
             .db
@@ -141,29 +147,32 @@ mod tests {
     async fn context_reads_and_struggle_are_derived() {
         let (store, sl) = seeded().await;
         store
-            .record(call("Read", Some(".context/usability.md"), Some(true)))
+            .record(call("read", Some(".context/usability.md"), Some(true)))
             .await
             .unwrap();
         store
-            .record(call("Read", Some("src/main.rs"), Some(true)))
+            .record(call("read", Some("src/main.rs"), Some(true)))
             .await
             .unwrap();
         for _ in 0..5 {
             store
-                .record(call("Edit", Some("src/hot.rs"), Some(true)))
+                .record(call("edit", Some("src/hot.rs"), Some(true)))
                 .await
                 .unwrap();
         }
         for _ in 0..4 {
             store
-                .record(call("Edit", Some("src/calm.rs"), Some(true)))
+                .record(call("edit", Some("src/calm.rs"), Some(true)))
                 .await
                 .unwrap();
         }
         for _ in 0..3 {
-            store.record(call("Bash", None, Some(false))).await.unwrap();
+            store
+                .record(call("shell", None, Some(false)))
+                .await
+                .unwrap();
         }
-        store.record(call("Bash", None, None)).await.unwrap(); // unknown outcome isn't a failure
+        store.record(call("shell", None, None)).await.unwrap(); // unknown outcome isn't a failure
 
         let rows = |sql: &'static str| {
             let sl = sl.clone();
@@ -178,7 +187,7 @@ mod tests {
         assert_eq!(
             rows("SELECT kind, subject, count FROM v_struggle ORDER BY kind").await,
             json!([
-                ["failed_commands", "Bash", 3],
+                ["failed_commands", "shell", 3],
                 ["repeated_edits", "src/hot.rs", 5]
             ])
         );

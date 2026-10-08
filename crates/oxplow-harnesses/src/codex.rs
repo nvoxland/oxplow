@@ -84,10 +84,6 @@ impl AgentHarness for Codex {
         codex_tool_use(body)
     }
 
-    fn writing_tools(&self) -> &[&str] {
-        &["apply_patch", "shell", "exec_command"]
-    }
-
     fn token_readings(&self, record: &OtlpRecord<'_>) -> Vec<TokenReading> {
         match record {
             OtlpRecord::Point {

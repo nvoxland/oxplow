@@ -741,7 +741,7 @@ mod tests {
                 std::time::Duration::from_secs(10),
             )
         };
-        crate::thread_checkpoint::tests::turn(&f, None, &["Read"]).await;
+        crate::thread_checkpoint::tests::turn(&f, None, &["read"]).await;
         settle().await;
         let turn = crate::sql_gateway::SqlGateway::new(svc.db.clone())
             .query_sql("SELECT max(id) FROM v_agent_turn", vec![], None)
@@ -784,7 +784,7 @@ mod tests {
             !again.contains("guide") && !again.contains("turn "),
             "{again}"
         );
-        crate::thread_checkpoint::tests::turn(&f, None, &["Read"]).await;
+        crate::thread_checkpoint::tests::turn(&f, None, &["read"]).await;
         settle().await;
         let third = svc
             .agent_context

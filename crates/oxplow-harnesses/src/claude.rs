@@ -147,18 +147,6 @@ impl AgentHarness for Claude {
         claude_shaped_tool_use(body)
     }
 
-    fn writing_tools(&self) -> &[&str] {
-        &[
-            "write",
-            "edit",
-            "multiedit",
-            "notebookedit",
-            "bash",
-            "agent",
-            "task",
-        ]
-    }
-
     fn turns(&self, transcript: &str) -> Vec<Turn> {
         transcript_turns(transcript)
             .into_iter()

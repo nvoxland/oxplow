@@ -236,8 +236,8 @@ mod tests {
             )
             .await
             .unwrap();
-        turn(&f, Some(("made.txt", "x")), &["Edit"]).await;
-        turn(&f, Some(("shell.txt", "y")), &["Bash"]).await;
+        turn(&f, Some(("made.txt", "x")), &["edit"]).await;
+        turn(&f, Some(("shell.txt", "y")), &["shell"]).await;
         settle(&f).await;
         assert_eq!(
             files(&f, f.effort).await,
@@ -262,7 +262,7 @@ mod tests {
             )
             .await
             .unwrap();
-        turn(&f, Some(("shell.txt", "y")), &["Bash"]).await;
+        turn(&f, Some(("shell.txt", "y")), &["shell"]).await;
         settle(&f).await;
         let opened = f
             .svc

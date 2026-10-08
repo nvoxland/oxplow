@@ -94,10 +94,6 @@ impl AgentHarness for FakeHarness {
         })
     }
 
-    fn writing_tools(&self) -> &[&str] {
-        &["edit"]
-    }
-
     fn token_readings(&self, record: &OtlpRecord<'_>) -> Vec<TokenReading> {
         let OtlpRecord::Point {
             metric: TOKEN_METRIC,

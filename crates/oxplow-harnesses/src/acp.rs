@@ -69,10 +69,6 @@ impl AgentHarness for Acp {
         None
     }
 
-    fn writing_tools(&self) -> &[&str] {
-        &["write", "edit", "bash"]
-    }
-
     /// It posts no hooks (its tool gate answers in-process); one naming its
     /// session gets the common shape.
     fn render(&self, answer: &HookAnswer) -> serde_json::Value {

@@ -1195,7 +1195,6 @@ impl Services {
         event_pump.register_async(Arc::new(thread_checkpoint::ThreadCheckpointConsumer {
             log: (*event_log_store).clone(),
             sql: sql.clone(),
-            harnesses: harnesses.clone(),
         }));
         // Its turn's changed files become the effort's observed ones.
         event_pump.register_async(Arc::new(effort_observation::EffortObservationConsumer {
