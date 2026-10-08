@@ -125,6 +125,10 @@ pub struct Hooks {
     pub plain_writes: bool,
     /// `started-file:<path>`: each `invoke` writes `<path>` as it begins.
     pub started_file: Option<String>,
+    /// `host-read`: an `estimate` first reads the host (`host/call`
+    /// `sql.read`, `SELECT 7 AS n`, naming its key) and answers what it
+    /// read beside its result (`read`).
+    pub host_read: bool,
 }
 
 impl Hooks {
@@ -171,6 +175,7 @@ impl Hooks {
                 None if part == "bad-record" => self.bad_record = true,
                 None if part == "stale-read" => self.stale_read = true,
                 None if part == "stuck-cursor" => self.stuck_cursor = true,
+                None if part == "host-read" => self.host_read = true,
                 _ => {}
             }
         }
@@ -631,6 +636,7 @@ async fn handle(
             let hooks = world.lock().await.hooks.clone();
             // Under `plain-writes` a key means nothing; `forget-keys`
             // drops it (breaking the promise it declares).
+            let sent_key = p.idempotency_key.clone();
             let key = p
                 .idempotency_key
                 .filter(|_| !hooks.plain_writes && !hooks.forget_keys);
@@ -645,7 +651,25 @@ async fn handle(
                     });
                 }
             }
-            let answer = invoke(world, &p.command, p.input.clone()).await?;
+            let read = if hooks.host_read && p.command == "estimate" {
+                Some(
+                    peer.request(
+                        method::HOST_CALL,
+                        json!({
+                            "key": sent_key,
+                            "capability": "sql.read",
+                            "args": { "sql": "SELECT 7 AS n" },
+                        }),
+                    )
+                    .await?,
+                )
+            } else {
+                None
+            };
+            let mut answer = invoke(world, &p.command, p.input.clone()).await?;
+            if let Some(read) = read {
+                answer["result"]["read"] = read;
+            }
             let mut w = world.lock().await;
             if let Some(key) = key {
                 w.answered.insert(key, (p.command, p.input, answer.clone()));

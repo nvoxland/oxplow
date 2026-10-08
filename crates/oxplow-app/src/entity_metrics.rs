@@ -1,5 +1,5 @@
 //! Entity metrics (tsk322): metrics computed over a semantic-layer view
-//! (`v_task`, an extension's `v_*`, …) instead of a measure's facts, sliced by
+//! (`v_work_item`, an extension's `v_*`, …) instead of a measure's facts, sliced by
 //! entity dimensions (a SQL expression over the same view, with an optional
 //! join).
 //!
@@ -386,12 +386,13 @@ mod tests {
                    VALUES (1, 'primary', 'p', 'main', 'refs/heads/main', 'local', '/r', '2026-01-01', '2026-01-01');
                  INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
                    VALUES (1, 1, 'T', 'active', '2026-01-01', '2026-01-01');
-                 INSERT INTO task (id, thread_id, title, status, priority, sort_index, created_by, created_at, updated_at, completed_at) VALUES
-                   (1, 1, 'a', 'done', 'high', 10, 'agent', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', '2026-09-21T09:00:00Z'),
-                   (2, 1, 'b', 'done', 'low', 20, 'agent', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', '2026-09-21T17:30:00Z'),
-                   (3, 1, 'c', 'done', 'high', 30, 'agent', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', '2026-09-23T12:00:00Z'),
-                   (4, 1, 'd', 'ready', 'high', 40, 'agent', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', NULL),
-                   (5, 1, 'e', 'in_progress', 'medium', 50, 'agent', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', NULL);",
+                 INSERT INTO capability_provider (capability, provider, active) VALUES ('work_items', 'oxplow', 1);
+                 INSERT INTO work_item (ref, provider, title, state, native_state, native, thread_id, rank, created_at, updated_at, closed_at) VALUES
+                   ('work_item:oxplow:tsk1', 'oxplow', 'a', 'done', 'done', '{\"priority\":\"high\"}', 1, 10, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', '2026-09-21T09:00:00Z'),
+                   ('work_item:oxplow:tsk2', 'oxplow', 'b', 'done', 'done', '{\"priority\":\"low\"}', 1, 20, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', '2026-09-21T17:30:00Z'),
+                   ('work_item:oxplow:tsk3', 'oxplow', 'c', 'done', 'done', '{\"priority\":\"high\"}', 1, 30, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', '2026-09-23T12:00:00Z'),
+                   ('work_item:oxplow:tsk4', 'oxplow', 'd', 'todo', 'ready', '{\"priority\":\"high\"}', 1, 40, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', NULL),
+                   ('work_item:oxplow:tsk5', 'oxplow', 'e', 'in_progress', 'in_progress', '{\"priority\":\"medium\"}', 1, 50, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', NULL);",
             )
             .map_err(|e| DomainError::Invalid(e.to_string()))
         })
@@ -402,9 +403,9 @@ mod tests {
 
     fn done() -> EntitySpec {
         EntitySpec {
-            view: "v_task".into(),
-            where_: Some("status = 'done'".into()),
-            time: Some("completed_at".into()),
+            view: "v_work_item".into(),
+            where_: Some("state = 'done'".into()),
+            time: Some("closed_at".into()),
             value: None,
             aggregation: "count".into(),
         }
@@ -412,8 +413,8 @@ mod tests {
 
     fn priority() -> EntityDimensionSpec {
         EntityDimensionSpec {
-            view: "v_task".into(),
-            expr: "e.priority".into(),
+            view: "v_work_item".into(),
+            expr: "json_extract(e.native, '$.priority')".into(),
             join: None,
         }
     }
@@ -489,7 +490,7 @@ mod tests {
         );
         // With a join: the dimension may read another view.
         let by_thread = EntityDimensionSpec {
-            view: "v_task".into(),
+            view: "v_work_item".into(),
             expr: "t.title".into(),
             join: Some("LEFT JOIN v_thread t ON t.id = e.thread_id".into()),
         };
@@ -505,7 +506,7 @@ mod tests {
     async fn state_values_and_order_statistics() {
         let l = layer().await;
         let open = EntitySpec {
-            where_: Some("status IN ('ready', 'in_progress', 'blocked')".into()),
+            where_: Some("state IN ('todo', 'in_progress', 'blocked')".into()),
             time: None,
             ..done()
         };
@@ -513,7 +514,7 @@ mod tests {
         assert_eq!(now[0].value, Some(2.0));
         let stat = |agg: &str| EntitySpec {
             where_: None,
-            value: Some("e.sort_index".into()),
+            value: Some("e.rank".into()),
             aggregation: agg.into(),
             ..done()
         };
@@ -525,7 +526,7 @@ mod tests {
                     .unwrap()
             }
         };
-        // sort_index 10..50: median 30, nearest-rank p90 of 5 = 5th = 50.
+        // rank 10..50: median 30, nearest-rank p90 of 5 = 5th = 50.
         assert_eq!(one("median").await, 30.0);
         assert_eq!(one("p90").await, 50.0);
         assert_eq!(one("sum").await, 150.0);
@@ -546,7 +547,7 @@ mod tests {
     async fn a_distinct_headline_counts_across_the_range() {
         let l = layer().await;
         let prios = EntitySpec {
-            value: Some("e.priority".into()),
+            value: Some("json_extract(e.native, '$.priority')".into()),
             aggregation: "count_distinct".into(),
             ..done()
         };
@@ -564,7 +565,7 @@ mod tests {
             .unwrap();
         assert_eq!(headline(&l, &done(), &count).await.unwrap(), Some(3.0));
         let latest = EntitySpec {
-            value: Some("e.sort_index".into()),
+            value: Some("e.rank".into()),
             aggregation: "max".into(),
             ..done()
         };
@@ -582,15 +583,15 @@ mod tests {
         let db = seeded_db().await;
         let l = crate::sql_gateway::SqlGateway::new(db.clone());
         let by_id = EntityDimensionSpec {
-            view: "v_task".into(),
-            expr: "e.id".into(),
+            view: "v_work_item".into(),
+            expr: "e.ref".into(),
             join: None,
         };
         db.transaction(|c| {
             c.execute_batch(
                 "WITH RECURSIVE n(i) AS (SELECT 100 UNION ALL SELECT i + 1 FROM n WHERE i < 10100)
-                 INSERT INTO task (id, thread_id, title, status, priority, sort_index, created_by, created_at, updated_at)
-                 SELECT i, 1, 't', 'ready', 'low', i, 'agent', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z' FROM n;",
+                 INSERT INTO work_item (ref, provider, title, state, native_state, native, thread_id, rank, created_at, updated_at)
+                 SELECT 'work_item:oxplow:tsk' || i, 'oxplow', 't', 'todo', 'ready', '{\"priority\":\"low\"}', 1, i, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z' FROM n;",
             )
             .map_err(|e| DomainError::Invalid(e.to_string()))
         })

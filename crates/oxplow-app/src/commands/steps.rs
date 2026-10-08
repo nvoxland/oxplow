@@ -384,9 +384,10 @@ impl CommandBus {
                     let invocation =
                         origin.invocation(actor, index, &step.call.name, &step.call.input);
                     let key = invocation.idempotency_key.clone();
+                    let trace = invocation.trace.clone();
                     handler(invocation, step.call.input.clone())
                         .await
-                        .map(|out| (same_events_once(out, key.as_deref()), BTreeMap::new()))
+                        .map(|out| (same_events_once(out, key.as_deref()), trace.summary()))
                 }
             };
             match ran {

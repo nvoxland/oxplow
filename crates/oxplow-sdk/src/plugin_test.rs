@@ -892,6 +892,7 @@ async fn test_provider(
         declared: declared.clone(),
         credentials: env_credentials(spec, env),
         host_env: env.clone(),
+        host_calls: None,
     };
     let client = match ReferenceClient::start(&launch).await {
         Ok(c) => c,
@@ -1453,7 +1454,7 @@ collectors:
   - id: things
     runtime: starlark
     entry: collectors/things.star
-    input: \"SELECT id FROM v_task\"
+    input: \"SELECT ref FROM v_work_item\"
     entities:
       - {{ name: thing, key: id, columns: {{ id: int, label: text }} }}
   - id: shell

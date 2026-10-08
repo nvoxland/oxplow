@@ -42,7 +42,7 @@ fn write_extension(project: &Path, hooks: &str) {
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
-        "manifest: 2\nname: tracker\nsharing: private\nintent:\n  purpose: the fake tracker\n  examples: [{ name: a }]\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/provider\n    declarations: provider.json\n",
+        "manifest: 2\nname: tracker\nsharing: private\nintent:\n  purpose: the fake tracker\n  examples: [{ name: a }]\ncommands:\n  - name: item.estimate\n    summary: Set a work item's points.\n    provider: fake\n    op: estimate\n    ui: { label: \"Estimate in Fake…\", group: Tracker, about: work_item, input: { ref: \"{{ref}}\", points: 3 } }\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/provider\n    declarations: provider.json\n",
     )
     .unwrap();
     let script = dir.join("bin/provider");
@@ -71,6 +71,11 @@ fn write_extension(project: &Path, hooks: &str) {
         serde_json::to_string_pretty(&declared).unwrap(),
     )
     .unwrap();
+}
+
+/// Whether instance `id` runs: its work list is registered.
+fn running(svc: &crate::Services, id: &str) -> bool {
+    svc.work_items.get(id).is_ok()
 }
 
 fn extension(project: &Path) -> Extension {
@@ -198,7 +203,7 @@ async fn an_unapproved_provider_is_refused_and_registers_nothing() {
         .await
         .unwrap_err();
     assert_eq!(refused, HostError::Unapproved(INSTANCE.into()));
-    assert!(!fx.svc.commands.namespace_owner("fake").is_some());
+    assert!(!running(&fx.svc, "fake"));
     assert!(fx.svc.work_items.get("fake").is_err());
     assert_eq!(
         fx.svc.providers.health(INSTANCE).unwrap().state,
@@ -216,9 +221,9 @@ async fn edited_declarations_need_approving_again() {
         .unwrap();
     // Its start's first read, in the background (tsk716).
     first_read(&fx).await;
-    assert!(fx.svc.commands.namespace_owner("fake").is_some());
+    assert!(running(&fx.svc, "fake"));
     assert!(providers.stop(INSTANCE).await);
-    assert!(!fx.svc.commands.namespace_owner("fake").is_some());
+    assert!(!running(&fx.svc, "fake"));
 
     // A widened declaration is a new version: shown unapproved, refused.
     let project = fx.svc.layout.project_dir.clone();
@@ -250,7 +255,7 @@ async fn a_provider_must_answer_with_its_approved_declarations() {
         matches!(&err, HostError::DeclarationsChanged { detail, .. } if detail.contains("/commands")),
         "{err}"
     );
-    assert!(!fx.svc.commands.namespace_owner("fake").is_some());
+    assert!(!running(&fx.svc, "fake"));
     // Not what was approved: off, and logged, until a person looks.
     assert!(matches!(
         fx.svc.providers.health(INSTANCE).unwrap().state,
@@ -279,7 +284,7 @@ async fn an_unconfigured_instance_cannot_be_enabled() {
         "{refused:?}"
     );
     assert!(fx.svc.config.read().unwrap().extension_instances.is_empty());
-    assert!(!fx.svc.commands.namespace_owner("fake").is_some());
+    assert!(!running(&fx.svc, "fake"));
 
     // Configured, it enables: written to the project's config and running.
     let view = providers
@@ -288,7 +293,7 @@ async fn an_unconfigured_instance_cannot_be_enabled() {
         .unwrap();
     assert_eq!(view.health.state, InstanceState::Ready);
     assert!(view.enabled);
-    assert!(fx.svc.commands.namespace_owner("fake").is_some());
+    assert!(running(&fx.svc, "fake"));
     let written =
         std::fs::read_to_string(oxplow_config::config_path(&fx.svc.layout.project_dir)).unwrap();
     assert!(written.contains("extensionInstances"), "{written}");
@@ -300,7 +305,7 @@ async fn an_unconfigured_instance_cannot_be_enabled() {
         .await
         .unwrap();
     assert_eq!(view.health.state, InstanceState::Off);
-    assert!(!fx.svc.commands.namespace_owner("fake").is_some());
+    assert!(!running(&fx.svc, "fake"));
 }
 
 /// P5.D4's red: three failures in a row disable the instance, logged
@@ -337,7 +342,7 @@ async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it()
         panic!("{health:?}");
     };
     assert!(reason.contains("3 failures in a row"), "{reason}");
-    assert!(!fx.svc.commands.namespace_owner("fake").is_some());
+    assert!(!running(&fx.svc, "fake"));
     let disabled = logged(&fx, "plugin.disabled").await;
     assert_eq!(disabled.len(), 1);
     assert_eq!(disabled[0]["plugin"], "plugin:tracker");
@@ -387,7 +392,7 @@ async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it()
         fx.svc.providers.health(INSTANCE).unwrap().state,
         InstanceState::Ready
     );
-    assert!(fx.svc.commands.namespace_owner("fake").is_some());
+    assert!(running(&fx.svc, "fake"));
 }
 
 /// P7.A7: the suite reads the provider back after its writes — a read
@@ -515,17 +520,20 @@ async fn work_item_commands_write_another_providers_items_through_its_process() 
         .unwrap();
     // Its start's first read, in the background (tsk716).
     first_read(&fx).await;
-    assert!(fx.svc.commands.spec("fake.work_items.transition").is_none());
-    assert!(fx.svc.commands.spec("fake.work_items.create").is_none());
+    // Its extra command is its extension's, declared over its operation.
+    fx.svc.extension_commands.reconcile().await;
     let estimate = fx
         .svc
         .commands
-        .spec("fake.work_items.estimate")
-        .expect("its own command");
+        .spec("tracker.item.estimate")
+        .expect("its extension's command");
     assert_eq!(estimate.atomicity, oxplow_domain::Atomicity::External);
     assert_eq!(
-        fx.svc.commands.namespace_owner("fake").as_deref(),
-        Some("provider:tracker/fake")
+        estimate.op,
+        Some(oxplow_domain::OpRef {
+            capability: "provider:tracker/fake".into(),
+            op: "estimate".into()
+        })
     );
 
     let items = fx.svc.work_items_client();
@@ -541,6 +549,35 @@ async fn work_item_commands_write_another_providers_items_through_its_process() 
         .unwrap()
         .expect("the list keeps it");
     assert_eq!(item, "work_item:fake:W-1");
+    // It runs on the instance its `ref` is of; one naming an instance that
+    // doesn't run is refused.
+    let estimated = fx
+        .svc
+        .commands
+        .run(
+            &Actor::Human,
+            "tracker.item.estimate",
+            json!({ "ref": item, "points": 5 }),
+            false,
+        )
+        .await
+        .unwrap();
+    assert!(estimated.audit_id.is_some(), "a record is audited");
+    let err = fx
+        .svc
+        .commands
+        .run(
+            &Actor::Human,
+            "tracker.item.estimate",
+            json!({ "ref": item, "points": 5, "instance": "fake_nope" }),
+            false,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("no running instance `fake_nope`"),
+        "{err}"
+    );
     let moved = items
         .transition(
             &Actor::Human,
@@ -572,11 +609,13 @@ async fn work_item_commands_write_another_providers_items_through_its_process() 
         .map(|r| r.command)
         .collect();
     // The fixture opened its effort; starting the instance read it once
-    // (as the system), then the two writes.
+    // (as the system), then the writes — the refused estimate audited too.
     assert_eq!(
         commands,
         vec![
             "oxplow.work_item.transition",
+            "tracker.item.estimate",
+            "tracker.item.estimate",
             "oxplow.work_item.create",
             "oxplow.provider.sync",
             "oxplow.effort.open"
@@ -855,57 +894,120 @@ async fn a_running_instance_publishes_its_features() {
     assert!(!stopped.available && !stopped.active);
 }
 
-/// P6b.C4: an extension's `ui.commands` name registered commands — or,
-/// for its own provider (not on the bus until its instance runs), commands
-/// its declarations list that aren't its capability's verbs — and their
-/// input must fit.
+/// Protocol 3's `host/call`: a provider whose manifest `needs` `sql.read`
+/// reads oxplow's models while it serves a command; the read is recorded
+/// with the run (its audit row's capabilities). One that doesn't need it
+/// is refused, and so is its command.
 #[tokio::test]
-async fn ui_commands_are_checked_against_the_registry_or_the_providers_declarations() {
+async fn a_provider_reads_the_host_through_what_it_needs() {
+    for (needs, reads) in [(true, true), (false, false)] {
+        let fx = services_with_effort().await;
+        let root = fx.svc.layout.project_dir.clone();
+        write_extension(&root, "host-read");
+        if needs {
+            let manifest = root.join("oxplow/extensions/tracker/extension.yaml");
+            let text = std::fs::read_to_string(&manifest).unwrap();
+            std::fs::write(&manifest, format!("{text}    needs: [sql.read]\n")).unwrap();
+        }
+        let ext = extension(&root);
+        assert_eq!(ext.providers[0].needs.is_empty(), !needs);
+        approve(&fx, &ext);
+        make_active(&fx, "fake");
+        fx.svc
+            .providers
+            .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
+            .await
+            .unwrap();
+        fx.svc.extension_commands.reconcile().await;
+        let item = fx
+            .svc
+            .work_items_client()
+            .create(
+                &Actor::Human,
+                crate::work_items::NewItem {
+                    title: "theirs".into(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        let ran = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                "tracker.item.estimate",
+                json!({ "ref": item, "points": 2 }),
+                false,
+            )
+            .await;
+        if reads {
+            let out = ran.unwrap();
+            assert_eq!(out.result["read"], json!([{ "n": 7 }]));
+            let audit = fx
+                .svc
+                .commands
+                .audit_store()
+                .get(out.audit_id.unwrap())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(audit.capabilities, [("sql.read".to_string(), 1)].into());
+        } else {
+            let err = ran.unwrap_err().to_string();
+            assert!(err.contains("isn't in the command's `needs`"), "{err}");
+        }
+    }
+}
+
+/// A provider's command is declared in its extension's manifest over an
+/// operation its declarations list (`provider:` + `op:`): its input is the
+/// operation's, with an optional `instance`; a capability verb, an
+/// operation it doesn't declare or a provider it doesn't have is refused
+/// at its line.
+#[tokio::test]
+async fn a_provider_command_is_declared_over_an_operation_it_lists() {
     let fx = services_with_effort().await;
     let root = fx.svc.layout.project_dir.clone();
     write_extension(&root, "");
+    let ext = extension(&root);
+    let estimate = ext
+        .commands
+        .iter()
+        .find(|c| c.name == "tracker.item.estimate")
+        .unwrap();
+    let schema = estimate.input_schema.as_ref().unwrap();
+    assert_eq!(schema["required"], json!(["ref", "points"]));
+    assert_eq!(schema["properties"]["instance"]["type"], json!("string"));
     let manifest = root.join("oxplow/extensions/tracker/extension.yaml");
     let base = std::fs::read_to_string(&manifest).unwrap();
-    std::fs::write(
-        &manifest,
-        format!(
-            "{base}ui:\n  commands:\n    - {{ command: fake.work_items.estimate, label: Estimate, about: work_item, input: {{ ref: \"{{{{ref}}}}\", points: 3 }} }}\n    - {{ command: fake.work_items.comment, label: Comment, about: work_item, input: {{ ref: \"{{{{ref}}}}\", body: hi }} }}\n    - {{ command: fake.work_items.nope, label: Nope, about: work_item }}\n    - {{ command: oxplow.work_item.transition, label: Done, about: work_item, input: {{ ref: \"{{{{ref}}}}\", to: done }} }}\n    - {{ command: oxplow.work_item.transition, label: Bad, about: work_item, input: {{ ref: \"{{{{ref}}}}\" }} }}\n"
+    for (entry, says) in [
+        (
+            "  - { name: item.comment, summary: S., provider: fake, op: comment }\n",
+            "`comment` is a work-item verb",
         ),
-    )
-    .unwrap();
-    let ext = extension(&root);
-    assert_eq!(ext.ui.commands.len(), 5);
-    assert_eq!(ext.ui.commands[0].group, "fake");
-    let schema = |name: &str| fx.svc.commands.input_schema(name);
-    let v = crate::extensions::validate_extension(
-        &fx.svc.sql,
-        &fx.svc.extension_catalog,
-        &root,
-        EXT,
-        Some(&schema),
-    )
-    .await
-    .unwrap();
-    let errs = v.errors.join("\n");
-    assert!(
-        !errs.contains("`Estimate`"),
-        "the provider declares it: {errs}"
-    );
-    // A capability verb isn't a command of its own: `oxplow.work_item.comment`
-    // is (P7.A1).
-    assert!(
-        errs.contains("`ui.commands` `Comment`: no command `fake.work_items.comment`"),
-        "{errs}"
-    );
-    assert!(!errs.contains("`Done`"), "{errs}");
-    assert!(
-        errs.contains("`ui.commands` `Nope`: no command `fake.work_items.nope`"),
-        "{errs}"
-    );
-    assert!(
-        errs.contains("`ui.commands` `Bad`: the input doesn't fit `oxplow.work_item.transition`"),
-        "{errs}"
-    );
+        (
+            "  - { name: item.nope, summary: S., provider: fake, op: nope }\n",
+            "its declarations have no command `nope`",
+        ),
+        (
+            "  - { name: item.other, summary: S., provider: other, op: estimate }\n",
+            "no provider `other`",
+        ),
+    ] {
+        std::fs::write(
+            &manifest,
+            base.replacen("providers:\n", &format!("{entry}providers:\n"), 1),
+        )
+        .unwrap();
+        let loaded = crate::extensions::load_extensions(&root)
+            .into_iter()
+            .find(|e| e.name == EXT)
+            .unwrap();
+        let errs = loaded.errors.join("\n");
+        assert!(errs.contains(says), "{entry}: {errs}");
+    }
 }
 
 /// P6b.E3: what approving a provider's declarations would change: all new
@@ -1349,7 +1451,7 @@ async fn a_disable_while_starting_keeps_the_instance_off() {
         .disable(INSTANCE, None, "a person turned it off".into())
         .await;
     let _ = starting.await.unwrap();
-    assert!(!fx.svc.commands.namespace_owner("fake").is_some());
+    assert!(!running(&fx.svc, "fake"));
     assert!(providers.get(INSTANCE).await.is_none());
     assert!(matches!(
         providers.health(INSTANCE).unwrap().state,
@@ -1372,7 +1474,7 @@ async fn an_unreadable_disable_record_keeps_the_instance_off() {
         .await
         .unwrap();
     fx.svc.providers.reconcile().await;
-    assert!(!fx.svc.commands.namespace_owner("fake").is_some());
+    assert!(!running(&fx.svc, "fake"));
     let health = fx.svc.providers.health(INSTANCE).unwrap();
     assert!(
         matches!(&health.state, InstanceState::Failing { errors } if errors[0].contains("disabled")),
@@ -1414,7 +1516,7 @@ async fn approving_updated_declarations_restarts_the_instance() {
     let (fx, _ext) = approved("").await;
     configure(&fx, true, json!({ "team": "core" }));
     fx.svc.providers.reconcile().await;
-    assert!(fx.svc.commands.namespace_owner("fake").is_some());
+    assert!(running(&fx.svc, "fake"));
 
     // The provider updates: new behaviour and new declarations, approved.
     let project = fx.svc.layout.project_dir.clone();
@@ -1507,7 +1609,7 @@ async fn a_failed_enable_writes_no_config() {
         .await;
     assert!(err.is_err(), "{err:?}");
     assert!(fx.svc.config.read().unwrap().extension_instances.is_empty());
-    assert!(!fx.svc.commands.namespace_owner("fake").is_some());
+    assert!(!running(&fx.svc, "fake"));
 }
 
 /// tsk569, P7.A1: a capability verb is run by `work_item.<verb>` (whose
@@ -2463,16 +2565,8 @@ async fn two_instances_of_one_provider_run_side_by_side() {
             "{name}"
         );
     }
-    assert_eq!(
-        fx.svc.commands.namespace_owner("fake_second").as_deref(),
-        Some("provider:tracker/fake_second")
-    );
-    assert!(fx.svc.commands.spec("fake.work_items.estimate").is_some());
-    assert!(fx
-        .svc
-        .commands
-        .spec("fake_second.work_items.estimate")
-        .is_some());
+    assert!(running(&fx.svc, "fake"));
+    assert!(running(&fx.svc, "fake_second"));
 
     let items = fx.svc.work_items_client();
     let new = |provider: &str| {
@@ -2524,12 +2618,8 @@ async fn two_instances_of_one_provider_run_side_by_side() {
 
     // Stopping one leaves the other.
     assert!(fx.svc.providers.stop(SECOND).await);
-    assert!(fx
-        .svc
-        .commands
-        .spec("fake_second.work_items.estimate")
-        .is_none());
-    assert!(fx.svc.commands.spec("fake.work_items.estimate").is_some());
+    assert!(!running(&fx.svc, "fake_second"));
+    assert!(running(&fx.svc, "fake"));
     assert!(items.create(&Actor::Human, new("fake")).await.is_ok());
 }
 
@@ -2609,11 +2699,7 @@ async fn a_named_instance_says_which_provider_it_is() {
         }
         other => panic!("{other:?}"),
     }
-    assert!(fx
-        .svc
-        .commands
-        .spec("fake_second.work_items.estimate")
-        .is_none());
+    assert!(!running(&fx.svc, "fake_second"));
 
     // A person adds one by naming the provider; a provider the extension
     // doesn't declare, or an id already taken, is refused.
@@ -2823,10 +2909,7 @@ async fn a_global_instance_runs_in_every_project_with_the_extension() {
         (there.scope, there.health.state),
         (Scope::Global, InstanceState::Ready)
     );
-    assert!(other
-        .commands
-        .spec("fake_shared.work_items.estimate")
-        .is_some());
+    assert!(running(&other, "fake_shared"));
 
     let (bare, _bare_dir) = sibling_project(&fx, "", false).await;
     bare.providers.reconcile().await;
@@ -2853,10 +2936,7 @@ async fn a_global_instance_runs_in_every_project_with_the_extension() {
     assert_eq!(state_of(&fx.svc, SHARED).await, None);
     assert!(other.providers.reconcile_if_global_changed().await);
     assert_eq!(state_of(&other, SHARED).await, None);
-    assert!(other
-        .commands
-        .spec("fake_shared.work_items.estimate")
-        .is_none());
+    assert!(!running(&other, "fake_shared"));
 }
 
 /// tsk843: a person turns a global instance off in one project from its
@@ -3936,7 +4016,7 @@ async fn a_revoked_sign_in_stops_the_instance_and_says_sign_in_again() {
     assert_eq!(path, "/credentials/FAKE_TOKEN");
     assert!(message.contains("sign in again"), "{message}");
     assert!(fx.svc.work_items.get("fake").is_err(), "nothing registered");
-    assert!(fx.svc.commands.namespace_owner("fake").is_none());
+    assert!(!running(&fx.svc, "fake"));
     assert_eq!(
         sign_in_state(&fx.svc.providers.list().await, "FAKE_TOKEN"),
         (false, Some(oauth::SignInState::SignInAgain))
@@ -4737,19 +4817,15 @@ async fn a_lost_reply_is_sent_again_and_lands_once() {
 /// changed in between.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_automatic_retry_sends_what_the_failed_attempt_composed() {
-    // Reads the oxplow task that moved (the fake is the active list, so
-    // the interface doesn't show it): its own view.
-    let titled_from_the_task = "def transform(x):\n    rows = capability(\"sql.read\", {\"sql\": \"SELECT title FROM v_task WHERE 'work_item:oxplow:tsk' || id = :work_item\", \"params\": {\"work_item\": x[\"event\"][\"payload\"][\"work_item\"]}})\n    return {\"commands\": [{\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"after \" + rows[0][\"title\"]}}]}\n";
-    let fx = with_effect("lose-reply", titled_from_the_task).await;
-    let task = oxplow_tasks::work_item_ref(fx.task);
+    // Reads something oxplow holds that can change between attempts: the
+    // fixture's thread's title (thread 1).
+    let titled_from_the_thread = "def transform(x):\n    rows = capability(\"sql.read\", {\"sql\": \"SELECT title FROM v_thread WHERE id = 1\"})\n    return {\"commands\": [{\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"after \" + rows[0][\"title\"]}}]}\n";
+    let fx = with_effect("lose-reply", titled_from_the_thread).await;
+    assert_eq!(fx.thread, ThreadId::new(1));
     let rows = fx
         .svc
         .sql
-        .query_sql(
-            &format!("SELECT title FROM v_task WHERE 'work_item:oxplow:tsk' || id = '{task}'"),
-            vec![],
-            None,
-        )
+        .query_sql("SELECT title FROM v_thread WHERE id = 1", vec![], None)
         .await
         .unwrap()
         .rows;
@@ -4759,14 +4835,16 @@ async fn an_automatic_retry_sends_what_the_failed_attempt_composed() {
         .to_string();
     react(&fx).await;
     assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
-    // What the effect reads changes before its retry (oxplow's task,
-    // through its own store: the fake is the active list).
-    {
-        use oxplow_tasks::TaskStore as _;
-        let mut t = fx.svc.task_store.get(fx.task).await.unwrap().unwrap();
-        t.title = "renamed".into();
-        fx.svc.task_store.update(&t).await.unwrap();
-    }
+    // What the effect reads changes before its retry.
+    fx.svc
+        .db
+        .transaction(|c| {
+            c.execute("UPDATE threads SET title = 'renamed' WHERE id = 1", [])
+                .map_err(oxplow_db::map_sql_err)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
     assert_eq!(
         crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(11))
             .await

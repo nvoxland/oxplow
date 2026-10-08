@@ -248,6 +248,8 @@ pub struct ProjectProgram {
     pub network: Vec<String>,
     /// The commands it may run with the viewer's rights (a component).
     pub commands: Vec<String>,
+    /// The host capabilities it may call (a provider's `needs`).
+    pub capabilities: Vec<String>,
     /// The project-relative folder whose every file the approval covers
     /// (a provider's extension, declarations included).
     pub tree: Option<String>,
@@ -380,6 +382,10 @@ impl ProjectProgram {
             h.update([7u8]);
             h.update(c.as_bytes());
         }
+        for c in &self.capabilities {
+            h.update([8u8]);
+            h.update(c.as_bytes());
+        }
         Ok(hex::encode(h.finalize()))
     }
 }
@@ -510,6 +516,7 @@ pub fn program_hash(project_dir: &Path, program: &str, args: &[String]) -> std::
         credentials: Vec::new(),
         network: Vec::new(),
         commands: Vec::new(),
+        capabilities: Vec::new(),
         tree: None,
         remote: false,
         approved: false,
@@ -537,6 +544,7 @@ pub fn may_run(
         credentials: Vec::new(),
         network: Vec::new(),
         commands: Vec::new(),
+        capabilities: Vec::new(),
         tree: None,
         remote: false,
         approved: false,
@@ -568,6 +576,7 @@ pub fn acp_program(agent: &oxplow_config::AcpAgentConfig) -> ProjectProgram {
         credentials: Vec::new(),
         network: Vec::new(),
         commands: Vec::new(),
+        capabilities: Vec::new(),
         tree: None,
         remote: false,
         approved: false,
@@ -611,6 +620,7 @@ pub fn advisory_program(ext: &crate::extensions::Extension) -> ProjectProgram {
         credentials: Vec::new(),
         network: Vec::new(),
         commands: Vec::new(),
+        capabilities: Vec::new(),
         tree: None,
         remote: false,
         approved: false,
@@ -661,6 +671,7 @@ pub fn provider_program(
         credentials: spec.credential_grants(),
         network: spec.network.clone(),
         commands: Vec::new(),
+        capabilities: spec.needs.clone(),
         tree: Some(dir.to_string()),
         approved: false,
         version: None,
@@ -687,6 +698,7 @@ pub fn component_program(
         credentials: Vec::new(),
         network: Vec::new(),
         commands: component.commands.clone(),
+        capabilities: Vec::new(),
         tree: Some(dir.to_string()),
         remote: false,
         approved: false,
@@ -762,6 +774,7 @@ pub fn list(
             credentials: Vec::new(),
             network: Vec::new(),
             commands: Vec::new(),
+            capabilities: Vec::new(),
             tree: None,
             remote: false,
             approved: false,
@@ -921,6 +934,7 @@ mod tests {
             credentials: Vec::new(),
             network: Vec::new(),
             commands: Vec::new(),
+            capabilities: Vec::new(),
             tree: Some("bundled:oxplow-bundled".into()),
             remote: false,
             approved: false,
@@ -943,6 +957,7 @@ mod tests {
             credentials: Vec::new(),
             network: Vec::new(),
             commands: Vec::new(),
+            capabilities: Vec::new(),
             tree: Some("bundled:oxplow-bundled".into()),
             remote: false,
             approved: false,

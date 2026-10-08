@@ -282,9 +282,9 @@ mod tests {
         assert_eq!(p.bucket, Some(TimeBucket::Week));
         assert_eq!(p.dim.as_deref(), Some("zone"));
         assert_eq!(p.keys, vec!["a.b".to_string(), "c".to_string()]);
-        assert_eq!(plan("SELECT 1 FROM v_task").unwrap(), None);
+        assert_eq!(plan("SELECT 1 FROM v_work_item").unwrap(), None);
         for (sql, says) in [
-            ("SELECT MEASURE('a') FROM v_task", "doesn't have"),
+            ("SELECT MEASURE('a') FROM v_work_item", "doesn't have"),
             (
                 "SELECT MEASURE('a') FROM metric_grid('hour')",
                 "'day', 'week', 'month' or 'capture'",

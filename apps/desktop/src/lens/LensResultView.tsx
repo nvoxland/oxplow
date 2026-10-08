@@ -42,8 +42,7 @@ import {
 } from "./lensModel.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
 import { useContextMenu } from "../components/useRowContextMenu.js";
-import { uiCommandMenuItems, uiCommandsAbout } from "../components/uiCommands.js";
-import { useUiCommands } from "../components/useUiCommands.js";
+import { refCommandMenuItems, useRefOffers } from "../components/refCommands.js";
 import { safeColor } from "../components/decorators.js";
 import { useDecorations } from "../components/useDecorations.js";
 import { RefBadge } from "../components/RefBadge.js";
@@ -226,7 +225,7 @@ function RowsBody({
   const lens = run.lens;
   const result = limitRows(run.result, maxRows);
   const ctxMenu = useContextMenu();
-  const uiCommands = useUiCommands();
+  const refOffersFor = useRefOffers();
   // Extensions' badges for the refs these rows link to (P6b.C5).
   const linkedRefs = result.rows.flatMap((row) =>
     lens.columns.flatMap((c) => {
@@ -290,14 +289,10 @@ function RowsBody({
       enabled: actions !== undefined,
       run: () => actions?.run(a, rowRecord(result.columns, row)),
     })),
-    // Extensions' commands for what the row links to (P6b.C4).
+    // The commands about what the row links to (their `ui.about`).
     ...(() => {
       const ref = rowRef(lens, result.columns, row);
-      return ref
-        ? uiCommandMenuItems(uiCommandsAbout(uiCommands, ref, "context"), ref, (c, input) =>
-            void personCommands.run(c.label, c.command, input),
-          )
-        : [];
+      return ref ? refCommandMenuItems(refOffersFor(ref)) : [];
     })(),
   ];
   // Every row of every row component: focusable, with its menu from a

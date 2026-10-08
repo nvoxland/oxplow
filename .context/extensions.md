@@ -501,7 +501,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     `oxplow.effort.verify_claim`, `claim` a param)
 
   **Its verdicts (P7.C5, the first bundled `commands:`)**, on an
-  effort's page under **Commands** (`ui.commands` about `effort`):
+  effort's page under **Commands** (their `ui.about: effort`):
   `oxplow.review.accept { ref, force? }` comments the review on the
   effort's work item then transitions it to `done`, refusing (`{ refuse }`)
   while a claim is unverified or an inferred decision unreviewed unless
@@ -733,7 +733,7 @@ and one calling MCP read identical `file:line: what — fix` lines.
     entity `item`, a model `open_items` over `ref('item')` and a lens over
     the model; its example runs the collector over fixture rows;
   - `command` — `commands: [note]` whose `handlers/note.star` composes
-    `oxplow.work_item.comment`, with an example and a `ui.commands` entry on
+    `oxplow.work_item.comment`, with an example and a `ui` about
     `work_item`; its intent example dry-runs it;
   - `effect` (P8.D12) — `effects: [on-done]` on `work_item.state_changed`
     `where: { to: done }`, whose `effects/on-done.star` composes
@@ -855,8 +855,7 @@ declared entity published empty (`collector_runner::publish_declared_empty`
 — as if each collector had run and found nothing; never on a real
 database), the extension models published and commands registered as at
 boot. It never opens the project's database. It runs `check` there
-(with that registry, so `commands:` examples dry-run and `ui.commands` /
-launcher commands are checked), then — only if `check` is clean — each
+(with that registry, so `commands:` examples dry-run), then — only if `check` is clean — each
 `intent.examples[*]` by its fixture `fixtures/<name>.yaml`:
 
 - `input: { lens: <slug>, params? }`, `expect: { columns?, rows: n |
@@ -1319,43 +1318,30 @@ changed lens before and after), the component the install review uses
 too. While the RPC runs it says "Reviewing acme…"; when it fails, "Could
 not review acme: <why>" (tsk793) — never a spinner that doesn't end.
 
-## Commands in core menus (`ui.commands`)
+## Commands in core menus (a command's `ui.about`)
 
-`ui.commands` (stable, P6b.C4; `extensions/ui_commands.rs`) puts a
-command — any registered one, or one of the extension's own provider's —
-in core menus, **for a ref**:
-
-```yaml
-ui:
-  commands:
-    - { command: fake.estimate, label: "Estimate in Fake…", about: work_item, placement: [menu, context] }
-    - { command: oxplow.work_item.transition, label: Move to Done, about: work_item, input: { ref: "{{ref}}", to: done } }
-```
-
-`about` (a core ref kind) is required; `placement` is `menu` (the page
-nav bar's **Commands** menu for the page's ref — `RefCommandsMenu` beside
-Ask, zero per-page wiring) and/or `context` (a row's right-click menu
-for the row's ref — lens rows, by the first ref the row links to
-(`rowRef`), and Board cards), both by default. `input` defaults to `{
-ref: "{{ref}}" }`; its strings may be exactly `{{ref}}` or `{{ref.id}}`
-and nothing else (`bindRefInput`). There is no launcher placement: a
-launcher has no current ref, and a ref-less command is offered by its own
-`ui`. (`ui.commands` overlaps a command's `ui.about`; it stays until a
-provider's commands can carry a `ui`, the providers phase.) A command whose namespace is one of
-the extension's providers groups under that provider's id, anything else
-under the extension's name. `check_commands` (it replaced
-`check_launcher_commands`) checks `ui.commands` entries
-alike against the registry — or, for one of the extension's own
-providers (not on the bus until its instance runs), against its
-declarations (`provider_command_schema`). The desktop reads them from
-the extensions list (`useUiCommands`) and runs each as the person
-through `personCommands` (`components/uiCommands.ts`).
+A command an extension declares meets a person through its own `ui`
+([commands.md](./commands.md) "Offering a command to a person"). One
+**about a ref's kind** (`ui: { label, group, about: work_item, input: {
+ref: "{{ref}}" } }`) is offered on that ref: its page's nav-bar
+**Commands** menu (`RefCommandsMenu`, beside Ask) and a row's right-click
+menu for the row's ref (lens rows, by the first ref the row links to —
+`rowRef` — and Board cards), grouped by `ui.group`. Its input's strings
+may be exactly `{{ref}}` / `{{ref.id}}` (or `{{stream}}` / `{{thread}}`),
+and without an `input` it gets `{ ref: "{{ref}}" }`. The desktop builds
+them from the person's command listing (`refOffers`,
+`components/refCommands.ts`) and runs each as search does (App publishes
+its offer host, `setRefOfferHost`). To put another command on a ref's
+menu — oxplow's transition to done, say — an extension declares its own
+command over the same operation (`capability:` / `provider:` + `op:`,
+with its `ui.input`) or a script composing it. The old `ui.commands`
+block is gone.
 
 **The desktop reads the extensions from one store**
 (`extensionsStore.ts`, `useExtensions()`): one `listExtensions` (the
 main worktree's, the same in every stream) and one event subscription
 however many readers are mounted
-(slots, `useSlotMounted`, `SettingsSlotSections`, `ui.commands` menus,
+(slots, `useSlotMounted`, `SettingsSlotSections`,
 decorators, rail panels, extension pages, the launcher), reloaded on
 `extensionsChanged`; the listing lives while something reads it, so a
 later mount loads afresh. Only Settings → Extensions lists them itself — it
@@ -1692,8 +1678,8 @@ at 50 items, saying how many more the review has. A bundled effect
 is approved like any (K1, tsk953: its embedded files are hashed alike),
 so it runs only once a person approves it. A task an effect (or oxplow
 itself) files has no `author` — it isn't the person's; its
-`work_item.created` and the run's audit name the effect (`v_task` v2
-says so). The loader no longer limits effects to private extensions.
+`work_item.created` and the run's audit name the effect (its `native`
+`author` is null). The loader no longer limits effects to private extensions.
 
 **Retention** (P8.D5) is the namespace's window for payloads and large
 content (data-model.md "event_log" retention): either omitted part is the
@@ -2222,6 +2208,14 @@ commands:
       - { name: gone, input: { ref: "work_item:oxplow:tsk9" }, answers: { sql.read: [[]] }, refuses: no such }
 ```
 
+A command may be **backed by an operation of one of the extension's
+providers**: `provider: fake` + `op: estimate`, the operation one its
+checked-in declarations list (not a capability verb — those run as
+`oxplow.work_item.<verb>`). Its input schema (plus an optional
+`instance`), effect and undo are the declaration's, its `confirm` the
+stronger of the manifest's and the declaration's; it runs on the
+instance its input names ([providers.md](./providers.md) "The host").
+
 A command may instead be **backed by an operation of a host capability**
 ([commands.md](./commands.md) "Host capabilities" → "Operations"):
 `capability: bookmarks.write` + `op: set` in place of `entry:` — no
@@ -2261,7 +2255,7 @@ namespace (other than `oxplow`) are both refused at load
 (`refuse_shared_namespaces`, after disabling applies). Each entry is
 checked at load, its error at its line (`entry_line`: the line whose
 `name:` is exactly that name — `a` never lands on `abc`; ids, lenses,
-models and `ui.commands` entries find their lines the same way): the name, `effect`, `confirm`,
+and models find their lines the same way): the name, `effect`, `confirm`,
 the schema compiles, each `needs` entry is a host capability or a
 capability / feature, and the entry is a file in the
 extension that parses and defines `transform` (`check_starlark`), and
@@ -2670,8 +2664,7 @@ tool list stable no matter how many extensions are installed.
   the agent's input (over `agent_input.write` `draft`) — is a command the
   extension declares with a `ui`, offered like oxplow's own
   (`commandOffers`). The launcher (`components/extensionLauncher.ts`
-  `launcherPages`) lists lenses and `pages:`; `check_commands` checks the
-  `ui.commands` entries.
+  `launcherPages`) lists lenses and `pages:`.
 - **Lens actions (current, P6.B1):** `actions:` are commands, run by an
   agent with `run_lens_action` as the lens acting for it (see "Actions
   are commands").

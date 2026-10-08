@@ -169,6 +169,9 @@ pub type ExternalHandler = dyn Fn(Invocation, Value) -> ExternalFuture + Send + 
 pub struct Invocation {
     pub actor: Actor,
     pub idempotency_key: Option<String>,
+    /// The host capabilities the run calls on its way (a provider's
+    /// `host/call`s): recorded with the run, like `TxCtx::trace`.
+    pub trace: Arc<crate::host_capabilities::CapabilityTrace>,
 }
 
 /// The idempotency key of step `index` (calling `call` with `input`) of
@@ -189,6 +192,27 @@ pub fn effect_step_key(
     let digest = hash.finalize();
     let short: String = digest.iter().take(8).map(|b| format!("{b:02x}")).collect();
     format!("effect:{}:{}:{index}:{short}", run.effect, run.event_id)
+}
+
+#[derive(Clone)]
+/// A run of an extension's command backed by one of its provider's
+/// operations (`provider:` + `op:` in its manifest).
+pub struct ProviderCall {
+    pub extension: String,
+    /// The provider's id in the extension.
+    pub provider: String,
+    /// The operation, as its declarations name it.
+    pub op: String,
+    /// The command's input: a `ref` to one of an instance's items, or an
+    /// `instance`, says which instance runs it.
+    pub input: Value,
+    pub invocation: Invocation,
+}
+
+/// Runs a provider's operation on the instance a call names: the provider
+/// registry (`providers::registry`).
+pub trait ProviderRouter: Send + Sync {
+    fn run(&self, call: ProviderCall) -> ExternalFuture;
 }
 
 #[derive(Clone)]
@@ -514,6 +538,7 @@ impl RunOrigin {
                 RunOrigin::Effect(run, _) => Some(effect_step_key(run, index, call, input)),
                 _ => None,
             },
+            trace: Arc::default(),
         }
     }
 }
@@ -529,6 +554,9 @@ pub struct CommandBus {
     /// The host capabilities' operations: what a command declared in a
     /// manifest is backed by (`ops.rs`).
     ops: RwLock<ops::Ops>,
+    /// Where an extension's provider command runs (`ProviderRouter`):
+    /// the provider registry, set once it exists.
+    providers: std::sync::OnceLock<std::sync::Weak<dyn ProviderRouter>>,
     write_gate: Option<WriteGate>,
     /// What's active, for what a command needs or which implementation
     /// owns it (`capabilities::Active::refusal`); `None` offers everything.
@@ -554,6 +582,7 @@ impl CommandBus {
             pump,
             commands: RwLock::new(Registry::default()),
             ops: RwLock::new(ops::Ops::default()),
+            providers: std::sync::OnceLock::new(),
             write_gate: None,
             capabilities: None,
         }
@@ -612,6 +641,28 @@ impl CommandBus {
     /// capability isn't in the catalog or the op is already there.
     pub fn add_op(&self, op: ops::Op) -> Result<(), CommandError> {
         self.ops.write().add(op)
+    }
+
+    /// Run extension commands backed by a provider's operation through
+    /// `router` (the provider registry).
+    pub fn set_provider_router(&self, router: std::sync::Weak<dyn ProviderRouter>) {
+        let _ = self.providers.set(router);
+    }
+
+    /// The provider router, while it's there.
+    pub fn provider_router(&self) -> Option<Arc<dyn ProviderRouter>> {
+        self.providers.get().and_then(std::sync::Weak::upgrade)
+    }
+
+    /// The command declared over operation `op` (its `CommandSpec::op`):
+    /// what an inverse naming an operation is a call of.
+    pub fn command_for_op(&self, op: &oxplow_domain::OpRef) -> Option<String> {
+        self.commands
+            .read()
+            .commands
+            .values()
+            .find(|c| c.spec.op.as_ref() == Some(op))
+            .map(|c| c.spec.id.clone())
     }
 
     /// The operation `op` of host capability `capability`.
@@ -1113,9 +1164,10 @@ impl CommandBus {
             Resolved::External(handler) => {
                 self.claim(&origin).await?;
                 let invocation = origin.invocation(actor, 0, &spec.id, &input);
+                let trace = invocation.trace.clone();
                 match handler(invocation, input.clone()).await {
                     Ok(out) => Ok(self
-                        .record_external(actor, spec, &input, out, origin.clone())
+                        .record_external(actor, spec, &input, out, origin.clone(), trace.summary())
                         .await),
                     Err(err) => {
                         self.release(&origin).await;
@@ -1654,6 +1706,7 @@ impl CommandBus {
                 let invocation = Invocation {
                     actor: actor.clone(),
                     idempotency_key: None,
+                    trace: Arc::default(),
                 };
                 handler(invocation, input).await?
             }
@@ -1716,6 +1769,7 @@ impl CommandBus {
         input: &Value,
         mut out: HandlerOutput,
         origin: RunOrigin,
+        capabilities: std::collections::BTreeMap<String, u32>,
     ) -> CommandOutcome {
         let (actor_c, spec_c, input_c) = (actor.clone(), spec.clone(), input.clone());
         let vocabulary = self.log.vocabulary().clone();
@@ -1736,7 +1790,10 @@ impl CommandBus {
                     &spec_c,
                     &input_c,
                     &shadow,
-                    Executed::ok(oxplow_domain::EventId::generate(), &origin),
+                    Executed {
+                        capabilities: capabilities.clone(),
+                        ..Executed::ok(oxplow_domain::EventId::generate(), &origin)
+                    },
                 )?;
                 match &origin {
                     RunOrigin::Call => {}

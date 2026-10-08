@@ -90,6 +90,7 @@ export function programRow(p: ProjectProgram): ProgramRowModel {
       ...(p.env.length > 0 ? [`env: ${p.env.join(", ")}`] : []),
       ...(p.credentials.length > 0 ? [`credentials: ${p.credentials.join(", ")}`] : []),
       ...(p.network.length > 0 ? [`reaches: ${p.network.join(", ")}`] : []),
+      ...(p.capabilities.length > 0 ? [`calls oxplow's: ${p.capabilities.join(", ")}`] : []),
     ].join("\n");
     return {
       key: `${p.kind}:${p.name}`,

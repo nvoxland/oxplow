@@ -23,13 +23,6 @@ mod tests;
 
 pub use host::HostError;
 
-/// The id of command `name` that instance `instance` of a `capability`
-/// provider declares: `<instance>.<capability>.<name>` (`fake.work_items.estimate`).
-/// Interim, until a provider's commands are namespaced by its extension
-/// like any other extension's.
-pub fn command_id(instance: &str, capability: &str, name: &str) -> String {
-    format!("{instance}.{capability}.{name}")
-}
 pub use registry::{BegunSignIn, SignInId};
 pub use registry::{
     CollectorView, ConfigProblem, HostDeps, Instance, InstanceHealth, InstanceState,

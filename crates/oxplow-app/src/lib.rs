@@ -1248,6 +1248,11 @@ impl Services {
             &commands,
             work_items.clone(),
         );
+        // An extension's provider commands run on its instances.
+        commands.set_provider_router({
+            let router: Arc<dyn commands::ProviderRouter> = providers.clone();
+            Arc::downgrade(&router)
+        });
         let plugin_health =
             plugin_health::PluginHealth::new(db.clone(), event_log_store.vocabulary().clone());
         commands

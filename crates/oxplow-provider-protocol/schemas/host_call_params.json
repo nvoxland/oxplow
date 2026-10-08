@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Provider → host (protocol 3): call a host capability the provider's\nmanifest lists in its `needs` (`sql.read`: `args` = `{ sql, params? }`\n→ rows). Answered with the capability's result, or `InvalidInput`\nsaying why not (one it doesn't need, one that isn't there).",
+  "properties": {
+    "args": {
+      "default": null
+    },
+    "capability": {
+      "description": "`sql.read`.",
+      "type": "string"
+    },
+    "key": {
+      "description": "The idempotency key of the `invoke` it serves (`InvokeParams`), so\nthe host records the call with that run; none outside one.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "op": {
+      "description": "The capability's operation, for one that has several.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "capability"
+  ],
+  "title": "HostCallParams",
+  "type": "object"
+}

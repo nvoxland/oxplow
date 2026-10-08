@@ -29,10 +29,7 @@ use oxplow_db::PluginKey;
 use oxplow_db::{Database, SqliteEventLogStore};
 use oxplow_domain::events::schema::{EventType as _, WorkItemRecorded};
 use oxplow_domain::work_items::WorkItemsRegistry;
-use oxplow_domain::{
-    Actor, Atomicity, CommandCall, CommandError, CommandSpec, DomainError, Envelope, Invokers,
-    Lifecycle,
-};
+use oxplow_domain::{Actor, CommandCall, CommandError, DomainError, Envelope};
 use oxplow_provider_protocol::model::{
     method, CheckParams, CheckResult, EventDraft, Handle, InitializeResult, InvokeParams,
     InvokeResult,
@@ -44,7 +41,7 @@ use serde_json::{json, Value};
 use super::host::{self, Connection, HostError, Launch};
 use super::oauth;
 use super::spec::{self, ProviderSpec};
-use crate::commands::{Command, CommandBus, Handler, HandlerOutput, Invocation};
+use crate::commands::{CommandBus, HandlerOutput};
 use crate::exec_consent::ApprovalStore;
 use crate::extension_catalog::ExtensionCatalog;
 use crate::extensions::Extension;
@@ -372,6 +369,8 @@ pub struct Instance {
     /// resumes from the checkpoint the first left.
     pub(super) reading:
         parking_lot::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// What its process may call of the host (`host/call`).
+    pub(super) host_calls: Arc<host::HostCalls>,
 }
 
 impl Instance {
@@ -532,6 +531,7 @@ impl Instance {
             declared,
             credentials,
             host_env: self.deps.host_env.clone(),
+            host_calls: Some(self.host_calls.clone()),
         })
         .await
         .map_err(plain)?;
@@ -1643,6 +1643,7 @@ impl ProviderRegistry {
             failed_keys: parking_lot::Mutex::new(std::collections::VecDeque::new()),
             not_before: parking_lot::Mutex::new(None),
             reading: parking_lot::Mutex::new(std::collections::HashMap::new()),
+            host_calls: host::HostCalls::new(spec.needs.clone(), self.deps.db.clone()),
         }))
     }
 
@@ -1836,26 +1837,108 @@ impl ProviderRegistry {
         }
     }
 
-    /// Put `instance`'s commands on the bus and its capability provider
-    /// in its registry; all or nothing.
-    fn register(&self, bus: &Arc<CommandBus>, instance: &Arc<Instance>) -> Result<(), String> {
-        let id = &instance.id;
-        bus.register_namespace(
-            id,
-            &format!("provider:{}", instance.name),
-            commands(instance)?,
-        )
-        .map_err(|e| e.to_string())?;
+    /// Put `instance`'s capability provider in its registry. Its commands
+    /// are its extension's (`provider:` + `op:` in the manifest), run on
+    /// it through the provider router (`ProviderRouter for
+    /// ProviderRegistry`).
+    fn register(&self, _bus: &Arc<CommandBus>, instance: &Arc<Instance>) -> Result<(), String> {
         if instance.spec.capability == spec::WORK_ITEMS {
-            match super::work_items::ExternalWorkItems::provider(instance) {
-                Ok(provider) => self.work_items.register(provider),
-                Err(e) => {
-                    bus.unregister_source(&format!("provider:{}", instance.name));
-                    return Err(e);
-                }
-            }
+            let provider = super::work_items::ExternalWorkItems::provider(instance)?;
+            self.work_items.register(provider);
         }
         Ok(())
+    }
+
+    /// A run of `call` on the instance its input names: an `instance`
+    /// field, else the instance its `ref` is of, else the provider's own.
+    /// Its events are the instance's, its inverse a call of the command
+    /// declared over the operation it names (with the instance, so an
+    /// undo goes back to it).
+    async fn run_op(
+        &self,
+        call: crate::commands::ProviderCall,
+    ) -> Result<HandlerOutput, CommandError> {
+        let crate::commands::ProviderCall {
+            extension,
+            provider,
+            op,
+            mut input,
+            invocation,
+        } = call;
+        let named = input
+            .as_object_mut()
+            .and_then(|o| o.remove("instance"))
+            .and_then(|v| v.as_str().map(str::to_string));
+        let id = named
+            .or_else(|| {
+                input
+                    .get("ref")
+                    .and_then(Value::as_str)
+                    .and_then(instance_of_ref)
+            })
+            .unwrap_or_else(|| provider.clone());
+        let instance = self
+            .running
+            .lock()
+            .await
+            .values()
+            .find(|i| i.ext.name == extension && i.spec.id == provider && i.id == id)
+            .cloned()
+            .ok_or_else(|| CommandError::Unavailable {
+                message: format!("`{extension}/{provider}` has no running instance `{id}`"),
+                retry_after_ms: None,
+            })?;
+        // Its `host/call`s name this key: they're recorded with the run.
+        let key = invocation
+            .idempotency_key
+            .clone()
+            .unwrap_or_else(|| format!("call:{}", uuid::Uuid::new_v4().simple()));
+        instance.host_calls.begin(&key, invocation.trace.clone());
+        let out = instance.invoke(&op, input, Some(key.clone())).await;
+        instance.host_calls.finish(&key);
+        let out = out?;
+        let events = out
+            .events
+            .into_iter()
+            .map(|d| instance.envelope(&invocation.actor, None, d))
+            .collect::<Result<Vec<_>, _>>()?;
+        let inverse = match out.inverse {
+            None => None,
+            Some(c) if oxplow_domain::work_items::VERBS.contains(&c.command.as_str()) => {
+                Some(CommandCall {
+                    name: format!("oxplow.work_item.{}", c.command),
+                    input: c.input,
+                })
+            }
+            Some(c) => {
+                let bus = self.bus.upgrade().ok_or_else(|| CommandError::Failed {
+                    message: "the command bus is gone".into(),
+                })?;
+                let op = oxplow_domain::OpRef {
+                    capability: format!("provider:{extension}/{provider}"),
+                    op: c.command.clone(),
+                };
+                let name = bus.command_for_op(&op).ok_or_else(|| CommandError::Failed {
+                    message: format!(
+                        "`{extension}` declares no command over `{provider}`'s `{}`, the inverse it returned",
+                        c.command
+                    ),
+                })?;
+                let mut input = c.input;
+                if let Some(o) = input.as_object_mut() {
+                    o.entry("instance")
+                        .or_insert_with(|| Value::String(id.clone()));
+                }
+                Some(CommandCall { name, input })
+            }
+        };
+        Ok(HandlerOutput {
+            result: out.result,
+            inverse,
+            events,
+            after_commit: None,
+            unchanged: false,
+        })
     }
 
     /// Stop `instance`: its commands and capability provider go, and its
@@ -1870,9 +1953,6 @@ impl ProviderRegistry {
 
     /// Unregister a stopped instance and end its process.
     async fn tear_down(&self, running: Arc<Instance>) {
-        if let Some(bus) = self.bus.upgrade() {
-            bus.unregister_source(&format!("provider:{}", running.name));
-        }
         self.work_items.unregister(&running.id);
         self.deps.capabilities.set_external(
             crate::capabilities::Implementation {
@@ -3004,71 +3084,24 @@ fn now() -> String {
         .unwrap_or_default()
 }
 
-/// The instance's declared commands, as bus commands — less its
-/// capability's verbs, which run as `work_item.<verb>` (one write surface,
-/// dispatched by ref), never as `<id>.<verb>`.
-fn commands(instance: &Arc<Instance>) -> Result<Vec<Command>, String> {
-    let id = instance.id.clone();
-    let verbs: &[&str] = if instance.spec.capability == spec::WORK_ITEMS {
-        &oxplow_domain::work_items::VERBS
-    } else {
-        &[]
-    };
-    instance
-        .declared
-        .commands
-        .iter()
-        .filter(|decl| !verbs.contains(&decl.name.as_str()))
-        .map(|decl| {
-            let spec = CommandSpec {
-                id: super::command_id(&id, &instance.spec.capability, &decl.name),
-                summary: format!("{} (provider `{}`)", decl.summary, instance.name),
-                input_schema: decl.input_schema.clone(),
-                invokers: Invokers::ALL,
-                confirm: host::confirm_of(&decl.confirm)?,
-                undoable: decl.undoable,
-                lifecycle: Lifecycle::Experimental,
-                atomicity: Atomicity::External,
-                effect: host::effect_of(&decl.effect)?,
-                needs: Vec::new(),
-                ui: None,
-                op: None,
-            };
-            let (instance, verb, id) = (instance.clone(), decl.name.clone(), id.clone());
-            Command::new(
-                spec,
-                Handler::External(Arc::new(
-                    move |Invocation {
-                              actor,
-                              idempotency_key,
-                          },
-                          input| {
-                        let (instance, verb, id) = (instance.clone(), verb.clone(), id.clone());
-                        let capability = instance.spec.capability.clone();
-                        Box::pin(async move {
-                            let out = instance.invoke(&verb, input, idempotency_key).await?;
-                            let events = out
-                                .events
-                                .into_iter()
-                                .map(|d| instance.envelope(&actor, None, d))
-                                .collect::<Result<Vec<_>, _>>()?;
-                            Ok(HandlerOutput {
-                                result: out.result,
-                                inverse: out.inverse.map(|c| CommandCall {
-                                    name: super::command_id(&id, &capability, &c.command),
-                                    input: c.input,
-                                }),
-                                events,
-                                after_commit: None,
-                                unchanged: false,
-                            })
-                        })
-                    },
-                )),
-            )
-            .map_err(|e| e.to_string())
+impl crate::commands::ProviderRouter for ProviderRegistry {
+    fn run(&self, call: crate::commands::ProviderCall) -> crate::commands::ExternalFuture {
+        let me = self.me.clone();
+        Box::pin(async move {
+            let registry = me.upgrade().ok_or_else(|| CommandError::Unavailable {
+                message: "providers aren't running".into(),
+                retry_after_ms: None,
+            })?;
+            registry.run_op(call).await
         })
-        .collect()
+    }
+}
+
+/// The instance a ref is of: a work item's (`work_item:<instance>:ENG-12`).
+fn instance_of_ref(r: &str) -> Option<String> {
+    let rest = r.strip_prefix("work_item:")?;
+    rest.split_once(':')
+        .map(|(instance, _)| instance.to_string())
 }
 
 impl HostError {

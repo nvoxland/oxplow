@@ -3319,10 +3319,10 @@ mod tests {
     #[test]
     fn a_distinct_event_metric_is_not_summed_across_buckets() {
         let entity = |aggregation: &str| oxplow_config::EntitySpec {
-            view: "v_task".into(),
+            view: "v_work_item".into(),
             where_: None,
-            time: Some("completed_at".into()),
-            value: Some("e.priority".into()),
+            time: Some("closed_at".into()),
+            value: Some("json_extract(e.native, '$.priority')".into()),
             aggregation: aggregation.into(),
         };
         let stored = |aggregation: &str| {
@@ -5943,8 +5943,8 @@ def transform(input):
         std::fs::write(
             ext.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: test\n\
-             dimensions:\n  - { key: acme.status, label: Status, entity: v_task, expr: e.status }\n\
-             metrics:\n  - { key: acme.tasks, title: Tasks, entity: v_task }\n",
+             dimensions:\n  - { key: acme.status, label: Status, entity: v_work_item, expr: e.state }\n\
+             metrics:\n  - { key: acme.tasks, title: Tasks, entity: v_work_item }\n",
         )
         .unwrap();
         svc.metrics.seed_catalog().await;

@@ -22,7 +22,6 @@ pub mod implementations;
 pub mod manifest_v2;
 pub mod replacements;
 pub mod skills;
-pub mod ui_commands;
 use manifest_v2::{at, entry_line, key_line, line_under, ManifestV2};
 pub use manifest_v2::{Intent, IntentExample, IntentPrompt, Sharing};
 
@@ -1119,8 +1118,6 @@ pub struct Extension {
 pub struct ExtensionUi {
     /// Lenses mounted into core pages (valid ones).
     pub slots: Vec<LensSlot>,
-    /// Commands in core menus, for a page's or a row's ref (valid ones).
-    pub commands: Vec<ui_commands::UiCommand>,
     /// Labels from its models on core refs (valid ones).
     pub decorators: Vec<decorators::UiDecorator>,
     /// Lenses that take the place of a core sub-component while its
@@ -1775,7 +1772,6 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     ext.errors.extend(errors);
     ext.warnings.extend(warnings);
     let panel_files = m.panels.clone();
-    let ui_command_files = m.ui.commands.clone();
     let decorator_files = m.ui.decorators.clone();
     // An experimental kind: a shared manifest's is refused by `check`.
     let replacement_files =
@@ -1910,12 +1906,9 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             .map(ForeignSubscription::warning)
             .collect();
         ext.warnings.extend(foreign);
-        // An experimental kind: a shared manifest's is refused by `check`.
-        if let Some(v) = m
-            .providers
-            .as_ref()
-            .filter(|_| m.sharing == Sharing::Private)
-        {
+        // Stable since the command model's providers phase: a shared
+        // extension's are loaded too.
+        if let Some(v) = &m.providers {
             let (providers, errors) = crate::providers::parse_providers(v, &|rel| files.read(rel));
             ext.providers = providers;
             ext.errors.extend(
@@ -1925,6 +1918,25 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             );
         }
         if let Some(v) = &m.commands {
+            let providers = ext.providers.clone();
+            let provider_ops = |provider: &str, op: &str| {
+                let spec = providers
+                    .iter()
+                    .find(|p| p.id == provider)
+                    .ok_or_else(|| format!("no provider `{provider}` in this extension"))?;
+                if spec.capability == crate::providers::spec::WORK_ITEMS
+                    && oxplow_domain::work_items::VERBS.contains(&op)
+                {
+                    return Err(format!(
+                        "`{op}` is a work-item verb: it runs as `oxplow.work_item.{op}`"
+                    ));
+                }
+                crate::providers::spec::read_declarations(spec, &|rel| files.read(rel))?
+                    .commands
+                    .into_iter()
+                    .find(|c| c.name == op)
+                    .ok_or_else(|| format!("its declarations have no command `{op}`"))
+            };
             let (commands, errors) = crate::extension_commands::parse_commands(
                 &ext.namespace,
                 m.sharing == Sharing::Shared,
@@ -1932,6 +1944,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 &file,
                 &manifest,
                 &|rel| files.read(rel),
+                &provider_ops,
             );
             ext.commands = commands;
             ext.errors.extend(errors);
@@ -2260,13 +2273,6 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 lens_id: format!("{name}/{}", s.lens),
             });
         }
-    }
-    if let Some(v) = ui_command_files {
-        let provider_ids: Vec<String> = ext.providers.iter().map(|p| p.id.clone()).collect();
-        let (commands, errors) =
-            ui_commands::parse_ui_commands(name, &provider_ids, &v, &file, &manifest);
-        ext.ui.commands = commands;
-        ext.errors.extend(errors);
     }
     if let Some(v) = decorator_files {
         let (decorators, errors) =
@@ -3051,8 +3057,8 @@ pub async fn validate_extension(
 }
 
 /// What a check asks the running oxplow's command registry (the
-/// `CommandBus`): a command's input schema by name — what a launcher,
-/// `ui.commands` or example command is checked against — and who holds a
+/// `CommandBus`): a command's input schema by name — what an example's or
+/// a component's command is checked against — and who holds a
 /// command namespace. A plain schema closure is one with no namespaces.
 /// `None` where there's no running app to ask (the CLI).
 pub trait RunningCommands: Sync {
@@ -3072,59 +3078,6 @@ impl<F: Fn(&str) -> Option<serde_json::Value> + Sync> RunningCommands for F {
 
 /// The registry a check is given.
 pub type CommandSchemas<'a> = &'a dyn RunningCommands;
-
-/// A command an extension names in a `ui.commands` entry is registered
-/// and its input fits. A command in one of the
-/// extension's own providers' namespaces isn't on the bus until its
-/// instance runs, so it is checked against that provider's declarations.
-/// Without a registry (the CLI) the check is skipped, and says so.
-pub fn check_commands(ext: &mut Extension, root: &Path, commands: Option<CommandSchemas<'_>>) {
-    let entries: Vec<(String, String, serde_json::Value)> = ext
-        .ui
-        .commands
-        .iter()
-        .map(|c| {
-            (
-                format!("`ui.commands` `{}`", c.label),
-                c.command.clone(),
-                c.input.clone(),
-            )
-        })
-        .collect();
-    if entries.is_empty() {
-        return;
-    }
-    let Some(schema_of) = commands else {
-        ext.warnings.push(format!(
-            "{}/extension.yaml: its commands weren't checked (no running oxplow to ask which \
-             commands exist) — check the extension from inside oxplow (Settings → Extensions)",
-            ext.path
-        ));
-        return;
-    };
-    for (what, command, input) in entries {
-        let schema = schema_of
-            .input_schema(&command)
-            .or_else(|| provider_command_schema(ext, root, &command));
-        match schema {
-            None => ext.errors.push(format!(
-                "{}/extension.yaml: {what}: no command `{command}` — name a registered one",
-                ext.path
-            )),
-            Some(schema) => {
-                let fits = oxplow_domain::InputValidator::compile(&schema)
-                    .map_err(|e| e.to_string())
-                    .and_then(|v| v.check(&input).map_err(|e| e.to_string()));
-                if let Err(e) = fits {
-                    ext.errors.push(format!(
-                        "{}/extension.yaml: {what}: the input doesn't fit `{command}`: {e}",
-                        ext.path
-                    ));
-                }
-            }
-        }
-    }
-}
 
 /// A custom component's declared commands must exist; a `custom` lens
 /// that also fills a kit role block gets a nudge — the kit may already
@@ -3178,37 +3131,6 @@ fn check_components(
              it — prefer the kit where it does"
         ));
     }
-}
-
-/// `command`'s input schema from the declarations of one of `ext`'s own
-/// providers, when the command is in its namespace — one of its own
-/// commands, not its capability's verbs (those run as `work_item.<verb>`).
-fn provider_command_schema(
-    ext: &Extension,
-    root: &Path,
-    command: &str,
-) -> Option<serde_json::Value> {
-    // `<instance>.<capability>.<name>` (`crate::providers::command_id`).
-    let mut parts = command.splitn(3, '.');
-    let (namespace, capability, verb) = (parts.next()?, parts.next()?, parts.next()?);
-    let spec = ext
-        .providers
-        .iter()
-        .find(|p| p.id == namespace && p.capability == capability)?;
-    if spec.capability == crate::providers::spec::WORK_ITEMS
-        && oxplow_domain::work_items::VERBS.contains(&verb)
-    {
-        return None;
-    }
-    let declared = crate::providers::spec::read_declarations(spec, &|rel| {
-        read_extension_file(root, &ext.name, rel)
-    })
-    .ok()?;
-    declared
-        .commands
-        .into_iter()
-        .find(|c| c.name == verb)
-        .map(|c| c.input_schema)
 }
 
 /// The empty stand-ins a check gives `ext`'s declared entities (P7.C6).
@@ -3308,7 +3230,6 @@ async fn prepare(
     read: &(dyn Fn(&str) -> Option<String> + Sync),
     commands: Option<CommandSchemas<'_>>,
 ) -> Prepared {
-    check_commands(ext, root, commands);
     check_components(ext, read, commands);
     let (overlay, errors) = model_overlay(layer, catalog, root, ext).await;
     ext.errors.extend(errors);
@@ -5114,7 +5035,7 @@ empty: No items.
         let new = || LensSpec {
             title: "Open Tasks".into(),
             description: "From Explore Data".into(),
-            query: "SELECT id, title FROM v_task".into(),
+            query: "SELECT ref, title FROM v_work_item".into(),
             ..spec_base()
         };
         let lens = save_lens(
@@ -5382,7 +5303,7 @@ empty: No items.
     #[test]
     fn a_shared_manifest_may_not_use_an_experimental_kind() {
         let dir = tempfile::tempdir().unwrap();
-        let manifest = "manifest: 2\nname: review\nsharing: shared\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\nproviders:\n  - id: ticket\n";
+        let manifest = "manifest: 2\nname: review\nsharing: shared\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\nui:\n  replacements: []\n";
         write(
             dir.path(),
             "oxplow/extensions/review/extension.yaml",
@@ -5392,10 +5313,10 @@ empty: No items.
         let err = e
             .errors
             .iter()
-            .find(|m| m.contains("`providers` is experimental"))
+            .find(|m| m.contains("`ui.replacements` is experimental"))
             .unwrap_or_else(|| panic!("{:?}", e.errors));
         assert!(
-            err.starts_with("oxplow/extensions/review/extension.yaml:8:"),
+            err.starts_with("oxplow/extensions/review/extension.yaml:9:"),
             "{err}"
         );
         assert_eq!(e.sharing, Sharing::Shared);
@@ -5518,7 +5439,7 @@ collectors:
   - id: things
     runtime: starlark
     entry: collectors/things.star
-    input: \"SELECT id FROM v_task\"
+    input: \"SELECT ref FROM v_work_item\"
     entities:
       - { name: thing, key: id, columns: { id: int, label: text } }
 models:
@@ -6203,9 +6124,9 @@ commands:
             "models:",
             "  - name: late",
             "    version: 1",
-            "    description: Blocked tasks.",
+            "    description: Blocked work items.",
             "    columns:",
-            "      - { name: id, type: INTEGER, doc: Task id. }",
+            "      - { name: ref, type: TEXT, doc: Work item ref. }",
             "  - { name: gone, version: 1, description: No file., columns: [] }",
             "",
         ]
@@ -6214,7 +6135,7 @@ commands:
         write(
             dir.path(),
             "oxplow/extensions/x/models/late.sql",
-            "SELECT id FROM ref('task') WHERE status = 'blocked'",
+            "SELECT ref FROM ref('work_item') WHERE state = 'blocked'",
         );
         write(
             dir.path(),
@@ -6249,7 +6170,7 @@ commands:
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         assert_eq!(ext.models.len(), 1);
         assert_eq!(ext.models[0].file, "oxplow/extensions/x/models/late.sql");
-        assert!(ext.models[0].sql.contains("ref('task')"));
+        assert!(ext.models[0].sql.contains("ref('work_item')"));
 
         write(
             dir.path(),
@@ -6278,7 +6199,7 @@ commands:
         let manifest = [
             "dimensions:",
             "  - { key: acme.team, label: Team }",
-            "  - { key: acme.prio, entity: v_task, expr: e.priority }",
+            "  - { key: acme.prio, entity: v_work_item, expr: \"json_extract(e.native, '$.priority')\" }",
             "  - { key: acme.hot, promote: true }",
             "",
         ]
@@ -6870,56 +6791,6 @@ commands:
         assert!(
             errs.contains("none") && errs.contains("change_id"),
             "{errs}"
-        );
-    }
-
-    const UI_COMMANDS_MANIFEST: &str = "manifest: 2\nintent:\n  purpose: p\nui:\n  commands:\n";
-    #[tokio::test]
-    async fn validate_checks_ui_commands_against_the_registry() {
-        let (d, _) = load_x(
-            &[],
-            &format!(
-                "{UI_COMMANDS_MANIFEST}    - {{ label: A, about: work_item, command: no.such.cmd, input: {{}} }}\n    - {{ label: B, about: work_item, command: oxplow.work_item.create, input: {{ nope: 1 }} }}\n    - {{ label: C, about: work_item, command: oxplow.work_item.create, input: {{ title: ok }} }}\n"
-            ),
-        );
-        let schema = |name: &str| {
-            (name == "oxplow.work_item.create").then(|| {
-                serde_json::json!({
-                    "type": "object",
-                    "properties": { "title": { "type": "string" } },
-                    "required": ["title"],
-                    "additionalProperties": false
-                })
-            })
-        };
-        let v = validate_extension(&layer().await, &cat(), d.path(), "x", Some(&schema))
-            .await
-            .unwrap();
-        let errs = v.errors.join("\n");
-        assert!(
-            errs.contains("`ui.commands` `A`: no command `no.such.cmd`"),
-            "{errs}"
-        );
-        assert!(
-            errs.contains("`ui.commands` `B`: the input doesn't fit `oxplow.work_item.create`"),
-            "{errs}"
-        );
-        assert!(!errs.contains("entry `C`"), "{errs}");
-
-        let v = validate_extension(&layer().await, &cat(), d.path(), "x", None)
-            .await
-            .unwrap();
-        assert!(
-            !v.errors.join("\n").contains("`ui.commands`"),
-            "{:?}",
-            v.errors
-        );
-        assert!(
-            v.warnings
-                .join("\n")
-                .contains("its commands weren't checked"),
-            "{:?}",
-            v.warnings
         );
     }
 

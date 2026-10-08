@@ -29,7 +29,7 @@ models:
     description: "Each oxplow task as an `e2e_item:<id>` ref: what the ref kind resolves."
     columns:
       - { name: ref, type: TEXT, doc: "`e2e_item:<id>`." }
-      - { name: title, type: TEXT, doc: "The task's title." }
+      - { name: title, type: TEXT, doc: "The item's title." }
 pages:
   - { id: item, title: Item, category: Work, lens: item }
 ref_kinds:

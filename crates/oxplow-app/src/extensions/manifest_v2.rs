@@ -80,17 +80,15 @@ pub struct SlotMount {
 }
 
 /// `ui:` — everything an extension adds to the core UI (P6b): lenses
-/// mounted into core pages (`slots`, stable), its commands in core menus
-/// (`commands`, stable), decorations on core refs (`decorators`, stable
-/// since P10) and replaced sub-components (`replacements`, experimental;
-/// `extensions/replacements.rs`).
+/// mounted into core pages (`slots`, stable), decorations on core refs
+/// (`decorators`, stable since P10) and replaced sub-components
+/// (`replacements`, experimental; `extensions/replacements.rs`). Its
+/// commands meet a person through their own `ui` (`commands:`).
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UiBlock {
     #[serde(default)]
     pub slots: Vec<SlotMount>,
-    #[serde(default)]
-    pub commands: Option<Value>,
     #[serde(default)]
     pub decorators: Option<Value>,
     #[serde(default)]
@@ -181,7 +179,8 @@ pub struct ManifestV2 {
     #[serde(default)]
     pub skills: Option<Value>,
 
-    // ---- experimental kinds (private extensions only) ----
+    /// External providers: programs implementing a capability, whose
+    /// operations its `commands:` declare (stable).
     #[serde(default)]
     pub providers: Option<Value>,
     #[serde(default)]
@@ -191,7 +190,7 @@ pub struct ManifestV2 {
 }
 
 /// The kinds a shared extension may not use, with the key each rides on.
-pub const EXPERIMENTAL_KINDS: &[&str] = &["providers", "ui.replacements"];
+pub const EXPERIMENTAL_KINDS: &[&str] = &["ui.replacements"];
 
 /// The stable kinds (permanent API), by manifest key.
 pub const STABLE_KINDS: &[&str] = &[
@@ -204,9 +203,8 @@ pub const STABLE_KINDS: &[&str] = &[
     "lenses",
     "pages",
     "panels",
-    "launcher",
+    "providers",
     "ui.slots",
-    "ui.commands",
     "ui.decorators",
     "ref_kinds",
     "implementations",
@@ -234,7 +232,6 @@ impl ManifestV2 {
     /// between the tables, nothing more.
     fn writes(&self, kind: &str) -> bool {
         match kind {
-            "providers" => self.providers.is_some(),
             "ui.replacements" => self.ui.replacements.is_some(),
             _ => false,
         }
@@ -490,17 +487,18 @@ mod tests {
 
     #[test]
     fn shared_needs_engine_and_stable_kinds_only_with_file_line() {
-        let text = "manifest: 2\nname: acme\nsharing: shared\nintent:\n  purpose: x\n  examples: [{ name: a }]\nproviders:\n  - id: ticket\n";
+        let text = "manifest: 2\nname: acme\nsharing: shared\nintent:\n  purpose: x\n  examples: [{ name: a }]\nui:\n  replacements: []\n";
         let (errors, _) = check(&parse(text), "e/extension.yaml", text, false);
         assert!(
             errors.iter().any(|e| e.contains("must declare `engine")),
             "{errors:?}"
         );
-        let providers = errors
-            .iter()
-            .find(|e| e.contains("`providers` is experimental"))
-            .unwrap();
-        assert!(providers.starts_with("e/extension.yaml:7:"), "{providers}");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("`ui.replacements` is experimental")),
+            "{errors:?}"
+        );
         let text = "manifest: 2\nname: acme\nsharing: shared\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\n";
         let (errors, warnings) = check(&parse(text), "e/extension.yaml", text, true);
         assert!(
@@ -544,7 +542,7 @@ mod tests {
         let mut experimental = EXPERIMENTAL_KINDS.to_vec();
         experimental.sort();
         assert_eq!(used, experimental);
-        assert!(EXPERIMENTAL_KINDS.contains(&"providers"));
+        assert!(STABLE_KINDS.contains(&"providers"));
     }
 
     /// P11 (tsk956): `effects` is stable — oxplow-bundled's follow-up is its

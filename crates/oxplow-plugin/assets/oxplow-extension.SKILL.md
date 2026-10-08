@@ -184,13 +184,17 @@ empty: Nothing is waiting on you.
 
   The old names (`task-detail`, `commit`, …) are errors naming the new
   one.
-- **`ui.commands`** put a command in core menus for a ref:
-  `ui: { commands: [{ command, label, about, placement?, input? }] }`.
-  `about` is a ref kind (`work_item`, `commit`, …); `placement` is `menu`
-  (the page's nav bar) and/or `context` (a row's right-click); `input`
-  defaults to `{ ref: "{{ref}}" }` (`"{{ref.id}}"` binds the id alone).
-  It runs as the person who picks it. Use it for a provider's
-  own commands (`fake.estimate`; its capability verbs run as `work_item.<verb>`) or a core one with a fixed input.
+- **A command on a ref's menus** (its page's Commands, a row's
+  right-click) says so in its own `ui`: `ui: { label, group?, about:
+  work_item, input?: { ref: "{{ref}}" } }` (`about` is a ref kind;
+  `"{{ref.id}}"` binds the id alone). To offer another command there with
+  a fixed input, declare your own over the same operation.
+- **A provider's own operations** are your commands too: `commands: [{
+  name: item.estimate, summary, provider: <your provider id>, op:
+  estimate, ui? }]` — the operation's input (plus an optional
+  `instance`) and effect come from its declarations; it runs on the
+  instance its `ref` (or `instance`) names. Its capability verbs aren't
+  declared: they run as `oxplow.work_item.<verb>`.
 - **`ui.decorators`** add a label to refs:
   `{ model, kind, placement: ref-chip | row-badge, label, color? }` — the
   model (this extension's) needs a `ref` column plus the `label` (and
@@ -214,8 +218,8 @@ empty: Nothing is waiting on you.
   `answers: { sql.read: [[rows of the 1st read], …] }` so it doesn't
   depend on the project's data, and `expect_commands: [...]` or `refuses:
   <part of the reason>`. `effect: read` makes a command that only reads
-  and returns a `result` (it composes nothing). A command on a ref's menu (`ui.commands`) gets `{ ref }`, so
-  name its input field `ref`. `extensions/oxplow-bundled/` (bundled) is a
+  and returns a `result` (it composes nothing). A command on a ref's menu (`ui.about`) gets `{ ref }` unless its
+  `ui.input` says otherwise, so name its input field `ref`. `extensions/oxplow-bundled/` (bundled) is a
   working example.
 - **`custom_components:`** (stable; not in a bundled extension) are web bundles a
   `viz: custom` lens renders: `{ id, title?, bundle?: components/<id>,

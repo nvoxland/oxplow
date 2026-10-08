@@ -185,15 +185,15 @@ Things I keep forgetting. Read this before adding any UI.
 
 ## Menus a page or row gets from extensions
 
-- **Order is fixed.** A page's nav bar: Ask, then **Commands**
-  (extensions' `ui.commands` for the page's ref; hidden when none apply).
-  A row's right-click menu: Ask About This, the lens's row actions, then
-  a separator and one submenu per provider or extension with its
-  commands for the row's ref (`uiCommandMenuItems`). A Board card: Move
-  To, then the same extension tail. Each runs through `personCommands`,
-  which asks first when the command asks. Testids: `page-nav-commands`,
-  `page-nav-command-<id>`, `menu-item-ui-commands-<group>`,
-  `menu-item-ui-command-<id>`.
+- **Order is fixed.** A page's nav bar: Ask, then **Commands** (the
+  commands about the page's ref kind — their `ui.about`; hidden when none
+  apply). A row's right-click menu: Ask About This, the lens's row
+  actions, then a separator and one submenu per `ui.group` with the
+  commands about the row's ref (`refCommandMenuItems`). A Board card:
+  Move To, then the same tail. Each runs as any offer does (asking first
+  when the command asks). Testids: `page-nav-commands`,
+  `page-nav-command-<command id>`, `menu-item-ref-commands-<group>`,
+  `menu-item-ref-command-<command id>`.
 
 ## A custom component is marked
 

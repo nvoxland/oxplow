@@ -2028,11 +2028,10 @@ mod tests {
             .lenses
             .iter()
             .any(|l| l.id == "oxplow-bundled/verify-claim-with-evidence"));
-        assert!(ext
-            .ui
-            .commands
-            .iter()
-            .any(|c| c.command == "oxplow.review.accept" && c.label == "Accept Review"));
+        assert!(ext.commands.iter().any(|c| c.name == "oxplow.review.accept"
+            && c.ui.as_ref().is_some_and(
+                |u| u.label == "Accept Review" && u.about.as_deref() == Some("effort")
+            )));
     }
 
     /// P7.B5: the "look here first" score is oxplow-bundled's model over

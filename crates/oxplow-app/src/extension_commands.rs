@@ -95,6 +95,44 @@ pub enum CommandHandler {
     /// One operation of a host capability (`capability:` + `op:`,
     /// `commands::ops`).
     Capability { capability: String, op: String },
+    /// One operation of one of the extension's providers (`provider:` +
+    /// `op:`): run on the instance its input names
+    /// (`commands::ProviderRouter`).
+    Provider {
+        provider: String,
+        op: String,
+        /// It returns an inverse (its declarations say).
+        undoable: bool,
+    },
+}
+
+/// What a provider declares of operation `op` (its checked-in
+/// declarations): the declaration, or why there isn't one to declare a
+/// command over.
+pub type ProviderOps<'a> =
+    dyn Fn(&str, &str) -> Result<oxplow_provider_protocol::model::CommandDecl, String> + 'a;
+
+/// No providers (oxplow's own extensions).
+pub fn no_providers(
+    provider: &str,
+    _op: &str,
+) -> Result<oxplow_provider_protocol::model::CommandDecl, String> {
+    Err(format!("no provider `{provider}` in this extension"))
+}
+
+/// `schema` with an optional `instance` field: which of the provider's
+/// instances runs it, when its input has no `ref` to say.
+fn with_instance(mut schema: Value) -> Value {
+    if let Some(props) = schema.get_mut("properties").and_then(Value::as_object_mut) {
+        props.insert(
+            "instance".into(),
+            json!({
+                "type": "string",
+                "description": "The instance that runs it (its id); else the one its `ref` names, else the provider's own."
+            }),
+        );
+    }
+    schema
 }
 
 /// A `commands:` entry as the manifest holds it.
@@ -109,6 +147,8 @@ struct CommandFile {
     entry: Option<String>,
     #[serde(default)]
     capability: Option<String>,
+    #[serde(default)]
+    provider: Option<String>,
     #[serde(default)]
     op: Option<String>,
     #[serde(default)]
@@ -147,6 +187,12 @@ struct ExampleFile {
 /// segments are snake_case).
 pub fn command_namespace(extension: &str) -> String {
     extension.replace('-', "_")
+}
+
+/// An operation's name — a provider's command, a capability's op: one
+/// snake_case segment.
+pub fn valid_op(name: &str) -> bool {
+    valid_segment(name)
 }
 
 fn valid_segment(segment: &str) -> bool {
@@ -198,6 +244,7 @@ pub fn parse_commands(
     file: &str,
     manifest: &str,
     read: &dyn Fn(&str) -> Option<String>,
+    provider_ops: &ProviderOps<'_>,
 ) -> (Vec<ExtensionCommand>, Vec<String>) {
     let block_line = key_line(manifest, "commands");
     let Some(items) = value.as_sequence() else {
@@ -217,7 +264,7 @@ pub fn parse_commands(
             }
         };
         let line = entry_line(manifest, "commands", "name", &entry.name).or(block_line);
-        match command_of(namespace, shared, entry, read) {
+        match command_of(namespace, shared, entry, read, provider_ops) {
             Ok(c) if out.iter().any(|o| o.name == c.name) => errors.push(at(
                 file,
                 line,
@@ -235,6 +282,7 @@ fn command_of(
     shared: bool,
     f: CommandFile,
     read: &dyn Fn(&str) -> Option<String>,
+    provider_ops: &ProviderOps<'_>,
 ) -> Result<ExtensionCommand, String> {
     if !valid_command_name(&f.name) {
         return Err(format!(
@@ -246,7 +294,7 @@ fn command_of(
     let name = format!("{namespace}.{}", f.name);
     CommandSpec::validate_id(&name).map_err(|e| e.to_string())?;
     let at_name = |m: String| format!("command `{}`: {m}", f.name);
-    let confirm = match f.confirm.as_deref() {
+    let mut confirm = match f.confirm.as_deref() {
         None | Some("never") => Confirm::Never,
         Some("always") => Confirm::Always,
         Some("destructive") => Confirm::Destructive,
@@ -262,18 +310,61 @@ fn command_of(
     if f.ui.as_ref().is_some_and(|ui| ui.label.trim().is_empty()) {
         return Err(at_name("`ui.label` must say what a person reads".into()));
     }
+    let handlers = [
+        f.entry.is_some(),
+        f.capability.is_some(),
+        f.provider.is_some(),
+    ];
+    if handlers.iter().filter(|h| **h).count() > 1 {
+        return Err(at_name(
+            "declares more than one of `entry:`, `capability:` and `provider:` — a command has \
+             one handler"
+                .into(),
+        ));
+    }
     let (handler, input_schema, effect) = match (f.capability, f.entry) {
-        (Some(_), Some(_)) => {
+        (None, None) if f.provider.is_none() => {
             return Err(at_name(
-                "declares both `capability:` and `entry:` — a command has one handler".into(),
+                "has no handler: give `entry:` (a Starlark script), `capability:` + `op:` (an \
+                 operation of a host capability) or `provider:` + `op:` (one of your provider's)"
+                    .into(),
             ))
         }
         (None, None) => {
-            return Err(at_name(
-                "has no handler: give `entry:` (a Starlark script) or `capability:` + `op:` \
-                 (an operation of a host capability)"
-                    .into(),
-            ))
+            let provider = f.provider.expect("a provider command");
+            let op = f.op.ok_or_else(|| {
+                at_name(format!(
+                    "`provider: {provider}` needs `op:`, the operation it runs"
+                ))
+            })?;
+            for (given, key) in [
+                (f.input_schema.is_some(), "input_schema"),
+                (f.effect.is_some(), "effect"),
+                (!f.examples.is_empty(), "examples"),
+            ] {
+                if given {
+                    return Err(at_name(format!(
+                        "`{key}` comes from the provider's declarations — drop it"
+                    )));
+                }
+            }
+            let decl = provider_ops(&provider, &op)
+                .map_err(|e| at_name(format!("`provider: {provider}`, `op: {op}`: {e}")))?;
+            let effect = crate::providers::host::effect_of(&decl.effect).map_err(at_name)?;
+            // The manifest may ask more than the provider does, never less.
+            let declared = crate::providers::host::confirm_of(&decl.confirm).map_err(at_name)?;
+            if f.confirm.is_none() || stronger(declared, confirm) {
+                confirm = declared;
+            }
+            (
+                CommandHandler::Provider {
+                    provider,
+                    op,
+                    undoable: decl.undoable,
+                },
+                Some(with_instance(decl.input_schema)),
+                effect,
+            )
         }
         (Some(capability), None) => {
             let class = oxplow_domain::host_capability::host_capability(&capability)
@@ -301,6 +392,7 @@ fn command_of(
                 crate::commands::ops::effect_of(class),
             )
         }
+        (Some(_), Some(_)) => unreachable!("refused above"),
         (None, Some(entry)) => {
             if f.op.is_some() {
                 return Err(at_name(
@@ -377,6 +469,16 @@ fn command_of(
             })
             .collect::<Result<_, _>>()?,
     })
+}
+
+/// `a` asks a person more than `b` does.
+fn stronger(a: Confirm, b: Confirm) -> bool {
+    let rank = |c: Confirm| match c {
+        Confirm::Never => 0,
+        Confirm::Destructive => 1,
+        Confirm::Always => 2,
+    };
+    rank(a) > rank(b)
 }
 
 /// A script's declared `effect` (default `write`): `read` only when it
@@ -647,6 +749,11 @@ pub fn extension_command(
                 })?;
             return backing.command(spec);
         }
+        CommandHandler::Provider {
+            provider,
+            op,
+            undoable,
+        } => return provider_command(bus, extension, spec, provider, op, *undoable),
         CommandHandler::Script { script, .. } => script.clone(),
     };
     let (needs, reads) = (decl.needs.clone(), decl.effect == CommandEffect::Read);
@@ -717,6 +824,7 @@ pub fn register_required(bus: &std::sync::Arc<crate::commands::CommandBus>) -> R
             &file,
             manifest,
             &|path| b.file(path).map(str::to_string),
+            &no_providers,
         );
         if !errors.is_empty() {
             return Err(errors.join("\n"));
@@ -751,12 +859,13 @@ pub fn register_declared(bus: &std::sync::Arc<crate::commands::CommandBus>) {
             "extension.yaml",
             manifest,
             &|path| b.file(path).map(str::to_string),
+            &no_providers,
         );
         let built: Vec<_> = decls
             .iter()
             .filter(|d| match &d.handler {
                 CommandHandler::Capability { capability, op } => bus.op(capability, op).is_some(),
-                CommandHandler::Script { .. } => false,
+                CommandHandler::Script { .. } | CommandHandler::Provider { .. } => false,
             })
             .map(|d| extension_command(bus, b.name, d).expect("it builds"))
             .collect();
@@ -767,6 +876,54 @@ pub fn register_declared(bus: &std::sync::Arc<crate::commands::CommandBus>) {
         )
         .expect("they register");
     }
+}
+
+/// The command `spec` over operation `op` of `extension`'s provider
+/// `provider`: it runs, outside the transaction, on the instance its input
+/// names, through the bus's provider router (the provider registry). Its
+/// spec names the operation (`provider:<extension>/<provider>`), which is
+/// how an inverse naming an operation finds its command.
+fn provider_command(
+    bus: &std::sync::Arc<crate::commands::CommandBus>,
+    extension: &str,
+    mut spec: CommandSpec,
+    provider: &str,
+    op: &str,
+    undoable: bool,
+) -> Result<crate::commands::Command, oxplow_domain::CommandError> {
+    use crate::commands::{Command, Handler, Invocation, ProviderCall};
+    spec.atomicity = oxplow_domain::Atomicity::External;
+    spec.undoable = undoable;
+    spec.op = Some(oxplow_domain::OpRef {
+        capability: format!("provider:{extension}/{provider}"),
+        op: op.into(),
+    });
+    let bus_weak = std::sync::Arc::downgrade(bus);
+    let (extension, provider, op) = (extension.to_string(), provider.to_string(), op.to_string());
+    Command::new(
+        spec,
+        Handler::External(std::sync::Arc::new(
+            move |invocation: Invocation, input: Value| {
+                let router = bus_weak.upgrade().and_then(|b| b.provider_router());
+                let call = ProviderCall {
+                    extension: extension.clone(),
+                    provider: provider.clone(),
+                    op: op.clone(),
+                    input,
+                    invocation,
+                };
+                match router {
+                    Some(router) => router.run(call),
+                    None => Box::pin(async {
+                        Err(oxplow_domain::CommandError::Unavailable {
+                            message: "providers aren't running".into(),
+                            retry_after_ms: None,
+                        })
+                    }),
+                }
+            },
+        )),
+    )
 }
 
 /// Keeps the bus's extension commands matching the enabled extensions of
@@ -1208,7 +1365,7 @@ mod tests {
             (
                 entry("a.b", "    capability: bookmarks.write\n    op: set\n"),
                 vec![("handlers/h.star", HANDLER)],
-                "both `capability:` and `entry:`",
+                "more than one of `entry:`, `capability:` and `provider:`",
             ),
             (
                 "  - name: a.b\n    summary: S.\n    capability: bookmarks.erase\n    op: set\n".into(),

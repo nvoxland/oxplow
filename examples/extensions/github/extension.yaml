@@ -1,13 +1,13 @@
 manifest: 2
 name: github
-description: Pull requests from this repo's GitHub, joined to oxplow tasks and streams.
+description: Pull requests from this repo's GitHub, joined to work items and streams.
 sharing: shared
 engine: ">=0.7"
 intent:
   purpose: >-
     Bring the repo's pull requests into the semantic layer as v_github_pr,
-    joined to streams by branch and to tasks by the tsk id in the title, so
-    lenses can show what is open against each stream.
+    joined to streams by branch and to work items by the item's id in the
+    title, so lenses can show what is open against each stream.
   origin: null
   examples:
     - name: a stream whose branch has an open PR
@@ -47,7 +47,7 @@ collectors:
           url: text
         relations:
           - { to: v_stream, on: "v_github_pr.head_branch = v_stream.branch" }
-          - { to: v_task, on: "v_github_pr.title LIKE '%tsk' || v_task.id || '%'" }
+          - { to: v_work_item, on: "v_github_pr.title LIKE '%' || substr(v_work_item.ref, length('work_item:' || v_work_item.provider || ':') + 1) || '%'" }
 models:
   - name: pull_request
     version: 1

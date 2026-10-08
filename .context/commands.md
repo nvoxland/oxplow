@@ -19,13 +19,11 @@ The **namespace** is its owner's, so two extensions' areas never collide:
   `namespace: oxplow`). They share it, collisions checked per id, so a
   command moving between core and a shipped extension keeps its id.
 - An extension's declared `namespace:` (default: its name with `-` →
-  `_`) — that extension's alone.
-- A provider instance's id — interim, `<instance>.<capability>.<name>`
-  (`providers::command_id`), until providers are namespaced by their
-  extension.
+  `_`) — that extension's alone, its providers' commands included (one
+  id for every instance; the input says which runs it).
 
 The registry records each command's **source** (`core`,
-`extension:<name>`, `provider:<name>`; `CommandBus::source_of`) and each
+`extension:<name>`; `CommandBus::source_of`) and each
 namespace's **holder** (`namespace_owner`: `oxplow`, or the one source
 holding it). `register` is core's (under `oxplow`); `register_namespace(ns,
 source, commands)` registers a source's commands all-or-nothing;
@@ -177,7 +175,9 @@ composing commands.
 
 **The per-run trace.** Each run has a `CapabilityTrace` (`TxCtx::trace`):
 fresh per transaction attempt, shared by the runs nested in it; steps
-add each step's to the composing pass's. Its summary — per capability,
+add each step's to the composing pass's. An `External` run's is its
+`Invocation::trace`: a provider's `host/call`s during it count there
+([providers.md](./providers.md) "The protocol"). Its summary — per capability,
 how many calls (`{"sql.read": 2}`) — is written on the run's audit row
 (`command_audit.capabilities_json`, V27; NULL when it used none). The
 routing pass (a composite composed on a read snapshot to decide where

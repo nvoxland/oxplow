@@ -239,7 +239,7 @@ mod tests {
                 &Actor::Human,
                 "oxplow.config.set",
                 json!({ "key": "metrics", "value": [
-                    { "key": "work.ready_now", "entity": "v_task", "where": "status = 'ready'" }
+                    { "key": "work.ready_now", "entity": "v_work_item", "where": "state = 'todo'" }
                 ] }),
                 false,
             )

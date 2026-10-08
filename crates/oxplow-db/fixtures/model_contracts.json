@@ -5546,12 +5546,12 @@
         {
           "name": "view",
           "type": "TEXT",
-          "doc": "The view to query (`v_task`)."
+          "doc": "The view to query (`v_work_item`)."
         },
         {
           "name": "name",
           "type": "TEXT",
-          "doc": "The model's name within its owner (`task`)."
+          "doc": "The model's name within its owner (`work_item`)."
         },
         {
           "name": "owner",

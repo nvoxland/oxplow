@@ -845,48 +845,6 @@
     - { name: "name", type: "TEXT", doc: "Tag name." }
     - { name: "sha", type: "TEXT", doc: "The commit it points at (v_commit.sha); annotated tags peeled." }
     - { name: "updated_at", type: "TEXT", doc: "When oxplow last read it (RFC 3339)." }
-- name: task
-  version: 1
-  description: "Tasks (work items), excluding deleted ones. `thread_id` NULL means the project-wide backlog."
-  columns:
-    - { name: "id", type: "INTEGER", doc: "Task id (shown as tsk<id>)." }
-    - { name: "thread_id", type: "INTEGER", doc: "Owning thread (v_thread.id); NULL = backlog." }
-    - { name: "stream_id", type: "INTEGER", doc: "The thread's stream; NULL for backlog tasks." }
-    - { name: "parent_id", type: "INTEGER", doc: "Parent task (an epic); NULL at top level." }
-    - { name: "title", type: "TEXT", doc: "Task title." }
-    - { name: "description", type: "TEXT", doc: "Markdown body." }
-    - { name: "status", type: "TEXT", doc: "`ready`, `in_progress`, `blocked`, `done`, `canceled` or `archived`." }
-    - { name: "priority", type: "TEXT", doc: "`low`, `medium`, `high` or `urgent`." }
-    - { name: "author", type: "TEXT", doc: "Who the task came from: `user` (a person) or `agent`; NULL when neither wrote it (an effect, oxplow itself — its `work_item.created` names which)." }
-    - { name: "sort_index", type: "INTEGER", doc: "Order within its list." }
-    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
-    - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
-    - { name: "completed_at", type: "TEXT", doc: "When the task reached `done`; kept if it is then archived, cleared if reopened." }
-- name: task_link
-  version: 1
-  description: "Typed links between tasks (one blocks another, duplicates it, …)."
-  columns:
-    - { name: "id", type: "INTEGER", doc: "Link id." }
-    - { name: "thread_id", type: "INTEGER", doc: "Thread the link was made in." }
-    - { name: "from_task_id", type: "INTEGER", doc: "Source task (v_task.id)." }
-    - { name: "to_task_id", type: "INTEGER", doc: "Target task (v_task.id)." }
-    - { name: "link_type", type: "TEXT", doc: "`blocks`, `relates_to`, `discovered_from`, `duplicates`, `supersedes` or `replies_to`." }
-    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
-  tests:
-    - { not_null: id }
-    - { unique: id }
-- name: task_note
-  version: 2
-  description: "Comments on oxplow's tasks (`task_note:<id>`; a `oxplow.work_item.comment`). A thread's notes are `v_thread_note`."
-  columns:
-    - { name: "id", type: "INTEGER", doc: "Comment id." }
-    - { name: "task_id", type: "INTEGER", doc: "The task it's on." }
-    - { name: "body", type: "TEXT", doc: "Markdown body." }
-    - { name: "author", type: "TEXT", doc: "Who wrote it (`agent`, `user`, …)." }
-    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
-  tests:
-    - { not_null: id }
-    - { unique: id }
 - name: test_case
   version: 1
   description: "Each test case in a run that produced a report (runs with only counts have none)."
@@ -1227,8 +1185,8 @@
   version: 1
   description: "Models: every published view, as compiled at this open — core ones and each extension's. Read a model's columns in `v_model_column`, what it reads in `v_model_lineage` and its declared tests' results in `v_model_test`."
   columns:
-    - { name: view, type: TEXT, doc: "The view to query (`v_task`)." }
-    - { name: name, type: TEXT, doc: "The model's name within its owner (`task`)." }
+    - { name: view, type: TEXT, doc: "The view to query (`v_work_item`)." }
+    - { name: name, type: TEXT, doc: "The model's name within its owner (`work_item`)." }
     - { name: owner, type: TEXT, doc: "`core`, or the extension that declares it." }
     - { name: kind, type: TEXT, doc: "`sql` (compiled from a model file) or `entity` (an extension's synced entity)." }
     - { name: version, type: INTEGER, doc: "Contract version: a change to the columns bumps it." }

@@ -160,7 +160,7 @@ mod tests {
             &gw,
             TileInput {
                 kind: "query".into(),
-                sql: Some("SELECT count(*) FROM v_task".into()),
+                sql: Some("SELECT count(*) FROM v_work_item".into()),
                 display: Some("number".into()),
                 options_json: Some(r#"{"size":"wide"}"#.into()),
                 ..TileInput::default()
@@ -169,7 +169,7 @@ mod tests {
         .await
         .unwrap();
         let opts: Value = serde_json::from_str(tile.options_json.as_deref().unwrap()).unwrap();
-        assert_eq!(opts["sql"], "SELECT count(*) FROM v_task");
+        assert_eq!(opts["sql"], "SELECT count(*) FROM v_work_item");
         assert_eq!(opts["display"], "number");
         assert_eq!(opts["size"], "wide");
         for (input, says) in [

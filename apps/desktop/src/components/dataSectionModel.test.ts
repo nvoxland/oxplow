@@ -14,13 +14,13 @@ test("entityRows puts core first, formats counts and flags unsynced entities", (
   const rows = entityRows(
     [
       entity("v_github_pr", "github", "declared"),
-      entity("v_task", "core", "sql"),
+      entity("v_work_item", "core", "sql"),
       entity("v_commit", "core", "sql"),
       entity("v_issues_issue", "issues", "entity"),
     ],
-    { v_task: { rows: 12345 }, v_commit: { rows: 0 }, v_issues_issue: { rows: 7 } },
+    { v_work_item: { rows: 12345 }, v_commit: { rows: 0 }, v_issues_issue: { rows: 7 } },
   );
-  expect(rows.map((r) => r.name)).toEqual(["v_commit", "v_task", "v_github_pr", "v_issues_issue"]);
+  expect(rows.map((r) => r.name)).toEqual(["v_commit", "v_work_item", "v_github_pr", "v_issues_issue"]);
   expect(rows[1]!.rows).toBe(new Intl.NumberFormat().format(12345));
   expect(rows[0]!.rows).toBe("0");
   expect(rows[2]!.rows).toBe("Not synced yet");
@@ -80,6 +80,7 @@ test("programRow shows a provider with the secrets and hosts it gets", () => {
     env: ["ISSUES_URL"],
     credentials: ["token"],
     network: ["api.tracker.example"],
+    capabilities: [],
     tree: "oxplow/extensions/tracker",
     remote: false,
     approved: false,
@@ -102,6 +103,7 @@ test("programRow shows an effect as reacting to events from approval on (P8.D9)"
     env: [],
     credentials: [],
     network: [],
+    capabilities: [],
     tree: "oxplow/extensions/acme",
     approved: false,
     version: "abc",
@@ -126,6 +128,7 @@ test("programRow shows a component with the commands it may run", () => {
     env: [],
     credentials: [],
     network: [],
+    capabilities: [],
     commands: ["oxplow.collector.sync"],
     tree: "oxplow/extensions/github",
     remote: false,
@@ -151,6 +154,7 @@ test("programRow says a bundled effect asks again when a new oxplow changes it",
     env: [],
     credentials: [],
     network: [],
+    capabilities: [],
     tree: "bundled:oxplow-bundled",
     remote: false,
     approved: false,
@@ -202,6 +206,7 @@ test("programRow says a server by url isn't code this approval covers", () => {
     env: [],
     credentials: ["NOTES_TOKEN"],
     network: ["mcp.example.com"],
+    capabilities: [],
     tree: "oxplow/extensions/notes",
     remote: true,
     approved: false,

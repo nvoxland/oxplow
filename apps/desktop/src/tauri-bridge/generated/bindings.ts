@@ -1822,7 +1822,15 @@ entry: string } |
  *  One operation of a host capability (`capability:` + `op:`,
  *  `commands::ops`).
  */
-{ kind: "capability"; capability: string; op: string };
+{ kind: "capability"; capability: string; op: string } | 
+/**
+ *  One operation of one of the extension's providers (`provider:` +
+ *  `op:`): run on the instance its input names
+ *  (`commands::ProviderRouter`).
+ */
+{ kind: "provider"; provider: string; op: string; 
+// It returns an inverse (its declarations say).
+undoable: boolean };
 
 // A completed run.
 export type CommandOutcome = {
@@ -2159,7 +2167,7 @@ export type DashboardWithItems = {
 
 // One row of Settings → Data.
 export type DataEntity = {
-	// The view to query (`v_task`, `v_my_gh_pr`).
+	// The view to query (`v_work_item`, `v_my_gh_pr`).
 	name: string,
 	// `core`, or the extension that provides it.
 	owner: string,
@@ -2467,7 +2475,7 @@ export type EntityDecl = {
  *  tells agents and lens authors how the data connects.
  */
 export type EntityRelation = {
-	// The view it joins to, e.g. `v_task` or `v_github_review`.
+	// The view it joins to, e.g. `v_work_item` or `v_github_review`.
 	to: string,
 	// The SQL join condition, e.g. `v_github_pr.head_branch = v_stream.branch`.
 	on: string,
@@ -2768,8 +2776,6 @@ export type ExtensionSource = {
 export type ExtensionUi = {
 	// Lenses mounted into core pages (valid ones).
 	slots: LensSlot[],
-	// Commands in core menus, for a page's or a row's ref (valid ones).
-	commands: UiCommand[],
 	// Labels from its models on core refs (valid ones).
 	decorators: UiDecorator[],
 	/**
@@ -3195,6 +3201,8 @@ export type Grants = {
 	hosts: string[],
 	credentials: string[],
 	env: string[],
+	// The host capabilities it may call (a provider's `needs`).
+	capabilities: string[],
 };
 
 // Where a stream's workspace is.
@@ -4269,7 +4277,7 @@ export type ModelFreshness = {
 // A model's declaration and its SQL file.
 export type ModelSource = {
 	decl: ModelDecl,
-	// Where the SQL came from, for error locations (`models/task.sql`).
+	// Where the SQL came from, for error locations (`models/work_item.sql`).
 	file: string,
 	sql: string,
 	/**
@@ -4765,6 +4773,8 @@ export type ProjectProgram = {
 	network: string[],
 	// The commands it may run with the viewer's rights (a component).
 	commands: string[],
+	// The host capabilities it may call (a provider's `needs`).
+	capabilities: string[],
 	/**
 	 *  The project-relative folder whose every file the approval covers
 	 *  (a provider's extension, declarations included).
@@ -4928,6 +4938,12 @@ export type ProviderSpec = {
 	 *  values? }]`.
 	 */
 	fields?: FieldDecl[],
+	/**
+	 *  The host capabilities it calls over the protocol (`host/call`,
+	 *  `sql.read`): part of what its approval covers, and the only ones it
+	 *  may call.
+	 */
+	needs?: string[],
 };
 
 // A provider as the UI and agents see it: never its key.
@@ -5628,31 +5644,6 @@ export type Twin = {
 	until: string,
 };
 
-/**
- *  A command in core menus (valid ones; invalid ones are in the
- *  extension's `errors`).
- */
-export type UiCommand = {
-	// `<extension>/<n>`, its place in the list.
-	id: string,
-	extension: string,
-	/**
-	 *  What the menu groups it under: the provider's id when the command
-	 *  is one of the extension's providers', else the extension's name.
-	 */
-	group: string,
-	command: string,
-	label: string,
-	// The ref kind it acts on (`work_item`, `commit`).
-	about: string,
-	placement: UiPlacement[],
-	/**
-	 *  The command's input; whole-value `{{ref}}` / `{{ref.id}}` strings
-	 *  are the ref it runs for and its id.
-	 */
-	input: unknown,
-};
-
 // A decorator (valid ones; invalid ones are in the extension's `errors`).
 export type UiDecorator = {
 	// `<extension>/<n>`.
@@ -5680,13 +5671,6 @@ export type UiLogEntry = {
 	context: string | null,
 	timestamp: string | null,
 };
-
-// Where a command shows.
-export type UiPlacement = 
-// The page nav bar's menu, for the page's ref.
-"menu" | 
-// A row's right-click menu, for the row's ref.
-"context";
 
 /**
  *  A replacement (valid ones; invalid ones are in the extension's

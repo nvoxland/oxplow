@@ -2,6 +2,7 @@ import { afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import { WORK_ITEM_DRAG_MIME } from "../../dragMimes.js";
+import { personSpec, recordRefOffers } from "../refCommandsTestSupport.js";
 
 // The Board (P6.E1a): work items by canonical state; a card moves by
 // drag or by its right-click menu, through oxplow.work_item.transition.
@@ -14,6 +15,10 @@ let extensions: unknown[] = [];
 mock.module("../../api.js", () => ({
   ...realApi,
   listExtensions: async () => extensions,
+  listPersonCommands: async () => [
+    personSpec("tracker.item.estimate", { label: "Estimate in Fake", group: "Tracker", about: "work_item", input: { ref: "{{ref}}" } }),
+    personSpec("tracker.commit.sync", { label: "Sync", group: "Tracker", about: "commit" }),
+  ],
   querySql: async (sql: string, ...rest: unknown[]) => {
     if (!sql.includes("FROM v_work_item w")) return (realQuerySql as (...a: unknown[]) => unknown)(sql, ...rest);
     return {
@@ -80,31 +85,18 @@ test("another provider's card links to its page and moves through oxplow.work_it
   await waitFor(() => expect(ran).toEqual([["oxplow.work_item.transition", { ref: "work_item:fake:W-1", to: "done" }]]));
 });
 
-// P6b.C4: an extension's `ui.commands` about work items join a card's
-// right-click menu, bound to that card's ref, and run as the person.
-test("a card's menu offers the extensions' commands for its item", async () => {
-  extensions = [
-    {
-      name: "tracker",
-      enabled: true,
-      ui: {
-        slots: [],
-        commands: [
-          { id: "tracker/0", extension: "tracker", command: "fake.work_items.estimate", label: "Estimate in Fake", about: "work_item", placement: ["context"], input: { ref: "{{ref}}" }, group: "fake" },
-          { id: "tracker/1", extension: "tracker", command: "fake.work_items.only_menu", label: "Nav only", about: "work_item", placement: ["menu"], input: { ref: "{{ref}}" }, group: "fake" },
-        ],
-        decorators: [],
-      },
-    },
-  ];
+// The commands about work items (their `ui.about`) join a card's
+// right-click menu, bound to that card's ref.
+test("a card's menu offers the commands about its item", async () => {
+  recordRefOffers(ran);
   const view = render(<WorkBoard scope="all" onOpenPage={() => {}} />);
   await waitFor(() => view.getByText("Their bug"));
   await new Promise((r) => setTimeout(r, 0));
   fireEvent.contextMenu(view.getByText("Their bug"));
-  fireEvent.click(await waitFor(() => view.getByTestId("menu-item-ui-commands-fake")));
-  const item = await waitFor(() => view.getByTestId("menu-item-ui-command-tracker/0"));
+  fireEvent.click(await waitFor(() => view.getByTestId("menu-item-ref-commands-Tracker")));
+  const item = await waitFor(() => view.getByTestId("menu-item-ref-command-tracker.item.estimate"));
   expect(item.textContent).toContain("Estimate in Fake");
-  expect(view.queryByTestId("menu-item-ui-command-tracker/1")).toBeNull();
+  expect(view.queryByTestId("menu-item-ref-command-tracker.commit.sync")).toBeNull();
   fireEvent.click(item);
-  await waitFor(() => expect(ran).toEqual([["fake.work_items.estimate", { ref: "work_item:fake:W-1" }]]));
+  await waitFor(() => expect(ran).toEqual([["tracker.item.estimate", { ref: "work_item:fake:W-1" }]]));
 });

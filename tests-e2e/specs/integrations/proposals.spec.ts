@@ -18,7 +18,7 @@ test("an effect's destructive step waits in Alerts until a person approves it", 
   const live = async () =>
     (
       await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
-        sql: "SELECT count(*) FROM v_task WHERE title = 'Pear [delete]'",
+        sql: "SELECT count(*) FROM v_work_item WHERE title = 'Pear [delete]'",
       })
     ).rows[0]?.[0];
   expect(await live()).toBe(1);

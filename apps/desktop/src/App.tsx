@@ -167,7 +167,8 @@ import { pickFolder } from "./tauri-bridge/nativeDialog.js";
 import { WORKING, shortRevisionLabel } from "./revision.js";
 import { advanceDaemonProbeState, INITIAL_DAEMON_PROBE_STATE } from "./daemon-recovery.js";
 import { offerForShortcut } from "./keybindings.js";
-import { commandOffers } from "./commandOffers.js";
+import { commandOffers, type OfferDeps } from "./commandOffers.js";
+import { setRefOfferHost } from "./components/refCommands.js";
 import { runLocally, startClientHost, type ClientCallContext, type ClientHandlers } from "./clientHost.js";
 import { streamOfThread, withTab, withoutTab } from "./tabs/threadTabOps.js";
 import { usePersonCommands } from "./personCommandsStore.js";
@@ -1278,54 +1279,63 @@ export function App() {
   // What the command bus offers a person (Pull, New Task, …): search lists
   // them with the app's own commands, and a shortcut may run one.
   const personSpecs = usePersonCommands();
-  const offers = useMemo(
-    () =>
-      commandOffers(personSpecs, { streamId: stream?.id ?? null, threadId: selectedThreadId ?? null }, {
-        openPage: (tabId) => {
-          const ref = refFromTabId(tabId);
-          if (ref) handleOpenPageRef.current?.(ref);
-        },
-        openForm,
-        // What the window has for one of its own to act on now.
-        available: (spec) => {
-          if (spec.ui?.form === "new-thread") return commandState.hasStream;
-          if (spec.ui?.form === "commit") return !!commandState.canCommit;
-          switch (spec.op ? `${spec.op.capability}/${spec.op.op}` : "") {
-            case "editor.write/save":
-              return commandState.canSave;
-            case "window.show/find":
-              return commandState.hasSelectedFile;
-            case "window.show/quick_open":
-              return commandState.hasStream;
-            case "agent_input.write/draft":
-              return commandState.hasThread;
-            case "projects.write/create":
-            case "projects.write/open":
-              // The shell's: a browser window has none to ask.
-              return shellAvailable();
-            default:
-              return true;
-          }
-        },
-        run: (label, id, input) => {
-          // One the window hosts runs here: nothing goes to the daemon.
-          const spec = personSpecs.find((s) => s.id === id);
-          const local = spec ? runLocally(windowHandlersRef.current, spec, input) : null;
-          if (local) {
-            return local
-              .then(({ result }): CommandOutcome => ({ result, audit_id: null, event_id: null, inverse: null }))
-              .catch((e: unknown) => {
-                recordOpError({ label, message: e instanceof Error ? e.message : String(e) });
-                return null;
-              });
-          }
-          return personCommands.run(label, id, input);
-        },
-        runInBackground: (label, id, input) =>
-          void runGitMenuOp(label, id, () => runCommandInBackground(label, id, input)),
-      }),
-    [personSpecs, stream?.id, selectedThreadId, runGitMenuOp, openForm, commandState],
+  const offerCtx = useMemo(
+    () => ({ streamId: stream?.id ?? null, threadId: selectedThreadId ?? null }),
+    [stream?.id, selectedThreadId],
   );
+  const offerDeps = useMemo<OfferDeps>(
+    () => ({
+      openPage: (tabId) => {
+        const ref = refFromTabId(tabId);
+        if (ref) handleOpenPageRef.current?.(ref);
+      },
+      openForm,
+      // What the window has for one of its own to act on now.
+      available: (spec) => {
+        if (spec.ui?.form === "new-thread") return commandState.hasStream;
+        if (spec.ui?.form === "commit") return !!commandState.canCommit;
+        switch (spec.op ? `${spec.op.capability}/${spec.op.op}` : "") {
+          case "editor.write/save":
+            return commandState.canSave;
+          case "window.show/find":
+            return commandState.hasSelectedFile;
+          case "window.show/quick_open":
+            return commandState.hasStream;
+          case "agent_input.write/draft":
+            return commandState.hasThread;
+          case "projects.write/create":
+          case "projects.write/open":
+            // The shell's: a browser window has none to ask.
+            return shellAvailable();
+          default:
+            return true;
+        }
+      },
+      run: (label, id, input) => {
+        // One the window hosts runs here: nothing goes to the daemon.
+        const spec = personSpecs.find((s) => s.id === id);
+        const local = spec ? runLocally(windowHandlersRef.current, spec, input) : null;
+        if (local) {
+          return local
+            .then(({ result }): CommandOutcome => ({ result, audit_id: null, event_id: null, inverse: null }))
+            .catch((e: unknown) => {
+              recordOpError({ label, message: e instanceof Error ? e.message : String(e) });
+              return null;
+            });
+        }
+        return personCommands.run(label, id, input);
+      },
+      runInBackground: (label, id, input) =>
+        void runGitMenuOp(label, id, () => runCommandInBackground(label, id, input)),
+      }),
+    [personSpecs, runGitMenuOp, openForm, commandState],
+  );
+  const offers = useMemo(() => commandOffers(personSpecs, offerCtx, offerDeps), [personSpecs, offerCtx, offerDeps]);
+  // A ref's menus (its page's, its rows') run offers the same way.
+  useEffect(() => {
+    setRefOfferHost({ ctx: offerCtx, deps: offerDeps });
+    return () => setRefOfferHost(null);
+  }, [offerCtx, offerDeps]);
   // The menu bar (File, Edit) and what search lists: the bus's offers,
   // and the shell's project commands.
   const menuGroups = useMemo(() => buildMenuBar(offers), [offers]);

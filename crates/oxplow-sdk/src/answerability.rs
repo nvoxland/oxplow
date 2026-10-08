@@ -377,12 +377,12 @@ mod tests {
     fn models_are_the_tables_a_query_reads() {
         assert_eq!(
             models_in(
-                "WITH x AS (SELECT 1 FROM V_Task) \
+                "WITH x AS (SELECT 1 FROM V_Work_Item) \
                  SELECT a.n AS v_total, 'v_quoted' -- v_comment\n\
                  FROM v_commit a, v_branch b /* v_block */ \
                  JOIN (SELECT * FROM v_tag) t ON 1 LEFT JOIN json_each(a.parents) p"
             ),
-            vec!["v_task", "v_commit", "v_branch", "v_tag"]
+            vec!["v_work_item", "v_commit", "v_branch", "v_tag"]
         );
     }
 

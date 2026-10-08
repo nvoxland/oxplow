@@ -9,7 +9,7 @@ const lens = (over: Partial<Lens> = {}): Lens => ({
   slug: "waiting",
   title: "Waiting on me",
   description: "Blocked tasks",
-  query: "SELECT id, title FROM v_task",
+  query: "SELECT ref, title FROM v_work_item",
   viz: "table",
   params: [],
   columns: [],
@@ -29,8 +29,8 @@ const lens = (over: Partial<Lens> = {}): Lens => ({
 
 describe("displayColumns", () => {
   test("without declared columns shows every result column by name", () => {
-    expect(displayColumns(lens(), ["id", "title"])).toEqual([
-      { key: "id", label: "id", index: 0, link: null, unitIndex: null, iconIndex: null, toneIndex: null },
+    expect(displayColumns(lens(), ["ref", "title"])).toEqual([
+      { key: "ref", label: "ref", index: 0, link: null, unitIndex: null, iconIndex: null, toneIndex: null },
       { key: "title", label: "title", index: 1, link: null, unitIndex: null, iconIndex: null, toneIndex: null },
     ]);
   });

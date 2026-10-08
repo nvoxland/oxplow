@@ -18,13 +18,13 @@ test("the catalog is the model registry, core first", () => {
     result(
       ["view", "owner", "kind", "description"],
       [
-        ["v_task", "core", "sql", "Tasks."],
+        ["v_work_item", "core", "sql", "Work items."],
         ["v_gh_pr", "gh", "entity", "Pull requests."],
       ],
     ),
   );
   expect(rows).toEqual([
-    { view: "v_task", owner: "core", kind: "sql", description: "Tasks." },
+    { view: "v_work_item", owner: "core", kind: "sql", description: "Work items." },
     { view: "v_gh_pr", owner: "gh", kind: "entity", description: "Pull requests." },
   ]);
   expect(modelColumns(result(["name", "sql_type", "doc"], [["id", "INTEGER", "Task id."], ["n", null, "Count."]]))).toEqual([
@@ -51,7 +51,7 @@ test("lineage splits what a model reads from what reads it", () => {
     ],
     readBy: ["v_claim_digest", "v_effort_claim"],
   });
-  expect(lineage("v_task", result(["view", "input", "kind"], []))).toEqual({ reads: [], readBy: [] });
+  expect(lineage("v_work_item", result(["view", "input", "kind"], []))).toEqual({ reads: [], readBy: [] });
 });
 
 test("a raw read can't be kept: saving and pinning say why", () => {

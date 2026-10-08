@@ -17,8 +17,10 @@ provider** (P7.A1), which the bus dispatches to the item's provider.
 tools — reads work items through `v_work_item`, `v_work_item_link` and
 `v_work_item_comment`, and writes them with the `work_item.*` commands;
 nothing outside a work list's implementation reads that list's own
-tables (`v_task` is oxplow's tasks'; `oxplow-dev` is the one development
-exception). The views show **the active work list's items only**: one
+tables (`oxplow-dev` is the one development exception). oxplow's tasks
+publish no model of their own — `v_task`, `v_task_link` and
+`v_task_note` were removed; their own fields are `native_state` and
+`native`. The views show **the active work list's items only**: one
 list at a time, whichever implementation it is, and nothing with none.
 
 `v_work_item` (table `work_item`, V115) holds the items by ref,
@@ -101,8 +103,8 @@ boot repair. A list writes no page refs of its own.
 
 The desktop reads **only the interface**, whichever list is active —
 never oxplow's task tables, ids or refs; a guard test
-(`apps/desktop/src/workItemInterface.guard.test.ts`) fails on `v_task`,
-a built `work_item:oxplow:` ref or `tsk` id parsing in desktop code.
+(`apps/desktop/src/workItemInterface.guard.test.ts`) fails on a `v_task`
+name, a built `work_item:oxplow:` ref or `tsk` id parsing in desktop code.
 
 `apps/desktop/src/workItems.ts` is the one read and write path:
 

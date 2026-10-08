@@ -210,12 +210,10 @@ pub fn scaffold(
              \x20       ref: {{ type: string, description: \"The work item (work_item:<provider>:<id>).\" }}\n\
              \x20     additionalProperties: false\n\
              \x20   entry: handlers/note.star\n\
-             \x20   examples:\n\
-             \x20     - {{ name: happy, input: {{ ref: \"work_item:oxplow:tsk1\" }}, expect_commands: [oxplow.work_item.comment] }}\n\
-             ui:\n\
-             \x20 commands:\n\
              \x20   # On a work item's page (Commands) and a row's right-click.\n\
-             \x20   - {{ command: {ns}.notes.add, label: Add Note, about: work_item }}\n"
+             \x20   ui: {{ label: Add Note, about: work_item, input: {{ ref: \"{{{{ref}}}}\" }} }}\n\
+             \x20   examples:\n\
+             \x20     - {{ name: happy, input: {{ ref: \"work_item:oxplow:tsk1\" }}, expect_commands: [oxplow.work_item.comment] }}\n"
         )),
         Kind::Effect => manifest.push_str(
             "effects:\n\
@@ -838,7 +836,7 @@ mod tests {
         write(
             dir.path(),
             "oxplow/extensions/team/extension.yaml",
-            "manifest: 2\nname: team\nsharing: shared\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\nproviders:\n  - id: ticket\n",
+            "manifest: 2\nname: team\nsharing: shared\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\nui:\n  replacements: []\n",
         );
         let report = check(
             dir.path(),
@@ -854,7 +852,7 @@ mod tests {
         let text = render_findings(&report, Format::Text);
         assert!(
             text.contains(
-                "error: oxplow/extensions/team/extension.yaml:8: `providers` is experimental"
+                "error: oxplow/extensions/team/extension.yaml:9: `ui.replacements` is experimental"
             ),
             "{text}"
         );
@@ -919,61 +917,6 @@ mod tests {
                     && w.contains("another extension's event type")),
             "{:?}",
             report.warnings
-        );
-    }
-
-    /// `ui.commands` entries are always checked: against the registry
-    /// when one is given, else a throwaway oxplow's (P7.C6).
-    #[tokio::test(flavor = "multi_thread")]
-    async fn ui_commands_are_checked_without_a_database() {
-        let dir = tempfile::tempdir().unwrap();
-        write(
-            dir.path(),
-            "oxplow/extensions/acme/extension.yaml",
-            "manifest: 2\nname: acme\nintent:\n  purpose: x\n  examples: [{ name: a }]\nui:\n  commands:\n    - { label: New Bug, about: work_item, command: oxplow.work_item.create, input: { title: 7 } }\n",
-        );
-        let throwaway = check(
-            dir.path(),
-            "acme",
-            &ExtensionCatalog::new(),
-            None,
-            None,
-            None,
-        )
-        .await
-        .unwrap();
-        assert!(
-            throwaway
-                .errors
-                .iter()
-                .any(|e| e.contains("the input doesn't fit")),
-            "{:?}",
-            throwaway.errors
-        );
-        let schema = serde_json::json!({
-            "type": "object",
-            "properties": { "title": { "type": "string" } },
-            "required": ["title"]
-        });
-        let schemas = move |name: &str| (name == "oxplow.work_item.create").then(|| schema.clone());
-        let checked = check(
-            dir.path(),
-            "acme",
-            &ExtensionCatalog::new(),
-            None,
-            Some(&schemas),
-            None,
-        )
-        .await
-        .unwrap();
-        assert!(!checked.ok);
-        assert!(
-            checked
-                .errors
-                .iter()
-                .any(|e| e.contains("the input doesn't fit")),
-            "{:?}",
-            checked.errors
         );
     }
 
