@@ -363,11 +363,15 @@ was refreshed by it (the agent ran `bun test` instead of the
 report-emitting `bun run test:collect`, for example), the `collection`
 reactor persists a one-shot nudge, which the thread's next tool-hook
 response delivers (`take_undelivered`; see Nudge persistence). The nudge names the project's
-own `testing.command` when set — and, when a `fastCommand` is declared,
-offers that for iterating and `command` for the closing run (this repo's
-`agentHint` says the same) — says the run wrote none of the reports the
-project's report collectors read when there are some but no `command`, or
-routes to `/oxplow:configure` when the project reads no reports at all.
+own `fastCommand` when declared, else its `testing.command` — only one:
+which tests to run, and whether to pay for the full run with coverage,
+is the agent's call, and a nudge naming the full run as "the closing
+run" kept agents running it on every commit after nothing required it.
+It says the run wrote none of the reports the project's report
+collectors read when there are some but no `command`, or routes to
+`/oxplow:configure` when the project reads no reports at all. It never
+repeats the agent's command back (the agent just wrote it; heredoc edit
+scripts made that kilobytes).
 When a collector **should** have read a report but didn't count — its
 parse failed, it is disabled, or its program awaits approval — the nudge
 says that instead, collector by collector (`RunReports::unread`,
@@ -381,6 +385,19 @@ built-in patterns + `runPatterns`) and (2) "did a report collector read a
 report this run wrote?" (its mtime inside the run's freshness window). The tool-specific command it
 names comes entirely from the project's config, so it works for any
 test tool, current or future.
+
+**What isn't a test run.** The command is split into sub-commands on
+shell operators; a sub-command led by a read-only executable (`grep`,
+`echo`, `cat`, …) only mentions a pattern, a heredoc's body is data (a
+script fed to `python3 -`, a file written with `cat > f <<EOF`) and is
+left out, and a `--no-run` invocation only builds. Each of these used to
+fire the nudge.
+
+**The runner itself wrote no report.** When the run was the project's
+own `command` or `fastCommand` and still no report appeared, it never got
+to the tests (a compile error, a timeout, a pipe cut short); naming the
+runner again adds nothing, so no nudge fires and the effort's one nudge
+stays for a run that needs it.
 
 **Anti-nag:** the nudge fires at most once per effort — a durable one-shot
 mark (`once_mark`, `claim_once`), so a daemon restart doesn't re-arm

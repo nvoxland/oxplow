@@ -81,9 +81,12 @@ pub fn detect_test_run(command: &str, extra_patterns: &[String]) -> bool {
 }
 
 /// The sub-command of `command` that runs the tests, trimmed — what a test
-/// run shows as its command, not the agent's whole Bash call (tsk1037).
+/// run shows as its command, not the agent's whole Bash call (tsk1037). A
+/// `--no-run` invocation builds the tests without running any, so it isn't
+/// one.
 pub fn test_run_segment(command: &str, extra_patterns: &[String]) -> Option<String> {
-    matched_segment(command, DEFAULT_TEST_PATTERNS, extra_patterns)
+    matched_segments(command, DEFAULT_TEST_PATTERNS, extra_patterns)
+        .find(|sub| !sub.split_whitespace().any(|t| t == "--no-run"))
 }
 
 /// Does `command` look like a static-analysis run? Same substring matching as
@@ -225,6 +228,18 @@ fn matches_any(command: &str, builtins: &[&str], extras: &[String]) -> bool {
 
 /// The first sub-command of `command` that [`matches_any`] matched.
 fn matched_segment(command: &str, builtins: &[&str], extras: &[String]) -> Option<String> {
+    matched_segments(command, builtins, extras).next()
+}
+
+/// Every sub-command of `command` that invokes a pattern, in order:
+/// operator-split, heredoc bodies left out (they are data — a script fed
+/// to an interpreter, a file written with `cat` — not commands), and
+/// read-only executables skipped.
+fn matched_segments(
+    command: &str,
+    builtins: &[&str],
+    extras: &[String],
+) -> impl Iterator<Item = String> {
     let pats: Vec<String> = builtins
         .iter()
         .map(|s| s.to_ascii_lowercase())
@@ -232,20 +247,62 @@ fn matched_segment(command: &str, builtins: &[&str], extras: &[String]) -> Optio
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect();
-    if pats.is_empty() {
-        return None;
-    }
-    let normalized = command
+    let normalized = without_heredoc_bodies(command)
         .replace("&&", "\n")
         .replace("||", "\n")
         .replace([';', '|'], "\n");
     normalized
         .split('\n')
-        .find(|sub| {
+        .filter(|sub| {
             let lower = sub.to_ascii_lowercase();
             pats.iter().any(|p| lower.contains(p.as_str())) && !subcommand_is_read_only(sub)
         })
         .map(|sub| sub.trim().to_string())
+        .collect::<Vec<_>>()
+        .into_iter()
+}
+
+/// `command` with each heredoc's body removed, the line that opens it kept.
+fn without_heredoc_bodies(command: &str) -> String {
+    let mut out = Vec::new();
+    let mut open: Option<(String, bool)> = None;
+    for line in command.lines() {
+        if let Some((delimiter, tabs)) = &open {
+            let line = if *tabs {
+                line.trim_start_matches('\t')
+            } else {
+                line
+            };
+            if line.trim_end() == delimiter {
+                open = None;
+            }
+            continue;
+        }
+        out.push(line);
+        open = heredoc_delimiter(line);
+    }
+    out.join("\n")
+}
+
+/// The delimiter of a heredoc `line` opens (`<<EOF`, `<<'EOF'`, `<<-"EOF"`)
+/// and whether its body may indent with tabs (`<<-`); `None` for no heredoc
+/// or a here-string (`<<<`).
+fn heredoc_delimiter(line: &str) -> Option<(String, bool)> {
+    let rest = &line[line.find("<<")? + 2..];
+    if rest.starts_with('<') {
+        return None;
+    }
+    let (tabs, rest) = match rest.strip_prefix('-') {
+        Some(r) => (true, r),
+        None => (false, rest),
+    };
+    let word: String = rest
+        .trim_start()
+        .chars()
+        .take_while(|c| !c.is_whitespace() && !matches!(c, ';' | '|' | '&' | '>' | '<' | ')'))
+        .collect();
+    let word = word.trim_matches(|c| c == '\'' || c == '"');
+    (!word.is_empty()).then(|| (word.to_string(), tabs))
 }
 
 /// The `metric_capture.trigger` every agent-work run (tests, coverage,
@@ -2373,12 +2430,19 @@ impl CollectionService {
         // tool-agnostic: it keys only on "test run detected" + "no fresh
         // report", never on which tool ran; the command it names comes
         // from the project's own config.
+        //
+        // The project's own runner writing no report never got to the tests
+        // (a compile error, a timeout, a pipe cut short): naming the runner
+        // again adds nothing, so that run spends no nudge.
         let produced_report = report.is_some() || coverage.is_some();
-        if !produced_report && self.mark_nudged(&effort).await {
+        let ran_the_runner = reads.unread.is_empty()
+            && test_run_segment(&bash.command, &test_patterns)
+                .is_some_and(|run| names_configured_runner(&cfg, &run));
+        if !produced_report && !ran_the_runner && self.mark_nudged(&effort).await {
             let msg = if reads.unread.is_empty() {
-                report_nudge_message(&cfg, !self.report_collectors().is_empty(), &bash.command)
+                report_nudge_message(&cfg, !self.report_collectors().is_empty())
             } else {
-                unread_reports_message(&bash.command, &reads.unread)
+                unread_reports_message(&reads.unread)
             };
             self.persist_nudge(
                 thread,
@@ -3410,63 +3474,61 @@ impl CollectionService {
     }
 }
 
+/// Does `run` (a test run's sub-command) invoke the project's configured
+/// `command` or `fastCommand`?
+fn names_configured_runner(cfg: &oxplow_config::TestingConfig, run: &str) -> bool {
+    let run = run.to_ascii_lowercase();
+    [cfg.command.as_deref(), cfg.fast_command.as_deref()]
+        .into_iter()
+        .flatten()
+        .map(|c| c.trim().to_ascii_lowercase())
+        .any(|c| !c.is_empty() && run.contains(&c))
+}
+
 /// The PostToolUse nudge shown when a detected test run produced no
-/// report oxplow could parse for the effort. Tool-agnostic: it only
-/// echoes the project's own configured command (or routes to
-/// `/oxplow:configure`), so it works for any current/future test tool
-/// without the hook knowing anything tool-specific.
-fn report_nudge_message(
-    cfg: &oxplow_config::TestingConfig,
-    has_report_collectors: bool,
-    command: &str,
-) -> String {
-    let cmd = command.trim();
-    if let Some(tc) = cfg
-        .command
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        match cfg
-            .fast_command
-            .as_deref()
-            .map(str::trim)
+/// report oxplow could parse for the effort. Tool-agnostic: it names only
+/// the project's own configured command (or routes to `/oxplow:configure`),
+/// so it works for any current/future test tool without the hook knowing
+/// anything tool-specific. It doesn't repeat the agent's command back (the
+/// agent just wrote it), and with a `fastCommand` it names only that one:
+/// which tests to run, and whether to pay for the full run, is the agent's
+/// call.
+fn report_nudge_message(cfg: &oxplow_config::TestingConfig, has_report_collectors: bool) -> String {
+    let configured = |c: Option<&str>| {
+        c.map(str::trim)
             .filter(|s| !s.is_empty())
-        {
-            Some(fast) => format!(
-                "Tests ran (`{cmd}`) but produced no report, so this run won't appear in the \
-                 effort's Tests panel — only report-emitting runs do. `{fast}` is the quick \
-                 run (it takes a filter); `{tc}` is the full run with coverage. Both in the \
-                 foreground."
-            ),
-            None => format!(
-                "Tests ran (`{cmd}`) but produced no report, so this run won't appear in the \
-                 effort's Tests panel — only report-emitting runs do. Run tests via `{tc}` in \
-                 the foreground so oxplow sees them."
-            ),
-        }
+            .map(str::to_string)
+    };
+    if let Some(runner) =
+        configured(cfg.fast_command.as_deref()).or(configured(cfg.command.as_deref()))
+    {
+        format!(
+            "That test run wrote no report oxplow reads, so it won't show in the effort's \
+             Tests panel. `{runner}` writes one{}; run it in the foreground.",
+            if cfg.fast_command.is_some() {
+                " and takes a filter"
+            } else {
+                ""
+            }
+        )
     } else if has_report_collectors {
-        format!(
-            "Tests ran (`{cmd}`) but wrote none of the reports this project's report collectors \
-             read, so this effort has no parsed tests/coverage. Re-run via the command that \
-             writes them, and set `testing.command` in .oxplow/project.yaml to make it one step."
-        )
+        "That test run wrote none of the reports this project's report collectors read. \
+         Run the command that writes them, and set `testing.command` in \
+         .oxplow/project.yaml to make it one step."
+            .to_string()
     } else {
-        format!(
-            "Tests ran (`{cmd}`) but this project reads no test reports, so oxplow can't \
-             attribute tests/coverage to the effort. Run /oxplow:configure to wire this stack's \
-             report(s)."
-        )
+        "That test run's results can't reach the effort: this project reads no test \
+         reports. Run /oxplow:configure to wire this stack's report(s)."
+            .to_string()
     }
 }
 
 /// The report-less nudge when the run's collectors didn't count (tsk893):
 /// why each didn't. Running the tests again changes none of it.
-fn unread_reports_message(command: &str, unread: &[String]) -> String {
+fn unread_reports_message(unread: &[String]) -> String {
     format!(
-        "Tests ran (`{}`) but oxplow read none of their reports: {}. Running the tests again \
-         won't change that.",
-        command.trim(),
+        "oxplow read none of that test run's reports: {}. Running the tests again won't \
+         change that.",
         unread.join("; ")
     )
 }
@@ -3881,40 +3943,34 @@ mod tests {
 
     #[test]
     fn report_nudge_names_configured_test_command() {
-        let msg = report_nudge_message(
-            &testing(Some("bun run test:collect"), None),
-            true,
-            "bun test",
-        );
-        // Echoes the project's own command — tool-agnostic, no built-in
+        let msg = report_nudge_message(&testing(Some("bun run test:collect"), None), true);
+        // Names the project's own command — tool-agnostic, no built-in
         // tool→command knowledge in the hook.
         assert!(msg.contains("bun run test:collect"), "{msg}");
-        assert!(msg.contains("bun test"), "{msg}");
         assert!(!msg.contains("/oxplow:configure"), "{msg}");
     }
 
-    /// With a fast command configured, the nudge offers it for iterating
-    /// and keeps the full one for the closing run.
+    /// With a fast command configured, the nudge names only it: which
+    /// tests to run, and whether to pay for the full run with coverage, is
+    /// the agent's call, and naming the full run steered agents into it on
+    /// every commit.
     #[test]
-    fn report_nudge_offers_the_fast_command_for_iterating() {
+    fn report_nudge_offers_only_the_fast_command() {
         let msg = report_nudge_message(
             &testing(Some("bun run test:collect"), Some("bun run test:fast")),
             true,
-            "cargo test -p x",
         );
         assert!(msg.contains("`bun run test:fast`"), "{msg}");
-        assert!(msg.contains("`bun run test:collect`"), "{msg}");
-        assert!(!msg.contains("EVERY"), "{msg}");
+        assert!(!msg.contains("test:collect"), "{msg}");
     }
 
     #[test]
     fn report_nudge_routes_to_configure_without_profile() {
         // Nothing reads reports → route to the agent-driven configure flow
         // (which adapts to any tool).
-        let msg = report_nudge_message(&testing(None, None), false, "pytest -q tests/");
+        let msg = report_nudge_message(&testing(None, None), false);
         assert!(msg.contains("/oxplow:configure"), "{msg}");
-        assert!(msg.contains("pytest -q tests/"), "{msg}");
-        let with_collectors = report_nudge_message(&testing(None, None), true, "pytest");
+        let with_collectors = report_nudge_message(&testing(None, None), true);
         assert!(
             with_collectors.contains("testing.command"),
             "{with_collectors}"
@@ -3931,7 +3987,7 @@ mod tests {
             (testing(None, None), true),
             (testing(None, None), false),
         ] {
-            let msg = report_nudge_message(&cfg, collectors, "bun test");
+            let msg = report_nudge_message(&cfg, collectors);
             assert!(!msg.contains(".context/"), "leaked repo path: {msg}");
         }
     }
@@ -3976,6 +4032,38 @@ mod tests {
             Some("RUST_LOG=debug bun run test:collect")
         );
         assert_eq!(test_run_segment("ls -la", &[]), None);
+    }
+
+    /// A heredoc's body is data — a script piped to an interpreter, a file
+    /// written with `cat` — so a test command named inside it is no run.
+    #[test]
+    fn a_test_command_inside_a_heredoc_is_not_a_run() {
+        let extra = ["test:fast".to_string()];
+        let edit = "python3 - <<'EOF'\ns = 'bun run test:fast -p x'\nprint('cargo test')\nEOF";
+        assert!(!detect_test_run(edit, &extra));
+        assert!(!detect_test_run(
+            "cat > notes.md <<EOF\nrun cargo test\nEOF",
+            &[]
+        ));
+        assert!(!detect_test_run(
+            "cat <<-\"END\" > x\n\tcargo test\n\tEND",
+            &[]
+        ));
+        // The command after the heredoc still counts.
+        assert!(detect_test_run(
+            "python3 - <<'EOF'\nprint(1)\nEOF\nbun run test:fast -p x",
+            &extra
+        ));
+    }
+
+    /// `--no-run` builds the tests without running any.
+    #[test]
+    fn a_build_only_test_command_is_not_a_run() {
+        assert!(!detect_test_run("cargo test -p oxplow-app --no-run", &[]));
+        assert!(detect_test_run(
+            "cargo test --no-run && cargo test -p oxplow-app",
+            &[]
+        ));
     }
 
     #[test]
@@ -7122,6 +7210,38 @@ mod tests {
             assert_eq!(spec.target, Some(80.0), "target in data");
             assert_eq!(spec.fail_at, Some(50.0), "fail floor in data");
             assert_eq!(spec.direction, "higher-better");
+        }
+
+        /// The project's own runner writing no report means it never got
+        /// to the tests (a compile error, a timeout, a pipe cut short), so
+        /// "run the project's runner" has nothing to add — and the one
+        /// nudge an effort gets stays for a run that needs it.
+        #[tokio::test]
+        async fn no_nudge_when_the_configured_runner_wrote_no_report() {
+            let h = build(None).await;
+            {
+                let mut cfg = h.service.config.write().unwrap();
+                cfg.testing.command = Some("bun run test:collect".into());
+                cfg.testing.fast_command = Some("bun run test:fast".into());
+                cfg.testing.run_patterns = vec!["test:fast".into()];
+            }
+            let run = |cmd: &'static str| {
+                let svc = h.service.clone();
+                let thread = h.thread;
+                async move {
+                    svc.on_post_tool_use(
+                        &thread,
+                        &bash_payload(cmd, 101),
+                        crate::collection::RunOrigin::Command { turn: None },
+                    )
+                    .await
+                    .unwrap()
+                }
+            };
+            assert_eq!(run("bun run test:fast -p oxplow-app foo").await, None);
+            let nudge = run("cargo test -p oxplow-app").await.expect("still nudged");
+            assert!(nudge.contains("`bun run test:fast`"), "{nudge}");
+            assert!(!nudge.contains("cargo test -p"), "no echo: {nudge}");
         }
 
         #[tokio::test]
