@@ -39,6 +39,7 @@ import { normalizeSnapshotId } from "./effort-snapshot.js";
 import { IpcCallError, ipcErrorCode, ipcErrorMessage } from "./ipc-error.js";
 import type {
   AiSettings,
+  HarnessListing,
   CatalogPrompt,
   EffectiveSetting,
   PanelPlacement,
@@ -278,8 +279,8 @@ export type { OpOutcome, RemoteBranchEntry, MergeReadiness } from "./tauri-bridg
 // Stream / Thread come straight from the Tauri bindings — the
 // renderer reads the flat shape (working_pane / talking_pane /
 // custom_prompt) directly; no synthesis happens at the boundary.
-import type { AgentKind, Stream, Thread } from "./tauri-bridge/index.js";
-export type { AgentKind, Stream, Thread };
+import type { Stream, Thread } from "./tauri-bridge/index.js";
+export type { Stream, Thread };
 
 export interface ThreadState {
   selectedThreadId: string | null;
@@ -949,6 +950,12 @@ export async function listAcpAgents(): Promise<AcpAgentListing[]> {
   return unwrap(await commands.listAcpAgents());
 }
 
+/// The registered agent harnesses in priority order: the session picker's
+/// and Settings' (`agentKinds.ts`).
+export async function listAgentHarnesses(): Promise<HarnessListing[]> {
+  return unwrap(await commands.listAgentHarnesses());
+}
+
 // ---- ACP sessions (tsk281) --------------------------------------------
 // A structured agent conversation instead of a terminal. `acpPrompt` is
 // the prompt box's Enter and nothing else: oxplow never sends an agent
@@ -1048,7 +1055,8 @@ export async function getConfig(): Promise<OxplowConfig> {
   return unwrap(await commands.getConfig());
 }
 
-export async function setAgents(agents: AgentKind[]): Promise<OxplowConfig> {
+/// The enabled agent harnesses, by key, in priority order.
+export async function setAgents(agents: string[]): Promise<OxplowConfig> {
   return unwrap(await commands.setAgents(agents));
 }
 
@@ -1062,11 +1070,11 @@ export async function setGenerated(
   return unwrap(await commands.setGenerated(generated));
 }
 
-/// Set (or clear, with null/blank) the launch-model override for one
-/// agent — `agentModels.<agent>` in .oxplow/project.yaml. Only opencode consumes
-/// the override today (`opencode -m provider/model`).
+/// Set (or clear, with null/blank) one harness's launch model —
+/// `agentConfig.<agent>.model` in .oxplow/project.yaml, which its launch
+/// reads.
 export async function setAgentModel(
-  agent: AgentKind,
+  agent: string,
   model: string | null,
 ): Promise<OxplowConfig> {
   return unwrap(await commands.setAgentModel(agent, model));
@@ -1308,7 +1316,8 @@ export interface AgentSessionRecord {
   /** `thr1`. */
   thread_id: string;
   kind: string;
-  harness: AgentKind;
+  /** The harness's key. */
+  harness: string;
   acp_agent: string | null;
   title: string;
 }
@@ -1320,7 +1329,7 @@ const sessionRef = (id: string) => `agent_session:${id}`;
  *  starts its process when it mounts). No harness: the project's default. */
 export async function openAgentSession(
   threadId: string,
-  harness?: AgentKind,
+  harness?: string,
   acpAgent?: string | null,
   title?: string,
 ): Promise<AgentSessionRecord> {

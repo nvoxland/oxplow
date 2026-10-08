@@ -8,7 +8,7 @@ use oxplow_domain::agent_session::{
     AgentSession, NewAgentSession, SessionCloseReason, SessionKind,
 };
 use oxplow_domain::stores::AgentSessionStore;
-use oxplow_domain::{AgentKind, AgentSessionId, DomainError, ThreadId, Timestamp};
+use oxplow_domain::{AgentSessionId, DomainError, ThreadId, Timestamp};
 
 use crate::database::{map_sql_err, string_to_ts, ts_to_string, Database};
 use oxplow_domain::vocabulary::VocabularyHandle;
@@ -37,7 +37,7 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentSession> {
         id: AgentSessionId::new(row.get("id")?),
         thread_id: ThreadId::new(row.get("thread_id")?),
         kind: SessionKind::parse(&kind).ok_or_else(|| invalid("kind", &kind))?,
-        harness: AgentKind::parse(&harness).ok_or_else(|| invalid("harness", &harness))?,
+        harness,
         acp_agent: row.get("acp_agent")?,
         title: row.get("title")?,
         resume_session_id: row.get("resume_session_id")?,
@@ -368,7 +368,7 @@ mod tests {
         let conn = fixture();
         let opened = insert_tx(
             &conn,
-            &NewAgentSession::of(ThreadId::new(1), AgentKind::Acp, Some("gemini".into())),
+            &NewAgentSession::chat(ThreadId::new(1), "acp", "gemini"),
             at(1),
         )
         .unwrap();
@@ -400,17 +400,17 @@ mod tests {
     fn a_thread_lists_its_open_sessions_oldest_first() {
         let conn = fixture();
         let thread = ThreadId::new(1);
-        let open = |ms, harness| {
-            insert_tx(&conn, &NewAgentSession::of(thread, harness, None), at(ms))
+        let open = |ms, harness: &str| {
+            insert_tx(&conn, &NewAgentSession::terminal(thread, harness), at(ms))
                 .unwrap()
                 .id
         };
-        let a = open(1, AgentKind::Claude);
-        let b = open(2, AgentKind::Codex);
-        let c = open(3, AgentKind::Claude);
+        let a = open(1, "claude");
+        let b = open(2, "codex");
+        let c = open(3, "claude");
         insert_tx(
             &conn,
-            &NewAgentSession::of(ThreadId::new(2), AgentKind::Claude, None),
+            &NewAgentSession::terminal(ThreadId::new(2), "claude"),
             at(4),
         )
         .unwrap();
@@ -433,24 +433,21 @@ mod tests {
         );
     }
 
+    /// A harness is a key, stored as given: any one an extension declares.
     #[test]
-    fn every_harness_round_trips() {
+    fn any_harness_key_round_trips() {
         let conn = fixture();
-        for harness in [
-            AgentKind::Claude,
-            AgentKind::Codex,
-            AgentKind::Opencode,
-            AgentKind::Acp,
+        for new in [
+            NewAgentSession::terminal(ThreadId::new(1), "codex"),
+            NewAgentSession::terminal(ThreadId::new(1), "someones-harness"),
+            NewAgentSession::chat(ThreadId::new(1), "acp", "gemini"),
         ] {
-            let acp = (harness == AgentKind::Acp).then(|| "gemini".to_string());
-            let s = insert_tx(
-                &conn,
-                &NewAgentSession::of(ThreadId::new(1), harness, acp.clone()),
-                at(1),
-            )
-            .unwrap();
+            let s = insert_tx(&conn, &new, at(1)).unwrap();
             let back = get_tx(&conn, s.id).unwrap().unwrap();
-            assert_eq!((back.harness, back.acp_agent), (harness, acp));
+            assert_eq!(
+                (back.kind, back.harness, back.acp_agent),
+                (new.kind, new.harness, new.acp_agent)
+            );
         }
     }
 
@@ -459,7 +456,7 @@ mod tests {
         let conn = fixture();
         let s = insert_tx(
             &conn,
-            &NewAgentSession::of(ThreadId::new(2), AgentKind::Claude, None),
+            &NewAgentSession::terminal(ThreadId::new(2), "claude"),
             at(1),
         )
         .unwrap();

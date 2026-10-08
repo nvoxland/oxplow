@@ -66,10 +66,8 @@ async fn seed_thread(services: &Services, status: ThreadStatus) -> ThreadId {
     services.thread_store.upsert(&thread).await.unwrap();
     services
         .agent_session_store
-        .open(&oxplow_domain::agent_session::NewAgentSession::of(
-            thread.id,
-            oxplow_domain::AgentKind::Claude,
-            None,
+        .open(&oxplow_domain::agent_session::NewAgentSession::terminal(
+            thread.id, "claude",
         ))
         .await
         .unwrap();
@@ -340,10 +338,8 @@ async fn open_second_session(
 ) -> oxplow_domain::AgentSessionId {
     services
         .agent_session_store
-        .open(&oxplow_domain::agent_session::NewAgentSession::of(
-            thread,
-            oxplow_domain::AgentKind::Claude,
-            None,
+        .open(&oxplow_domain::agent_session::NewAgentSession::terminal(
+            thread, "claude",
         ))
         .await
         .unwrap()

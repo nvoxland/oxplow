@@ -306,11 +306,29 @@ async fn stream_reads() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn config_setters_round_trip() {
-    use oxplow_config::AgentKind;
     let app = TestApp::build();
-    commands::generated::set_agents(app.state(), vec![AgentKind::Claude, AgentKind::Codex])
-        .await
-        .unwrap();
+    let config =
+        commands::generated::set_agents(app.state(), vec!["claude".into(), "codex".into()])
+            .await
+            .unwrap();
+    assert_eq!(config.agents, ["claude", "codex"]);
+    assert!(
+        commands::generated::set_agents(app.state(), vec!["nope".into()])
+            .await
+            .is_err(),
+        "a harness nothing registers is refused"
+    );
+    let config = commands::generated::set_agent_model(
+        app.state(),
+        "opencode".into(),
+        Some("github-copilot/gpt-5-mini".into()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        config.agent_config["opencode"]["model"],
+        "github-copilot/gpt-5-mini"
+    );
     commands::generated::set_agent_prompt_append(app.state(), "be concise".into())
         .await
         .unwrap();

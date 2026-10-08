@@ -18,10 +18,10 @@ intent:
 # The agent harnesses, ACP agents and AI providers oxplow runs: core's
 # built-ins, many of each at once (every one declared here is active).
 implementations:
-  - { capability: agent_harness, id: claude, entry: "oxplow:claude-code" }
-  - { capability: agent_harness, id: codex, entry: "oxplow:codex-cli" }
-  - { capability: agent_harness, id: opencode, entry: "oxplow:opencode" }
-  - { capability: agent_harness, id: acp, entry: "oxplow:acp" }
+  - { capability: agent_harness, id: claude, entry: "oxplow:claude-code", title: Claude }
+  - { capability: agent_harness, id: codex, entry: "oxplow:codex-cli", title: Codex }
+  - { capability: agent_harness, id: opencode, entry: "oxplow:opencode", title: OpenCode }
+  - { capability: agent_harness, id: acp, entry: "oxplow:acp", title: ACP }
   - { capability: acp_adapter, id: claude, entry: "oxplow:acp-adapter", config: { command: claude-agent-acp, systemPrompt: meta } }
   - { capability: acp_adapter, id: gemini, entry: "oxplow:acp-adapter", config: { command: gemini, args: [--acp] } }
   - { capability: acp_adapter, id: codex, entry: "oxplow:acp-adapter", config: { command: codex-acp } }

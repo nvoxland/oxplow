@@ -7,9 +7,7 @@ import {
   subscribeNavigatorOpenRequests,
   type NavigatorMenuRequest,
 } from "../navigator-bus.js";
-import { archiveStream, type AgentKind, type Stream, type Thread, type ThreadState } from "../api.js";
-import { agentChoices, parseAgentChoice } from "../agentKinds.js";
-import { listAcpAgents } from "../api.js";
+import { archiveStream, type Stream, type Thread, type ThreadState } from "../api.js";
 import type { AcpAgentListing } from "../tauri-bridge/generated/bindings.js";
 import { subscribeNewThreadRequests } from "../new-thread-bus.js";
 import { AgentStatusDot, type AgentStatusDotState } from "./AgentStatusDot.js";

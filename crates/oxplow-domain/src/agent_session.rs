@@ -12,9 +12,9 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+use crate::agent::harness::{Interact, Transcript};
 use crate::ids::{AgentSessionId, ThreadId};
 use crate::time::Timestamp;
-use crate::AgentKind;
 
 /// What kind of slot a session is.
 #[derive(
@@ -48,12 +48,12 @@ impl SessionKind {
         }
     }
 
-    /// The kind a session running `harness` is when nobody says.
-    pub fn default_for(harness: AgentKind) -> Self {
-        if harness.is_terminal() {
-            SessionKind::Terminal
-        } else {
-            SessionKind::Chat
+    /// The kind a session of a harness that interacts so is when nobody
+    /// says: a chat for a structured transcript, else a terminal.
+    pub fn default_for(interact: Interact) -> Self {
+        match interact.transcript {
+            Transcript::Terminal => SessionKind::Terminal,
+            Transcript::Structured => SessionKind::Chat,
         }
     }
 }
@@ -94,8 +94,9 @@ pub struct AgentSession {
     pub id: AgentSessionId,
     pub thread_id: ThreadId,
     pub kind: SessionKind,
-    /// The harness that runs in it.
-    pub harness: AgentKind,
+    /// The harness that runs in it: its registry key
+    /// (`agent::registry::HarnessRegistry`).
+    pub harness: String,
     /// For an `acp` session, the ACP agent's name (see `acpAgents`).
     pub acp_agent: Option<String>,
     /// What the person called it; empty until renamed.
@@ -121,21 +122,46 @@ impl AgentSession {
 pub struct NewAgentSession {
     pub thread_id: ThreadId,
     pub kind: SessionKind,
-    pub harness: AgentKind,
+    pub harness: String,
     pub acp_agent: Option<String>,
     pub title: String,
 }
 
 impl NewAgentSession {
-    /// A session of `harness`'s default kind on `thread`, untitled.
-    pub fn of(thread_id: ThreadId, harness: AgentKind, acp_agent: Option<String>) -> Self {
+    /// An untitled `kind` session of `harness` on `thread`.
+    pub fn of(
+        thread_id: ThreadId,
+        kind: SessionKind,
+        harness: impl Into<String>,
+        acp_agent: Option<String>,
+    ) -> Self {
         Self {
             thread_id,
-            kind: SessionKind::default_for(harness),
-            harness,
+            kind,
+            harness: harness.into(),
             acp_agent,
             title: String::new(),
         }
+    }
+
+    /// An untitled terminal session of `harness` on `thread`.
+    pub fn terminal(thread_id: ThreadId, harness: impl Into<String>) -> Self {
+        Self::of(thread_id, SessionKind::Terminal, harness, None)
+    }
+
+    /// An untitled chat session of `harness` running `acp_agent` on
+    /// `thread`.
+    pub fn chat(
+        thread_id: ThreadId,
+        harness: impl Into<String>,
+        acp_agent: impl Into<String>,
+    ) -> Self {
+        Self::of(
+            thread_id,
+            SessionKind::Chat,
+            harness,
+            Some(acp_agent.into()),
+        )
     }
 }
 
@@ -165,11 +191,22 @@ mod tests {
         }
     }
 
+    /// A harness with a structured transcript runs in a chat; the rest in
+    /// a terminal.
     #[test]
-    fn an_acp_session_is_a_chat_and_the_rest_are_terminals() {
-        assert_eq!(SessionKind::default_for(AgentKind::Acp), SessionKind::Chat);
+    fn a_structured_harness_is_a_chat_and_the_rest_are_terminals() {
+        use crate::agent::harness::{Gate, Input};
+        let interact = |transcript| Interact {
+            transcript,
+            input: Input::Keystrokes,
+            gate: Gate::Harness,
+        };
         assert_eq!(
-            SessionKind::default_for(AgentKind::Codex),
+            SessionKind::default_for(interact(Transcript::Structured)),
+            SessionKind::Chat
+        );
+        assert_eq!(
+            SessionKind::default_for(interact(Transcript::Terminal)),
             SessionKind::Terminal
         );
     }

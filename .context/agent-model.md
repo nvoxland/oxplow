@@ -169,9 +169,9 @@ touches the database.
 The harness also names its **instruction files** (`instruction_files()`;
 `["CLAUDE.md"]` for every built-in today), which `agent_prompt` reads into the
 system prompt, and its **environment markers** (`env_markers()`), below. The
-harness config is a JSON value: `{"model": …}` from `agentModels` for the PTY
-harnesses, `{program, args, env, systemPromptViaMeta}` from the ACP agent's
-entry. Where a session's `billing_pool` (plan / API credits / purchased) gets
+harness config is a JSON value: the harness's `agentConfig.<key>` entry for the
+PTY harnesses (`{"model": …}` for opencode), `{program, args, env,
+systemPromptViaMeta}` from the ACP agent's entry. Where a session's `billing_pool` (plan / API credits / purchased) gets
 derived, when token facts carry it, is here: the harness knows how it was
 launched.
 
@@ -189,16 +189,28 @@ Project configuration is changed through the `config.*` commands on the
 command bus ([commands.md](./commands.md)) — an agent sets `zones`,
 `metricRetentionDays`, `generated`, … with `oxplow.config.set`, while the keys
 that run a program or pick the model (`agents`, `lsp`, `collection`,
-`ai`, `acpAgents`, `agentModels`, `extensions`, `agentPromptAppend`, …)
+`ai`, `acpAgents`, `agentConfig`, `extensions`, `agentPromptAppend`, …)
 need a person's confirmation: the agent's `oxplow.config.set` is kept as a
 proposal (`proposal:N`, with the before/after) that the person approves
 or declines, and `run_command` tells the agent so ([commands.md](./commands.md),
 "Proposals"). `set_zones` is gone; `zones` is just a key.
 
-`.oxplow/project.yaml` lists enabled agents as `agents: [...]`; the first entry
-is the default for newly-created threads, and each thread persists its
-own `agent` at creation time so Claude and Codex threads can run
-concurrently.
+**A harness is a registry key, never an enum.** An agent session's
+`harness` is the key of a registered harness (`HarnessRegistry`, the
+`agent_harness` declarations, in declaration order); nothing in core names
+one. `.oxplow/project.yaml`'s `agents: [...]` lists the enabled ones in
+priority order (the first is a new session's default); left out, every
+registered harness is enabled and the first declared is the default. The
+config checks only the keys' shape; `set_agents` and
+`oxplow.agent_session.open` check them against the registry, naming the
+registered on a miss. Each harness's own settings are `agentConfig: { <key>:
+{ … } }`, what its `launch` reads; the retired `agentModels` is a load error
+naming it. Whether a session runs an ACP agent in a chat follows from its
+harness's `interact()` (a structured transcript), not its name. The UI reads
+the harnesses through `list_agent_harnesses` (`harnesses::listing`: key,
+title, enabled, chat; priority order) by `useAgentHarnesses`, and
+`agentKinds.ts` builds the picker and labels from it. Each session
+persists its own harness, so Claude and Codex sessions run concurrently.
 
 - Claude runs `claude --plugin-dir <abs> --append-system-prompt <text>
   --mcp-config <json> [--resume <sid>]`.
@@ -206,7 +218,7 @@ concurrently.
   <sid>`, plus CLI config overrides for oxplow MCP and lifecycle hooks.
 - opencode runs `opencode -m <model> [-s <sid>]` (with a fresh-session
   fallback when the saved resume id is stale). The model is the harness
-  config's `model` (`agentModels.opencode`), defaulting to
+  config's `model` (`agentConfig.opencode.model`), defaulting to
   `github-copilot/gpt-5-mini`. Hooks, MCP, and the per-thread system prompt
   all ride the `OPENCODE_CONFIG_CONTENT` env var — inline opencode
   config (merged last by opencode) wiring the oxplow MCP server
@@ -316,7 +328,7 @@ depends only on the domain; core's text and the capability questions live in
   description + body template) as `/oxplow-review-comments` etc. — opencode
   has no plugin namespacing, hence the `oxplow-` prefix instead of
   Claude's `/oxplow:` form. The launch model comes from
-  `agentModels.opencode` in .oxplow/project.yaml (falling back to the
+  `agentConfig.opencode.model` in .oxplow/project.yaml (falling back to the
   harness's `DEFAULT_MODEL`). Known gaps vs the Claude bridge: no
   SessionStart/SessionEnd/Notification events.
 
@@ -524,10 +536,10 @@ site, so a timed-out PreToolUse deny is still caught there.
 
 ## ACP agents: configuration (tsk335)
 
-**Sessions.** `AgentKind::Acp` sessions name an ACP agent in
-`agent_session.acp_agent`. `AgentKind::is_terminal()` is false for them:
-`open_terminal_session` refuses them: their harness launches a
-`LaunchSpec::Acp`, not a PTY command.
+**Sessions.** A chat session (its harness's transcript is structured: the
+`acp` harness) names an ACP agent in `agent_session.acp_agent`.
+`open_terminal_session` refuses it: its harness launches a `LaunchSpec::Acp`,
+not a PTY command.
 
 **Configuration.** Agents are declarations: `oxplow-foundation`'s
 `acp_adapter` implementations (the `oxplow:acp-adapter` built-in, config
@@ -552,12 +564,12 @@ resolved path (`agent_path::resolve_program`). A declared adapter may
 always start; a project entry needs a person's approval in Settings → Data → Programs
 (`exec_consent`, `ProgramKind::AcpAgent`).
 
-**Creating threads.** `oxplow.thread.create` takes `acp_agent` (stored on the
-thread's agent session). It's required for
-`agent: acp`, refused otherwise, and must name a known agent. The
-new-thread picker lists "ACP · <name>" per agent when ACP is enabled in
-`agents:`, flagged "not installed" or "needs approval" (`agentChoices` in
-`agentKinds.ts`).
+**Opening sessions.** `oxplow.agent_session.open` takes `acp_agent`. It's
+required for a chat harness (the project's first ACP agent when the harness
+isn't named either), refused otherwise, and must name a known agent. The
+session picker lists "<harness title> · <name>" per ACP agent for each
+enabled chat harness, flagged "not installed" or "needs approval"
+(`agentChoices` in `agentKinds.ts`).
 
 **Not built yet:** a personal (user-global) `acpAgents` file; declared
 adapters and project entries only for now.

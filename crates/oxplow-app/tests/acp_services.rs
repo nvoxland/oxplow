@@ -17,9 +17,7 @@ use oxplow_app::acp::transcript::ItemBody;
 use oxplow_app::Services;
 use oxplow_db::semantic_layer::SqlCell;
 use oxplow_domain::stores::{AgentSessionStore, AgentTurnStore, StreamStore, ThreadStore};
-use oxplow_domain::{
-    AgentKind, Stream, StreamId, StreamKind, Thread, ThreadId, ThreadStatus, Timestamp,
-};
+use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadId, ThreadStatus, Timestamp};
 use oxplow_tasks::TaskId;
 use oxplow_tasks::TaskStore;
 use oxplow_tasks::{Task, TaskActorKind, TaskPriority, TaskStatus};
@@ -79,10 +77,8 @@ async fn seed(svc: &Services, root: &std::path::Path, status: ThreadStatus) -> T
     };
     svc.thread_store.upsert(&thread).await.unwrap();
     svc.agent_session_store
-        .open(&oxplow_domain::agent_session::NewAgentSession::of(
-            thread.id,
-            AgentKind::Acp,
-            Some("fake".into()),
+        .open(&oxplow_domain::agent_session::NewAgentSession::chat(
+            thread.id, "acp", "fake",
         ))
         .await
         .unwrap();
@@ -433,10 +429,8 @@ async fn two_acp_sessions_in_a_thread_run_apart() {
     let a = open_in_process(&svc, thread, &root).await;
     let b = svc
         .agent_session_store
-        .open(&oxplow_domain::agent_session::NewAgentSession::of(
-            thread,
-            AgentKind::Acp,
-            Some("fake".into()),
+        .open(&oxplow_domain::agent_session::NewAgentSession::chat(
+            thread, "acp", "fake",
         ))
         .await
         .unwrap()
@@ -478,10 +472,8 @@ async fn closing_an_acp_thread_stops_its_session() {
     assert!(svc.acp.is_open(&session));
     let terminal = svc
         .agent_session_store
-        .open(&oxplow_domain::agent_session::NewAgentSession::of(
-            thread,
-            AgentKind::Claude,
-            None,
+        .open(&oxplow_domain::agent_session::NewAgentSession::terminal(
+            thread, "claude",
         ))
         .await
         .unwrap()

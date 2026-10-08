@@ -831,11 +831,7 @@ mod tests {
                 db.transaction(move |tx| {
                     crate::agent_session_store::insert_tx(
                         tx,
-                        &oxplow_domain::agent_session::NewAgentSession::of(
-                            tid,
-                            oxplow_domain::AgentKind::Claude,
-                            None,
-                        ),
+                        &oxplow_domain::agent_session::NewAgentSession::terminal(tid, "claude"),
                         Timestamp::from_unix_ms(at),
                     )
                 })
@@ -912,11 +908,7 @@ mod tests {
                 for (at, state) in [(1, a), (2, b)] {
                     let session = crate::agent_session_store::insert_tx(
                         &conn,
-                        &oxplow_domain::agent_session::NewAgentSession::of(
-                            tid,
-                            oxplow_domain::AgentKind::Claude,
-                            None,
-                        ),
+                        &oxplow_domain::agent_session::NewAgentSession::terminal(tid, "claude"),
                         Timestamp::from_unix_ms(at),
                     )
                     .unwrap()
@@ -970,11 +962,7 @@ mod tests {
             .transaction(move |tx| {
                 crate::agent_session_store::insert_tx(
                     tx,
-                    &oxplow_domain::agent_session::NewAgentSession::of(
-                        tid,
-                        oxplow_domain::AgentKind::Claude,
-                        None,
-                    ),
+                    &oxplow_domain::agent_session::NewAgentSession::terminal(tid, "claude"),
                     Timestamp::from_unix_ms(1),
                 )
             })

@@ -15,6 +15,18 @@ pub async fn list_threads(svc: &Services, stream_id: StreamId) -> Result<Vec<Thr
     Ok(svc.thread_store.list_for_stream(&stream_id).await?)
 }
 
+/// The registered agent harnesses, in declaration order, with which the
+/// project enables and which run ACP agents.
+pub async fn list_agent_harnesses(
+    svc: &Services,
+) -> Result<Vec<oxplow_app::harnesses::HarnessListing>, IpcError> {
+    let config = read_config(&svc.config);
+    Ok(oxplow_app::harnesses::listing(
+        &svc.harnesses,
+        &config.agents,
+    ))
+}
+
 /// The ACP agents this project can run, with approval and install state.
 pub async fn list_acp_agents(
     svc: &Services,

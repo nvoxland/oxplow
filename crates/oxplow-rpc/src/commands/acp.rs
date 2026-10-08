@@ -16,8 +16,9 @@ use oxplow_app::acp::{agents, manager::AcpManager};
 use oxplow_app::Services;
 use oxplow_domain::agent::acp_adapter::SystemPromptVia;
 use oxplow_domain::agent::harness::LaunchSpec;
+use oxplow_domain::agent_session::SessionKind;
 use oxplow_domain::stores::{AgentSessionStore, StreamStore, ThreadStore};
-use oxplow_domain::{AgentKind, AgentSessionId};
+use oxplow_domain::AgentSessionId;
 
 use crate::error::IpcError;
 use crate::RpcContext;
@@ -57,8 +58,8 @@ pub async fn acp_open_session(
             "agent session {session_id} is closed"
         )));
     }
-    let (name, resume) = match (session.harness, session.acp_agent.clone()) {
-        (AgentKind::Acp, Some(name)) => (name, session.resume_session_id.clone()),
+    let (name, resume) = match (session.kind, session.acp_agent.clone()) {
+        (SessionKind::Chat, Some(name)) => (name, session.resume_session_id.clone()),
         _ => return Err(IpcError::invalid("this session doesn't run an ACP agent")),
     };
     let thread = svc

@@ -36,7 +36,6 @@ import {
   runCommandInBackground,
   writeWorkspaceFile,
   type ThreadState,
-  type AgentKind,
   type SqlCell,
   type Stream,
   type WorkspaceContext,
@@ -107,7 +106,8 @@ import { AgentSessionPage } from "./pages/AgentSessionPage.js";
 import { NewSessionPage } from "./pages/NewSessionPage.js";
 import { InlinePromptStrip } from "./components/InlinePromptStrip.js";
 import { reconcileSessionTabs } from "./tabs/sessionTabs.js";
-import { agentLabel, sessionLabel } from "./agentKinds.js";
+import { sessionLabel } from "./agentKinds.js";
+import { useAgentHarnesses } from "./useAgentHarnesses.js";
 import { useThreadSessions } from "./agentSessions.js";
 import { rollUpAgentStatus, threadStatuses } from "./agentStatusRollup.js";
 import { TerminalPage } from "./pages/TerminalPage.js";
@@ -277,24 +277,13 @@ function homeTabOf(tabs: TabRef[]): string {
 export function App() {
   const [streams, setStreams] = useState<Stream[]>([]);
   const [threadStates, setThreadStates] = useState<Record<string, ThreadState>>({});
-  const [enabledAgents, setEnabledAgents] = useState<AgentKind[]>(["claude"]);
+  const harnesses = useAgentHarnesses();
   // Mirror of threadStates for subscription callbacks that need the
   // latest map without re-subscribing when it changes (see
   // useBackendSubscriptions). Kept current on every render.
   const threadStatesRef = useRef(threadStates);
   threadStatesRef.current = threadStates;
 
-  useEffect(() => {
-    let cancelled = false;
-    void getConfig()
-      .then((config) => {
-        if (!cancelled && config.agents?.length) setEnabledAgents(config.agents);
-      })
-      .catch((e) => logUi("warn", "failed to load project config", { error: String(e) }));
-    return () => {
-      cancelled = true;
-    };
-  }, []);
   const [threadWorkStates, setThreadWorkStates] = useState<Record<string, WorkList>>({});
   const threadWorkStatesRef = useRef(threadWorkStates);
   threadWorkStatesRef.current = threadWorkStates;
@@ -1156,7 +1145,6 @@ export function App() {
     setStream,
     setSessionStatuses,
     setGeneratedState,
-    setEnabledAgents,
   });
 
   useEffect(() => {
@@ -2472,7 +2460,7 @@ export function App() {
         const sessionId = (ref.payload as { sessionId: string }).sessionId;
         const session = selectedThreadSessions?.find((candidate) => candidate.id === sessionId) ?? null;
         const status = sessionStatuses[sessionId];
-        const label = session ? session.title || sessionLabel(session) : "Agent";
+        const label = session ? session.title || sessionLabel(harnesses, session) : "Agent";
         return {
           id: ref.id,
           label,
@@ -2510,7 +2498,7 @@ export function App() {
         render: () => (
           <NewSessionPage
             thread={selectedThread}
-            enabledAgents={enabledAgents}
+            harnesses={harnesses}
             onStart={async (harness, acpAgent) => {
               if (!selectedThread) return;
               const opened = await openAgentSession(selectedThread.id, harness, acpAgent);
@@ -3274,7 +3262,7 @@ export function App() {
     agentThreadStatus,
     selectedThreadSessions,
     sessionStatuses,
-    enabledAgents,
+    harnesses,
     openTerminalPath,
     effectiveCenterActive,
     stream,

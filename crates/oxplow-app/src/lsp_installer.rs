@@ -243,7 +243,7 @@ mod tests {
 
     fn empty_session_mgr() -> LspSessionManager {
         let cfg = Arc::new(RwLock::new(oxplow_config::OxplowConfig {
-            agents: vec![oxplow_config::AgentKind::Claude],
+            agents: vec![],
             project_name: "p".into(),
             lsp_servers: vec![],
             agent_prompt_append: String::new(),
@@ -264,7 +264,7 @@ mod tests {
             measures: Default::default(),
             dimensions: Default::default(),
             zones: Default::default(),
-            agent_models: Default::default(),
+            agent_config: Default::default(),
             acp_agents: Vec::new(),
             extension_instances: Default::default(),
             active_providers: Default::default(),

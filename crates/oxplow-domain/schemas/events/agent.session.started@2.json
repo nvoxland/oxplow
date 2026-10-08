@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`agent.session.started@2`: v1 with the harness as its registry key\n(`claude`, or whatever an extension declares). A v1 payload is a v2 one\nas is: its four names are those keys.",
+  "properties": {
+    "harness": {
+      "description": "The harness's registry key; empty when no agent session claims the\nhook (an agent oxplow didn't start).",
+      "type": "string"
+    },
+    "resumed": {
+      "description": "The session is the thread's resume session (a reattach), not new.",
+      "type": "boolean"
+    },
+    "session": {
+      "type": "string"
+    },
+    "thread": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "session",
+    "thread",
+    "harness",
+    "resumed"
+  ],
+  "title": "AgentSessionStartedV2",
+  "type": "object"
+}

@@ -63,7 +63,15 @@ test("no metrics recorded is an EmptyState", async () => {
 test("a thread with no agent session shows the picker, with no prompts", () => {
   const thread = { id: "thr1", title: "Fix the cart" } as unknown as Thread;
   const { container, getByTestId } = render(
-    <NewSessionPage thread={thread} enabledAgents={["claude", "codex"]} onStart={async () => {}} />,
+    <NewSessionPage
+      thread={thread}
+      harnesses={[
+        { id: "claude", title: "Claude", chat: false, enabled: true },
+        { id: "codex", title: "Codex", chat: false, enabled: true },
+        { id: "opencode", title: "OpenCode", chat: false, enabled: false },
+      ]}
+      onStart={async () => {}}
+    />,
   );
   expect(emptyStates(container).length).toBe(1);
   expect(container.textContent).not.toContain("Ask the agent");

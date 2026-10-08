@@ -1159,13 +1159,15 @@ impl Services {
         // active (`work_items::none_provider`).
         work_items.register(work_items::none_provider());
         // The agent harnesses foundation declares; a new session's default
-        // is the project's first enabled agent.
+        // is the project's first enabled agent, else the first declared.
         let harnesses = {
             let config = config_arc.clone();
             oxplow_domain::agent::registry::HarnessRegistry::new(Arc::new(move || {
-                oxplow_config::default_harness(&config_service::read_config(&config))
-                    .as_str()
-                    .to_string()
+                config_service::read_config(&config)
+                    .agents
+                    .first()
+                    .cloned()
+                    .unwrap_or_default()
             }))
         };
         harnesses::register_built_ins(&harnesses, &declared);
@@ -1227,6 +1229,7 @@ impl Services {
         .chain(commands::thread::ops(session_processes.clone()))
         .chain(commands::agent_session::ops(
             config_arc.clone(),
+            harnesses.clone(),
             acp_adapters.clone(),
             session_processes.clone(),
         ))

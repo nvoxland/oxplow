@@ -107,6 +107,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	listAgentHarnesses: () => typedError<HarnessListing[], IpcError>(__TAURI_INVOKE("list_agent_harnesses")),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listClosedThreads: (streamId: StreamId) => typedError<Thread[], IpcError>(__TAURI_INVOKE("list_closed_threads", { streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -649,7 +654,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	setAgents: (agents: AgentKind[]) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_agents", { agents })),
+	setAgents: (agents: string[]) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_agents", { agents })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -659,7 +664,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	setAgentModel: (agent: AgentKind, model: string | null) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_agent_model", { agent, model })),
+	setAgentModel: (agent: string, model: string | null) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_agent_model", { agent, model })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1245,13 +1250,6 @@ export type AdvisoryOncePer =
 "session" | 
 // Once per thread per day (UTC).
 "day";
-
-export type AgentKind = "claude" | "codex" | "opencode" | 
-/**
- *  An agent spoken to over the Agent Client Protocol (tsk335); which one
- *  is the thread's `acp_agent`.
- */
-"acp";
 
 export type AgentSessionId = string;
 
@@ -3238,6 +3236,20 @@ export type Grants = {
 	capabilities: string[],
 };
 
+// One registered harness, as the session picker and Settings see it.
+export type HarnessListing = {
+	// Its key (what `agents:` and a session's `harness` name).
+	id: string,
+	title: string,
+	/**
+	 *  It runs an ACP agent in a chat (a structured transcript), so a
+	 *  session of it names one.
+	 */
+	chat: boolean,
+	// The project enables it (`agents:` names it, or names none).
+	enabled: boolean,
+};
+
 // Where a stream's workspace is.
 export type HeadInfo = {
 	// The head revision; `None` before the first commit.
@@ -4398,10 +4410,12 @@ export type OpRef = {
 
 export type OxplowConfig = {
 	/**
-	 *  Enabled agent implementations for this project, in priority order.
-	 *  The first entry is the default for newly-created threads.
+	 *  The agent harnesses enabled for this project, by registry key, in
+	 *  priority order: the first is a new session's default. Empty (the
+	 *  default) enables every registered harness, the first declared one
+	 *  the default.
 	 */
-	agents: AgentKind[],
+	agents: string[],
 	/**
 	 *  Human-readable project name. Defaults to the basename of the
 	 *  project dir when not set in .oxplow/project.yaml.
@@ -4520,13 +4534,10 @@ export type OxplowConfig = {
 	 */
 	zones?: ZoneRuleConfig[],
 	/**
-	 *  Per-agent launch model overrides, e.g.
-	 *  `agentModels: { opencode: "github-copilot/gpt-5-mini" }`.
-	 *  Only opencode consumes this today (its `-m provider/model`
-	 *  flag); claude/codex launch with their own defaults. Absent
-	 *  entries fall back to the built-in constant.
+	 *  Each harness's configuration, by its key: what its `launch` reads,
+	 *  e.g. `agentConfig: { opencode: { model: "github-copilot/gpt-5-mini" } }`.
 	 */
-	agentModels: Partial<{ [key in AgentKind]: string }>,
+	agentConfig: { [key in string]: unknown },
 	/**
 	 *  The project's ACP agents (`acpAgents:`), layered over the declared
 	 *  ACP adapters (`oxplow_app::acp::agents::resolve`).

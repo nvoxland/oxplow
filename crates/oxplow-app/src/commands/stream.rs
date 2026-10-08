@@ -522,10 +522,8 @@ mod tests {
         let second = fx
             .svc
             .agent_session_store
-            .open(&oxplow_domain::agent_session::NewAgentSession::of(
-                thread.id,
-                oxplow_domain::AgentKind::Claude,
-                None,
+            .open(&oxplow_domain::agent_session::NewAgentSession::terminal(
+                thread.id, "claude",
             ))
             .await
             .unwrap()

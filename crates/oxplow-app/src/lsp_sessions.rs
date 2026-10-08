@@ -870,13 +870,12 @@ fn binary_exists(command: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_config::AgentKind;
     use std::time::Duration;
     use tokio::time::timeout;
 
     fn empty_config() -> Arc<std::sync::RwLock<OxplowConfig>> {
         Arc::new(std::sync::RwLock::new(OxplowConfig {
-            agents: vec![AgentKind::Claude],
+            agents: vec![],
             project_name: "p".into(),
             lsp_servers: vec![],
             agent_prompt_append: String::new(),
@@ -897,7 +896,7 @@ mod tests {
             measures: Default::default(),
             dimensions: Default::default(),
             zones: Default::default(),
-            agent_models: Default::default(),
+            agent_config: Default::default(),
             acp_agents: Vec::new(),
             extension_instances: Default::default(),
             active_providers: Default::default(),

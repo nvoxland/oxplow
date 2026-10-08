@@ -70,10 +70,8 @@ pub async fn open_session(
 ) -> oxplow_domain::AgentSessionId {
     use oxplow_domain::stores::AgentSessionStore as _;
     svc.agent_session_store
-        .open(&oxplow_domain::agent_session::NewAgentSession::of(
-            thread,
-            oxplow_domain::AgentKind::Claude,
-            None,
+        .open(&oxplow_domain::agent_session::NewAgentSession::terminal(
+            thread, "claude",
         ))
         .await
         .unwrap()

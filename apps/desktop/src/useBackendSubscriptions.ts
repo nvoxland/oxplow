@@ -1,7 +1,6 @@
 import { type Dispatch, type RefObject, type SetStateAction, useEffect } from "react";
 
 import {
-  type AgentKind,
   type AgentStatusEntry,
   generatedPaths,
   getConfig,
@@ -53,7 +52,6 @@ export interface BackendSubscriptionHandlers {
   /** Each agent session's status, by `sessionStatusKey`. */
   setSessionStatuses: Dispatch<SetStateAction<Record<string, AgentStatusEntry>>>;
   setGeneratedState: (next: { exclude: string[]; include: string[] }) => void;
-  setEnabledAgents: (next: AgentKind[]) => void;
 }
 
 /**
@@ -101,7 +99,6 @@ export function useBackendSubscriptions(
     setStream,
     setSessionStatuses,
     setGeneratedState,
-    setEnabledAgents,
   } = handlers;
   const {
     subscribeWorkspaceContext,
@@ -232,7 +229,6 @@ export function useBackendSubscriptions(
         .then((cfg) => {
           if (cancelled) return;
           setGeneratedState(generatedPaths(cfg));
-          setEnabledAgents(cfg.agents?.length ? cfg.agents : ["claude"]);
         })
         .catch((error) => {
           logUi("warn", "failed to load config", { error: String(error) });
@@ -248,7 +244,7 @@ export function useBackendSubscriptions(
       unsub();
       unsubReconnect();
     };
-  }, [setEnabledAgents, setGeneratedState]);
+  }, [setGeneratedState]);
 
   useEffect(() => {
     let cancelled = false;

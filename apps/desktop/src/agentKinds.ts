@@ -1,52 +1,45 @@
-import type { AgentKind } from "./api.js";
-import type { AcpAgentListing } from "./tauri-bridge/generated/bindings.js";
+import type { AcpAgentListing, HarnessListing } from "./tauri-bridge/generated/bindings.js";
 
-/// Every agent oxplow can launch, in default display order. Adding an
-/// agent here (plus the Rust AgentKind variant) is what surfaces it in
-/// the Settings picker and the new-thread dialog.
-export const ALL_AGENT_KINDS: AgentKind[] = ["claude", "codex", "opencode", "acp"];
+/// The agent harnesses come from the backend (`listAgentHarnesses`): the
+/// ones the project's extensions declare, in priority order, each with its
+/// title, whether the project enables it, and whether it runs an ACP agent
+/// in a chat. Nothing here names a harness.
 
-const LABELS: Record<AgentKind, string> = {
-  claude: "Claude",
-  codex: "Codex",
-  // The brand styles itself lowercase, but next to "Claude" / "Codex"
-  // a lowercase entry reads as a bug — match the picker's casing.
-  opencode: "OpenCode",
-  // Agent Client Protocol: which agent is the session's `acp_agent`.
-  acp: "ACP",
-};
-
-export function agentLabel(agent: AgentKind): string {
-  return LABELS[agent] ?? agent;
+/// A harness as a person reads it: its title, else its key.
+export function harnessLabel(harnesses: HarnessListing[], id: string): string {
+  return harnesses.find((h) => h.id === id)?.title ?? id;
 }
 
-/// An agent session as its tab names it: "ACP · gemini" for an ACP
-/// session.
-export function sessionLabel(session: { harness: AgentKind; acpAgent: string | null }): string {
-  return session.harness === "acp" && session.acpAgent ? `ACP · ${session.acpAgent}` : agentLabel(session.harness);
+/// An agent session as its tab names it: "ACP · gemini" for a session
+/// running an ACP agent.
+export function sessionLabel(harnesses: HarnessListing[], session: { harness: string; acpAgent: string | null }): string {
+  const title = harnessLabel(harnesses, session.harness);
+  return session.acpAgent ? `${title} · ${session.acpAgent}` : title;
 }
 
 export interface AgentChoice {
-  /// `claude` for a terminal agent, `acp:<name>` for an ACP agent.
+  /// `<harness>`, or `<harness>:<acp agent>` for a chat harness.
   value: string;
   label: string;
 }
 
-/// The session picker's choices: each enabled terminal agent, and when
-/// ACP is enabled one per ACP agent, flagged when it can't start yet.
-export function agentChoices(enabled: AgentKind[], acpAgents: AcpAgentListing[]): AgentChoice[] {
-  return enabled.flatMap((kind): AgentChoice[] => {
-    if (kind !== "acp") return [{ value: kind, label: agentLabel(kind) }];
-    return acpAgents.map((a) => {
-      const note = !a.resolvedPath ? " (not installed)" : !a.approved ? " (needs approval)" : "";
-      return { value: `acp:${a.name}`, label: `ACP · ${a.name}${note}` };
+/// The session picker's choices: each enabled harness, in priority order,
+/// and for a chat harness one per ACP agent, flagged when it can't start
+/// yet.
+export function agentChoices(harnesses: HarnessListing[], acpAgents: AcpAgentListing[]): AgentChoice[] {
+  return harnesses
+    .filter((h) => h.enabled)
+    .flatMap((h): AgentChoice[] => {
+      if (!h.chat) return [{ value: h.id, label: h.title }];
+      return acpAgents.map((a) => {
+        const note = !a.resolvedPath ? " (not installed)" : !a.approved ? " (needs approval)" : "";
+        return { value: `${h.id}:${a.name}`, label: `${h.title} · ${a.name}${note}` };
+      });
     });
-  });
 }
 
-/// A choice value back into what thread creation takes.
-export function parseAgentChoice(value: string): { agent: AgentKind; acpAgent: string | null } {
-  return value.startsWith("acp:")
-    ? { agent: "acp", acpAgent: value.slice("acp:".length) }
-    : { agent: value as AgentKind, acpAgent: null };
+/// A choice value back into what opening a session takes.
+export function parseAgentChoice(value: string): { harness: string; acpAgent: string | null } {
+  const at = value.indexOf(":");
+  return at < 0 ? { harness: value, acpAgent: null } : { harness: value.slice(0, at), acpAgent: value.slice(at + 1) };
 }

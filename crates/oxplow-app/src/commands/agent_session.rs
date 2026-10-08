@@ -18,14 +18,12 @@ use std::sync::{Arc, RwLock};
 
 use oxplow_config::OxplowConfig;
 use oxplow_db::agent_session_store::{get_tx, insert_tx, set_title_tx};
-use oxplow_domain::agent::registry::AcpAdapterRegistry;
+use oxplow_domain::agent::registry::{AcpAdapterRegistry, HarnessRegistry};
 use oxplow_domain::agent_session::{
     AgentSession, NewAgentSession, SessionCloseReason, SessionKind,
 };
 use oxplow_domain::refs::build::{agent_session_ref, stream_ref, thread_ref};
-use oxplow_domain::{
-    AgentKind, AgentSessionId, CommandCall, CommandError, ThreadId, ThreadStatus, Timestamp,
-};
+use oxplow_domain::{AgentSessionId, CommandCall, CommandError, ThreadId, ThreadStatus, Timestamp};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::json;
@@ -41,14 +39,15 @@ pub const CLOSE: &str = "oxplow.agent_session.close";
 pub struct OpenInput {
     /// The thread (`thread:thr1`).
     pub thread: String,
-    /// `terminal` or `chat` (default: `chat` for an `acp` harness, else
-    /// `terminal`).
+    /// `terminal` or `chat` (default: `chat` for a harness with a
+    /// structured transcript, such as `acp`, else `terminal`).
     #[serde(default)]
     pub kind: Option<SessionKind>,
-    /// What runs in it (default: the project's first enabled agent).
+    /// What runs in it: a registered harness's key (default: the project's
+    /// first enabled agent).
     #[serde(default)]
-    pub harness: Option<AgentKind>,
-    /// For an `acp` session, which ACP agent.
+    pub harness: Option<String>,
+    /// For a chat session, which ACP agent.
     #[serde(default)]
     pub acp_agent: Option<String>,
     /// What to call it.
@@ -136,29 +135,55 @@ fn in_own_stream(ctx: &TxCtx<'_>, thread: ThreadId) -> Result<(), CommandError> 
     Ok(())
 }
 
-/// The harness and ACP agent a session runs: what was named, checked
-/// against the project's enabled agents and its ACP agents, else the
-/// project's default.
+/// The harness, kind and ACP agent a session runs: what was named, checked
+/// against the registered harnesses, the project's enabled ones and its
+/// ACP agents, else the project's default. A harness with a structured
+/// transcript runs an ACP agent in a chat; the rest run in a terminal.
 fn choose_agent(
     config: &OxplowConfig,
+    harnesses: &HarnessRegistry,
     adapters: &AcpAdapterRegistry,
-    harness: Option<AgentKind>,
-    acp_agent: Option<String>,
-) -> Result<(AgentKind, Option<String>), CommandError> {
-    let chosen = harness.unwrap_or_else(|| oxplow_config::default_harness(config));
-    let acp_agent = acp_agent.or_else(|| {
-        (harness.is_none() && chosen == AgentKind::Acp)
-            .then(|| crate::acp::agents::default_agent(adapters, config))
-            .flatten()
-    });
-    if !config.agents.contains(&chosen) {
+    input: &OpenInput,
+) -> Result<(String, SessionKind, Option<String>), CommandError> {
+    let harness = match &input.harness {
+        Some(key) => harnesses.get(key),
+        None => harnesses.default(),
+    }
+    .map_err(|e| invalid("/harness", e.to_string()))?;
+    let key = harness.id().to_string();
+    if !config.agents.is_empty() && !config.agents.contains(&key) {
         return Err(invalid(
             "/harness",
-            format!("agent `{}` isn't enabled for this project", chosen.as_str()),
+            format!("agent `{key}` isn't enabled for this project"),
         ));
     }
-    let acp_agent = match (chosen, acp_agent) {
-        (AgentKind::Acp, Some(name)) => {
+    let natural = SessionKind::default_for(harness.interact());
+    let kind = input.kind.unwrap_or(natural);
+    match kind {
+        SessionKind::Action => {
+            return Err(invalid(
+                "/kind",
+                "an action session has no implementation yet".into(),
+            ))
+        }
+        k if k != natural => {
+            return Err(invalid(
+                "/kind",
+                format!(
+                    "a `{}` session runs {}",
+                    k.as_str(),
+                    if k == SessionKind::Chat {
+                        "an ACP agent"
+                    } else {
+                        "a terminal harness, not ACP"
+                    }
+                ),
+            ))
+        }
+        _ => {}
+    }
+    let acp_agent = match (kind, input.acp_agent.clone()) {
+        (SessionKind::Chat, Some(name)) => {
             if crate::acp::agents::find(adapters, config, &name).is_none() {
                 return Err(invalid(
                     "/acp_agent",
@@ -167,7 +192,11 @@ fn choose_agent(
             }
             Some(name)
         }
-        (AgentKind::Acp, None) => {
+        (SessionKind::Chat, None) if input.harness.is_none() => Some(
+            crate::acp::agents::default_agent(adapters, config)
+                .ok_or_else(|| invalid("/acp_agent", "there are no ACP agents".into()))?,
+        ),
+        (SessionKind::Chat, None) => {
             return Err(invalid("/acp_agent", "an ACP session needs one".into()))
         }
         (_, Some(_)) => {
@@ -178,13 +207,17 @@ fn choose_agent(
         }
         (_, None) => None,
     };
-    Ok((chosen, acp_agent))
+    Ok((key, kind, acp_agent))
 }
 
 /// `agent_session.open { thread, kind?, harness?, acp_agent?, title? }`:
 /// a new slot on the thread. It only inserts the row — it never starts a
 /// process and never sends a prompt. Undone by closing it.
-pub fn open_op(config: Arc<RwLock<OxplowConfig>>, adapters: AcpAdapterRegistry) -> Op {
+pub fn open_op(
+    config: Arc<RwLock<OxplowConfig>>,
+    harnesses: HarnessRegistry,
+    adapters: AcpAdapterRegistry,
+) -> Op {
     Op::new(
         "agent_sessions.write",
         "open",
@@ -205,32 +238,7 @@ pub fn open_op(config: Arc<RwLock<OxplowConfig>>, adapters: AcpAdapterRegistry) 
             }
             in_own_stream(ctx, thread)?;
             let config = crate::config_service::read_config(&config);
-            let (harness, acp_agent) =
-                choose_agent(&config, &adapters, input.harness, input.acp_agent)?;
-            let kind = input.kind.unwrap_or(SessionKind::default_for(harness));
-            match kind {
-                SessionKind::Action => {
-                    return Err(invalid(
-                        "/kind",
-                        "an action session has no implementation yet".into(),
-                    ))
-                }
-                k if k != SessionKind::default_for(harness) => {
-                    return Err(invalid(
-                        "/kind",
-                        format!(
-                            "a `{}` session runs {}",
-                            k.as_str(),
-                            if k == SessionKind::Chat {
-                                "an ACP agent"
-                            } else {
-                                "a terminal harness, not ACP"
-                            }
-                        ),
-                    ))
-                }
-                _ => {}
-            }
+            let (harness, kind, acp_agent) = choose_agent(&config, &harnesses, &adapters, &input)?;
             let session = insert_tx(
                 ctx.conn,
                 &NewAgentSession {
@@ -312,10 +320,15 @@ pub fn close_op(processes: crate::agent_sessions::SessionProcesses) -> Op {
 /// The agent-session commands, for the bus.
 pub fn ops(
     config: Arc<RwLock<OxplowConfig>>,
+    harnesses: HarnessRegistry,
     adapters: AcpAdapterRegistry,
     processes: crate::agent_sessions::SessionProcesses,
 ) -> Vec<Op> {
-    vec![open_op(config, adapters), rename_op(), close_op(processes)]
+    vec![
+        open_op(config, harnesses, adapters),
+        rename_op(),
+        close_op(processes),
+    ]
 }
 
 #[cfg(test)]
@@ -368,7 +381,8 @@ mod tests {
         let s: AgentSession = serde_json::from_value(out.result).unwrap();
         assert_eq!(
             (s.kind, s.harness, s.title.as_str()),
-            (SessionKind::Terminal, AgentKind::Claude, "review")
+            (SessionKind::Terminal, "claude".to_string(), "review"),
+            "the first declared harness, with no agents: named"
         );
         assert!(!fx
             .svc
@@ -385,16 +399,19 @@ mod tests {
     }
 
     /// The input is checked: an unknown field and a bad value name their
-    /// field; an action session isn't built; a harness the project hasn't
-    /// enabled, or an ACP agent named wrong, is refused.
+    /// field; an action session isn't built; a harness nothing registers,
+    /// or the project hasn't enabled, or an ACP agent named wrong, is
+    /// refused.
     #[tokio::test]
     async fn the_input_is_checked() {
         let fx = services_with_effort().await;
         let thread = thread_ref(fx.thread);
+        fx.svc.config.write().unwrap().agents = vec!["claude".into()];
         for (input, field) in [
             (json!({ "thread": thread, "kind": "action" }), "/kind"),
             (json!({ "thread": thread, "kind": "chat" }), "/kind"),
             (json!({ "thread": thread, "harness": "codex" }), "/harness"),
+            (json!({ "thread": thread, "harness": "nope" }), "/harness"),
             (
                 json!({ "thread": thread, "acp_agent": "gemini" }),
                 "/acp_agent",
@@ -419,7 +436,7 @@ mod tests {
         .await
         .unwrap_err();
         assert!(err.to_string().contains("agent"), "{err}");
-        fx.svc.config.write().unwrap().agents.push(AgentKind::Acp);
+        fx.svc.config.write().unwrap().agents.push("acp".into());
         let err = run(
             &fx,
             &Actor::Human,

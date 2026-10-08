@@ -231,13 +231,12 @@ fn skill_index_block(text: &oxplow_domain::agent::text::AgentText) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_config::AgentKind;
     use oxplow_domain::{StreamId, StreamKind, ThreadId, ThreadStatus, Timestamp};
     use tempfile::tempdir;
 
     fn config() -> OxplowConfig {
         OxplowConfig {
-            agents: vec![AgentKind::Claude],
+            agents: vec![],
             project_name: "p".into(),
             lsp_servers: vec![],
             agent_prompt_append: "be precise".into(),
@@ -258,7 +257,7 @@ mod tests {
             measures: Default::default(),
             dimensions: Default::default(),
             zones: Default::default(),
-            agent_models: Default::default(),
+            agent_config: Default::default(),
             acp_agents: Vec::new(),
             extension_instances: Default::default(),
             active_providers: Default::default(),

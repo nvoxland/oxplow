@@ -183,10 +183,9 @@ mod tests {
         db.transaction(|tx| {
             oxplow_db::agent_session_store::insert_tx(
                 tx,
-                &oxplow_domain::agent_session::NewAgentSession::of(
+                &oxplow_domain::agent_session::NewAgentSession::terminal(
                     ThreadId::new(1),
-                    oxplow_domain::AgentKind::Claude,
-                    None,
+                    "claude",
                 ),
                 Timestamp::now(),
             )

@@ -14,8 +14,6 @@ use tracing::info;
 pub mod collectors;
 pub mod keys;
 
-pub use oxplow_domain::AgentKind;
-
 pub mod recent;
 pub use recent::{RecentProject, RecentProjects};
 
@@ -146,13 +144,6 @@ pub enum AcpAgentSource {
     Declared,
     /// The project's `acpAgents:`; needs a person's approval to run.
     Project,
-}
-
-/// The harness a new agent session runs when it names none
-/// (`oxplow.agent_session.open`): the project's first enabled agent (Claude
-/// when `agents:` is empty).
-pub fn default_harness(config: &OxplowConfig) -> AgentKind {
-    config.agents.first().copied().unwrap_or(AgentKind::Claude)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, schemars::JsonSchema)]
@@ -557,9 +548,11 @@ pub const ZONE_EXTERNAL: &str = "external";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct OxplowConfig {
-    /// Enabled agent implementations for this project, in priority order.
-    /// The first entry is the default for newly-created threads.
-    pub agents: Vec<AgentKind>,
+    /// The agent harnesses enabled for this project, by registry key, in
+    /// priority order: the first is a new session's default. Empty (the
+    /// default) enables every registered harness, the first declared one
+    /// the default.
+    pub agents: Vec<String>,
     /// Human-readable project name. Defaults to the basename of the
     /// project dir when not set in .oxplow/project.yaml.
     #[serde(rename = "projectName")]
@@ -669,13 +662,11 @@ pub struct OxplowConfig {
     /// zone surfaces stay empty until the project declares its own.
     #[serde(default)]
     pub zones: Vec<ZoneRuleConfig>,
-    /// Per-agent launch model overrides, e.g.
-    /// `agentModels: { opencode: "github-copilot/gpt-5-mini" }`.
-    /// Only opencode consumes this today (its `-m provider/model`
-    /// flag); claude/codex launch with their own defaults. Absent
-    /// entries fall back to the built-in constant.
-    #[serde(rename = "agentModels")]
-    pub agent_models: std::collections::BTreeMap<AgentKind, String>,
+    /// Each harness's configuration, by its key: what its `launch` reads,
+    /// e.g. `agentConfig: { opencode: { model: "github-copilot/gpt-5-mini" } }`.
+    #[serde(rename = "agentConfig")]
+    #[specta(type = std::collections::BTreeMap<String, oxplow_domain::Json>)]
+    pub agent_config: std::collections::BTreeMap<String, serde_json::Value>,
     /// The project's ACP agents (`acpAgents:`), layered over the declared
     /// ACP adapters (`oxplow_app::acp::agents::resolve`).
     #[serde(rename = "acpAgents")]
@@ -836,9 +827,9 @@ pub fn parse_hex_rgb(s: &str) -> Option<(u8, u8, u8)> {
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct RawConfig {
-    /// Enabled agent implementations, in priority order; the first is the default for new threads.
+    /// Enabled agent harnesses by key, in priority order; the first is a new session's default. Absent enables every registered one.
     #[serde(default)]
-    agents: Option<Vec<AgentKind>>,
+    agents: Option<Vec<String>>,
     /// Display name; defaults to the project directory's basename.
     #[serde(rename = "projectName", default)]
     project_name: Option<String>,
@@ -896,9 +887,13 @@ struct RawConfig {
     /// Architectural zones: an ORDERED rule table, first match wins; `other`/`external` are reserved labels.
     #[serde(default)]
     zones: Option<Vec<RawZoneRule>>,
-    /// Per-agent launch model overrides, e.g. `{ opencode: "github-copilot/gpt-5-mini" }`.
+    /// Each agent harness's configuration by its key, e.g. `{ opencode: { model: "github-copilot/gpt-5-mini" } }`. Runs programs.
+    #[serde(rename = "agentConfig", default)]
+    agent_config: Option<std::collections::BTreeMap<String, serde_json::Value>>,
+    /// Retired: read as an error naming `agentConfig`.
     #[serde(rename = "agentModels", default)]
-    agent_models: Option<std::collections::BTreeMap<AgentKind, String>>,
+    #[schemars(skip)]
+    agent_models: Option<serde_yaml::Value>,
     /// The project's ACP agents, layered over the presets. Runs programs.
     #[serde(rename = "acpAgents", default)]
     acp_agents: Option<Vec<AcpAgentConfig>>,
@@ -969,7 +964,6 @@ pub fn load_project_config(project_dir: impl AsRef<Path>) -> Result<OxplowConfig
     if !config_path.exists() {
         info!(
             config_path = %config_path.display(),
-            agents = ?vec![AgentKind::default()],
             "project config not found; using defaults"
         );
         return Ok(OxplowConfig {
@@ -1296,11 +1290,7 @@ pub fn config_entries(config: &OxplowConfig, fallback_name: &str) -> Vec<ConfigE
     let mut put = |key: &'static str, value: serde_yaml::Value, set: bool| {
         out.push(ConfigEntry { key, value, set });
     };
-    put(
-        "agents",
-        to_yaml(&config.agents),
-        config.agents != vec![AgentKind::default()],
-    );
+    put("agents", to_yaml(&config.agents), !config.agents.is_empty());
     put(
         "projectName",
         if config.project_name.is_empty() {
@@ -1443,9 +1433,9 @@ pub fn config_entries(config: &OxplowConfig, fallback_name: &str) -> Vec<ConfigE
     );
     put("zones", to_yaml(&config.zones), !config.zones.is_empty());
     put(
-        "agentModels",
-        to_yaml(&config.agent_models),
-        !config.agent_models.is_empty(),
+        "agentConfig",
+        to_yaml(&config.agent_config),
+        !config.agent_config.is_empty(),
     );
     put(
         "acpAgents",
@@ -1569,7 +1559,7 @@ fn dimension_entry_to_yaml(e: &DimensionEntry) -> serde_yaml::Value {
 
 fn default_config(project_name: String) -> OxplowConfig {
     OxplowConfig {
-        agents: vec![AgentKind::default()],
+        agents: Vec::new(),
         project_name,
         lsp_servers: Vec::new(),
         agent_prompt_append: String::new(),
@@ -1590,7 +1580,7 @@ fn default_config(project_name: String) -> OxplowConfig {
         measures: Vec::new(),
         dimensions: Vec::new(),
         zones: Vec::new(),
-        agent_models: Default::default(),
+        agent_config: Default::default(),
         acp_agents: Vec::new(),
         extension_instances: std::collections::BTreeMap::new(),
         active_providers: std::collections::BTreeMap::new(),
@@ -2080,20 +2070,13 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
     let measures = validate_measures(raw.measures)?;
     let dimensions = validate_dimensions(raw.dimensions)?;
 
-    let agent_models = {
-        let mut out = std::collections::BTreeMap::new();
-        for (agent, model) in raw.agent_models.unwrap_or_default() {
-            let trimmed = model.trim().to_string();
-            if trimmed.is_empty() {
-                return Err(ConfigError::Invalid(format!(
-                    "agentModels.{} must be a non-empty string",
-                    agent.as_str()
-                )));
-            }
-            out.insert(agent, trimmed);
-        }
-        out
-    };
+    if raw.agent_models.is_some() {
+        return Err(ConfigError::Invalid(
+            "agentModels is now agentConfig: write `agentConfig: { <agent>: { model: <model> } }`"
+                .into(),
+        ));
+    }
+    let agent_config = validate_agent_config(raw.agent_config.unwrap_or_default())?;
 
     let acp_agents = validate_acp_agents(raw.acp_agents.unwrap_or_default())?;
     let extension_instances =
@@ -2164,7 +2147,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         measures,
         dimensions,
         zones,
-        agent_models,
+        agent_config,
         acp_agents,
         extension_instances,
         active_providers,
@@ -3132,23 +3115,59 @@ pub fn load_global_dimension_entries(global_dir: &Path) -> Vec<DimensionEntry> {
     })
 }
 
-fn validate_agents(raw: Option<Vec<AgentKind>>) -> Result<Vec<AgentKind>, ConfigError> {
-    let agents = raw.unwrap_or_else(|| vec![AgentKind::default()]);
+/// A harness key's shape: lowercase letters, digits, `_` and `-`, starting
+/// with a letter. Whether one is registered is the app's to say.
+fn is_agent_key(key: &str) -> bool {
+    key.starts_with(|c: char| c.is_ascii_lowercase())
+        && key
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+}
+
+fn validate_agents(raw: Option<Vec<String>>) -> Result<Vec<String>, ConfigError> {
+    let Some(agents) = raw else {
+        return Ok(Vec::new());
+    };
     if agents.is_empty() {
         return Err(ConfigError::Invalid(
-            "agents must list at least one enabled agent".into(),
+            "agents must list at least one enabled agent (leave it out to enable every one)".into(),
         ));
     }
-    let mut seen = Vec::new();
+    let mut seen: Vec<String> = Vec::new();
     for agent in agents {
+        if !is_agent_key(&agent) {
+            return Err(ConfigError::Invalid(format!(
+                "agents: `{agent}` isn't an agent key (lowercase letters, digits, `_`, `-`)"
+            )));
+        }
         if seen.contains(&agent) {
             return Err(ConfigError::Invalid(format!(
-                "agents must not contain duplicates (got {agent:?})"
+                "agents must not contain duplicates (got `{agent}`)"
             )));
         }
         seen.push(agent);
     }
     Ok(seen)
+}
+
+/// `agentConfig`: an object per harness key. Its fields are the harness's
+/// to check.
+fn validate_agent_config(
+    raw: std::collections::BTreeMap<String, serde_json::Value>,
+) -> Result<std::collections::BTreeMap<String, serde_json::Value>, ConfigError> {
+    for (agent, config) in &raw {
+        if !is_agent_key(agent) {
+            return Err(ConfigError::Invalid(format!(
+                "agentConfig: `{agent}` isn't an agent key"
+            )));
+        }
+        if !config.is_object() {
+            return Err(ConfigError::Invalid(format!(
+                "agentConfig.{agent} must be a map of settings"
+            )));
+        }
+    }
+    Ok(raw)
 }
 
 fn validate_testing(raw: Option<RawTestingBlock>) -> Result<TestingConfig, ConfigError> {
@@ -3810,10 +3829,7 @@ dimensions:
         let raw = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
         assert!(raw.starts_with(original), "the rest moved:\n{raw}");
         assert!(raw.ends_with("metrics:\n- use: oxplow.fn_count\n"), "{raw}");
-        assert_eq!(
-            load_project_config(dir.path()).unwrap().agents,
-            vec![AgentKind::Claude]
-        );
+        assert_eq!(load_project_config(dir.path()).unwrap().agents, ["claude"]);
     }
 
     /// Setting a key the file has replaces only that key's lines, under its
@@ -3883,7 +3899,7 @@ dimensions:
     fn load_defaults_when_file_absent() {
         let dir = tempdir().unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
-        assert_eq!(cfg.agents, vec![AgentKind::Claude]);
+        assert!(cfg.agents.is_empty(), "every registered harness");
         assert_eq!(cfg.snapshot_retention_days, DEFAULT_SNAPSHOT_RETENTION_DAYS);
         assert!(cfg.lsp_servers.is_empty());
         assert!(cfg.inject_session_context);
@@ -3906,35 +3922,31 @@ dimensions:
         )
         .unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
-        assert_eq!(cfg.agents, vec![AgentKind::Claude, AgentKind::Codex]);
+        assert_eq!(cfg.agents, ["claude", "codex"]);
         assert_eq!(cfg.project_name, "explicit-name");
     }
 
-    /// tsk970: a new session that names no agent runs the project's first
-    /// enabled one (the ACP agent it then runs is `acp::agents`').
+    /// `agents` names harness keys, whatever is registered; the shape is
+    /// checked here, the keys by the app.
     #[test]
-    fn a_new_sessions_default_harness_is_the_projects() {
+    fn agents_are_keys_checked_for_shape() {
         let dir = tempdir().unwrap();
         let load = |yaml: &str| {
             std::fs::write(cfg_path(dir.path()), yaml).unwrap();
-            load_project_config(dir.path()).unwrap()
+            load_project_config(dir.path())
         };
         assert_eq!(
-            default_harness(&load("agents: [codex, claude]\n")),
-            AgentKind::Codex
+            load("agents: [claude, my-agent_2]\n").unwrap().agents,
+            ["claude", "my-agent_2"]
         );
-        assert_eq!(default_harness(&load("{}\n")), AgentKind::Claude);
-    }
-
-    #[test]
-    fn loads_all_three_agent_kinds() {
-        let dir = tempdir().unwrap();
-        std::fs::write(cfg_path(dir.path()), "agents: [claude, codex, opencode]\n").unwrap();
-        let cfg = load_project_config(dir.path()).unwrap();
-        assert_eq!(
-            cfg.agents,
-            vec![AgentKind::Claude, AgentKind::Codex, AgentKind::Opencode]
-        );
+        for (yaml, needle) in [
+            ("agents: []\n", "at least one"),
+            ("agents: [Claude]\n", "isn't an agent key"),
+            ("agents: [codex, codex]\n", "duplicates"),
+        ] {
+            let err = load(yaml).unwrap_err().to_string();
+            assert!(err.contains(needle), "{yaml}: {err}");
+        }
     }
 
     /// The single-`agent` form is gone: `agents` is the one key.
@@ -3944,14 +3956,6 @@ dimensions:
         std::fs::write(cfg_path(dir.path()), "agent: codex\n").unwrap();
         let err = load_project_config(dir.path()).unwrap_err().to_string();
         assert!(err.contains("agent"), "{err}");
-    }
-
-    #[test]
-    fn rejects_invalid_agent_in_agents() {
-        let dir = tempdir().unwrap();
-        std::fs::write(cfg_path(dir.path()), "agents: [emacs]\n").unwrap();
-        let err = load_project_config(dir.path()).unwrap_err();
-        assert!(matches!(err, ConfigError::Parse(_)));
     }
 
     #[test]
@@ -4314,26 +4318,22 @@ lsp:
     }
 
     #[test]
-    fn agent_models_round_trip() {
+    fn agent_config_round_trips() {
         let dir = tempdir().unwrap();
         std::fs::write(
             cfg_path(dir.path()),
-            "agentModels:\n  opencode: github-copilot/gpt-5-mini\n",
+            "agentConfig:\n  opencode:\n    model: github-copilot/gpt-5-mini\n",
         )
         .unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
         assert_eq!(
-            cfg.agent_models
-                .get(&AgentKind::Opencode)
-                .map(String::as_str),
-            Some("github-copilot/gpt-5-mini")
+            cfg.agent_config["opencode"]["model"],
+            "github-copilot/gpt-5-mini"
         );
         write_rendered(dir.path(), &cfg);
-        let raw = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
-        assert!(raw.contains("agentModels:"), "got:\n{raw}");
-        assert!(
-            raw.contains("opencode: github-copilot/gpt-5-mini"),
-            "got:\n{raw}"
+        assert_eq!(
+            load_project_config(dir.path()).unwrap().agent_config,
+            cfg.agent_config
         );
     }
 
@@ -4388,19 +4388,23 @@ lsp:
         }
     }
 
+    /// `agentModels` is retired: loading it says what replaced it. An
+    /// `agentConfig` entry is a map under an agent key.
     #[test]
-    fn agent_models_rejects_unknown_agent_and_blank_model() {
+    fn agent_models_is_an_error_naming_agent_config() {
         let dir = tempdir().unwrap();
-        std::fs::write(cfg_path(dir.path()), "agentModels:\n  goose: some/model\n").unwrap();
-        assert!(matches!(
-            load_project_config(dir.path()).unwrap_err(),
-            ConfigError::Parse(_)
-        ));
-        std::fs::write(cfg_path(dir.path()), "agentModels:\n  opencode: \"  \"\n").unwrap();
-        assert!(matches!(
-            load_project_config(dir.path()).unwrap_err(),
-            ConfigError::Invalid(msg) if msg.contains("agentModels.opencode")
-        ));
+        for (yaml, needle) in [
+            (
+                "agentModels:\n  opencode: some/model\n",
+                "agentModels is now agentConfig",
+            ),
+            ("agentConfig:\n  opencode: some/model\n", "map of settings"),
+            ("agentConfig:\n  Bad: {}\n", "isn't an agent key"),
+        ] {
+            std::fs::write(cfg_path(dir.path()), yaml).unwrap();
+            let err = load_project_config(dir.path()).unwrap_err().to_string();
+            assert!(err.contains(needle), "{yaml}: {err}");
+        }
     }
 
     #[test]

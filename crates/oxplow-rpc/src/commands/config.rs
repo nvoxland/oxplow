@@ -6,7 +6,7 @@ use specta::Type;
 use oxplow_app::commands::config_commands::{SET, UNSET};
 use oxplow_app::config_service::read_config;
 use oxplow_app::Services;
-use oxplow_config::{AgentKind, GeneratedConfig, OxplowConfig};
+use oxplow_config::{GeneratedConfig, OxplowConfig};
 use oxplow_domain::Actor;
 use serde_json::{json, Value};
 
@@ -48,32 +48,44 @@ pub async fn set_agent_prompt_append(
     set_key(svc, "agentPromptAppend", value).await
 }
 
-pub async fn set_agents(svc: &Services, agents: Vec<AgentKind>) -> Result<OxplowConfig, IpcError> {
+/// The enabled agent harnesses, by key, in priority order. Each must be
+/// registered.
+pub async fn set_agents(svc: &Services, agents: Vec<String>) -> Result<OxplowConfig, IpcError> {
+    for agent in &agents {
+        svc.harnesses
+            .get(agent)
+            .map_err(|e| IpcError::invalid(e.to_string()))?;
+    }
     set_key(svc, "agents", Some(value_of(&agents))).await
 }
 
-/// Set (or clear, with `None`/blank) the launch-model override for one
-/// agent — `agentModels.<agent>` in .oxplow/project.yaml. Only opencode consumes
-/// the override today.
+/// Set (or clear, with `None`/blank) one agent's launch model:
+/// `agentConfig.<agent>.model` in .oxplow/project.yaml, which the harness's
+/// launch reads (opencode's today).
 pub async fn set_agent_model(
     svc: &Services,
-    agent: AgentKind,
+    agent: String,
     model: Option<String>,
 ) -> Result<OxplowConfig, IpcError> {
-    let mut models = read_config(&svc.config).agent_models;
+    let mut all = read_config(&svc.config).agent_config;
+    let mut entry = all.remove(&agent).unwrap_or_else(|| json!({}));
+    let fields = entry.as_object_mut().expect("agentConfig entries are maps");
     match model
         .map(|m| m.trim().to_string())
         .filter(|m| !m.is_empty())
     {
         Some(m) => {
-            models.insert(agent, m);
+            fields.insert("model".into(), Value::String(m));
         }
         None => {
-            models.remove(&agent);
+            fields.remove("model");
         }
     }
-    let value = (!models.is_empty()).then(|| value_of(&models));
-    set_key(svc, "agentModels", value).await
+    if !fields.is_empty() {
+        all.insert(agent, entry);
+    }
+    let value = (!all.is_empty()).then(|| value_of(&all));
+    set_key(svc, "agentConfig", value).await
 }
 
 /// The generated-file include/exclude lists. The snapshot captures pick up
@@ -196,7 +208,7 @@ mod tests {
             [
                 "agents",
                 "agentPromptAppend",
-                "agentModels",
+                "agentConfig",
                 "generated",
                 "extensions",
             ]
@@ -213,10 +225,10 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(out["agentModels"], json!({}));
+        assert_eq!(out["agentConfig"], json!({}));
         assert_eq!(
             audited_config_sets(&svc).await.last().unwrap().1,
-            "agentModels"
+            "agentConfig"
         );
     }
 }

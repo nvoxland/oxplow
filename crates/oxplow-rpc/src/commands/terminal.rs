@@ -155,10 +155,11 @@ pub async fn open_terminal_session(
         &stream,
         Some(&thread),
     );
-    let harness_config = match config.agent_models.get(&session.harness) {
-        Some(model) => serde_json::json!({ "model": model }),
-        None => serde_json::json!({}),
-    };
+    let harness_config = config
+        .agent_config
+        .get(&session.harness)
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
     let launch = launch_session(
         ctx,
         harness.as_ref(),
@@ -342,7 +343,6 @@ mod tests {
     use super::{identity_env, shell_session_key};
     use crate::error::IpcError;
     use crate::test_support::services;
-    use oxplow_domain::AgentKind;
 
     #[test]
     fn the_identity_env_names_the_session() {
@@ -425,7 +425,7 @@ mod tests {
             id: oxplow_domain::AgentSessionId::new(3),
             thread_id: oxplow_domain::ThreadId::new(1),
             kind: SessionKind::Terminal,
-            harness: AgentKind::Claude,
+            harness: "claude".into(),
             acp_agent: None,
             title: String::new(),
             resume_session_id: String::new(),
@@ -438,7 +438,7 @@ mod tests {
         assert!(super::has_a_terminal(&open).is_ok());
         let chat = AgentSession {
             kind: SessionKind::Chat,
-            harness: AgentKind::Acp,
+            harness: "acp".into(),
             ..open.clone()
         };
         let err = super::has_a_terminal(&chat).unwrap_err();

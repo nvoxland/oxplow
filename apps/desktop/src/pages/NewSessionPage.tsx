@@ -1,17 +1,17 @@
 import { useEffect, useState } from "react";
 
-import { listAcpAgents, type AgentKind, type Thread } from "../api.js";
+import { listAcpAgents, type Thread } from "../api.js";
 import { agentChoices, parseAgentChoice } from "../agentKinds.js";
-import type { AcpAgentListing } from "../tauri-bridge/generated/bindings.js";
+import type { AcpAgentListing, HarnessListing } from "../tauri-bridge/generated/bindings.js";
 import { EmptyState } from "../components/Prompts/EmptyState.js";
 import { Page, pageH1Style } from "../tabs/Page.js";
 
 interface NewSessionPageProps {
   thread: Thread | null;
-  /** The agents the project enables (`agents:`). */
-  enabledAgents: AgentKind[];
+  /** The registered harnesses in priority order (`useAgentHarnesses`). */
+  harnesses: HarnessListing[];
   /** Open the session; resolves once its row exists (its tab follows). */
-  onStart(harness: AgentKind, acpAgent: string | null): Promise<void>;
+  onStart(harness: string, acpAgent: string | null): Promise<void>;
 }
 
 /**
@@ -20,20 +20,20 @@ interface NewSessionPageProps {
  * tab starts its process when it mounts, and nothing is typed into it.
  * It offers no prompts to hand an agent: there is no agent here yet.
  */
-export function NewSessionPage({ thread, enabledAgents, onStart }: NewSessionPageProps) {
+export function NewSessionPage({ thread, harnesses, onStart }: NewSessionPageProps) {
   const [acpAgents, setAcpAgents] = useState<AcpAgentListing[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const acpEnabled = enabledAgents.includes("acp");
+  const acpEnabled = harnesses.some((h) => h.enabled && h.chat);
   useEffect(() => {
     if (!acpEnabled) return;
     void listAcpAgents()
       .then(setAcpAgents)
       .catch(() => setAcpAgents([]));
   }, [acpEnabled]);
-  const choices = agentChoices(enabledAgents.length > 0 ? enabledAgents : ["claude"], acpAgents);
-  const [choice, setChoice] = useState<string>(choices[0]?.value ?? "claude");
-  const picked = choices.some((c) => c.value === choice) ? choice : (choices[0]?.value ?? "claude");
+  const choices = agentChoices(harnesses, acpAgents);
+  const [choice, setChoice] = useState<string>(choices[0]?.value ?? "");
+  const picked = choices.some((c) => c.value === choice) ? choice : (choices[0]?.value ?? "");
   return (
     <Page testId="page-new-session" showNavBar={false} titleInBody>
       <div style={{ padding: "20px 24px", maxWidth: 560 }}>
@@ -50,8 +50,8 @@ export function NewSessionPage({ thread, enabledAgents, onStart }: NewSessionPag
               setBusy(true);
               setError(null);
               try {
-                const { agent, acpAgent } = parseAgentChoice(picked);
-                await onStart(agent, acpAgent);
+                const { harness, acpAgent } = parseAgentChoice(picked);
+                await onStart(harness, acpAgent);
               } catch (err) {
                 setError(err instanceof Error ? err.message : String(err));
               } finally {
@@ -74,7 +74,7 @@ export function NewSessionPage({ thread, enabledAgents, onStart }: NewSessionPag
                 </option>
               ))}
             </select>
-            <button type="submit" data-testid="new-session-start" disabled={busy || !thread} style={startStyle}>
+            <button type="submit" data-testid="new-session-start" disabled={busy || !thread || !picked} style={startStyle}>
               Start
             </button>
           </form>

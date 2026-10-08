@@ -4,34 +4,59 @@
 //! declaration gives — the key an agent session's `harness` names. Many are
 //! registered at once, the way collectors are.
 
-use std::sync::Arc;
-
-use oxplow_domain::agent::harness::AgentHarness;
 use oxplow_domain::agent::registry::{AcpAdapterRegistry, HarnessRegistry};
 
 use crate::capabilities::{Implementation, Source};
 
 /// Register the harnesses `declared` names (the project's extensions'
-/// `implementations:`), and unregister the ones it no longer does.
+/// `implementations:`), in declaration order, and nothing else.
 pub fn register_built_ins(registry: &HarnessRegistry, declared: &[Implementation]) {
-    let harnesses: Vec<Arc<dyn AgentHarness>> = declared
-        .iter()
-        .filter(|i| i.capability == "agent_harness")
-        .filter_map(|i| match i.source {
-            Source::BuiltIn(entry) => oxplow_harnesses::built_in(entry, &i.id, &i.title),
-            _ => None,
+    registry.set(
+        declared
+            .iter()
+            .filter(|i| i.capability == "agent_harness")
+            .filter_map(|i| match i.source {
+                Source::BuiltIn(entry) => oxplow_harnesses::built_in(entry, &i.id, &i.title),
+                _ => None,
+            })
+            .collect(),
+    );
+}
+
+/// One registered harness, as the session picker and Settings see it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct HarnessListing {
+    /// Its key (what `agents:` and a session's `harness` name).
+    pub id: String,
+    pub title: String,
+    /// It runs an ACP agent in a chat (a structured transcript), so a
+    /// session of it names one.
+    pub chat: bool,
+    /// The project enables it (`agents:` names it, or names none).
+    pub enabled: bool,
+}
+
+/// Every registered harness in priority order: the ones `agents:` names,
+/// in its order (the first is a new session's default), then the rest as
+/// declared.
+pub fn listing(registry: &HarnessRegistry, agents: &[String]) -> Vec<HarnessListing> {
+    use oxplow_domain::agent::harness::Transcript;
+    let mut all = registry.all();
+    all.sort_by_key(|h| {
+        agents
+            .iter()
+            .position(|a| a == h.id())
+            .unwrap_or(agents.len())
+    });
+    all.iter()
+        .map(|h| HarnessListing {
+            id: h.id().to_string(),
+            title: h.title().to_string(),
+            chat: h.interact().transcript == Transcript::Structured,
+            enabled: agents.is_empty() || agents.iter().any(|a| a == h.id()),
         })
-        .collect();
-    for gone in registry
-        .names()
-        .into_iter()
-        .filter(|n| !harnesses.iter().any(|h| h.id() == n))
-    {
-        registry.unregister(&gone);
-    }
-    for h in harnesses {
-        registry.register(h);
-    }
+        .collect()
 }
 
 /// Set the ACP adapters `declared` names, in declaration order. One whose
@@ -78,7 +103,7 @@ mod tests {
     /// What's declared is registered under its key; what no longer is goes.
     #[test]
     fn the_declared_harnesses_are_registered() {
-        let r = HarnessRegistry::new(Arc::new(|| "claude".into()));
+        let r = HarnessRegistry::new(std::sync::Arc::new(|| "claude".into()));
         register_built_ins(
             &r,
             &[
@@ -87,7 +112,7 @@ mod tests {
                 declared("work_items", "oxplow", "oxplow:tasks"),
             ],
         );
-        assert_eq!(r.names(), ["acp", "claude"]);
+        assert_eq!(r.names(), ["claude", "acp"]);
         assert_eq!(r.default().unwrap().id(), "claude");
         register_built_ins(&r, &[declared("agent_harness", "acp", "oxplow:acp")]);
         assert_eq!(r.names(), ["acp"]);
@@ -124,6 +149,35 @@ mod tests {
                 ("gemini".to_string(), "gemini".to_string()),
                 ("claude".to_string(), "claude-agent-acp".to_string())
             ]
+        );
+    }
+
+    /// The listing is the registry's, the enabled ones first in `agents:`
+    /// order; with no `agents:` every harness is enabled, as declared.
+    #[test]
+    fn the_listing_says_which_run_acp_agents_and_which_are_enabled() {
+        let r = HarnessRegistry::new(std::sync::Arc::new(String::new));
+        register_built_ins(
+            &r,
+            &[
+                declared("agent_harness", "claude", "oxplow:claude-code"),
+                declared("agent_harness", "acp", "oxplow:acp"),
+            ],
+        );
+        let rows = |agents: &[&str]| {
+            let agents: Vec<String> = agents.iter().map(|a| a.to_string()).collect();
+            listing(&r, &agents)
+                .into_iter()
+                .map(|h| (h.id, h.chat, h.enabled))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            rows(&[]),
+            [("claude".into(), false, true), ("acp".into(), true, true)]
+        );
+        assert_eq!(
+            rows(&["acp"]),
+            [("acp".into(), true, true), ("claude".into(), false, false)]
         );
     }
 }

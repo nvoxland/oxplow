@@ -1,6 +1,5 @@
 //! The registered agent harnesses, by key.
 
-use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 
 use super::acp_adapter::AcpAdapter;
@@ -15,18 +14,19 @@ pub struct UnknownHarness {
     pub registered: Vec<String>,
 }
 
-/// The harnesses the project's extensions declare, many at once. Cloning
-/// shares them.
+/// The harnesses the project's extensions declare, many at once, in
+/// declaration order. Cloning shares them.
 #[derive(Clone)]
 pub struct HarnessRegistry {
-    harnesses: Arc<RwLock<BTreeMap<String, Arc<dyn AgentHarness>>>>,
-    /// The one a new session runs when it names none.
+    harnesses: Arc<RwLock<Vec<Arc<dyn AgentHarness>>>>,
+    /// The key of the one a new session runs when it names none; empty for
+    /// the first registered.
     default: ActiveSource,
 }
 
 impl HarnessRegistry {
     /// A registry whose default harness is what `default` says each time
-    /// it's asked.
+    /// it's asked (empty: the first registered).
     pub fn new(default: ActiveSource) -> Self {
         Self {
             harnesses: Arc::default(),
@@ -34,55 +34,62 @@ impl HarnessRegistry {
         }
     }
 
+    /// Replace what's registered, in this order.
+    pub fn set(&self, harnesses: Vec<Arc<dyn AgentHarness>>) {
+        *self.harnesses.write().unwrap_or_else(|e| e.into_inner()) = harnesses;
+    }
+
+    /// Register `harness`, replacing one with its key in place, else last.
     pub fn register(&self, harness: Arc<dyn AgentHarness>) {
-        self.harnesses
-            .write()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(harness.id().to_string(), harness);
+        let mut harnesses = self.harnesses.write().unwrap_or_else(|e| e.into_inner());
+        match harnesses.iter_mut().find(|h| h.id() == harness.id()) {
+            Some(slot) => *slot = harness,
+            None => harnesses.push(harness),
+        }
     }
 
     pub fn unregister(&self, id: &str) {
         self.harnesses
             .write()
             .unwrap_or_else(|e| e.into_inner())
-            .remove(id);
+            .retain(|h| h.id() != id);
     }
 
-    /// Every registered key, sorted.
+    /// Every registered key, in declaration order.
     pub fn names(&self) -> Vec<String> {
-        self.harnesses
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .keys()
-            .cloned()
-            .collect()
+        self.all().iter().map(|h| h.id().to_string()).collect()
     }
 
-    /// Every registered harness, by key.
+    /// Every registered harness, in declaration order.
     pub fn all(&self) -> Vec<Arc<dyn AgentHarness>> {
         self.harnesses
             .read()
             .unwrap_or_else(|e| e.into_inner())
-            .values()
-            .cloned()
-            .collect()
+            .clone()
     }
 
     pub fn get(&self, id: &str) -> Result<Arc<dyn AgentHarness>, UnknownHarness> {
-        self.harnesses
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(id)
+        let all = self.all();
+        all.iter()
+            .find(|h| h.id() == id)
             .cloned()
             .ok_or_else(|| UnknownHarness {
                 harness: id.to_string(),
-                registered: self.names(),
+                registered: all.iter().map(|h| h.id().to_string()).collect(),
             })
     }
 
-    /// The harness a session runs when it names none.
+    /// The harness a session runs when it names none: the project's choice,
+    /// else the first registered.
     pub fn default(&self) -> Result<Arc<dyn AgentHarness>, UnknownHarness> {
-        self.get(&(self.default)())
+        let named = (self.default)();
+        if named.is_empty() {
+            return self.all().into_iter().next().ok_or_else(|| UnknownHarness {
+                harness: String::new(),
+                registered: Vec::new(),
+            });
+        }
+        self.get(&named)
     }
 }
 
@@ -184,5 +191,19 @@ mod tests {
         assert_eq!(r.default().unwrap().id(), "codex");
         r.unregister("codex");
         assert!(r.default().is_err());
+    }
+
+    /// Registration keeps declaration order; with no choice named, the
+    /// default is the first registered.
+    #[test]
+    fn the_default_is_the_projects_else_the_first_declared() {
+        let r = HarnessRegistry::new(Arc::new(String::new));
+        assert!(r.default().is_err());
+        r.set(vec![Arc::new(Fake("codex")), Arc::new(Fake("claude"))]);
+        assert_eq!(r.names(), ["codex", "claude"]);
+        assert_eq!(r.default().unwrap().id(), "codex");
+        r.register(Arc::new(Fake("acp")));
+        r.register(Arc::new(Fake("codex")));
+        assert_eq!(r.names(), ["codex", "claude", "acp"]);
     }
 }

@@ -36,11 +36,7 @@ async fn a_real_adapter_answers_a_prompt() {
     let stream = svc.streams.ensure_primary().await.unwrap();
     // An ACP thread names a known ACP agent; the session below launches the
     // adapter under test whatever the thread names.
-    svc.config
-        .write()
-        .unwrap()
-        .agents
-        .push(oxplow_domain::AgentKind::Acp);
+    svc.config.write().unwrap().agents.push("acp".into());
     let created = svc
         .commands
         .run(

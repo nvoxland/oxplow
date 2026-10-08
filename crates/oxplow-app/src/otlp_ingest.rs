@@ -225,11 +225,7 @@ mod tests {
                 move |tx| {
                     oxplow_db::agent_session_store::insert_tx(
                         tx,
-                        &oxplow_domain::agent_session::NewAgentSession::of(
-                            thread,
-                            oxplow_domain::AgentKind::Claude,
-                            None,
-                        ),
+                        &oxplow_domain::agent_session::NewAgentSession::terminal(thread, "claude"),
                         Timestamp::now(),
                     )
                 }

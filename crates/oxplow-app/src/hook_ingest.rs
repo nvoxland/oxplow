@@ -51,13 +51,13 @@ use oxplow_db::event_log_store::{append_unique_tx, EventCtx};
 use oxplow_db::{event_content_store, Database};
 use oxplow_domain::events::schema::{
     AgentPromptSubmitted, AgentPromptSubmittedV1, AgentSessionEnded, AgentSessionEndedV1,
-    AgentSessionStarted, AgentSessionStartedV1, AgentToolFinished, AgentToolFinishedV1,
+    AgentSessionStarted, AgentSessionStartedV2, AgentToolFinished, AgentToolFinishedV1,
     AgentToolRequested, AgentToolRequestedV1, ContentRef, ToolDecision as Decision,
 };
 use oxplow_domain::refs::build::{thread_ref, turn_ref};
 use oxplow_domain::{
-    AgentKind, AgentStatus, AgentStatusState, AgentTurnId, DomainError, HookKind, StreamId,
-    ThreadId, Timestamp,
+    AgentStatus, AgentStatusState, AgentTurnId, DomainError, HookKind, StreamId, ThreadId,
+    Timestamp,
 };
 
 use crate::events::{EventBus, OxplowEvent};
@@ -330,7 +330,6 @@ struct ThreadRow {
     /// for an agent oxplow didn't start.
     session: Option<oxplow_domain::AgentSessionId>,
     resume_session_id: String,
-    agent: AgentKind,
     /// The session's harness key; `None` with no session.
     harness: Option<String>,
     worktree: PathBuf,
@@ -369,8 +368,7 @@ fn session_row_tx(
             .as_ref()
             .map(|s| s.resume_session_id.clone())
             .unwrap_or_default(),
-        harness: session.as_ref().map(|s| s.harness.as_str().to_string()),
-        agent: session.map(|s| s.harness).unwrap_or_default(),
+        harness: session.map(|s| s.harness),
         worktree: if worktree.is_empty() {
             project_dir.to_path_buf()
         } else {
@@ -653,10 +651,10 @@ fn track_session_tx(
     now: Timestamp,
 ) -> Result<(), DomainError> {
     let env = ev
-        .typed::<AgentSessionStarted>(&AgentSessionStartedV1 {
+        .typed::<AgentSessionStarted>(&AgentSessionStartedV2 {
             session: session.to_string(),
             thread: thread_ref(thread),
-            harness: row.agent.into(),
+            harness: row.harness.clone().unwrap_or_default(),
             resumed: row.resume_session_id == session,
         })
         .with_anchors(activity_anchors_tx(conn, thread, row.session)?)
@@ -858,7 +856,7 @@ mod tests {
         db.transaction(move |tx| {
             oxplow_db::agent_session_store::insert_tx(
                 tx,
-                &oxplow_domain::agent_session::NewAgentSession::of(t.id, AgentKind::Claude, None),
+                &oxplow_domain::agent_session::NewAgentSession::terminal(t.id, "claude"),
                 now,
             )
         })
@@ -982,11 +980,7 @@ mod tests {
             .transaction(move |tx| {
                 oxplow_db::agent_session_store::insert_tx(
                     tx,
-                    &oxplow_domain::agent_session::NewAgentSession::of(
-                        thread,
-                        AgentKind::Claude,
-                        None,
-                    ),
+                    &oxplow_domain::agent_session::NewAgentSession::terminal(thread, "claude"),
                     Timestamp::now(),
                 )
             })

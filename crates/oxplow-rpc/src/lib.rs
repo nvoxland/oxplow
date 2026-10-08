@@ -199,6 +199,7 @@ macro_rules! oxplow_command_table {
                 // threads
                 list_threads => $crate::commands::threads::list_threads { stream_id: ::oxplow_domain::StreamId } -> Vec<::oxplow_domain::Thread>,
                 list_acp_agents => $crate::commands::threads::list_acp_agents {} -> Vec<::oxplow_app::acp::agents::AcpAgentListing>,
+                list_agent_harnesses => $crate::commands::threads::list_agent_harnesses {} -> Vec<::oxplow_app::harnesses::HarnessListing>,
                 // acp sessions (tsk281) — UI-only; acp_prompt is the prompt box's Enter
                 acp_prompt => $crate::commands::acp::acp_prompt { session_id: ::oxplow_domain::AgentSessionId, text: String } -> (),
                 acp_cancel => $crate::commands::acp::acp_cancel { session_id: ::oxplow_domain::AgentSessionId } -> (),
@@ -342,9 +343,9 @@ macro_rules! oxplow_command_table {
                 // config
                 get_config => $crate::commands::config::get_config {} -> ::oxplow_config::OxplowConfig,
                 set_agent_prompt_append => $crate::commands::config::set_agent_prompt_append { text: String } -> ::oxplow_config::OxplowConfig,
-                set_agents => $crate::commands::config::set_agents { agents: Vec<::oxplow_config::AgentKind> } -> ::oxplow_config::OxplowConfig,
+                set_agents => $crate::commands::config::set_agents { agents: Vec<String> } -> ::oxplow_config::OxplowConfig,
                 set_generated => $crate::commands::config::set_generated { generated: ::oxplow_config::GeneratedConfig } -> ::oxplow_config::OxplowConfig,
-                set_agent_model => $crate::commands::config::set_agent_model { agent: ::oxplow_config::AgentKind, model: Option<String> } -> ::oxplow_config::OxplowConfig,
+                set_agent_model => $crate::commands::config::set_agent_model { agent: String, model: Option<String> } -> ::oxplow_config::OxplowConfig,
                 get_workspace_context => $crate::commands::config::get_workspace_context {} -> $crate::commands::config::WorkspaceContext,
                 // lsp
                 list_installed_lsp_packages => $crate::commands::lsp::list_installed_lsp_packages {} -> Vec<$crate::commands::lsp::InstalledLspPackage>,
