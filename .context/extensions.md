@@ -571,9 +571,9 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
 - **P8 (2026-10-02).** The experimental kinds run, in a private
   extension: `event_types:` ("Event types"), `ref_kinds:` ("Ref kinds")
   and `effects:` ("Effects"), through one swappable vocabulary. A change
-  is reviewed by its rows, collector outputs and effects at any revision,
-  on the CLI (`extension check --effects`) and in an effort's review
-  ("Reviewing by effect"). Models declare keys and may materialize on a
+  is reviewed by its impact — rows, collector outputs, effects'
+  reactions — at any revision, on the CLI (`extension check --impact`)
+  and in an effort's review ("Reviewing by impact"). Models declare keys and may materialize on a
   clock or incrementally ([semantic-layer.md](./semantic-layer.md)).
   Installs and updates are the `oxplow.extension.install` / `oxplow.extension.update`
   commands.
@@ -833,17 +833,18 @@ The `oxplow-extension` skill requires `check` after every edit.
 
 ## Answerability
 
-`crates/oxplow-sdk/src/answerability.rs` (P5.F1) checks that an agent
-reading the right skill can answer the questions a capability exists
-for. A questions file is a list of `{ question, skill, reaches: { sql } |
+`crates/oxplow-sdk/src/answerability.rs` checks that an agent
+reading the right skill can answer the questions an area of oxplow, or
+an extension, exists for. A questions file is a list of `{ question, skill, reaches: { sql } |
 { command, input }, shape: { columns } }`:
 
-- **Core capabilities**: `crates/oxplow-agent-text/assets/questions/<capability>.yaml`
-  (`vcs`, `work_items`, `knowledge`, `code_intel`;
-  `oxplow_agent_text::CAPABILITY_QUESTIONS`), each naming a shipped skill
+- **Core's areas**: `crates/oxplow-agent-text/assets/questions/<area>.yaml`
+  (`vcs`, `work_items`, `knowledge`, `code_intel`, `extensions` — areas
+  of oxplow, not capabilities; `oxplow_agent_text::ANSWERABILITY_QUESTIONS`),
+  each naming a shipped skill
   (`oxplow-codebase` — history and code, added for this —
   `oxplow-runtime`, `oxplow-wiki-capture`). The in-tree test
-  (`every_capability_question_reaches_what_its_skill_names`) runs them
+  (`every_answerability_question_reaches_what_its_skill_names`) runs them
   against a throwaway `Services::in_memory`.
 - **Per question**: the skill's text names every model the SQL reads
   and the command it runs — as a whole word, in any case
@@ -1171,13 +1172,14 @@ isn't a backend ([providers.md](./providers.md) "Which trackers are
 backends"). The likely first real one is a beads backend's ready-work
 board.
 
-## Reviewing by effect
+## Reviewing by impact
 
-An extension is reviewed by what it would **change**, not only by what
-it declares (P6b.E; `extension_effects.rs`). `EffectReport` holds, each
-with a `Change` (`added`, `removed`, `changed`, `unchanged`):
+An extension is reviewed by its **impact** — what installing or updating
+it would change — not only by what it declares (`extension_impact.rs`).
+`ImpactReport` holds, each with a `Change` (`added`, `removed`,
+`changed`, `unchanged`):
 
-- `lenses` — each lens's rendered text before and after (`LensEffect`);
+- `lenses` — each lens's rendered text before and after (`LensImpact`);
 - `models` — each view, the parts that differ (`changed`: `query`,
   `columns`, `description`, `tests`, `version`, `deprecated`), its
   columns before and after, the first contract difference
@@ -1192,16 +1194,18 @@ with a `Change` (`added`, `removed`, `changed`, `unchanged`):
   declarations first differ (`first_difference`, so a change no grant,
   command or feature shows still reads as something) (`providers_diff`,
   over each spec and its checked-in declarations);
+- `effects` — each effect contribution's trigger and reactions
+  (`EffectImpact`, below);
 - `config` — the instance config schema, with the property keys added,
   removed or changed and the first change outside `properties`
   (`other_change`: `required`, …) (`config_diff`).
 
-`extension_effects::json_difference` is the one "where do two JSON
+`extension_impact::json_difference` is the one "where do two JSON
 values first differ" walk (the provider host's `first_difference` uses
 it too). A provider's changes are worded once, in Rust
-(`extension_effects::provider_phrases`, P8.C5): the review's `summary`
+(`extension_impact::provider_phrases`): the review's `summary`
 prefixes each phrase with `Provider <id>:`, and `approval_lines` — sent
-as `ProviderEffect.lines` — capitalizes them for the Data section's
+as `ProviderImpact.lines` — capitalizes them for the Data section's
 approval row.
 
 The report is built from the two loaded versions: **it never runs a
@@ -1210,33 +1214,31 @@ version nobody approved. What it does run is read-only or sandboxed:
 lens and model queries on each version's overlay, and derived
 collectors' and effects' scripts (below).
 
-`extension_effects::effects(layer, before, after)` (P6b.E2) builds it:
+`extension_impact::impact(layer, before, after)` builds it:
 each version carries its lenses **already run once**
 (`extensions::run_lenses` → `LensRuns`: default params, no viewer
 context) — for the candidate, the very runs `check_extension` checked,
 so a review runs each lens once — and each is rendered from its run
 (`lens_text::render`, a grid's children rendering empty) against **its
-own version's models** (each side's overlay, P8.C2 — so a lens over a
+own version's models** (each side's overlay — so a lens over a
 model the candidate changes renders against the changed SQL). A lens
 that fails the same way on both sides is `unchanged`. Each
 model's `downstream` is its direct readers from `v_model_lineage`
 (`downstream_of`) other than this extension's own views, by exact name;
 a provider's declarations are read from each version's files.
-`review_extension` fills `ExtensionReview.effects`, with the installed
+`review_extension` fills `ExtensionReview.impact`, with the installed
 version as `before` when it replaces one (`review_update`), else none
 (everything is `added`); a candidate that doesn't load gets **no**
-report (`effects: None` — its errors say why, and it can't be
-installed). Settings → Extensions shows `EffectReport.lines` —
-`extension_effects::summary` (P8.C5), the one wording the install
-review, `extension check --effects` and an effort's review share:
+report (`impact: None` — its errors say why, and it can't be
+installed). Settings → Extensions shows `ImpactReport.lines` —
+`extension_impact::summary`, the one wording the install
+review, `extension check --impact` and an effort's review share:
 collectors' and providers' grants first — "now reaches x (was y)", a
 provider command added (destructive) — then models with their readers,
 lenses, the config keys) and each changed lens's text before and after,
-side by side (`EffectDiff`; no line diff yet). Model rows, collector
-dry runs, `extension check --effects` and the effort-review view followed
-in P8.C (below).
+side by side (`LensDiff`; no line diff yet).
 
-**An extension at any revision** (P8.C1). `extension_at(trees, ws, rev,
+**An extension at any revision.** `extension_at(trees, ws, rev,
 name)` loads project extension `name` as revision `rev` of the
 workspace holds it — a commit (`git:HEAD`), a snapshot, the working
 tree — through `Trees::corpus` into an in-memory `Tree` (the
@@ -1244,12 +1246,12 @@ tree — through `Trees::corpus` into an in-memory `Tree` (the
 looked up three ways (`BundleLook`): on disk it's `Found` or `Absent` (an
 error); in a revision's tree it's checked from the tree's own paths when
 they're there, and `Unknown` — taken as declared, not an error — when
-they aren't, since a built bundle usually isn't committed (tsk784). At `git:HEAD` of a clean worktree it equals the
+they aren't, since a built bundle usually isn't committed. At `git:HEAD` of a clean worktree it equals the
 disk load; `None` when that revision has no `extension.yaml`. It's what
 lets a review compare two revisions of an extension, neither of which
 need be on disk.
 
-**Each side on its own overlay** (P8.C2). A check is `prepare` →
+**Each side on its own overlay.** A check is `prepare` →
 `Prepared { lenses, overlay }`: the extension's models (with the other
 enabled extensions') compile to temp views, published nowhere, and its
 lenses, advisories and commands read through that overlay. A review
@@ -1258,39 +1260,39 @@ lens over a model whose SQL changed renders against each version's own
 SQL, whatever the database has published (a disabled extension, a model
 that failed, another worktree's copy).
 
-**A model's rows** (P8.C3). Each changed, added or removed model's
-`ModelEffect.rows` is a `RowDiff { before, after, keyed?, note? }`: each
-side's rows read through that side's own overlay (up to 10 000 — the read gateway's own cap, `MAX_ROW_LIMIT`, tsk779;
+**A model's rows.** Each changed, added or removed model's
+`ModelImpact.rows` is a `RowDiff { before, after, keyed?, note? }`: each
+side's rows read through that side's own overlay (up to 10 000 — the read gateway's own cap, `MAX_ROW_LIMIT`;
 `ROW_DIFF_LIMIT`). When both versions declare the same non-empty `key`
-(P8.B1) it's a merge-join by key — `KeyedDiff { key, added, removed,
+it's a merge-join by key — `KeyedDiff { key, added, removed,
 changed, samples }`, up to 20 sample rows in key order, each with its key
 and its row before and after (key order is SQLite's: numbers by value,
 then text); otherwise, or past the limit, or when a side's key has a
 NULL part or repeats (one row would stand for several — the key test
-runs only at publish, tsk792), counts with a note saying why (or that a
+runs only at publish), counts with a note saying why (or that a
 side's query failed). An unchanged model has
 none. The rows are the review's only reads of model data; nothing is
 written.
 
-**A collector's outputs** (P8.C4). Each derived collector (Starlark,
+**A collector's outputs.** Each derived collector (Starlark,
 jaq) whose script or declaration changed is dry-run on the same inputs
 in both versions — each version's intent-example fixtures that name it
 (`fixtures/<example>.yaml`, `input: { collector, rows }`), the latest
 five events its `on:` trigger matches, else its `input:` query once — by
 `collector_runner::dry_run_collector`: each version's own script text,
-its `input:` read through that version's own overlay (tsk782),
+its `input:` read through that version's own overlay,
 storing nothing, with a `RefusingOracle` answering every `ai_*` builtin
 with an error (a review never spends or sends), under the command
 scripts' `COMMAND_SCRIPT_BUDGET` (5 s, not a live collector's 120 s:
-someone waits on a review). `CollectorEffect.outputs`
+someone waits on a review). `CollectorImpact.outputs`
 holds each input's `Ran { counts, rows (20 per entity), error? }` before
 and after. An exec or read collector is never run — approved or not —
 and says so in `not_run`. A collector whose entry's text changed though
 its declaration didn't is `changed` with `script_changed`, and says "its
-script changed" even when there's nothing to run it on (tsk783).
+script changed" even when there's nothing to run it on.
 
-**An effect's reactions** (P8.D12). `EffectReport.effects` lists each
-effect by id with its trigger before and after (`EffectTrigger { on,
+**An effect's reactions.** `ImpactReport.effects` lists each
+effect by id (`EffectImpact`) with its trigger before and after (`EffectTrigger { on,
 filter, needs }`; a script-only change is `changed` too) and, when it
 changed, `outputs`: each input — both versions' fixtures that name it
 (`input: { effect, event, answers? }`) and the latest five events of its
@@ -1299,11 +1301,11 @@ changed, `outputs`: each input — both versions' fixtures that name it
 `Composes { commands, skip?, error? }`. The lines read "Effect x: added — on t where k = v", "Effect x: on …
 → on …", "Effect x on fixture basic: runs [a] → skips (why)".
 
-**A bounded review** (tsk791). Script dry runs — collectors' and
+**A bounded review.** Script dry runs — collectors' and
 effects' — share one deadline, `REVIEW_DEADLINE` (60 s, from the start
-of `effects`; `effects_within` takes another): past it, no further input
+of `impact`; `impact_within` takes another): past it, no further input
 runs, and each collector or effect that didn't get through its inputs
-is in `EffectReport.out_of_time` (`collector <id>`, `effect <id>`), with
+is in `ImpactReport.out_of_time` (`collector <id>`, `effect <id>`), with
 the line "Out of time: collector a and effect b — the review stops
 running scripts after 60s". Only the later side is *checked*
 (`prepare`: commands and their examples, components, advisories, lens
@@ -1311,30 +1313,30 @@ shapes); the earlier side is only *read* (`read_side`: its models'
 overlay and its lenses rendered on it) — what it was, not whether it
 was right.
 
-**`oxplow extension check <name> --effects [--against <rev>]`** (P8.C6).
+**`oxplow extension check <name> --impact [--against <rev>]`.**
 The same review on the CLI: `oxplow_sdk::check(…, against)` — the check
-and its effects with one throwaway oxplow's command registry — loads the
+and its impact with one throwaway oxplow's command registry — loads the
 extension at git `HEAD` (or `--against`) — `extension_tree_at` through a
 `Trees` over the VCS alone — as `before` and the working tree as `after`,
-and runs `extensions::effects_between` (the install review's path too):
+and runs `extensions::impact_between` (the install review's path too):
 each side on its own overlay over the project's database read
 read-only (else an empty one), so it **writes nothing** — the database
-file is byte-identical after. Text output adds `effects against <rev>:`
-and the report's lines; `--json` adds `effects` (the `EffectReport`) and
+file is byte-identical after. Text output adds `impact against <rev>:`
+and the report's lines; `--json` adds `impact` (the `ImpactReport`) and
 `against` to the check's JSON.
 
-**On an effort's review** (P8.C7). DiffViewPage shows an "Extension
+**On an effort's review.** DiffViewPage shows an "Extension
 Changes" section when the change's files include `oxplow/extensions/**`
-(`changedExtensions`): RPC `extension_effects_between { streamId, start,
+(`changedExtensions`): RPC `extension_impact_between { streamId, start,
 end }` → `extensions::extension_changes_between` names each extension
 whose files differ between the two revisions (`Trees::diff`), loads both
 versions as those revisions hold them (`extension_tree_at`) and reviews
-them with `effects_between` — an `ExtensionChange { name, change,
-effects?, errors }` each (a removed one has no report). The section
-renders each with `EffectReportView` (the server's lines, then each
+them with `impact_between` — an `ExtensionChange { name, change,
+impact?, errors }` each (a removed one has no report). The section
+renders each with `ImpactReportView` (the server's lines, then each
 changed lens before and after), the component the install review uses
 too. While the RPC runs it says "Reviewing acme…"; when it fails, "Could
-not review acme: <why>" (tsk793) — never a spinner that doesn't end.
+not review acme: <why>" — never a spinner that doesn't end.
 
 ## Commands in core menus (a command's `ui.about`)
 
@@ -2675,10 +2677,11 @@ tool list stable no matter how many extensions are installed.
 - **Row actions (current):** right-click a lens row → "Ask About This"
   (P6.D1): `[oxplow ref <ref>]` for the first ref the row links to, else
   `[oxplow lens <id> row: col=value, …]` (`rowAsk`).
-- **The prompt catalog (current, P6.D2):** what a person can ask.
-  - Core's are the capability questions
+- **The prompt catalog (current):** what a person can ask.
+  - Core's are the answerability questions, by area
     (`crates/oxplow-agent-text/assets/questions/*.yaml`,
-    `oxplow_agent_text::capability_prompts`); a question with `about: <ref
+    `oxplow_agent_text::answerability_prompts` → `AnswerabilityPrompt {
+    area, prompt, about }`; `PromptSource::Area` in the catalog); a question with `about: <ref
     kind>` is phrased with "this" and is offered on pages for that kind
     (its `reaches` keeps concrete fixture values for the answerability
     check, which also checks `about` names a registered kind).

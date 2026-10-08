@@ -37,7 +37,7 @@ import { useCommandDraft } from "../commandDraft.js";
 import { enableAgain, healthLine, healthOf, repairWithAgent, useContributionHealth, type ContributionHealth } from "../contributionHealth.js";
 import { collectorRan, extensionCredentials, extensionRowModel, reviewModel } from "./extensionRowModel.js";
 import { extensionsChanged } from "../lens/lensRerun.js";
-import { EffectReportView } from "./EffectReportView.js";
+import { ImpactReportView } from "./ImpactReportView.js";
 import { InlineConfirm } from "./InlineConfirm.js";
 import { recordOpError } from "./opErrorsStore.js";
 import { showToast } from "./toastStore.js";
@@ -325,7 +325,7 @@ export function ReviewPanel({
         ))}
       </ul>
       {/* No report when the candidate doesn't load; its errors say why. */}
-      {review.effects ? <EffectReportView report={review.effects} testId="extension-review-effects" /> : null}
+      {review.impact ? <ImpactReportView report={review.impact} testId="extension-review-impact" /> : null}
       {m.errors.map((err, i) => (
         <div key={`e${i}`} style={errorStyle}>
           {err}

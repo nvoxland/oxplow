@@ -280,7 +280,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	providerDeclarationEffects: (instance: string) => typedError<ProviderEffect, IpcError>(__TAURI_INVOKE("provider_declaration_effects", { instance })),
+	providerDeclarationImpact: (instance: string) => typedError<ProviderImpact, IpcError>(__TAURI_INVOKE("provider_declaration_impact", { instance })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -545,7 +545,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	extensionEffectsBetween: (streamId: string | null, start: string | null, end: string) => typedError<ExtensionChange[], IpcError>(__TAURI_INVOKE("extension_effects_between", { streamId, start, end })),
+	extensionImpactBetween: (streamId: string | null, start: string | null, end: string) => typedError<ExtensionChange[], IpcError>(__TAURI_INVOKE("extension_impact_between", { streamId, start, end })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1613,11 +1613,11 @@ export type CheckReport_Deserialize = {
 	dryRun: DryRun,
 	extension: Extension_Deserialize,
 	/**
-	 *  With `--effects` (P8.C6): what going from `against` to the working
+	 *  With `--impact`: what going from `against` to the working
 	 *  tree changes; `null` without it.
 	 */
-	effects: EffectReport | null,
-	// The revision `effects` compares the working tree with.
+	impact: ImpactReport | null,
+	// The revision `impact` compares the working tree with.
 	against: string | null,
 };
 
@@ -1633,18 +1633,18 @@ export type CheckReport_Serialize = {
 	dryRun: DryRun,
 	extension: Extension_Serialize,
 	/**
-	 *  With `--effects` (P8.C6): what going from `against` to the working
+	 *  With `--impact`: what going from `against` to the working
 	 *  tree changes; `null` without it.
 	 */
-	effects: EffectReport | null,
-	// The revision `effects` compares the working tree with.
+	impact: ImpactReport | null,
+	// The revision `impact` compares the working tree with.
 	against: string | null,
 };
 
 // How a client authenticates to a token endpoint.
 export type ClientAuth = "basic" | "post";
 
-export type CollectorEffect = {
+export type CollectorImpact = {
 	id: string,
 	change: Change,
 	before: Grants | null,
@@ -1652,7 +1652,7 @@ export type CollectorEffect = {
 	// The views it fills.
 	entities: string[],
 	/**
-	 *  What each version makes of the same inputs (P8.C4) — its fixtures
+	 *  What each version makes of the same inputs — its fixtures
 	 *  and the latest events it'd run on — for a derived collector whose
 	 *  script or declaration changed; storing nothing, asking no model.
 	 */
@@ -2116,7 +2116,7 @@ export type Composes = {
 };
 
 // The instance config schema (`config:`), by property.
-export type ConfigEffect = {
+export type ConfigImpact = {
 	before: unknown | null,
 	after: unknown | null,
 	changedKeys: string[],
@@ -2386,7 +2386,7 @@ export type EffectDecl = {
 };
 
 // An effect before and after: when it reacts, and what it composes.
-export type EffectEffect = {
+export type EffectImpact = {
 	id: string,
 	change: Change,
 	before: EffectTrigger | null,
@@ -2406,30 +2406,6 @@ export type EffectOutput = {
 	change: Change,
 	before: Composes | null,
 	after: Composes | null,
-};
-
-// Everything installing or updating an extension would change.
-export type EffectReport = {
-	lenses: LensEffect[],
-	models: ModelEffect[],
-	collectors: CollectorEffect[],
-	providers: ProviderEffect[],
-	/**
-	 *  Its effects (P8.D12): what each reacts to, and what each version
-	 *  composes on the same events.
-	 */
-	effects: EffectEffect[],
-	config: ConfigEffect | null,
-	/**
-	 *  What its dry runs didn't get to (`collector <id>`, `effect <id>`):
-	 *  the review stops running scripts at its deadline.
-	 */
-	outOfTime: string[],
-	/**
-	 *  The report as lines ([`summary`]): what the install review, `extension
-	 *  check --effects` and an effort's review say, in one wording.
-	 */
-	lines: string[],
 };
 
 // When an effect reacts, and what it reads.
@@ -2654,15 +2630,15 @@ export type EventTypes = {
 export type Extension = Extension_Serialize | Extension_Deserialize;
 
 /**
- *  One extension that changed between two revisions of a workspace
- *  (P8.C7): what an effort's review shows for it.
+ *  One extension that changed between two revisions of a workspace:
+ *  what an effort's review shows for it.
  */
 export type ExtensionChange = {
 	name: string,
 	// `added`, `removed` or `changed`.
 	change: Change,
 	// What the change does; `None` for a removed extension.
-	effects: EffectReport | null,
+	impact: ImpactReport | null,
 	// What's wrong with the later version.
 	errors: string[],
 };
@@ -2803,10 +2779,10 @@ export type ExtensionReview_Deserialize = {
 	problems: string[],
 	/**
 	 *  What installing it would change, against the installed version
-	 *  when it replaces one (P6b.E2); `None` when the candidate doesn't
+	 *  when it replaces one; `None` when the candidate doesn't
 	 *  load (its `problems` say why).
 	 */
-	effects: EffectReport | null,
+	impact: ImpactReport | null,
 };
 
 /**
@@ -2827,10 +2803,10 @@ export type ExtensionReview_Serialize = {
 	problems: string[],
 	/**
 	 *  What installing it would change, against the installed version
-	 *  when it replaces one (P6b.E2); `None` when the candidate doesn't
+	 *  when it replaces one; `None` when the candidate doesn't
 	 *  load (its `problems` say why).
 	 */
-	effects: EffectReport | null,
+	impact: ImpactReport | null,
 };
 
 // Provenance of an installed extension, kept in its `source.yaml`.
@@ -3350,6 +3326,30 @@ export type HookKind =
  */
 "notification";
 
+// Everything installing or updating an extension would change.
+export type ImpactReport = {
+	lenses: LensImpact[],
+	models: ModelImpact[],
+	collectors: CollectorImpact[],
+	providers: ProviderImpact[],
+	/**
+	 *  Its effects: what each reacts to, and what each version
+	 *  composes on the same events.
+	 */
+	effects: EffectImpact[],
+	config: ConfigImpact | null,
+	/**
+	 *  What its dry runs didn't get to (`collector <id>`, `effect <id>`):
+	 *  the review stops running scripts at its deadline.
+	 */
+	outOfTime: string[],
+	/**
+	 *  The report as lines ([`summary`]): what the install review, `extension
+	 *  check --impact` and an effort's review say, in one wording.
+	 */
+	lines: string[],
+};
+
 // One implementation as the extension declares it.
 export type ImplementationDecl = {
 	capability: string,
@@ -3643,16 +3643,6 @@ export type LensCustom_Serialize = {
 	props: unknown | null,
 };
 
-// A lens, by its rendered text before and after (P6b.E2).
-export type LensEffect = {
-	id: string,
-	change: Change,
-	before: string | null,
-	after: string | null,
-	// Why a side couldn't render (its query failed).
-	error: string | null,
-};
-
 // `form` viz: the command it submits and the values it starts from.
 export type LensForm = LensForm_Serialize | LensForm_Deserialize;
 
@@ -3687,6 +3677,16 @@ export type LensHunks = {
 	path: string | null,
 	from: string | null,
 	to: string | null,
+};
+
+// A lens, by its rendered text before and after.
+export type LensImpact = {
+	id: string,
+	change: Change,
+	before: string | null,
+	after: string | null,
+	// Why a side couldn't render (its query failed).
+	error: string | null,
 };
 
 // A lens that didn't run for want of a capability.
@@ -4345,7 +4345,14 @@ export type ModelDecl = {
 	materialize?: Materialize | null,
 };
 
-export type ModelEffect = {
+// When one model last changed.
+export type ModelFreshness = {
+	model: string,
+	// RFC 3339.
+	changedAt: string,
+};
+
+export type ModelImpact = {
 	view: string,
 	change: Change,
 	/**
@@ -4357,20 +4364,13 @@ export type ModelEffect = {
 	afterColumns: string[],
 	// The first difference in its contract (columns, types, docs).
 	contractChange: string | null,
-	// Models that read it, which a contract change can break (P6b.E2).
+	// Models that read it, which a contract change can break.
 	downstream: string[],
 	/**
-	 *  What its rows would become (P8.C3), each side read through its own
+	 *  What its rows would become, each side read through its own
 	 *  models; `None` for an unchanged model.
 	 */
 	rows: RowDiff | null,
-};
-
-// When one model last changed.
-export type ModelFreshness = {
-	model: string,
-	// RFC 3339.
-	changedAt: string,
 };
 
 // A model's declaration and its SQL file.
@@ -4903,8 +4903,11 @@ export type ProjectProgram = {
 
 // Who offers a prompt.
 export type PromptSource = 
-// A core capability (`vcs`, `work_items`, `knowledge`, `code_intel`).
-{ kind: "capability"; name: string } | 
+/**
+ *  One of core's areas (`vcs`, `work_items`, `knowledge`,
+ *  `code_intel`, `extensions`).
+ */
+{ kind: "area"; name: string } | 
 // An extension.
 { kind: "extension"; name: string };
 
@@ -4926,14 +4929,14 @@ export type ProviderConfig = {
 	baseUrl?: string | null,
 };
 
-export type ProviderEffect = {
+export type ProviderImpact = {
 	id: string,
 	capability: string,
 	change: Change,
 	before: Grants | null,
 	after: Grants | null,
 	commands: CommandChange[],
-	// Behind the MCP adapter (P7.A6): each pinned tool of its server.
+	// Behind the MCP adapter: each pinned tool of its server.
 	tools: CommandChange[],
 	featuresBefore: unknown | null,
 	featuresAfter: unknown | null,
@@ -5070,7 +5073,7 @@ export type Ran = {
 	// The rows per entity (the first 20).
 	rows: unknown,
 	/**
-	 *  The events it would log, counted per type (P9.D2) — as the script
+	 *  The events it would log, counted per type — as the script
 	 *  returned them: whether it may emit them is checked when it runs.
 	 */
 	events: { [key in string]: number },
@@ -5233,7 +5236,7 @@ export type RoleStatus = {
 	overridden: boolean,
 };
 
-// A model's rows before and after (P8.C3).
+// A model's rows before and after.
 export type RowDiff = {
 	// Rows on each side (`None`: it isn't on that side).
 	before: number | null,

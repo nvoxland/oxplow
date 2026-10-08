@@ -524,10 +524,10 @@ pub struct CheckReport {
     /// What its SQL was dry-run against.
     pub dry_run: DryRun,
     pub extension: Extension,
-    /// With `--effects` (P8.C6): what going from `against` to the working
+    /// With `--impact`: what going from `against` to the working
     /// tree changes; `null` without it.
-    pub effects: Option<oxplow_app::extension_effects::EffectReport>,
-    /// The revision `effects` compares the working tree with.
+    pub impact: Option<oxplow_app::extension_impact::ImpactReport>,
+    /// The revision `impact` compares the working tree with.
     pub against: Option<String>,
 }
 
@@ -550,7 +550,7 @@ pub enum DryRun {
 /// and what `oxplow extension check` prints. `commands` (the running app's
 /// registry) checks launcher command entries; without it, a throwaway
 /// oxplow's does. With `against` (a git revision), the report also says
-/// what going from it to the working tree changes ([`CheckReport::effects`]).
+/// what going from it to the working tree changes ([`CheckReport::impact`]).
 pub async fn check(
     root: &Path,
     name: &str,
@@ -587,9 +587,9 @@ pub async fn check(
             DomainError::NotFound => SdkError::NotFound(name.to_string()),
             other => SdkError::Domain(other),
         })?;
-    let effects = match (against, commands) {
+    let impact = match (against, commands) {
         (Some(rev), Some(commands)) => {
-            Some(effects_against(root, name, catalog, layer, rev, commands).await?)
+            Some(impact_against(root, name, catalog, layer, rev, commands).await?)
         }
         _ => None,
     };
@@ -600,25 +600,25 @@ pub async fn check(
         warnings: extension.warnings.clone(),
         dry_run,
         extension,
-        effects,
+        impact,
         against: against.map(str::to_string),
     })
 }
 
 /// What going from git revision `against` (`HEAD`, a branch, a sha) to the
-/// working tree changes for extension `name` (P8.C6) — the review an
+/// working tree changes for extension `name` — the review an
 /// install or an effort shows, on the CLI: lenses, models and their rows,
 /// collectors and their outputs, providers, config. It reads through
 /// `layer` and writes nothing: each side's models are temp views.
-async fn effects_against(
+async fn impact_against(
     root: &Path,
     name: &str,
     catalog: &ExtensionCatalog,
     layer: &SqlGateway,
     against: &str,
     commands: extensions::CommandSchemas<'_>,
-) -> Result<oxplow_app::extension_effects::EffectReport, SdkError> {
-    use oxplow_app::extensions::{effects_between, extension_tree_at, ReviewSide};
+) -> Result<oxplow_app::extension_impact::ImpactReport, SdkError> {
+    use oxplow_app::extensions::{extension_tree_at, impact_between, ReviewSide};
     // A revision's files through the VCS; nothing here reads a snapshot.
     let trees = oxplow_app::trees::Trees::new(
         std::sync::Arc::new(oxplow_app::vcs::GitProvider),
@@ -652,7 +652,7 @@ async fn effects_against(
         extension: after,
         read: &read_after,
     };
-    Ok(effects_between(
+    Ok(impact_between(
         layer,
         catalog,
         root,
@@ -714,15 +714,15 @@ pub fn render_findings(report: &CheckReport, format: Format) -> String {
                 report.warnings.len(),
                 if report.warnings.len() == 1 { "" } else { "s" },
             ));
-            if let Some(effects) = &report.effects {
+            if let Some(impact) = &report.impact {
                 out.push_str(&format!(
-                    "effects against {}:\n",
+                    "impact against {}:\n",
                     report.against.as_deref().unwrap_or("HEAD")
                 ));
-                if effects.lines.is_empty() {
+                if impact.lines.is_empty() {
                     out.push_str("  (nothing changes)\n");
                 }
-                for line in &effects.lines {
+                for line in &impact.lines {
                     out.push_str(&format!("  {line}\n"));
                 }
             }

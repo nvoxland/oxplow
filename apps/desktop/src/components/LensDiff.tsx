@@ -1,22 +1,22 @@
-/// A changed lens in an extension review (P6b.E2): its text before and
+/// A changed lens in an extension review: its text before and
 /// after, side by side — what an agent would read from it, which is also
 /// what it shows. No line diff yet; the two texts are short.
 import type { CSSProperties } from "react";
 
-export function EffectDiff({ id, before, after }: { id: string; before: string; after: string }) {
+export function LensDiff({ id, before, after }: { id: string; before: string; after: string }) {
   return (
-    <div data-testid={`effect-lens-${id}`} style={{ marginTop: 6 }}>
+    <div data-testid={`impact-lens-${id}`} style={{ marginTop: 6 }}>
       <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{id}</div>
       <div style={{ display: "flex", gap: 8 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={labelStyle}>Before</div>
-          <pre data-testid={`effect-lens-${id}-before`} style={textStyle}>
+          <pre data-testid={`impact-lens-${id}-before`} style={textStyle}>
             {before}
           </pre>
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={labelStyle}>After</div>
-          <pre data-testid={`effect-lens-${id}-after`} style={textStyle}>
+          <pre data-testid={`impact-lens-${id}-after`} style={textStyle}>
             {after}
           </pre>
         </div>

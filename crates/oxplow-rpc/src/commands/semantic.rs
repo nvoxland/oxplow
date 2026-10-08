@@ -45,8 +45,9 @@ pub async fn list_data_entities(
 }
 
 /// What the person can ask (the catalog page, contextual prompts): every
-/// capability's questions and the enabled extensions' prompts (the main
-/// worktree's, for every stream). UI-only: the agent is who gets asked.
+/// area's answerability questions and the enabled extensions' prompts
+/// (the main worktree's, for every stream). UI-only: the agent is who
+/// gets asked.
 pub async fn prompt_catalog(
     svc: &Services,
 ) -> Result<Vec<oxplow_app::prompt_catalog::CatalogPrompt>, IpcError> {
@@ -110,7 +111,7 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .any(|p| p["about"] == "effort" && p["source"]["kind"] == "capability"));
+            .any(|p| p["about"] == "effort" && p["source"]["kind"] == "area"));
     }
 
     #[tokio::test]

@@ -15,7 +15,7 @@ import {
   approveProjectProgram,
   programSource,
   listDataEntities,
-  providerDeclarationEffects,
+  providerDeclarationImpact,
   listProjectPrograms,
   listCollectors,
   approveCollector,
@@ -35,10 +35,10 @@ import {
   entityRows,
   entitySummary,
   programRow,
-  providerEffectLines,
+  providerImpactLines,
   type BackfillResult,
   type EntityCount,
-  type ProviderEffectState,
+  type ProviderImpactState,
 } from "./dataSectionModel.js";
 import { collectorRan, collectorRowModel } from "./extensionRowModel.js";
 import { DeliveryList } from "./DeliveryList.js";
@@ -55,7 +55,7 @@ export function DataSection() {
   const [programs, setPrograms] = useState<ProjectProgram[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   // What approving each unapproved provider would change, by instance.
-  const [effects, setEffects] = useState<Record<string, ProviderEffectState>>({});
+  const [impacts, setImpacts] = useState<Record<string, ProviderImpactState>>({});
 
   const refresh = useCallback(async () => {
     try {
@@ -120,14 +120,14 @@ export function DataSection() {
   useEffect(() => {
     let live = true;
     const pending = pendingKey === "" ? [] : pendingKey.split("\n").map((k) => k.split("\u0000")[0]!);
-    setEffects(Object.fromEntries(pending.map((name) => [name, "loading" as const])));
+    setImpacts(Object.fromEntries(pending.map((name) => [name, "loading" as const])));
     for (const name of pending) {
-      void providerDeclarationEffects(name)
+      void providerDeclarationImpact(name)
         .then((e) => {
-          if (live) setEffects((prev) => ({ ...prev, [name]: e }));
+          if (live) setImpacts((prev) => ({ ...prev, [name]: e }));
         })
         .catch((e: unknown) => {
-          if (live) setEffects((prev) => ({ ...prev, [name]: { error: e instanceof Error ? e.message : String(e) } }));
+          if (live) setImpacts((prev) => ({ ...prev, [name]: { error: e instanceof Error ? e.message : String(e) } }));
         });
     }
     return () => {
@@ -256,9 +256,9 @@ export function DataSection() {
       ) : (
         programs.map((p) => {
           const m = programRow(p);
-          const effect = p.kind === "provider" && !p.approved ? effects[p.name] : undefined;
-          const failed = effect !== undefined && effect !== "loading" && "error" in effect ? effect.error : null;
-          const diff = effect !== undefined && effect !== "loading" && !("error" in effect) ? effect : null;
+          const impact = p.kind === "provider" && !p.approved ? impacts[p.name] : undefined;
+          const failed = impact !== undefined && impact !== "loading" && "error" in impact ? impact.error : null;
+          const diff = impact !== undefined && impact !== "loading" && !("error" in impact) ? impact : null;
           return (
             <div key={m.key} data-testid={`program-row-${m.key}`} style={rowStyle}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -271,7 +271,7 @@ export function DataSection() {
                     type="button"
                     data-testid={`program-approve-${m.key}`}
                     title={failed !== null ? "We couldn't compare what approving would change; fix the error first" : m.approveTitle}
-                    disabled={busy !== null || !canApprove(p, effect)}
+                    disabled={busy !== null || !canApprove(p, impact)}
                     onClick={() => void approve(p)}
                   >
                     {busy === m.key ? "Approving…" : "Approve"}
@@ -280,15 +280,15 @@ export function DataSection() {
               </div>
               {m.bundled ? <ProgramSource rowKey={m.key} program={p} /> : null}
               {p.kind === "effect" && p.approved ? <BackfillAction rowKey={m.key} effect={p.name} /> : null}
-              {effect === "loading" ? (
+              {impact === "loading" ? (
                 <div style={mutedStyle}>Comparing its declarations…</div>
               ) : failed !== null ? (
-                <div data-testid={`program-effects-error-${m.key}`} style={errorStyle}>
+                <div data-testid={`program-impact-error-${m.key}`} style={errorStyle}>
                   Couldn&apos;t compare its declarations: {failed}
                 </div>
               ) : diff ? (
-                <ul data-testid={`program-effects-${m.key}`} style={{ margin: "4px 0 0", paddingLeft: 18, ...mutedStyle }}>
-                  {providerEffectLines(diff).map((line, i) => (
+                <ul data-testid={`program-impact-${m.key}`} style={{ margin: "4px 0 0", paddingLeft: 18, ...mutedStyle }}>
+                  {providerImpactLines(diff).map((line, i) => (
                     <li key={i}>{line}</li>
                   ))}
                 </ul>

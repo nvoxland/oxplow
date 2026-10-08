@@ -1447,16 +1447,16 @@ pub async fn extension_tree_at(
     Ok(tree.read("extension.yaml").is_some().then_some(tree))
 }
 
-/// One extension that changed between two revisions of a workspace
-/// (P8.C7): what an effort's review shows for it.
+/// One extension that changed between two revisions of a workspace:
+/// what an effort's review shows for it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtensionChange {
     pub name: String,
     /// `added`, `removed` or `changed`.
-    pub change: crate::extension_effects::Change,
+    pub change: crate::extension_impact::Change,
     /// What the change does; `None` for a removed extension.
-    pub effects: Option<crate::extension_effects::EffectReport>,
+    pub impact: Option<crate::extension_impact::ImpactReport>,
     /// What's wrong with the later version.
     pub errors: Vec<String>,
 }
@@ -1495,8 +1495,8 @@ pub async fn extension_changes_between(
             if before.is_some() {
                 out.push(ExtensionChange {
                     name,
-                    change: crate::extension_effects::Change::Removed,
-                    effects: None,
+                    change: crate::extension_impact::Change::Removed,
+                    impact: None,
                     errors: Vec::new(),
                 });
             }
@@ -1508,7 +1508,7 @@ pub async fn extension_changes_between(
             extension: after.load(&name, &rel),
             read: &read_after,
         };
-        let effects = effects_between(
+        let impact = impact_between(
             &svc.sql,
             &svc.extension_catalog,
             ws,
@@ -1522,12 +1522,12 @@ pub async fn extension_changes_between(
         .await;
         out.push(ExtensionChange {
             change: if before.is_some() {
-                crate::extension_effects::Change::Changed
+                crate::extension_impact::Change::Changed
             } else {
-                crate::extension_effects::Change::Added
+                crate::extension_impact::Change::Added
             },
             name,
-            effects: Some(effects),
+            impact: Some(impact),
             errors: side.extension.errors,
         });
     }
@@ -1542,18 +1542,18 @@ pub struct ReviewSide<'a> {
 }
 
 /// What going from `before` (none: a first install) to `after` would
-/// change (P8.C2–C5): each side on its own overlay — `after` checked,
+/// change: each side on its own overlay — `after` checked,
 /// `before` only read — then compared: lenses, models and their rows,
 /// collectors and their outputs, providers, config. `after.extension`
 /// gets its check's errors.
-pub async fn effects_between(
+pub async fn impact_between(
     layer: &crate::sql_gateway::SqlGateway,
     catalog: &crate::extension_catalog::ExtensionCatalog,
     root: &Path,
     before: Option<ReviewSide<'_>>,
     after: &mut ReviewSide<'_>,
     commands: CommandSchemas<'_>,
-) -> crate::extension_effects::EffectReport {
+) -> crate::extension_impact::ImpactReport {
     let prepared_after = prepare(
         layer,
         catalog,
@@ -1568,9 +1568,9 @@ pub async fn effects_between(
         None => None,
     };
     let no_runs = LensRuns::new();
-    crate::extension_effects::effects(
+    crate::extension_impact::impact(
         layer,
-        before.as_ref().map(|b| crate::extension_effects::Version {
+        before.as_ref().map(|b| crate::extension_impact::Version {
             extension: &b.extension,
             read: b.read,
             lenses: prepared_before.as_ref().map_or(&no_runs, |p| &p.lenses),
@@ -1578,7 +1578,7 @@ pub async fn effects_between(
                 .as_ref()
                 .map_or(&[], |p| p.overlay.as_slice()),
         }),
-        crate::extension_effects::Version {
+        crate::extension_impact::Version {
             extension: &after.extension,
             read: after.read,
             lenses: &prepared_after.lenses,
@@ -3346,9 +3346,9 @@ pub struct ExtensionReview {
     pub sha: String,
     pub problems: Vec<String>,
     /// What installing it would change, against the installed version
-    /// when it replaces one (P6b.E2); `None` when the candidate doesn't
+    /// when it replaces one; `None` when the candidate doesn't
     /// load (its `problems` say why).
-    pub effects: Option<crate::extension_effects::EffectReport>,
+    pub impact: Option<crate::extension_impact::ImpactReport>,
 }
 
 /// Clone an extension and report what it declares, installing nothing.
@@ -3386,7 +3386,7 @@ pub async fn review_extension(
     let read_installed = |rel: &str| read_extension_file(root, &name, rel);
     let clone = Disk(fetched.clone.clone());
     let read_candidate = |rel: &str| clone.read(rel);
-    let effects = if load_errors > 0 {
+    let impact = if load_errors > 0 {
         // A candidate that doesn't load has nothing reliable to compare;
         // its check still says what else is wrong.
         prepare(
@@ -3407,7 +3407,7 @@ pub async fn review_extension(
             extension,
             read: &read_candidate,
         };
-        let report = effects_between(
+        let report = impact_between(
             layer,
             catalog,
             root,
@@ -3429,7 +3429,7 @@ pub async fn review_extension(
         git_ref: git_ref.map(str::to_string),
         sha: fetched.sha,
         problems,
-        effects,
+        impact,
     })
 }
 
@@ -4499,7 +4499,7 @@ empty: No items.
         run_git(repo, &["rev-parse", "HEAD"]).unwrap()
     }
 
-    /// P8.C2: each side of a review reads through its own overlay — a lens
+    /// Each side of a review reads through its own overlay — a lens
     /// over a model whose SQL changed renders against each version's own
     /// SQL, though neither version's models are published.
     #[tokio::test]
@@ -4533,7 +4533,7 @@ empty: No items.
             .await
             .unwrap();
         let count = update
-            .effects
+            .impact
             .as_ref()
             .unwrap()
             .lenses
@@ -4548,9 +4548,9 @@ empty: No items.
             ),
             (Some("1"), Some("2"), None)
         );
-        // P8.C3: its rows, each side's own — counts, since it has no key.
+        // Its rows, each side's own — counts, since it has no key.
         let x = update
-            .effects
+            .impact
             .as_ref()
             .unwrap()
             .models
@@ -4565,7 +4565,7 @@ empty: No items.
         );
     }
 
-    /// P6b.E2: an update is reviewed against the installed version — a
+    /// An update is reviewed against the installed version — a
     /// changed lens shows its text before and after.
     #[tokio::test]
     async fn review_update_shows_before_and_after_against_the_installed_version() {
@@ -4585,12 +4585,12 @@ empty: No items.
         .await
         .unwrap();
         assert!(first
-            .effects
+            .impact
             .as_ref()
             .unwrap()
             .lenses
             .iter()
-            .all(|l| l.change == crate::extension_effects::Change::Added));
+            .all(|l| l.change == crate::extension_impact::Change::Added));
         install_extension(project.path(), project.path(), &url, None, &first.sha).unwrap();
         write(
             repo.path(),
@@ -4604,19 +4604,19 @@ empty: No items.
         .await
         .unwrap();
         let count = update
-            .effects
+            .impact
             .as_ref()
             .unwrap()
             .lenses
             .iter()
             .find(|l| l.id == "shared/count")
             .unwrap();
-        assert_eq!(count.change, crate::extension_effects::Change::Changed);
+        assert_eq!(count.change, crate::extension_impact::Change::Changed);
         assert_eq!(
             (count.before.as_deref(), count.after.as_deref()),
             (Some("1"), Some("2"))
         );
-        // A candidate that doesn't load has no effects to show: its
+        // A candidate that doesn't load has no impact to show: its
         // problems say why.
         write(
             repo.path(),
@@ -4630,7 +4630,7 @@ empty: No items.
         .await
         .unwrap();
         assert!(!broken.extension.errors.is_empty());
-        assert_eq!(broken.effects, None);
+        assert_eq!(broken.impact, None);
     }
 
     /// Before anything lands in the repo a person sees what the extension
@@ -6937,7 +6937,7 @@ commands:
         assert_eq!(at_snapshot.description, "Edited.");
     }
 
-    /// P8.C7: an effort's review names the extensions that changed between
+    /// An effort's review names the extensions that changed between
     /// its two revisions, each with what the change does; files outside
     /// `oxplow/extensions/` change nothing here.
     #[tokio::test]
@@ -6995,8 +6995,8 @@ commands:
         .unwrap();
         assert_eq!(changes.len(), 1, "{changes:?}");
         assert_eq!(changes[0].name, "acme");
-        assert_eq!(changes[0].change, crate::extension_effects::Change::Changed);
-        let report = changes[0].effects.as_ref().unwrap();
+        assert_eq!(changes[0].change, crate::extension_impact::Change::Changed);
+        let report = changes[0].impact.as_ref().unwrap();
         assert!(
             report.lines.iter().any(|l| l == "Lens acme/count: changed"),
             "{:?}",

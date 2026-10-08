@@ -1,8 +1,8 @@
-//! The agent-answerability check (P5.F1, `.context/extensions.md`
+//! The agent-answerability check (`.context/extensions.md`
 //! "Answerability"): can an agent that reads the right skill answer the
-//! questions a capability exists for?
+//! questions an area of oxplow, or an extension, exists for?
 //!
-//! A questions file (`crates/oxplow-agent-text/assets/questions/<capability>.yaml`,
+//! A questions file (`crates/oxplow-agent-text/assets/questions/<area>.yaml`,
 //! or an extension's own `questions.yaml`) lists entries:
 //!
 //! ```yaml
@@ -39,7 +39,7 @@ pub struct Question {
     #[serde(default)]
     pub shape: Option<Shape>,
     /// The kind of ref it's about (`file`, `commit`): a page for one
-    /// offers it (P6.D2). Phrase it with "this".
+    /// offers it. Phrase it with "this".
     #[serde(default)]
     pub about: Option<String>,
 }
@@ -415,11 +415,11 @@ mod tests {
         );
     }
 
-    /// P5.F1's red: every capability question reaches something its skill
+    /// Every answerability question reaches something its skill
     /// names — the SQL runs with its declared columns and a command's
     /// input fits its spec.
     #[tokio::test]
-    async fn every_capability_question_reaches_what_its_skill_names() {
+    async fn every_answerability_question_reaches_what_its_skill_names() {
         let tmp = tempfile::tempdir().unwrap();
         oxplow_app::vcs::GitProvider
             .init_repository(tmp.path())
@@ -437,8 +437,8 @@ mod tests {
         };
         let mut errors = Vec::new();
         let mut asked = 0;
-        for (capability, yaml) in oxplow_agent_text::CAPABILITY_QUESTIONS {
-            let file = format!("questions/{capability}.yaml");
+        for (area, yaml) in oxplow_agent_text::ANSWERABILITY_QUESTIONS {
+            let file = format!("questions/{area}.yaml");
             let questions = parse(yaml).unwrap_or_else(|e| panic!("{file}: {e}"));
             assert!(!questions.is_empty(), "{file} asks nothing");
             asked += questions.len();

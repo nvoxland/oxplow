@@ -1,18 +1,18 @@
-/// What an extension change does (P8.C7): the server's lines
-/// (`extension_effects::summary` — grants first, then collectors' outputs,
+/// What an extension change does: the server's lines
+/// (`extension_impact::summary` — grants first, then collectors' outputs,
 /// models and their rows, lenses, config), then each changed lens's text
 /// before and after. The install review and an effort's review show it.
-import type { EffectReport } from "../tauri-bridge/generated/bindings.js";
-import { EffectDiff } from "./EffectDiff.js";
+import type { ImpactReport } from "../tauri-bridge/generated/bindings.js";
+import { LensDiff } from "./LensDiff.js";
 
 /** The lenses whose text changes, before and after. */
-export function lensDiffs(report: EffectReport): { id: string; before: string; after: string }[] {
+export function lensDiffs(report: ImpactReport): { id: string; before: string; after: string }[] {
   return report.lenses
     .filter((l) => l.change === "changed" && l.before !== null && l.after !== null)
     .map((l) => ({ id: l.id, before: l.before!, after: l.after! }));
 }
 
-export function EffectReportView({ report, testId }: { report: EffectReport; testId: string }) {
+export function ImpactReportView({ report, testId }: { report: ImpactReport; testId: string }) {
   return (
     <>
       {report.lines.length > 0 ? (
@@ -26,7 +26,7 @@ export function EffectReportView({ report, testId }: { report: EffectReport; tes
         </>
       ) : null}
       {lensDiffs(report).map((d) => (
-        <EffectDiff key={d.id} id={d.id} before={d.before} after={d.after} />
+        <LensDiff key={d.id} id={d.id} before={d.before} after={d.after} />
       ))}
     </>
   );

@@ -105,7 +105,7 @@ mock.module("../api.js", () => ({
     },
   ],
   programSource: async () => "def transform(x):\n    return {\"skip\": \"nothing\"}\n",
-  providerDeclarationEffects: () => answer(),
+  providerDeclarationImpact: () => answer(),
   subscribeOxplowEvents: () => () => {},
 }));
 const { DataSection } = await import("./DataSection.js");

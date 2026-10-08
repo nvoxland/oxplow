@@ -376,7 +376,7 @@ impl HostCalls {
 pub fn first_difference(approved: &InitializeResult, live: &InitializeResult) -> String {
     let a = serde_json::to_value(approved).unwrap_or_default();
     let b = serde_json::to_value(live).unwrap_or_default();
-    crate::extension_effects::json_difference(&a, &b)
+    crate::extension_impact::json_difference(&a, &b)
         .map(|(path, a, b)| format!("at `{path}`: approved {a}, running {b}"))
         .unwrap_or_else(|| "they differ".into())
 }

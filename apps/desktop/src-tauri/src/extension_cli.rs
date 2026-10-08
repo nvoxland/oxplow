@@ -23,13 +23,13 @@ usage:
       commands; an effect reacting to an event; a custom component with
       its lens and bundle. Each checks clean and passes `test` as written
       (a provider once a real program replaces its stub)
-  oxplow extension check <name|path> [--effects] [--against <rev>] [--json] [--root <dir>]
+  oxplow extension check <name|path> [--impact] [--against <rev>] [--json] [--root <dir>]
       load the extension and report every problem with file:line, dry-running
       its models, commands, lenses and advisories — against the project's
       database when it has been opened in oxplow (.oxplow/local.sqlite),
       else an empty one; command names against a throwaway oxplow.
-      --effects also says what the working tree's version changes against
-      git HEAD (or --against <rev>, which implies --effects): lenses' text,
+      --impact also says what the working tree's version changes against
+      git HEAD (or --against <rev>, which implies --impact): lenses' text,
       models and their rows, collectors' outputs, providers' grants —
       writing nothing
   oxplow extension test <name|path> [--bless] [--json] [--root <dir>]
@@ -85,8 +85,8 @@ struct Parsed {
     root: Option<PathBuf>,
     json: bool,
     bless: bool,
-    /// `check --effects`: compare the working tree with `against`.
-    effects: bool,
+    /// `check --impact`: compare the working tree with `against`.
+    impact: bool,
     against: Option<String>,
 }
 
@@ -97,7 +97,7 @@ fn parse(args: &[String]) -> Result<Parsed, Failure> {
         root: None,
         json: false,
         bless: false,
-        effects: false,
+        impact: false,
         against: None,
     };
     let mut it = args.iter();
@@ -117,7 +117,7 @@ fn parse(args: &[String]) -> Result<Parsed, Failure> {
                     })?))
             }
             "--json" => p.json = true,
-            "--effects" => p.effects = true,
+            "--impact" => p.impact = true,
             "--against" => {
                 p.against = Some(
                     it.next()
@@ -187,8 +187,8 @@ fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Resul
             });
             let layer = db.map(oxplow_app::sql_gateway::SqlGateway::new);
             // No running oxplow to ask which commands exist: the check
-            // starts a throwaway one, and its effects use the same.
-            let against = (p.effects || p.against.is_some())
+            // starts a throwaway one, and its impact review uses the same.
+            let against = (p.impact || p.against.is_some())
                 .then(|| p.against.clone().unwrap_or_else(|| "HEAD".into()));
             let report = block_on(oxplow_sdk::check(
                 &root,
@@ -560,12 +560,12 @@ mod tests {
         assert!(ok, "git {args:?}");
     }
 
-    /// P8.C6: `check --effects` compares the working tree with `git:HEAD`
+    /// `check --impact` compares the working tree with `git:HEAD`
     /// (or `--against`): a lens and a model edited in the worktree read as
     /// changed, the model with its rows; `--json` carries the report; the
     /// project's database isn't touched.
     #[test]
-    fn check_effects_compares_the_worktree_with_head_and_writes_nothing() {
+    fn check_impact_compares_the_worktree_with_head_and_writes_nothing() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         let ext = root.join("oxplow/extensions/acme");
@@ -594,16 +594,16 @@ mod tests {
 
         w("models/x.sql", "SELECT 2 AS n\n");
         let root_s = root.to_str().unwrap();
-        let (code, out, err) = cli(&["check", "acme", "--root", root_s, "--effects"]);
+        let (code, out, err) = cli(&["check", "acme", "--root", root_s, "--impact"]);
         assert_eq!(code, 0, "{out}{err}");
-        assert!(out.contains("effects against HEAD:"), "{out}");
+        assert!(out.contains("impact against HEAD:"), "{out}");
         assert!(out.contains("Lens acme/count: changed"), "{out}");
         assert!(out.contains("Model v_acme_x rows: 1 → 1"), "{out}");
 
-        let (code, out, _) = cli(&["check", "acme", "--root", root_s, "--effects", "--json"]);
+        let (code, out, _) = cli(&["check", "acme", "--root", root_s, "--impact", "--json"]);
         assert_eq!(code, 0);
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
-        assert!(v["effects"]["lines"]
+        assert!(v["impact"]["lines"]
             .as_array()
             .unwrap()
             .iter()

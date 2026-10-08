@@ -270,7 +270,7 @@ pub const MANIFEST: &[Capability] = &[
         "a person reads what they're asked to approve; an agent reads its worktree's files",
     ),
     ui(
-        "provider_declaration_effects",
+        "provider_declaration_impact",
         "what a provider's approval would change, shown before a person approves it (P6b.E3)",
     ),
     ui(
@@ -554,8 +554,8 @@ pub const MANIFEST: &[Capability] = &[
         "a revision's file list, for the editor; an agent reads a revision with `read_at`",
     ),
     ui(
-        "extension_effects_between",
-        "an effort review's Extension Changes (P8.C7); an agent runs `oxplow extension check --effects`",
+        "extension_impact_between",
+        "an effort review's Extension Changes; an agent runs `oxplow extension check --impact`",
     ),
     ui(
         "vcs_head",

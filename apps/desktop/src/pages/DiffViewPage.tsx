@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type { DiffEntry, EffortAtSnapshot, Snapshot, Stream } from "../api.js";
 import type { ExtensionChange } from "../tauri-bridge/generated/bindings.js";
-import { EffectReportView } from "../components/EffectReportView.js";
+import { ImpactReportView } from "../components/ImpactReportView.js";
 import { readWorkItem, readWorkItemsByRef } from "../workItems.js";
 import {
-  extensionEffectsBetween,
+  extensionImpactBetween,
   querySql,
   getAgentTurn,
   getEffort,
@@ -326,7 +326,7 @@ function ResolvedEndpointDiff({
   // header note flags that the end side is moving.
   const changed = useChangedFiles(stream ? { kind: "endpoints", streamId: stream.id, start, end } : null);
 
-  // An extension's files changed: what the change does (P8.C7), each
+  // An extension's files changed: what the change does, each
   // version reviewed as its revision holds it.
   const extensionNames = changedExtensions(changed.files.map((f) => f.path));
   const extensionKey = extensionNames.join(",");
@@ -337,12 +337,12 @@ function ResolvedEndpointDiff({
     setExtensionReview({ state: "reviewing" });
     if (!stream || extensionKey === "") return;
     let cancelled = false;
-    void extensionEffectsBetween(stream.id, start, end)
+    void extensionImpactBetween(stream.id, start, end)
       .then((changes) => {
         if (!cancelled) setExtensionReview({ state: "reviewed", changes });
       })
       .catch((err: unknown) => {
-        logUi("warn", "extension effects failed", { error: String(err) });
+        logUi("warn", "extension impact failed", { error: String(err) });
         if (!cancelled) {
           setExtensionReview({ state: "failed", message: err instanceof Error ? err.message : String(err) });
         }
@@ -793,7 +793,7 @@ function ResolvedEndpointDiff({
                     {e}
                   </div>
                 ))}
-                {c.effects ? <EffectReportView report={c.effects} testId={`extension-change-${c.name}-effects`} /> : null}
+                {c.impact ? <ImpactReportView report={c.impact} testId={`extension-change-${c.name}-impact`} /> : null}
               </div>
             ))
           )}

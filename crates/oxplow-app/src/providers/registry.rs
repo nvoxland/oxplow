@@ -1321,13 +1321,13 @@ impl ProviderRegistry {
 
     /// What approving `instance` as it is on disk would change against
     /// what was approved last — the approved copy a start last ran
-    /// (`host::last_approved`), whether or not it runs now (P6b.E3): its
+    /// (`host::last_approved`), whether or not it runs now: its
     /// grants, each declared command and its features. Never run,
     /// everything is new. Reads files; runs nothing.
-    pub async fn declaration_effects(
+    pub async fn declaration_impact(
         &self,
         instance: &str,
-    ) -> Result<crate::extension_effects::ProviderEffect, DomainError> {
+    ) -> Result<crate::extension_impact::ProviderImpact, DomainError> {
         let Resolved { ext, spec, .. } =
             self.resolve(instance).map_err(|_| DomainError::NotFound)?;
         let dir = host::ext_dir(&self.deps.project_dir, &ext);
@@ -1339,7 +1339,7 @@ impl ProviderRegistry {
             tokio::task::spawn_blocking(move || host::last_approved(&copies, &ext_c, &spec_c))
                 .await
                 .map_err(|e| DomainError::Invariant(format!("reading the approved copy: {e}")))?;
-        crate::extension_effects::providers_diff(
+        crate::extension_impact::providers_diff(
             &approved.into_iter().collect::<Vec<_>>(),
             &[on_disk],
         )

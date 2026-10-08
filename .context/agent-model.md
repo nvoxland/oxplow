@@ -298,7 +298,7 @@ handed (`oxplow-agent-text`'s `core_text` plus what extensions offer,
 the skills and commands of a runtime already on disk, creating none:
 `capabilities::refresh_agent_text` calls it on every registered harness at
 boot, on an extension change and on a `capability.switched`. The crate
-depends only on the domain; core's text and the capability questions live in
+depends only on the domain; core's text and the answerability questions live in
 `oxplow-agent-text`, which the app and the SDK read.
 
 - Claude writes `.oxplow/runtime/claude-plugin/`, passes it with

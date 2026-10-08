@@ -77,9 +77,9 @@ pub async fn changed_paths(
 }
 
 /// The extensions that changed between `start` and `end` of the stream's
-/// workspace, each with what the change does (P8.C7): the "Extension
+/// workspace, each with what the change does: the "Extension
 /// Changes" section of an effort's review.
-pub async fn extension_effects_between(
+pub async fn extension_impact_between(
     svc: &Services,
     stream_id: Option<String>,
     start: Option<Revision>,

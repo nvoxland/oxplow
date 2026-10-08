@@ -1016,18 +1016,13 @@ async fn a_provider_command_is_declared_over_an_operation_it_lists() {
     }
 }
 
-/// P6b.E3: what approving a provider's declarations would change: all new
+/// What approving a provider's declarations would change: all new
 /// before it runs; against the running declarations after an edit.
 #[tokio::test]
-async fn declaration_effects_compare_the_files_with_what_runs() {
+async fn declaration_impact_compare_the_files_with_what_runs() {
     let (fx, ext) = approved("").await;
-    let first = fx
-        .svc
-        .providers
-        .declaration_effects(INSTANCE)
-        .await
-        .unwrap();
-    assert_eq!(first.change, crate::extension_effects::Change::Added);
+    let first = fx.svc.providers.declaration_impact(INSTANCE).await.unwrap();
+    assert_eq!(first.change, crate::extension_impact::Change::Added);
     fx.svc
         .providers
         .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
@@ -1046,27 +1041,22 @@ async fn declaration_effects_compare_the_files_with_what_runs() {
     extra.confirm = "destructive".into();
     declared.commands.push(extra);
     std::fs::write(&path, serde_json::to_string_pretty(&declared).unwrap()).unwrap();
-    let after = fx
-        .svc
-        .providers
-        .declaration_effects(INSTANCE)
-        .await
-        .unwrap();
-    assert_eq!(after.change, crate::extension_effects::Change::Changed);
+    let after = fx.svc.providers.declaration_impact(INSTANCE).await.unwrap();
+    assert_eq!(after.change, crate::extension_impact::Change::Changed);
     let archive = after.commands.iter().find(|c| c.name == "archive").unwrap();
-    assert_eq!(archive.change, crate::extension_effects::Change::Added);
+    assert_eq!(archive.change, crate::extension_impact::Change::Added);
     assert!(after
         .commands
         .iter()
         .filter(|c| c.name != "archive")
-        .all(|c| c.change == crate::extension_effects::Change::Unchanged));
+        .all(|c| c.change == crate::extension_impact::Change::Unchanged));
 }
 
 /// R7: the baseline is the last approved copy, not the running instance —
 /// a changed spec stops the instance (and a restart starts none), and the
 /// re-approval must still show what changed.
 #[tokio::test]
-async fn declaration_effects_compare_against_the_last_approved_copy() {
+async fn declaration_impact_compare_against_the_last_approved_copy() {
     let (fx, ext) = approved("").await;
     fx.svc
         .providers
@@ -1088,19 +1078,14 @@ async fn declaration_effects_compare_against_the_last_approved_copy() {
     .unwrap();
     fx.svc.providers.stop(INSTANCE).await;
     assert!(fx.svc.providers.get(INSTANCE).await.is_none());
-    let effect = fx
-        .svc
-        .providers
-        .declaration_effects(INSTANCE)
-        .await
-        .unwrap();
-    assert_eq!(effect.change, crate::extension_effects::Change::Changed);
+    let effect = fx.svc.providers.declaration_impact(INSTANCE).await.unwrap();
+    assert_eq!(effect.change, crate::extension_impact::Change::Changed);
     assert_eq!(effect.before.unwrap().hosts, Vec::<String>::new());
     assert_eq!(effect.after.unwrap().hosts, vec!["api.example.com"]);
     assert!(effect
         .commands
         .iter()
-        .all(|c| c.change == crate::extension_effects::Change::Unchanged));
+        .all(|c| c.change == crate::extension_impact::Change::Unchanged));
 }
 
 /// tsk546: a provider's args are hashed where it runs (its extension
@@ -1564,7 +1549,7 @@ async fn approving_updated_declarations_restarts_the_instance() {
 /// the provider isn't there to compare: `NotFound`, never an empty diff,
 /// and the load error names the file.
 #[tokio::test]
-async fn declaration_effects_of_unreadable_declarations_is_an_error() {
+async fn declaration_impact_of_unreadable_declarations_is_an_error() {
     let (fx, _ext) = approved("").await;
     std::fs::write(
         fx.svc
@@ -1577,7 +1562,7 @@ async fn declaration_effects_of_unreadable_declarations_is_an_error() {
     let err = fx
         .svc
         .providers
-        .declaration_effects(INSTANCE)
+        .declaration_impact(INSTANCE)
         .await
         .unwrap_err();
     assert!(

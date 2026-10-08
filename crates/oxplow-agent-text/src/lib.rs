@@ -1,15 +1,16 @@
 //! The text oxplow gives every agent: core's skills and slash commands
-//! ([`core_text`]), and the capability questions an agent should be able
-//! to answer ([`CAPABILITY_QUESTIONS`], [`capability_prompts`]). Each
+//! ([`core_text`]), and the answerability questions an agent should be
+//! able to answer, by area ([`ANSWERABILITY_QUESTIONS`],
+//! [`answerability_prompts`]). Each
 //! harness (`oxplow-harnesses`) writes it into its own runtime.
 
 use oxplow_domain::agent::text::{AgentText, Text};
 
-/// The capability answerability questions (`assets/questions/<capability>.yaml`,
-/// P5.F1): what an agent should be able to answer, the skill that should
-/// lead it there, and what it reaches. `oxplow_sdk::answerability` checks
-/// them.
-pub const CAPABILITY_QUESTIONS: &[(&str, &str)] = &[
+/// The answerability questions, one file per area of oxplow
+/// (`assets/questions/<area>.yaml`): what an agent should be able to
+/// answer, the skill that should lead it there, and what it reaches.
+/// `oxplow_sdk::answerability` checks them.
+pub const ANSWERABILITY_QUESTIONS: &[(&str, &str)] = &[
     ("vcs", include_str!("../assets/questions/vcs.yaml")),
     (
         "work_items",
@@ -29,33 +30,34 @@ pub const CAPABILITY_QUESTIONS: &[(&str, &str)] = &[
     ),
 ];
 
-/// A capability question as the person sees it (P6.D2): offered with an
+/// An answerability question as the person sees it: offered with an
 /// Ask button on the catalog page, and on a page for a ref of `about`'s
 /// kind (`file`, `commit`, `effort`, `work_item`).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CapabilityPrompt {
-    pub capability: &'static str,
+pub struct AnswerabilityPrompt {
+    /// The area it's about (`vcs`, `work_items`, `knowledge`, …).
+    pub area: &'static str,
     pub prompt: String,
     pub about: Option<String>,
 }
 
-/// Every capability question, in file order. The files' other keys are
+/// Every answerability question, in file order. The files' other keys are
 /// the answerability check's (`oxplow_sdk::answerability`).
-pub fn capability_prompts() -> Vec<CapabilityPrompt> {
+pub fn answerability_prompts() -> Vec<AnswerabilityPrompt> {
     #[derive(serde::Deserialize)]
     struct Entry {
         question: String,
         #[serde(default)]
         about: Option<String>,
     }
-    CAPABILITY_QUESTIONS
+    ANSWERABILITY_QUESTIONS
         .iter()
-        .flat_map(|(capability, yaml)| {
+        .flat_map(|(area, yaml)| {
             serde_yaml::from_str::<Vec<Entry>>(yaml)
                 .expect("a bundled questions file parses (checked by its test)")
                 .into_iter()
-                .map(|e| CapabilityPrompt {
-                    capability,
+                .map(|e| AnswerabilityPrompt {
+                    area,
                     prompt: e.question,
                     about: e.about,
                 })
@@ -127,11 +129,11 @@ const OXPLOW_SKILLS: &[(&str, &str)] = &[
 mod tests {
     use super::*;
 
-    /// P6.D2: each capability question is a prompt; an `about` names a
+    /// Each answerability question is a prompt; an `about` names a
     /// registered kind of ref, and the entity pages have some.
     #[test]
-    fn capability_prompts_are_about_registered_ref_kinds() {
-        let prompts = capability_prompts();
+    fn answerability_prompts_are_about_registered_ref_kinds() {
+        let prompts = answerability_prompts();
         let kinds = oxplow_domain::refs::kind::core_kinds();
         for p in &prompts {
             if let Some(about) = &p.about {
@@ -146,7 +148,7 @@ mod tests {
         }
         assert!(prompts
             .iter()
-            .any(|p| p.capability == "vcs" && p.prompt == "Who has changed this file the most?"));
+            .any(|p| p.area == "vcs" && p.prompt == "Who has changed this file the most?"));
     }
 
     /// Agents that can't discover skill files get an index instead

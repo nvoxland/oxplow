@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import { subscribeAgentInput } from "../agent-input-bus.js";
 
-// The catalog page (P6.D2): what can be asked (by capability and
+// The catalog page: what can be asked (by area and
 // extension), what data exists, and what can be configured.
 
 const realApi = await import("../api.js");
@@ -15,7 +15,7 @@ const realRunCommand = realApi.runCommand;
 mock.module("../api.js", () => ({
   ...realApi,
   promptCatalog: async () => [
-    { prompt: "Which branches exist?", about: null, source: { kind: "capability", name: "vcs" } },
+    { prompt: "Which branches exist?", about: null, source: { kind: "area", name: "vcs" } },
     { prompt: "Which PRs wait on me?", about: null, source: { kind: "extension", name: "gh" } },
   ],
   querySql: async (sql: string, ...rest: unknown[]) => {
@@ -43,7 +43,7 @@ test("the catalog lists prompts by source, data by owner and config keys", async
   const opened: string[] = [];
   const view = render(<CatalogPage onOpenPage={(r) => opened.push(r.id)} />);
   await waitFor(() => view.getByText("Which PRs wait on me?"));
-  expect(view.getByTestId("catalog-prompts-capability-vcs").textContent).toContain("Which branches exist?");
+  expect(view.getByTestId("catalog-prompts-area-vcs").textContent).toContain("Which branches exist?");
   expect(view.getByTestId("catalog-prompts-extension-gh").textContent).toContain("Which PRs wait on me?");
   fireEvent.click(view.getByText("Which PRs wait on me?"));
   expect(inserted).toEqual(["Which PRs wait on me?"]);

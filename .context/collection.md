@@ -41,7 +41,7 @@ section for the column.
 > no parseable report — no longer leaves a "ran-record" row; the report-less
 > nudge is what surfaces it.)
 
-## Pieces
+## Components
 
 - **Effort-review rows** are reconstructed from the metric substrate
   (`effort_observations_from_metrics`), not a dedicated table. The

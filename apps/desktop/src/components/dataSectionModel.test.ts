@@ -166,30 +166,30 @@ test("programRow says a bundled effect asks again when a new oxplow changes it",
   expect(m.approveTitle).toContain("A new oxplow that changes it asks again");
 });
 
-import { backfillAsk, backfillDone, backfillRunLabel, canApprove, providerEffectLines } from "./dataSectionModel.js";
-import type { ProviderEffect } from "../tauri-bridge/generated/bindings.js";
+import { backfillAsk, backfillDone, backfillRunLabel, canApprove, providerImpactLines } from "./dataSectionModel.js";
+import type { ProviderImpact } from "../tauri-bridge/generated/bindings.js";
 
-// P6b.E3: a provider's Approve waits for what approving would change; the
+// A provider's Approve waits for what approving would change; the
 // change reads as lines — everything new at first, then what differs.
 test("a provider's approve waits for its declaration diff", () => {
   const provider = { kind: "provider", name: "tracker/fake", program: "p", args: [], env: [], approved: false } as never;
   expect(canApprove(provider, undefined)).toBe(false);
   expect(canApprove(provider, "loading")).toBe(false);
-  expect(canApprove(provider, { change: "added" } as ProviderEffect)).toBe(true);
+  expect(canApprove(provider, { change: "added" } as ProviderImpact)).toBe(true);
   expect(canApprove(provider, { error: "no provider.json" })).toBe(false);
   const collector = { kind: "collector", name: "g", program: "p", args: [], env: [], approved: false } as never;
   expect(canApprove(collector, undefined)).toBe(true);
 });
 
-// P8.C5: the wording is the server's (`extension_effects::approval_lines`,
+// The wording is the server's (`extension_impact::approval_lines`,
 // tested in Rust); the approval row shows the lines it sends.
 test("a provider's declaration diff shows the server's lines", () => {
-  const effect = {
+  const impact = {
     id: "fake",
     change: "changed",
     lines: ["Now reaches api.example.com (was none)", "Command `archive` added (destructive)"],
-  } as unknown as ProviderEffect;
-  expect(providerEffectLines(effect)).toEqual([
+  } as unknown as ProviderImpact;
+  expect(providerImpactLines(impact)).toEqual([
     "Now reaches api.example.com (was none)",
     "Command `archive` added (destructive)",
   ]);

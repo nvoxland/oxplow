@@ -94,13 +94,13 @@ async fn shared_extensions(svc: &Services) -> Vec<oxplow_app::extensions::Extens
 }
 
 /// What approving provider `instance` as it is on disk would change
-/// against what was approved last (P6b.E3) — what Settings → Data shows
+/// against what was approved last — what Settings → Data shows
 /// before its Approve.
-pub async fn provider_declaration_effects(
+pub async fn provider_declaration_impact(
     svc: &Services,
     instance: String,
-) -> Result<oxplow_app::extension_effects::ProviderEffect, IpcError> {
-    Ok(svc.providers.declaration_effects(&instance).await?)
+) -> Result<oxplow_app::extension_impact::ProviderImpact, IpcError> {
+    Ok(svc.providers.declaration_impact(&instance).await?)
 }
 
 /// Approve one of the project's programs as it is now. UI only: consent to

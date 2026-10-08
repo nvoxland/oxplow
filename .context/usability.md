@@ -146,7 +146,8 @@ Things I keep forgetting. Read this before adding any UI.
 - **No internal ids, codes or placeholders in what a person reads**.
   A thread by its title ("The agent in “Fix the cart”"),
   never `thr1`; a command by its label, its id only on hover; a
-  capability by its name ("Version control", `capabilityLabel`), not
+  capability by its title (`capability_title`), an area by its name
+  ("Version control", `areaLabel`), not
   `vcs`; no plan codes ("(P5.E1)") in model docs (`model_docs_carry_no_
   plan_labels`); no `TODO:` scaffold text a person sees (Keep This's
   `my-lenses` gets a real description); counts agree in number ("1

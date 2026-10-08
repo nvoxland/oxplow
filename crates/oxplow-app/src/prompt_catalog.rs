@@ -1,5 +1,5 @@
-//! What a person can ask (P6.D2, target §13.1): every capability's
-//! questions (`oxplow_agent_text::capability_prompts`) and every enabled
+//! What a person can ask: every area's answerability questions
+//! (`oxplow_agent_text::answerability_prompts`) and every enabled
 //! extension's `intent.prompts`, in one list. The catalog page groups it
 //! by source; a page for a ref shows the prompts `about` that ref's kind.
 //! See `.context/extensions.md` → "The prompt catalog".
@@ -20,20 +20,21 @@ pub struct CatalogPrompt {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", tag = "kind", content = "name")]
 pub enum PromptSource {
-    /// A core capability (`vcs`, `work_items`, `knowledge`, `code_intel`).
-    Capability(String),
+    /// One of core's areas (`vcs`, `work_items`, `knowledge`,
+    /// `code_intel`, `extensions`).
+    Area(String),
     /// An extension.
     Extension(String),
 }
 
 /// Core's prompts, then each enabled extension's, in name order.
 pub fn prompt_catalog(extensions: &[Extension]) -> Vec<CatalogPrompt> {
-    let core = oxplow_agent_text::capability_prompts()
+    let core = oxplow_agent_text::answerability_prompts()
         .into_iter()
         .map(|p| CatalogPrompt {
             prompt: p.prompt,
             about: p.about,
-            source: PromptSource::Capability(p.capability.to_string()),
+            source: PromptSource::Area(p.area.to_string()),
         });
     let mut exts: Vec<&Extension> = extensions.iter().filter(|e| e.enabled).collect();
     exts.sort_by(|a, b| a.name.cmp(&b.name));
@@ -90,7 +91,7 @@ mod tests {
             .iter()
             .any(|p| p.prompt == "Who has changed this file the most?"
                 && p.about.as_deref() == Some("file")
-                && p.source == PromptSource::Capability("vcs".into())));
+                && p.source == PromptSource::Area("vcs".into())));
         let mine: Vec<_> = catalog
             .iter()
             .filter(|p| p.source == PromptSource::Extension("gh".into()))
@@ -105,6 +106,6 @@ mod tests {
         );
         assert!(!catalog.iter().any(|p| p.prompt == "Hidden?"));
         // Core first.
-        assert!(matches!(catalog[0].source, PromptSource::Capability(_)));
+        assert!(matches!(catalog[0].source, PromptSource::Area(_)));
     }
 }

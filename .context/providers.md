@@ -182,7 +182,7 @@ that aren't a JSON list of named tools. **The approval covers it all**: the prog
 file, the mapping and tools are named in its args, and the tree hash
 covers the folder, so changing the mapping, a pin or the server needs
 approving again; the approval row lists the server and each pinned tool
-added, removed or changed (`ProviderEffect.tools`).
+added, removed or changed (`ProviderImpact.tools`).
 
 **A server by `url`** (P9.B4): `mcp` names exactly one of `command` and
 `url` (`spec::McpServer`, an enum — the rule is the type):
@@ -347,17 +347,17 @@ version, shown unapproved in Settings → Data → Programs (with its grants lis
 until a person approves it again. Every start re-checks it, restarts
 included.
 
-**The approval shows what it changes** (P6b.E3): an unapproved
-provider's row loads `provider_declaration_effects { instance }`
-(`ProviderRegistry::declaration_effects`: the spec and declarations on
+**The approval shows what it changes**: an unapproved
+provider's row loads `provider_declaration_impact { instance }`
+(`ProviderRegistry::declaration_impact`: the spec and declarations on
 disk against the last approved copy's — `host::last_approved`, the
 intact `copies/<ext>/<id>/<hash>` a start last ran, so a changed spec
 that stopped the instance, or a restart, still shows what changed — or
 everything it declares when it never ran; read, never run) and lists
 its hosts, credentials, commands added, removed or changed (destructive
 ones marked), features, or — when none of those shows the change — where
-the declarations first differ (`ProviderEffect.lines`, worded in Rust
-by `extension_effects::approval_lines`, P8.C5). Its Approve stays disabled
+the declarations first differ (`ProviderImpact.lines`, worded in Rust
+by `extension_impact::approval_lines`). Its Approve stays disabled
 until that diff has loaded (`canApprove`), on top of the reviewed
 `version` round trip; a diff that fails to load is shown on the row
 ("Couldn't compare its declarations: …") and Approve stays disabled with
@@ -429,7 +429,7 @@ One spelling everywhere, because the id is used as it stands:
 |---|---|
 | the ref segment (`work_item:issues_acme:ENG-1`) and `check_subject` | the consent key `provider:<ext>/<provider id>` and its hash |
 | an extension command's `instance` (`tracker.item.estimate { instance: issues_acme }`) | the approved copy (`copies/<ext>/<provider id>/<hash>`) |
-| the work-items registry id, `v_capability_provider.provider`, the `activeProviders` value | Data → Programs' row, `declaration_effects` |
+| the work-items registry id, `v_capability_provider.provider`, the `activeProviders` value | Data → Programs' row, `declaration_impact` |
 | `OXPLOW_PROVIDER_ID` (the provider is told which instance it is) | the kit's fixtures and transcripts (it tests the program, as its default instance) |
 | `contribution_health.contribution`, `provider_collector_state.instance` (the name) | |
 | the credential accounts (`instance:<project>:<ext>/<id>:<name>`) | |

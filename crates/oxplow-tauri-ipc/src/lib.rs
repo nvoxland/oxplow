@@ -149,7 +149,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::list_project_programs,
             commands::generated::approve_project_program,
             commands::generated::program_source,
-            commands::generated::provider_declaration_effects,
+            commands::generated::provider_declaration_impact,
             commands::generated::list_provider_instances,
             commands::generated::check_provider_instance,
             commands::generated::set_provider_instance,
@@ -203,7 +203,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::get_file_snapshot,
             commands::generated::diff,
             commands::generated::changed_paths,
-            commands::generated::extension_effects_between,
+            commands::generated::extension_impact_between,
             commands::generated::get_snapshot_stats,
             commands::generated::get_blob_storage_bytes,
             // branch

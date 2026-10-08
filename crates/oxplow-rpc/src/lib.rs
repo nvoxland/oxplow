@@ -288,7 +288,7 @@ macro_rules! oxplow_command_table {
                 approve_collector => $crate::commands::collectors::approve_collector { owner: String, id: String, version: String } -> (),
                 set_credential => $crate::commands::collectors::set_credential { extension: String, name: String, value: Option<String> } -> (),
                 list_project_programs => $crate::commands::collectors::list_project_programs {} -> Vec<::oxplow_app::exec_consent::ProjectProgram>,
-                provider_declaration_effects => $crate::commands::collectors::provider_declaration_effects { instance: String } -> ::oxplow_app::extension_effects::ProviderEffect,
+                provider_declaration_impact => $crate::commands::collectors::provider_declaration_impact { instance: String } -> ::oxplow_app::extension_impact::ProviderImpact,
                 approve_project_program => $crate::commands::collectors::approve_project_program { kind: ::oxplow_app::exec_consent::ProgramKind, name: String, version: String } -> Vec<::oxplow_app::exec_consent::ProjectProgram>,
                 program_source => $crate::commands::collectors::program_source { kind: ::oxplow_app::exec_consent::ProgramKind, name: String } -> String,
                 // providers (Settings → Integrations)
@@ -373,7 +373,7 @@ macro_rules! oxplow_command_table {
                 get_file_snapshot => $crate::commands::snapshot::get_file_snapshot { file_snapshot_id: i64 } -> Option<::oxplow_db::FileSnapshot>,
                 changed_paths => $crate::commands::trees::changed_paths { stream_id: Option<String>, from: Option<::oxplow_domain::vcs::Revision>, to: ::oxplow_domain::vcs::Revision } -> Vec<::oxplow_app::trees::ChangedPath>,
                 diff => $crate::commands::trees::diff { stream_id: Option<String>, from: Option<::oxplow_domain::vcs::Revision>, to: ::oxplow_domain::vcs::Revision } -> Vec<::oxplow_app::trees::DiffEntry>,
-                extension_effects_between => $crate::commands::trees::extension_effects_between { stream_id: Option<String>, start: Option<::oxplow_domain::vcs::Revision>, end: ::oxplow_domain::vcs::Revision } -> Vec<::oxplow_app::extensions::ExtensionChange>,
+                extension_impact_between => $crate::commands::trees::extension_impact_between { stream_id: Option<String>, start: Option<::oxplow_domain::vcs::Revision>, end: ::oxplow_domain::vcs::Revision } -> Vec<::oxplow_app::extensions::ExtensionChange>,
                 // background
                 list_background_tasks => $crate::commands::background::list_background_tasks {} -> Vec<::oxplow_app::BackgroundTask>,
                 get_background_task => $crate::commands::background::get_background_task { id: String } -> Option<::oxplow_app::BackgroundTask>,

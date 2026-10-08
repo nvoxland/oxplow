@@ -8,7 +8,7 @@ import type {
   OpOutcome,
   OxplowConfig,
   OxplowEvent,
-  ProviderEffect,
+  ProviderImpact,
   Reads,
   Scope,
   SignInCompletion,
@@ -836,9 +836,9 @@ export async function listProjectPrograms(): Promise<ProjectProgram[]> {
 }
 
 /** What approving provider `instance` as it is on disk would change
- *  against what was approved last (P6b.E3). */
-export async function providerDeclarationEffects(instance: string): Promise<ProviderEffect> {
-  return unwrap(await commands.providerDeclarationEffects(instance));
+ *  against what was approved last. */
+export async function providerDeclarationImpact(instance: string): Promise<ProviderImpact> {
+  return unwrap(await commands.providerDeclarationImpact(instance));
 }
 
 /// A person approves one of the project's programs (Settings → Data).
@@ -2078,13 +2078,13 @@ export async function changedPaths(
 
 /** The extensions that changed between `start` (null: nothing before) and
  *  `end` of the stream's workspace, each with what the change does
- *  (P8.C7) — the "Extension Changes" section of an effort's review. */
-export async function extensionEffectsBetween(
+ *  — the "Extension Changes" section of an effort's review. */
+export async function extensionImpactBetween(
   streamId: string,
   start: Revision | null,
   end: Revision,
 ): Promise<ExtensionChange[]> {
-  return unwrap(await commands.extensionEffectsBetween(streamId || null, start, end));
+  return unwrap(await commands.extensionImpactBetween(streamId || null, start, end));
 }
 
 /** Every file in the stream's workspace at `revision`, sorted. */

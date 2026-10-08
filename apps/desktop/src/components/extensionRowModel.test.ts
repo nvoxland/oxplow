@@ -204,7 +204,7 @@ describe("reviewModel", () => {
     gitRef: null,
     sha: "0123456789abcdef0123456789abcdef01234567",
     problems,
-    effects: { lenses: [], models: [], collectors: [], providers: [], effects: [], config: null, lines: [] },
+    impact: { lenses: [], models: [], collectors: [], providers: [], effects: [], config: null, lines: [] },
   });
 
   test("spells out what runs, where it reaches and what it reads", () => {
@@ -224,7 +224,7 @@ describe("reviewModel", () => {
   });
 
   test("load errors block the install; dry-run problems don't", () => {
-    const broken = reviewModel({ ...review({ errors: ["extension.yaml: unknown field `bogus`"] }), effects: null });
+    const broken = reviewModel({ ...review({ errors: ["extension.yaml: unknown field `bogus`"] }), impact: null });
     expect(broken.canInstall).toBe(false);
     const m = reviewModel(review({}, ["lens shared/x: column `y` isn't in the query result"]));
     expect(m.canInstall).toBe(true);

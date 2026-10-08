@@ -1,13 +1,12 @@
-//! Reviewing an extension by its **effects** (P6b.E1): what installing or
-//! updating it would change — lenses' rendered text, models and their
-//! contracts (and what reads them), collectors' and providers' grants, a
-//! provider's commands and features, the instance config schema — rather
-//! than only what it declares, plus models' rows before and after
-//! (P8.C3), derived collectors' and effects' dry runs on the same inputs
-//! (P8.C4, D12) — each version on its own models' overlay. It never
-//! runs a program, a provider or an exec collector (consent forbids
-//! running an unapproved version), and stores nothing. See
-//! `.context/extensions.md` → "Reviewing by effect".
+//! Reviewing an extension by its **impact**: what installing or updating
+//! it would change — lenses' rendered text, models and their contracts
+//! (and what reads them), collectors' and providers' grants, a provider's
+//! commands and features, the instance config schema — rather than only
+//! what it declares, plus models' rows before and after, and derived
+//! collectors' and effects' dry runs on the same inputs — each version on
+//! its own models' overlay. It never runs a program, a provider or an exec
+//! collector (consent forbids running an unapproved version), and stores
+//! nothing. See `.context/extensions.md` → "Reviewing by impact".
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -51,10 +50,10 @@ pub struct Grants {
     pub scopes: Vec<String>,
 }
 
-/// A lens, by its rendered text before and after (P6b.E2).
+/// A lens, by its rendered text before and after.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct LensEffect {
+pub struct LensImpact {
     pub id: String,
     pub change: Change,
     pub before: Option<String>,
@@ -65,7 +64,7 @@ pub struct LensEffect {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct ModelEffect {
+pub struct ModelImpact {
     pub view: String,
     pub change: Change,
     /// For a changed model, the parts that differ, in order: `query`,
@@ -75,9 +74,9 @@ pub struct ModelEffect {
     pub after_columns: Vec<String>,
     /// The first difference in its contract (columns, types, docs).
     pub contract_change: Option<String>,
-    /// Models that read it, which a contract change can break (P6b.E2).
+    /// Models that read it, which a contract change can break.
     pub downstream: Vec<String>,
-    /// What its rows would become (P8.C3), each side read through its own
+    /// What its rows would become, each side read through its own
     /// models; `None` for an unchanged model.
     pub rows: Option<RowDiff>,
 }
@@ -90,7 +89,7 @@ pub const ROW_DIFF_LIMIT: usize = oxplow_db::semantic_layer::MAX_ROW_LIMIT;
 /// The most sample changes a keyed diff keeps.
 pub const ROW_DIFF_SAMPLES: usize = 20;
 
-/// A model's rows before and after (P8.C3).
+/// A model's rows before and after.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct RowDiff {
@@ -303,14 +302,14 @@ fn cmp_key(a: &[Value], b: &[Value]) -> std::cmp::Ordering {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct CollectorEffect {
+pub struct CollectorImpact {
     pub id: String,
     pub change: Change,
     pub before: Option<Grants>,
     pub after: Option<Grants>,
     /// The views it fills.
     pub entities: Vec<String>,
-    /// What each version makes of the same inputs (P8.C4) — its fixtures
+    /// What each version makes of the same inputs — its fixtures
     /// and the latest events it'd run on — for a derived collector whose
     /// script or declaration changed; storing nothing, asking no model.
     pub outputs: Vec<CollectorOutput>,
@@ -324,7 +323,7 @@ pub struct CollectorEffect {
 /// An effect before and after: when it reacts, and what it composes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct EffectEffect {
+pub struct EffectImpact {
     pub id: String,
     pub change: Change,
     pub before: Option<EffectTrigger>,
@@ -384,12 +383,12 @@ fn effect_trigger(d: &crate::effects::EffectDecl) -> EffectTrigger {
 pub fn effects_diff(
     before: &[crate::effects::EffectDecl],
     after: &[crate::effects::EffectDecl],
-) -> Vec<EffectEffect> {
+) -> Vec<EffectImpact> {
     pair_by(before, after, |d| d.id.clone())
         .into_iter()
         .map(|(id, b, a)| {
             let (tb, ta) = (b.map(effect_trigger), a.map(effect_trigger));
-            EffectEffect {
+            EffectImpact {
                 id,
                 change: match change_of(tb.as_ref(), ta.as_ref()) {
                     Change::Unchanged if b.map(|d| &d.script) != a.map(|d| &d.script) => {
@@ -453,7 +452,7 @@ async fn effect_outputs(
     layer: &crate::sql_gateway::SqlGateway,
     before: Option<&Version<'_>>,
     after: &Version<'_>,
-    effect: &mut EffectEffect,
+    effect: &mut EffectImpact,
     deadline: std::time::Instant,
 ) -> DryRuns {
     if effect.change == Change::Unchanged {
@@ -597,7 +596,7 @@ pub struct Ran {
     /// The rows per entity (the first 20).
     #[specta(type = oxplow_domain::Json)]
     pub rows: Value,
-    /// The events it would log, counted per type (P9.D2) — as the script
+    /// The events it would log, counted per type — as the script
     /// returned them: whether it may emit them is checked when it runs.
     pub events: BTreeMap<String, i64>,
     /// Why it failed (a model call it tried was refused, say).
@@ -654,14 +653,14 @@ pub struct CommandChange {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct ProviderEffect {
+pub struct ProviderImpact {
     pub id: String,
     pub capability: String,
     pub change: Change,
     pub before: Option<Grants>,
     pub after: Option<Grants>,
     pub commands: Vec<CommandChange>,
-    /// Behind the MCP adapter (P7.A6): each pinned tool of its server.
+    /// Behind the MCP adapter: each pinned tool of its server.
     pub tools: Vec<CommandChange>,
     #[specta(type = Option<oxplow_domain::Json>)]
     pub features_before: Option<Value>,
@@ -679,7 +678,7 @@ pub struct ProviderEffect {
 /// The instance config schema (`config:`), by property.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct ConfigEffect {
+pub struct ConfigImpact {
     #[specta(type = Option<oxplow_domain::Json>)]
     pub before: Option<Value>,
     #[specta(type = Option<oxplow_domain::Json>)]
@@ -692,20 +691,20 @@ pub struct ConfigEffect {
 /// Everything installing or updating an extension would change.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct EffectReport {
-    pub lenses: Vec<LensEffect>,
-    pub models: Vec<ModelEffect>,
-    pub collectors: Vec<CollectorEffect>,
-    pub providers: Vec<ProviderEffect>,
-    /// Its effects (P8.D12): what each reacts to, and what each version
+pub struct ImpactReport {
+    pub lenses: Vec<LensImpact>,
+    pub models: Vec<ModelImpact>,
+    pub collectors: Vec<CollectorImpact>,
+    pub providers: Vec<ProviderImpact>,
+    /// Its effects: what each reacts to, and what each version
     /// composes on the same events.
-    pub effects: Vec<EffectEffect>,
-    pub config: Option<ConfigEffect>,
+    pub effects: Vec<EffectImpact>,
+    pub config: Option<ConfigImpact>,
     /// What its dry runs didn't get to (`collector <id>`, `effect <id>`):
     /// the review stops running scripts at its deadline.
     pub out_of_time: Vec<String>,
     /// The report as lines ([`summary`]): what the install review, `extension
-    /// check --effects` and an effort's review say, in one wording.
+    /// check --impact` and an effort's review say, in one wording.
     pub lines: Vec<String>,
 }
 
@@ -791,7 +790,7 @@ fn destructive(c: &CommandChange) -> &'static str {
 /// A provider's changes as phrases: everything it declares when it's new,
 /// else its grants, commands, MCP tools and features that differ — and,
 /// when none of those shows a change, where its declarations first differ.
-pub fn provider_phrases(e: &ProviderEffect) -> Vec<String> {
+pub fn provider_phrases(e: &ProviderImpact) -> Vec<String> {
     match e.change {
         Change::Added => {
             let commands: Vec<String> = e
@@ -853,7 +852,7 @@ pub fn provider_phrases(e: &ProviderEffect) -> Vec<String> {
 
 /// What approving a provider would change, as sentences: against what was
 /// approved last, or everything it declares at a first approval.
-pub fn approval_lines(e: &ProviderEffect) -> Vec<String> {
+pub fn approval_lines(e: &ProviderImpact) -> Vec<String> {
     let lines: Vec<String> = provider_phrases(e)
         .into_iter()
         .map(|l| {
@@ -902,7 +901,7 @@ fn ran_text(r: Option<&Ran>) -> String {
 /// The report as lines: collectors' and providers' grants first (what a
 /// person approves), then what the collectors make of their inputs, the
 /// models (and their rows), the lenses and the config schema.
-pub fn summary(report: &EffectReport) -> Vec<String> {
+pub fn summary(report: &ImpactReport) -> Vec<String> {
     let mut out = Vec::new();
     for c in &report.collectors {
         match c.change {
@@ -1064,7 +1063,7 @@ pub fn models_diff(
     extension: &str,
     before: &[ModelSource],
     after: &[ModelSource],
-) -> Vec<ModelEffect> {
+) -> Vec<ModelImpact> {
     let cols = |m: Option<&ModelSource>| -> Vec<String> {
         m.map(|m| m.decl.columns.iter().map(|c| c.name.clone()).collect())
             .unwrap_or_default()
@@ -1099,7 +1098,7 @@ pub fn models_diff(
                 }
                 _ => None,
             };
-            ModelEffect {
+            ModelImpact {
                 view: extension_view(extension, &name),
                 change,
                 changed,
@@ -1126,10 +1125,10 @@ fn collector_grants(s: &CollectorSpec) -> Grants {
 }
 
 /// Collectors before and after, by id: their grants and the views they fill.
-pub fn collectors_diff(before: &[CollectorSpec], after: &[CollectorSpec]) -> Vec<CollectorEffect> {
+pub fn collectors_diff(before: &[CollectorSpec], after: &[CollectorSpec]) -> Vec<CollectorImpact> {
     pair_by(before, after, |s| s.id.clone())
         .into_iter()
-        .map(|(id, b, a)| CollectorEffect {
+        .map(|(id, b, a)| CollectorImpact {
             id,
             change: change_of(b, a),
             before: b.map(collector_grants),
@@ -1182,7 +1181,7 @@ async fn collector_outputs(
     layer: &crate::sql_gateway::SqlGateway,
     before: Option<&Version<'_>>,
     after: &Version<'_>,
-    effect: &mut CollectorEffect,
+    impact: &mut CollectorImpact,
     deadline: std::time::Instant,
 ) -> DryRuns {
     use crate::collector_runner::dry_run_collector;
@@ -1190,7 +1189,7 @@ async fn collector_outputs(
         v.extension
             .collectors
             .iter()
-            .find(|c| c.id == effect.id)
+            .find(|c| c.id == impact.id)
             .cloned()
     };
     let (spec_b, spec_a) = (before.and_then(spec_of), spec_of(after));
@@ -1199,14 +1198,14 @@ async fn collector_outputs(
         (v.read)(spec.entry.as_deref().unwrap_or_default())
     };
     let (script_b, script_a) = (script(before, &spec_b), script(Some(after), &spec_a));
-    if effect.change == Change::Unchanged && script_b == script_a {
+    if impact.change == Change::Unchanged && script_b == script_a {
         return DryRuns::All;
     }
     // A rewritten script is a change even when nothing runs it here.
     if spec_b.is_some() && spec_a.is_some() && script_b != script_a {
-        effect.script_changed = true;
-        if effect.change == Change::Unchanged {
-            effect.change = Change::Changed;
+        impact.script_changed = true;
+        if impact.change == Change::Unchanged {
+            impact.change = Change::Changed;
         }
     }
     let Some(spec) = spec_a.clone().or(spec_b.clone()) else {
@@ -1216,14 +1215,14 @@ async fn collector_outputs(
         if let crate::collector_runner::DryRun::NotRun(why) =
             dry_run_collector(layer, &spec, None, None, None).await
         {
-            effect.not_run = Some(why);
+            impact.not_run = Some(why);
         }
         return DryRuns::All;
     }
     // The inputs: fixtures (the candidate's first), then the events.
     let mut fixtures: BTreeMap<String, Option<Vec<Value>>> = BTreeMap::new();
     for v in before.into_iter().chain(std::iter::once(after)) {
-        for (name, rows) in collector_fixtures(v, &effect.id) {
+        for (name, rows) in collector_fixtures(v, &impact.id) {
             fixtures.insert(name, rows);
         }
     }
@@ -1278,7 +1277,7 @@ async fn collector_outputs(
             run(&layer_b, &spec_b, &script_b).await,
             run(&layer_a, &spec_a, &script_a).await,
         );
-        effect.outputs.push(CollectorOutput {
+        impact.outputs.push(CollectorOutput {
             input: label,
             change: change_of(b.as_ref(), a.as_ref()),
             before: b,
@@ -1346,7 +1345,7 @@ fn named_changes(before: Vec<(String, Value)>, after: Vec<(String, Value)>) -> V
 pub fn providers_diff(
     before: &[DeclaredProvider],
     after: &[DeclaredProvider],
-) -> Vec<ProviderEffect> {
+) -> Vec<ProviderImpact> {
     pair_by(before, after, |p| p.spec.id.clone())
         .into_iter()
         .map(|(id, b, a)| {
@@ -1392,7 +1391,7 @@ pub fn providers_diff(
                 (Some(x), Some(y)) => described_difference(x, y),
                 _ => None,
             };
-            let mut effect = ProviderEffect {
+            let mut impact = ProviderImpact {
                 id,
                 capability: a
                     .or(b)
@@ -1408,15 +1407,15 @@ pub fn providers_diff(
                 features_after: a.and_then(features_of),
                 lines: Vec::new(),
             };
-            effect.lines = approval_lines(&effect);
-            effect
+            impact.lines = approval_lines(&impact);
+            impact
         })
         .collect()
 }
 
 /// The instance config schema before and after, by property: which keys
 /// were added, removed or changed. `None` when neither version has one.
-pub fn config_diff(before: Option<&Value>, after: Option<&Value>) -> Option<ConfigEffect> {
+pub fn config_diff(before: Option<&Value>, after: Option<&Value>) -> Option<ConfigImpact> {
     if before.is_none() && after.is_none() {
         return None;
     }
@@ -1443,7 +1442,7 @@ pub fn config_diff(before: Option<&Value>, after: Option<&Value>) -> Option<Conf
         .filter(|k| pb.get(*k) != pa.get(*k))
         .cloned()
         .collect();
-    Some(ConfigEffect {
+    Some(ConfigImpact {
         before: before.cloned(),
         after: after.cloned(),
         changed_keys,
@@ -1583,25 +1582,25 @@ pub async fn downstream_of(layer: &crate::sql_gateway::SqlGateway, view: &str) -
 /// overlay); models' rows read and diffed; derived collectors and effects
 /// dry-run on the same inputs, within [`REVIEW_DEADLINE`]; exec
 /// collectors and providers only compared.
-pub async fn effects(
+pub async fn impact(
     layer: &crate::sql_gateway::SqlGateway,
     before: Option<Version<'_>>,
     after: Version<'_>,
-) -> EffectReport {
-    effects_within(layer, before, after, REVIEW_DEADLINE).await
+) -> ImpactReport {
+    impact_within(layer, before, after, REVIEW_DEADLINE).await
 }
 
 /// How long a review spends running scripts (collectors' and effects' dry
 /// runs), all told; each run has the command scripts' own budget.
 pub const REVIEW_DEADLINE: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// [`effects`], running scripts for at most `deadline`.
-pub async fn effects_within(
+/// [`impact`], running scripts for at most `deadline`.
+pub async fn impact_within(
     layer: &crate::sql_gateway::SqlGateway,
     before: Option<Version<'_>>,
     after: Version<'_>,
     deadline: std::time::Duration,
-) -> EffectReport {
+) -> ImpactReport {
     let deadline = std::time::Instant::now() + deadline;
     let mut out_of_time = Vec::new();
     let name = &after.extension.name;
@@ -1617,7 +1616,7 @@ pub async fn effects_within(
             let (b, a) = (texts_before.get(slug), texts_after.get(slug));
             let ok = |r: Option<&Result<String, String>>| r.and_then(|r| r.as_ref().ok().cloned());
             let error = a.or(b).and_then(|r| r.as_ref().err().cloned());
-            LensEffect {
+            LensImpact {
                 id: format!("{name}/{slug}"),
                 change: match (b, a) {
                     (None, _) => Change::Added,
@@ -1742,7 +1741,7 @@ pub async fn effects_within(
         before.as_ref().and_then(config_schema).as_ref(),
         config_schema(&after).as_ref(),
     );
-    let mut report = EffectReport {
+    let mut report = ImpactReport {
         lenses,
         models,
         collectors,
@@ -1801,7 +1800,7 @@ mod tests {
             model("retyped", &[("a", "INTEGER")], "SELECT 1"),
             model("new", &[("b", "TEXT")], "SELECT 1"),
         ];
-        let out: BTreeMap<String, ModelEffect> = models_diff("my-ext", &before, &after)
+        let out: BTreeMap<String, ModelImpact> = models_diff("my-ext", &before, &after)
             .into_iter()
             .map(|m| (m.view.clone(), m))
             .collect();
@@ -1870,7 +1869,7 @@ mod tests {
         }
     }
 
-    /// P9.D2: what a collector's dry run would log shows beside what it
+    /// What a collector's dry run would log shows beside what it
     /// would store.
     #[test]
     fn a_dry_runs_events_show_in_the_review() {
@@ -1898,7 +1897,7 @@ mod tests {
         );
     }
 
-    /// P9.B4: a server reached by url isn't a program that runs here —
+    /// A server reached by url isn't a program that runs here —
     /// what runs is oxplow's adapter, against it — and moving it shows.
     #[test]
     fn a_url_servers_effects_say_what_runs_here() {
@@ -1962,7 +1961,7 @@ mod tests {
         );
     }
 
-    /// P7.A6: an adapter provider's approval shows its server and each
+    /// An adapter provider's approval shows its server and each
     /// pinned tool added, removed or changed.
     #[test]
     fn an_adapter_providers_effects_show_its_server_and_pinned_tools() {
@@ -1980,7 +1979,7 @@ mod tests {
             }
         };
         let tool = |name: &str, description: &str| json!({ "name": name, "description": description, "inputSchema": { "type": "object" } });
-        let effects = providers_diff(
+        let impacts = providers_diff(
             &[adapter(json!([
                 tool("list_items", "List."),
                 tool("drop_all", "Drop.")
@@ -1990,7 +1989,7 @@ mod tests {
                 tool("create_item", "Create.")
             ]))],
         );
-        let p = &effects[0];
+        let p = &impacts[0];
         assert_eq!(p.change, Change::Changed);
         let grants = p.after.as_ref().unwrap();
         assert_eq!(
@@ -2021,7 +2020,7 @@ mod tests {
                 collector("new", &[]),
             ],
         );
-        let by: BTreeMap<&str, &CollectorEffect> =
+        let by: BTreeMap<&str, &CollectorImpact> =
             collectors.iter().map(|c| (c.id.as_str(), c)).collect();
         assert_eq!(by["prs"].change, Change::Changed);
         assert_eq!(
@@ -2074,13 +2073,13 @@ mod tests {
         let before = provider("fake", &[], true, &["create"]);
         let mut after = before.clone();
         after.declarations.as_mut().unwrap().capabilities[0].capability = "work_items_v2".into();
-        let effect = providers_diff(std::slice::from_ref(&before), &[after]).remove(0);
-        assert_eq!(effect.change, Change::Changed);
-        assert!(effect
+        let impact = providers_diff(std::slice::from_ref(&before), &[after]).remove(0);
+        assert_eq!(impact.change, Change::Changed);
+        assert!(impact
             .commands
             .iter()
             .all(|c| c.change == Change::Unchanged));
-        let first = effect.first_difference.unwrap();
+        let first = impact.first_difference.unwrap();
         assert!(
             first.contains("/declarations/capabilities/0/capability"),
             "{first}"
@@ -2168,7 +2167,7 @@ mod tests {
             crate::extensions::run_lenses(&layer, &before).await,
             crate::extensions::run_lenses(&layer, &after).await,
         );
-        let report = effects(
+        let report = impact(
             &layer,
             Some(Version {
                 extension: &before,
@@ -2184,7 +2183,7 @@ mod tests {
             },
         )
         .await;
-        let by: BTreeMap<&str, &LensEffect> =
+        let by: BTreeMap<&str, &LensImpact> =
             report.lenses.iter().map(|l| (l.id.as_str(), l)).collect();
         assert_eq!(by["x/broken"].change, Change::Unchanged);
         assert!(by["x/broken"].error.is_some(), "still says why it fails");
@@ -2212,7 +2211,7 @@ mod tests {
             crate::extensions::run_lenses(&layer, &before).await,
             crate::extensions::run_lenses(&layer, &after).await,
         );
-        let report = effects(
+        let report = impact(
             &layer,
             Some(Version {
                 extension: &before,
@@ -2228,7 +2227,7 @@ mod tests {
             },
         )
         .await;
-        let by: BTreeMap<&str, &LensEffect> =
+        let by: BTreeMap<&str, &LensImpact> =
             report.lenses.iter().map(|l| (l.id.as_str(), l)).collect();
         assert_eq!(by["x/same"].change, Change::Unchanged);
         assert_eq!(by["x/count"].change, Change::Changed);
@@ -2245,7 +2244,7 @@ mod tests {
             by["x/broken"]
         );
         // A first install: everything is added.
-        let fresh = effects(
+        let fresh = impact(
             &layer,
             None,
             Version {
@@ -2282,7 +2281,7 @@ mod tests {
         let root = d.path().join("oxplow/extensions/x");
         let read = move |rel: &str| std::fs::read_to_string(root.join(rel)).ok();
         let runs = crate::extensions::LensRuns::new();
-        let report = effects(
+        let report = impact(
             &layer,
             None,
             Version {
@@ -2322,7 +2321,7 @@ mod tests {
         }
     }
 
-    /// P8.C3: with the same key on both sides, a changed model's rows are
+    /// With the same key on both sides, a changed model's rows are
     /// merge-joined — added, removed and changed counted, with samples.
     #[test]
     fn a_keyed_row_diff_counts_and_samples_each_change() {
@@ -2534,7 +2533,7 @@ mod tests {
             view("SELECT 1 AS id"),
             view("SELECT 1 AS id UNION ALL SELECT 2"),
         );
-        let report = effects(
+        let report = impact(
             &layer,
             Some(Version {
                 extension: &eb,
@@ -2596,7 +2595,7 @@ mod tests {
         );
         let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
         let runs = crate::extensions::LensRuns::new();
-        let report = effects(
+        let report = impact(
             &layer,
             Some(Version {
                 extension: &eb,
@@ -2653,7 +2652,7 @@ mod tests {
         let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
         let runs = crate::extensions::LensRuns::new();
         let started = std::time::Instant::now();
-        let report = effects_within(
+        let report = impact_within(
             &layer,
             None,
             Version {
@@ -2713,7 +2712,7 @@ mod tests {
         );
     }
 
-    /// P8.D12: a changed effect shows what it reacts to and what each
+    /// A changed effect shows what it reacts to and what each
     /// version composes on its fixture — nothing runs.
     #[tokio::test]
     async fn an_effects_trigger_and_composed_commands_are_compared() {
@@ -2761,7 +2760,7 @@ mod tests {
         );
         let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
         let runs = crate::extensions::LensRuns::new();
-        let report = effects(
+        let report = impact(
             &layer,
             Some(Version {
                 extension: &eb,
@@ -2790,7 +2789,7 @@ mod tests {
         );
     }
 
-    /// P8.C4: a review runs each changed derived collector on the same
+    /// A review runs each changed derived collector on the same
     /// inputs in both versions — here its fixture — and shows how the
     /// output differs; it never runs an exec collector's program (approved
     /// or not), and a model call is refused, not made.
@@ -2819,7 +2818,7 @@ mod tests {
         );
         let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
         let runs = crate::extensions::LensRuns::new();
-        let report = effects(
+        let report = impact(
             &layer,
             Some(Version {
                 extension: &eb,
@@ -2873,7 +2872,7 @@ mod tests {
         assert!(error.contains("refused"), "{error}");
     }
 
-    // ---- P8.C5: the wording, ported from the desktop's line tests ----
+    // ---- the wording, ported from the desktop's line tests ----
 
     fn grants(hosts: &[&str], credentials: &[&str]) -> Grants {
         Grants {
@@ -2896,8 +2895,8 @@ mod tests {
         }
     }
 
-    fn effect(change: Change) -> ProviderEffect {
-        ProviderEffect {
+    fn provider_impact(change: Change) -> ProviderImpact {
+        ProviderImpact {
             id: "fake".into(),
             capability: "work_items".into(),
             change,
@@ -2914,7 +2913,7 @@ mod tests {
 
     #[test]
     fn a_new_provider_reads_as_everything_it_declares() {
-        let added = ProviderEffect {
+        let added = ProviderImpact {
             before: None,
             after: Some(grants(&["api.example.com"], &["token"])),
             commands: vec![
@@ -2925,7 +2924,7 @@ mod tests {
                     Some(json!({"confirm": "destructive"})),
                 ),
             ],
-            ..effect(Change::Added)
+            ..provider_impact(Change::Added)
         };
         assert_eq!(
             provider_phrases(&added),
@@ -2938,7 +2937,7 @@ mod tests {
 
     #[test]
     fn a_changed_provider_reads_as_what_differs() {
-        let changed = ProviderEffect {
+        let changed = ProviderImpact {
             after: Some(grants(&["api.example.com"], &["token"])),
             commands: vec![
                 command("create", Change::Unchanged, Some(json!({}))),
@@ -2948,7 +2947,7 @@ mod tests {
                     Some(json!({"confirm": "destructive"})),
                 ),
             ],
-            ..effect(Change::Changed)
+            ..provider_impact(Change::Changed)
         };
         assert_eq!(
             provider_phrases(&changed),
@@ -2962,28 +2961,28 @@ mod tests {
             "Now reaches api.example.com (was none)"
         );
         assert_eq!(
-            approval_lines(&effect(Change::Unchanged)),
+            approval_lines(&provider_impact(Change::Unchanged)),
             vec!["Nothing changed since it was last approved."]
         );
     }
 
     #[test]
     fn a_change_no_grant_command_or_feature_shows_names_its_first_difference() {
-        let quiet = ProviderEffect {
+        let quiet = ProviderImpact {
             first_difference: Some("`/declarations/version` was 1, now 2".into()),
-            ..effect(Change::Changed)
+            ..provider_impact(Change::Changed)
         };
         assert_eq!(
             provider_phrases(&quiet),
             vec!["`/declarations/version` was 1, now 2"]
         );
-        assert!(provider_phrases(&effect(Change::Unchanged)).is_empty());
+        assert!(provider_phrases(&provider_impact(Change::Unchanged)).is_empty());
     }
 
     #[test]
     fn an_mcp_adapter_provider_names_its_pinned_tools_and_each_that_changed() {
         let tool = |name: &str, change: Change| command(name, change, Some(json!({"name": name})));
-        let added = ProviderEffect {
+        let added = ProviderImpact {
             before: None,
             after: Some(Grants {
                 entry: "bin/server".into(),
@@ -2994,7 +2993,7 @@ mod tests {
                 tool("create_item", Change::Added),
                 tool("list_items", Change::Added),
             ],
-            ..effect(Change::Added)
+            ..provider_impact(Change::Added)
         };
         assert_eq!(
             provider_phrases(&added),
@@ -3004,13 +3003,13 @@ mod tests {
                 "MCP tools: create_item, list_items"
             ]
         );
-        let changed = ProviderEffect {
+        let changed = ProviderImpact {
             tools: vec![
                 tool("list_items", Change::Changed),
                 tool("drop_all", Change::Added),
                 tool("create_item", Change::Unchanged),
             ],
-            ..effect(Change::Changed)
+            ..provider_impact(Change::Changed)
         };
         assert_eq!(
             provider_phrases(&changed),
@@ -3022,7 +3021,7 @@ mod tests {
     /// CLI and an effort's review all say.
     #[test]
     fn effects_spell_out_each_change_grants_first() {
-        let lens = |id: &str, change: Change, error: Option<&str>| LensEffect {
+        let lens = |id: &str, change: Change, error: Option<&str>| LensImpact {
             id: id.into(),
             change,
             before: None,
@@ -3030,7 +3029,7 @@ mod tests {
             error: error.map(str::to_string),
         };
         let model = |view: &str, changed: &[&str], contract: Option<&str>, downstream: &[&str]| {
-            ModelEffect {
+            ModelImpact {
                 view: view.into(),
                 change: Change::Changed,
                 changed: changed.iter().map(|c| c.to_string()).collect(),
@@ -3054,7 +3053,7 @@ mod tests {
             }),
             note: None,
         });
-        let report = EffectReport {
+        let report = ImpactReport {
             lenses: vec![
                 lens("shared/count", Change::Changed, None),
                 lens("shared/same", Change::Unchanged, None),
@@ -3072,7 +3071,7 @@ mod tests {
                 model("v_shared_t", &["description", "tests"], None, &[]),
                 rows_model,
             ],
-            collectors: vec![CollectorEffect {
+            collectors: vec![CollectorImpact {
                 id: "gh".into(),
                 change: Change::Changed,
                 before: Some(Grants {
@@ -3103,7 +3102,7 @@ mod tests {
                 not_run: None,
                 script_changed: false,
             }],
-            providers: vec![ProviderEffect {
+            providers: vec![ProviderImpact {
                 commands: vec![
                     command(
                         "delete",
@@ -3114,10 +3113,10 @@ mod tests {
                 ],
                 features_before: Some(json!({"comments": false})),
                 features_after: Some(json!({"comments": false})),
-                ..effect(Change::Changed)
+                ..provider_impact(Change::Changed)
             }],
             effects: vec![
-                EffectEffect {
+                EffectImpact {
                     id: "on-done".into(),
                     change: Change::Changed,
                     before: Some(EffectTrigger {
@@ -3145,7 +3144,7 @@ mod tests {
                         }),
                     }],
                 },
-                EffectEffect {
+                EffectImpact {
                     id: "ping".into(),
                     change: Change::Added,
                     before: None,
@@ -3157,7 +3156,7 @@ mod tests {
                     outputs: vec![],
                 },
             ],
-            config: Some(ConfigEffect {
+            config: Some(ConfigImpact {
                 before: None,
                 after: Some(json!({})),
                 changed_keys: vec!["team".into()],

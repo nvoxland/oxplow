@@ -9,8 +9,8 @@ import { askText, promptsAbout, promptsBySource } from "./promptModel.js";
 // every Ask fills the agent's input and never sends.
 
 const catalog: CatalogPrompt[] = [
-  { prompt: "Which files did this effort touch?", about: "effort", source: { kind: "capability", name: "work_items" } },
-  { prompt: "Who has changed this file the most?", about: "file", source: { kind: "capability", name: "vcs" } },
+  { prompt: "Which files did this effort touch?", about: "effort", source: { kind: "area", name: "work_items" } },
+  { prompt: "Who has changed this file the most?", about: "file", source: { kind: "area", name: "vcs" } },
   { prompt: "Which PRs wait on me?", about: null, source: { kind: "extension", name: "gh" } },
 ];
 
@@ -32,7 +32,7 @@ afterEach(() => {
 
 test("prompts about a kind; grouped by source, core first; asking about a ref leads with it", () => {
   expect(promptsAbout(catalog, "effort").map((p) => p.prompt)).toEqual(["Which files did this effort touch?"]);
-  // A capability reads as a person names it (tsk1044); its id stays the key.
+  // An area reads as a person names it; its id stays the key.
   expect(promptsBySource(catalog).map((g) => [g.name, g.label, g.prompts.length])).toEqual([
     ["vcs", "Version control", 1],
     ["work_items", "Work items", 1],

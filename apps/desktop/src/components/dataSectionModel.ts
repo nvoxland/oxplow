@@ -1,7 +1,7 @@
 /// Pure view model for Settings → Data (DataSection.tsx): what data the
 /// semantic layer holds, who provides it, and how much. See
 /// `.context/semantic-layer.md`.
-import type { DataEntity, ProjectProgram, ProviderEffect } from "../tauri-bridge/generated/bindings.js";
+import type { DataEntity, ProjectProgram, ProviderImpact } from "../tauri-bridge/generated/bindings.js";
 
 export interface EntityRowModel {
   name: string;
@@ -149,20 +149,20 @@ export function programRow(p: ProjectProgram): ProgramRowModel {
   };
 }
 
-/** What approving a provider would change, as lines (P6b.E3): the
- *  server's wording (`extension_effects::approval_lines`). */
-export function providerEffectLines(e: ProviderEffect): string[] {
+/** What approving a provider would change, as lines: the
+ *  server's wording (`extension_impact::approval_lines`). */
+export function providerImpactLines(e: ProviderImpact): string[] {
   return e.lines;
 }
 
 /** A provider's Approve waits until its declaration diff has loaded: a
  *  person approves what they saw change. Other programs approve as listed. */
-export function canApprove(p: ProjectProgram, effects: ProviderEffectState | undefined): boolean {
-  return p.kind !== "provider" || (effects !== undefined && effects !== "loading" && !("error" in effects));
+export function canApprove(p: ProjectProgram, impact: ProviderImpactState | undefined): boolean {
+  return p.kind !== "provider" || (impact !== undefined && impact !== "loading" && !("error" in impact));
 }
 
 /** A provider's declaration diff as the Data section holds it. */
-export type ProviderEffectState = ProviderEffect | "loading" | { error: string };
+export type ProviderImpactState = ProviderImpact | "loading" | { error: string };
 
 /** What `oxplow.effect.backfill` answers (P9.D5). */
 export interface BackfillResult {

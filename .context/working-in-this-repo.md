@@ -132,7 +132,7 @@ The backend is Rust; the desktop frontend is React/Monaco/xterm.
   `oxplow-harnesses` (the built-in agent harnesses — Claude Code, Codex,
   opencode, ACP — each launching its sessions and writing its runtime;
   depends only on the domain), `oxplow-agent-text` (core's skills,
-  slash commands and capability questions),
+  slash commands and answerability questions),
   `oxplow-coverage` (pure report-parse data types),
   `oxplow-script` (the jaq/Starlark/exec script runtimes collectors,
   effects and command handlers run in, + host parse helpers),

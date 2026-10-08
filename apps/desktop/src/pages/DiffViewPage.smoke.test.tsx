@@ -29,7 +29,7 @@ const neutral: Record<string, (...args: unknown[]) => Promise<unknown>> = {
     diffCalls.push(args);
     return ok(diffFiles);
   },
-  extensionEffectsBetween: async (...args) => {
+  extensionImpactBetween: async (...args) => {
     extensionCalls.push(args);
     if (extensionFailure) throw new Error(extensionFailure);
     return ok([
@@ -37,7 +37,7 @@ const neutral: Record<string, (...args: unknown[]) => Promise<unknown>> = {
         name: "acme",
         change: "changed",
         errors: [],
-        effects: {
+        impact: {
           lenses: [{ id: "acme/count", change: "changed", before: "1", after: "2", error: null }],
           models: [],
           collectors: [],
@@ -159,7 +159,7 @@ test("history reads v_commit from the stream's head, not git log", async () => {
   expect(gitCalls).toEqual([]);
 });
 
-// P8.C7: an effort's review shows "Extension Changes" only when files under
+// An effort's review shows "Extension Changes" only when files under
 // `oxplow/extensions/` changed — what each change does, in the server's
 // lines, with a changed lens's text before and after.
 test("extension changes show only when an extension's files changed", async () => {
@@ -175,9 +175,9 @@ test("extension changes show only when an extension's files changed", async () =
   const second = render(
     <DiffViewPage stream={STREAM} spec={{ mode: "endpoints", start: "snap:1", end: "snap:2" }} onOpenPage={() => {}} onOpenFile={() => {}} />,
   );
-  const lines = await second.findByTestId("extension-change-acme-effects");
+  const lines = await second.findByTestId("extension-change-acme-impact");
   expect(lines.textContent).toContain("Lens acme/count: changed");
-  expect(second.getByTestId("effect-lens-acme/count")).toBeTruthy();
+  expect(second.getByTestId("impact-lens-acme/count")).toBeTruthy();
   expect(extensionCalls[0]).toEqual(["str1", "snap:1", "snap:2"]);
   diffFiles = [{ path: "a.ts", status: "modified", additions: 2, deletions: 1 }];
 });

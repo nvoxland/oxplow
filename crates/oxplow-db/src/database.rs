@@ -1859,6 +1859,48 @@ mod tests {
         );
     }
 
+    /// V36: the zone the agent harnesses and agent text live in is
+    /// `agents`, in the changes already analyzed too.
+    #[test]
+    fn v36_renames_the_plugin_zone_to_agents() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::models::drop_all(&conn).unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(35))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            r#"PRAGMA foreign_keys = OFF;
+               INSERT INTO change_file (change_id, path, status, additions, deletions, zone, is_test) VALUES
+                 (1, 'crates/oxplow-harnesses/src/lib.rs', 'modified', 1, 0, 'plugin', 0),
+                 (1, 'crates/oxplow-app/src/lib.rs', 'modified', 1, 0, 'app', 0);
+               INSERT INTO change_import (change_id, path, module, direction, from_zone, to_zone, cross_zone) VALUES
+                 (1, 'crates/oxplow-app/src/lib.rs', 'oxplow_agent_text', 'added', 'app', 'plugin', 1),
+                 (1, 'crates/oxplow-harnesses/src/lib.rs', 'oxplow_domain', 'added', 'plugin', 'domain', 1);"#,
+        )
+        .unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(36))
+            .run(&mut conn)
+            .unwrap();
+        let rows = |sql: &str| -> Vec<String> {
+            conn.prepare(sql)
+                .unwrap()
+                .query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        assert_eq!(
+            rows("SELECT zone FROM change_file ORDER BY path"),
+            vec!["app", "agents"]
+        );
+        assert_eq!(
+            rows("SELECT from_zone || ' → ' || to_zone FROM change_import ORDER BY path"),
+            vec!["app → agents", "agents → domain"]
+        );
+    }
+
     /// V32: a thread's agent becomes one `agent_session` (closed with the
     /// thread, or with its stream's archive), its turns and its `agent.*`
     /// events carry that session, and the thread loses the agent columns.

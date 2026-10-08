@@ -1,7 +1,7 @@
-/// The catalog (P6.D2, target §13.2): what oxplow knows and can do, so the
-/// person knows what to ask — the questions each capability and extension
-/// answers (each with Ask), the data behind them (`v_model` by owner), and
-/// what can be configured (`oxplow.config.list_keys`, changed in Settings).
+/// The catalog: what oxplow knows and can do, so the person knows what
+/// to ask — the questions each of core's areas and each extension answers
+/// (each with Ask), the data behind them (`v_model` by owner), and what
+/// can be configured (`oxplow.config.list_keys`, changed in Settings).
 import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 
@@ -57,7 +57,7 @@ export function CatalogPage({ onOpenPage }: { onOpenPage(ref: TabRef): void }) {
             <div key={`${g.kind}:${g.name}`} data-testid={`catalog-prompts-${g.kind}-${g.name}`} style={groupStyle}>
               <div style={labelStyle}>
                 {g.label}
-                <span style={hintStyle}> {g.kind === "capability" ? "core" : "extension"}</span>
+                <span style={hintStyle}> {g.kind === "area" ? "core" : "extension"}</span>
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                 {g.prompts.map((p) => (
