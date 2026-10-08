@@ -533,8 +533,9 @@ that missed a change) and `useChange`. A new reader of events adopts it
 rather than re-reading per event. Writers help from their side by
 committing a unit of work once (a duplicate scan stores its findings in
 one transaction). **The boot page-ref repair** (`page_ref_backfill.rs`,
-run once per build and schema version — every restart after a rebuild)
-restates every task, link, note and finding slice: it writes them in
+run once per projection-code hash and schema version — it used to be
+once per build, ~59 s of a thread at every restart after a dev rebuild)
+restates every work item, effort, note and finding slice: it writes them in
 batches of 1000 through `SqlitePageRefStore::replace_sources`, one
 transaction each. Written one commit per row, it once sent ~250k change
 events at boot (a quarter of a million piled-up findings): the events

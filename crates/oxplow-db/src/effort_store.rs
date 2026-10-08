@@ -780,84 +780,51 @@ impl SqliteEffortStore {
         }
     }
 
-    /// Re-emit the full effort-owned slice for `task_id` — the
+    /// Re-emit the full effort-owned slice for `work_item` — the
     /// union of touched-file edges, the parsed wikilink/file/dir/
     /// task/finding/commit refs pulled from every effort's
     /// `summary` body, and the declared `TaskImpact` rows.
     /// Replaces under `effort_ref_types()` so the task-body slice
     /// (owned by `task_store`) is unaffected.
     pub async fn project_effort_slice(&self, work_item: &str) -> Result<(), DomainError> {
-        let Some(source) = work_item_id_of_ref(work_item).map(str::to_string) else {
-            return Err(DomainError::Invalid(format!(
-                "`{work_item}` is not a work_item ref"
-            )));
-        };
-        let refs = &self.page_refs;
-        type SliceRows = (Vec<(String, String)>, Vec<String>, Vec<String>);
-        let work_item = work_item.to_string();
-        let (paths, summaries, impact_jsons): SliceRows = self
-            .db
-            .call(move |conn| {
-                // Pick the most-recent `change_kind` per path across
-                // every effort on this task. "Most recent" = the
-                // effort with the latest `started_at`. The window
-                // function isolates rn=1 so each path appears once.
-                let mut path_stmt = conn.prepare(
-                    "SELECT path, change_kind FROM (
-                       SELECT f.path, f.change_kind,
-                              ROW_NUMBER() OVER (
-                                PARTITION BY f.path
-                                ORDER BY e.started_at DESC
-                              ) AS rn
-                       FROM effort_file f
-                       JOIN effort e ON e.id = f.effort_id
-                       WHERE e.work_item = ?1
-                     )
-                     WHERE rn = 1
-                     ORDER BY path",
-                )?;
-                let paths: Vec<(String, String)> = path_stmt
-                    .query_map(params![work_item], |r| {
-                        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-                    })?
-                    .collect::<rusqlite::Result<Vec<_>>>()?;
-                let mut sum_stmt = conn.prepare(
-                    "SELECT summary FROM effort
-                      WHERE work_item = ?1
-                        AND summary IS NOT NULL
-                        AND summary <> ''
-                      ORDER BY started_at",
-                )?;
-                let summaries: Vec<String> = sum_stmt
-                    .query_map(params![work_item], |r| r.get::<_, String>(0))?
-                    .collect::<rusqlite::Result<Vec<_>>>()?;
-                let mut imp_stmt = conn.prepare(
-                    "SELECT impacts_json FROM effort
-                      WHERE work_item = ?1
-                        AND impacts_json IS NOT NULL
-                        AND impacts_json <> ''
-                      ORDER BY started_at",
-                )?;
-                let impact_jsons: Vec<String> = imp_stmt
-                    .query_map(params![work_item], |r| r.get::<_, String>(0))?
-                    .collect::<rusqlite::Result<Vec<_>>>()?;
-                Ok((paths, summaries, impact_jsons))
-            })
-            .await?;
-        let mut impacts: Vec<TaskImpact> = Vec::new();
-        for j in &impact_jsons {
-            match serde_json::from_str::<Vec<TaskImpact>>(j) {
-                Ok(rows) => impacts.extend(rows),
-                Err(e) => {
-                    tracing::warn!(?e, "effort impacts_json deserialize failed; skipping");
-                }
-            }
-        }
         let vocabulary = self.vocabulary.current();
-        let mut edges = effort_touched_file_edges(&source, &paths);
-        edges.extend(effort_summary_edges(&vocabulary.kinds, &source, &summaries));
-        edges.extend(effort_impact_edges(&vocabulary.kinds, &source, &impacts));
-        refs.replace_source_for_ref_types(KIND_WORK_ITEM, &source, effort_ref_types(), edges)
+        let work_item = work_item.to_string();
+        let slice = self
+            .db
+            .call(move |conn| effort_slice_on(conn, &vocabulary.kinds, &work_item))
+            .await?;
+        self.page_refs
+            .replace_source_for_ref_types(
+                &slice.source_kind,
+                &slice.source_id,
+                effort_ref_types(),
+                slice.edges,
+            )
+            .await
+    }
+
+    /// The effort-owned slice of every work item with an effort, read in one
+    /// go — what the page-ref repair restates in batches rather than a read
+    /// and a write per work item.
+    pub async fn effort_slices(&self) -> Result<Vec<crate::SourceSlice>, DomainError> {
+        let vocabulary = self.vocabulary.current();
+        self.db
+            .call(move |conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT DISTINCT work_item FROM effort WHERE work_item IS NOT NULL ORDER BY work_item",
+                )?;
+                let work_items: Vec<String> = stmt
+                    .query_map([], |r| r.get(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                let mut slices = Vec::with_capacity(work_items.len());
+                for work_item in work_items {
+                    match effort_slice_on(conn, &vocabulary.kinds, &work_item) {
+                        Ok(slice) => slices.push(slice),
+                        Err(e) => tracing::warn!(?e, %work_item, "effort slice skipped"),
+                    }
+                }
+                Ok(slices)
+            })
             .await
     }
 
@@ -1482,6 +1449,81 @@ impl EffortStore for SqliteEffortStore {
             })
             .await
     }
+}
+
+/// `work_item`'s effort-owned page-ref slice (see
+/// [`SqliteEffortStore::project_effort_slice`]), from its efforts' rows.
+fn effort_slice_on(
+    conn: &rusqlite::Connection,
+    kinds: &oxplow_domain::refs::kind::KindRegistry,
+    work_item: &str,
+) -> rusqlite::Result<crate::SourceSlice> {
+    let Some(source) = work_item_id_of_ref(work_item).map(str::to_string) else {
+        return Err(rusqlite::Error::InvalidParameterName(format!(
+            "`{work_item}` is not a work_item ref"
+        )));
+    };
+    // Pick the most-recent `change_kind` per path across
+    // every effort on this task. "Most recent" = the
+    // effort with the latest `started_at`. The window
+    // function isolates rn=1 so each path appears once.
+    let mut path_stmt = conn.prepare(
+        "SELECT path, change_kind FROM (
+           SELECT f.path, f.change_kind,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY f.path
+                    ORDER BY e.started_at DESC
+                  ) AS rn
+           FROM effort_file f
+           JOIN effort e ON e.id = f.effort_id
+           WHERE e.work_item = ?1
+         )
+         WHERE rn = 1
+         ORDER BY path",
+    )?;
+    let paths: Vec<(String, String)> = path_stmt
+        .query_map(params![work_item], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut sum_stmt = conn.prepare(
+        "SELECT summary FROM effort
+          WHERE work_item = ?1
+            AND summary IS NOT NULL
+            AND summary <> ''
+          ORDER BY started_at",
+    )?;
+    let summaries: Vec<String> = sum_stmt
+        .query_map(params![work_item], |r| r.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut imp_stmt = conn.prepare(
+        "SELECT impacts_json FROM effort
+          WHERE work_item = ?1
+            AND impacts_json IS NOT NULL
+            AND impacts_json <> ''
+          ORDER BY started_at",
+    )?;
+    let impact_jsons: Vec<String> = imp_stmt
+        .query_map(params![work_item], |r| r.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut impacts: Vec<TaskImpact> = Vec::new();
+    for j in &impact_jsons {
+        match serde_json::from_str::<Vec<TaskImpact>>(j) {
+            Ok(rows) => impacts.extend(rows),
+            Err(e) => {
+                tracing::warn!(?e, "effort impacts_json deserialize failed; skipping");
+            }
+        }
+    }
+    let mut edges = effort_touched_file_edges(&source, &paths);
+    edges.extend(effort_summary_edges(kinds, &source, &summaries));
+    edges.extend(effort_impact_edges(kinds, &source, &impacts));
+    Ok(crate::SourceSlice {
+        source_kind: KIND_WORK_ITEM.to_string(),
+        source_id: source,
+        ref_types: Some(effort_ref_types()),
+        edges,
+    })
 }
 
 #[cfg(test)]

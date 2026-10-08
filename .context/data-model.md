@@ -1101,13 +1101,18 @@ projects every work item (`work_item_refs::all_refs_tx`, deleted ones
 included — restating one clears it), effort, finding and thread note into the table,
 idempotently — the graph's repair path after a migration that resets
 `page_ref` (V92) or a writer's drift. It runs at boot only when the
-schema version or the build changed since its last run
+schema version or the projection code changed since its last run — a
+hash of the files that decide a source's edges (`PROJECTION_SOURCES`:
+the backfill, `page_ref_projections.rs`, `work_item_refs.rs`,
+`effort_store.rs`), not the build, which every dev rebuild changed
 (`needs_repair`; recorded as `asset_state` row `page_ref_repair`):
-between those the writers keep the graph current. The effort slice (touched files + summary refs
-+ declared impacts) goes through the effort store's own
-`project_effort_slice` for every work item with an effort
-(`list_work_items`) — another provider's included (tsk452; a copy of the
-projection in the backfill used to drop declared impacts on every boot). Wiki bodies and recent commits are covered by their
+between those the writers keep the graph current. A new projection file
+belongs in that list. The effort slice (touched files + summary refs
++ declared impacts) is the effort store's own (`effort_slice_on`, behind
+`project_effort_slice` and `effort_slices`), read for every work item
+with an effort in one go and written in batches — another provider's
+included (tsk452; a copy of the projection in the backfill used to drop
+declared impacts on every boot). Wiki bodies and recent commits are covered by their
 own initial-scan paths and don't need separate backfill.
 
 The effort slice has three contributors that run independently —
