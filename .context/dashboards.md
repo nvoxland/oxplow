@@ -66,10 +66,12 @@ dashboard.rs`, P8.A5), for the desktop (`runCommand`), an agent
   confirmation, so the desktop runs it confirmed; not undoable).
 - `External`: `oxplow.dashboard.add_item { dashboard, kind, sql?, display?,
   lens_id?, options_json?, position? }` and `oxplow.dashboard.update_item { item,
-  options_json? }` — a query tile's SQL is checked by the semantic engine
-  first (`dashboard_tiles::new_tile` / `SqlGateway::check`: the read
-  contract, `MEASURE()` resolved), which is async and can't run inside the
-  bus's transaction; the write that follows is one statement. Both undo
+  options_json? }` — a tile is checked by `dashboard_tiles::new_tile`
+  first, an edited one as a new tile of its kind (its options parse, a
+  query tile keeps its SQL — `SqlGateway::check`: the read contract,
+  `MEASURE()` resolved — and a display it can show, a lens tile its lens),
+  which is async and can't run inside the bus's transaction; the write
+  that follows is one statement. Both undo
   (remove the tile; restore the old options).
 
 Dashboards and tiles are named by id (`dsh3`, `dti7`). The reads stay

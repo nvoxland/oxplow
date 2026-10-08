@@ -19,7 +19,7 @@ use oxplow_db::Database;
 use oxplow_domain::{CommandCall, CommandError, Confirm, DashboardId, DashboardItemId, Invokers};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::json;
 
 use super::util::{invalid, parse, schema};
 use super::{Handler, HandlerOutput, Invocation, TxCtx};
@@ -87,7 +87,8 @@ pub struct AddItemInput {
 pub struct UpdateItemInput {
     /// The tile (`dti7`).
     pub item: String,
-    /// Its options JSON (a query tile's `sql` is checked again).
+    /// Its options JSON, checked as a new tile of its kind is (a query
+    /// tile's `sql` and `display`, a lens tile's `lensId`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub options_json: Option<String>,
 }
@@ -264,19 +265,28 @@ pub fn update_item_op(db: Database, sql: SqlGateway) -> Op {
             Box::pin(async move {
                 let input: UpdateItemInput = parse(input)?;
                 let id = item_id(&input.item, "/item")?;
-                // A query tile's SQL is held to the read contract on every
-                // edit too.
-                if let Some(query) = input
-                    .options_json
-                    .as_deref()
-                    .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
-                    .and_then(|v| v.get("sql").and_then(Value::as_str).map(str::to_string))
-                {
-                    sql.check(&query)
-                        .await
-                        .map_err(|e| tile_error(e, "/options_json"))?;
-                }
-                let options = input.options_json.clone();
+                // An edited tile is checked as a new one of its kind is:
+                // its options parse, a query tile keeps its SQL (held to the
+                // read contract) and a display it can show.
+                let kind = db
+                    .read(move |tx| {
+                        item_tx(tx, id)?.map(|t| t.kind).ok_or_else(|| {
+                            oxplow_domain::DomainError::Invalid(format!("no tile `{id}`"))
+                        })
+                    })
+                    .await
+                    .map_err(|e| tile_error(e, "/item"))?;
+                let tile = new_tile(
+                    &sql,
+                    TileInput {
+                        kind,
+                        options_json: input.options_json.clone(),
+                        ..TileInput::default()
+                    },
+                )
+                .await
+                .map_err(|e| tile_error(e, "/options_json"))?;
+                let options = tile.options_json;
                 let before = db
                     .transaction(move |tx| {
                         let before = item_tx(tx, id)?.ok_or_else(|| {
@@ -388,6 +398,7 @@ mod tests {
     use super::*;
     use crate::test_fixtures::{services_with_effort, EffortFixture};
     use oxplow_domain::Actor;
+    use serde_json::Value;
 
     fn agent(fx: &EffortFixture) -> Actor {
         Actor::Agent {
@@ -455,6 +466,54 @@ mod tests {
             );
         }
         assert_eq!(tiles(&fx, &d).await.len(), 1);
+    }
+
+    /// Editing a tile is held to what adding one is: options that aren't
+    /// JSON, a query tile left without its SQL, or an unknown display are
+    /// refused, and nothing changes.
+    #[tokio::test]
+    async fn an_edited_tile_is_checked_like_a_new_one() {
+        let fx = services_with_effort().await;
+        let d = dashboard(&fx).await;
+        let out = run(
+            &fx,
+            &Actor::Human,
+            ADD_ITEM,
+            json!({ "dashboard": d, "kind": "query", "sql": "SELECT count(*) AS n FROM v_work_item",
+                    "display": "number" }),
+        )
+        .await
+        .unwrap();
+        let item = out.result["id"].as_str().unwrap().to_string();
+        let before = tiles(&fx, &d).await;
+        for options in [
+            "{not json".to_string(),
+            json!({ "display": "number" }).to_string(),
+            json!({ "sql": "SELECT 1 AS n", "display": "pie" }).to_string(),
+        ] {
+            let err = run(
+                &fx,
+                &Actor::Human,
+                UPDATE_ITEM,
+                json!({ "item": item, "options_json": options }),
+            )
+            .await
+            .unwrap_err();
+            assert!(
+                matches!(err, CommandError::Invalid { .. }),
+                "{options}: {err:?}"
+            );
+        }
+        assert_eq!(tiles(&fx, &d).await, before);
+        run(
+            &fx,
+            &Actor::Human,
+            UPDATE_ITEM,
+            json!({ "item": item, "options_json": json!({ "sql": "SELECT 2 AS n", "display": "number", "title": "Two" }).to_string() }),
+        )
+        .await
+        .unwrap();
+        assert!(tiles(&fx, &d).await[0].contains("SELECT 2 AS n"));
     }
 
     /// Removing a tile undoes by putting it back where it was.
