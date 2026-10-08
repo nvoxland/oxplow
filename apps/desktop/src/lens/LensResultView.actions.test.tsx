@@ -100,7 +100,7 @@ test("a row action's confirmation shows when the toolbar is hidden", async () =>
   await waitFor(() => expect(queryByTestId("lens-action-confirm")).not.toBeNull());
   fireEvent.click(getByTestId("lens-action-confirm-run"));
   await waitFor(() => expect(calls).toEqual([false, true]));
-  await waitFor(() => expect(queryByTestId("lens-action-confirm")).toBeNull());
+  await waitFor(() => expect(queryByTestId("lens-action-confirm") === null).toBe(true));
 });
 
 // Every row of every row component has the row menu (Ask About This and

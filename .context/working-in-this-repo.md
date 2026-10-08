@@ -230,7 +230,13 @@ a full run and then refuses to reproduce in isolation.
 
 Prefer asserting **completion under a budget** over a wall-clock number
 (`lcov_plugin_parses_a_whole_workspace_report_without_timing_out` is the
-model). When you genuinely need a timing *ratio* — a curve-shape guard —
+model), and make the budget generous: a wait that returns as soon as the
+event arrives costs nothing extra on a pass, while a 3 s budget for an
+FSEvents delivery or a loopback redirect failed in most full runs on a
+loaded machine (`a_top_level_dir_created_later_is_followed`,
+`an_idle_connection_doesnt_hold_up_the_redirect` now allow 20–30 s). When
+the deadline is the thing under test, retry the scenario on a lost race
+(`a_listener_stops_when_its_time_is_up_with_nobody_waiting`). When you genuinely need a timing *ratio* — a curve-shape guard —
 min-of-N sampling is **not** enough on its own, because all N samples of a
 size can be descheduled together. Retry the whole comparison and pass on
 any clean attempt (`first_ratio_under` in `oxplow-collect-plugin`): noise
@@ -255,7 +261,9 @@ in isolation. Rules, applied in `TerminalTabStrip.test.tsx`,
   flushes through `act`. Never `await sleep(); expect(…)`.
 - A change that must **not** happen: sleep *inside* `act` (`await
   act(settle)`) so anything pending has flushed before you look.
-- Absence is a boolean: `expect(queryByTestId("x") === null).toBe(true)`.
+- Absence is a boolean: `expect(queryByTestId("x") === null).toBe(true)`,
+  inside `waitFor` too — there a failing `toBeNull()` serializes the tree
+  on every poll, which under load ran a menu test past bun's 5 s timeout.
   `expect(el).toBeNull()` on a present element serializes the whole
   happy-dom tree into the JUnit message — that is how
   `apps/desktop/test-report.xml` once reached 1.8 GB.

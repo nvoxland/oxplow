@@ -288,7 +288,7 @@ test("an instance is added by name and scope, and a named one removed", async ()
   fireEvent.click(view.getByTestId("integration-remove-tracker/fake_two-trigger"));
   fireEvent.click(view.getByTestId("integration-remove-tracker/fake_two-confirm"));
   await waitFor(() => expect(removed).toEqual(["tracker/fake_two"]));
-  await waitFor(() => expect(view.queryByTestId("integration-row-tracker/fake_two")).toBeNull());
+  await waitFor(() => expect(view.queryByTestId("integration-row-tracker/fake_two") === null).toBe(true));
 });
 
 // tsk824: where a credential signs in is part of what a person approves, so

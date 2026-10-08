@@ -121,7 +121,7 @@ test("the strip lists a thread's answers newest first, each rendered live", asyn
 test("no answers, no strip", async () => {
   answerRows = [];
   const view = render(<AnswersStrip threadId="thr1" onOpenPage={() => {}} />);
-  await waitFor(() => expect(view.queryByTestId("answers-strip")).toBeNull());
+  await waitFor(() => expect(view.queryByTestId("answers-strip") === null).toBe(true));
 });
 
 test("the strip collapses, and Escape inside it collapses it", async () => {

@@ -182,14 +182,27 @@ mod tests {
     /// redirect is answered and the port is free for the next sign-in.
     #[tokio::test]
     async fn a_listener_stops_when_its_time_is_up_with_nobody_waiting() {
-        let listeners = RedirectListeners::new(Duration::from_secs(2));
-        let (id, port) = listeners.listen(0).await.unwrap();
-        let browser = tokio::spawn(async move { get(port, "/callback?state=s").await });
-        assert_eq!(
-            listeners.next(id).await.unwrap(),
-            "/callback?state=s",
-            "handed over, then nobody answers"
-        );
+        // The redirect has to arrive inside the listener's 2 s; on a loaded
+        // machine it sometimes doesn't, and the listener rightly stops
+        // first. Load only adds time, so a lost race is retried: a listener
+        // that never hands over fails every attempt.
+        let (listeners, port, browser) = 'attempt: {
+            for _ in 0..3 {
+                let listeners = RedirectListeners::new(Duration::from_secs(2));
+                let (id, port) = listeners.listen(0).await.unwrap();
+                let browser = tokio::spawn(async move { get(port, "/callback?state=s").await });
+                match listeners.next(id).await {
+                    Ok(target) => {
+                        assert_eq!(target, "/callback?state=s");
+                        break 'attempt (listeners, port, browser);
+                    }
+                    Err(Ended::Stopped) => browser.abort(),
+                    Err(e) => panic!("{e:?}"),
+                }
+            }
+            panic!("the redirect was never handed over in time");
+        };
+        // Handed over, then nobody answers.
         let (status, page) = browser.await.unwrap();
         assert_eq!(status, 400);
         assert!(page.contains("wasn't finished"), "{page}");

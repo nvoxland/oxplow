@@ -844,7 +844,9 @@ mod tests {
         std::fs::write(late.join("extensions/mine/extension.yaml"), b"x").unwrap();
         let root = project.path().canonicalize().unwrap();
         let early = root.join("oxplow/extensions/mine/extension.yaml");
-        let seen = seen_within(&mut rx, &early, Duration::from_secs(3)).await;
+        // A generous budget: it returns as soon as the event arrives, and
+        // under a full concurrent suite FSEvents can take seconds.
+        let seen = seen_within(&mut rx, &early, Duration::from_secs(20)).await;
         assert!(
             seen.contains(&early),
             "written before its watch landed: {seen:?}"
@@ -853,7 +855,7 @@ mod tests {
         let after = late.join("extensions/mine/lens.yaml");
         std::fs::write(&after, b"y").unwrap();
         let after = root.join("oxplow/extensions/mine/lens.yaml");
-        let seen = seen_within(&mut rx, &after, Duration::from_secs(3)).await;
+        let seen = seen_within(&mut rx, &after, Duration::from_secs(20)).await;
         assert!(seen.contains(&after), "written once it's watched: {seen:?}");
     }
 

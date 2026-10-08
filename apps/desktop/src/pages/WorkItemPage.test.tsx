@@ -109,7 +109,7 @@ test("comments, links and a parent show when the provider declares them; Comment
   await waitFor(() =>
     expect(ran).toEqual([["oxplow.work_item.comment", { ref: "work_item:fake:W-1", body: "Seen it too." }]]),
   );
-  await waitFor(() => expect(view.queryByTestId("work-item-comment-body")).toBeNull());
+  await waitFor(() => expect(view.queryByTestId("work-item-comment-body") === null).toBe(true));
 });
 
 test("Link… takes any link type the provider names, not oxplow's list", async () => {

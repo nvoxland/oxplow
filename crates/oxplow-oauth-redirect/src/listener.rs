@@ -224,7 +224,9 @@ mod tests {
             .await
             .unwrap();
         let browser = tokio::spawn(async move { get(port, "/callback?state=s").await });
-        let redirect = tokio::time::timeout(Duration::from_secs(5), listener.next())
+        // Returns as soon as the redirect arrives; the budget only bounds a
+        // real hang, so it allows for a loaded machine.
+        let redirect = tokio::time::timeout(Duration::from_secs(30), listener.next())
             .await
             .expect("the redirect is handed over")
             .unwrap();
