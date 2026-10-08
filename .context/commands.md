@@ -61,20 +61,34 @@ A command says how a person meets it with an optional `ui`
 | `keywords` | more words search matches it by |
 | `about` | the ref kind it acts on: offered on that ref's page and rows; absent, it needs no ref and **search** offers it |
 | `input` | the input it runs with; a string exactly `{{stream}}`, `{{thread}}`, `{{ref}}` or `{{ref.id}}` binds from where it runs, and one with nothing to bind there makes it unavailable there |
-| `form` | the page that gathers its input (`page:new-task`): choosing it opens that page instead of running it |
+| `form` | what gathers its input: a page (a tab id, `page:new-task`) or one of the window's own forms (`new-thread`: the Navigator's inline form; `commit`: the Files page's commit dialog) — choosing it opens that instead of running it |
 | `open_after` | a tab id to open once it ran, `{{result.<field>}}` from its result (`page:custom-dashboard?id={{result.id}}`) |
 | `background` | it runs as a background task (kind `vcs` for `oxplow.vcs.*`, else `command`), its failure an op error |
+| `shortcut` | the key that runs it, `Ctrl/Cmd+S` / `Ctrl/Cmd+Shift+N` (`keybindings.ts` `offerForShortcut`) |
+| `while_typing` | its shortcut runs while the person types in a field too (Save, Find, Quick Open); otherwise typing keeps it (New Task) |
+| `menu` | its place in the menu bar: `{ bar: file \| edit, order }` (`menuBar.ts`) |
 
 RPC `list_person_commands` lists what a person is offered: what they may
 run now (invokers, `needs` active) that has a `ui`. The desktop keeps one
 listing (`personCommandsStore.ts`, reloaded when extensions or config
-change) and turns the ref-less ones into search entries with
-`commandOffers.ts` (pure: binding, availability, run / form / background /
-open-after); a shortcut may run one by id (⌘⇧N → `oxplow.work_item.create`'s
-form). Offered now: `oxplow.vcs.pull` / `push`, `oxplow.work_item.create`,
-`oxplow.dashboard.create`, `oxplow.stream.create_worktree`. Commit, New
-Thread and New Lens with Your Agent are still the app's own commands
-(`commands.ts`) until the window provides them as capabilities.
+change) and turns it into **offers** with `commandOffers.ts` (pure:
+binding, availability, run / form / background / open-after; whether the
+window has something for one of its own to act on now — `available`).
+Everything a person reaches a command by comes from the offers:
+
+- **search** lists the ref-less ones that can run now;
+- **the menu bar** (`menuBar.ts`: the OS's on macOS, the in-window
+  `Menubar` elsewhere) is the offers with a `ui.menu` place, in order —
+  beside the shell's project commands (New / Open Project, until the app
+  shell hosts them) and the native Edit roles (Undo … Select All, done by
+  the OS's responder chain: WKWebView only delivers ⌘C/⌘V with them in
+  the menu);
+- **shortcuts** are the offers' `ui.shortcut`s.
+
+Save, Find, Quick Open and New Lens with Your Agent are the window's own
+commands (below, "Where a command runs"); New Thread and Commit are
+`oxplow.thread.create` / `oxplow.vcs.commit` with a window `form`. There
+is no other command list in the app.
 
 ## Host capabilities
 
@@ -110,6 +124,33 @@ script fails with the reason), one that is is counted and answered; a
 busy database retries the whole run. A dry run (an extension's
 `examples`) answers from the example's `answers` (per capability, in
 call order) or through the SQL gateway.
+
+**Where a command runs** (VS Code's model: commands run where their
+handler lives). A capability says its host (`Host`): the **daemon**
+(oxplow's records, the repository, the project — every capability so far
+but one) or the project's **window** (`tabs.write`: open, close, focus a
+tab; later the editor, the search box, the agent's input). A command
+backed by a window capability is View class (not recorded, no
+transaction) and its spec carries the operation (`CommandSpec::op`):
+
+- **The window's own runs stay in it** — `clientHost.ts` `runLocally`:
+  the window does it with its own handler, nothing sent to the daemon.
+- **A run on the daemon** (an agent's through MCP, a script's) reaches
+  the window through `client_host::ClientHost`: an
+  `OxplowEvent::ClientCall { id, thread_id, actor, capability, op, input }`
+  to the project's one window, which does it and answers
+  `answer_client_call { id, result | error }`; the run waits (15 s), its
+  answer the run's result. The window says it's open — and what it hosts —
+  with `register_client_host` when it starts and on reconnect; with no
+  window, one that doesn't host it or doesn't answer, the run is
+  `Unavailable`.
+- **An agent acts only in its own thread**: the call carries the agent's
+  thread and the window acts in that thread's tabs — opening a file there
+  reads it into its stream's session — never switching the thread or
+  stream the person sees (an agent with no thread is refused). A person's
+  call acts in the thread shown. Every call carries its actor.
+- One handler per command; something that should happen when one runs
+  reacts to an event, not a second handler.
 
 **Operations** (`commands/ops.rs`). A record or write capability's
 native behavior comes as **operations**: `bookmarks.write` has `set` and
@@ -622,7 +663,7 @@ input, confirmed }` and `undo_command { audit_id, confirmed }`
 A typed IPC setter is a convenience over one command; anything new the
 UI writes goes through `run_command`. Parity: `both("run_command")`,
 `ui("undo_command")`. A person's undo is offered where they ran it: a
-command run through `personCommands` (a board move, a launcher entry)
+command run through `personCommands` (a board move, a search offer)
 that comes back undoable (its outcome's `inverse`) shows **Undo** on its
 "done" toast, which runs `undoCommand(audit_id)` — the click is the
 person's confirmation — and says "undone" or records the failure

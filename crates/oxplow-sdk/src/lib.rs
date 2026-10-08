@@ -922,15 +922,15 @@ mod tests {
         );
     }
 
-    /// Launcher command entries are always checked: against the registry
+    /// `ui.commands` entries are always checked: against the registry
     /// when one is given, else a throwaway oxplow's (P7.C6).
     #[tokio::test(flavor = "multi_thread")]
-    async fn launcher_commands_are_checked_without_a_database() {
+    async fn ui_commands_are_checked_without_a_database() {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
             "oxplow/extensions/acme/extension.yaml",
-            "manifest: 2\nname: acme\nintent:\n  purpose: x\n  examples: [{ name: a }]\nlauncher:\n  - { label: New Bug, category: Work, target: { command: oxplow.work_item.create, input: { title: 7 } } }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: x\n  examples: [{ name: a }]\nui:\n  commands:\n    - { label: New Bug, about: work_item, command: oxplow.work_item.create, input: { title: 7 } }\n",
         );
         let throwaway = check(
             dir.path(),

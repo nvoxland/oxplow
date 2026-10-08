@@ -18,7 +18,7 @@ function spec(id: string, ui: Partial<CommandUi>): CommandSpec {
     atomicity: "tx",
     effect: "write",
     needs: [],
-    ui: { label: id, group: null, keywords: [], about: null, input: null, form: null, open_after: null, background: false, ...ui },
+    ui: { label: id, group: null, keywords: [], about: null, input: null, form: null, open_after: null, background: false, shortcut: null, while_typing: false, menu: null, ...ui },
   } as unknown as CommandSpec;
 }
 
@@ -26,6 +26,7 @@ function deps() {
   const calls: string[] = [];
   const d: OfferDeps = {
     openPage: (tabId) => calls.push(`open ${tabId}`),
+    openForm: (name) => calls.push(`form ${name}`),
     run: async (label, id, input) => {
       calls.push(`run ${id} ${JSON.stringify(input)}`);
       return { result: { id: 7 } } as never;
@@ -84,5 +85,23 @@ test("a form opens its page; a background command runs in the background; anothe
     'background oxplow.vcs.pull {"stream":"str2"}',
     'run oxplow.dashboard.create {"title":"Untitled dashboard"}',
     "open page:custom-dashboard?id=7",
+  ]);
+});
+
+test("a form that isn't a tab id is one of the window's own; an offer says its shortcut, menu place and whether it can run", () => {
+  const { d, calls } = deps();
+  const offers = commandOffers(
+    [
+      spec("oxplow.thread.create", { label: "New Thread…", form: "new-thread" }),
+      spec("oxplow.editor.save", { label: "Save", shortcut: "Ctrl/Cmd+S", while_typing: true, menu: { bar: "file", order: 40 } }),
+    ],
+    ctx,
+    { ...d, available: (s) => s.id !== "oxplow.editor.save" },
+  );
+  offers[0].run();
+  expect(calls).toEqual(["form new-thread"]);
+  expect(offers.map((o) => [o.id, o.shortcut, o.whileTyping, o.menu, o.enabled])).toEqual([
+    ["oxplow.thread.create", undefined, false, null, true],
+    ["oxplow.editor.save", "Ctrl/Cmd+S", true, { bar: "file", order: 40 }, false],
   ]);
 });

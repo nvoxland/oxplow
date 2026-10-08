@@ -46,6 +46,34 @@ pub async fn list_person_commands(svc: &Services) -> Result<Vec<CommandSpec>, Ip
     Ok(specs)
 }
 
+/// The window is open and hosts `capabilities` (`tabs.write`, …): a
+/// command the daemon runs over one of them comes to it as a
+/// `clientCall` event (`oxplow_app::client_host`). Said when the window
+/// starts and again when it reconnects.
+pub async fn register_client_host(
+    svc: &Services,
+    capabilities: Vec<String>,
+) -> Result<(), IpcError> {
+    svc.client_host.register(capabilities);
+    Ok(())
+}
+
+/// The window's answer to client call `id`: its `result`, or the `error`
+/// it couldn't do it for.
+pub async fn answer_client_call(
+    svc: &Services,
+    id: String,
+    result: Option<Json>,
+    error: Option<String>,
+) -> Result<(), IpcError> {
+    let answer = match error {
+        Some(message) => Err(message),
+        None => Ok(result.map(|r| r.0).unwrap_or(serde_json::Value::Null)),
+    };
+    svc.client_host.answer(&id, answer);
+    Ok(())
+}
+
 /// A command's spec — what a form renders from its `input_schema`, and
 /// what a confirmation says (its summary, whether it's destructive).
 pub async fn get_command(svc: &Services, name: String) -> Result<CommandSpec, IpcError> {

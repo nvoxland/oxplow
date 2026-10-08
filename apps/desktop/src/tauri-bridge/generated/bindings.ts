@@ -729,6 +729,16 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	registerClientHost: (capabilities: string[]) => typedError<null, IpcError>(__TAURI_INVOKE("register_client_host", { capabilities })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	answerClientCall: (id: string, result: unknown | null, error: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("answer_client_call", { id, result, error })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	undoCommand: (auditId: number, confirmed: boolean) => typedError<CommandOutcome, IpcError>(__TAURI_INVOKE("undo_command", { auditId, confirmed })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -1862,6 +1872,11 @@ export type CommandSpec = {
 	 *  (a step other commands compose, an agent's tool).
 	 */
 	ui?: CommandUi | null,
+	/**
+	 *  The host capability operation behind it, when it is one: where it
+	 *  runs (a window capability's runs in the window) and what it does.
+	 */
+	op?: OpRef | null,
 };
 
 /**
@@ -1887,8 +1902,9 @@ export type CommandUi = {
 	 */
 	input?: unknown | null,
 	/**
-	 *  The page that gathers its input (a tab id, `page:new-task`):
-	 *  choosing it opens that page rather than running it.
+	 *  What gathers its input — a page (a tab id, `page:new-task`) or one
+	 *  of the window's own forms (`new-thread`, `commit`): choosing it
+	 *  opens that rather than running it.
 	 */
 	form?: string | null,
 	/**
@@ -1901,6 +1917,18 @@ export type CommandUi = {
 	 *  failure is reported, rather than awaited where it was chosen.
 	 */
 	background?: boolean,
+	/**
+	 *  The key that runs it, as `Ctrl/Cmd+S` / `Ctrl/Cmd+Shift+N`
+	 *  (`Ctrl/Cmd` is Cmd on macOS, Ctrl elsewhere).
+	 */
+	shortcut?: string | null,
+	/**
+	 *  Its shortcut runs it while the person types in a field too (Save,
+	 *  Find); otherwise typing keeps it.
+	 */
+	while_typing?: boolean,
+	// Where the menu bar shows it.
+	menu?: MenuPlace | null,
 };
 
 /**
@@ -2868,11 +2896,6 @@ export type Extension_Deserialize = {
 	// Full pages it contributes (valid ones; invalid ones are in `errors`).
 	pages: ExtensionPage[],
 	/**
-	 *  Launcher entries for what isn't a lens: a page, a command, a
-	 *  prompt (P6.D1; valid ones — invalid ones are in `errors`).
-	 */
-	launcher: LauncherEntry[],
-	/**
 	 *  Commands it registers on the bus, each a Starlark script composing
 	 *  core commands (P6b; valid ones — invalid ones are in `errors`).
 	 */
@@ -2994,11 +3017,6 @@ export type Extension_Serialize = {
 	panels: ExtensionPanel[],
 	// Full pages it contributes (valid ones; invalid ones are in `errors`).
 	pages: ExtensionPage[],
-	/**
-	 *  Launcher entries for what isn't a lens: a page, a command, a
-	 *  prompt (P6.D1; valid ones — invalid ones are in `errors`).
-	 */
-	launcher: LauncherEntry[],
 	/**
 	 *  Commands it registers on the bus, each a Starlark script composing
 	 *  core commands (P6b; valid ones — invalid ones are in `errors`).
@@ -3417,28 +3435,6 @@ export type KeyedDiff = {
  *  renderer's `PageCategory`.
  */
 export type LauncherCategory = "Work" | "Code" | "Git" | "Activity" | "Knowledge" | "Data" | "Lenses" | "System";
-
-/**
- *  A launcher entry for something that isn't a lens (P6.D1): the launcher
- *  lists it under `category`.
- */
-export type LauncherEntry = {
-	label: string,
-	category: LauncherCategory,
-	target: LauncherTarget,
-};
-
-// What a launcher entry does.
-export type LauncherTarget = 
-// Open a page: a canonical ref (`page:settings`, `lens:x/y`).
-{ kind: "ref"; ref: string } | 
-/**
- *  Run a command as the person who picked it, asking first when the
- *  command asks.
- */
-{ kind: "command"; command: string; input: unknown } | 
-// Put a prompt in the agent's input. Never sent: the person sends it.
-{ kind: "prompt"; prompt: string };
 
 // A loaded lens.
 export type Lens = Lens_Serialize | Lens_Deserialize;
@@ -4110,6 +4106,16 @@ export type MenuItemSnapshot = {
 	submenu?: MenuItemSnapshot[] | null,
 };
 
+/**
+ *  A command's place in the menu bar: which menu, and where in it
+ *  (lowest first).
+ */
+export type MenuPlace = {
+	// `file` or `edit`.
+	bar: string,
+	order: number,
+};
+
 // Whether `head` would merge into `base` cleanly.
 export type MergeReadiness = 
 // `head` has nothing `base` lacks.
@@ -4327,6 +4333,15 @@ export type OpOutcome = {
 	conflicts: string[],
 	// Conflicts oxplow's smart merge resolved on its own.
 	auto_resolved: number,
+};
+
+/**
+ *  An operation of a host capability (`capability: tabs.write`, `op:
+ *  open`).
+ */
+export type OpRef = {
+	capability: string,
+	op: string,
 };
 
 export type OxplowConfig = {
@@ -4575,6 +4590,15 @@ detail: string | null } |
  *  reloads, and a lens re-runs its definition.
  */
 { kind: "extensionsChanged" } | 
+/**
+ *  A command running on the daemon calls a capability the window
+ *  hosts (`client_host.rs`): the window does `capability`'s `op` with
+ *  `input` — in `thread_id`'s tabs, or the one it shows when `None` —
+ *  and answers `answer_client_call { id, … }`.
+ */
+{ kind: "clientCall"; id: string; threadId: ThreadId | null; 
+// Who ran the command (`agent:thr3`, `human`).
+actor: string; capability: string; op: string; input: unknown } | 
 /**
  *  A person approved a program on this machine (a provider, collector,
  *  effect, component, ACP agent): what shows approval state —

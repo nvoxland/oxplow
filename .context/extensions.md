@@ -1339,11 +1339,12 @@ for the row's ref — lens rows, by the first ref the row links to
 (`rowRef`), and Board cards), both by default. `input` defaults to `{
 ref: "{{ref}}" }`; its strings may be exactly `{{ref}}` or `{{ref.id}}`
 and nothing else (`bindRefInput`). There is no launcher placement: a
-launcher has no current ref, and `launcher: [{ target: { command } }]`
-already covers a ref-less command. A command whose namespace is one of
+launcher has no current ref, and a ref-less command is offered by its own
+`ui`. (`ui.commands` overlaps a command's `ui.about`; it stays until a
+provider's commands can carry a `ui`, the providers phase.) A command whose namespace is one of
 the extension's providers groups under that provider's id, anything else
 under the extension's name. `check_commands` (it replaced
-`check_launcher_commands`) checks launcher and `ui.commands` entries
+`check_launcher_commands`) checks `ui.commands` entries
 alike against the registry — or, for one of the extension's own
 providers (not on the bus until its instance runs), against its
 declarations (`provider_command_schema`). The desktop reads them from
@@ -2663,27 +2664,14 @@ tool list stable no matter how many extensions are installed.
     prompts by source, `v_model` by owner, `oxplow.config.list_keys`), the nav
     bar's Ask menu (suggested prompts for the page's ref kind), and
     `EmptyState`'s prompts (usability.md → "Empty states").
-- **Launcher entries (current, P6.D1):** the manifest's `launcher:` lists
-  what isn't a lens, each `{ label, category, target }`, where `target` is
-  exactly one of `{ ref }` (a canonical ref the kind registry validates —
-  known kind, well-formed id — of a kind that opens as a page,
-  `manifest_v2::PAGE_KINDS`, which mirrors the UI's `pageKindOf`; anything
-  else is a load error rather than an entry the launcher drops silently),
-  `{ command, input? }` (run as the person, asking first when the command
-  asks — `personCommands.ts` + `PersonCommandConfirm`, mounted once in
-  `App`) or `{ prompt }` (put in the agent's input, never sent; one line,
-  like `intent.prompts`, checked by `manifest_v2::prompt_line_problem`).
-  `manifest_v2::launcher_entries` types them at load (a bad one is an
-  error at its line and is dropped); the dry run (`validate_extension`,
-  `review_extension`, with `CommandBus::input_schema` as
-  `CommandSchemas`) checks that a command is registered and its input
-  fits. `oxplow plugin check` has no running app to ask, so it says the
-  commands weren't checked and where to check them (Settings →
-  Extensions) — with or without a project database
-  (`check_commands` (launcher and `ui.commands` entries) runs on both of `oxplow_sdk::check`'s
-  branches). The launcher (`components/extensionLauncher.ts`)
-  merges ref entries into the page directory and lists the others as
-  actions under their category.
+- **No launcher entries.** The manifest's old `launcher:` list (a ref,
+  a command or a prompt) is gone: a page is a `pages:` entry or a lens; a
+  command — one that runs another with fixed input, or puts a prompt in
+  the agent's input (over `agent_input.write` `draft`) — is a command the
+  extension declares with a `ui`, offered like oxplow's own
+  (`commandOffers`). The launcher (`components/extensionLauncher.ts`
+  `launcherPages`) lists lenses and `pages:`; `check_commands` checks the
+  `ui.commands` entries.
 - **Lens actions (current, P6.B1):** `actions:` are commands, run by an
   agent with `run_lens_action` as the lens acting for it (see "Actions
   are commands").

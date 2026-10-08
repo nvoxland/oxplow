@@ -29,6 +29,7 @@ pub mod capabilities;
 pub mod change_analysis;
 pub mod change_reactor;
 pub mod churn;
+pub mod client_host;
 pub mod code_analysis;
 pub mod code_intel;
 pub mod code_intel_conformance;
@@ -515,6 +516,8 @@ pub struct Services {
     /// Filled at boot (`effect_triggers::register`): the services the
     /// effect operations run against.
     pub effect_services: commands::effect::ServicesSlot,
+    /// The daemon's line to its window: the window's capabilities' calls.
+    pub client_host: Arc<client_host::ClientHost>,
     /// The knowledge provider: oxplow's wiki (`.context/knowledge.md`).
     pub knowledge: Arc<dyn oxplow_domain::knowledge::KnowledgeProvider>,
     pub wiki_page_store: Arc<SqliteWikiPageStore>,
@@ -1368,11 +1371,13 @@ impl Services {
             commands.add_op(command).expect("core ops register");
         }
         let effect_services = commands::effect::ServicesSlot::default();
+        let client_host = Arc::new(client_host::ClientHost::new(event_bus.clone()));
         // oxplow's own commands are declared in its required extensions
         // over these operations (`commands/ops.rs`).
         for op in commands::bookmark::ops()
             .into_iter()
             .chain(commands::effect::ops(effect_services.clone()))
+            .chain(client_host::ops(&client_host))
         {
             commands.add_op(op).expect("core ops register");
         }
@@ -1462,6 +1467,7 @@ impl Services {
             component_bundles: Arc::new(component_bundles::ComponentBundles::new()),
             extension_commands,
             effect_services,
+            client_host,
             commands,
             work_items,
             capabilities,

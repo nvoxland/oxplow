@@ -16,6 +16,18 @@ intent:
       input: { command: oxplow.bookmark.set, input: { ref: "page:git-dashboard", page_kind: git-dashboard, scope: thread, thread: thr1 } }
       expect: the page in v_bookmark at the thread's scope, undone by oxplow.bookmark.remove
 commands:
+  # agent_input.write — the window's; a person's only (oxplow never types for the agent).
+  - name: agent.draft
+    summary: "Put text in the shown thread's agent input, unsent."
+    capability: agent_input.write
+    op: draft
+    invokers: { human: true, agent: false, lens: true }
+  - name: lens.draft_with_agent
+    summary: "Start a prompt asking your agent to build a lens, in its input, unsent."
+    capability: agent_input.write
+    op: draft
+    invokers: { human: true, agent: false, lens: false }
+    ui: { label: "New Lens with Your Agent…", group: Tasks, input: { text: "Build me an oxplow lens (a page I can open with Cmd+P) that shows " } }
   # bookmarks.write — a person's navigation, not the agent's.
   - name: bookmark.set
     summary: "Bookmark a page at a scope (`thread`, `stream` or `project`), moving it there if it's bookmarked at another."
@@ -88,6 +100,12 @@ commands:
     capability: diagnostics.write
     op: report_error
     invokers: { human: true, agent: false, lens: false }
+  # editor.write — the window's; an agent saves in its own thread.
+  - name: editor.save
+    summary: "Save a file's unsaved changes (`ref`: its tab, `file:src/a.rs`; none saves the one your thread shows)."
+    capability: editor.write
+    op: save
+    ui: { label: Save, group: File, shortcut: "Ctrl/Cmd+S", while_typing: true, menu: { bar: file, order: 40 } }
   # efforts.write
   - name: effort.close
     summary: "Close an effort (by id, or a thread's open one), optionally as of a past point and with a summary."
@@ -299,6 +317,19 @@ commands:
     capability: streams.write
     op: set_prompt
     invokers: { human: true, agent: false, lens: true }
+  # tabs.write — the window's; an agent's acts in its own thread's tabs.
+  - name: tab.open
+    summary: "Open a tab (`ref`: a page's ref — `file:src/a.rs`, `work_item:oxplow:tsk3`) in your thread's tabs, without bringing it to the front."
+    capability: tabs.write
+    op: open
+  - name: tab.focus
+    summary: "Bring a tab (`ref`) to the front of your thread's tabs, opening it first if it isn't open."
+    capability: tabs.write
+    op: focus
+  - name: tab.close
+    summary: "Close a tab (`ref`) in your thread's tabs."
+    capability: tabs.write
+    op: close
   # test_runs.write
   - name: test.record_run
     summary: "Record a test run with pass/fail counts oxplow couldn't read from its output, marked `asserted`. oxplow records runs it sees in shell commands itself; this is for runs it couldn't parse. The run is the thread's open effort's. Returns `{ recorded, observationId }`."
@@ -313,6 +344,7 @@ commands:
     summary: "Start a thread on a stream (`stream:str1`) — or fork one (`from: thread:thr3`), running the same agent. It becomes the stream's writer when it has none, else joins the queue."
     capability: threads.write
     op: create
+    ui: { label: "New Thread…", group: Tasks, form: new-thread }
   - name: thread.demote
     summary: "Move a stream's writer back into the queue, leaving the stream with no writer. A person's."
     capability: threads.write
@@ -392,6 +424,7 @@ commands:
     capability: vcs.write
     op: commit
     invokers: { human: true, agent: false, lens: false }
+    ui: { label: "Commit Changes…", group: Git, form: commit }
   - name: vcs.delete_branch
     summary: "Delete a branch (`force` even when unmerged)."
     capability: vcs.write
@@ -425,6 +458,19 @@ commands:
     capability: vcs.write
     op: stage
     invokers: { human: true, agent: false, lens: false }
+  # window.show — the window's; a person's.
+  - name: window.find
+    summary: "Show the find bar in the file the window shows."
+    capability: window.show
+    op: find
+    invokers: { human: true, agent: false, lens: false }
+    ui: { label: Find, group: Edit, shortcut: "Ctrl/Cmd+F", while_typing: true, menu: { bar: edit, order: 100 } }
+  - name: window.quick_open
+    summary: "Show the search box (files, pages, commands)."
+    capability: window.show
+    op: quick_open
+    invokers: { human: true, agent: false, lens: false }
+    ui: { label: "Quick Open…", group: File, shortcut: "Ctrl/Cmd+P", while_typing: true, menu: { bar: file, order: 50 } }
   # work_items.write
   - name: work_item.comment
     summary: "Comment on a work item (oxplow: a note shown with the task)."
@@ -435,7 +481,7 @@ commands:
     summary: "File a work item on the active tracker (the one the person chose), optionally straight into a state. `thread` is the thread it's filed on: absent, an agent's own (a person's lands on the backlog). `native` is the tracker's own fields as its create declares them (oxplow: { priority }). On oxplow the result carries `link_warnings`: the `[[…]]` links in the body that don't resolve."
     capability: work_items.write
     op: create
-    ui: {"label": "New Task…", "group": "Tasks", "keywords": ["work item"], "form": "page:new-task"}
+    ui: {"label": "New Task…", "group": "Tasks", "keywords": ["work item"], "form": "page:new-task", "shortcut": "Ctrl/Cmd+Shift+N"}
   - name: work_item.delete
     summary: "Delete a work item."
     capability: work_items.write

@@ -137,6 +137,18 @@ pub struct CommandSpec {
     /// (a step other commands compose, an agent's tool).
     #[serde(default)]
     pub ui: Option<CommandUi>,
+    /// The host capability operation behind it, when it is one: where it
+    /// runs (a window capability's runs in the window) and what it does.
+    #[serde(default)]
+    pub op: Option<OpRef>,
+}
+
+/// An operation of a host capability (`capability: tabs.write`, `op:
+/// open`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, JsonSchema)]
+pub struct OpRef {
+    pub capability: String,
+    pub op: String,
 }
 
 /// A command as a person meets it (`.context/commands.md` "Offering a
@@ -162,8 +174,9 @@ pub struct CommandUi {
     #[serde(default)]
     #[specta(type = Option<crate::Json>)]
     pub input: Option<Value>,
-    /// The page that gathers its input (a tab id, `page:new-task`):
-    /// choosing it opens that page rather than running it.
+    /// What gathers its input — a page (a tab id, `page:new-task`) or one
+    /// of the window's own forms (`new-thread`, `commit`): choosing it
+    /// opens that rather than running it.
     #[serde(default)]
     pub form: Option<String>,
     /// The page to open once it ran: a tab id whose `{{result.<field>}}`
@@ -174,6 +187,27 @@ pub struct CommandUi {
     /// failure is reported, rather than awaited where it was chosen.
     #[serde(default)]
     pub background: bool,
+    /// The key that runs it, as `Ctrl/Cmd+S` / `Ctrl/Cmd+Shift+N`
+    /// (`Ctrl/Cmd` is Cmd on macOS, Ctrl elsewhere).
+    #[serde(default)]
+    pub shortcut: Option<String>,
+    /// Its shortcut runs it while the person types in a field too (Save,
+    /// Find); otherwise typing keeps it.
+    #[serde(default)]
+    pub while_typing: bool,
+    /// Where the menu bar shows it.
+    #[serde(default)]
+    pub menu: Option<MenuPlace>,
+}
+
+/// A command's place in the menu bar: which menu, and where in it
+/// (lowest first).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MenuPlace {
+    /// `file` or `edit`.
+    pub bar: String,
+    pub order: u32,
 }
 
 /// The namespace oxplow's own commands are under: core's and its shipped

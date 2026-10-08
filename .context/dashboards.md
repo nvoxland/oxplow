@@ -252,9 +252,10 @@ through a supposedly opaque bar — dim the text `color` instead.
 inline (Enter creates it and pins, Escape cancels; tsk1045 — it used to
 make "My Dashboard" without asking).
 
-**New Dashboard command** — `dashboard.new` in `commands.ts` (Tasks/"plan"
-group); the App handler create-then-navigates (`createDashboard` →
-`customDashboardRef`), no form.
+**New Dashboard command** — `oxplow.dashboard.create`'s `ui` in
+`oxplow-foundation` (Tasks group): it creates "Untitled dashboard", then
+opens it (`open_after: page:custom-dashboard?id={{result.id}}`), no
+form.
 
 Pure helpers live in `pages/customDashboardData.ts` (React-free, unit-tested):
 `parseTileOptions` (tolerant of null/malformed JSON, drops unknown enum values),

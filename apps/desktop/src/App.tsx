@@ -65,7 +65,7 @@ import {
   updateFileDraft,
   type FileSessionState,
 } from "./editor-session.js";
-import { buildMenuGroupSnapshots, buildMenuGroups, buildNativeMenuSnapshots, menuBarGroups, OPEN_RECENT_PREFIX } from "./commands.js";
+import { buildMenuBar, buildNativeMenuSnapshots, menuItemById, OPEN_RECENT_PREFIX, shellCommands, type ShellActions } from "./menuBar.js";
 import { externalFileSyncAction } from "./external-file-sync.js";
 import type { EditorNavigationTarget } from "./lsp.js";
 import { Navigator } from "./components/Navigator.js";
@@ -115,7 +115,6 @@ import { MetricsPage } from "./pages/MetricsPage.js";
 import { CustomDashboardPage } from "./pages/CustomDashboardPage.js";
 import { DashboardsIndexPage } from "./pages/DashboardsIndexPage.js";
 import { LensPage } from "./pages/LensPage.js";
-import { NEW_LENS_PROMPT } from "./lens/lensModel.js";
 import { insertIntoAgent } from "./agent-input-bus.js";
 import { getPageDetailStore } from "./tabs/openPageDetail.js";
 import { ExploreDataPage } from "./pages/ExploreDataPage.js";
@@ -163,15 +162,16 @@ import {
 import { forgetPage, generatedPaths, recordPageVisit, recordUserInterrupt, reportOpenPage } from "./api.js";
 import { openProject, createProject, listRecentProjects, shellAvailable } from "./api.js";
 import { onRemoteReconnect, triggerRemoteResync } from "./api.js";
-import type { RecentProjectView } from "./tauri-bridge/generated/bindings.js";
+import type { CommandOutcome, RecentProjectView } from "./tauri-bridge/generated/bindings.js";
 import { pickFolder } from "./tauri-bridge/nativeDialog.js";
 import { WORKING, shortRevisionLabel } from "./revision.js";
 import { advanceDaemonProbeState, INITIAL_DAEMON_PROBE_STATE } from "./daemon-recovery.js";
-import { getCommandIdForShortcut } from "./keybindings.js";
+import { offerForShortcut } from "./keybindings.js";
 import { commandOffers } from "./commandOffers.js";
+import { runLocally, startClientHost, type ClientCallContext, type ClientHandlers } from "./clientHost.js";
+import { streamOfThread, withTab, withoutTab } from "./tabs/threadTabOps.js";
 import { usePersonCommands } from "./personCommandsStore.js";
 import { personCommands } from "./personCommands.js";
-import type { CommandId } from "./commands.js";
 import { logUi, setUiLogContext } from "./logger.js";
 
 // Cap on concurrent file tabs in the center. Intellij uses ~10 by default;
@@ -663,23 +663,33 @@ export function App() {
     mutateFileSession(stream.id, (s) => updateFileDraft(s, session.selectedPath!, value));
   }
 
+  /** Save `path`'s unsaved changes in `streamId`'s session; throws what
+   *  went wrong. */
+  async function saveFile(streamId: string, path: string) {
+    const current = getFileSession(streamId).files[path];
+    if (!current) throw new Error(`\`${path}\` isn't open`);
+    if (current.isLoading) throw new Error(`\`${path}\` is still loading`);
+    mutateFileSession(streamId, (s) => setOpenFileLoading(s, path, true));
+    try {
+      const saved = await writeWorkspaceFile(streamId, path, current.draftContent);
+      mutateFileSession(streamId, (s) => markFileSaved(s, saved.path, saved.content));
+      logUi("info", "saved file", { streamId, path: saved.path });
+    } catch (e) {
+      mutateFileSession(streamId, (s) => setOpenFileLoading(s, path, false));
+      logUi("error", "failed to save file", { streamId, path, error: String(e) });
+      throw e;
+    }
+  }
+
   async function handleEditorSave() {
     if (!stream) return;
-    const session = getFileSession(stream.id);
-    const selectedPath = session.selectedPath;
+    const selectedPath = getFileSession(stream.id).selectedPath;
     if (!selectedPath) return;
-    const current = session.files[selectedPath];
-    if (!current || current.isLoading) return;
-    mutateFileSession(stream.id, (s) => setOpenFileLoading(s, selectedPath, true));
     try {
-      const saved = await writeWorkspaceFile(stream.id, selectedPath, current.draftContent);
-      mutateFileSession(stream.id, (s) => markFileSaved(s, saved.path, saved.content));
+      await saveFile(stream.id, selectedPath);
       setError(null);
-      logUi("info", "saved file", { streamId: stream.id, path: saved.path });
     } catch (e) {
       setError(String(e));
-      logUi("error", "failed to save file", { streamId: stream.id, path: selectedPath, error: String(e) });
-      mutateFileSession(stream.id, (s) => setOpenFileLoading(s, selectedPath, false));
     }
   }
 
@@ -1205,7 +1215,7 @@ export function App() {
   // useEffect chain can stall for 10+ seconds before committing. Direct
   // ref call inside flushSync sidesteps the scheduler entirely.
   const planOpenCreateRef = useRef<(() => void) | null>(null);
-  // Forward ref so commandHandlers (declared above handleOpenPage) can
+  // Forward ref so the forms and offers (declared above handleOpenPage) can
   // route through the same page-tab opener used by every other caller.
   // The ref is populated in a useEffect after handleOpenPage is defined.
   const handleOpenPageRef = useRef<((ref: TabRef) => void) | null>(null);
@@ -1236,33 +1246,8 @@ export function App() {
     },
     [],
   );
-  const commandHandlers = useMemo(() => ({
-    save() {
-      void handleEditorSave();
-    },
-    quickOpen() {
-      if (!stream) return;
-      setQuickOpenVisible(true);
-    },
-    find() {
-      if (!selectedFilePath) return;
-      setCenterActive(fileRef(selectedFilePath).id);
-      setEditorFindRequest((current) => current + 1);
-    },
-    newLensWithAgent() {
-      insertIntoAgent(NEW_LENS_PROMPT);
-    },
-    newThread() {
-      if (!stream) return;
-      // The Navigator owns thread creation (inline title + agent
-      // picker); route there via the bus instead of a local counter.
-      requestNewThread(stream.id);
-    },
-    commitFiles() {
-      if (!stream || !workspaceContext.vcsEnabled) return;
-      handleOpenPageRef.current?.(indexRef("files"));
-      setCommitFilesRequest((n) => n + 1);
-    },
+  // The shell's project commands (opening a folder is the shell's).
+  const shellActions = useMemo<ShellActions>(() => ({
     openProject() {
       void pickAndOpenProject(false);
     },
@@ -1272,7 +1257,24 @@ export function App() {
     newProject() {
       void pickAndCreateProject();
     },
-  }), [stream, selectedFilePath, workspaceContext.vcsEnabled, runGitMenuOp]);
+  }), []);
+  /** One of the window's own forms — a command's `ui.form` that isn't a
+   *  tab id: what gathers New Thread's and Commit's input. */
+  const openForm = useCallback((name: string) => {
+    switch (name) {
+      case "new-thread":
+        // The Navigator owns thread creation (inline title + agent picker).
+        if (stream) requestNewThread(stream.id);
+        return;
+      case "commit":
+        if (!stream || !workspaceContext.vcsEnabled) return;
+        handleOpenPageRef.current?.(indexRef("files"));
+        setCommitFilesRequest((n) => n + 1);
+        return;
+      default:
+        recordOpError({ label: "Open form", message: `the window has no form \`${name}\`` });
+    }
+  }, [stream, workspaceContext.vcsEnabled]);
   const [recentProjects, setRecentProjects] = useState<RecentProjectView[]>([]);
   // The native menu and its recent projects are the shell's: a browser
   // window has neither to ask for.
@@ -1285,19 +1287,6 @@ export function App() {
   // Cancel the native WKWebView context menu everywhere except inputs,
   // contenteditable, Monaco, and the terminal (see context-menu.ts).
   useEffect(() => installContextMenuSuppressor(), []);
-  const menuGroupSnapshots = useMemo(() => buildMenuGroupSnapshots(commandState), [commandState]);
-  const nativeMenuSnapshots = useMemo(
-    () => buildNativeMenuSnapshots(commandState, recentProjects),
-    [commandState, recentProjects],
-  );
-  const menuGroups = useMemo(
-    () => buildMenuGroups(commandState, commandHandlers),
-    [commandState, commandHandlers],
-  );
-  const commandMap = useMemo(
-    () => new Map(menuGroups.flatMap((group) => group.items.map((item) => [item.id, item] as const))),
-    [menuGroups],
-  );
   // What the command bus offers a person (Pull, New Task, …): search lists
   // them with the app's own commands, and a shortcut may run one.
   const personSpecs = usePersonCommands();
@@ -1308,16 +1297,55 @@ export function App() {
           const ref = refFromTabId(tabId);
           if (ref) handleOpenPageRef.current?.(ref);
         },
-        run: (label, id, input) => personCommands.run(label, id, input),
+        openForm,
+        // What the window has for one of its own to act on now.
+        available: (spec) => {
+          if (spec.ui?.form === "new-thread") return commandState.hasStream;
+          if (spec.ui?.form === "commit") return !!commandState.canCommit;
+          switch (spec.op ? `${spec.op.capability}/${spec.op.op}` : "") {
+            case "editor.write/save":
+              return commandState.canSave;
+            case "window.show/find":
+              return commandState.hasSelectedFile;
+            case "window.show/quick_open":
+              return commandState.hasStream;
+            case "agent_input.write/draft":
+              return commandState.hasThread;
+            default:
+              return true;
+          }
+        },
+        run: (label, id, input) => {
+          // One the window hosts runs here: nothing goes to the daemon.
+          const spec = personSpecs.find((s) => s.id === id);
+          const local = spec ? runLocally(windowHandlersRef.current, spec, input) : null;
+          if (local) {
+            return local
+              .then(({ result }): CommandOutcome => ({ result, audit_id: null, event_id: null, inverse: null }))
+              .catch((e: unknown) => {
+                recordOpError({ label, message: e instanceof Error ? e.message : String(e) });
+                return null;
+              });
+          }
+          return personCommands.run(label, id, input);
+        },
         runInBackground: (label, id, input) =>
           void runGitMenuOp(label, id, () => runCommandInBackground(label, id, input)),
       }),
-    [personSpecs, stream?.id, selectedThreadId, runGitMenuOp],
+    [personSpecs, stream?.id, selectedThreadId, runGitMenuOp, openForm, commandState],
   );
+  // The menu bar (File, Edit) and what search lists: the bus's offers,
+  // and the shell's project commands.
+  const menuGroups = useMemo(() => buildMenuBar(offers, shellActions), [offers, shellActions]);
+  const nativeMenuSnapshots = useMemo(
+    () => buildNativeMenuSnapshots(menuGroups, recentProjects),
+    [menuGroups, recentProjects],
+  );
+  const searchOffers = useMemo(() => [...offers, ...shellCommands(shellActions)], [offers, shellActions]);
 
   // The launcher (QuickOpen) is the single discovery surface — pages,
   // files, commands, and body search in one box — and has exactly one
-  // shortcut: Cmd/Ctrl+P (its `file.quickOpen` menu command). The old
+  // shortcut: Cmd/Ctrl+P (`oxplow.window.quick_open`'s). The old
   // Cmd+K / Cmd+Shift+F aliases were removed (tsk59): one door is
   // clearer, and Cmd+P is the established dev quick-open reflex. Monaco
   // doesn't bind Cmd+P, so no capture-phase interception is needed — the
@@ -1326,33 +1354,23 @@ export function App() {
   useEffect(() => {
     // Runs in both Electron and browser modes. In Electron the native
     // menu's accelerator should also fire for the same command, but the
-    // handler is idempotent (commandMap.run() → modal setters are no-ops
+    // handler is idempotent (an offer's run → modal setters are no-ops
     // when the modal is already open) so a double-dispatch is harmless
     // — and not relying on the native menu means Cmd+Shift+N works even
     // when the menu snapshot is momentarily stale at startup.
     function handleKeyDown(event: KeyboardEvent) {
-      const commandId = getCommandIdForShortcut(event);
-      if (!commandId) return;
-      // Only New Task suppresses itself inside a text input — the
-      // rest (save, find, quick-open) are explicitly useful while editing.
-      // Rationale: a user in the middle of typing a description shouldn't
-      // lose focus to a New-Task modal and drop their half-typed text.
-      if (commandId === "oxplow.work_item.create" && isEditableTarget(event.target)) return;
-      const offer = offers.find((o) => o.id === commandId);
-      if (offer) {
-        event.preventDefault();
-        offer.run();
-        return;
-      }
-      const command = commandMap.get(commandId as CommandId);
-      if (!command || !command.enabled || !command.run) return;
+      // A command's `ui.shortcut`; typing in a field keeps it unless it
+      // runs while typing (Save, Find, Quick Open do — a user mid-way
+      // through a description shouldn't lose it to New Task's form).
+      const offer = offerForShortcut(offers, event, isEditableTarget(event.target));
+      if (!offer || offer.enabled === false) return;
       event.preventDefault();
-      command.run();
+      offer.run();
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [commandMap, offers]);
+  }, [offers]);
 
   useEffect(() => {
     if (!shellAvailable()) return;
@@ -1363,7 +1381,7 @@ export function App() {
 
   useEffect(() => {
     return desktopBridge().onMenuCommand((commandId: string) => {
-      // Dynamic "Open Recent ▸ <project>" entries aren't in commandMap;
+      // Dynamic "Open Recent ▸ <project>" entries aren't menu items;
       // open the trailing path in a new window. A recent whose `.oxplow/`
       // has since been deleted errors rather than re-creating it.
       if (commandId.startsWith(OPEN_RECENT_PREFIX)) {
@@ -1376,7 +1394,7 @@ export function App() {
         });
         return;
       }
-      const command = commandMap.get(commandId as never);
+      const command = menuItemById(menuGroups, commandId);
       if (!command || !command.run) return;
       // React 18 only auto-flushes effects synchronously for discrete
       // user input events (click, keydown on webContents). IPC messages
@@ -1388,9 +1406,9 @@ export function App() {
       // through an imperative ref registered by the target pane so the
       // modal setState also commits here rather than via useEffect.
       const run = command.run;
-      flushSync(() => { run(); });
+      flushSync(() => { void run(); });
     });
-  }, [commandMap]);
+  }, [menuGroups]);
 
   const pageTabsForActiveThread = selectedThreadId ? threadPageTabs[selectedThreadId] ?? [] : [];
   const availableCenterIds = useMemo(() => {
@@ -2059,6 +2077,111 @@ export function App() {
     }
   }, [selectedThreadId, setCenterActive, setThreadPageMru, stream]);
 
+  // The window as a command host (`clientHost.ts`): what only it can do,
+  // for a command the daemon runs over it — an agent's `oxplow.tab.*`, in
+  // the agent's own thread (never switching the thread or stream shown).
+  const windowHandlers = useMemo<ClientHandlers>(() => {
+    const threadOf = (ctx: ClientCallContext) => {
+      const thread = ctx.threadId ?? selectedThreadId;
+      if (!thread) throw new Error("no thread is shown");
+      return thread;
+    };
+    const refOf = (input: unknown) => {
+      const id = (input as { ref?: unknown } | null)?.ref;
+      if (typeof id !== "string") throw new Error("`ref` is a page's ref (`file:src/a.rs`)");
+      const ref = refFromTabId(id);
+      if (!ref) throw new Error(`\`${id}\` isn't a page's ref`);
+      return ref;
+    };
+    const open = async (input: unknown, ctx: ClientCallContext, focus: boolean) => {
+      const thread = threadOf(ctx);
+      const ref = refOf(input);
+      if (thread === selectedThreadId && focus) {
+        handleOpenPageRef.current?.(ref);
+        return { ref: ref.id, focused: true };
+      }
+      // A working-tree file's content lives in its stream's session: read
+      // it first (a path that isn't a file opens nothing), keeping what
+      // the session shows.
+      const path = diskFilePath(ref.id);
+      const streamId = streamOfThread(threadStates, thread);
+      if (path !== null && streamId && !getFileSession(streamId).files[path]) {
+        const file = await readWorkspaceFile(streamId, path);
+        mutateFileSession(streamId, (base) => {
+          const opened = openFileInSession(base, path, "", false);
+          return enforceOpenFileLimit({ ...opened, selectedPath: base.selectedPath }, MAX_OPEN_FILE_TABS);
+        });
+        mutateFileSession(streamId, (s) => setLoadedFileContent(s, path, file.content));
+      }
+      setThreadPageTabs((prev) => withTab(prev, thread, ref));
+      if (focus) setThreadCenterActive((prev) => ({ ...prev, [thread]: ref.id }));
+      return { ref: ref.id, focused: focus };
+    };
+    return {
+      "editor.write": {
+        // The file `ref` names, else the one the thread shows.
+        save: async (input, ctx) => {
+          const thread = threadOf(ctx);
+          const id = (input as { ref?: unknown } | null)?.ref;
+          const shown = thread === selectedThreadId ? centerActive : threadCenterActive[thread];
+          const tab = typeof id === "string" ? id : shown;
+          const path = tab ? diskFilePath(tab) : null;
+          if (path === null) throw new Error(typeof id === "string" ? `\`${id}\` isn't a file in the working tree` : "no file is shown");
+          const streamId = streamOfThread(threadStates, thread);
+          if (!streamId) throw new Error(`no stream has thread \`${thread}\``);
+          await saveFile(streamId, path);
+          return { saved: path };
+        },
+      },
+      "window.show": {
+        find: () => {
+          if (!selectedFilePath) throw new Error("no file is shown");
+          setCenterActive(fileRef(selectedFilePath).id);
+          setEditorFindRequest((current) => current + 1);
+          return null;
+        },
+        quick_open: () => {
+          if (!stream) throw new Error("no stream is shown");
+          setQuickOpenVisible(true);
+          return null;
+        },
+      },
+      // A person's only (the command's invokers): oxplow never types for
+      // the agent. It fills the shown thread's agent input, unsent.
+      "agent_input.write": {
+        draft: (input) => {
+          const text = (input as { text?: unknown } | null)?.text;
+          if (typeof text !== "string") throw new Error("`text` is the draft");
+          insertIntoAgent(text);
+          return null;
+        },
+      },
+      "tabs.write": {
+        open: (input, ctx) => open(input, ctx, false),
+        focus: (input, ctx) => open(input, ctx, true),
+        close: (input, ctx) => {
+          const thread = threadOf(ctx);
+          const ref = refOf(input);
+          if (thread === selectedThreadId) {
+            closePageTab(ref.id);
+          } else {
+            setThreadPageTabs((prev) => withoutTab(prev, thread, ref.id));
+            setThreadCenterActive((prev) =>
+              prev[thread] === ref.id ? { ...prev, [thread]: AGENT_TAB_ID } : prev,
+            );
+          }
+          return { ref: ref.id, closed: true };
+        },
+      },
+    };
+    // getFileSession / mutateFileSession are plain functions over the
+    // session state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedThreadId, threadStates, closePageTab, setThreadPageTabs, setThreadCenterActive, centerActive, threadCenterActive, selectedFilePath, stream, setCenterActive]);
+  const windowHandlersRef = useRef(windowHandlers);
+  windowHandlersRef.current = windowHandlers;
+  useEffect(() => startClientHost(() => windowHandlersRef.current), []);
+
   // Used when the record a tab shows is *deleted* (wiki page / task).
   // Rather than closing the tab outright, navigate it back one entry in
   // its own history; only close when there's nothing to go back to.
@@ -2142,7 +2265,7 @@ export function App() {
   }, [threadPageTabs, selectedThreadId, centerActive, threadPageMru, fileSessions, stream, closePageTab]);
 
   // Keep the forward ref in sync with the latest handleOpenPage. Used by
-  // commandHandlers (declared above handleOpenPage) so menu/keyboard
+  // the forms and offers (declared above handleOpenPage) so menu/keyboard
   // dispatches route through the same page-tab opener.
   useEffect(() => {
     handleOpenPageRef.current = handleOpenPage;
@@ -3096,7 +3219,7 @@ export function App() {
           webview reaches the top edge: the title bar is the window's top,
           its empty space drags it and its start leaves room for the
           floating traffic lights. Elsewhere it sits under the menu bar. */}
-      {!isMac ? <Menubar groups={menuBarGroups(menuGroups)} /> : null}
+      {!isMac ? <Menubar groups={menuGroups} /> : null}
       <TitleBar
         stream={stream}
         thread={selectedThread ? { id: selectedThread.id, title: selectedThread.title } : null}
@@ -3243,8 +3366,7 @@ export function App() {
         pages={computePagesDirectory({
           backlogReadyCount: backlogState?.items.length ?? 0,
         })}
-        menuGroups={menuGroups}
-        offers={offers}
+        offers={searchOffers}
         onClose={() => setQuickOpenVisible(false)}
         onOpenFile={(path) => {
           void handleOpenFile(path);

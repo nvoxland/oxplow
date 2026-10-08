@@ -14,12 +14,11 @@ import {
   type Stream,
   type WorkspaceIndexedFile,
 } from "../api.js";
-import type { MenuGroup } from "../commands.js";
 import {
   buildLauncherTree,
   buildQuickOpenResults,
   buildRecentEntries,
-  flattenCommands,
+  searchableCommands,
   nextSectionIndex,
   type LauncherNavRow,
   type LauncherPageEntry,
@@ -32,8 +31,7 @@ import { RAIL_HISTORY_EXCLUDE_KINDS } from "./RailHud/history.js";
 import type { PageCategory, PageDirectoryEntry } from "./RailHud/sections.js";
 import { mergeDirectory } from "../lens/lensModel.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
-import { personCommands } from "../personCommands.js";
-import { launcherDirectory } from "./extensionLauncher.js";
+import { launcherPages } from "./extensionLauncher.js";
 
 interface Props {
   open: boolean;
@@ -47,7 +45,6 @@ interface Props {
   pages: PageDirectoryEntry[];
   /** Menu commands flattened into the launcher so actions (Commit,
    *  New Task, …) are discoverable here too — this is the only palette. */
-  menuGroups: MenuGroup[];
   /** What the command bus offers a person here (`commandOffers`). */
   offers: CommandEntry[];
   onClose(): void;
@@ -121,7 +118,7 @@ function persistRecentCollapsed(collapsed: boolean): void {
   }
 }
 
-export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pages: staticPages, menuGroups, offers, onClose, onOpenFile, onOpenPage, onOpenSearchHit }: Props) {
+export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pages: staticPages, offers, onClose, onOpenFile, onOpenPage, onOpenSearchHit }: Props) {
   const [query, setQuery] = useState("");
   const [files, setFiles] = useState<WorkspaceIndexedFile[]>([]);
   const [siteHits, setSiteHits] = useState<SearchHit[]>([]);
@@ -277,7 +274,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
   // Their manifest `launcher:` entries join too: a ref as a page, a
   // command or prompt as an action (P6.D1).
   const exts = useExtensions();
-  const { pages: lensPages, actions: launcherActions } = useMemo(() => launcherDirectory(exts ?? []), [exts]);
+  const lensPages = useMemo(() => launcherPages(exts ?? []), [exts]);
   const pages = useMemo(() => mergeDirectory(staticPages, lensPages), [staticPages, lensPages]);
 
   // Recent pages for the "Recent" start-menu section: the 10 most recent
@@ -308,30 +305,9 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
     };
   }, [open, threadId]);
 
-  // The launcher's commands — the retired CommandPalette's entries now
-  // live here so this overlay is the single discovery surface.
-  // An extension's command entry runs as the person (asking first when
-  // the command asks); a prompt entry fills the agent's input, never sent.
-  const commands = useMemo(
-    () => [
-      ...flattenCommands(menuGroups),
-      ...offers,
-      ...launcherActions.map((a) => {
-        const t = a.target;
-        return {
-          id: `ext:${a.id}`,
-          group: a.category,
-          label: a.label,
-          run:
-            t.kind === "prompt"
-              ? () => insertIntoAgent(t.prompt)
-              : () => void personCommands.run(a.label, t.command, t.input),
-          searchKey: `${a.category} ${a.label} ${a.extension}`.toLowerCase(),
-        };
-      }),
-    ],
-    [menuGroups, offers, launcherActions],
-  );
+  // The launcher's commands: the bus's offers that can run now (an
+  // extension's too — a command with a `ui`).
+  const commands = useMemo(() => searchableCommands(offers), [offers]);
 
   // Empty input = launcher mode (pages only, grouped by category in the
   // render below). With a query: exact matches first, then pages →

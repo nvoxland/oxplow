@@ -227,6 +227,8 @@ macro_rules! oxplow_command_table {
                 // the command bus, as the person
                 get_command => $crate::commands::bus::get_command { name: String } -> ::oxplow_domain::CommandSpec,
                 list_person_commands => $crate::commands::bus::list_person_commands {} -> Vec<::oxplow_domain::CommandSpec>,
+                register_client_host => $crate::commands::bus::register_client_host { capabilities: Vec<String> } -> (),
+                answer_client_call => $crate::commands::bus::answer_client_call { id: String, result: Option<::oxplow_domain::Json>, error: Option<String> } -> (),
                 run_command => $crate::commands::bus::run_command { id: String, input: ::oxplow_domain::Json, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
                 undo_command => $crate::commands::bus::undo_command { audit_id: i64, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
                 decide_proposal => $crate::commands::bus::decide_proposal { proposal: i64, approve: bool } -> Option<::oxplow_domain::CommandOutcome>,
