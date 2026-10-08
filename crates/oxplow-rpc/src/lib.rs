@@ -366,6 +366,7 @@ macro_rules! oxplow_command_table {
                 list_wiki_slugs_for_snapshots => $crate::commands::snapshot::list_wiki_slugs_for_snapshots { snapshot_ids: Vec<i64> } -> Vec<(i64, String)>,
                 list_files_for_snapshot => $crate::commands::snapshot::list_files_for_snapshot { snapshot_id: i64 } -> Vec<::oxplow_db::FileSnapshot>,
                 get_file_snapshot => $crate::commands::snapshot::get_file_snapshot { file_snapshot_id: i64 } -> Option<::oxplow_db::FileSnapshot>,
+                changed_paths => $crate::commands::trees::changed_paths { stream_id: Option<String>, from: Option<::oxplow_domain::vcs::Revision>, to: ::oxplow_domain::vcs::Revision } -> Vec<::oxplow_app::trees::ChangedPath>,
                 diff => $crate::commands::trees::diff { stream_id: Option<String>, from: Option<::oxplow_domain::vcs::Revision>, to: ::oxplow_domain::vcs::Revision } -> Vec<::oxplow_app::trees::DiffEntry>,
                 extension_effects_between => $crate::commands::trees::extension_effects_between { stream_id: Option<String>, start: Option<::oxplow_domain::vcs::Revision>, end: ::oxplow_domain::vcs::Revision } -> Vec<::oxplow_app::extensions::ExtensionChange>,
                 // background

@@ -48,6 +48,7 @@ import type {
   CommentMessage,
   CommentStatus,
   CommentThread,
+  ChangedPath,
   DiffEntry,
   Extension,
   ExtensionReview,
@@ -95,7 +96,7 @@ export type {
   ToolDiff,
   TranscriptItem,
 };
-export type { DiffEntry };
+export type { ChangedPath, DiffEntry };
 export type { DataEntity, Extension, ExtensionReview, Lens, LensRun, LensViz, LensSpec, SearchHit, CollectorListing, CollectorRunReport, SqlCell, SqlQueryResult };
 export type { ProviderInstanceView };
 
@@ -1990,6 +1991,17 @@ export async function diffRevisions(
   to: Revision,
 ): Promise<DiffEntry[]> {
   return unwrap(await commands.diff(streamId || null, from, to));
+}
+
+/** Which paths changed from `from` (nothing, when null) to `to`, and
+ *  how — {@link diffRevisions} without the line counts, so the daemon
+ *  reads no file. For views that filter by what changed. */
+export async function changedPaths(
+  streamId: string,
+  from: Revision | null,
+  to: Revision,
+): Promise<ChangedPath[]> {
+  return unwrap(await commands.changedPaths(streamId || null, from, to));
 }
 
 /** The extensions that changed between `start` (null: nothing before) and

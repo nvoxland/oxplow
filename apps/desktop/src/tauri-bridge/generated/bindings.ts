@@ -535,6 +535,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	changedPaths: (streamId: string | null, from: string | null, to: string) => typedError<ChangedPath[], IpcError>(__TAURI_INVOKE("changed_paths", { streamId, from, to })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	extensionEffectsBetween: (streamId: string | null, start: string | null, end: string) => typedError<ExtensionChange[], IpcError>(__TAURI_INVOKE("extension_effects_between", { streamId, start, end })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -1505,6 +1510,16 @@ export type ChangeTarget =
  *  this turn" (P2.10). A turn still running has no end: `NotFound`.
  */
 { kind: "turn"; turnId: string };
+
+/**
+ *  One path that differs between two revisions, without line counts:
+ *  what a changed-paths view needs, found by comparing ids alone.
+ */
+export type ChangedPath = {
+	path: string,
+	// `added`, `modified` or `deleted`.
+	status: FileStatus,
+};
 
 // What `check` found.
 export type CheckReport = CheckReport_Serialize | CheckReport_Deserialize;

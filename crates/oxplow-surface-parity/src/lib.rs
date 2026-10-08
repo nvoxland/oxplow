@@ -355,6 +355,10 @@ pub const MANIFEST: &[Capability] = &[
     // ---- git: read tools mirrored to MCP ----
     both_named("git.status", "git_change_scopes", "git_status"),
     both("diff"),
+    ui(
+        "changed_paths",
+        "an agent reads the same paths, with line counts, through `diff`",
+    ),
     both("vcs_log"),
     both("vcs_blame"),
     both("read_at"),
