@@ -739,16 +739,13 @@ mod tests {
     }
 
     /// tsk787: promoting onto a stream with no writer undoes by demoting
-    /// it back; `oxplow.thread.demote` is a person's, and undoes by promoting.
+    /// it back; `oxplow.thread.demote` (anyone's: an agent hands the
+    /// worktree back when it's done) undoes by promoting.
     #[tokio::test]
     async fn promote_from_no_writer_undoes_by_demoting() {
         let fx = services_with_effort().await;
         let me = thread_ref(fx.thread);
-        let denied = run(&fx, &agent(&fx), DEMOTE, json!({ "thread": me }))
-            .await
-            .unwrap_err();
-        assert!(matches!(denied, CommandError::Denied { .. }), "{denied:?}");
-        let demoted = run(&fx, &Actor::Human, DEMOTE, json!({ "thread": me }))
+        let demoted = run(&fx, &agent(&fx), DEMOTE, json!({ "thread": me }))
             .await
             .unwrap();
         assert_eq!(thread(&fx, fx.thread).await.status, ThreadStatus::Queued);

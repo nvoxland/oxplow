@@ -215,8 +215,10 @@ table in [commands.md](./commands.md)): `oxplow.vcs.commit`, `oxplow.vcs.stage`,
 `oxplow.vcs.checkout_branch`, `oxplow.vcs.rename_branch`, `oxplow.vcs.delete_branch`,
 `oxplow.vcs.resolve_conflict`, and git's own `oxplow.git.rebase`, `oxplow.git.cherry_pick`,
 `oxplow.git.revert`, `oxplow.git.ignore` (inherent methods on `GitProvider`). They are
-`External` (the VCS isn't the bus's to roll back), a person's only,
-not undoable, and name their `stream` (`WorktreeRouter::resolve_strict`).
+`External` (the VCS isn't the bus's to roll back), a person's or an
+agent's — an agent's on its own stream only, as its terminal's `git`
+reaches only its own worktree (a destructive one becomes a proposal a
+person decides) — not undoable, and name their `stream` (`WorktreeRouter::resolve_strict`).
 Discard, merge, branch delete, rebase and revert are `Destructive`. The
 audit row keeps the returned `OpOutcome`, so a merge's conflicts are on
 record. The desktop runs them with `runCommand` through `api.ts`
