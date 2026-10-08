@@ -164,8 +164,8 @@ empty: Nothing is waiting on you.
   launcher, for lenses only a slot shows.
 - **Something to run from the launcher** is a command with a `ui` (`ui:
   { label, group, input? }`): it can run another command with fixed input
-  (a `capability:` + `op:` over the same operation, or a script composing
-  it), or put a prompt in the agent's input (`capability:
+  (a `scope:` + `op:` over the same operation, or a script composing
+  it), or put a prompt in the agent's input (`scope:
   agent_input.write`, `op: draft`, `ui.input: { text: "…" }`). A page is a
   `pages:` entry or a lens.
 - **Slots** mount a lens into a core page (`ui: { slots: [{ slot, lens }] }`
@@ -204,7 +204,7 @@ empty: Nothing is waiting on you.
   `<namespace>.<area>.<verb>`: `{ name: area.verb, summary, input_schema,
   entry: handlers/x.star, needs?: [sql.read], confirm?, effect?,
   invokers?, examples? }`. The Starlark `transform(x)` gets `{ input }`,
-  reads with `capability("sql.read", { "sql": "SELECT … WHERE ref = :ref",
+  reads with `scope("sql.read", { "sql": "SELECT … WHERE ref = :ref",
   "params": { "ref": x["input"]["ref"] } })` (a list of row dicts; it must
   list `sql.read` in `needs`) and returns `{ commands: [{ name, input }],
   result? }`

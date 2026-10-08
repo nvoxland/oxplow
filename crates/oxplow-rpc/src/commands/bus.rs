@@ -47,16 +47,16 @@ pub async fn list_person_commands(svc: &Services) -> Result<Vec<CommandSpec>, Ip
 }
 
 /// Window `client` (an id it mints when it starts) is open and hosts
-/// `capabilities` (`tabs.write`, …): a command the daemon runs over one
+/// `scopes` (`tabs.write`, …): a command the daemon runs over one
 /// of them comes to it as a `clientCall` event addressed to it
 /// (`oxplow_app::client_host`). Said when the window starts and again
 /// when it reconnects.
 pub async fn register_client_host(
     svc: &Services,
     client: String,
-    capabilities: Vec<String>,
+    scopes: Vec<String>,
 ) -> Result<(), IpcError> {
-    svc.client_host.register(&client, capabilities);
+    svc.client_host.register(&client, scopes);
     Ok(())
 }
 

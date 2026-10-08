@@ -7,7 +7,7 @@
 _ITEM = "SELECT CAST(ref AS TEXT) AS ref, CAST(title AS TEXT) AS title FROM v_work_item WHERE ref = :work_item"
 
 def transform(x):
-    rows = capability("sql.read", {"sql": _ITEM, "params": {"work_item": x["event"]["payload"]["work_item"]}})
+    rows = scope("sql.read", {"sql": _ITEM, "params": {"work_item": x["event"]["payload"]["work_item"]}})
     if not rows:
         return {"skip": "the item is gone"}
     item = rows[0]

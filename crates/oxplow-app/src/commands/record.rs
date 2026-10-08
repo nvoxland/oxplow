@@ -26,7 +26,7 @@ impl CommandBus {
             error,
             result: None,
             inverse: None,
-            capabilities: Default::default(),
+            scopes: Default::default(),
         };
         if let Err(e) = self
             .db
@@ -49,7 +49,7 @@ impl CommandBus {
         input: &Value,
         mut out: HandlerOutput,
         origin: RunOrigin,
-        capabilities: std::collections::BTreeMap<String, u32>,
+        scopes: std::collections::BTreeMap<String, u32>,
     ) -> CommandOutcome {
         let (actor_c, spec_c, input_c) = (actor.clone(), spec.clone(), input.clone());
         let vocabulary = self.log.vocabulary().clone();
@@ -71,7 +71,7 @@ impl CommandBus {
                     &input_c,
                     &shadow,
                     Executed {
-                        capabilities: capabilities.clone(),
+                        scopes: scopes.clone(),
                         ..Executed::ok(oxplow_domain::EventId::generate(), &origin)
                     },
                 )?;
@@ -180,15 +180,15 @@ pub(super) fn finish(mut out: HandlerOutput, recorded: Recorded) -> CommandOutco
 
 /// The `command.executed` a run is recorded under: its id (fixed before a
 /// `Tx` handler runs, so its events can name it as their cause), for a
-/// composite's steps that failed partway, why, and the host capabilities
+/// composite's steps that failed partway, why, and the scopes
 /// the run called.
 pub(super) struct Executed {
     pub id: oxplow_domain::EventId,
     pub failed: Option<String>,
     /// What caused the run: the event an effect reacted to.
     pub cause: Option<oxplow_domain::EventId>,
-    /// Its trace's summary ("Host capabilities").
-    pub capabilities: std::collections::BTreeMap<String, u32>,
+    /// Its trace's summary ("Scopes").
+    pub scopes: std::collections::BTreeMap<String, u32>,
 }
 
 impl Executed {
@@ -197,7 +197,7 @@ impl Executed {
             id,
             failed: None,
             cause: origin.cause(),
-            capabilities: Default::default(),
+            scopes: Default::default(),
         }
     }
 }
@@ -217,7 +217,7 @@ pub(super) fn record_tx(
         id: executed_id,
         failed,
         cause,
-        capabilities,
+        scopes,
     } = executed;
     // A run that failed partway (a composite's steps, some landed) is
     // recorded with what landed, as an error.
@@ -243,7 +243,7 @@ pub(super) fn record_tx(
             error: failed,
             result: Some(out.result.clone()),
             inverse: inverse.clone(),
-            capabilities,
+            scopes,
         },
     )?;
     let mut executed = Envelope::typed::<CommandExecuted>(

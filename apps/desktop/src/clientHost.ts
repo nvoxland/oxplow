@@ -1,5 +1,5 @@
 /// The window as a command host (`.context/commands.md` "Where a command
-/// runs"): it hosts the capabilities only it can do — its threads' tabs,
+/// runs"): it hosts the scopes only it can do — its threads' tabs,
 /// … — and says so under an id of its own (`register_client_host`). A
 /// command the daemon runs over one (an agent's `oxplow.tab.open`) comes
 /// as a `clientCall` event addressed to one window; that window does it in
@@ -34,11 +34,11 @@ export interface ClientCallContext {
 
 export type ClientHandler = (input: unknown, ctx: ClientCallContext) => unknown | Promise<unknown>;
 
-/** The window's handlers: capability → op → handler. */
+/** The window's handlers: scope → op → handler. */
 export type ClientHandlers = Record<string, Record<string, ClientHandler>>;
 
 export interface ClientHostDeps {
-  register(client: string, capabilities: string[]): Promise<void>;
+  register(client: string, scopes: string[]): Promise<void>;
   unregister(client: string): Promise<void>;
   answer(client: string, id: string, answer: { result: unknown } | { error: string }): Promise<void>;
   subscribe(fn: (event: OxplowEvent) => void): () => void;
@@ -62,8 +62,8 @@ const DEPS: ClientHostDeps = {
 type ClientCall = Extract<OxplowEvent, { kind: "clientCall" }>;
 
 async function perform(handlers: ClientHandlers, call: ClientCall): Promise<{ result: unknown } | { error: string }> {
-  const handler = handlers[call.capability]?.[call.op];
-  if (!handler) return { error: `the window doesn't do \`${call.capability}\` \`${call.op}\`` };
+  const handler = handlers[call.scope]?.[call.op];
+  if (!handler) return { error: `the window doesn't do \`${call.scope}\` \`${call.op}\`` };
   try {
     const ctx = { threadId: call.threadId, actor: call.actor, call: { client: call.client, id: call.id } };
     return { result: (await handler(call.input, ctx)) ?? null };
@@ -97,14 +97,14 @@ export function startClientHost(
 }
 
 /** A person's run of `spec` in the window, when it's backed by a
- *  capability the window hosts: done here, never sent to the daemon (a
+ *  scope the window hosts: done here, never sent to the daemon (a
  *  view: nothing to record). `null` when the daemon runs it. */
 export function runLocally(
   handlers: ClientHandlers,
   spec: CommandSpec,
   input: unknown,
 ): Promise<{ result: unknown }> | null {
-  const handler = spec.op ? handlers[spec.op.capability]?.[spec.op.op] : undefined;
+  const handler = spec.op ? handlers[spec.op.scope]?.[spec.op.op] : undefined;
   if (!handler) return null;
   return Promise.resolve(handler(input, { threadId: null, actor: "human", call: null })).then((result) => ({ result }));
 }

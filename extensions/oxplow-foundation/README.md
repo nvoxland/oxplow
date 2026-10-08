@@ -1,8 +1,8 @@
 # oxplow-foundation
 
 oxplow's own commands, declared the way any extension declares one. Each
-entry under `commands:` names an operation of a host capability
-(`capability: bookmarks.write`, `op: set`) and says how the command meets
+entry under `commands:` names an operation of a scope
+(`scope: bookmarks.write`, `op: set`) and says how the command meets
 the people and agents who run it: its summary, who may run it, whether a
 person confirms it, and how search offers it.
 

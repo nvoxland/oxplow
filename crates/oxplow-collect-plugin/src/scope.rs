@@ -1,7 +1,7 @@
-//! The `capability(id, args)` Starlark builtin for **command handlers**
-//! (`.context/commands.md` "Host capabilities"): a script asks its host
+//! The `scope(id, args)` Starlark builtin for **command handlers**
+//! (`.context/commands.md` "Scopes"): a script asks its host
 //! to do something — read the semantic layer (`sql.read`), and in time
-//! write oxplow's records, run git, open a page — by the capability's id.
+//! write oxplow's records, run git, open a page — by the scope's id.
 //!
 //! The script runs on a worker thread (the sandbox); the host answers on
 //! the caller's thread, which owns what the answer needs (the command's
@@ -20,7 +20,7 @@ use serde_json::Value;
 use crate::runtime::{run_starlark_inner, Host, RunClock, SandboxBudget};
 use crate::CollectError;
 
-/// Answers a script's `capability(id, args)` call: the answer, or why not.
+/// Answers a script's `scope(id, args)` call: the answer, or why not.
 pub type Serve<'a> = dyn FnMut(&str, Value) -> Result<Value, String> + 'a;
 
 enum Msg {
@@ -32,16 +32,16 @@ enum Msg {
     Done(Result<Value, CollectError>),
 }
 
-/// The worker's side: where its `capability` calls go.
+/// The worker's side: where its `scope` calls go.
 #[derive(starlark::any::ProvidesStaticType)]
-pub struct CapabilityHost {
+pub struct ScopeHost {
     calls: mpsc::Sender<Msg>,
 }
 
-impl CapabilityHost {
+impl ScopeHost {
     fn call(&self, id: &str, args: Value) -> Result<Value, String> {
         let (reply, answer) = mpsc::channel();
-        let gone = || "the run ran out of time; no more capability calls".to_string();
+        let gone = || "the run ran out of time; no more scope calls".to_string();
         self.calls
             .send(Msg::Call {
                 id: id.to_string(),
@@ -54,7 +54,7 @@ impl CapabilityHost {
 }
 
 /// Run a Starlark command handler (`def transform(x)`) over `input` in
-/// the sandbox, answering its `capability(id, args)` calls with `serve`
+/// the sandbox, answering its `scope(id, args)` calls with `serve`
 /// on this thread.
 pub fn run_starlark_serving(
     budget: &SandboxBudget,
@@ -63,10 +63,10 @@ pub fn run_starlark_serving(
     serve: &mut Serve<'_>,
 ) -> Result<Value, CollectError> {
     let (tx, rx) = mpsc::channel();
-    let host = CapabilityHost { calls: tx.clone() };
+    let host = ScopeHost { calls: tx.clone() };
     let (script, input) = (script.to_string(), input.clone());
     std::thread::spawn(move || {
-        let out = run_starlark_inner(&script, &input, Host::Capability(&host));
+        let out = run_starlark_inner(&script, &input, Host::Scope(&host));
         let _ = tx.send(Msg::Done(out));
     });
     let clock = RunClock::default();
@@ -93,10 +93,10 @@ pub fn run_starlark_serving(
 }
 
 #[starlark::starlark_module]
-pub(crate) fn capability_builtins(builder: &mut starlark::environment::GlobalsBuilder) {
-    /// What the host capability `id` answers for `args` (a dict): only in
-    /// a command's handler, and only a capability the command `needs`.
-    fn capability<'v>(
+pub(crate) fn scope_builtins(builder: &mut starlark::environment::GlobalsBuilder) {
+    /// What the scope `id` answers for `args` (a dict): only in a
+    /// command's handler, and only a scope the command `needs`.
+    fn scope<'v>(
         id: &str,
         #[starlark(default = starlark::values::none::NoneOr::None)]
         args: starlark::values::none::NoneOr<starlark::values::Value<'v>>,
@@ -108,8 +108,8 @@ pub(crate) fn capability_builtins(builder: &mut starlark::environment::GlobalsBu
         };
         let host = eval
             .extra
-            .and_then(|e| e.downcast_ref::<CapabilityHost>())
-            .ok_or_else(|| anyhow::anyhow!("capability() is available in command handlers only"))?;
+            .and_then(|e| e.downcast_ref::<ScopeHost>())
+            .ok_or_else(|| anyhow::anyhow!("scope() is available in command handlers only"))?;
         let out = host.call(id, args).map_err(anyhow::Error::msg)?;
         Ok(eval.heap().alloc(out))
     }
@@ -123,12 +123,12 @@ mod tests {
 
     const READS: &str = r#"
 def transform(x):
-    rows = capability("sql.read", {"sql": "SELECT 1", "params": {"ref": x["ref"]}})
-    return {"rows": rows, "again": capability("sql.read", {"sql": "SELECT 2"})}
+    rows = scope("sql.read", {"sql": "SELECT 1", "params": {"ref": x["ref"]}})
+    return {"rows": rows, "again": scope("sql.read", {"sql": "SELECT 2"})}
 "#;
 
     #[test]
-    fn a_handler_calls_capabilities_its_host_answers() {
+    fn a_handler_calls_scopes_its_host_answers() {
         let mut asked = Vec::new();
         let out = run_starlark_serving(
             &SandboxBudget::with_timeout(Duration::from_secs(5)),
@@ -167,12 +167,12 @@ def transform(x):
     }
 
     #[test]
-    fn only_a_command_handler_has_capabilities() {
+    fn only_a_command_handler_has_scopes() {
         let err = run_starlark(READS, &json!({ "ref": "x" }))
             .unwrap_err()
             .to_string();
         assert!(
-            err.contains("capability() is available in command handlers only"),
+            err.contains("scope() is available in command handlers only"),
             "{err}"
         );
     }
@@ -184,7 +184,7 @@ def transform(x):
         let budget = SandboxBudget::with_timeout(Duration::from_millis(150));
         let out = run_starlark_serving(
             &budget,
-            "def transform(x):\n    return capability('sql.read')\n",
+            "def transform(x):\n    return scope('sql.read')\n",
             &json!({}),
             &mut |_, _| {
                 std::thread::sleep(Duration::from_millis(300));

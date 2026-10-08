@@ -124,11 +124,11 @@ pub fn choosable() -> impl Iterator<Item = &'static CapabilitySpec> {
     CAPABILITIES.iter().filter(|c| c.choosable)
 }
 
-/// Check one declared need: a host capability (`sql.read`,
-/// [`crate::host_capability`]), a capability (`work_items`), or one of its
+/// Check one declared need: a scope (`sql.read`,
+/// [`crate::scope`]), a capability (`work_items`), or one of its
 /// features (`snapshots.contents`), as core declares them.
 pub fn check_need(need: &str) -> Result<(), String> {
-    if crate::host_capability::host_capability(need).is_some() {
+    if crate::scope::scope(need).is_some() {
         return Ok(());
     }
     let (id, feature) = match need.split_once('.') {
@@ -165,7 +165,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_need_may_name_a_host_capability() {
+    fn a_need_may_name_a_scope() {
         assert!(check_need("sql.read").is_ok());
         assert!(check_need("sql.write").is_err());
     }

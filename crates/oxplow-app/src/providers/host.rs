@@ -305,16 +305,15 @@ pub fn serve_incoming(
 }
 
 /// What a provider may call of the host over the protocol (`host/call`):
-/// the host capabilities its manifest `needs`, through the gate a
-/// command's handler meets (`host_capabilities::Calls`), each call counted
+/// the scopes its manifest `needs`, through the gate a
+/// command's handler meets (`scope_calls::Calls`), each call counted
 /// with the `invoke` it serves — named by that call's idempotency key — so
 /// the run's audit row records it.
 pub struct HostCalls {
     needs: Vec<String>,
     db: oxplow_db::Database,
-    traces: parking_lot::Mutex<
-        std::collections::HashMap<String, Arc<crate::host_capabilities::CapabilityTrace>>,
-    >,
+    traces:
+        parking_lot::Mutex<std::collections::HashMap<String, Arc<crate::scope_calls::ScopeTrace>>>,
 }
 
 impl HostCalls {
@@ -327,7 +326,7 @@ impl HostCalls {
     }
 
     /// Count the calls naming `key` into `trace` until [`Self::finish`].
-    pub fn begin(&self, key: &str, trace: Arc<crate::host_capabilities::CapabilityTrace>) {
+    pub fn begin(&self, key: &str, trace: Arc<crate::scope_calls::ScopeTrace>) {
         self.traces.lock().insert(key.to_string(), trace);
     }
 
@@ -344,13 +343,13 @@ impl HostCalls {
             serde_json::from_value(params)
                 .map_err(|e| ProtocolError::InvalidParams(e.to_string()))?;
         let refused = |message: String| ProtocolError::InvalidInput {
-            field: "/capability".into(),
+            field: "/scope".into(),
             message,
         };
         if let Some(op) = &params.op {
             return Err(refused(format!(
                 "`{}` has no operation `{op}` a provider calls",
-                params.capability
+                params.scope
             )));
         }
         let trace = params
@@ -364,8 +363,8 @@ impl HostCalls {
             let read = Box::new(|q: oxplow_db::SqlQuery| {
                 runtime.block_on(db.read(move |tx| oxplow_db::semantic_layer::read_on(tx, &q)))
             });
-            let mut calls = crate::host_capabilities::Calls::new(&needs, &trace, read);
-            calls.serve(&params.capability, params.args)
+            let mut calls = crate::scope_calls::Calls::new(&needs, &trace, read);
+            calls.serve(&params.scope, params.args)
         })
         .await
         .map_err(|e| ProtocolError::Internal(e.to_string()))?

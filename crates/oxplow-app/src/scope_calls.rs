@@ -1,7 +1,7 @@
-//! Serving the host capabilities (`oxplow_domain::host_capability`) to a
-//! command's handler (`.context/commands.md` "Host capabilities"): each
-//! call checked against the command's `needs` — one it didn't declare is
-//! refused — counted in the run's [`CapabilityTrace`], and answered.
+//! Serving the scopes (`oxplow_domain::scope`) to a command's handler
+//! (`.context/commands.md` "Scopes"): each call checked against the
+//! command's `needs` — one it didn't declare is refused — counted in
+//! the run's [`ScopeTrace`], and answered.
 //!
 //! The same [`Calls`] serves a run inside the bus's transaction (reading
 //! on its connection) and a dry run of an example (reading through the
@@ -16,13 +16,13 @@ use serde_json::Value;
 /// The most rows one `sql.read` answers.
 pub const SQL_READ_ROW_CAP: usize = 1_000;
 
-/// What a run called, per capability: the per-run summary its audit row
+/// What a run called, per scope: the per-run summary its audit row
 /// records. One per run, shared by the runs nested in it; a retried run
 /// starts a fresh one.
 #[derive(Debug, Default)]
-pub struct CapabilityTrace(parking_lot::Mutex<BTreeMap<String, u32>>);
+pub struct ScopeTrace(parking_lot::Mutex<BTreeMap<String, u32>>);
 
-impl CapabilityTrace {
+impl ScopeTrace {
     fn count(&self, id: &str) {
         *self.0.lock().entry(id.to_string()).or_default() += 1;
     }
@@ -33,7 +33,7 @@ impl CapabilityTrace {
         add_counts(&mut self.0.lock(), counts.clone());
     }
 
-    /// Each capability called, and how often.
+    /// Each scope called, and how often.
     pub fn summary(&self) -> BTreeMap<String, u32> {
         self.0.lock().clone()
     }
@@ -50,20 +50,20 @@ pub fn add_counts(into: &mut BTreeMap<String, u32>, from: BTreeMap<String, u32>)
 pub type Reader<'a> =
     dyn FnMut(oxplow_db::SqlQuery) -> Result<oxplow_db::SqlQueryResult, DomainError> + 'a;
 
-/// One handler run's capability calls.
+/// One handler run's scope calls.
 pub struct Calls<'a> {
     needs: &'a [String],
-    trace: &'a CapabilityTrace,
+    trace: &'a ScopeTrace,
     read: Box<Reader<'a>>,
-    /// Answers standing in for a capability's own, in call order (an
-    /// example's); a capability without any is served for real.
+    /// Answers standing in for a scope's own, in call order (an
+    /// example's); a scope without any is served for real.
     answers: BTreeMap<String, VecDeque<Value>>,
     /// The database was busy answering: the run is retried, not failed.
     busy: Option<String>,
 }
 
 impl<'a> Calls<'a> {
-    pub fn new(needs: &'a [String], trace: &'a CapabilityTrace, read: Box<Reader<'a>>) -> Self {
+    pub fn new(needs: &'a [String], trace: &'a ScopeTrace, read: Box<Reader<'a>>) -> Self {
         Self {
             needs,
             trace,
@@ -73,7 +73,7 @@ impl<'a> Calls<'a> {
         }
     }
 
-    /// These calls answered from `answers` (per capability, in call order).
+    /// These calls answered from `answers` (per scope, in call order).
     pub fn with_answers(mut self, answers: &BTreeMap<String, Vec<Value>>) -> Self {
         self.answers = answers
             .iter()
@@ -84,8 +84,8 @@ impl<'a> Calls<'a> {
 
     /// The handler's call of `id` with `args`: its answer, or why not.
     pub fn serve(&mut self, id: &str, args: Value) -> Result<Value, String> {
-        if oxplow_domain::host_capability::host_capability(id).is_none() {
-            return Err(format!("no host capability `{id}`"));
+        if oxplow_domain::scope::scope(id).is_none() {
+            return Err(format!("no scope `{id}`"));
         }
         if !self.needs.iter().any(|n| n == id) {
             return Err(format!(
@@ -183,7 +183,7 @@ mod tests {
 
     #[test]
     fn a_call_is_checked_against_needs_counted_and_answered() {
-        let (needs, trace, mut asked) = (needs(&["sql.read"]), CapabilityTrace::default(), vec![]);
+        let (needs, trace, mut asked) = (needs(&["sql.read"]), ScopeTrace::default(), vec![]);
         let mut calls = Calls::new(&needs, &trace, reader(&mut asked));
         let rows = calls
             .serve(
@@ -205,8 +205,8 @@ mod tests {
     }
 
     #[test]
-    fn a_capability_not_declared_or_not_known_is_refused_uncounted() {
-        let (none, trace, mut asked) = (needs(&["work_items"]), CapabilityTrace::default(), vec![]);
+    fn a_scope_not_declared_or_not_known_is_refused_uncounted() {
+        let (none, trace, mut asked) = (needs(&["work_items"]), ScopeTrace::default(), vec![]);
         let mut calls = Calls::new(&none, &trace, reader(&mut asked));
         let err = calls
             .serve("sql.read", json!({ "sql": "SELECT 1" }))
@@ -216,7 +216,7 @@ mod tests {
             "{err}"
         );
         let err = calls.serve("fs.erase", json!({})).unwrap_err();
-        assert!(err.contains("no host capability `fs.erase`"), "{err}");
+        assert!(err.contains("no scope `fs.erase`"), "{err}");
         drop(calls);
         assert!(asked.is_empty());
         assert!(trace.summary().is_empty());
@@ -224,7 +224,7 @@ mod tests {
 
     #[test]
     fn an_examples_answers_stand_in_until_they_run_out() {
-        let (needs, trace, mut asked) = (needs(&["sql.read"]), CapabilityTrace::default(), vec![]);
+        let (needs, trace, mut asked) = (needs(&["sql.read"]), ScopeTrace::default(), vec![]);
         let answers = [("sql.read".to_string(), vec![json!([{ "a": 1 }])])].into();
         let mut calls = Calls::new(&needs, &trace, reader(&mut asked)).with_answers(&answers);
         assert_eq!(
@@ -239,7 +239,7 @@ mod tests {
 
     #[test]
     fn a_busy_database_is_kept_for_a_retry() {
-        let (needs, trace) = (needs(&["sql.read"]), CapabilityTrace::default());
+        let (needs, trace) = (needs(&["sql.read"]), ScopeTrace::default());
         let mut calls = Calls::new(
             &needs,
             &trace,

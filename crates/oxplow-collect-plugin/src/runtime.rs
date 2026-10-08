@@ -582,7 +582,7 @@ pub(crate) enum Host<'a> {
     None,
     Tree(&'a TreeHost),
     Ai(&'a crate::ai::AiHost),
-    Capability(&'a crate::capability::CapabilityHost),
+    Scope(&'a crate::scope::ScopeHost),
 }
 
 /// Like [`run_starlark`] but with a [`TreeHost`] in scope, so the script's
@@ -619,7 +619,7 @@ pub(crate) fn run_starlark_inner(
     let globals = GlobalsBuilder::extended_by(&[LibraryExtension::Json])
         .with(collect_helpers)
         .with(crate::ai::ai_builtins)
-        .with(crate::capability::capability_builtins)
+        .with(crate::scope::scope_builtins)
         .build();
 
     Module::with_temp_heap(|module| {
@@ -628,7 +628,7 @@ pub(crate) fn run_starlark_inner(
             Host::None => {}
             Host::Tree(h) => eval.extra = Some(h),
             Host::Ai(h) => eval.extra = Some(h),
-            Host::Capability(h) => eval.extra = Some(h),
+            Host::Scope(h) => eval.extra = Some(h),
         }
         let result = eval
             .eval_module(ast, &globals)

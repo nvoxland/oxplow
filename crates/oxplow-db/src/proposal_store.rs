@@ -460,7 +460,7 @@ mod tests {
                         error: None,
                         result: None,
                         inverse: None,
-                        capabilities: Default::default(),
+                        scopes: Default::default(),
                     },
                 )
             })
@@ -511,7 +511,7 @@ mod tests {
                         error: None,
                         result: None,
                         inverse: None,
-                        capabilities: Default::default(),
+                        scopes: Default::default(),
                     },
                 )
             })

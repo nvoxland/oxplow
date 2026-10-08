@@ -657,7 +657,7 @@ async fn handle(
                         method::HOST_CALL,
                         json!({
                             "key": sent_key,
-                            "capability": "sql.read",
+                            "scope": "sql.read",
                             "args": { "sql": "SELECT 7 AS n" },
                         }),
                     )

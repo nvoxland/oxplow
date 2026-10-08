@@ -47,7 +47,7 @@ def _text(value):
 
 def transform(x):
     event = x["event"]
-    rows = capability("sql.read", {
+    rows = scope("sql.read", {
         "sql": _ACCEPTED,
         "params": {"event_id": event["id"], "event_seq": event["seq"]},
     })

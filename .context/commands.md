@@ -44,13 +44,13 @@ ids. A command declares (`oxplow_domain::commands::CommandSpec`):
 |---|---|
 | `input_schema` | JSON Schema; the bus validates the input first and names the failing field, plus what the schema accepts there (`InputValidator::check`: an object's fields, required first, for an unknown or missing one; the choices for a bad enum value), so a caller fixes it in one more call |
 | `invokers` | which surfaces may run it: `human`, `agent`, `lens` |
-| `confirm` | `Never`, `Always`, or `Destructive` — a person confirms; an agent never can. A `Read` command may not ask (`Command::new` / `with_confirm_for` refuse it — so a read capability's command can't declare `confirm`): it runs unrecorded, so nothing would resolve its proposal |
+| `confirm` | `Never`, `Always`, or `Destructive` — a person confirms; an agent never can. A `Read` command may not ask (`Command::new` / `with_confirm_for` refuse it — so a read scope's command can't declare `confirm`): it runs unrecorded, so nothing would resolve its proposal |
 | `undoable` | the handler returns an inverse call that `undo` applies |
 | `lifecycle` | `Stable` / `Experimental` |
 | `atomicity` | `Tx` (handler runs inside the bus's transaction), `External` (against a system the bus doesn't own — a VCS, a process, a work list), or `Dispatch` — a composite, which its calls decide ("Composition") |
 | `effect` | `Write` (the default), `Read` or `Record`. A read runs without an audit row or `command.executed`, so a polling agent doesn't fill the log, and a thread that may not write can still run it (`oxplow.config.list_keys`, `oxplow.config.get`). A `Write` is refused to an agent thread that may not write. A `Record` changes oxplow's own records (`work_item.*`, `effort.*`): audited like a write, open to any thread |
 | `unrecorded` | top-level input fields its audit row leaves out, kept as their size (`{ "omitted_bytes": n }`; an op's `with_unrecorded` — `oxplow.file.save`'s `content`): still audited, the log not grown by every file saved |
-| `needs` | the **host capabilities** its handler calls (`sql.read`; below — always available, enforced per call) and the capabilities, or their features (`work_items.comments`), it needs active — the grammar lenses use. Unmet, it isn't offered and doesn't run (pipeline step 0). `oxplow.work_item.create` / `update` / `transition` need `work_items`; `link`, `comment` and `delete` need their feature |
+| `needs` | the **scopes** its handler calls (`sql.read`; below — always available, enforced per call) and the capabilities, or their features (`work_items.comments`), it needs active — the grammar lenses use. Unmet, it isn't offered and doesn't run (pipeline step 0). `oxplow.work_item.create` / `update` / `transition` need `work_items`; `link`, `comment` and `delete` need their feature |
 
 `Actor` is who runs it: `Human`, `Agent { thread_id, stream_id }`,
 `Lens { lens_id, on_behalf_of }`, `System`. Its `source()` (`human`,
@@ -118,14 +118,16 @@ commands (below, "Where a command runs"); New Thread and Commit are
 `oxplow.thread.create` / `oxplow.vcs.commit` with a window `form`. There
 is no other command list in the app.
 
-## Host capabilities
+## Scopes
 
-What a handler may do beyond composing other commands is a **host
-capability**: named like an OAuth scope, `<resource>.<action>`, declared
-by core with an **effect class** (`oxplow_domain::host_capability`:
-`HOST_CAPABILITIES`, `EffectClass`), and listed in the command's
-`needs`. Every command — core's and any extension's — reaches them the
-same way, so oxplow's own commands can do nothing an extension's can't.
+What a handler may do beyond composing other commands is a **scope**:
+an OAuth-style permission named `<resource>.<action>`, declared by core
+with an **effect class** (`oxplow_domain::scope`: `SCOPES`,
+`EffectClass`), and listed in the command's `needs`. (Not a
+*capability*: that word is the swappable pieces — `work_items`,
+`snapshots` — a project picks an implementation of.)
+Every command — core's and any extension's — reaches them the same way,
+so oxplow's own commands can do nothing an extension's can't.
 
 | Class | Does | Audited | An agent's run |
 |---|---|---|---|
@@ -149,20 +151,20 @@ statement over the published models (`v_*`), its `:name`s bound from
 row objects (`semantic_layer::read_on` on the run's connection: the
 `query_sql` authorizer, inside the transaction).
 
-A Starlark handler calls one with `capability(id, args)`
-(`oxplow_collect_plugin::capability`). The script runs on the sandbox's
+A Starlark handler calls one with `scope(id, args)`
+(`oxplow_collect_plugin::scope`). The script runs on the sandbox's
 worker thread; the call crosses to the thread that runs the handler
 (which owns the transaction) and is answered there while the sandbox
 waits (`run_starlark_serving`) — that time is left out of the script's
-budget, not its ceiling. `crate::host_capabilities::Calls` serves it: a
-capability that isn't in the command's `needs` is **refused** (the
+budget, not its ceiling. `crate::scope_calls::Calls` serves it: a
+scope that isn't in the command's `needs` is **refused** (the
 script fails with the reason), one that is is counted and answered; a
 busy database retries the whole run. A dry run (an extension's
-`examples`) answers from the example's `answers` (per capability, in
+`examples`) answers from the example's `answers` (per scope, in
 call order) or through the SQL gateway.
 
 **Where a command runs** (VS Code's model: commands run where their
-handler lives). A capability says its host (`Host`): the **daemon**
+handler lives). A scope says its host (`Host`): the **daemon**
 (oxplow's records, the repository, the project's files), the project's
 **window** (`tabs.write`: open, close, focus a tab; `editor.write`:
 save; `window.show`: find, quick open; `agent_input.write`: draft, a
@@ -171,20 +173,20 @@ Open Project; the window reaches the shell, so the window hosts its
 handlers too). A shell command isn't recorded: there's no app-scope bus
 or log yet — one comes when something there is worth recording or an
 agent needs it. A command
-backed by a window capability is View class (not recorded, no
+backed by a window scope is View class (not recorded, no
 transaction) and its spec carries the operation (`CommandSpec::op`):
 
 - **The window's own runs stay in it** — `clientHost.ts` `runLocally`:
   the window does it with its own handler, nothing sent to the daemon.
 - **A run on the daemon** (an agent's through MCP, a script's) reaches
   the window through `client_host::ClientHost`: an
-  `OxplowEvent::ClientCall { id, client, thread_id, actor, capability, op, input }`
+  `OxplowEvent::ClientCall { id, client, thread_id, actor, scope, op, input }`
   addressed to one window — the last registered that hosts the
-  capability — which does it and answers `answer_client_call { client,
+  scope — which does it and answers `answer_client_call { client,
   id, result | error }` (another window's answer is ignored); the run
   waits (15 s), its answer the run's result. A window mints an id when it
   starts and says it's open — and what it hosts — with
-  `register_client_host { client, capabilities }` then and on reconnect,
+  `register_client_host { client, scopes }` then and on reconnect,
   and `unregister_client_host` when it closes (`pagehide`), which refuses
   its unanswered calls at once. With no window, one that doesn't host it,
   closes or doesn't answer, the run is `Unavailable`; a window that
@@ -206,16 +208,16 @@ transaction) and its spec carries the operation (`CommandSpec::op`):
 - One handler per command; something that should happen when one runs
   reacts to an event, not a second handler.
 
-**Operations** (`commands/ops.rs`). A record or write capability's
+**Operations** (`commands/ops.rs`). A record or write scope's
 native behavior comes as **operations**: `bookmarks.write` has `set` and
 `remove`. Each `Op` carries what only Rust can supply — the input schema
 of the type its handler reads, the handler (`Tx` / `External` /
 `Dispatch`), whether it returns an inverse, a per-input confirmation, a
 check before the transaction — and is added to the bus (`add_op`). A
-manifest command backed by one (`capability:` + `op:`) gets the
-operation's schema, undo and atomicity, its effect from the capability's
+manifest command backed by one (`scope:` + `op:`) gets the
+operation's schema, undo and atomicity, its effect from the scope's
 class (record → `Record`, write → `Write`, read / view → `Read`), and
-the capability in its `needs`; the manifest says the rest. oxplow's own
+the scope in its `needs`; the manifest says the rest. oxplow's own
 are declared in **`oxplow-foundation`** — a shipped extension that is
 **required** (`BundledExtension::required`: it can't be disabled, and
 `extension_commands::register_required` registers its commands when
@@ -242,16 +244,17 @@ everyone unconfirmed; `CommandBus::open_ops` lists those, pinned by
 choice. A manifest command's `invokers` is **required** (an omitted one
 once meant everyone, agents included).
 
-**The per-run trace.** Each run has a `CapabilityTrace` (`TxCtx::trace`):
+**The per-run trace.** Each run has a `ScopeTrace` (`TxCtx::trace`):
 fresh per transaction attempt, shared by the runs nested in it; steps
 add each step's to the composing pass's. An `External` run's is its
 `Invocation::trace`: a provider's `host/call`s during it count there
-([providers.md](./providers.md) "The protocol"). Its summary — per capability,
+([providers.md](./providers.md) "The protocol"). Its summary — per scope,
 how many calls (`{"sql.read": 2}`) — is written on the run's audit row
-(`command_audit.capabilities_json`, V27; NULL when it used none). The
+(`command_audit.scopes_json`, V27, named so in V34; NULL when it used
+none). The
 routing pass (a composite composed on a read snapshot to decide where
 its calls run) counts nothing. Later: each call's detail (what it
-touched), sampled or on by setting, and approvals by capability.
+touched), sampled or on by setting, and approvals by scope.
 
 ## The pipeline (`crates/oxplow-app/src/commands/mod.rs`)
 
@@ -262,7 +265,7 @@ run's audit row and events (`record_tx`, `audit_only`,
 claims that keep two undos or approvals from both applying;
 `proposals.rs` proposals (`unconfirmed`, the dry run, approve,
 decline); `steps.rs` composition — the composed tree, routing, steps;
-`ops.rs` the host capabilities' operations; `util.rs` what handlers
+`ops.rs` the scopes' operations; `util.rs` what handlers
 share; `tests.rs` the bus's own tests.
 
 `CommandBus::run(actor, name, input, confirmed)`:
@@ -323,9 +326,9 @@ skipping.
    row (`crates/oxplow-db/src/command_audit_store.rs`: actor, input,
    outcome, the handler's `result` — V114, so a run's answer, such as a
    merge's conflicts, stays readable after the fact — inverse, and the
-   host capabilities it called, "Host capabilities"), `command.executed@2` in the event log pointing at
-   the audit row, the handler's domain events (with `cause` = the
-   executed event, and the actor's thread/stream — `Actor::anchors()` —
+   scopes it called, "Scopes"), `command.executed@2` in the event log
+   pointing at the audit row, the handler's domain events (with `cause` =
+   the executed event, and the actor's thread/stream — `Actor::anchors()` —
    filled into any anchor the handler left empty), and the audit row's
    `event_id`. A handler failure
    rolls all of it back and is audited as `error` in a transaction of its
@@ -687,9 +690,8 @@ once, whichever list holds it.
 ## Commands so far
 
 Each `oxplow.*` row below is declared in `extensions/oxplow-foundation`
-(or, where it says so, `oxplow-bundled`) over an operation of the host
-capability its area falls under (`threads.write`, `vcs.write`, …;
-`HOST_CAPABILITIES`); "Handler" describes that operation.
+(or, where it says so, `oxplow-bundled`) over an operation of the scope
+its area falls under (`threads.write`, `vcs.write`, …; `SCOPES`); "Handler" describes that operation.
 
 | Command | Handler | Notes |
 |---|---|---|
@@ -833,8 +835,7 @@ headers reach `command.executed`'s `source = agent:thr…`.
 ## Adding a command
 
 oxplow's own commands are declared in `extensions/oxplow-foundation`
-over operations of the host capabilities ("Host capabilities" →
-"Operations"); `Services::new` adds the operations and registers the
+over operations of the scopes ("Scopes" → "Operations"); `Services::new` adds the operations and registers the
 declarations (`register_required`). Only `oxplow.command.sequence`, the
 bus's composition primitive, is registered as a Rust command. A bus with
 one area's operations (a test's, `oxplow-dev`'s) registers what's
@@ -850,16 +851,16 @@ declared over them with `register_declared`.
    Return the inverse (a call of the command that undoes it) when it is
    undoable, and any domain events as typed envelopes
    (`Envelope::typed::<T>`).
-3. Make it an operation of the capability whose scope it falls under
-   (`Op::new(capability, name, schema, undoable, handler)`, plus
+3. Make it an operation of the scope it falls under
+   (`Op::new(scope, name, schema, undoable, handler)`, plus
    `with_confirm_for` / `with_precheck`), give it its floor — who may
    run it at most (`open_to`) and the least it is confirmed
    (`confirm_at_least`) — or, leaving it open to everyone unconfirmed,
    add it to `the_open_ops_are_the_reviewed_ones`; add the scope to
-   `HOST_CAPABILITIES` if it's new (its class decides the command's
+   `SCOPES` if it's new (its class decides the command's
    effect), and add the op in `Services::new` (`commands.add_op`).
 4. Declare the command in `extensions/oxplow-foundation/extension.yaml`:
-   `name: <area>.<verb>`, `summary`, `capability`, `op`, `invokers`
+   `name: <area>.<verb>`, `summary`, `scope`, `op`, `invokers`
    (required; within the floor), `confirm` (at least the floor's),
    `needs` (features), `ui`.
 5. Route the existing RPC/MCP entry points through `commands.run(...)`

@@ -42,10 +42,10 @@ schemars), host → provider:
 | `shutdown` | → `null` | |
 
 Provider → host (protocol 3): `host/call` — `HostCallParams { key?,
-capability, op?, args }` → the capability's answer: a host capability the
-provider's manifest `needs` (`sql.read`: `args` `{ sql, params? }` →
+scope, op?, args }` → the scope's answer: a scope the provider's
+manifest `needs` (`sql.read`: `args` `{ sql, params? }` →
 rows), `key` naming the idempotency key of the `invoke` it serves so the
-call is recorded with that run. Refused (`InvalidInput` at `/capability`)
+call is recorded with that run. Refused (`InvalidInput` at `/scope`)
 for one it doesn't need or that isn't there.
 
 `PROTOCOL_VERSION` is `"3"` (P10: `InvokeParams.idempotency_key`; 3:
@@ -312,7 +312,7 @@ providers:
     network: [api.example.com]   # hosts it may reach
     declarations: provider.json  # its InitializeResult, checked in
     id_pattern: "[A-Z]+-\\d+"     # a work list's own ids (optional)
-    needs: [sql.read]            # host capabilities it calls (`host/call`); read ones only
+    needs: [sql.read]            # scopes it calls (`host/call`); read ones only
 ```
 
 `fields` (a work list's own, kept in `native`: `[{ name, title, kind:
@@ -340,10 +340,10 @@ and the declarations file among them; a symlink anywhere makes it
 unapprovable — plus the entry path, `args` (hashed relative to the
 folder, where it runs; an arg path leaving the folder is refused at
 load), `env` names, `credentials` (each as `CredentialDecl::grant` renders
-it — a signed-in one with its endpoints, client id, scopes, client secret's
+it — a signed-in one with its endpoints, client id, OAuth scopes, client secret's
 name and redirect port, so changing where it signs in asks again) and
-`network`, and the host capabilities it `needs`. So a changed declaration is a new version,
-shown unapproved in Settings → Data → Programs (with its grants listed)
+`network`, and the scopes it `needs`. So a changed declaration is a new
+version, shown unapproved in Settings → Data → Programs (with its grants listed)
 until a person approves it again. Every start re-checks it, restarts
 included.
 
@@ -394,7 +394,7 @@ first difference), and `check` of the instance's config must return a
 handle (`HostError::Unconfigured { problems }` otherwise). A request
 from the provider is answered `MethodNotFound` but `host/call`, served by
 the instance's `host::HostCalls` through the gate a command's handler
-meets (`host_capabilities::Calls`: its `needs`; `sql.read` on a read of
+meets (`scope_calls::Calls`: its `needs`; `sql.read` on a read of
 the database), each call counted into the trace of the run whose key it
 names (`ProviderRegistry::run_op` registers the run's
 `Invocation::trace` under its key) — so the run's audit row records it.
@@ -762,8 +762,8 @@ for every instance (`tracker.item.estimate`), registered by the
 extension reconciler whether or not an instance runs. Its spec takes the
 operation's input schema (plus an optional `instance`), effect and
 undo; its `confirm` is the manifest's when that asks more, else the
-declaration's; its `op` is `{ capability: provider:<ext>/<provider>, op
-}`. A run goes through the bus's **provider router**
+declaration's; its `op` is `{ scope: provider:<ext>/<provider>, op }`.
+A run goes through the bus's **provider router**
 (`CommandBus::set_provider_router`, `ProviderRouter for
 ProviderRegistry::run_op`) to the instance its input names — an
 `instance` field, else the instance its `ref` is of

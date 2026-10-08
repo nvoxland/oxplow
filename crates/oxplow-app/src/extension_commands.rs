@@ -8,7 +8,7 @@
 //!     summary: Mark the task done and leave a note.
 //!     input_schema: { type: object, required: [ref], properties: { ref: { type: string } } }
 //!     entry: handlers/finish_review.star # defines transform({ input })
-//!     needs: [sql.read]                  # the host capabilities it calls
+//!     needs: [sql.read]                  # the scopes it calls
 //!     confirm: never                     # never | always | destructive
 //!     effect: write                      # write | record | read
 //!     invokers: { human: true, agent: true, lens: true }
@@ -17,8 +17,8 @@
 //!       - { name: gone, input: { ref: "work_item:oxplow:tsk9" }, answers: { sql.read: [[]] }, refuses: no such task }
 //! ```
 //!
-//! The script reads with `capability("sql.read", { sql, params })` (one
-//! of its `needs`; `crate::host_capabilities`) and returns `{ commands:
+//! The script reads with `scope("sql.read", { sql, params })` (one
+//! of its `needs`; `crate::scope_calls`) and returns `{ commands:
 //! [{ name, input }], result? }`, or `{ refuse: "<why>" }` to decline (the
 //! run is `Invalid` with that reason). The namespace is the extension's
 //! name with `-` → `_`.
@@ -41,9 +41,9 @@ pub struct CommandExample {
     pub name: String,
     #[specta(type = oxplow_domain::Json)]
     pub input: Value,
-    /// Answers standing in for the capabilities' own, per capability in
-    /// call order (so the example doesn't depend on the project's data);
-    /// a capability without any is served for real.
+    /// Answers standing in for the scopes' own, per scope in call order
+    /// (so the example doesn't depend on the project's data); a scope
+    /// without any is served for real.
     #[specta(type = BTreeMap<String, Vec<oxplow_domain::Json>>)]
     pub answers: BTreeMap<String, Vec<Value>>,
     pub expect_commands: Vec<String>,
@@ -59,7 +59,7 @@ pub struct ExtensionCommand {
     /// Its name on the bus: `<namespace>.<name>`.
     pub name: String,
     pub summary: String,
-    /// Its input's schema; `None` for one backed by a capability's
+    /// Its input's schema; `None` for one backed by a scope's
     /// operation (the operation's).
     #[specta(type = Option<oxplow_domain::Json>)]
     pub input_schema: Option<Value>,
@@ -68,8 +68,8 @@ pub struct ExtensionCommand {
     pub confirm: Confirm,
     pub effect: CommandEffect,
     pub invokers: Invokers,
-    /// The host capabilities its script calls, and the capabilities (or
-    /// features) it needs active, as core's commands declare them
+    /// The scopes its script calls, and the capabilities (or features)
+    /// it needs active, as core's commands declare them
     /// (`oxplow_domain::capability::check_need`).
     pub needs: Vec<String>,
     /// How a person meets it (label, group, …), as core's commands do.
@@ -92,9 +92,9 @@ pub enum CommandHandler {
         #[serde(skip)]
         script: String,
     },
-    /// One operation of a host capability (`capability:` + `op:`,
+    /// One operation of a scope (`scope:` + `op:`,
     /// `commands::ops`).
-    Capability { capability: String, op: String },
+    Scope { scope: String, op: String },
     /// One operation of one of the extension's providers (`provider:` +
     /// `op:`): run on the instance its input names
     /// (`commands::ProviderRouter`).
@@ -146,7 +146,7 @@ struct CommandFile {
     #[serde(default)]
     entry: Option<String>,
     #[serde(default)]
-    capability: Option<String>,
+    scope: Option<String>,
     #[serde(default)]
     provider: Option<String>,
     #[serde(default)]
@@ -189,7 +189,7 @@ pub fn command_namespace(extension: &str) -> String {
     extension.replace('-', "_")
 }
 
-/// An operation's name — a provider's command, a capability's op: one
+/// An operation's name — a provider's command, a scope's op: one
 /// snake_case segment.
 pub fn valid_op(name: &str) -> bool {
     valid_segment(name)
@@ -340,23 +340,19 @@ fn command_of(
     if f.ui.as_ref().is_some_and(|ui| ui.label.trim().is_empty()) {
         return Err(at_name("`ui.label` must say what a person reads".into()));
     }
-    let handlers = [
-        f.entry.is_some(),
-        f.capability.is_some(),
-        f.provider.is_some(),
-    ];
+    let handlers = [f.entry.is_some(), f.scope.is_some(), f.provider.is_some()];
     if handlers.iter().filter(|h| **h).count() > 1 {
         return Err(at_name(
-            "declares more than one of `entry:`, `capability:` and `provider:` — a command has \
+            "declares more than one of `entry:`, `scope:` and `provider:` — a command has \
              one handler"
                 .into(),
         ));
     }
-    let (handler, input_schema, effect) = match (f.capability, f.entry) {
+    let (handler, input_schema, effect) = match (f.scope, f.entry) {
         (None, None) if f.provider.is_none() => {
             return Err(at_name(
-                "has no handler: give `entry:` (a Starlark script), `capability:` + `op:` (an \
-                 operation of a host capability) or `provider:` + `op:` (one of your provider's)"
+                "has no handler: give `entry:` (a Starlark script), `scope:` + `op:` (an \
+                 operation of a scope) or `provider:` + `op:` (one of your provider's)"
                     .into(),
             ))
         }
@@ -396,13 +392,13 @@ fn command_of(
                 effect,
             )
         }
-        (Some(capability), None) => {
-            let class = oxplow_domain::host_capability::host_capability(&capability)
-                .ok_or_else(|| at_name(format!("`capability`: no host capability `{capability}`")))?
+        (Some(scope), None) => {
+            let class = oxplow_domain::scope::scope(&scope)
+                .ok_or_else(|| at_name(format!("`scope`: no scope `{scope}`")))?
                 .class;
             let op = f.op.filter(|op| valid_segment(op)).ok_or_else(|| {
                 at_name(format!(
-                    "`capability: {capability}` needs `op:`, the operation it runs"
+                    "`scope: {scope}` needs `op:`, the operation it runs"
                 ))
             })?;
             for (given, key) in [
@@ -412,12 +408,12 @@ fn command_of(
             ] {
                 if given {
                     return Err(at_name(format!(
-                        "`{key}` comes from the capability's operation — drop it"
+                        "`{key}` comes from the scope's operation — drop it"
                     )));
                 }
             }
             (
-                CommandHandler::Capability { capability, op },
+                CommandHandler::Scope { scope, op },
                 None,
                 crate::commands::ops::effect_of(class),
             )
@@ -425,9 +421,7 @@ fn command_of(
         (Some(_), Some(_)) => unreachable!("refused above"),
         (None, Some(entry)) => {
             if f.op.is_some() {
-                return Err(at_name(
-                    "`op:` names an operation of a `capability:`".into(),
-                ));
+                return Err(at_name("`op:` names an operation of a `scope:`".into()));
             }
             let input_schema = f
                 .input_schema
@@ -536,10 +530,10 @@ fn script_effect(
         }
     };
     if effect == CommandEffect::Read {
-        use oxplow_domain::host_capability::{host_capability, EffectClass};
+        use oxplow_domain::scope::{scope, EffectClass};
         if let Some(writes) = needs
             .iter()
-            .find(|n| host_capability(n).is_some_and(|c| c.class > EffectClass::Read))
+            .find(|n| scope(n).is_some_and(|c| c.class > EffectClass::Read))
         {
             return Err(format!(
                 "`effect: read` but it needs `{writes}`, which changes things"
@@ -707,16 +701,16 @@ pub const COMMAND_SCRIPT_BUDGET: oxplow_collect_plugin::SandboxBudget =
 pub const MAX_EXAMPLES: usize = 10;
 
 /// Run a command's script over `{ input }` in the sandbox
-/// ([`COMMAND_SCRIPT_BUDGET`]), its `capability` calls answered by
+/// ([`COMMAND_SCRIPT_BUDGET`]), its `scope` calls answered by
 /// `calls`, and read what it composes: the one compose step, for the
 /// handler and the examples dry run alike. Blocks: the handler calls it
 /// inside the bus's transaction (off the async runtime already).
 pub fn compose_calls(
     script: &str,
     input: Value,
-    calls: &mut crate::host_capabilities::Calls<'_>,
+    calls: &mut crate::scope_calls::Calls<'_>,
 ) -> Result<Composed, oxplow_domain::CommandError> {
-    let out = oxplow_collect_plugin::capability::run_starlark_serving(
+    let out = oxplow_collect_plugin::scope::run_starlark_serving(
         &COMMAND_SCRIPT_BUDGET,
         script,
         &json!({ "input": input }),
@@ -778,13 +772,11 @@ pub fn extension_command(
         unrecorded: Vec::new(),
     };
     let script = match &decl.handler {
-        CommandHandler::Capability { capability, op } => {
-            let backing = bus
-                .op(capability, op)
-                .ok_or_else(|| CommandError::Invalid {
-                    field: None,
-                    message: format!("the host capability `{capability}` has no op `{op}`"),
-                })?;
+        CommandHandler::Scope { scope, op } => {
+            let backing = bus.op(scope, op).ok_or_else(|| CommandError::Invalid {
+                field: None,
+                message: format!("the scope `{scope}` has no op `{op}`"),
+            })?;
             return backing.command(spec);
         }
         CommandHandler::Provider {
@@ -799,11 +791,11 @@ pub fn extension_command(
     let source = format!("extension:{extension}/{}", decl.name);
     let compose: std::sync::Arc<Composer> = std::sync::Arc::new(
         move |conn: &rusqlite::Connection,
-              trace: &crate::host_capabilities::CapabilityTrace,
+              trace: &crate::scope_calls::ScopeTrace,
               input: &Value| {
             let read =
                 Box::new(|q: oxplow_db::SqlQuery| oxplow_db::semantic_layer::read_on(conn, &q));
-            let mut calls = crate::host_capabilities::Calls::new(&needs, trace, read);
+            let mut calls = crate::scope_calls::Calls::new(&needs, trace, read);
             match compose_calls(&script, input.clone(), &mut calls)? {
                 Composed::Run { calls, events, .. }
                     if reads && !(calls.is_empty() && events.is_empty()) =>
@@ -902,7 +894,7 @@ pub fn register_declared(bus: &std::sync::Arc<crate::commands::CommandBus>) {
         let built: Vec<_> = decls
             .iter()
             .filter(|d| match &d.handler {
-                CommandHandler::Capability { capability, op } => bus.op(capability, op).is_some(),
+                CommandHandler::Scope { scope, op } => bus.op(scope, op).is_some(),
                 CommandHandler::Script { .. } | CommandHandler::Provider { .. } => false,
             })
             .map(|d| extension_command(bus, b.name, d).expect("it builds"))
@@ -933,7 +925,7 @@ fn provider_command(
     spec.atomicity = oxplow_domain::Atomicity::External;
     spec.undoable = undoable;
     spec.op = Some(oxplow_domain::OpRef {
-        capability: format!("provider:{extension}/{provider}"),
+        scope: format!("provider:{extension}/{provider}"),
         op: op.into(),
     });
     let bus_weak = std::sync::Arc::downgrade(bus);
@@ -1089,7 +1081,7 @@ pub fn spawn_reconciler(state: std::sync::Arc<crate::Services>) {
 
 /// Check `ext`'s commands (`check_extension`): with the running oxplow's
 /// registry, its namespace is free (or already its own); then every
-/// example is dry-run — the script in the sandbox, its capability calls
+/// example is dry-run — the script in the sandbox, its scope calls
 /// answered by the example's `answers` or for real, and what it composes against
 /// the registry (each command exists, its input fits, and the names are
 /// `expect_commands`, in order).
@@ -1180,7 +1172,7 @@ pub fn call_names(calls: &[CommandCall]) -> Vec<&str> {
     calls.iter().map(|c| c.name.as_str()).collect()
 }
 
-/// Dry-run `cmd` on `input`: the script in the sandbox, its capability
+/// Dry-run `cmd` on `input`: the script in the sandbox, its scope
 /// calls answered from `answers` or for real (reads only: `sql.read`
 /// through `layer`), and — when it composes — each command against
 /// `registry` (it exists, its input fits). What the script decided;
@@ -1195,7 +1187,7 @@ pub async fn dry_run(
 ) -> Result<Composed, String> {
     let CommandHandler::Script { script, .. } = &cmd.handler else {
         return Err(format!(
-            "`{}` runs a capability's operation; only a script's command is dry-run",
+            "`{}` runs a scope's operation; only a script's command is dry-run",
             cmd.name
         ));
     };
@@ -1203,10 +1195,9 @@ pub async fn dry_run(
     let (layer, answers) = (layer.clone(), answers.clone());
     let runtime = tokio::runtime::Handle::current();
     let decided = tokio::task::spawn_blocking(move || {
-        let trace = crate::host_capabilities::CapabilityTrace::default();
+        let trace = crate::scope_calls::ScopeTrace::default();
         let read = Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(layer.run(q)));
-        let mut calls =
-            crate::host_capabilities::Calls::new(&needs, &trace, read).with_answers(&answers);
+        let mut calls = crate::scope_calls::Calls::new(&needs, &trace, read).with_answers(&answers);
         compose_calls(&script, input, &mut calls)
     })
     .await
@@ -1321,7 +1312,7 @@ mod tests {
         assert_eq!(command_namespace("my-review"), "my_review");
     }
 
-    /// A command declares the capabilities it needs and how a person meets
+    /// A command declares what it needs and how a person meets
     /// it, like core's; a private extension's is experimental.
     #[test]
     fn a_command_declares_its_needs_and_how_a_person_meets_it() {
@@ -1402,24 +1393,24 @@ mod tests {
                 "has no handler",
             ),
             (
-                entry("a.b", "    capability: bookmarks.write\n    op: set\n"),
+                entry("a.b", "    scope: bookmarks.write\n    op: set\n"),
                 vec![("handlers/h.star", HANDLER)],
-                "more than one of `entry:`, `capability:` and `provider:`",
+                "more than one of `entry:`, `scope:` and `provider:`",
             ),
             (
-                "  - name: a.b\n    summary: S.\n    capability: bookmarks.erase\n    op: set\n".into(),
+                "  - name: a.b\n    summary: S.\n    scope: bookmarks.erase\n    op: set\n".into(),
                 vec![],
-                "no host capability `bookmarks.erase`",
+                "no scope `bookmarks.erase`",
             ),
             (
-                "  - name: a.b\n    summary: S.\n    capability: bookmarks.write\n".into(),
+                "  - name: a.b\n    summary: S.\n    scope: bookmarks.write\n".into(),
                 vec![],
                 "needs `op:`",
             ),
             (
-                "  - name: a.b\n    summary: S.\n    capability: bookmarks.write\n    op: set\n    input_schema: { type: object }\n".into(),
+                "  - name: a.b\n    summary: S.\n    scope: bookmarks.write\n    op: set\n    input_schema: { type: object }\n".into(),
                 vec![],
-                "`input_schema` comes from the capability's operation",
+                "`input_schema` comes from the scope's operation",
             ),
             (
                 entry("a.b", "    effect: read\n    confirm: always\n"),
@@ -1651,7 +1642,7 @@ mod tests {
                 &[(
                     "handlers/finish_review.star",
                     &format!(
-                        "def transform(x):\n    rows = capability(\"sql.read\", {{\"sql\": \"{sql}\", \"params\": {{\"ref\": x[\"input\"][\"ref\"]}}}})\n    return {{\"commands\": [{{\"name\": \"oxplow.work_item.transition\", \"input\": {{\"ref\": rows[0][\"r\"], \"to\": \"done\"}}}}]}}\n"
+                        "def transform(x):\n    rows = scope(\"sql.read\", {{\"sql\": \"{sql}\", \"params\": {{\"ref\": x[\"input\"][\"ref\"]}}}})\n    return {{\"commands\": [{{\"name\": \"oxplow.work_item.transition\", \"input\": {{\"ref\": rows[0][\"r\"], \"to\": \"done\"}}}}]}}\n"
                     ),
                 )],
             );
@@ -1737,7 +1728,7 @@ mod tests {
 
     /// Transitions the task to done and renames it after its row.
     const FINISH: &str = "def transform(x):
-    row = capability(\"sql.read\", {
+    row = scope(\"sql.read\", {
         \"sql\": \"SELECT ref, title FROM v_work_item WHERE ref = :ref\",
         \"params\": {\"ref\": x[\"input\"][\"ref\"]},
     })[0]
@@ -1877,7 +1868,7 @@ mod tests {
         assert_eq!(ok.len(), 1, "one audit row for the run");
         assert_eq!(ok[0].command, "my_review.review.finish");
         assert_eq!(
-            ok[0].capabilities,
+            ok[0].scopes,
             [("sql.read".to_string(), 1)].into(),
             "the run's own read, not the routing pass's"
         );
@@ -1904,7 +1895,7 @@ mod tests {
             write_ext(fx._dir.path(), "acme", block, &[]);
         };
         declare(
-            "  - name: page.star\n    summary: Star the page.\n    capability: bookmarks.write\n    op: set\n    invokers: { human: true, agent: true, lens: true }\n",
+            "  - name: page.star\n    summary: Star the page.\n    scope: bookmarks.write\n    op: set\n    invokers: { human: true, agent: true, lens: true }\n",
         );
         fx.svc.extension_commands.reconcile().await;
         assert!(fx.svc.commands.spec("acme.page.star").is_none());
@@ -1916,7 +1907,7 @@ mod tests {
         );
 
         declare(
-            "  - name: files.drop\n    summary: Discard.\n    capability: vcs.write\n    op: discard\n    invokers: { human: true, agent: false, lens: false }\n",
+            "  - name: files.drop\n    summary: Discard.\n    scope: vcs.write\n    op: discard\n    invokers: { human: true, agent: false, lens: false }\n",
         );
         fx.svc.extension_commands.reconcile().await;
         assert!(fx.svc.commands.spec("acme.files.drop").is_none());
@@ -1929,7 +1920,7 @@ mod tests {
 
         // Narrowing is fine: a person-only star over a person-or-lens op.
         declare(
-            "  - name: page.star\n    summary: Star the page.\n    capability: bookmarks.write\n    op: set\n    invokers: { human: true, agent: false, lens: false }\n",
+            "  - name: page.star\n    summary: Star the page.\n    scope: bookmarks.write\n    op: set\n    invokers: { human: true, agent: false, lens: false }\n",
         );
         fx.svc.extension_commands.reconcile().await;
         assert!(fx.svc.commands.spec("acme.page.star").is_some());
@@ -1939,7 +1930,7 @@ mod tests {
     /// A project extension declares its own command over one of the
     /// operations oxplow's commands are backed by: nothing about
     /// oxplow's is special. Its spec is the operation's (schema, undo,
-    /// effect), the capability among its needs; one naming an operation
+    /// effect), the scope among its needs; one naming an operation
     /// that isn't there isn't registered, its problem said.
     #[tokio::test(flavor = "multi_thread")]
     async fn an_extension_declares_a_command_over_an_operation() {
@@ -1949,7 +1940,7 @@ mod tests {
                 fx._dir.path(),
                 "acme",
                 &format!(
-                    "  - name: page.star\n    summary: Star the page for the project.\n    capability: bookmarks.write\n    op: {op}\n    invokers: {{ human: true, agent: false, lens: false }}\n"
+                    "  - name: page.star\n    summary: Star the page for the project.\n    scope: bookmarks.write\n    op: {op}\n    invokers: {{ human: true, agent: false, lens: false }}\n"
                 ),
                 &[],
             );
@@ -1982,10 +1973,10 @@ mod tests {
         assert!(problem.contains("has no op `erase`"), "{problem}");
     }
 
-    /// A capability the command didn't declare in `needs` is refused: the
+    /// A scope the command didn't declare in `needs` is refused: the
     /// run fails, writing nothing.
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_capability_the_command_didnt_declare_is_refused() {
+    async fn a_scope_the_command_didnt_declare_is_refused() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         write_ext(
             fx._dir.path(),
@@ -2034,7 +2025,7 @@ mod tests {
                 .run(&agent, "my_review.work.count", json!({}), false)
         };
         with_count(
-            "def transform(x):\n    rows = capability(\"sql.read\", {\"sql\": \"SELECT count(*) AS n FROM v_work_item\"})\n    return {\"commands\": [], \"result\": {\"n\": rows[0][\"n\"]}}\n",
+            "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT count(*) AS n FROM v_work_item\"})\n    return {\"commands\": [], \"result\": {\"n\": rows[0][\"n\"]}}\n",
         );
         fx.svc.extension_commands.reconcile().await;
         let out = run().await.unwrap();
@@ -2287,7 +2278,7 @@ mod tests {
             .contains("a refusal composes nothing"),);
     }
 
-    /// An example may stand in answers for its capability calls
+    /// An example may stand in answers for its scope calls
     /// (`answers:`, so it doesn't depend on the project's data) and may
     /// expect a refusal (`refuses:`, a part of its reason).
     #[tokio::test(flavor = "multi_thread")]
@@ -2304,7 +2295,7 @@ mod tests {
         let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
         let cat = crate::extension_catalog::ExtensionCatalog::new();
         const SCRIPT: &str = "def transform(x):
-    rows = capability(\"sql.read\", {\"sql\": \"SELECT ref FROM v_work_item WHERE ref = :ref\", \"params\": {\"ref\": x[\"input\"][\"ref\"]}})
+    rows = scope(\"sql.read\", {\"sql\": \"SELECT ref FROM v_work_item WHERE ref = :ref\", \"params\": {\"ref\": x[\"input\"][\"ref\"]}})
     if not rows:
         return {\"refuse\": \"no such item\"}
     return {\"commands\": [{\"name\": \"oxplow.work_item.transition\", \"input\": {\"ref\": rows[0][\"ref\"], \"to\": \"done\"}}]}

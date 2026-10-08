@@ -5530,7 +5530,7 @@ commands:
     }
 
     /// Oxplow ships two extensions: `oxplow-foundation`, its own commands
-    /// over the host capabilities' operations, and `oxplow-bundled`: the
+    /// over the scopes' operations, and `oxplow-bundled`: the
     /// review packet, the analytics lenses and the agent's advisories
     /// together. They load clean and every lens's SQL runs.
     #[tokio::test]
@@ -5548,7 +5548,7 @@ commands:
         assert_eq!(foundation.namespace, "oxplow");
         assert!(foundation.commands.iter().all(|c| matches!(
             c.handler,
-            crate::extension_commands::CommandHandler::Capability { .. }
+            crate::extension_commands::CommandHandler::Scope { .. }
         )));
         let b = bundled[0];
         assert!(b.errors.is_empty(), "{:?}", b.errors);

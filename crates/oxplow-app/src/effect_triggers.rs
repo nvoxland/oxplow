@@ -575,7 +575,7 @@ pub(crate) async fn run_reaction(
     // goes to a provider that keeps `idempotent_writes`, it isn't sent:
     // the failure is a person's.
     // What the script called: a resend composes nothing, so calls nothing.
-    let mut capabilities = BTreeMap::new();
+    let mut scopes = BTreeMap::new();
     let (calls, events) = if origin == ReactionOrigin::Auto {
         let failed_attempt = EffectRunKey {
             attempt: key.attempt - 1,
@@ -594,7 +594,7 @@ pub(crate) async fn run_reaction(
             Ok(c) => c,
             Err(reason) => return failed(reason).await,
         };
-        capabilities = used;
+        scopes = used;
         match composed {
             Reaction::Skip(why) => return skipped(why).await,
             Reaction::Run { calls, events } => (calls, events),
@@ -616,7 +616,7 @@ pub(crate) async fn run_reaction(
     };
     let input = json!({ "calls": calls });
     let safe = safe_to_resend(svc, &calls);
-    let command = effect_command(&svc.commands, calls, events, capabilities)
+    let command = effect_command(&svc.commands, calls, events, scopes)
         .map_err(|e| DomainError::Invariant(e.to_string()))?;
     // Kept with its claim when it may be sent again by itself: what an
     // attempt cut off before its record sends (tsk954).
@@ -866,20 +866,20 @@ pub(crate) fn find_effect(svc: &Services, name: &str) -> Option<(Extension, Effe
 
 /// The run of an effect's reaction: the registered `oxplow.command.sequence` —
 /// its spec and compiled schema — over what its script composed: `calls`,
-/// and its own `events` beside them, with the capabilities composing them
+/// and its own `events` beside them, with the scopes composing them
 /// called (recorded with the run).
 fn effect_command(
     bus: &Arc<crate::commands::CommandBus>,
     calls: Vec<CommandCall>,
     events: Vec<oxplow_domain::Envelope>,
-    capabilities: BTreeMap<String, u32>,
+    scopes: BTreeMap<String, u32>,
 ) -> Result<crate::commands::Command, CommandError> {
     use crate::commands::compose::{Compose, Composer, Composition, SEQUENCE};
     let sequence = bus.command(SEQUENCE).ok_or_else(|| CommandError::Failed {
         message: format!("`{SEQUENCE}` isn't registered"),
     })?;
     let composer: Arc<Composer> = Arc::new(move |_conn, trace, _input| {
-        trace.add(&capabilities);
+        trace.add(&scopes);
         Ok(Composition {
             calls: calls.clone(),
             result: None,
@@ -898,7 +898,7 @@ fn effect_command(
 
 /// Run the effect's script over `{ event }`, sandboxed, its `sql.read`
 /// calls answered through the SQL gateway (each its own read, so the
-/// script never holds a connection). The reaction, and the capabilities
+/// script never holds a connection). The reaction, and the scopes
 /// it called; `Err` is why it failed.
 async fn run_script(
     svc: &Services,
@@ -909,9 +909,9 @@ async fn run_script(
     let (script, needs, layer) = (decl.script.clone(), decl.needs.clone(), svc.sql.clone());
     let runtime = tokio::runtime::Handle::current();
     tokio::task::spawn_blocking(move || {
-        let trace = crate::host_capabilities::CapabilityTrace::default();
+        let trace = crate::scope_calls::ScopeTrace::default();
         let read = Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(layer.run(q)));
-        let mut calls = crate::host_capabilities::Calls::new(&needs, &trace, read);
+        let mut calls = crate::scope_calls::Calls::new(&needs, &trace, read);
         let reaction = effects::run_script(&script, event, &mut calls)?;
         Ok((reaction, trace.summary()))
     })
@@ -937,7 +937,7 @@ mod tests {
 
     /// Marks a finished item's title.
     const MARK_DONE: &str = "  - id: mark-done\n    summary: Mark a finished item.\n    on: [work_item.state_changed]\n    where: { to: done }\n    needs: [sql.read]\n    entry: mark.star\n";
-    const MARK: &str = "def transform(x):\n    rows = capability(\"sql.read\", {\"sql\": \"SELECT title FROM v_work_item WHERE ref = :work_item\", \"params\": {\"work_item\": x[\"event\"][\"payload\"][\"work_item\"]}})\n    ref = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": ref, \"title\": rows[0][\"title\"] + \" (done)\"}}]}\n";
+    const MARK: &str = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_work_item WHERE ref = :work_item\", \"params\": {\"work_item\": x[\"event\"][\"payload\"][\"work_item\"]}})\n    ref = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": ref, \"title\": rows[0][\"title\"] + \" (done)\"}}]}\n";
 
     fn extension(root: &Path, effects: &str, files: &[(&str, &str)]) {
         let dir = root.join("oxplow/extensions/acme");
@@ -1039,7 +1039,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         let stamp = "  - id: stamp\n    summary: Stamp the event's seq.\n    on: [work_item.state_changed]\n    where: { to: done }\n    needs: [sql.read]\n    entry: stamp.star\n";
-        let script = "def transform(x):\n    rows = capability(\"sql.read\", {\"sql\": \"SELECT seq, type FROM v_event WHERE id = :event_id AND seq = :event_seq\", \"params\": {\"event_id\": x[\"event\"][\"id\"], \"event_seq\": x[\"event\"][\"seq\"]}})\n    ref = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": ref, \"title\": rows[0][\"type\"] + \" #\" + str(rows[0][\"seq\"])}}]}\n";
+        let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT seq, type FROM v_event WHERE id = :event_id AND seq = :event_seq\", \"params\": {\"event_id\": x[\"event\"][\"id\"], \"event_seq\": x[\"event\"][\"seq\"]}})\n    ref = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": ref, \"title\": rows[0][\"type\"] + \" #\" + str(rows[0][\"seq\"])}}]}\n";
         extension(&svc.layout.project_dir, stamp, &[("stamp.star", script)]);
         approve(svc).await;
         let ev = log(svc, state_changed(fx.task, CanonicalState::Done)).await;
@@ -1055,7 +1055,7 @@ mod tests {
         // what the script called.
         let audit = svc.commands.audit_store().list_recent(1).await.unwrap();
         assert_eq!(audit[0].command, crate::commands::compose::SEQUENCE);
-        assert_eq!(audit[0].capabilities, [("sql.read".to_string(), 1)].into());
+        assert_eq!(audit[0].scopes, [("sql.read".to_string(), 1)].into());
         // The dry run (`plugin test`, a change's review) reads alike.
         let (_, decl) = effects(svc).into_iter().next().unwrap();
         let reaction = effects::dry_run(
@@ -1572,7 +1572,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         let bang = "  - id: bang\n    summary: Add a bang.\n    on: [work_item.edited]\n    needs: [sql.read]\n    entry: bang.star\n";
-        let script = "def transform(x):\n    rows = capability(\"sql.read\", {\"sql\": \"SELECT title FROM v_work_item WHERE ref = :work_item\", \"params\": {\"work_item\": x[\"event\"][\"payload\"][\"work_item\"]}})\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": x[\"event\"][\"payload\"][\"work_item\"], \"title\": rows[0][\"title\"] + \"!\"}}]}\n";
+        let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_work_item WHERE ref = :work_item\", \"params\": {\"work_item\": x[\"event\"][\"payload\"][\"work_item\"]}})\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": x[\"event\"][\"payload\"][\"work_item\"], \"title\": rows[0][\"title\"] + \"!\"}}]}\n";
         extension(&svc.layout.project_dir, bang, &[("bang.star", script)]);
         approve(svc).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
@@ -2038,7 +2038,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         let bang = "  - id: bang\n    summary: Add a bang.\n    on: [work_item.edited]\n    needs: [sql.read]\n    entry: bang.star\n";
-        let script = "def transform(x):\n    rows = capability(\"sql.read\", {\"sql\": \"SELECT title FROM v_work_item WHERE ref = :work_item\", \"params\": {\"work_item\": x[\"event\"][\"payload\"][\"work_item\"]}})\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": x[\"event\"][\"payload\"][\"work_item\"], \"title\": rows[0][\"title\"] + \"!\"}}]}\n";
+        let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_work_item WHERE ref = :work_item\", \"params\": {\"work_item\": x[\"event\"][\"payload\"][\"work_item\"]}})\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": x[\"event\"][\"payload\"][\"work_item\"], \"title\": rows[0][\"title\"] + \"!\"}}]}\n";
         extension(&svc.layout.project_dir, bang, &[("bang.star", script)]);
         register(svc);
         let r = oxplow_tasks::work_item_ref(fx.task);

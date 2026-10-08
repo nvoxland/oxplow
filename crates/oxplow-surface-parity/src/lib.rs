@@ -154,7 +154,7 @@ pub const MANIFEST: &[Capability] = &[
     ),
     ui(
         "register_client_host",
-        "the window says it's open and which capabilities it hosts; an agent reaches them by running their commands",
+        "the window says it's open and which scopes it hosts; an agent reaches them by running their commands",
     ),
     ui(
         "unregister_client_host",
@@ -162,7 +162,7 @@ pub const MANIFEST: &[Capability] = &[
     ),
     ui(
         "answer_client_call",
-        "the window answers a call to a capability it hosts; an agent's call is answered through `run_command`",
+        "the window answers a call to a scope it hosts; an agent's call is answered through `run_command`",
     ),
     ui(
         "run_command_for_call",

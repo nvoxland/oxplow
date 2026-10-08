@@ -12,11 +12,11 @@ oxplow-coverage = { workspace = true }
 # The bundled parsers' table (name, what each records, its report format
 # and program) is the config's: one table for the check and the runtime.
 oxplow-config = { workspace = true }
-# Tree-sitter AST engine behind the `ast_query` gauge host capability.
+# Tree-sitter AST engine behind the `ast_query` gauge builtin.
 oxplow-code-metrics = { workspace = true }
-# The duplicate-block detector behind the `duplicate_blocks` host capability.
+# The duplicate-block detector behind the `duplicate_blocks` builtin.
 oxplow-code-dup = { workspace = true }
-# Glob matching for the `files(glob)` snapshot host capability.
+# Glob matching for the `files(glob)` snapshot builtin.
 globset = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

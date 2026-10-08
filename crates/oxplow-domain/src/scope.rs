@@ -1,10 +1,9 @@
-//! Host capabilities: the native things a command's handler may do —
-//! read the semantic layer, write oxplow's records, run git, write files,
-//! open a dialog — each named like an OAuth scope (resource + action) and
-//! declared in the command's `needs` (`.context/commands.md` "Host
-//! capabilities"). Every command — oxplow's own and any extension's —
-//! reaches them the same way; a call to one the command didn't declare is
-//! refused.
+//! Scopes: the native things a command's handler may do — read the
+//! semantic layer, write oxplow's records, run git, write files, open a
+//! dialog — each named like an OAuth scope (resource + action) and
+//! declared in the command's `needs` (`.context/commands.md` "Scopes").
+//! Every command — oxplow's own and any extension's — reaches them the
+//! same way; a call to one the command didn't declare is refused.
 //!
 //! Not to be confused with [`crate::capability`]: the swappable pieces a
 //! project chooses an implementation of (`work_items`, `snapshots`). A
@@ -14,7 +13,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// What a capability does to the world: a command's effect is the
+/// What a scope lets a handler do to the world: a command's effect is the
 /// strongest class among what it needs — whether its run is recorded and
 /// who may make it (`CommandEffect`). Not where its handler runs: that is
 /// the operation's handler, in the bus's transaction or outside it
@@ -37,7 +36,7 @@ pub enum EffectClass {
     Write,
 }
 
-/// Where a capability's handler lives: a command it backs runs there,
+/// Where a scope's handler lives: a command it backs runs there,
 /// and a call from anywhere else is a round trip to it (VS Code's model).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, specta::Type)]
 #[serde(rename_all = "snake_case")]
@@ -54,9 +53,9 @@ pub enum Host {
     Shell,
 }
 
-/// One host capability, as core declares it.
+/// One scope, as core declares it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct HostCapability {
+pub struct Scope {
     /// `sql.read`: `<resource>.<action>`.
     pub id: &'static str,
     pub class: EffectClass,
@@ -65,148 +64,148 @@ pub struct HostCapability {
     pub summary: &'static str,
 }
 
-/// Every host capability core provides, by id.
-pub const HOST_CAPABILITIES: &[HostCapability] = &[
-    HostCapability {
+/// Every scope core provides, by id.
+pub const SCOPES: &[Scope] = &[
+    Scope {
         id: "agent_input.write",
         class: EffectClass::View,
         host: Host::Window,
         summary: "Put text in a thread's agent input, unsent — a person's: oxplow never types for the agent.",
     },
-    HostCapability {
+    Scope {
         id: "bookmarks.write",
         class: EffectClass::Record,
         host: Host::Daemon,
         summary: "Star a page for a person, at a thread, stream or project, or take the star off.",
     },
-    HostCapability {
+    Scope {
         id: "collectors.sync",
         class: EffectClass::Write,
         host: Host::Daemon,
         summary: "Run the project's and extensions' collectors now, syncing what they read.",
     },
-    HostCapability {
+    Scope {
         id: "config.read",
         class: EffectClass::Read,
         host: Host::Daemon,
         summary: "Read the project's configuration (`.oxplow/project.yaml`) and its keys.",
     },
-    HostCapability {
+    Scope {
         id: "config.write",
         class: EffectClass::Write,
         host: Host::Daemon,
         summary: "Change the project's configuration file (`.oxplow/project.yaml`).",
     },
-    HostCapability {
+    Scope {
         id: "dashboards.write",
         class: EffectClass::Record,
         host: Host::Daemon,
         summary: "Create, rename, delete and arrange dashboards and their tiles.",
     },
-    HostCapability {
+    Scope {
         id: "diagnostics.write",
         class: EffectClass::Record,
         host: Host::Daemon,
         summary: "Record an error the window ran into, for the person to see.",
     },
-    HostCapability {
+    Scope {
         id: "editor.write",
         class: EffectClass::View,
         host: Host::Window,
         summary: "Save a file's unsaved changes in a thread's editor.",
     },
-    HostCapability {
+    Scope {
         id: "effects.read",
         class: EffectClass::Read,
         host: Host::Daemon,
         summary: "Read what an extension's effect would react to.",
     },
-    HostCapability {
+    Scope {
         id: "effects.run",
         class: EffectClass::Write,
         host: Host::Daemon,
         summary: "Run an extension's effect again: retry a reaction, backfill past events.",
     },
-    HostCapability {
+    Scope {
         id: "efforts.write",
         class: EffectClass::Record,
         host: Host::Daemon,
         summary:
             "Open, update, link and close efforts; record and review their claims and decisions.",
     },
-    HostCapability {
+    Scope {
         id: "extensions.enable",
         class: EffectClass::Write,
         host: Host::Daemon,
         summary: "Turn a disabled plugin contribution back on.",
     },
-    HostCapability {
+    Scope {
         id: "extensions.install",
         class: EffectClass::Write,
         host: Host::Daemon,
         summary: "Install or update an extension in the project's `oxplow/extensions/`.",
     },
-    HostCapability {
+    Scope {
         id: "files.write",
         class: EffectClass::Write,
         host: Host::Daemon,
         summary: "Write files in a worktree (restore one from a snapshot).",
     },
-    HostCapability {
+    Scope {
         id: "hints.write",
         class: EffectClass::Record,
         host: Host::Daemon,
         summary: "Dismiss a hint oxplow showed.",
     },
-    HostCapability {
+    Scope {
         id: "knowledge.write",
         class: EffectClass::Record,
         host: Host::Daemon,
         summary: "Write the project's wiki: pages, notes, comments and links.",
     },
-    HostCapability {
+    Scope {
         id: "lenses.show",
         class: EffectClass::Record,
         host: Host::Daemon,
         summary: "Show a lens beside the conversation.",
     },
-    HostCapability {
+    Scope {
         id: "lenses.write",
         class: EffectClass::Write,
         host: Host::Daemon,
         summary: "Keep or share a lens as a file in the project.",
     },
-    HostCapability {
+    Scope {
         id: "lsp.install",
         class: EffectClass::Write,
         host: Host::Daemon,
         summary: "Install or remove a language server on this machine.",
     },
-    HostCapability {
+    Scope {
         id: "metrics.read",
         class: EffectClass::Read,
         host: Host::Daemon,
         summary: "Read a metric's definition, scaffolded for editing.",
     },
-    HostCapability {
+    Scope {
         id: "metrics.write",
         class: EffectClass::Write,
         host: Host::Daemon,
         summary: "Enable, record and rebuild metrics (changes the configuration and the facts).",
     },
-    HostCapability {
+    Scope {
         id: "projects.write",
         class: EffectClass::Write,
         host: Host::Shell,
         summary: "Create a project in a folder, or open one — in this window or a new one.",
     },
-    HostCapability {
+    Scope {
         id: "providers.sync",
         class: EffectClass::Record,
         host: Host::Daemon,
         summary: "Sync a provider's records into oxplow.",
     },
-    HostCapability {
+    Scope {
         id: "sql.read",
         class: EffectClass::Read,
         host: Host::Daemon,
@@ -214,55 +213,55 @@ pub const HOST_CAPABILITIES: &[HostCapability] = &[
             "Read oxplow's published models (`v_*`) with SQL: one read-only statement a call, \
               bound by named parameters.",
     },
-    HostCapability {
+    Scope {
         id: "streams.write",
         class: EffectClass::Record,
         host: Host::Daemon,
         summary: "Rename a stream and set its standing prompt.",
     },
-    HostCapability {
+    Scope {
         id: "tabs.write",
         class: EffectClass::View,
         host: Host::Window,
         summary: "Open, close and focus tabs in a thread's set of tabs — an agent's only in its own thread's.",
     },
-    HostCapability {
+    Scope {
         id: "test_runs.write",
         class: EffectClass::Record,
         host: Host::Daemon,
         summary: "Record a test run's results.",
     },
-    HostCapability {
+    Scope {
         id: "threads.write",
         class: EffectClass::Record,
         host: Host::Daemon,
         summary: "Create, rename, reorder, promote, close and reopen threads.",
     },
-    HostCapability {
+    Scope {
         id: "vcs.remote",
         class: EffectClass::Write,
         host: Host::Daemon,
         summary: "Fetch, pull and push the repository's branches.",
     },
-    HostCapability {
+    Scope {
         id: "vcs.write",
         class: EffectClass::Write,
         host: Host::Daemon,
         summary: "Change the repository: stage, commit, discard, branch, merge, rebase, resolve.",
     },
-    HostCapability {
+    Scope {
         id: "window.show",
         class: EffectClass::View,
         host: Host::Window,
         summary: "Show the window's search box (Quick Open) or its find-in-file bar.",
     },
-    HostCapability {
+    Scope {
         id: "work_items.write",
         class: EffectClass::Record,
         host: Host::Daemon,
         summary: "Create, update, move, link, comment on and delete work items.",
     },
-    HostCapability {
+    Scope {
         id: "worktrees.write",
         class: EffectClass::Write,
         host: Host::Daemon,
@@ -270,19 +269,15 @@ pub const HOST_CAPABILITIES: &[HostCapability] = &[
     },
 ];
 
-/// The host capability `id`, if core provides it.
-pub fn host_capability(id: &str) -> Option<&'static HostCapability> {
-    HOST_CAPABILITIES.iter().find(|c| c.id == id)
+/// The scope `id`, if core provides it.
+pub fn scope(id: &str) -> Option<&'static Scope> {
+    SCOPES.iter().find(|c| c.id == id)
 }
 
-/// The strongest class among `needs`' host capabilities; `None` when it
+/// The strongest class among `needs`' scopes; `None` when it
 /// names none (a command that only composes others).
 pub fn strongest_class(needs: &[String]) -> Option<EffectClass> {
-    needs
-        .iter()
-        .filter_map(|n| host_capability(n))
-        .map(|c| c.class)
-        .max()
+    needs.iter().filter_map(|n| scope(n)).map(|c| c.class).max()
 }
 
 #[cfg(test)]
@@ -290,13 +285,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn each_capability_is_declared_once_as_resource_and_action() {
-        let mut ids: Vec<&str> = HOST_CAPABILITIES.iter().map(|c| c.id).collect();
+    fn each_scope_is_declared_once_as_resource_and_action() {
+        let mut ids: Vec<&str> = SCOPES.iter().map(|c| c.id).collect();
         let listed = ids.clone();
         ids.sort();
         ids.dedup();
         assert_eq!(ids, listed, "sorted, each once");
-        for c in HOST_CAPABILITIES {
+        for c in SCOPES {
             assert_eq!(c.id.split('.').count(), 2, "{}", c.id);
             assert!(!c.summary.is_empty(), "{}", c.id);
         }

@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { startClientHost, type ClientHostDeps, type ClientHandlers } from "./clientHost.js";
 import type { OxplowEvent } from "./tauri-bridge/generated/bindings.js";
 
-// The window as a command host: it says which capabilities it hosts, does
+// The window as a command host: it says which scopes it hosts, does
 // what the daemon calls it for, and answers — in the caller's thread. It
 // has an id of its own: calls are addressed to one window, and it says
 // when it closes.
@@ -45,7 +45,7 @@ function harness(handlers: ClientHandlers) {
 }
 
 const call = (op: string, input: unknown, client = "w1"): OxplowEvent =>
-  ({ kind: "clientCall", id: `c-${op}`, client, threadId: "thr3", actor: "agent:thr3", capability: "tabs.write", op, input }) as OxplowEvent;
+  ({ kind: "clientCall", id: `c-${op}`, client, threadId: "thr3", actor: "agent:thr3", scope: "tabs.write", op, input }) as OxplowEvent;
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 

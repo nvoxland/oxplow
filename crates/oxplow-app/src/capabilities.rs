@@ -292,9 +292,9 @@ impl Active {
     pub fn unmet(&self, needs: &[String]) -> Vec<String> {
         needs
             .iter()
-            // A host capability is always there; what may use it is a
+            // A scope is always there; what may use it is a
             // separate question (`.context/commands.md`).
-            .filter(|need| oxplow_domain::host_capability::host_capability(need).is_none())
+            .filter(|need| oxplow_domain::scope::scope(need).is_none())
             .filter(|need| {
                 let (id, feature) = match need.split_once('.') {
                     Some((id, f)) => (id, Some(f)),

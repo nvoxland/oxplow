@@ -1,5 +1,5 @@
 //! The window as a command host (`.context/commands.md` "Where a command
-//! runs"): a command backed by a capability the window hosts
+//! runs"): a command backed by a scope the window hosts
 //! (`Host::Window`: `tabs.write`, …) runs in the window — and one the
 //! app shell hosts (`Host::Shell`: `projects.write`), which the window
 //! reaches. The window's own
@@ -36,7 +36,7 @@ pub const ANSWER_TIMEOUT: Duration = Duration::from_secs(15);
 type Answer = tokio::sync::oneshot::Sender<Result<Value, String>>;
 
 /// An open window: its id (minted by the window when it starts) and the
-/// capabilities it hosts.
+/// scopes it hosts.
 struct Window {
     client: String,
     hosted: BTreeSet<String>,
@@ -53,7 +53,7 @@ struct Pending {
 pub struct ClientHost {
     events: EventBus,
     /// The open windows, the most recently registered last: a call goes
-    /// to the last one that hosts its capability.
+    /// to the last one that hosts its scope.
     windows: parking_lot::Mutex<Vec<Window>>,
     pending: parking_lot::Mutex<HashMap<String, Pending>>,
     timeout: Duration,
@@ -73,15 +73,15 @@ impl ClientHost {
         }
     }
 
-    /// Window `client` is open and hosts `capabilities` (it says so when
+    /// Window `client` is open and hosts `scopes` (it says so when
     /// it starts, and again when it reconnects). It takes the calls from
     /// now on.
-    pub fn register(&self, client: &str, capabilities: Vec<String>) {
+    pub fn register(&self, client: &str, scopes: Vec<String>) {
         let mut windows = self.windows.lock();
         windows.retain(|w| w.client != client);
         windows.push(Window {
             client: client.into(),
-            hosted: capabilities.into_iter().collect(),
+            hosted: scopes.into_iter().collect(),
         });
     }
 
@@ -118,11 +118,11 @@ impl ClientHost {
         }
     }
 
-    /// Have the window do `capability`'s `op` with `input` for `actor`.
+    /// Have the window do `scope`'s `op` with `input` for `actor`.
     pub async fn call(
         &self,
         actor: &Actor,
-        capability: &str,
+        scope: &str,
         op: &str,
         input: Value,
     ) -> Result<Value, CommandError> {
@@ -135,9 +135,9 @@ impl ClientHost {
             if windows.is_empty() {
                 return Err(refused("no window is open".into()));
             }
-            match windows.iter().rev().find(|w| w.hosted.contains(capability)) {
+            match windows.iter().rev().find(|w| w.hosted.contains(scope)) {
                 Some(w) => w.client.clone(),
-                None => return Err(refused(format!("the window doesn't host `{capability}`"))),
+                None => return Err(refused(format!("the window doesn't host `{scope}`"))),
             }
         };
         let thread_id = match actor.agent_thread() {
@@ -146,7 +146,7 @@ impl ClientHost {
             Some(None) => {
                 return Err(CommandError::Invalid {
                     field: None,
-                    message: format!("`{capability}` acts in a thread's tabs; this agent has none"),
+                    message: format!("`{scope}` acts in a thread's tabs; this agent has none"),
                 })
             }
             Some(thread) => thread,
@@ -167,7 +167,7 @@ impl ClientHost {
             client: client.clone(),
             thread_id,
             actor: actor.source(),
-            capability: capability.into(),
+            scope: scope.into(),
             op: op.into(),
             input: oxplow_domain::Json(input),
         });
@@ -187,24 +187,24 @@ impl ClientHost {
         }
     }
 
-    /// `capability`'s operation `op` on the daemon: its runs go to the
+    /// `scope`'s operation `op` on the daemon: its runs go to the
     /// window.
     pub fn op(
         host: &Arc<ClientHost>,
-        capability: &'static str,
+        scope: &'static str,
         op: &'static str,
         input_schema: Value,
     ) -> Op {
         let host = host.clone();
         Op::new(
-            capability,
+            scope,
             op,
             input_schema,
             false,
             Handler::External(Arc::new(move |invocation: Invocation, input: Value| {
                 let host = host.clone();
                 Box::pin(async move {
-                    let result = host.call(&invocation.actor, capability, op, input).await?;
+                    let result = host.call(&invocation.actor, scope, op, input).await?;
                     Ok(HandlerOutput {
                         result,
                         ..HandlerOutput::default()
@@ -328,7 +328,7 @@ mod tests {
                     client,
                     thread_id,
                     actor,
-                    capability,
+                    scope,
                     op,
                     input,
                 } = seen.recv().await.unwrap()
@@ -336,7 +336,7 @@ mod tests {
                     panic!("a client call")
                 };
                 assert_eq!(
-                    (thread_id, actor.as_str(), capability.as_str(), op.as_str()),
+                    (thread_id, actor.as_str(), scope.as_str(), op.as_str()),
                     (Some(ThreadId::new(3)), "agent:thr3", "tabs.write", "open")
                 );
                 assert_eq!(client, "w1");
@@ -367,7 +367,7 @@ mod tests {
         assert_eq!(
             spec.op,
             Some(oxplow_domain::OpRef {
-                capability: "tabs.write".into(),
+                scope: "tabs.write".into(),
                 op: "open".into()
             })
         );

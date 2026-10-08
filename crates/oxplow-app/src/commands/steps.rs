@@ -48,8 +48,8 @@ pub(super) struct Composed {
     result: Option<Value>,
     /// The composite's own events, recorded with the run.
     events: Vec<oxplow_domain::Envelope>,
-    /// The host capabilities composing it called: the run's.
-    capabilities: BTreeMap<String, u32>,
+    /// The scopes composing it called: the run's.
+    scopes: BTreeMap<String, u32>,
 }
 
 /// One call of a [`Composed`].
@@ -68,7 +68,7 @@ impl Composed {
             calls,
             result: None,
             events: Vec::new(),
-            capabilities: BTreeMap::new(),
+            scopes: BTreeMap::new(),
         }
     }
 
@@ -157,7 +157,7 @@ impl Router<'_> {
                 ),
             });
         }
-        let trace = crate::host_capabilities::CapabilityTrace::default();
+        let trace = crate::scope_calls::ScopeTrace::default();
         let composition = (compose.compose)(self.conn, &trace, input)?;
         let (calls, outside) = self.route_calls(composition.calls, depth, at)?;
         Ok(Routed {
@@ -165,7 +165,7 @@ impl Router<'_> {
                 calls,
                 result: composition.result,
                 events: composition.events,
-                capabilities: trace.summary(),
+                scopes: trace.summary(),
             },
             outside,
         })
@@ -331,7 +331,7 @@ pub(super) fn run_composed(
 /// changed nothing has nothing to undo. One whose every child changed
 /// nothing, with no events of its own, changed nothing.
 fn run_tree(ctx: &TxCtx<'_>, composed: &Composed) -> Result<HandlerOutput, CommandError> {
-    ctx.trace.add(&composed.capabilities);
+    ctx.trace.add(&composed.scopes);
     let inner = TxCtx {
         conn: ctx.conn,
         actor: ctx.actor,
@@ -522,7 +522,7 @@ impl CommandBus {
         let mut landed: Vec<NestedChild> = Vec::with_capacity(plan.calls.len());
         let mut events = Vec::new();
         let mut failure: Option<(&ComposedCall, CommandError)> = None;
-        let mut capabilities = plan.capabilities.clone();
+        let mut scopes = plan.scopes.clone();
         for (index, step) in plan.calls.iter().enumerate() {
             let tx = match (&step.nested, &step.command.handler) {
                 (Some(nested), _) => Some(composed_handler(
@@ -561,7 +561,7 @@ impl CommandBus {
             let ran = ran.and_then(|(out, used)| Ok((honest(out, &step.call.name)?, used)));
             match ran {
                 Ok((mut out, used)) => {
-                    crate::host_capabilities::add_counts(&mut capabilities, used);
+                    crate::scope_calls::add_counts(&mut scopes, used);
                     if let Some(after) = out.after_commit.take() {
                         after();
                     }
@@ -635,7 +635,7 @@ impl CommandBus {
                         id: executed_id.clone(),
                         failed: failed_c.clone(),
                         cause: origin.cause(),
-                        capabilities: capabilities.clone(),
+                        scopes: scopes.clone(),
                     },
                 )?;
                 match &origin {
@@ -705,7 +705,7 @@ impl CommandBus {
         let vocabulary = self.log.vocabulary().clone();
         self.db
             .transaction_or(move |tx| {
-                let trace = crate::host_capabilities::CapabilityTrace::default();
+                let trace = crate::scope_calls::ScopeTrace::default();
                 let ctx = TxCtx {
                     conn: tx,
                     actor: &actor,

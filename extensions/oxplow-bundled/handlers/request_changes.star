@@ -24,7 +24,7 @@ def _list(text):
 
 def transform(x):
     ref = x["input"]["ref"]
-    rows = capability("sql.read", {"sql": _REVIEW, "params": {"ref": ref}})
+    rows = scope("sql.read", {"sql": _REVIEW, "params": {"ref": ref}})
     if not rows:
         return {"refuse": "no effort `%s`" % ref}
     row = rows[0]

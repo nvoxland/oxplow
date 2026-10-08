@@ -1452,8 +1452,8 @@ checkpointed and dead-lettered like any other consumer. The task
 store's own insert/update (not the commands') still project inline.
 
 `command_audit` (who ran which command, the input, outcome, the undo as
-`inverse_json`, `undone_by`, and `capabilities_json` — V27, the host
-capabilities the run called and how often, NULL for none) is written by the command bus through
+`inverse_json`, `undone_by`, and `scopes_json` — V27, named so in V34: the scopes the run called and how often,
+NULL for none) is written by the command bus through
 `command_audit_store::insert_tx` / `set_event_id_tx` / `mark_undone_tx`
 inside the run's transaction; `SqliteCommandAuditStore` reads it. See
 [commands.md](./commands.md). V147 rebuilt it (an `effect` actor kind in

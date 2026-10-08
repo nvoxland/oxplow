@@ -1612,7 +1612,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(audit.capabilities, [("sql.read".to_string(), 1)].into());
+        assert_eq!(audit.scopes, [("sql.read".to_string(), 1)].into());
         let notes = task_notes(&f).await;
         assert_eq!(notes.len(), 1, "{notes:?}");
         assert!(notes[0].starts_with("Review accepted"), "{}", notes[0]);

@@ -96,7 +96,7 @@ pub struct ProviderSpec {
     /// values? }]`.
     #[serde(default)]
     pub fields: Vec<oxplow_domain::work_items::FieldDecl>,
-    /// The host capabilities it calls over the protocol (`host/call`,
+    /// The scopes it calls over the protocol (`host/call`,
     /// `sql.read`): part of what its approval covers, and the only ones it
     /// may call.
     #[serde(default)]
@@ -487,24 +487,22 @@ pub fn read_pinned_tools(
 
 /// What's wrong with how `spec` names what runs: exactly one of `entry`
 /// and `adapter`, and every file it names inside the folder.
-/// A provider may call the host capabilities that only read so far: what
+/// A provider may call the scopes that only read so far: what
 /// `host/call` answers.
 fn needs_problem(spec: &ProviderSpec) -> Option<String> {
-    use oxplow_domain::host_capability::{host_capability, EffectClass};
-    spec.needs
-        .iter()
-        .find_map(|need| match host_capability(need) {
-            None => Some(format!(
-                "provider `{}`: `needs`: no host capability `{need}`",
-                spec.id
-            )),
-            Some(c) if c.class != EffectClass::Read => Some(format!(
-            "provider `{}`: `needs`: a provider may call only capabilities that read (`{need}` \
+    use oxplow_domain::scope::{scope, EffectClass};
+    spec.needs.iter().find_map(|need| match scope(need) {
+        None => Some(format!(
+            "provider `{}`: `needs`: no scope `{need}`",
+            spec.id
+        )),
+        Some(c) if c.class != EffectClass::Read => Some(format!(
+            "provider `{}`: `needs`: a provider may call only scopes that read (`{need}` \
              changes things)",
             spec.id
         )),
-            Some(_) => None,
-        })
+        Some(_) => None,
+    })
 }
 
 fn program_problem(spec: &ProviderSpec, read: &dyn Fn(&str) -> Option<String>) -> Option<String> {

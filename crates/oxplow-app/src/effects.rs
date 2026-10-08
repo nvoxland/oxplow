@@ -9,7 +9,7 @@
 //!     summary: Note a finished item on its thread.
 //!     on: [work_item.state_changed]
 //!     where: { to: done }        # optional: payload fields equal to these
-//!     needs: [sql.read]              # the host capabilities its script calls
+//!     needs: [sql.read]              # the scopes its script calls
 //!     entry: effects/announce.star   # transform({event}) → {commands, events?} | {skip}
 //!     after: [page_ref.work_item]    # optional: consumers it waits for
 //! ```
@@ -42,8 +42,8 @@ pub struct EffectDecl {
     /// Payload fields that must equal these values (the collectors'
     /// `where`).
     pub filter: BTreeMap<String, String>,
-    /// The host capabilities its script calls (`capability(id, args)`,
-    /// `.context/commands.md` "Host capabilities"): `sql.read`.
+    /// The scopes its script calls (`scope(id, args)`,
+    /// `.context/commands.md` "Scopes"): `sql.read`.
     pub needs: Vec<String>,
     /// The script's path in the folder.
     pub entry: String,
@@ -156,9 +156,9 @@ fn decl_of(
         _ => return Err(named("`on` lists the event types it reacts to".into())),
     };
     for need in &f.needs {
-        if oxplow_domain::host_capability::host_capability(need).is_none() {
+        if oxplow_domain::scope::scope(need).is_none() {
             return Err(named(format!(
-                "`needs`: `{need}` isn't a host capability an effect's script can call"
+                "`needs`: `{need}` isn't a scope an effect's script can call"
             )));
         }
     }
@@ -194,7 +194,7 @@ pub fn effect_program(ext: &Extension, decl: &EffectDecl) -> ProjectProgram {
         credentials: Vec::new(),
         network: Vec::new(),
         commands: Vec::new(),
-        capabilities: Vec::new(),
+        scopes: Vec::new(),
         tree: Some(dir.to_string()),
         remote: false,
         approved: false,
@@ -351,9 +351,9 @@ pub fn reacts_to(decl: &EffectDecl, event_type: &str, payload: &serde_json::Valu
 pub fn run_script(
     script: &str,
     event: serde_json::Value,
-    calls: &mut crate::host_capabilities::Calls<'_>,
+    calls: &mut crate::scope_calls::Calls<'_>,
 ) -> Result<Reaction, String> {
-    let out = oxplow_collect_plugin::capability::run_starlark_serving(
+    let out = oxplow_collect_plugin::scope::run_starlark_serving(
         &crate::extension_commands::COMMAND_SCRIPT_BUDGET,
         script,
         &serde_json::json!({ "event": event }),
@@ -364,7 +364,7 @@ pub fn run_script(
 }
 
 /// What `decl` would do with `event` (a fixture's, or a logged one's
-/// [`event_json`]) — its script, its capability calls answered from
+/// [`event_json`]) — its script, its scope calls answered from
 /// `answers` or for real (reads through `layer`), the commands it composes
 /// checked against `registry` — running nothing: `plugin test` and a
 /// change's review.
@@ -380,10 +380,9 @@ pub async fn dry_run(
     let (layer, answers) = (layer.clone(), answers.clone());
     let runtime = tokio::runtime::Handle::current();
     let reaction = tokio::task::spawn_blocking(move || {
-        let trace = crate::host_capabilities::CapabilityTrace::default();
+        let trace = crate::scope_calls::ScopeTrace::default();
         let read = Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(layer.run(q)));
-        let mut calls =
-            crate::host_capabilities::Calls::new(&needs, &trace, read).with_answers(&answers);
+        let mut calls = crate::scope_calls::Calls::new(&needs, &trace, read).with_answers(&answers);
         run_script(&script, event, &mut calls)
     })
     .await

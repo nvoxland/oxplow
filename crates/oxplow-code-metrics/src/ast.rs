@@ -1,5 +1,5 @@
 //! Generic, query-based AST access — the engine behind the metric substrate's
-//! `ast_query` host capability (epic tsk213, P3). The per-function metric
+//! `ast_query` builtin (epic tsk213, P3). The per-function metric
 //! walkers in [`crate`] are *one* consumer of tree-sitter; this module exposes
 //! the grammars generically so a bundled or user-authored gauge plugin can run
 //! an arbitrary tree-sitter S-expression query against source text and get back
@@ -94,8 +94,8 @@ pub fn query(
 }
 
 /// Parse `text` as `language` (by name, e.g. `"rust"`, `"typescript"`) and run a
-/// tree-sitter `sexpr` query — the one-call entry the `ast_query` host
-/// capability is built on.
+/// tree-sitter `sexpr` query — the one-call entry the `ast_query`
+/// builtin is built on.
 pub fn ast_query(
     text: &str,
     language: &str,

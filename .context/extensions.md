@@ -877,8 +877,8 @@ boot. It never opens the project's database. It runs `check` there
 - `input: { effect: <id>, event: { type, payload, subject? }, answers? }`,
   `expect: { commands: [names] } | { skip: <part of the reason> } | {
   reacts: false }` (P8.D12) — whether the effect reacts (`on`/`where`),
-  then `effects::dry_run`: its script, its capability calls answered
-  from `answers` (per capability, in call order) or for real, the
+  then `effects::dry_run`: its script, its scope calls answered
+  from `answers` (per scope, in call order) or for real, the
   composed calls checked against the registry; nothing runs. An
   extension command's is `input: { command: <id>, input, answers? }`;
 - `input: { event_type, v?, payload }`, `expect: { valid: true | false,
@@ -1333,7 +1333,7 @@ them from the person's command listing (`refOffers`,
 `components/refCommands.ts`) and runs each as search does (App publishes
 its offer host, `setRefOfferHost`). To put another command on a ref's
 menu — oxplow's transition to done, say — an extension declares its own
-command over the same operation (`capability:` / `provider:` + `op:`,
+command over the same operation (`scope:` / `provider:` + `op:`,
 with its `ui.input`) or a script composing it. The old `ui.commands`
 block is gone.
 
@@ -1948,7 +1948,7 @@ effects:
     summary: Note a finished item on its thread.
     on: [work_item.state_changed]  # core types, its own, or another extension's ("Event types")
     where: { to: done }            # optional: payload fields equal to these
-    needs: [sql.read]              # the host capabilities its script calls
+    needs: [sql.read]              # the scopes its script calls
     entry: effects/announce.star   # transform({event}) → {commands, events?} | {skip}
     after: [page_ref.work_item]    # optional: consumers it waits for
 ```
@@ -2026,18 +2026,18 @@ once**, keyed by `effect_run (effect, event_id)` (V149, `v_effect_run`):
    triggers it; one that `MAX_CHAIN` (4) effect runs already led to is
    `skipped`;
 4. the script runs sandboxed over `{ event: { id, type, v, seq, source,
-   subject, payload } }`, reading with the host capabilities its `needs`
-   lists — `capability("sql.read", { sql, params })`, binding what it
+   subject, payload } }`, reading with the scopes its `needs`
+   lists — `scope("sql.read", { sql, params })`, binding what it
    wants (the payload's fields, the event's `id` / `seq` to read its own
    `v_event` row, its subject or cause) — served through the SQL gateway,
    each call its own read (`effects::run_script` with
-   `host_capabilities::Calls`, for the run and `dry_run` alike; a dry run
+   `scope_calls::Calls`, for the run and `dry_run` alike; a dry run
    answers from a fixture's `answers`): `{ skip: "why" }` is `skipped`;
    `{ commands, events? }` runs. The script and its reads run **before**
    the run's transaction: the composed calls are fixed by then, so a row
    can be stale against what the run then sees (each command's own
    validation is what holds — the composer doesn't re-read). What it
-   called is added to the run's trace (`CapabilityTrace::add`), so the
+   called is added to the run's trace (`ScopeTrace::add`), so the
    reaction's audit row records it.
 
 A run is the registered `oxplow.command.sequence` — its spec and compiled input
@@ -2184,9 +2184,8 @@ Reacting to the past exists only as `oxplow.effect.backfill`.
 
 An extension's `commands:` (a stable kind, P6b; `extension_commands.rs`)
 are commands on the bus whose handler is a Starlark script that
-**composes core commands**, reaching anything else only through the **host
-capabilities** it declares in `needs` ([commands.md](./commands.md) "Host
-capabilities") — `capability("sql.read", { sql, params })` today:
+**composes core commands**, reaching anything else only through the **scopes**
+it declares in `needs` ([commands.md](./commands.md) "Scopes") — `scope("sql.read", { sql, params })` today:
 
 ```yaml
 commands:
@@ -2196,8 +2195,8 @@ commands:
     entry: handlers/finish_review.star # defines transform(x), x = { input }
     confirm: never                     # never (default) | always | destructive; children only add
     effect: write                      # write (default) | record | read (composes nothing, returns a result)
-    invokers: { human: true, agent: true, lens: true }   # required: who may run it (within its operation's floor, for a capability command)
-    needs: [sql.read, work_items.comments]   # host capabilities it calls; capabilities / features it needs active
+    invokers: { human: true, agent: true, lens: true }   # required: who may run it (within its operation's floor, for a scope command)
+    needs: [sql.read, work_items.comments]   # scopes it calls; capabilities / features it needs active
     ui:                                # how a person meets it (`.context/commands.md` "Offering a command")
       label: Finish Review
       group: Review
@@ -2216,11 +2215,11 @@ checked-in declarations list (not a capability verb — those run as
 stronger of the manifest's and the declaration's; it runs on the
 instance its input names ([providers.md](./providers.md) "The host").
 
-A command may instead be **backed by an operation of a host capability**
-([commands.md](./commands.md) "Host capabilities" → "Operations"):
-`capability: bookmarks.write` + `op: set` in place of `entry:` — no
+A command may instead be **backed by an operation of a scope**
+([commands.md](./commands.md) "Scopes" → "Operations"):
+`scope: bookmarks.write` + `op: set` in place of `entry:` — no
 `input_schema`, `effect` or `examples` (the operation's and its
-capability's class), the capability implied in `needs`; the bus refuses
+scope's class), the scope implied in `needs`; the bus refuses
 to register one naming an operation that isn't there. oxplow's own
 commands are declared this way in the required `oxplow-foundation`.
 
@@ -2230,10 +2229,10 @@ A shared extension's commands are `Stable`, a private one's
 and writes nothing (`composed` → `Composed::{Run, Refused}`). An `effect:
 read` command composes nothing and logs no events (refused at run time
 otherwise): it reads and returns a `result`, is never confirmed and needs
-no capability that changes things; the bus runs it on a read snapshot,
-unrecorded. An example may give `answers:` — per capability, its calls'
+no scope that changes things; the bus runs it on a read snapshot,
+unrecorded. An example may give `answers:` — per scope, its calls'
 answers in order, standing in so it doesn't depend on the project's data
-(a capability without any is served for real; one that runs out is an
+(a scope without any is served for real; one that runs out is an
 error) — and may expect a refusal with `refuses: <part of the reason>` instead of
 `expect_commands` (not both). A command's manifest `name` is
 `<area>.<verb>`; its **command id** is `<namespace>.<area>.<verb>`. The
@@ -2256,7 +2255,7 @@ namespace (other than `oxplow`) are both refused at load
 checked at load, its error at its line (`entry_line`: the line whose
 `name:` is exactly that name — `a` never lands on `abc`; ids, lenses,
 and models find their lines the same way): the name, `effect`, `confirm`,
-the schema compiles, each `needs` entry is a host capability or a
+the schema compiles, each `needs` entry is a scope or a
 capability / feature, and the entry is a file in the
 extension that parses and defines `transform` (`check_starlark`), and
 it declares at most `MAX_EXAMPLES` (10) examples. The
@@ -2272,10 +2271,10 @@ warns that the examples weren't checked. **`compose_calls`** is the one
 compose step, for the dry run and the handler alike: the script in the
 sandbox under `COMMAND_SCRIPT_BUDGET` (5 s of the script's own time, not
 the collectors' 120 s runaway catch, because at run time the script holds
-the bus's write transaction; no files, no `ai_*`), its `capability` calls
-served on the calling thread (`run_starlark_serving`, `host_capabilities::
-Calls`; a busy database retries the run), then the `{ commands, result? }`
-shape (`composed`; any other key is `Invalid`).
+the bus's write transaction; no files, no `ai_*`), its `scope` calls
+served on the calling thread (`run_starlark_serving`,
+`scope_calls::Calls`; a busy database retries the run), then the
+`{ commands, result? }` shape (`composed`; any other key is `Invalid`).
 
 **Running** (`extension_command`): each is a composite
 (`Handler::Compose`, atomicity `Dispatch`) `<namespace>.<name>`
@@ -2284,7 +2283,7 @@ shape (`composed`; any other key is `Invalid`).
 `sql.read` on the connection it's given (`semantic_layer::read_on`: the
 `query_sql` authorizer, row cap and timeout, the read session restored —
 `query_only` off — before any writes) and counting each call in the run's
-`CapabilityTrace` (pure, so the bus may compose more than once: once to
+`ScopeTrace` (pure, so the bus may compose more than once: once to
 route, again in the run's transaction, whose calls are the ones recorded).
 The bus runs what it composes ([commands.md](./commands.md) →
 "Composition"): when every call stays in oxplow's records, as children
@@ -2296,7 +2295,7 @@ children as its undo; when one leaves it (`work_item.*` on another
 provider's item, tsk713), as **steps** — all checked first, then run in
 order, each landing as it runs, stopping at the first failure, one audit
 row, no undo. A script can't do I/O of its own: `files()` sees
-nothing, `ai_*` is refused without a host, and `capability` reaches only
+nothing, `ai_*` is refused without a host, and `scope` reaches only
 what it `needs`. **Registration**
 (`ExtensionCommands`, `Services.extension_commands`): the enabled
 extensions of the **primary worktree** (one bus, like providers — a

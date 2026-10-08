@@ -127,8 +127,8 @@ pub enum OxplowEvent {
     /// extensions contribute — the launcher, pages, panels, slots —
     /// reloads, and a lens re-runs its definition.
     ExtensionsChanged,
-    /// A command running on the daemon calls a capability the window
-    /// hosts (`client_host.rs`): the window does `capability`'s `op` with
+    /// A command running on the daemon calls a scope the window
+    /// hosts (`client_host.rs`): the window does `scope`'s `op` with
     /// `input` — in `thread_id`'s tabs, or the one it shows when `None` —
     /// and answers `answer_client_call { id, … }`.
     ClientCall {
@@ -139,7 +139,7 @@ pub enum OxplowEvent {
         thread_id: Option<ThreadId>,
         /// Who ran the command (`agent:thr3`, `human`).
         actor: String,
-        capability: String,
+        scope: String,
         op: String,
         input: oxplow_domain::Json,
     },

@@ -1,12 +1,12 @@
-//! The host capabilities' **operations** (`.context/commands.md` "Host
-//! capabilities"): the native behavior behind the commands extensions
-//! declare. A capability is a scope (`work_items.write`) in the domain's
-//! catalog; each of its operations (`transition`) is registered here with
-//! what only Rust can supply — the input schema of the type its handler
-//! reads, the handler, whether it returns an inverse, a per-input
-//! confirmation, a check before the transaction.
+//! The scopes' **operations** (`.context/commands.md` "Scopes"): the
+//! native behavior behind the commands extensions declare. A scope
+//! (`work_items.write`) is in the domain's catalog; each of its
+//! operations (`transition`) is registered here with what only Rust can
+//! supply — the input schema of the type its handler reads, the handler,
+//! whether it returns an inverse, a per-input confirmation, a check
+//! before the transaction.
 //!
-//! A manifest's command names one (`capability: work_items.write`, `op:
+//! A manifest's command names one (`scope: work_items.write`, `op:
 //! transition`) and says the rest — summary, invokers, confirmation, ui —
 //! so oxplow's own commands are declared like any extension's
 //! (`extensions/oxplow-foundation`), and any extension may declare one
@@ -20,10 +20,10 @@ use serde_json::Value;
 
 use super::{Command, ConfirmFor, Handler, Precheck};
 
-/// One operation of a host capability.
+/// One operation of a scope.
 pub struct Op {
     /// Its scope: `work_items.write`.
-    pub capability: String,
+    pub scope: String,
     /// Its name within the scope: `transition`.
     pub name: String,
     /// The input its handler reads.
@@ -47,14 +47,14 @@ pub struct Op {
 
 impl Op {
     pub fn new(
-        capability: &str,
+        scope: &str,
         name: &str,
         input_schema: Value,
         undoable: bool,
         handler: Handler,
     ) -> Self {
         Self {
-            capability: capability.into(),
+            scope: scope.into(),
             name: name.into(),
             input_schema,
             undoable,
@@ -82,9 +82,9 @@ impl Op {
         self
     }
 
-    /// `cap/op`.
+    /// `scope/op`.
     pub fn id(&self) -> String {
-        format!("{}/{}", self.capability, self.name)
+        format!("{}/{}", self.scope, self.name)
     }
 
     /// Whether anyone may run it with no confirmation — no floor at all.
@@ -144,12 +144,12 @@ impl Op {
 
     /// The command `spec` declares, backed by this operation: its input
     /// schema, undo and atomicity are the operation's, its effect the
-    /// capability's class, and the capability is among its needs. Its
+    /// scope's class, and the scope is among its needs. Its
     /// `invokers` and `confirm` stay within the operation's floor.
     pub fn command(&self, mut spec: CommandSpec) -> Result<Command, CommandError> {
-        let class = oxplow_domain::host_capability::host_capability(&self.capability)
+        let class = oxplow_domain::scope::scope(&self.scope)
             .ok_or_else(|| CommandError::Failed {
-                message: format!("no host capability `{}`", self.capability),
+                message: format!("no scope `{}`", self.scope),
             })?
             .class;
         self.within_floor(&spec)?;
@@ -163,11 +163,11 @@ impl Op {
         spec.effect = effect_of(class);
         spec.unrecorded = self.unrecorded.clone();
         spec.op = Some(oxplow_domain::OpRef {
-            capability: self.capability.clone(),
+            scope: self.scope.clone(),
             op: self.name.clone(),
         });
-        if !spec.needs.contains(&self.capability) {
-            spec.needs.insert(0, self.capability.clone());
+        if !spec.needs.contains(&self.scope) {
+            spec.needs.insert(0, self.scope.clone());
         }
         let mut command = Command::new(spec, self.handler.clone())?;
         if let Some(f) = &self.confirm_for {
@@ -189,10 +189,10 @@ fn confirm_name(confirm: Confirm) -> &'static str {
     }
 }
 
-/// A command's effect, from the class of the capability behind it: only
+/// A command's effect, from the class of the scope behind it: only
 /// a record or a write is audited.
-pub fn effect_of(class: oxplow_domain::host_capability::EffectClass) -> CommandEffect {
-    use oxplow_domain::host_capability::EffectClass;
+pub fn effect_of(class: oxplow_domain::scope::EffectClass) -> CommandEffect {
+    use oxplow_domain::scope::EffectClass;
     match class {
         EffectClass::View | EffectClass::Read => CommandEffect::Read,
         EffectClass::Record => CommandEffect::Record,
@@ -200,19 +200,19 @@ pub fn effect_of(class: oxplow_domain::host_capability::EffectClass) -> CommandE
     }
 }
 
-/// The registered operations, by capability and name.
+/// The registered operations, by scope and name.
 #[derive(Default)]
 pub struct Ops(BTreeMap<(String, String), Arc<Op>>);
 
 impl Ops {
     pub fn add(&mut self, op: Op) -> Result<(), CommandError> {
-        if oxplow_domain::host_capability::host_capability(&op.capability).is_none() {
+        if oxplow_domain::scope::scope(&op.scope).is_none() {
             return Err(CommandError::Invalid {
                 field: None,
-                message: format!("`{}` isn't a host capability in the catalog", op.capability),
+                message: format!("`{}` isn't a scope", op.scope),
             });
         }
-        let key = (op.capability.clone(), op.name.clone());
+        let key = (op.scope.clone(), op.name.clone());
         if self.0.contains_key(&key) {
             return Err(CommandError::Invalid {
                 field: None,
@@ -223,13 +223,11 @@ impl Ops {
         Ok(())
     }
 
-    pub fn get(&self, capability: &str, op: &str) -> Option<Arc<Op>> {
-        self.0
-            .get(&(capability.to_string(), op.to_string()))
-            .cloned()
+    pub fn get(&self, scope: &str, op: &str) -> Option<Arc<Op>> {
+        self.0.get(&(scope.to_string(), op.to_string())).cloned()
     }
 
-    /// The operations with no floor, as `cap/op`, sorted.
+    /// The operations with no floor, as `scope/op`, sorted.
     pub fn fully_open(&self) -> Vec<String> {
         self.0
             .values()

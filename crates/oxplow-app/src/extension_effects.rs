@@ -47,8 +47,8 @@ pub struct Grants {
     pub hosts: Vec<String>,
     pub credentials: Vec<String>,
     pub env: Vec<String>,
-    /// The host capabilities it may call (a provider's `needs`).
-    pub capabilities: Vec<String>,
+    /// The scopes it may call (a provider's `needs`).
+    pub scopes: Vec<String>,
 }
 
 /// A lens, by its rendered text before and after (P6b.E2).
@@ -342,7 +342,7 @@ pub struct EffectTrigger {
     pub on: Vec<String>,
     /// Its `where`.
     pub filter: BTreeMap<String, String>,
-    /// The host capabilities its script calls.
+    /// The scopes its script calls.
     pub needs: Vec<String>,
 }
 
@@ -369,7 +369,7 @@ pub struct Composes {
     pub error: Option<String>,
 }
 
-/// Answers standing in for capability calls', per capability in call order.
+/// Answers standing in for scope calls', per scope in call order.
 type Answers = BTreeMap<String, Vec<Value>>;
 
 fn effect_trigger(d: &crate::effects::EffectDecl) -> EffectTrigger {
@@ -407,7 +407,7 @@ pub fn effects_diff(
 
 /// The fixtures of `v`'s intent examples that run effect `id`: the
 /// example's name, its event and its `answers` (standing in for its
-/// capability calls').
+/// scope calls').
 fn effect_fixtures(v: &Version<'_>, id: &str) -> Vec<(String, Value, Answers)> {
     let examples = v
         .extension
@@ -736,10 +736,10 @@ fn run_line(g: &Grants) -> String {
 
 /// A program's grants: "runs x · reaches y · reads z".
 pub fn grants_line(g: &Grants) -> String {
-    let calls = if g.capabilities.is_empty() {
+    let calls = if g.scopes.is_empty() {
         String::new()
     } else {
-        format!(" · calls {}", g.capabilities.join(", "))
+        format!(" · calls {}", g.scopes.join(", "))
     };
     format!(
         "runs {} · reaches {} · reads {}{calls}",
@@ -762,7 +762,7 @@ pub fn grant_changes(before: Option<&Grants>, after: Option<&Grants>) -> Vec<Str
         ("now reaches", &b.hosts, &a.hosts),
         ("now reads", &b.credentials, &a.credentials),
         ("now reads env", &b.env, &a.env),
-        ("now calls", &b.capabilities, &a.capabilities),
+        ("now calls", &b.scopes, &a.scopes),
     ];
     for (what, was, now) in pairs {
         if was != now {
@@ -1121,7 +1121,7 @@ fn collector_grants(s: &CollectorSpec) -> Grants {
         hosts: s.network.clone(),
         credentials: s.credentials.clone(),
         env: s.env.clone(),
-        capabilities: Vec::new(),
+        scopes: Vec::new(),
     }
 }
 
@@ -1303,7 +1303,7 @@ fn provider_grants(p: &ProviderSpec) -> Grants {
         hosts: p.network.clone(),
         credentials: p.credential_grants(),
         env: p.env.clone(),
-        capabilities: p.needs.clone(),
+        scopes: p.needs.clone(),
     }
 }
 
@@ -2883,7 +2883,7 @@ mod tests {
             hosts: hosts.iter().map(|h| h.to_string()).collect(),
             credentials: credentials.iter().map(|c| c.to_string()).collect(),
             env: vec![],
-            capabilities: Vec::new(),
+            scopes: Vec::new(),
         }
     }
 

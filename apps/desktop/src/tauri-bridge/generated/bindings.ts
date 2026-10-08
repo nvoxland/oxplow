@@ -735,7 +735,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	registerClientHost: (client: string, capabilities: string[]) => typedError<null, IpcError>(__TAURI_INVOKE("register_client_host", { client, capabilities })),
+	registerClientHost: (client: string, scopes: string[]) => typedError<null, IpcError>(__TAURI_INVOKE("register_client_host", { client, scopes })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1831,9 +1831,9 @@ export type CommandExample = {
 	name: string,
 	input: unknown,
 	/**
-	 *  Answers standing in for the capabilities' own, per capability in
-	 *  call order (so the example doesn't depend on the project's data);
-	 *  a capability without any is served for real.
+	 *  Answers standing in for the scopes' own, per scope in call order
+	 *  (so the example doesn't depend on the project's data); a scope
+	 *  without any is served for real.
 	 */
 	answers: { [key in string]: unknown[] },
 	expectCommands: string[],
@@ -1848,10 +1848,10 @@ export type CommandHandler =
 // The script, relative to the extension folder.
 entry: string } | 
 /**
- *  One operation of a host capability (`capability:` + `op:`,
+ *  One operation of a scope (`scope:` + `op:`,
  *  `commands::ops`).
  */
-{ kind: "capability"; capability: string; op: string } | 
+{ kind: "scope"; scope: string; op: string } | 
 /**
  *  One operation of one of the extension's providers (`provider:` +
  *  `op:`): run on the instance its input names
@@ -1898,9 +1898,9 @@ export type CommandSpec = {
 	atomicity: Atomicity,
 	effect: CommandEffect,
 	/**
-	 *  The capabilities (or their features: `work_items.comments`) it
-	 *  needs active; unmet, it isn't offered and doesn't run
-	 *  (`.context/commands.md`).
+	 *  The scopes its handler calls (`sql.read`) and the capabilities, or
+	 *  their features (`work_items.comments`), it needs active; unmet, it
+	 *  isn't offered and doesn't run (`.context/commands.md`).
 	 */
 	needs: string[],
 	/**
@@ -1910,8 +1910,8 @@ export type CommandSpec = {
 	 */
 	ui?: CommandUi | null,
 	/**
-	 *  The host capability operation behind it, when it is one: where it
-	 *  runs (a window capability's runs in the window) and what it does.
+	 *  The scope operation behind it, when it is one: where it runs (a
+	 *  window scope's runs in the window) and what it does.
 	 */
 	op?: OpRef | null,
 	/**
@@ -2344,8 +2344,8 @@ export type EffectDecl = {
 	 */
 	filter: { [key in string]: string },
 	/**
-	 *  The host capabilities its script calls (`capability(id, args)`,
-	 *  `.context/commands.md` "Host capabilities"): `sql.read`.
+	 *  The scopes its script calls (`scope(id, args)`,
+	 *  `.context/commands.md` "Scopes"): `sql.read`.
 	 */
 	needs: string[],
 	// The script's path in the folder.
@@ -2410,7 +2410,7 @@ export type EffectTrigger = {
 	on: string[],
 	// Its `where`.
 	filter: { [key in string]: string },
-	// The host capabilities its script calls.
+	// The scopes its script calls.
 	needs: string[],
 };
 
@@ -2649,7 +2649,7 @@ export type ExtensionCommand = {
 	name: string,
 	summary: string,
 	/**
-	 *  Its input's schema; `None` for one backed by a capability's
+	 *  Its input's schema; `None` for one backed by a scope's
 	 *  operation (the operation's).
 	 */
 	inputSchema: unknown | null,
@@ -2659,8 +2659,8 @@ export type ExtensionCommand = {
 	effect: CommandEffect,
 	invokers: Invokers,
 	/**
-	 *  The host capabilities its script calls, and the capabilities (or
-	 *  features) it needs active, as core's commands declare them
+	 *  The scopes its script calls, and the capabilities (or features)
+	 *  it needs active, as core's commands declare them
 	 *  (`oxplow_domain::capability::check_need`).
 	 */
 	needs: string[],
@@ -3245,8 +3245,8 @@ export type Grants = {
 	hosts: string[],
 	credentials: string[],
 	env: string[],
-	// The host capabilities it may call (a provider's `needs`).
-	capabilities: string[],
+	// The scopes it may call (a provider's `needs`).
+	scopes: string[],
 };
 
 // Where a stream's workspace is.
@@ -4390,12 +4390,9 @@ export type OpOutcome = {
 	auto_resolved: number,
 };
 
-/**
- *  An operation of a host capability (`capability: tabs.write`, `op:
- *  open`).
- */
+// An operation of a scope (`scope: tabs.write`, `op: open`).
 export type OpRef = {
-	capability: string,
+	scope: string,
 	op: string,
 };
 
@@ -4646,8 +4643,8 @@ detail: string | null } |
  */
 { kind: "extensionsChanged" } | 
 /**
- *  A command running on the daemon calls a capability the window
- *  hosts (`client_host.rs`): the window does `capability`'s `op` with
+ *  A command running on the daemon calls a scope the window
+ *  hosts (`client_host.rs`): the window does `scope`'s `op` with
  *  `input` — in `thread_id`'s tabs, or the one it shows when `None` —
  *  and answers `answer_client_call { id, … }`.
  */
@@ -4658,7 +4655,7 @@ detail: string | null } |
  */
 client: string; threadId: ThreadId | null; 
 // Who ran the command (`agent:thr3`, `human`).
-actor: string; capability: string; op: string; input: unknown } | 
+actor: string; scope: string; op: string; input: unknown } | 
 /**
  *  A person approved a program on this machine (a provider, collector,
  *  effect, component, ACP agent): what shows approval state —
@@ -4825,8 +4822,8 @@ export type ProjectProgram = {
 	network: string[],
 	// The commands it may run with the viewer's rights (a component).
 	commands: string[],
-	// The host capabilities it may call (a provider's `needs`).
-	capabilities: string[],
+	// The scopes it may call (a provider's `needs`).
+	scopes: string[],
 	/**
 	 *  The project-relative folder whose every file the approval covers
 	 *  (a provider's extension, declarations included).
@@ -4991,7 +4988,7 @@ export type ProviderSpec = {
 	 */
 	fields?: FieldDecl[],
 	/**
-	 *  The host capabilities it calls over the protocol (`host/call`,
+	 *  The scopes it calls over the protocol (`host/call`,
 	 *  `sql.read`): part of what its approval covers, and the only ones it
 	 *  may call.
 	 */

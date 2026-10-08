@@ -531,7 +531,7 @@ async fn work_item_commands_write_another_providers_items_through_its_process() 
     assert_eq!(
         estimate.op,
         Some(oxplow_domain::OpRef {
-            capability: "provider:tracker/fake".into(),
+            scope: "provider:tracker/fake".into(),
             op: "estimate".into()
         })
     );
@@ -953,7 +953,7 @@ async fn a_provider_reads_the_host_through_what_it_needs() {
                 .await
                 .unwrap()
                 .unwrap();
-            assert_eq!(audit.capabilities, [("sql.read".to_string(), 1)].into());
+            assert_eq!(audit.scopes, [("sql.read".to_string(), 1)].into());
         } else {
             let err = ran.unwrap_err().to_string();
             assert!(err.contains("isn't in the command's `needs`"), "{err}");
@@ -4825,7 +4825,7 @@ async fn a_lost_reply_is_sent_again_and_lands_once() {
 async fn an_automatic_retry_sends_what_the_failed_attempt_composed() {
     // Reads something oxplow holds that can change between attempts: the
     // fixture's thread's title (thread 1).
-    let titled_from_the_thread = "def transform(x):\n    rows = capability(\"sql.read\", {\"sql\": \"SELECT title FROM v_thread WHERE id = 1\"})\n    return {\"commands\": [{\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"after \" + rows[0][\"title\"]}}]}\n";
+    let titled_from_the_thread = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_thread WHERE id = 1\"})\n    return {\"commands\": [{\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"after \" + rows[0][\"title\"]}}]}\n";
     let fx = with_effect("lose-reply", titled_from_the_thread).await;
     assert_eq!(fx.thread, ThreadId::new(1));
     let rows = fx

@@ -161,17 +161,17 @@ pub struct CommandSpec {
     pub lifecycle: Lifecycle,
     pub atomicity: Atomicity,
     pub effect: CommandEffect,
-    /// The capabilities (or their features: `work_items.comments`) it
-    /// needs active; unmet, it isn't offered and doesn't run
-    /// (`.context/commands.md`).
+    /// The scopes its handler calls (`sql.read`) and the capabilities, or
+    /// their features (`work_items.comments`), it needs active; unmet, it
+    /// isn't offered and doesn't run (`.context/commands.md`).
     pub needs: Vec<String>,
     /// How a person meets it — label, group, where it's offered and how
     /// it runs from there. `None`: it isn't offered to a person by itself
     /// (a step other commands compose, an agent's tool).
     #[serde(default)]
     pub ui: Option<CommandUi>,
-    /// The host capability operation behind it, when it is one: where it
-    /// runs (a window capability's runs in the window) and what it does.
+    /// The scope operation behind it, when it is one: where it runs (a
+    /// window scope's runs in the window) and what it does.
     #[serde(default)]
     pub op: Option<OpRef>,
     /// Top-level input fields its record leaves out — a file's content —
@@ -201,11 +201,10 @@ impl CommandSpec {
     }
 }
 
-/// An operation of a host capability (`capability: tabs.write`, `op:
-/// open`).
+/// An operation of a scope (`scope: tabs.write`, `op: open`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, JsonSchema)]
 pub struct OpRef {
-    pub capability: String,
+    pub scope: String,
     pub op: String,
 }
 

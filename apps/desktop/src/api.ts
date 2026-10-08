@@ -1141,9 +1141,9 @@ async function runAsBackgroundTask(
 
 /** The commands a person is offered — those with a `ui` they may run now
  *  (`list_person_commands`); search lists the ref-less ones. */
-/** Window `client` says it's open and hosts `capabilities` (`clientHost.ts`). */
-export async function registerClientHost(client: string, capabilities: string[]): Promise<void> {
-  unwrap(await commands.registerClientHost(client, capabilities));
+/** Window `client` says it's open and hosts `scopes` (`clientHost.ts`). */
+export async function registerClientHost(client: string, scopes: string[]): Promise<void> {
+  unwrap(await commands.registerClientHost(client, scopes));
 }
 
 /** Window `client` is closing: calls stop coming to it. */

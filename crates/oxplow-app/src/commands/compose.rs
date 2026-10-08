@@ -40,12 +40,11 @@ pub struct Composition {
 
 /// Say what a composite runs for `input`, reading on `conn` (a read
 /// snapshot when the bus routes a run, the run's transaction for a call a
-/// handler composes by hand) and counting the host capabilities it calls in
-/// `trace`. The bus composes once per run: what it routed and checked is
-/// what runs.
+/// handler composes by hand) and counting the scopes it calls in `trace`. The bus composes once per run:
+/// what it routed and checked is what runs.
 pub type Composer = dyn Fn(
         &rusqlite::Connection,
-        &crate::host_capabilities::CapabilityTrace,
+        &crate::scope_calls::ScopeTrace,
         &Value,
     ) -> Result<Composition, CommandError>
     + Send

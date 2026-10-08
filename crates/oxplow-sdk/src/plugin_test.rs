@@ -257,8 +257,8 @@ async fn lens_example(
     }
 }
 
-/// A fixture's `answers`: per capability, its calls' answers in call order,
-/// standing in for the capabilities' own (none: each is served for real);
+/// A fixture's `answers`: per scope, its calls' answers in call order,
+/// standing in for the scopes' own (none: each is served for real);
 /// `None`, with the error reported, when they aren't that shape.
 fn answers(
     ex: &Example<'_>,
@@ -270,7 +270,7 @@ fn answers(
         Some(Ok(answers)) => Some(answers),
         Some(Err(e)) => {
             report.errors.push(format!(
-                "{}:1: {what}: `answers` must map each capability to its answers in call \
+                "{}:1: {what}: `answers` must map each scope to its answers in call \
                  order: {e}",
                 ex.shown
             ));
@@ -280,10 +280,10 @@ fn answers(
 }
 
 /// Dry-run one of the extension's own `commands:` on the fixture's
-/// `input` (and `answers`, standing in for its capability calls' — per
-/// capability, in call order): what it composes, checked against the throwaway's
-/// registry, against `expect` — `{ commands: [names] }`, or `{ refuses:
-/// <part of the reason> }`. Nothing runs.
+/// `input` (and `answers`, standing in for its scope calls' — per
+/// scope, in call order): what it composes, checked against the
+/// throwaway's registry, against `expect` — `{ commands: [names] }`, or
+/// `{ refuses: <part of the reason> }`. Nothing runs.
 async fn command_example(
     host: &Host,
     ex: &Example<'_>,

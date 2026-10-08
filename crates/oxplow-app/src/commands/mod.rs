@@ -142,9 +142,9 @@ pub struct TxCtx<'a> {
     /// composition is refused rather than recursing until the stack
     /// overflows (a command that composes itself).
     pub depth: usize,
-    /// The host capabilities the run has called: shared by the runs
+    /// The scopes the run has called: shared by the runs
     /// nested in it, recorded on its audit row.
-    pub trace: &'a crate::host_capabilities::CapabilityTrace,
+    pub trace: &'a crate::scope_calls::ScopeTrace,
 }
 
 /// The deepest a composite may nest (`oxplow.command.sequence` and extension
@@ -167,9 +167,9 @@ pub type ExternalHandler = dyn Fn(Invocation, Value) -> ExternalFuture + Send + 
 pub struct Invocation {
     pub actor: Actor,
     pub idempotency_key: Option<String>,
-    /// The host capabilities the run calls on its way (a provider's
+    /// The scopes the run calls on its way (a provider's
     /// `host/call`s): recorded with the run, like `TxCtx::trace`.
-    pub trace: Arc<crate::host_capabilities::CapabilityTrace>,
+    pub trace: Arc<crate::scope_calls::ScopeTrace>,
 }
 
 /// The idempotency key of step `index` (calling `call` with `input`) of
@@ -589,7 +589,7 @@ pub struct CommandBus {
     policy: Arc<AgentPolicy>,
     pump: Arc<EventPump>,
     commands: RwLock<Registry>,
-    /// The host capabilities' operations: what a command declared in a
+    /// The scopes' operations: what a command declared in a
     /// manifest is backed by (`ops.rs`).
     ops: RwLock<ops::Ops>,
     /// Where an extension's provider command runs (`ProviderRouter`):
@@ -675,8 +675,8 @@ impl CommandBus {
         self.commands.write().add(namespace, source, commands)
     }
 
-    /// Add a host capability's operation (`ops.rs`): refused when its
-    /// capability isn't in the catalog or the op is already there.
+    /// Add a scope's operation (`ops.rs`): refused when its scope
+    /// isn't in the catalog or the op is already there.
     pub fn add_op(&self, op: ops::Op) -> Result<(), CommandError> {
         self.ops.write().add(op)
     }
@@ -696,7 +696,7 @@ impl CommandBus {
     /// `CommandSpec::op`): what a provider's inverse naming an operation is
     /// a call of. There is one — an extension declares one command per
     /// provider operation (`extension_commands::parse_commands`) — where a
-    /// host capability's operation may back several (`project.open`,
+    /// scope's operation may back several (`project.open`,
     /// `project.open_in_new_window`), so it isn't asked for those.
     pub fn command_for_op(&self, op: &oxplow_domain::OpRef) -> Option<String> {
         self.commands
@@ -707,9 +707,9 @@ impl CommandBus {
             .map(|c| c.spec.id.clone())
     }
 
-    /// The operation `op` of host capability `capability`.
-    pub fn op(&self, capability: &str, op: &str) -> Option<Arc<ops::Op>> {
-        self.ops.read().get(capability, op)
+    /// The operation `op` of scope `scope`.
+    pub fn op(&self, scope: &str, op: &str) -> Option<Arc<ops::Op>> {
+        self.ops.read().get(scope, op)
     }
 
     /// The operations with no floor — anyone may declare a command over
@@ -819,8 +819,8 @@ impl CommandBus {
             // not against a system that owns state: reviewed as a class.
             .filter(|c| {
                 !c.spec.op.as_ref().is_some_and(|op| {
-                    oxplow_domain::host_capability::host_capability(&op.capability)
-                        .is_some_and(|h| h.host != oxplow_domain::host_capability::Host::Daemon)
+                    oxplow_domain::scope::scope(&op.scope)
+                        .is_some_and(|h| h.host != oxplow_domain::scope::Host::Daemon)
                 })
             })
             .map(|c| c.spec.id.clone())
@@ -1102,7 +1102,7 @@ impl CommandBus {
                     .transaction_or(move |tx| {
                         let executed_id = oxplow_domain::EventId::generate();
                         // Fresh per attempt: a retried run counts its calls once.
-                        let trace = crate::host_capabilities::CapabilityTrace::default();
+                        let trace = crate::scope_calls::ScopeTrace::default();
                         let ctx = TxCtx {
                             conn: tx,
                             actor: &actor_c,
@@ -1151,7 +1151,7 @@ impl CommandBus {
                             &input_c,
                             &out,
                             Executed {
-                                capabilities: trace.summary(),
+                                scopes: trace.summary(),
                                 ..Executed::ok(executed_id, &origin_tx)
                             },
                         )?;
@@ -1350,7 +1350,7 @@ impl CommandBus {
                             confirmed: false,
                             may_write: None,
                             depth: 0,
-                            trace: &crate::host_capabilities::CapabilityTrace::default(),
+                            trace: &crate::scope_calls::ScopeTrace::default(),
                         };
                         handler(&ctx, input.clone()).map_err(TxError::Aborted)
                     })
