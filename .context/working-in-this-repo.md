@@ -152,6 +152,14 @@ test) or a tempfile-backed DB.
 Frontend tests still use `bun test` (run from `apps/desktop/`); root
 `bun run test` invokes both Rust and TS suites.
 
+**A fresh worktree runs as-is.** `test:fast`, `test:collect` and
+`lint:collect` start with `scripts/test-prereqs.sh`, which builds what no
+crate's own graph does, only when it's missing: the staged sidecars
+(oxplow-desktop's build script validates them, so a workspace test or
+clippy run fails without them) and the fake provider's binary
+(oxplow-app's provider tests spawn it). Both used to fail a new
+worktree's first run.
+
 **Which tests and lint to run, and when, is the agent's call** — run
 what the change warrants; nothing requires a full run before a commit.
 Use the report-emitting commands below, not bare `cargo test` /
