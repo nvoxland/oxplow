@@ -424,6 +424,11 @@ fn dispatching(
             }
             let mut events = out.events;
             let state = external_state(verb, &input, &result, &events);
+            // The interface's answer, the same for every list: the item and,
+            // when the verb put it in one, its state.
+            if let (Some(state), Value::Object(fields)) = (state, &mut result) {
+                fields.insert("state".into(), json!(state));
+            }
             events.extend(canonical_events(
                 &invocation.actor.source(),
                 verb,
@@ -734,6 +739,27 @@ pub fn move_op(registry: WorkItemsRegistry) -> Op {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The task a run's result names, as its store holds it: the item's
+    /// own fields, which the interface's answer (`{ ref, state? }`) leaves
+    /// out.
+    async fn task_row(svc: &crate::Services, result: &Value) -> Value {
+        use oxplow_tasks::TaskStore as _;
+        let id = oxplow_tasks::task_of_work_item_ref(result["ref"].as_str().unwrap()).unwrap();
+        serde_json::to_value(svc.task_store.get(id).await.unwrap().unwrap()).unwrap()
+    }
+
+    /// A column of the oxplow row `sql` (one `?1`, the id) reads.
+    async fn column(svc: &crate::Services, sql: &'static str, id: String) -> Value {
+        svc.db
+            .read(move |tx| {
+                tx.query_row(sql, [id], |r| r.get::<_, String>(0))
+                    .map(Value::String)
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap()
+    }
     use oxplow_db::EffortStore as _;
     use oxplow_domain::Actor;
     use oxplow_domain::StreamId;
@@ -878,7 +904,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(out.result["status"], "archived");
+        assert_eq!(task_row(&fx.svc, &out.result).await["status"], "archived");
         let inverse = out.inverse.clone().unwrap();
         assert_eq!(inverse.name, NAME);
         assert_eq!(
@@ -933,9 +959,15 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(out.result["priority"], "high");
-        assert_eq!(out.result["thread_id"], fx.thread.to_string());
-        assert_eq!(out.result["description"], "the body");
+        assert_eq!(task_row(&fx.svc, &out.result).await["priority"], "high");
+        assert_eq!(
+            task_row(&fx.svc, &out.result).await["thread_id"],
+            fx.thread.to_string()
+        );
+        assert_eq!(
+            task_row(&fx.svc, &out.result).await["description"],
+            "the body"
+        );
         for (input, field) in [
             (
                 json!({ "title": "x", "native": { "bogus": 1 } }),
@@ -988,7 +1020,13 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            assert_eq!(commented.result["author"], author, "{actor:?}");
+            let note = commented.result["comment"].as_str().unwrap();
+            let id = note.trim_start_matches("not").to_string();
+            assert_eq!(
+                column(&fx.svc, "SELECT author FROM task_note WHERE id = ?1", id).await,
+                author,
+                "{actor:?}"
+            );
         }
     }
 
@@ -1014,7 +1052,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(out.result["status"], "blocked");
+        assert_eq!(task_row(&fx.svc, &out.result).await["status"], "blocked");
         let child = fx
             .svc
             .commands
@@ -1026,7 +1064,10 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(child.result["parent_id"], json!(loose));
+        assert_eq!(
+            task_row(&fx.svc, &child.result).await["parent_id"],
+            json!(loose)
+        );
         fx.svc
             .commands
             .run(
@@ -1141,7 +1182,10 @@ mod tests {
             .run(&agent, CREATE, json!({ "title": "mine" }), false)
             .await
             .unwrap();
-        assert_eq!(mine.result["thread_id"], fx.thread.to_string());
+        assert_eq!(
+            task_row(&fx.svc, &mine.result).await["thread_id"],
+            fx.thread.to_string()
+        );
         let named = fx
             .svc
             .commands
@@ -1153,14 +1197,21 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(named.result["thread_id"], fx.thread.to_string());
+        assert_eq!(
+            task_row(&fx.svc, &named.result).await["thread_id"],
+            fx.thread.to_string()
+        );
         let backlog = fx
             .svc
             .commands
             .run(&Actor::Human, CREATE, json!({ "title": "later" }), false)
             .await
             .unwrap();
-        assert!(backlog.result["thread_id"].is_null(), "{}", backlog.result);
+        assert!(
+            task_row(&fx.svc, &backlog.result).await["thread_id"].is_null(),
+            "{}",
+            backlog.result
+        );
         // oxplow's own fields are its priority only.
         let err = fx
             .svc
@@ -1194,7 +1245,10 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(out.result["thread_id"], fx.thread.to_string());
+        assert_eq!(
+            task_row(&fx.svc, &out.result).await["thread_id"],
+            fx.thread.to_string()
+        );
         let another = file_on(&fx, "another", None).await;
         let err = fx
             .svc
@@ -1301,8 +1355,16 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(linked.result["link_type"], "blocks");
-        assert_eq!(linked.result["thread_id"], fx.thread.to_string());
+        let from_id = from.rsplit("tsk").next().unwrap().to_string();
+        assert_eq!(
+            column(
+                &fx.svc,
+                "SELECT link_type || ' ' || thread_id FROM task_link WHERE from_item_id = ?1",
+                from_id
+            )
+            .await,
+            format!("blocks {}", fx.thread.value())
+        );
         let commented = fx
             .svc
             .commands
@@ -1314,11 +1376,19 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(commented.result["author"], "agent");
         let events = fx.svc.event_log_store.read_after(0, 500).await.unwrap();
         // The comment event names the note by the list's own id for it.
         let note = commented.result["comment"].as_str().unwrap().to_string();
         assert!(note.starts_with("not"), "{note}");
+        assert_eq!(
+            column(
+                &fx.svc,
+                "SELECT author FROM task_note WHERE id = ?1",
+                note.trim_start_matches("not").to_string()
+            )
+            .await,
+            "agent"
+        );
         let logged = events
             .iter()
             .find(|e| {
@@ -1403,7 +1473,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(outcome.result["status"], "done");
+        assert_eq!(task_row(&fx.svc, &outcome.result).await["status"], "done");
         let executed = outcome.event_id.expect("a write is recorded");
 
         let events = fx.svc.event_log_store.read_after(0, 50).await.unwrap();
@@ -1463,9 +1533,9 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(out.result["title"], "renamed");
-        assert_eq!(out.result["status"], "blocked");
-        assert_eq!(out.result["priority"], "urgent");
+        assert_eq!(task_row(&fx.svc, &out.result).await["title"], "renamed");
+        assert_eq!(task_row(&fx.svc, &out.result).await["status"], "blocked");
+        assert_eq!(task_row(&fx.svc, &out.result).await["priority"], "urgent");
         let executed = out.event_id.clone().unwrap();
         let events = fx.svc.event_log_store.read_after(0, 100).await.unwrap();
         let caused: Vec<(&str, &serde_json::Value)> = events
@@ -1531,7 +1601,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(out.result["status"], "done");
+        assert_eq!(task_row(&fx.svc, &out.result).await["status"], "done");
         use oxplow_tasks::TaskStore as _;
         let row = fx.svc.task_store.get(fx.task).await.unwrap().unwrap();
         assert_eq!(
@@ -1568,7 +1638,10 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(out.result["status"], "in_progress");
+        assert_eq!(
+            task_row(&fx.svc, &out.result).await["status"],
+            "in_progress"
+        );
     }
 
     /// `oxplow.work_item.create`: filing a task is audited to the actor; filed
@@ -1597,9 +1670,13 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(out.result["status"], "in_progress");
-        assert_eq!(out.result["author"], "agent");
-        let id: TaskId = out.result["id"].as_str().unwrap().parse().unwrap();
+        assert_eq!(
+            task_row(&fx.svc, &out.result).await["status"],
+            "in_progress"
+        );
+        assert_eq!(task_row(&fx.svc, &out.result).await["author"], "agent");
+        let id: TaskId =
+            oxplow_tasks::task_of_work_item_ref(out.result["ref"].as_str().unwrap()).unwrap();
         let executed = out.event_id.clone().unwrap();
         let events = fx.svc.event_log_store.read_after(0, 100).await.unwrap();
         let caused: Vec<&str> = events

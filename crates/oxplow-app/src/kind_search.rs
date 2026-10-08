@@ -767,7 +767,6 @@ mod core_tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-
     use oxplow_domain::{CommentTarget, StreamId, ThreadId};
 
     use crate::assets::Assets;

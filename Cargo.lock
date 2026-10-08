@@ -4672,6 +4672,7 @@ dependencies = [
  "oxplow-app",
  "oxplow-db",
  "oxplow-domain",
+ "oxplow-tasks",
  "oxplow-workspace-hack",
  "rusqlite",
  "serde_json",

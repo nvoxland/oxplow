@@ -806,6 +806,7 @@ fn core_never_special_cases_its_own_pieces() {
 const TASK_IMPLEMENTATION: &[(&str, &str)] = &[
     ("crates/oxplow-app/src/work_items.rs", "the built-in factory: `oxplow:tasks` is oxplow_tasks's verbs"),
     ("crates/oxplow-app/src/lib.rs", "wires the task stores into Services"),
+    ("crates/oxplow-dev/src/main.rs", "oxplow's own task CLI, over its tables"),
 ];
 
 /// The implementation's own crate.
