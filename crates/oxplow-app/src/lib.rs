@@ -1131,7 +1131,7 @@ impl Services {
         );
         // Composition (P6b.A1): several Tx commands as one run.
         commands
-            .register(commands::compose::sequence_command(&commands))
+            .register(commands::compose::sequence_command())
             .expect("command.sequence registers");
         // The work-items providers (`.context/work-items.md`); oxplow's
         // own, over this bus. Its active one is resolved from the config as

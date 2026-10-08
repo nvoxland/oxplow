@@ -16,8 +16,12 @@
 //!    caused by it. Not undoable: a system outside the bus can't be rolled
 //!    back with it.
 //!
-//! Composites routed entirely inside the transaction never come here:
-//! they run as one transaction through `CommandBus::run_nested`.
+//! Composites routed entirely inside the transaction run as one
+//! transaction instead ([`run_composed`]). Either way the composition is
+//! made once — on the snapshot it's routed and checked on ([`Router`]) —
+//! and is what runs: a [`Composed`] tree, each composite call's own
+//! composition beside it, so the calls prechecked are the calls run and a
+//! nested composite's confirmations are known before anything lands.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -27,38 +31,50 @@ use oxplow_domain::{Actor, CommandCall, CommandError, CommandOutcome, CommandSpe
 use oxplow_runtime::policy::PolicyDecision;
 use serde_json::{json, Value};
 
-use super::compose::Compose;
+use super::compose::{Compose, SEQUENCE};
 use super::{
     finish_undo_claim_tx, log_approved_tx, proposal_store, record_tx, Command, CommandBus,
-    Executed, ExternalHandler, Gates, Handler, HandlerOutput, NestedChild, Resolved, RunOrigin,
-    TxCtx, TxHandler, MAX_NESTING,
+    Executed, Gates, Handler, HandlerOutput, NestedChild, Resolved, RunOrigin, TxCtx, TxHandler,
+    MAX_NESTING,
 };
+use crate::agent_policy::AgentPolicy;
 
-/// How one step runs.
-#[derive(Clone)]
-pub(super) enum StepRun {
-    /// In its own transaction.
-    Tx(Arc<TxHandler>),
-    /// Against its system.
-    External(Arc<ExternalHandler>),
-}
-
-/// One routed call of a composite's steps.
-pub(super) struct Step {
-    command: Arc<Command>,
-    call: CommandCall,
-    run: StepRun,
-}
-
-/// A composite that runs as steps: each call routed, and the composite's
-/// own result.
-pub(super) struct Plan {
-    steps: Vec<Step>,
+/// A composition as routed: composed once, on the snapshot the run is
+/// checked on, and run as is — its calls, each with the command that runs
+/// it and, for a composite, that composite's own composition.
+pub(super) struct Composed {
+    calls: Vec<ComposedCall>,
     result: Option<Value>,
     /// The composite's own events, recorded with the run.
     events: Vec<oxplow_domain::Envelope>,
-    /// The host capabilities composing it called.
+    /// The host capabilities composing it called: the run's.
     capabilities: BTreeMap<String, u32>,
+}
+
+/// One call of a [`Composed`].
+pub(super) struct ComposedCall {
+    command: Arc<Command>,
+    call: CommandCall,
+    /// A composite call's own composition.
+    nested: Option<Arc<Composed>>,
+}
+
+impl Composed {
+    /// Calls routed by hand (`CommandBus::run_nested`): no result or events
+    /// of their own, nothing composing them called.
+    pub(super) fn of(calls: Vec<ComposedCall>) -> Self {
+        Self {
+            calls,
+            result: None,
+            events: Vec::new(),
+            capabilities: BTreeMap::new(),
+        }
+    }
+
+    /// Its calls as a confirmation shows them.
+    fn preview_input(&self) -> Value {
+        json!({ "calls": self.calls.iter().map(|c| &c.call).collect::<Vec<_>>() })
+    }
 }
 
 /// Steps 3 and 4's answers for a run, and what it is: what its steps run
@@ -100,30 +116,29 @@ impl Pending {
     }
 }
 
-/// Where a composite's calls run.
-enum Routed {
-    /// Every call joins the transaction.
-    Tx,
-    /// At least one leaves it.
-    Steps(Plan),
+/// A composition routed: what it runs, and the first call that leaves
+/// the transaction, if one does (it then runs as steps).
+struct Routed {
+    composed: Composed,
+    outside: Option<usize>,
 }
 
-/// Routes a composite's calls on a read snapshot, collecting each call's
-/// check before the transaction (tsk1010).
-struct Router<'a> {
-    registry: &'a BTreeMap<String, Arc<Command>>,
-    conn: &'a rusqlite::Connection,
+/// Routes a composite's calls — composing it once, on `conn` — checking
+/// each call (step 0, its input, that it writes) and collecting its check
+/// before the transaction (tsk1010).
+pub(super) struct Router<'a> {
+    pub registry: &'a BTreeMap<String, Arc<Command>>,
+    pub conn: &'a rusqlite::Connection,
     /// What's active: each call needs what a direct one would (step 0).
-    active: Option<&'a crate::capabilities::Active>,
-    prechecks: Vec<Pending>,
+    pub active: Option<&'a crate::capabilities::Active>,
+    pub prechecks: Vec<Pending>,
 }
 
 impl Router<'_> {
-    /// Compose `compose` for `input` on the snapshot and route each call; a
-    /// call that is itself a composite must route inside the transaction
-    /// (its steps would otherwise land outside the run they're a step of).
-    /// Each call's check before the transaction is collected, placed at `at`
-    /// + the call's input.
+    /// Compose `compose` for `input` and route each call; a call that is
+    /// itself a composite must route inside the transaction (its steps
+    /// would otherwise land outside the run they're a step of). Problems
+    /// and checks are placed at `at` + the call's place.
     fn route(
         &mut self,
         compose: &Compose,
@@ -132,7 +147,6 @@ impl Router<'_> {
         depth: usize,
         at: &str,
     ) -> Result<Routed, CommandError> {
-        let (registry, conn) = (self.registry, self.conn);
         if depth >= MAX_NESTING {
             return Err(CommandError::Invalid {
                 field: None,
@@ -142,18 +156,37 @@ impl Router<'_> {
                 ),
             });
         }
-        // What composing calls is the run's when it runs as steps (this
-        // composition is the one that runs); a nested composite composes
-        // again in its step's transaction, counted there.
         let trace = crate::host_capabilities::CapabilityTrace::default();
-        let composition = (compose.compose)(conn, &trace, input)?;
-        let mut steps = Vec::with_capacity(composition.calls.len());
-        let mut outside = false;
-        for (i, call) in composition.calls.into_iter().enumerate() {
-            let name_field = || Some(format!("/calls/{i}/name"));
+        let composition = (compose.compose)(self.conn, &trace, input)?;
+        let (calls, outside) = self.route_calls(composition.calls, depth, at)?;
+        Ok(Routed {
+            composed: Composed {
+                calls,
+                result: composition.result,
+                events: composition.events,
+                capabilities: trace.summary(),
+            },
+            outside,
+        })
+    }
+
+    /// Route `calls`, made at nesting `depth`: each checked, a composite
+    /// one composed in turn. With the first that leaves the transaction.
+    pub(super) fn route_calls(
+        &mut self,
+        calls: Vec<CommandCall>,
+        depth: usize,
+        at: &str,
+    ) -> Result<(Vec<ComposedCall>, Option<usize>), CommandError> {
+        let registry = self.registry;
+        let mut routed = Vec::with_capacity(calls.len());
+        let mut outside = None;
+        for (i, call) in calls.into_iter().enumerate() {
+            let name_field = format!("{at}/calls/{i}/name");
+            let call_at = format!("{at}/calls/{i}/input");
             let at_input = |e: CommandError| match e {
                 CommandError::Invalid { field, message } => CommandError::Invalid {
-                    field: Some(format!("/calls/{i}/input{}", field.unwrap_or_default())),
+                    field: Some(format!("{call_at}{}", field.unwrap_or_default())),
                     message,
                 },
                 other => other,
@@ -165,10 +198,10 @@ impl Router<'_> {
                     .ok_or_else(|| CommandError::Unknown {
                         name: call.name.clone(),
                     })?;
-            super::offered(self.active, &command.spec, i)?;
+            super::offered(self.active, &command.spec, &name_field)?;
             if command.spec.effect == oxplow_domain::CommandEffect::Read {
                 return Err(CommandError::Invalid {
-                    field: name_field(),
+                    field: Some(name_field),
                     message: format!(
                         "`{}` only reads; a composite composes commands that write",
                         call.name
@@ -176,7 +209,6 @@ impl Router<'_> {
                 });
             }
             command.validator.check(&call.input).map_err(at_input)?;
-            let call_at = format!("{at}/calls/{i}/input");
             if let Some(check) = &command.precheck {
                 self.prechecks.push(Pending {
                     check: check.clone(),
@@ -184,41 +216,186 @@ impl Router<'_> {
                     at: call_at.clone(),
                 });
             }
-            let run = match &command.handler {
-                Handler::Tx(h) => StepRun::Tx(h.clone()),
-                Handler::External(h) => {
-                    outside = true;
-                    StepRun::External(h.clone())
+            let nested = match &command.handler {
+                Handler::Tx(_) => None,
+                Handler::External(_) => {
+                    outside.get_or_insert(i);
+                    None
                 }
                 Handler::Compose(c) => {
-                    match self.route(c, &call.input, &call.name, depth + 1, &call_at)? {
-                        Routed::Tx => StepRun::Tx(c.tx.clone()),
-                        Routed::Steps(_) => {
-                            return Err(CommandError::Invalid {
-                                field: name_field(),
-                                message: format!(
-                                    "`{}` runs steps outside the transaction, so it can't be one \
+                    let inner = self.route(c, &call.input, &call.name, depth + 1, &call_at)?;
+                    if inner.outside.is_some() {
+                        return Err(CommandError::Invalid {
+                            field: Some(name_field),
+                            message: format!(
+                                "`{}` runs steps outside the transaction, so it can't be one \
                                  step of another composite",
-                                    call.name
-                                ),
-                            })
-                        }
+                                call.name
+                            ),
+                        });
                     }
+                    Some(Arc::new(inner.composed))
                 }
             };
-            steps.push(Step { command, call, run });
+            routed.push(ComposedCall {
+                command,
+                call,
+                nested,
+            });
         }
-        Ok(if outside {
-            Routed::Steps(Plan {
-                steps,
-                result: composition.result,
-                events: composition.events,
-                capabilities: trace.summary(),
-            })
-        } else {
-            Routed::Tx
-        })
+        Ok((routed, outside))
     }
+}
+
+/// Every call of `calls`, and of the composites among them, as `actor`
+/// may run it (`may_write`: the write gate's answer): its own invokers and
+/// the agent policy — a composite never widens what its calls allow —
+/// and whether any asks for a confirmation (and is destructive).
+fn check_tree(
+    policy: &AgentPolicy,
+    actor: &Actor,
+    may_write: Option<bool>,
+    calls: &[ComposedCall],
+) -> Result<(bool, bool), CommandError> {
+    let (mut asks, mut destructive) = (false, false);
+    for c in calls {
+        let spec = &c.command.spec;
+        if !spec.invokers.allows(actor.invoker()) {
+            return Err(CommandError::Denied {
+                reason: format!("`{}` is not open to {:?} callers", spec.id, actor.invoker()),
+            });
+        }
+        if let Some(thread_id) = actor.agent_thread() {
+            let gated = may_write.filter(|_| spec.effect == oxplow_domain::CommandEffect::Write);
+            if let PolicyDecision::Deny { reason, .. } =
+                policy.check_command(thread_id.as_ref(), spec, gated)
+            {
+                return Err(CommandError::Denied { reason });
+            }
+        }
+        let confirm = c.command.confirm(&c.call.input);
+        asks |= confirm.required();
+        destructive |= matches!(confirm, oxplow_domain::Confirm::Destructive);
+        if let Some(nested) = &c.nested {
+            let (a, d) = check_tree(policy, actor, may_write, &nested.calls)?;
+            asks |= a;
+            destructive |= d;
+        }
+    }
+    Ok((asks, destructive))
+}
+
+/// A handler's answer, held to the contract: one that says it changed
+/// nothing returns no events and no inverse (tsk901).
+fn honest(out: HandlerOutput, name: &str) -> Result<HandlerOutput, CommandError> {
+    if out.unchanged && (!out.events.is_empty() || out.inverse.is_some()) {
+        return Err(CommandError::Failed {
+            message: format!("`{name}` said it changed nothing but returned events or an inverse"),
+        });
+    }
+    Ok(out)
+}
+
+/// Run composite `parent`'s `composed` calls in `ctx`'s transaction, as
+/// one: every call checked first (each one's own invokers, the agent
+/// policy, its confirmation — one that asks makes the run ask, unless it
+/// was confirmed), then each run one level deeper.
+pub(super) fn run_composed(
+    policy: &AgentPolicy,
+    ctx: &TxCtx<'_>,
+    parent: &CommandSpec,
+    composed: &Composed,
+) -> Result<HandlerOutput, CommandError> {
+    let (asks, destructive) = check_tree(policy, ctx.actor, ctx.may_write, &composed.calls)?;
+    if asks && !ctx.confirmed {
+        return Err(CommandError::NeedsConfirmation {
+            preview: Box::new(Preview {
+                command: parent.id.clone(),
+                summary: parent.summary.clone(),
+                input: composed.preview_input(),
+                destructive,
+            }),
+        });
+    }
+    run_tree(ctx, composed)
+}
+
+/// `composed`'s calls, run on `ctx` one level deeper, checked already:
+/// the composite's answer — each child's name and result (the caller sent
+/// the inputs; the composite's inverse is the undo, so echoing either only
+/// costs the reader), its events and its own after them, the children's
+/// `after_commit`s in order. Its inverse is the inverses of the children
+/// that changed something, reversed, as a `oxplow.command.sequence` — none
+/// when one of those has none (it can't be undone in part); a child that
+/// changed nothing has nothing to undo. One whose every child changed
+/// nothing, with no events of its own, changed nothing.
+fn run_tree(ctx: &TxCtx<'_>, composed: &Composed) -> Result<HandlerOutput, CommandError> {
+    ctx.trace.add(&composed.capabilities);
+    let inner = TxCtx {
+        conn: ctx.conn,
+        actor: ctx.actor,
+        events: ctx.events.clone(),
+        confirmed: ctx.confirmed,
+        may_write: ctx.may_write,
+        depth: ctx.depth + 1,
+        trace: ctx.trace,
+    };
+    let mut children = Vec::with_capacity(composed.calls.len());
+    let mut events = Vec::new();
+    let mut afters: Vec<Box<dyn FnOnce() + Send + Sync>> = Vec::new();
+    let mut inverses: Vec<Option<CommandCall>> = Vec::new();
+    for c in &composed.calls {
+        let out = match (&c.nested, &c.command.handler) {
+            (Some(nested), _) => run_tree(&inner, nested)?,
+            (None, Handler::Tx(handler)) => handler(&inner, c.call.input.clone())?,
+            (None, _) => {
+                return Err(CommandError::Failed {
+                    message: format!("`{}` can't run in the transaction", c.call.name),
+                })
+            }
+        };
+        let mut out = honest(out, &c.call.name)?;
+        if let Some(after) = out.after_commit.take() {
+            afters.push(after);
+        }
+        events.extend(out.events);
+        children.push(json!({ "name": c.call.name, "result": out.result }));
+        if !out.unchanged {
+            inverses.push(out.inverse.filter(|_| c.command.spec.undoable));
+        }
+    }
+    let unchanged = inverses.is_empty() && composed.events.is_empty();
+    let inverse = (!inverses.is_empty())
+        .then(|| inverses.into_iter().rev().collect::<Option<Vec<_>>>())
+        .flatten()
+        .map(|calls| CommandCall {
+            name: SEQUENCE.into(),
+            input: json!({ "calls": calls }),
+        });
+    events.extend(composed.events.iter().cloned());
+    Ok(HandlerOutput {
+        result: json!({ "result": composed.result, "children": children }),
+        inverse,
+        events,
+        after_commit: (!afters.is_empty()).then(|| {
+            Box::new(move || {
+                for after in afters {
+                    after();
+                }
+            }) as Box<dyn FnOnce() + Send + Sync>
+        }),
+        unchanged,
+    })
+}
+
+/// The `Tx` handler that runs composite `parent`'s routed `composed` calls
+/// — the same calls on every attempt of its transaction.
+pub(super) fn composed_handler(
+    policy: Arc<AgentPolicy>,
+    parent: CommandSpec,
+    composed: Arc<Composed>,
+) -> Arc<TxHandler> {
+    Arc::new(move |ctx: &TxCtx<'_>, _input: Value| run_composed(&policy, ctx, &parent, &composed))
 }
 
 /// A step sent with an idempotency key is the same write on every
@@ -257,13 +434,14 @@ fn stopped(failed: &str, landed: &[NestedChild], err: &CommandError) -> CommandE
 }
 
 impl CommandBus {
-    /// Route composite `compose` for `input`: composed on a read snapshot,
-    /// each call checked and routed. Every call inside the transaction →
-    /// its `Tx` handler (which composes again, in the run's own
-    /// transaction); any outside → its steps. With it, every composed
-    /// call's check before the transaction (tsk1010).
+    /// Route composite `spec` (`compose`) for `input`: composed once, on a
+    /// read snapshot, each call checked and routed. Every call inside the
+    /// transaction → a `Tx` handler running exactly those calls; any
+    /// outside → its steps. With it, every composed call's check before
+    /// the transaction (tsk1010).
     pub(super) async fn route_composite(
         &self,
+        spec: &CommandSpec,
         compose: &Arc<Compose>,
         input: &Value,
     ) -> Result<(Resolved, Vec<Pending>), CommandError> {
@@ -296,23 +474,28 @@ impl CommandBus {
                     .take()
                     .unwrap_or_else(|| CommandError::from(db_err))
             })?;
-        let (routed, prechecks) = routed;
+        let (Routed { composed, outside }, prechecks) = routed;
+        let composed = Arc::new(composed);
         Ok((
-            match routed {
-                Routed::Tx => Resolved::Tx(compose.tx.clone()),
-                Routed::Steps(plan) => Resolved::Steps(Arc::new(plan)),
+            match outside {
+                None => Resolved::Tx(composed_handler(
+                    self.policy.clone(),
+                    spec.clone(),
+                    composed,
+                )),
+                Some(_) => Resolved::Steps(composed),
             },
             prechecks,
         ))
     }
 
-    /// Run `plan`'s steps as `actor` (see the module doc).
+    /// Run `plan`'s calls as steps, as `actor` (see the module doc).
     pub(super) async fn run_steps(
         &self,
         actor: &Actor,
         spec: &CommandSpec,
         input: &Value,
-        plan: Arc<Plan>,
+        plan: Arc<Composed>,
         admitted: Admitted,
     ) -> Result<CommandOutcome, CommandError> {
         let Admitted {
@@ -320,46 +503,23 @@ impl CommandBus {
             gates,
             origin,
         } = admitted;
-        // 1. Every step's own invokers, policy and confirmation, before
-        // any runs.
-        let mut asks = false;
-        let mut destructive = false;
-        for step in &plan.steps {
-            let child = &step.command.spec;
-            let refused = if !child.invokers.allows(actor.invoker()) {
-                Some(format!(
-                    "`{}` is not open to {:?} callers",
-                    child.id,
-                    actor.invoker()
-                ))
-            } else if let Some(thread_id) = actor.agent_thread() {
-                let gated = gates
-                    .may_write
-                    .filter(|_| child.effect == oxplow_domain::CommandEffect::Write);
-                match self.policy.check_command(thread_id.as_ref(), child, gated) {
-                    PolicyDecision::Deny { reason, .. } => Some(reason),
-                    _ => None,
+        // 1. Every step's — and every composite step's calls' — own
+        // invokers, policy and confirmation, before any runs.
+        let (asks, destructive) =
+            match check_tree(&self.policy, actor, gates.may_write, &plan.calls) {
+                Ok(answer) => answer,
+                Err(err) => {
+                    self.audit_only(actor, spec, input, Outcome::Denied, Some(err.to_string()))
+                        .await;
+                    return Err(err);
                 }
-            } else {
-                None
             };
-            if let Some(reason) = refused {
-                let err = CommandError::Denied { reason };
-                self.audit_only(actor, spec, input, Outcome::Denied, Some(err.to_string()))
-                    .await;
-                return Err(err);
-            }
-            let confirm = step.command.confirm(&step.call.input);
-            asks |= confirm.required();
-            destructive |= matches!(confirm, oxplow_domain::Confirm::Destructive);
-        }
-        let calls: Vec<&CommandCall> = plan.steps.iter().map(|s| &s.call).collect();
         if asks && !confirmed {
             return Err(CommandError::NeedsConfirmation {
                 preview: Box::new(Preview {
                     command: spec.id.clone(),
                     summary: spec.summary.clone(),
-                    input: json!({ "calls": calls }),
+                    input: plan.preview_input(),
                     destructive,
                 }),
             });
@@ -368,15 +528,24 @@ impl CommandBus {
         // 2. In order, each landing as it runs; the first failure stops.
         self.claim(&origin).await?;
         let executed_id = oxplow_domain::EventId::generate();
-        let mut landed: Vec<NestedChild> = Vec::with_capacity(plan.steps.len());
+        let mut landed: Vec<NestedChild> = Vec::with_capacity(plan.calls.len());
         let mut events = Vec::new();
-        let mut failure: Option<(&Step, CommandError)> = None;
+        let mut failure: Option<(&ComposedCall, CommandError)> = None;
         let mut capabilities = plan.capabilities.clone();
-        for (index, step) in plan.steps.iter().enumerate() {
-            let ran = match &step.run {
-                StepRun::Tx(handler) => {
+        for (index, step) in plan.calls.iter().enumerate() {
+            let tx = match (&step.nested, &step.command.handler) {
+                (Some(nested), _) => Some(composed_handler(
+                    self.policy.clone(),
+                    step.command.spec.clone(),
+                    nested.clone(),
+                )),
+                (None, Handler::Tx(handler)) => Some(handler.clone()),
+                (None, _) => None,
+            };
+            let ran = match (tx, &step.command.handler) {
+                (Some(handler), _) => {
                     self.run_step_tx(
-                        handler.clone(),
+                        handler,
                         actor,
                         &step.call.input,
                         &executed_id,
@@ -385,7 +554,7 @@ impl CommandBus {
                     )
                     .await
                 }
-                StepRun::External(handler) => {
+                (None, Handler::External(handler)) => {
                     let invocation =
                         origin.invocation(actor, index, &step.call.name, &step.call.input);
                     let key = invocation.idempotency_key.clone();
@@ -394,7 +563,11 @@ impl CommandBus {
                         .await
                         .map(|out| (same_events_once(out, key.as_deref()), trace.summary()))
                 }
+                (None, _) => Err(CommandError::Failed {
+                    message: format!("`{}` has no handler to run", step.call.name),
+                }),
             };
+            let ran = ran.and_then(|(out, used)| Ok((honest(out, &step.call.name)?, used)));
             match ran {
                 Ok((mut out, used)) => {
                     crate::host_capabilities::add_counts(&mut capabilities, used);

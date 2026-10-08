@@ -883,7 +883,7 @@ fn effect_command(
         Ok(Composition {
             calls: calls.clone(),
             result: None,
-            // Fresh ids each time the bus composes (it may, more than once).
+            // Fresh ids for this run's events.
             events: events
                 .iter()
                 .map(|e| oxplow_domain::Envelope {
@@ -893,7 +893,7 @@ fn effect_command(
                 .collect(),
         })
     });
-    sequence.with_handler(Compose::handler(bus, sequence.spec.clone(), composer))
+    sequence.with_handler(Compose::handler(composer))
 }
 
 /// Run the effect's script over `{ event }`, sandboxed, its `sql.read`

@@ -244,9 +244,11 @@ pub(crate) fn change(
         })?;
     let after = layer.value(&next, &target.project_dir, key);
     if before == after {
-        // Nothing to write, log or undo.
+        // Nothing to write, log or undo: the run leaves no record, and
+        // doesn't keep a composite it's part of from undoing the rest.
         return Ok(HandlerOutput {
             result: json!({ "key": key, "before": before, "after": after, "changed": false }),
+            unchanged: true,
             ..HandlerOutput::default()
         });
     }
@@ -639,7 +641,8 @@ mod tests {
             .unwrap();
         assert!(!file(&dir).contains("zones"), "{}", file(&dir));
         assert!(target.config.read().unwrap().zones.is_empty());
-        // A no-op set changes nothing and logs nothing new.
+        // A set that changes nothing leaves no record: no audit row, no
+        // `command.executed`, nothing to undo.
         let before = bus.log_for_tests().read_after(0, 100).await.unwrap().len();
         let noop = bus
             .run(&agent(), UNSET, json!({"key": "zones"}), false)
@@ -647,10 +650,10 @@ mod tests {
             .unwrap();
         assert_eq!(noop.result["changed"], false);
         assert!(noop.inverse.is_none());
-        // (`command.executed` is still logged for the run itself.)
+        assert_eq!(noop.audit_id, None);
         assert_eq!(
             bus.log_for_tests().read_after(0, 100).await.unwrap().len(),
-            before + 1
+            before
         );
     }
 

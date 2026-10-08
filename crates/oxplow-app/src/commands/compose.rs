@@ -3,28 +3,29 @@
 //! (P6b.B2) are built on. A composite is a [`Compose`] handler: given its
 //! input it says which calls to run; the bus decides where they run.
 //!
-//! - Every call runs in the transaction (a `Tx` command, a `Dispatch`
-//!   command routed inside it, a composite whose calls all do): one run in
-//!   one transaction (`CommandBus::run_nested`) — all or nothing, one audit
-//!   row and `command.executed` with the children's events caused by it,
-//!   undone by the children's inverses reversed.
+//! - Every call runs in the transaction (a `Tx` command, a composite whose
+//!   calls all do): one run in one transaction (`steps::run_composed`) —
+//!   all or nothing, one audit row and `command.executed` with the
+//!   children's events caused by it, undone by the inverses of the
+//!   children that changed something, reversed.
 //! - Any call leaves it (an `External` command, `work_item.*` on another
 //!   provider's item): its **steps** run in order (`steps.rs`), each
 //!   landing as it runs, with no undo (P7 review, tsk713).
 //!
-//! Either way each child's own invokers, policy and confirmation apply,
-//! checked before anything runs.
+//! Either way it is composed once, on the snapshot the bus routes it on,
+//! and each child's own needs, invokers, policy and confirmation — a
+//! composite child's children's too — are checked before anything runs.
 
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 
 use oxplow_domain::{
     Atomicity, CommandCall, CommandEffect, CommandError, CommandSpec, Confirm, Invokers, Lifecycle,
 };
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::Value;
 
-use super::{Command, CommandBus, Handler, HandlerOutput, TxCtx, TxHandler};
+use super::{Command, Handler};
 
 /// What a composite runs for one input: its calls, in order, the run's
 /// own `result` (beside the children's), and events of its own, appended
@@ -37,10 +38,11 @@ pub struct Composition {
     pub events: Vec<oxplow_domain::Envelope>,
 }
 
-/// Say what a composite runs for `input`, reading on `conn` (the run's
-/// transaction, or a read snapshot when the bus routes it) and counting
-/// the host capabilities it calls in `trace`. Pure: the bus may compose
-/// more than once.
+/// Say what a composite runs for `input`, reading on `conn` (a read
+/// snapshot when the bus routes a run, the run's transaction for a call a
+/// handler composes by hand) and counting the host capabilities it calls in
+/// `trace`. The bus composes once per run: what it routed and checked is
+/// what runs.
 pub type Composer = dyn Fn(
         &rusqlite::Connection,
         &crate::host_capabilities::CapabilityTrace,
@@ -49,48 +51,16 @@ pub type Composer = dyn Fn(
     + Send
     + Sync;
 
-/// A composite's handler: its composer, and the `Tx` handler that runs
-/// what it composes in the bus's transaction (`run_nested`) when every
-/// call can.
+/// A composite's handler: its composer. The bus composes it, routes the
+/// calls and runs them (`steps.rs`).
 pub struct Compose {
     pub compose: Arc<Composer>,
-    pub tx: Arc<TxHandler>,
 }
 
 impl Compose {
-    /// The composite `parent` (its spec, for the children's checks) over
-    /// `compose`, on `bus`.
-    pub fn handler(bus: &Arc<CommandBus>, parent: CommandSpec, compose: Arc<Composer>) -> Handler {
-        let bus: Weak<CommandBus> = Arc::downgrade(bus);
-        let composer = compose.clone();
-        let tx: Arc<TxHandler> = Arc::new(move |ctx: &TxCtx<'_>, input: Value| {
-            let bus = bus.upgrade().ok_or_else(|| CommandError::Failed {
-                message: "the command bus is gone".into(),
-            })?;
-            let Composition {
-                calls,
-                result,
-                events,
-            } = composer(ctx.conn, ctx.trace, &input)?;
-            let nested = bus.run_nested(ctx, &parent, &calls)?;
-            // Each child answers with its name and result: the caller sent
-            // the inputs, and the composite's own inverse is the undo, so
-            // echoing either only costs the reader (an agent filing twenty
-            // tasks got 23k characters back).
-            let children: Vec<Value> = nested
-                .children
-                .iter()
-                .map(|c| json!({ "name": c.name, "result": c.result }))
-                .collect();
-            Ok(HandlerOutput {
-                result: json!({ "result": result, "children": children }),
-                inverse: nested.inverse,
-                events: nested.events.into_iter().chain(events).collect(),
-                after_commit: nested.after_commit,
-                unchanged: false,
-            })
-        });
-        Handler::Compose(Arc::new(Compose { compose, tx }))
+    /// The composite over `compose`.
+    pub fn handler(compose: Arc<Composer>) -> Handler {
+        Handler::Compose(Arc::new(Compose { compose }))
     }
 }
 
@@ -139,7 +109,7 @@ pub fn sequence_spec() -> CommandSpec {
     }
 }
 
-pub fn sequence_command(bus: &Arc<CommandBus>) -> Command {
+pub fn sequence_command() -> Command {
     let spec = sequence_spec();
     let compose: Arc<Composer> = Arc::new(|_conn, _trace, input: &Value| {
         let input: SequenceInput =
@@ -160,8 +130,7 @@ pub fn sequence_command(bus: &Arc<CommandBus>) -> Command {
             events: Vec::new(),
         })
     });
-    let handler = Compose::handler(bus, spec.clone(), compose);
-    Command::new(spec, handler).expect("command.sequence registers")
+    Command::new(spec, Compose::handler(compose)).expect("command.sequence registers")
 }
 
 #[cfg(test)]
@@ -170,6 +139,7 @@ mod tests {
     use oxplow_domain::Actor;
     use oxplow_tasks::work_item_ref;
     use oxplow_tasks::TaskStore as _;
+    use serde_json::json;
 
     /// Two `work_item.*` commands as one run by an agent: a work list's
     /// verbs run outside the transaction, so the sequence runs them as

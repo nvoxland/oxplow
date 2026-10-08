@@ -111,16 +111,6 @@ pub struct NestedChild {
     pub inverse: Option<CommandCall>,
 }
 
-/// What a composite's children produced, for the parent's `HandlerOutput`.
-pub struct NestedOutcome {
-    pub children: Vec<NestedChild>,
-    /// The children's inverses reversed, as a `oxplow.command.sequence`; `None`
-    /// when a child has none.
-    pub inverse: Option<CommandCall>,
-    pub events: Vec<Envelope>,
-    pub after_commit: Option<Box<dyn FnOnce() + Send + Sync>>,
-}
-
 /// What a `Tx` handler runs with: the run's transaction, the actor, and
 /// the context its store cores log events through — the actor's `source`,
 /// caused by this run's `command.executed` (whose id is fixed before the
@@ -233,8 +223,9 @@ pub enum Handler {
 enum Resolved {
     Tx(Arc<TxHandler>),
     External(Arc<ExternalHandler>),
-    /// A composite with a call outside the transaction: its checked steps.
-    Steps(Arc<steps::Plan>),
+    /// A composite with a call outside the transaction: its routed calls,
+    /// run as steps.
+    Steps(Arc<steps::Composed>),
 }
 
 /// Step 1's routing: decided from the input alone, or a composite, routed
@@ -961,8 +952,15 @@ impl CommandBus {
                     .map(|p| steps::Pending::own(p, input.clone()));
                 (resolved, own.into_iter().collect())
             }
-            Routing::Composite(compose) => match self.route_composite(&compose, &input).await {
-                Ok(routed) => routed,
+            Routing::Composite(compose) => match self.route_composite(spec, &compose, &input).await
+            {
+                Ok((resolved, mut prechecks)) => {
+                    // Its own check, then each composed call's.
+                    if let Some(own) = command.precheck.clone() {
+                        prechecks.insert(0, steps::Pending::own(own, input.clone()));
+                    }
+                    (resolved, prechecks)
+                }
                 Err(err) => {
                     let recorded = match err {
                         CommandError::Denied { .. } => Outcome::Denied,
@@ -1496,25 +1494,20 @@ impl CommandBus {
         Ok(proposal)
     }
 
-    /// Run `calls` as one: the children of a composite (`oxplow.command.sequence`,
-    /// an extension's command) inside the parent's transaction and audit
-    /// row (P6b.A1). First a pass that writes nothing — every call must
-    /// name a `Tx` command (an `External` one can't join the transaction),
-    /// its input must fit, and its own `invokers`, the agent policy and
-    /// its `confirm` apply, so a composite never widens what its children
-    /// allow; a child that asks makes the parent ask, unless the run was
-    /// confirmed — then every handler runs on `ctx`, one level deeper. The
-    /// children's events ride out on the parent's; the inverse is the
-    /// children's inverses, reversed, as a `oxplow.command.sequence`, or none when
-    /// a child has none — so a composite declared undoable whose child
-    /// isn't (or gave no inverse) is recorded with no inverse, and its
-    /// undo is refused as "not undoable" rather than half-applied.
+    /// Run `calls` as one, inside `ctx`'s transaction: a `Tx` handler
+    /// composing other commands by hand (a composite command is routed by
+    /// the bus instead, `steps.rs`). Each call is routed as a composite's
+    /// are — what it needs active, its input, that it writes and stays in
+    /// the transaction (one that leaves it is refused, naming the system
+    /// and `parent`), a composite call composed — then checked and run
+    /// like a routed composite's (`steps::run_composed`): one audit row,
+    /// the children's inverses reversed as the undo.
     pub fn run_nested(
         &self,
         ctx: &TxCtx<'_>,
         parent: &CommandSpec,
         calls: &[CommandCall],
-    ) -> Result<NestedOutcome, CommandError> {
+    ) -> Result<HandlerOutput, CommandError> {
         if ctx.depth >= MAX_NESTING {
             return Err(CommandError::Invalid {
                 field: None,
@@ -1525,151 +1518,25 @@ impl CommandBus {
                 ),
             });
         }
-        let resolved: Vec<Arc<Command>> = {
-            let registry = self.commands.read();
-            calls
-                .iter()
-                .map(|call| {
-                    registry
-                        .get(&call.name)
-                        .cloned()
-                        .ok_or_else(|| CommandError::Unknown {
-                            name: call.name.clone(),
-                        })
-                })
-                .collect::<Result<_, _>>()?
-        };
+        let registry = self.commands.read().commands.clone();
         let active = self.active();
-        let mut asks = false;
-        let mut destructive = false;
-        let mut handlers: Vec<Arc<TxHandler>> = Vec::with_capacity(calls.len());
-        for (i, (call, command)) in calls.iter().zip(&resolved).enumerate() {
-            let spec = &command.spec;
-            offered(active.as_ref(), spec, i)?;
-            let name_field = || Some(format!("/calls/{i}/name"));
-            let at_input = |e: CommandError| match e {
-                CommandError::Invalid { field, message } => CommandError::Invalid {
-                    field: Some(format!("/calls/{i}/input{}", field.unwrap_or_default())),
-                    message,
-                },
-                other => other,
-            };
-            // This composite runs in a transaction (the bus routed every
-            // call inside one, or it is one step of a composite's steps):
-            // a call that leaves it can't join.
-            let external = |what: String| CommandError::Invalid {
-                field: name_field(),
-                message: format!(
-                    "`{}` {what}, outside the transaction `{}` runs in",
-                    spec.id, parent.id
-                ),
-            };
-            if spec.effect == oxplow_domain::CommandEffect::Read {
-                return Err(CommandError::Invalid {
-                    field: name_field(),
-                    message: format!(
-                        "`{}` only reads; a composite composes commands that write",
-                        spec.id
-                    ),
-                });
-            }
-            command.validator.check(&call.input).map_err(at_input)?;
-            let handler = match &command.handler {
-                Handler::Tx(h) => h.clone(),
-                Handler::External(_) => return Err(external("runs against a system".into())),
-                // Its own calls join this transaction too, or are refused
-                // there.
-                Handler::Compose(c) => c.tx.clone(),
-            };
-            handlers.push(handler);
-            if !spec.invokers.allows(ctx.actor.invoker()) {
-                return Err(CommandError::Denied {
-                    reason: format!(
-                        "`{}` is not open to {:?} callers",
-                        spec.id,
-                        ctx.actor.invoker()
-                    ),
-                });
-            }
-            if let Some(thread_id) = ctx.actor.agent_thread() {
-                let gated = ctx
-                    .may_write
-                    .filter(|_| spec.effect == oxplow_domain::CommandEffect::Write);
-                if let PolicyDecision::Deny { reason, .. } =
-                    self.policy.check_command(thread_id.as_ref(), spec, gated)
-                {
-                    return Err(CommandError::Denied { reason });
-                }
-            }
-            let confirm = command.confirm(&call.input);
-            if confirm.required() {
-                asks = true;
-                destructive |= matches!(confirm, oxplow_domain::Confirm::Destructive);
-            }
-        }
-        if asks && !ctx.confirmed {
-            return Err(CommandError::NeedsConfirmation {
-                preview: Box::new(Preview {
-                    command: parent.id.clone(),
-                    summary: parent.summary.clone(),
-                    input: serde_json::json!({ "calls": calls }),
-                    destructive,
-                }),
-            });
-        }
-        let inner = TxCtx {
+        let mut router = steps::Router {
+            registry: &registry,
             conn: ctx.conn,
-            actor: ctx.actor,
-            events: ctx.events.clone(),
-            confirmed: ctx.confirmed,
-            may_write: ctx.may_write,
-            depth: ctx.depth + 1,
-            trace: ctx.trace,
+            active: active.as_ref(),
+            prechecks: Vec::new(),
         };
-        let mut children = Vec::with_capacity(calls.len());
-        let mut events = Vec::new();
-        let mut afters: Vec<Box<dyn FnOnce() + Send + Sync>> = Vec::new();
-        for ((call, command), handler) in calls.iter().zip(&resolved).zip(&handlers) {
-            let mut out = handler(&inner, call.input.clone())?;
-            if let Some(after) = out.after_commit.take() {
-                afters.push(after);
-            }
-            events.extend(out.events);
-            children.push(NestedChild {
-                name: call.name.clone(),
-                input: call.input.clone(),
-                result: out.result,
-                inverse: if command.spec.undoable {
-                    out.inverse
-                } else {
-                    None
-                },
+        let (routed, outside) = router.route_calls(calls.to_vec(), ctx.depth, "")?;
+        if let Some(i) = outside {
+            return Err(CommandError::Invalid {
+                field: Some(format!("/calls/{i}/name")),
+                message: format!(
+                    "`{}` runs against a system, outside the transaction `{}` runs in",
+                    calls[i].name, parent.id
+                ),
             });
         }
-        let inverse = children
-            .iter()
-            .map(|c| c.inverse.clone())
-            .rev()
-            .collect::<Option<Vec<_>>>()
-            .map(|calls| CommandCall {
-                name: compose::SEQUENCE.into(),
-                input: serde_json::json!({ "calls": calls }),
-            });
-        let after_commit: Option<Box<dyn FnOnce() + Send + Sync>> = if afters.is_empty() {
-            None
-        } else {
-            Some(Box::new(move || {
-                for after in afters {
-                    after();
-                }
-            }))
-        };
-        Ok(NestedOutcome {
-            children,
-            inverse,
-            events,
-            after_commit,
-        })
+        steps::run_composed(&self.policy, ctx, parent, &steps::Composed::of(routed))
     }
 
     /// Step 5 for a `Read` command: the handler on a plain connection,
@@ -1934,17 +1801,17 @@ impl CommandBus {
     }
 }
 
-/// Step 0 for a composed call at `i`: what it needs is active (and the
+/// Step 0 for a composed call (at `field`): what it needs is active (and the
 /// implementation that owns it is), as a direct call's must be — else
 /// it's refused at its place in the calls.
 pub(super) fn offered(
     active: Option<&crate::capabilities::Active>,
     spec: &CommandSpec,
-    i: usize,
+    field: &str,
 ) -> Result<(), CommandError> {
     match active.and_then(|a| a.refusal(spec)) {
         Some(message) => Err(CommandError::Invalid {
-            field: Some(format!("/calls/{i}/name")),
+            field: Some(field.to_string()),
             message: format!("`{}`: {message}", spec.id),
         }),
         None => Ok(()),
@@ -2488,14 +2355,7 @@ mod tests {
                 Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
                     let calls: Vec<CommandCall> =
                         serde_json::from_value(input["calls"].clone()).unwrap();
-                    let nested = weak.upgrade().unwrap().run_nested(ctx, &parent, &calls)?;
-                    Ok(HandlerOutput {
-                        result: json!(null),
-                        inverse: nested.inverse,
-                        events: nested.events,
-                        after_commit: nested.after_commit,
-                        unchanged: false,
-                    })
+                    weak.upgrade().unwrap().run_nested(ctx, &parent, &calls)
                 })),
             )
             .unwrap(),
@@ -3398,8 +3258,7 @@ mod tests {
             .unwrap(),
         )
         .unwrap();
-        bus.register(super::compose::sequence_command(&bus))
-            .unwrap();
+        bus.register(super::compose::sequence_command()).unwrap();
         (db, bus)
     }
 
@@ -3460,6 +3319,142 @@ mod tests {
             assert_eq!(kv_value(&db, "a").await, None, "{why}: nothing landed");
             assert_eq!(kv_value(&db, "n").await, None, "{why}");
         }
+    }
+
+    /// A composite is composed once — on the snapshot it's routed and
+    /// prechecked on — and those calls are what run: a composer that would
+    /// say something else the second time is never asked, nested or not.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_composite_runs_the_calls_it_was_routed_with() {
+        use super::compose::{Compose, Composer, Composition};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let (db, bus) = composing_bus();
+        let composed = Arc::new(AtomicUsize::new(0));
+        let count = composed.clone();
+        let compose: Arc<Composer> = Arc::new(move |_conn, _trace, _input: &Value| {
+            // The first composition sets `a`; any later one would set `b`.
+            let k = if count.fetch_add(1, Ordering::SeqCst) == 0 {
+                "a"
+            } else {
+                "b"
+            };
+            Ok(Composition {
+                calls: vec![CommandCall {
+                    name: "oxplow.kv.set".into(),
+                    input: json!({ "k": k, "v": "1" }),
+                }],
+                ..Composition::default()
+            })
+        });
+        let mut spec = kv_spec("oxplow.kv.once", Invokers::ALL, Confirm::Never);
+        spec.atomicity = Atomicity::Dispatch;
+        spec.input_schema = json!({ "type": "object" });
+        bus.register(Command::new(spec, Compose::handler(compose)).unwrap())
+            .unwrap();
+
+        bus.run(&Actor::Human, "oxplow.kv.once", json!({}), false)
+            .await
+            .unwrap();
+        assert_eq!(composed.load(Ordering::SeqCst), 1, "composed once");
+        assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
+        assert_eq!(kv_value(&db, "b").await, None);
+
+        // Nested in a sequence, in one transaction and as a step.
+        for first in ["oxplow.kv.set", "oxplow.kv.external"] {
+            composed.store(0, Ordering::SeqCst);
+            bus.run(
+                &Actor::Human,
+                "oxplow.command.sequence",
+                json!({ "calls": [
+                    { "name": first, "input": { "k": "x", "v": "1" } },
+                    { "name": "oxplow.kv.once", "input": {} },
+                ] }),
+                false,
+            )
+            .await
+            .unwrap();
+            assert_eq!(composed.load(Ordering::SeqCst), 1, "{first}: composed once");
+            assert_eq!(kv_value(&db, "b").await, None, "{first}");
+        }
+    }
+
+    /// A step that is itself a composite whose child asks makes the run
+    /// ask before any step lands — not after the steps before it stand.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_nested_composites_confirmation_is_asked_before_any_step_lands() {
+        let (db, bus) = composing_bus();
+        let input = json!({ "calls": [
+            { "name": "oxplow.kv.external", "input": { "k": "a", "v": "1" } },
+            { "name": "oxplow.command.sequence", "input": { "calls": [
+                { "name": "oxplow.kv.danger", "input": { "k": "b", "v": "2" } },
+            ] } },
+        ] });
+        let err = bus
+            .run(
+                &Actor::Human,
+                "oxplow.command.sequence",
+                input.clone(),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, CommandError::NeedsConfirmation { preview } if preview.destructive),
+            "{err:?}"
+        );
+        assert_eq!(kv_value(&db, "a").await, None, "no step landed");
+        bus.run(&Actor::Human, "oxplow.command.sequence", input, true)
+            .await
+            .unwrap();
+        assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
+        assert_eq!(kv_value(&db, "b").await.as_deref(), Some("2"));
+    }
+
+    /// A child that changed nothing has nothing to undo: it doesn't keep
+    /// the composite from undoing what the others changed; a composite
+    /// whose every child changed nothing leaves no record, like such a
+    /// call.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_child_that_changed_nothing_doesnt_keep_the_composite_from_undoing() {
+        let (db, bus) = composing_bus();
+        bus.register(
+            Command::new(
+                kv_spec("oxplow.kv.same", Invokers::ALL, Confirm::Never),
+                kv_unchanged(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let out = bus
+            .run(
+                &Actor::Human,
+                "oxplow.command.sequence",
+                calls(&[("oxplow.kv.set", "a", "1"), ("oxplow.kv.same", "b", "x")]),
+                false,
+            )
+            .await
+            .unwrap();
+        assert!(out.inverse.is_some(), "undoable: the change to `a`");
+        bus.undo(&Actor::Human, out.audit_id.unwrap(), false)
+            .await
+            .unwrap();
+        assert_eq!(kv_value(&db, "a").await.as_deref(), Some(""));
+
+        let before = audits_of(&db, "oxplow.command.sequence").await.len();
+        let out = bus
+            .run(
+                &Actor::Human,
+                "oxplow.command.sequence",
+                calls(&[("oxplow.kv.same", "c", "x")]),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(out.audit_id, None, "nothing changed, nothing recorded");
+        assert_eq!(
+            audits_of(&db, "oxplow.command.sequence").await.len(),
+            before
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -3625,7 +3620,7 @@ mod tests {
                 )],
             })
         });
-        bus.register(Command::new(spec.clone(), Compose::handler(&bus, spec, compose)).unwrap())
+        bus.register(Command::new(spec.clone(), Compose::handler(compose)).unwrap())
             .unwrap();
         let log = oxplow_db::SqliteEventLogStore::new(db.clone(), bus.vocabulary().clone());
         let announced = || async {

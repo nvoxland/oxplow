@@ -358,7 +358,7 @@ re-applies the key to the config as it is then, writes project.yaml and
 swaps memory under one lock, so concurrent sets of different keys both
 survive.
 
-## Composition: `oxplow.command.sequence`, `run_nested` and steps (P6b.A1, tsk713)
+## Composition: `oxplow.command.sequence`, the composed tree and steps (P6b.A1, tsk713)
 
 A composite is a command made of other commands' calls: a
 `Handler::Compose` (`commands/compose.rs`) whose **composer** says, for
@@ -372,50 +372,63 @@ script returns over its `input` rows. Its atomicity is `Dispatch` — its
 calls decide where it runs, so composites are pinned
 (`CommandBus::composite_commands`, `the_composite_commands_are_the_reviewed_ones`).
 Once the actor is admitted (steps 2–3), the bus **routes** it
-(`CommandBus::route_composite`, `commands/steps.rs`): it composes on a
-read snapshot and routes each call — a `Tx` command stays in the
-transaction; an `External` one (every work list's `work_item.*` verbs,
-oxplow's own tasks' included) leaves it; a nested composite must route inside (its
-steps would otherwise land outside the run they're a step of), and a
-`Read` call is refused (a composite composes commands that write).
-Every call inside → **one run in one transaction**, below; any outside →
+(`CommandBus::route_composite`, `commands/steps.rs` `Router`): it
+**composes once**, on a read snapshot, and routes each call — a `Tx`
+command stays in the transaction; an `External` one (every work list's
+`work_item.*` verbs, oxplow's own tasks' included) leaves it; a nested
+composite is composed in turn and must route inside (its steps would
+otherwise land outside the run they're a step of), and a `Read` call is
+refused (a composite composes commands that write). Each call's needs
+(step 0, refused at `/calls/<i>/name` — `commands::offered`), input (at
+`/calls/<i>/input/…`, a nested call's at its full path) and precheck
+are taken there, the composite's own precheck first. What it routed is
+a `Composed` tree — each composite call's own composition beside it —
+and **that is what runs**: the composer is never asked again, so the
+calls checked are the calls run (an extension's script runs once; a
+composer that would answer differently later isn't asked). Every call
+inside → **one run in one transaction**, below; any outside →
 **steps** (next section).
 
-**In one transaction**: `CommandBus::run_nested(ctx, parent_spec,
-calls)` (`commands/mod.rs`), the composite's `Tx` handler — composing
-again, in the run's own transaction. It first makes a pass that writes
-nothing: every call must join the transaction (a call that leaves it is
-refused, naming the system and the composite), what it needs must be
-active (step 0, refused at `/calls/<i>/name` — `commands::offered`), its
-input must fit (a problem is reported at `/calls/<i>/input/…`), and its
-**own** `invokers`, the agent policy (with the parent's `may_write`) and
-its `confirm` apply, so a composite never widens what its children allow; a child that asks
-makes the parent ask (`Preview { command: <parent>, destructive }`)
-unless the run was confirmed. Then every handler runs on the parent's
-`TxCtx` one level deeper (`TxCtx.depth`); a composite more than
-`MAX_NESTING` (8) deep is `Invalid` ("does a command compose itself?")
-instead of recursing until the stack overflows, and the whole run rolls
-back. The parent has the **one audit row** and `command.executed`
-(children are not audited separately — a child row would be an
-independently undoable unit fighting the parent's inverse); its
-`result` is `{ result, children: [{ name, result }] }` — no child's
-`input` (the caller sent it) or `inverse` (the parent's is the undo):
-echoing both cost an agent filing twenty tasks 23k characters back;
-the children's events ride out on the parent's `HandlerOutput.events`,
-so they are caused by the parent's `command.executed`; their
-`after_commit`s chain in order. The inverse is the children's inverses,
-**reversed**, as a `oxplow.command.sequence` — or none when a child has none —
-so `undo` needs nothing new, and a child whose inverse asks makes the
-undo ask. A child's `Busy` propagates and the bus retries the whole
-parent (handlers are pure).
+**In one transaction** (`steps::run_composed`, the `Tx` handler the bus
+makes from the tree — the same calls on every attempt of the
+transaction): first a pass that writes nothing over the whole tree —
+each call's **own** `invokers`, the agent policy (with the parent's
+`may_write`) and its `confirm`, a nested composite's calls' too — so a
+composite never widens what its children allow; a call anywhere in the
+tree that asks makes the parent ask (`Preview { command: <parent>,
+destructive }`) unless the run was confirmed. Then every handler runs on
+the parent's `TxCtx` one level deeper (`TxCtx.depth`); routing refuses a
+composite more than `MAX_NESTING` (8) deep ("does a command compose
+itself?") instead of recursing until the stack overflows. The parent has
+the **one audit row** and `command.executed` (children are not audited
+separately — a child row would be an independently undoable unit
+fighting the parent's inverse); its `result` is `{ result, children: [{
+name, result }] }` — no child's `input` (the caller sent it) or `inverse`
+(the parent's is the undo): echoing both cost an agent filing twenty
+tasks 23k characters back; the children's events ride out on the
+parent's `HandlerOutput.events`, so they are caused by the parent's
+`command.executed`; their `after_commit`s chain in order. The inverse is
+the inverses of the children **that changed something**, reversed, as a
+`oxplow.command.sequence` — or none when one of those has none (it can't
+be undone in part) — so `undo` needs nothing new, and a child whose
+inverse asks makes the undo ask. A child that says `unchanged` (an
+`oxplow.config.set` to the value already there) has nothing to undo and
+doesn't veto the rest; one that says so but returns events or an inverse
+is refused; a composite whose every child changed nothing, with no events
+of its own, is `unchanged` itself and leaves no record. A child's `Busy`
+propagates and the bus retries the whole parent (handlers are pure).
+`CommandBus::run_nested(ctx, parent, calls)` is the same for a `Tx`
+handler that composes by hand: its calls routed on the run's own
+connection (one that leaves the transaction refused, naming the system
+and the composite) and run as above.
 
 **As steps** (P7 review, tsk713; `CommandBus::run_steps`): a composite
 with a call outside the transaction can't be all-or-nothing, so its
-calls run as steps. (1) **Checked first**: every step's needs (step 0),
-its input (at `/calls/<i>/input/…`), its own invokers and the agent
-policy, before
-anything runs — a refusal is the run's, audited, and nothing ran; a step
-that asks makes the run ask once (`NeedsConfirmation` with the calls in
+calls run as steps. (1) **Checked first** (routed as above, then): every
+step's — and every composite step's calls' — own invokers and the agent
+policy, before anything runs — a refusal is the run's, audited, and
+nothing ran; a step that asks, or a composite step whose call asks, makes
+the run ask once (`NeedsConfirmation` with the calls in
 the preview), and an agent's run is a proposal **with no dry run**
 (nothing outside the transaction runs before a person decides). (2)
 **In order**, each landing as it runs: a step inside oxplow in its own
@@ -625,9 +638,9 @@ capability its area falls under (`threads.write`, `vcs.write`, …;
 
 | Command | Handler | Notes |
 |---|---|---|
-| `<extension namespace>.<name>` (an enabled extension's `commands:`) | `Tx`: the extension's Starlark script composes core commands, run through `run_nested` (`extension_commands.rs`, P6b.B2) | declared invokers / confirm / effect, undoable, `Experimental`; registered while the extension is enabled (primary worktree). See [extensions.md](./extensions.md) → "Commands" |
+| `<extension namespace>.<name>` (an enabled extension's `commands:`) | `Dispatch`: the extension's Starlark script composes core commands — once, when the bus routes the run — run as any composite's (`extension_commands.rs`, P6b.B2; "Composition") | declared invokers / confirm / effect, undoable, `Experimental`; registered while the extension is enabled (primary worktree). See [extensions.md](./extensions.md) → "Commands" |
 | `oxplow.review.accept`, `oxplow.review.request_changes` (oxplow-bundled, P7.C5) | extension composites of `oxplow.work_item.comment` + `oxplow.work_item.transition` (to `done` / `todo`) on an effort's work item — as steps, every list's verbs running outside the transaction (not undoable); an effort without a work item is refused by name; accept refuses unreviewed claims or inferred decisions unless `force` | human + lens, not agent; `confirm: always`. See [extensions.md](./extensions.md) → "oxplow-bundled" |
-| `oxplow.command.sequence { calls: [{ name, input }] }` | `Dispatch` — a composite (`commands/compose.rs`, P6b.A1) | all invokers, `Write`, `Confirm::Never` — the children decide. Each child's own invokers, policy and confirmation; one audit row for the parent with the children in `result`. Every call in oxplow's records → one transaction (`run_nested`), undoable as the reversed children; a call outside it (a `work_item.*` verb, any list's) → steps, in order, not undoable. The one composition mechanism (an extension's command runs on it). See "Composition" |
+| `oxplow.command.sequence { calls: [{ name, input }] }` | `Dispatch` — a composite (`commands/compose.rs`, P6b.A1) | all invokers, `Write`, `Confirm::Never` — the children decide. Each child's own invokers, policy and confirmation; one audit row for the parent with the children in `result`. Every call in oxplow's records → one transaction (`steps::run_composed`), undoable as the reversed children that changed something; a call outside it (a `work_item.*` verb, any list's) → steps, in order, not undoable. The one composition mechanism (an extension's command runs on it). See "Composition" |
 | `oxplow.work_item.transition { ref, to, native_state? }` | `External` (`commands/work_item.rs`): the item's list's `transition` verb (oxplow's tasks: `oxplow_tasks::verbs::transition_tx`, in a transaction of their own) | all invokers, `Record`; undoable (the inverse restores the prior canonical and native state; an external inverse is renamed to `oxplow.work_item.transition` so undo dispatches again). `to` is a canonical state, `native_state` the provider's own and must map to it (oxplow: its status; `archived` with `done` or `canceled`). For every provider core logs `work_item.state_changed` when the state moved, with the audit, caused by `command.executed` (the interface's events: [work-items.md](./work-items.md)), which the effort policy reacts to ([work-tracking.md](./work-tracking.md)). |
 | `oxplow.work_item.create { title, body?, parent_ref?, state?, native_state?, native?, thread? }` | `External`: the active list's `create` (oxplow's tasks: `oxplow_tasks::verbs::create_tx`) | all invokers; not undoable (that would be deleting an item). Always files on the active tracker, which must be running. `thread`: absent, an agent's own; a person's without one, the backlog. oxplow: `native { priority? }`; the row at the end of its list (`next_sort_index_tx`), core's `work_item.created@2 { work_item, state }` and `work_item.state_changed`, caused by the run; an agent's task is authored `agent`. The result has the item's `ref` and `link_warnings`: the body's `[[…]]` links that don't resolve, checked like a note's, for every list (`link_check::LinkDeps::item_warnings`, on a read of its own). |
 | `oxplow.work_item.update { ref, title?, body?, parent_ref?, state?, native_state?, native? }` | `External`: the item's list's `update` (oxplow's tasks: `oxplow_tasks::verbs::update_tx`) | all invokers; undoable (the inverse restores exactly the fields and state given). oxplow: fields and status commit together — core logs `work_item.edited@2 { work_item, fields }` for the fields the input set, then the status move with everything `oxplow.work_item.transition` implies; `native { priority? }` (a thread change is `oxplow.work_item.move`). A refused run writes nothing. An update that sets a body carries its `link_warnings`, as `oxplow.work_item.create`'s does. |

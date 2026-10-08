@@ -2288,7 +2288,7 @@ shape (`composed`; any other key is `Invalid`).
 route, again in the run's transaction, whose calls are the ones recorded).
 The bus runs what it composes ([commands.md](./commands.md) →
 "Composition"): when every call stays in oxplow's records, as children
-in one transaction (`run_nested`) — each child's invokers, policy and
+in one transaction (`steps::run_composed`; the script runs once, when the bus routes the run) — each child's invokers, policy and
 confirmation apply (an agent's run whose child asks becomes a proposal
 with the children as its dry run), one audit row with `{ result,
 children }`, the children's events caused by the run, the reversed

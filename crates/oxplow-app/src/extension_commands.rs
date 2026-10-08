@@ -831,7 +831,7 @@ pub fn extension_command(
             }
         },
     );
-    let handler = Compose::handler(bus, spec.clone(), compose);
+    let handler = Compose::handler(compose);
     Command::new(spec, handler)
 }
 
