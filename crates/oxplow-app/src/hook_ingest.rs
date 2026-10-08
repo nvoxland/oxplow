@@ -36,6 +36,7 @@
 //! in commit order.
 
 use oxplow_domain::vocabulary::VocabularyHandle;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -153,9 +154,11 @@ pub struct HookIngestService {
     project_dir: PathBuf,
     /// Reads recent activity to derive a thread's status.
     log: oxplow_db::SqliteEventLogStore,
-    /// Held from a status-deciding transaction to its announcement, so
-    /// `AgentStatusChanged` reaches the UI in commit order.
-    status_order: Arc<tokio::sync::Mutex<()>>,
+    /// One lock per thread, held from a status-deciding transaction to its
+    /// announcement, so a thread's `AgentStatusChanged` reaches the UI in
+    /// commit order. Per thread: one agent's hooks never queue behind
+    /// another thread's.
+    status_order: Arc<parking_lot::Mutex<HashMap<ThreadId, Arc<tokio::sync::Mutex<()>>>>>,
     events: EventBus,
     pump: Option<Arc<crate::event_pump::EventPump>>,
     /// Snapshots the worktree when a turn ends (P2.3); `None` in bare tests.
@@ -178,7 +181,7 @@ impl HookIngestService {
             db,
             vocabulary,
             project_dir,
-            status_order: Arc::new(tokio::sync::Mutex::new(())),
+            status_order: Arc::default(),
             events,
             pump: None,
             turn_snapshots: None,
@@ -201,8 +204,24 @@ impl HookIngestService {
         self
     }
 
-    /// Record the envelope and drive the turn / status state machine.
+    /// `thread`'s ordering lock.
+    fn order_of(&self, thread: ThreadId) -> Arc<tokio::sync::Mutex<()>> {
+        self.status_order.lock().entry(thread).or_default().clone()
+    }
+
+    /// Record the envelope and drive the turn / status state machine. It
+    /// runs as its own task, so a caller that stops waiting (the hook
+    /// route's budget ran out) can't cut it short between its commit and
+    /// what follows: the status, the pump's wake, a closed turn's end
+    /// snapshot.
     pub async fn ingest(&self, env: HookEnvelope) -> Result<IngestOutcome, HookIngestError> {
+        let this = self.clone();
+        tokio::spawn(async move { this.ingest_now(env).await })
+            .await
+            .map_err(|e| HookIngestError::Storage(DomainError::Invariant(e.to_string())))?
+    }
+
+    async fn ingest_now(&self, env: HookEnvelope) -> Result<IngestOutcome, HookIngestError> {
         let now = Timestamp::now();
         let mut outcome = IngestOutcome::default();
         let kind = env.kind;
@@ -210,7 +229,8 @@ impl HookIngestService {
             return Ok(outcome); // no thread: nothing to anchor a record to
         };
 
-        let order = self.status_order.lock().await;
+        let order_lock = self.order_of(thread);
+        let order = order_lock.lock().await;
         let vocabulary = self.vocabulary.clone();
         let project_dir = self.project_dir.clone();
         let harnesses = self.harnesses.clone();
@@ -255,7 +275,8 @@ impl HookIngestService {
         state: AgentStatusState,
         detail: Option<String>,
     ) -> Result<(), HookIngestError> {
-        let _order = self.status_order.lock().await;
+        let order_lock = self.order_of(*thread);
+        let _order = order_lock.lock().await;
         let vocabulary = self.vocabulary.clone();
         let (thread_c, detail_c) = (*thread, detail.clone());
         let slot = self
@@ -1760,6 +1781,62 @@ mod tests {
         let status = status(&svc, tid).await.unwrap();
         assert_eq!(status.state, AgentStatusState::Stopped);
         assert!(turns(&svc).list_open(&tid).await.unwrap().is_empty());
+    }
+
+    /// Records each turn-end take it finishes; a take takes a while, as
+    /// one behind a busy database writer does.
+    #[derive(Default)]
+    struct Takes(std::sync::Mutex<Vec<AgentTurnId>>);
+
+    #[async_trait::async_trait]
+    impl crate::turn_snapshots::TurnSnapshots for Takes {
+        async fn take_turn_end(&self, _thread: ThreadId, turn: AgentTurnId) {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            self.0.lock().unwrap().push(turn);
+        }
+    }
+
+    /// A Stop whose caller stops waiting (the hook route's budget ran out)
+    /// still finishes: the turn it closed gets its end snapshot.
+    #[tokio::test]
+    async fn a_stop_finishes_though_its_caller_stops_waiting() {
+        let (svc, tid) = fixture().await;
+        let takes = std::sync::Arc::new(Takes::default());
+        let svc = svc.with_turn_snapshots(takes.clone());
+        svc.ingest(HookEnvelope {
+            kind: HookKind::UserPromptSubmit,
+            thread_id: Some(tid),
+            stream_id: None,
+            agent_session_id: None,
+            session_id: None,
+            payload_json: "{}".into(),
+            prompt: Some("p".into()),
+            decision: None,
+            tool: None,
+        })
+        .await
+        .unwrap();
+        let stop = svc.ingest(HookEnvelope {
+            kind: HookKind::Stop,
+            thread_id: Some(tid),
+            stream_id: None,
+            agent_session_id: None,
+            session_id: None,
+            payload_json: "{}".into(),
+            prompt: None,
+            decision: None,
+            tool: None,
+        });
+        // The caller gives up while the take is under way: the ingest's
+        // future is dropped.
+        let _ = tokio::time::timeout(std::time::Duration::from_millis(20), stop).await;
+        for _ in 0..200 {
+            if !takes.0.lock().unwrap().is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert_eq!(takes.0.lock().unwrap().len(), 1, "the turn's end take");
     }
 
     /// The person's Escape only interrupts a turn that's running: with

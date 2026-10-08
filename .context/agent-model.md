@@ -623,8 +623,15 @@ against a 5s timeout (`HOOK_HANDLING_TIMEOUT` /
 On expiry it logs a warning and returns the generic ack — tool call
 allowed — so a wedged DB (e.g. the writer lock held by
 a snapshot flush) can never stall the agent. Availability over
-enforcement: the MCP tools re-check write-guard + filing at the call
-site, so a timed-out PreToolUse deny is still caught there.
+enforcement: a timed-out PreToolUse is allowed (MCP writes are commands,
+gated again on the bus; an edit tool's file write isn't re-checked).
+The ingest itself isn't cut short: `HookIngestService::ingest` runs as its
+own task, so when the route stops waiting the hook still finishes — its
+status announcement, the pump's wake and a closed turn's end snapshot
+(without which the turn would get no `thread.checkpoint` and no observed
+files). Its ordering lock is per thread: one thread's hooks wait for each
+other (status changes reach the UI in commit order), never for another
+thread's.
 
 ## ACP agents: configuration (tsk335)
 

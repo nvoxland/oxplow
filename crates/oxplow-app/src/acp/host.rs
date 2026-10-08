@@ -309,7 +309,21 @@ impl AcpHost for ServicesAcpHost {
             decision: None,
             tool: None,
         };
+        // Its open turn ends interrupted; the agent is gone either way, so
+        // the session reads stopped even when no turn was running.
         self.ingest(&svc, env).await;
+        if let Err(err) = svc
+            .hook_ingest
+            .set_status(
+                thread,
+                Some(self.session),
+                AgentStatusState::Stopped,
+                Some("interrupt".into()),
+            )
+            .await
+        {
+            warn!(?err, "acp: status update failed");
+        }
     }
 
     fn activity(&self, _thread: &ThreadId) {
