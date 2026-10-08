@@ -239,8 +239,15 @@ Things I keep forgetting. Read this before adding any UI.
 - **Per-row destructives use `InlineConfirm`** at
   `apps/desktop/src/components/InlineConfirm.tsx`. First click on the trigger
   swaps to a `[Confirm] [Cancel]` pair in the same horizontal real
-  estate. The Confirm button auto-focuses; Escape, blur (outside the
-  pair), or Cancel reverts. Examples in tree: Restore button on each
+  estate. The Confirm button auto-focuses; Escape, a press outside the
+  pair, focus moving elsewhere, or Cancel reverts. Focus moving to an
+  element *around* the pair (the tab or row it sits in) doesn't revert
+  it: WebKit, the desktop window's engine, doesn't focus a clicked
+  button, so a click on Confirm moves focus to the nearest focusable
+  ancestor first — reverting on that swallowed the click (the session
+  tab's Close session did nothing in the app while Chromium tests
+  passed). Check a focus-dependent control in the WebKit e2e project
+  (`tests-e2e/specs/components/`). Examples in tree: Restore button on each
   file row in `SnapshotsPanel.tsx`'s detail pane; Delete button on
   `WaitPointRow.tsx`; Force-delete button in `BranchPicker.tsx`'s
   manage flow.

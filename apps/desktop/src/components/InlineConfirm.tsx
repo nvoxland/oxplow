@@ -7,8 +7,13 @@ import { useEffect, useRef, useState } from "react";
  *
  * First click on the trigger swaps to a `[Confirm] [Cancel]` pair in the
  * same horizontal real-estate. Pressing Enter on the auto-focused
- * Confirm button (or clicking it) fires `onConfirm`. Escape, blur, or
- * the Cancel button reverts to the trigger.
+ * Confirm button (or clicking it) fires `onConfirm`. Escape, a press
+ * outside the pair, focus moving elsewhere, or the Cancel button reverts
+ * to the trigger. Focus moving to an element around the pair doesn't:
+ * WebKit (the desktop window's engine) doesn't focus a button that's
+ * clicked, so a click on Confirm first moves focus to the nearest
+ * focusable ancestor — a tab, a row — and reverting then would swallow
+ * the click.
  *
  * Use this when the action lives on a specific UI element (delete row,
  * delete note, restore file). For non-row-anchored destructives (archive
@@ -55,14 +60,24 @@ export function InlineConfirm({
         setArmed(false);
       }
     }
+    // A press anywhere outside the pair reverts it.
+    function handlePointer(event: PointerEvent | MouseEvent) {
+      if (!containerRef.current?.contains(event.target as Node)) setArmed(false);
+    }
     window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
+    document.addEventListener("mousedown", handlePointer);
+    return () => {
+      window.removeEventListener("keydown", handleKey);
+      document.removeEventListener("mousedown", handlePointer);
+    };
   }, [armed]);
 
   function handleBlur(event: React.FocusEvent<HTMLSpanElement>) {
-    // If focus stayed within our pair (jumping to Cancel etc.), stay armed.
     const next = event.relatedTarget as Node | null;
-    if (next && containerRef.current?.contains(next)) return;
+    // Focus stayed within the pair (Tab to Cancel), or went to an element
+    // around it — WebKit's focus for a click on Confirm — or nowhere
+    // focusable: stay armed. A press outside reverts it (above).
+    if (!next || containerRef.current?.contains(next) || next.contains(containerRef.current)) return;
     setArmed(false);
   }
 
