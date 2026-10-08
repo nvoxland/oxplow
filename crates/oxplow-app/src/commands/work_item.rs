@@ -38,10 +38,10 @@ use oxplow_domain::work_items::{
     WorkItemUpdateInput, WorkItemsProvider, WorkItemsRegistry, VERBS,
 };
 use oxplow_domain::{CommandCall, CommandError, ThreadId};
-use schemars::JsonSchema;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
+use super::util::{parse, schema};
 use super::{Handler, HandlerOutput, Invocation};
 
 fn parse_thread(raw: &str, field: &str) -> Result<ThreadId, CommandError> {
@@ -60,24 +60,8 @@ pub fn filing_thread(
 ) -> Result<Option<ThreadId>, CommandError> {
     match named {
         Some(raw) => parse_thread(raw, "/thread").map(Some),
-        None => Ok(agent_thread(actor)),
+        None => Ok(actor.thread_id()),
     }
-}
-
-fn agent_thread(actor: &oxplow_domain::Actor) -> Option<ThreadId> {
-    use oxplow_domain::Actor;
-    match actor {
-        Actor::Agent { thread_id, .. } => *thread_id,
-        Actor::Lens { on_behalf_of, .. } => agent_thread(on_behalf_of),
-        _ => None,
-    }
-}
-
-fn parse<T: serde::de::DeserializeOwned>(input: Value) -> Result<T, CommandError> {
-    serde_json::from_value(input).map_err(|e| CommandError::Invalid {
-        field: None,
-        message: e.to_string(),
-    })
 }
 
 /// The fields that name a work item, in any command's input.
@@ -600,17 +584,13 @@ pub struct Shape {
     pub undoable: bool,
 }
 
-fn schema_of<T: JsonSchema>() -> Value {
-    serde_json::to_value(schemars::schema_for!(T)).expect("schema serializes")
-}
-
 // ---- oxplow.work_item.transition ----
 
 pub const NAME: &str = "oxplow.work_item.transition";
 
 pub fn transition_shape() -> Shape {
     Shape {
-        schema: schema_of::<WorkItemTransitionInput>(),
+        schema: schema::<WorkItemTransitionInput>(),
         undoable: true,
     }
 }
@@ -625,7 +605,7 @@ pub const CREATE: &str = "oxplow.work_item.create";
 
 pub fn create_shape() -> Shape {
     Shape {
-        schema: schema_of::<WorkItemCreateInput>(),
+        schema: schema::<WorkItemCreateInput>(),
         // Undoing a filing would be deleting an item — not what undo is for.
         undoable: false,
     }
@@ -647,7 +627,7 @@ pub const UPDATE: &str = "oxplow.work_item.update";
 
 pub fn update_shape() -> Shape {
     Shape {
-        schema: schema_of::<WorkItemUpdateInput>(),
+        schema: schema::<WorkItemUpdateInput>(),
         undoable: true,
     }
 }
@@ -668,7 +648,7 @@ pub const LINK: &str = "oxplow.work_item.link";
 
 pub fn link_op(registry: WorkItemsRegistry) -> Op {
     let shape = Shape {
-        schema: schema_of::<WorkItemLinkInput>(),
+        schema: schema::<WorkItemLinkInput>(),
         undoable: false,
     };
     dispatching(shape, registry, "link", link_target, None)
@@ -680,7 +660,7 @@ pub const COMMENT: &str = "oxplow.work_item.comment";
 
 pub fn comment_op(registry: WorkItemsRegistry) -> Op {
     let shape = Shape {
-        schema: schema_of::<WorkItemCommentInput>(),
+        schema: schema::<WorkItemCommentInput>(),
         undoable: false,
     };
     dispatching(shape, registry, "comment", comment_target, None)
@@ -692,7 +672,7 @@ pub const DELETE: &str = "oxplow.work_item.delete";
 
 pub fn delete_op(registry: WorkItemsRegistry) -> Op {
     let shape = Shape {
-        schema: schema_of::<WorkItemDeleteInput>(),
+        schema: schema::<WorkItemDeleteInput>(),
         undoable: false,
     };
     dispatching(shape, registry, "delete", delete_target, None)
@@ -706,7 +686,7 @@ pub const MOVE: &str = "oxplow.work_item.move";
 
 pub fn reorder_op(registry: WorkItemsRegistry) -> Op {
     let shape = Shape {
-        schema: schema_of::<WorkItemReorderInput>(),
+        schema: schema::<WorkItemReorderInput>(),
         undoable: true,
     };
     dispatching(shape, registry, "reorder", reorder_target, None)
@@ -714,7 +694,7 @@ pub fn reorder_op(registry: WorkItemsRegistry) -> Op {
 
 pub fn move_op(registry: WorkItemsRegistry) -> Op {
     let shape = Shape {
-        schema: schema_of::<WorkItemMoveInput>(),
+        schema: schema::<WorkItemMoveInput>(),
         undoable: true,
     };
     dispatching(shape, registry, "move", move_target, None)

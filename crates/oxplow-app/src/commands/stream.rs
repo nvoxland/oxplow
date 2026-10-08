@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::thread::agent_scope;
+use super::util::{invalid, parse, schema, sql};
 use super::{Handler, HandlerOutput, Invocation, TxCtx};
 
 pub const CREATE_WORKTREE: &str = "oxplow.stream.create_worktree";
@@ -88,20 +89,6 @@ pub struct StreamDeps {
     pub efforts: Arc<oxplow_db::SqliteEffortStore>,
 }
 
-fn invalid(field: &str, message: String) -> CommandError {
-    CommandError::Invalid {
-        field: Some(field.into()),
-        message,
-    }
-}
-
-fn parse<T: serde::de::DeserializeOwned>(input: serde_json::Value) -> Result<T, CommandError> {
-    serde_json::from_value(input).map_err(|e| CommandError::Invalid {
-        field: None,
-        message: e.to_string(),
-    })
-}
-
 fn stream_of(value: &str) -> Result<StreamId, CommandError> {
     value
         .strip_prefix("stream:")
@@ -118,17 +105,11 @@ fn session(e: oxplow_session::SessionError) -> CommandError {
     use oxplow_session::SessionError as E;
     match e {
         E::DuplicateWorktreeSlug(_) => invalid("/slug", e.to_string()),
-        E::Storage(oxplow_domain::DomainError::NotFound) => {
-            invalid("/stream", "no such stream".into())
-        }
+        E::Storage(oxplow_domain::DomainError::NotFound) => invalid("/stream", "no such stream"),
         other => CommandError::Failed {
             message: other.to_string(),
         },
     }
-}
-
-fn sql(e: rusqlite::Error) -> CommandError {
-    CommandError::from(oxplow_db::map_sql_err(e))
 }
 
 fn load(ctx: &TxCtx<'_>, id: StreamId) -> Result<Stream, CommandError> {
@@ -143,10 +124,6 @@ fn result(stream: &Stream) -> HandlerOutput {
         result: serde_json::to_value(stream).expect("a stream serializes"),
         ..HandlerOutput::default()
     }
-}
-
-fn schema<T: JsonSchema>() -> serde_json::Value {
-    serde_json::to_value(schemars::schema_for!(T)).expect("schema serializes")
 }
 
 /// A new stream's capture service starts, so its edits land in snapshots.
@@ -240,7 +217,7 @@ pub fn archive_op(deps: StreamDeps) -> Op {
                     {
                         return Err(invalid(
                             "/stream",
-                            "an agent is still running in one of this stream's threads".into(),
+                            "an agent is still running in one of this stream's threads",
                         ));
                     }
                 }

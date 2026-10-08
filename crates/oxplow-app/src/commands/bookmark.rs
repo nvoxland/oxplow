@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::ops::Op;
+use super::util::{invalid, parse, schema};
 use super::{Handler, HandlerOutput, TxCtx};
 
 /// The capability its operations are of.
@@ -74,24 +75,6 @@ pub struct RemoveInput {
     /// The stream (`str1`), when there's no thread.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream: Option<String>,
-}
-
-fn invalid(field: &str, message: String) -> CommandError {
-    CommandError::Invalid {
-        field: Some(field.into()),
-        message,
-    }
-}
-
-fn parse<T: serde::de::DeserializeOwned>(input: Value) -> Result<T, CommandError> {
-    serde_json::from_value(input).map_err(|e| CommandError::Invalid {
-        field: None,
-        message: e.to_string(),
-    })
-}
-
-fn schema<T: JsonSchema>() -> Value {
-    serde_json::to_value(schemars::schema_for!(T)).expect("schema serializes")
 }
 
 /// The viewer named by `thread` / `stream`: a thread's stream is its own.

@@ -34,6 +34,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use super::util::{invalid, parse, schema, sql};
 use super::{Handler, HandlerOutput, TxCtx};
 
 pub const OPEN: &str = "oxplow.effort.open";
@@ -113,26 +114,6 @@ pub struct EffortUpdateInput {
     pub title: Option<String>,
 }
 
-fn parse<T: serde::de::DeserializeOwned>(input: serde_json::Value) -> Result<T, CommandError> {
-    serde_json::from_value(input).map_err(|e| CommandError::Invalid {
-        field: None,
-        message: e.to_string(),
-    })
-}
-
-fn invalid(field: &str, message: impl Into<String>) -> CommandError {
-    CommandError::Invalid {
-        field: Some(field.into()),
-        message: message.into(),
-    }
-}
-
-/// A SQLite error as the bus sees it — a lock blip stays `Busy`, so the
-/// run retries.
-fn storage(e: rusqlite::Error) -> CommandError {
-    CommandError::from(oxplow_db::map_sql_err(e))
-}
-
 fn timestamp(raw: &str, field: &str) -> Result<Timestamp, CommandError> {
     Timestamp::parse(raw).map_err(|e| invalid(field, format!("`{raw}` isn't RFC 3339: {e}")))
 }
@@ -153,12 +134,18 @@ fn reachable_thread(ctx: &TxCtx<'_>, thread: ThreadId, field: &str) -> Result<()
             |r| r.get(0),
         )
         .optional()
-        .map_err(storage)?
+        .map_err(sql)?
         .ok_or_else(|| invalid(field, format!("unknown thread `{thread}`")))?;
     match ctx.actor.stream_id() {
         Some(own) if own != StreamId::new(stream) => Err(invalid(
             field,
             format!("thread `{thread}` is in stream `str{stream}`, not the caller's `{own}`"),
+        )),
+        // The bus gives an agent with a thread its stream: one without
+        // either reaches no thread.
+        None if ctx.actor.is_agent_driven() => Err(invalid(
+            field,
+            "an agent with no thread reaches no thread's effort",
         )),
         _ => Ok(()),
     }
@@ -184,14 +171,14 @@ fn target_effort(
                     |r| r.get(0),
                 )
                 .optional()
-                .map_err(storage)?
+                .map_err(sql)?
                 .ok_or_else(|| invalid("/effort", format!("no effort `{id}`")))?;
             (id, ThreadId::new(thread))
         }
         (None, Some(raw)) => {
             let thread = thread_id(raw, "/thread")?;
             let id = open_for_thread_tx(ctx.conn, thread)
-                .map_err(storage)?
+                .map_err(sql)?
                 .ok_or_else(|| {
                     invalid("/thread", format!("thread `{thread}` has no open effort"))
                 })?;
@@ -259,7 +246,7 @@ pub fn open_op(work_items: WorkItemsRegistry) -> Op {
     Op::new(
         "efforts.write",
         "open",
-        serde_json::to_value(schemars::schema_for!(EffortOpenInput)).expect("schema"),
+        schema::<EffortOpenInput>(),
         false,
         handler,
     )
@@ -280,7 +267,7 @@ pub fn close_op() -> Op {
                 [id.value()],
                 |r| r.get(0),
             )
-            .map_err(storage)?;
+            .map_err(sql)?;
         if Timestamp::parse(&started).is_ok_and(|s| at < s) {
             return Err(invalid(
                 "/as_of",
@@ -314,7 +301,7 @@ pub fn close_op() -> Op {
     Op::new(
         "efforts.write",
         "close",
-        serde_json::to_value(schemars::schema_for!(EffortCloseInput)).expect("schema"),
+        schema::<EffortCloseInput>(),
         false,
         handler,
     )
@@ -339,7 +326,7 @@ pub fn link_op(work_items: WorkItemsRegistry) -> Op {
     Op::new(
         "efforts.write",
         "link",
-        serde_json::to_value(schemars::schema_for!(EffortLinkInput)).expect("schema"),
+        schema::<EffortLinkInput>(),
         true,
         handler,
     )
@@ -361,7 +348,7 @@ pub fn update_op() -> Op {
     Op::new(
         "efforts.write",
         "update",
-        serde_json::to_value(schemars::schema_for!(EffortUpdateInput)).expect("schema"),
+        schema::<EffortUpdateInput>(),
         true,
         handler,
     )
@@ -481,6 +468,20 @@ mod tests {
         assert_eq!(
             field(
                 bus.run(&agent(&fx), OPEN, json!({ "thread": "thr2" }), false)
+                    .await
+                    .unwrap_err()
+            ),
+            "/thread"
+        );
+        // An agent with no thread has no stream, so it reaches no thread —
+        // never all of them.
+        let threadless = Actor::Agent {
+            thread_id: None,
+            stream_id: None,
+        };
+        assert_eq!(
+            field(
+                bus.run(&threadless, OPEN, json!({ "thread": "thr2" }), false)
                     .await
                     .unwrap_err()
             ),

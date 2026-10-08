@@ -30,6 +30,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use crate::commands::util::{invalid, parse, schema};
 use crate::commands::{Handler, HandlerOutput, TxCtx};
 use crate::link_check::{check_links_in, LinkWorld};
 use crate::wiki_pages::{
@@ -504,20 +505,6 @@ pub struct KnowledgeTarget {
     pub vcs: Arc<dyn Vcs>,
 }
 
-fn invalid(field: &str, message: impl Into<String>) -> CommandError {
-    CommandError::Invalid {
-        field: Some(field.into()),
-        message: message.into(),
-    }
-}
-
-fn parse<T: serde::de::DeserializeOwned>(input: serde_json::Value) -> Result<T, CommandError> {
-    serde_json::from_value(input).map_err(|e| CommandError::Invalid {
-        field: None,
-        message: e.to_string(),
-    })
-}
-
 fn slug_of(raw: &str) -> Result<&str, CommandError> {
     if valid_slug(raw) {
         Ok(raw)
@@ -826,14 +813,14 @@ pub fn ops(target: KnowledgeTarget) -> Vec<Op> {
         Op::new(
             "knowledge.write",
             "write_page",
-            serde_json::to_value(schemars::schema_for!(WritePageInput)).expect("schema"),
+            schema::<WritePageInput>(),
             false,
             write,
         ),
         Op::new(
             "knowledge.write",
             "delete_page",
-            serde_json::to_value(schemars::schema_for!(SlugInput)).expect("schema"),
+            schema::<SlugInput>(),
             false,
             delete,
         )
@@ -841,14 +828,14 @@ pub fn ops(target: KnowledgeTarget) -> Vec<Op> {
         Op::new(
             "knowledge.write",
             "link",
-            serde_json::to_value(schemars::schema_for!(LinkInput)).expect("schema"),
+            schema::<LinkInput>(),
             false,
             link,
         ),
         Op::new(
             "knowledge.write",
             "resync",
-            serde_json::to_value(schemars::schema_for!(SlugInput)).expect("schema"),
+            schema::<SlugInput>(),
             false,
             resync,
         ),

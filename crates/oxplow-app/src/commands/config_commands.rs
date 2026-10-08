@@ -33,6 +33,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use super::util::{parse, schema};
 use super::{Handler, HandlerOutput};
 use crate::events::EventBus;
 use crate::OxplowEvent;
@@ -153,17 +154,6 @@ pub struct KeyReport {
     pub set: bool,
     /// The value as written to the file; `null` when unset.
     pub value: Value,
-}
-
-fn schema_of<T: JsonSchema>() -> Value {
-    serde_json::to_value(schemars::schema_for!(T)).expect("schema serializes")
-}
-
-fn parse<T: for<'de> Deserialize<'de>>(input: Value) -> Result<T, CommandError> {
-    serde_json::from_value(input).map_err(|e| CommandError::Invalid {
-        field: None,
-        message: e.to_string(),
-    })
 }
 
 fn known_key(key: &str) -> Result<ConfigKey, CommandError> {
@@ -322,7 +312,7 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
         Op::new(
             "config.read",
             "list_keys",
-            schema_of::<NoInput>(),
+            schema::<NoInput>(),
             false,
             Handler::Tx(Arc::new(move |_ctx: &super::TxCtx<'_>, input| {
                 parse::<NoInput>(input)?;
@@ -343,7 +333,7 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
         Op::new(
             "config.read",
             "get",
-            schema_of::<KeyInput>(),
+            schema::<KeyInput>(),
             false,
             Handler::Tx(Arc::new(move |_ctx: &super::TxCtx<'_>, input| {
                 let input: KeyInput = parse(input)?;
@@ -361,7 +351,7 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
         Op::new(
             "config.write",
             "set",
-            schema_of::<SetInput>(),
+            schema::<SetInput>(),
             true,
             Handler::Tx(Arc::new(move |ctx: &super::TxCtx<'_>, input| {
                 let actor = ctx.actor;
@@ -376,7 +366,7 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
         Op::new(
             "config.write",
             "unset",
-            schema_of::<UnsetInput>(),
+            schema::<UnsetInput>(),
             true,
             Handler::Tx(Arc::new(move |ctx: &super::TxCtx<'_>, input| {
                 let actor = ctx.actor;
@@ -423,6 +413,12 @@ mod tests {
             bus.add_op(op).unwrap();
         }
         crate::extension_commands::register_declared(&bus);
+        // The thread `agent()` runs in (the bus resolves an agent's stream
+        // from it); a test that runs a handler by hand has no runtime and
+        // no need.
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            tokio::task::block_in_place(|| handle.block_on(seed_agent_thread(&bus)));
+        }
         (dir, target, bus)
     }
 
@@ -663,7 +659,6 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_human_only_key_needs_a_persons_confirmation() {
         let (dir, target, bus) = setup(None).await_ready();
-        seed_agent_thread(&bus).await;
         let value = json!({"roles": {"main": {"provider": "anthropic", "model": "claude"}}});
         let err = bus
             .run(&agent(), SET, json!({"key": "ai", "value": value}), true)

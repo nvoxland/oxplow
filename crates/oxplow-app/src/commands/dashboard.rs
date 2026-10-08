@@ -21,6 +21,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use super::util::{invalid, parse, schema};
 use super::{Handler, HandlerOutput, Invocation, TxCtx};
 use crate::dashboard_tiles::{new_tile, TileInput};
 use crate::sql_gateway::SqlGateway;
@@ -107,20 +108,6 @@ pub struct ReorderItemsInput {
     pub order: Vec<String>,
 }
 
-fn invalid(field: &str, message: String) -> CommandError {
-    CommandError::Invalid {
-        field: Some(field.into()),
-        message,
-    }
-}
-
-fn parse<T: serde::de::DeserializeOwned>(input: Value) -> Result<T, CommandError> {
-    serde_json::from_value(input).map_err(|e| CommandError::Invalid {
-        field: None,
-        message: e.to_string(),
-    })
-}
-
 fn dashboard_id(value: &str, field: &str) -> Result<DashboardId, CommandError> {
     DashboardId::try_from_str(value)
         .ok_or_else(|| invalid(field, format!("`{value}` isn't a dashboard id (dsh…)")))
@@ -143,10 +130,6 @@ fn exists(conn: &rusqlite::Connection, id: DashboardId, field: &str) -> Result<(
     dashboard_tx(conn, id)?
         .map(|_| ())
         .ok_or_else(|| invalid(field, format!("no dashboard `{id}`")))
-}
-
-fn schema<T: JsonSchema>() -> Value {
-    serde_json::to_value(schemars::schema_for!(T)).expect("schema serializes")
 }
 
 /// `dashboard.create { title }`: an empty dashboard at the end of the list.

@@ -20,6 +20,7 @@ use serde_json::{json, Value};
 
 use super::comment::author_of;
 use super::thread::{acting_thread, agent_scope};
+use super::util::{invalid, parse, schema};
 use super::{Handler, HandlerOutput, TxCtx};
 use crate::link_check::LinkDeps;
 
@@ -47,20 +48,6 @@ pub struct UpdateInput {
     pub body: String,
 }
 
-fn invalid(field: &str, message: String) -> CommandError {
-    CommandError::Invalid {
-        field: Some(field.into()),
-        message,
-    }
-}
-
-fn parse<T: serde::de::DeserializeOwned>(input: Value) -> Result<T, CommandError> {
-    serde_json::from_value(input).map_err(|e| CommandError::Invalid {
-        field: None,
-        message: e.to_string(),
-    })
-}
-
 /// The note and the links in its body that don't resolve.
 fn with_warnings(
     deps: &LinkDeps,
@@ -70,10 +57,6 @@ fn with_warnings(
     thread: Option<oxplow_domain::ThreadId>,
 ) -> Value {
     json!({ "note": note, "link_warnings": deps.warnings(ctx, body, thread) })
-}
-
-fn schema<T: JsonSchema>() -> Value {
-    serde_json::to_value(schemars::schema_for!(T)).expect("schema serializes")
 }
 
 /// `knowledge.add_note { thread?, body }`.

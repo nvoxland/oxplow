@@ -12,6 +12,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use super::util::{parse, schema};
 use super::{Handler, HandlerOutput, Invocation};
 use crate::snapshot_files::{SnapshotFileError, SnapshotFiles};
 
@@ -29,16 +30,12 @@ pub fn restore_file_op(files: SnapshotFiles) -> Op {
     Op::new(
         "files.write",
         "restore_file",
-        serde_json::to_value(schemars::schema_for!(RestoreInput)).expect("schema serializes"),
+        schema::<RestoreInput>(),
         false,
         Handler::External(Arc::new(move |_: Invocation, input: Value| {
             let files = files.clone();
             Box::pin(async move {
-                let input: RestoreInput =
-                    serde_json::from_value(input).map_err(|e| CommandError::Invalid {
-                        field: None,
-                        message: e.to_string(),
-                    })?;
+                let input: RestoreInput = parse(input)?;
                 let restored = files
                     .restore_file_snapshot(input.file_snapshot)
                     .await

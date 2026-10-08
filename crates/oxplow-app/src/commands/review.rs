@@ -23,6 +23,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use super::util::{invalid, parse, schema};
 use super::{Handler, HandlerOutput, TxCtx};
 
 pub const VERIFY_CLAIM: &str = "oxplow.effort.verify_claim";
@@ -57,20 +58,6 @@ pub struct ClaimInput {
 pub struct DecisionInput {
     /// The decision (`decision:3`).
     pub decision: String,
-}
-
-fn invalid(field: &str, message: String) -> CommandError {
-    CommandError::Invalid {
-        field: Some(field.into()),
-        message,
-    }
-}
-
-fn parse<T: serde::de::DeserializeOwned>(input: serde_json::Value) -> Result<T, CommandError> {
-    serde_json::from_value(input).map_err(|e| CommandError::Invalid {
-        field: None,
-        message: e.to_string(),
-    })
 }
 
 /// The id a `<kind>:<n>` ref names.
@@ -141,7 +128,7 @@ pub fn verify_claim_op() -> Op {
     Op::new(
         "efforts.write",
         "verify_claim",
-        serde_json::to_value(schemars::schema_for!(VerifyClaimInput)).expect("schema"),
+        schema::<VerifyClaimInput>(),
         true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: VerifyClaimInput = parse(input)?;
@@ -174,7 +161,7 @@ pub fn unverify_claim_op() -> Op {
     Op::new(
         "efforts.write",
         "unverify_claim",
-        serde_json::to_value(schemars::schema_for!(ClaimInput)).expect("schema"),
+        schema::<ClaimInput>(),
         true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: ClaimInput = parse(input)?;
@@ -271,7 +258,7 @@ fn decision_op(op: &'static str, from: &'static [&'static str], to: &'static str
     Op::new(
         "efforts.write",
         op,
-        serde_json::to_value(schemars::schema_for!(DecisionInput)).expect("schema"),
+        schema::<DecisionInput>(),
         true,
         Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
             review_decision(ctx, parse(input)?, from, to)

@@ -23,6 +23,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use super::util::{invalid, parse, schema};
 use super::{Handler, HandlerOutput, Invocation, TxCtx};
 use crate::extension_catalog::ExtensionCatalog;
 use crate::extensions::{self, LensContext, LensOrigin, LensSpec};
@@ -90,20 +91,6 @@ pub struct ShareInput {
     pub stream: Option<String>,
 }
 
-fn invalid(field: &str, message: impl Into<String>) -> CommandError {
-    CommandError::Invalid {
-        field: Some(field.into()),
-        message: message.into(),
-    }
-}
-
-fn parse<T: serde::de::DeserializeOwned>(input: Value) -> Result<T, CommandError> {
-    serde_json::from_value(input).map_err(|e| CommandError::Invalid {
-        field: None,
-        message: e.to_string(),
-    })
-}
-
 fn domain(e: DomainError) -> CommandError {
     match e {
         DomainError::Invalid(m) => CommandError::Invalid {
@@ -137,15 +124,14 @@ fn thread_root_tx(
     Ok(crate::worktrees::workspace_path(project_dir, &path))
 }
 
-fn thread_stream_tx(conn: &rusqlite::Connection, thread: i64) -> Option<i64> {
+fn thread_stream_tx(conn: &rusqlite::Connection, thread: i64) -> Result<Option<i64>, DomainError> {
     conn.query_row(
         "SELECT stream_id FROM threads WHERE id = ?1",
         [thread],
         |r| r.get(0),
     )
     .optional()
-    .ok()
-    .flatten()
+    .map_err(oxplow_db::map_sql_err)
 }
 
 /// The worktree of stream `raw` (`str2`); `Invalid` for one that isn't.
@@ -259,7 +245,7 @@ fn show(target: LensTarget) -> Op {
                 .ok_or_else(|| invalid("/thread", "no thread given and the caller has none"))?
                 .value(),
         };
-        let stream = thread_stream_tx(ctx.conn, thread)
+        let stream = thread_stream_tx(ctx.conn, thread)?
             .ok_or_else(|| invalid("/thread", format!("no thread `thr{thread}`")))?;
         let params = input.params.unwrap_or_default();
         let lens_ctx = LensContext {
@@ -307,14 +293,7 @@ fn show(target: LensTarget) -> Op {
             unchanged: false,
         })
     }));
-    Op::new(
-        "lenses.show",
-        "show",
-        serde_json::to_value(schemars::schema_for!(ShowInput)).expect("schema serializes"),
-        false,
-        handler,
-    )
-    .with_precheck(precheck)
+    Op::new("lenses.show", "show", schema::<ShowInput>(), false, handler).with_precheck(precheck)
 }
 
 /// What `oxplow.lens.keep` writes for answer `id`: its spec with the shown
@@ -397,13 +376,15 @@ async fn keeping_spec(
     let keeping = target
         .db
         .read(move |tx| {
+            let own = match thread {
+                Some(t) => thread_stream_tx(tx, t)?,
+                None => None,
+            };
             let (stream_id, root) = match stream.as_deref() {
                 Some(raw) => match stream_root_tx(tx, &project_dir, raw) {
                     // An agent writes in its own thread's stream only, as
                     // the agent policy keeps its edits there (tsk988).
-                    Ok((id, _))
-                        if agent && thread.and_then(|t| thread_stream_tx(tx, t)) != Some(id) =>
-                    {
+                    Ok((id, _)) if agent && own != Some(id) => {
                         return Ok(Err(invalid(
                             "/stream",
                             format!(
@@ -416,10 +397,7 @@ async fn keeping_spec(
                     Err(e) => return Err(e),
                 },
                 None => match thread {
-                    Some(t) => (
-                        thread_stream_tx(tx, t),
-                        thread_root_tx(tx, &project_dir, t)?,
-                    ),
+                    Some(t) => (own, thread_root_tx(tx, &project_dir, t)?),
                     None => (None, project_dir.clone()),
                 },
             };
@@ -539,7 +517,7 @@ fn keep(target: LensTarget) -> Op {
     Op::new(
         "lenses.write",
         "keep",
-        serde_json::to_value(schemars::schema_for!(KeepInput)).expect("schema serializes"),
+        schema::<KeepInput>(),
         false,
         handler,
     )
@@ -578,7 +556,7 @@ fn share(target: LensTarget) -> Op {
     Op::new(
         "lenses.write",
         "share",
-        serde_json::to_value(schemars::schema_for!(ShareInput)).expect("schema serializes"),
+        schema::<ShareInput>(),
         false,
         handler,
     )

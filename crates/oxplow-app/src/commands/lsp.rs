@@ -8,12 +8,12 @@
 use oxplow_domain::Confirm;
 use std::sync::Arc;
 
-use oxplow_domain::CommandError;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::json;
 
 use super::ops::Op;
+use super::util::{failed, parse, schema};
 use super::{Handler, HandlerOutput, Invocation};
 use crate::background_task::{BackgroundTaskKind, BackgroundTaskStore, StartInput};
 use crate::events::{EventBus, OxplowEvent};
@@ -38,34 +38,17 @@ pub struct LspDeps {
     pub events: EventBus,
 }
 
-fn schema() -> Value {
-    serde_json::to_value(schemars::schema_for!(PackageInput)).expect("schema serializes")
-}
-
-fn parse(input: Value) -> Result<PackageInput, CommandError> {
-    serde_json::from_value(input).map_err(|e| CommandError::Invalid {
-        field: None,
-        message: e.to_string(),
-    })
-}
-
-fn failed(e: impl std::fmt::Display) -> CommandError {
-    CommandError::Failed {
-        message: e.to_string(),
-    }
-}
-
 /// `lsp.install_server { package }`.
 pub fn install_op(deps: LspDeps) -> Op {
     Op::new(
         "lsp.install",
         "install_server",
-        schema(),
+        schema::<PackageInput>(),
         false,
         Handler::External(Arc::new(move |_: Invocation, input| {
             let deps = deps.clone();
             Box::pin(async move {
-                let input = parse(input)?;
+                let input = parse::<PackageInput>(input)?;
                 let task = deps.background.start(StartInput {
                     kind: BackgroundTaskKind::Lsp,
                     label: format!("Install language server: {}", input.package),
@@ -102,12 +85,12 @@ pub fn remove_op(deps: LspDeps) -> Op {
     Op::new(
         "lsp.install",
         "remove_server",
-        schema(),
+        schema::<PackageInput>(),
         false,
         Handler::External(Arc::new(move |_: Invocation, input| {
             let deps = deps.clone();
             Box::pin(async move {
-                let input = parse(input)?;
+                let input = parse::<PackageInput>(input)?;
                 deps.installer
                     .remove(&input.package)
                     .await
@@ -129,6 +112,7 @@ mod tests {
     use super::*;
     use crate::test_fixtures::services_with_effort;
     use oxplow_domain::Actor;
+    use oxplow_domain::CommandError;
 
     /// What oxplow downloads and runs is a person's call.
     #[tokio::test]

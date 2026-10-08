@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::thread::parse_thread_ref;
+use super::util::{failed, invalid, parse, schema};
 use super::{Handler, HandlerOutput, Invocation};
 use crate::effort_service::EffortService;
 use crate::sql_gateway::SqlGateway;
@@ -58,26 +59,6 @@ pub struct EffortDeps {
     pub vcs: Arc<dyn Vcs>,
 }
 
-fn invalid(field: &str, message: String) -> CommandError {
-    CommandError::Invalid {
-        field: Some(field.into()),
-        message,
-    }
-}
-
-fn parse<T: serde::de::DeserializeOwned>(input: Value) -> Result<T, CommandError> {
-    serde_json::from_value(input).map_err(|e| CommandError::Invalid {
-        field: None,
-        message: e.to_string(),
-    })
-}
-
-fn failed(e: impl std::fmt::Display) -> CommandError {
-    CommandError::Failed {
-        message: e.to_string(),
-    }
-}
-
 /// The agent's own thread; an agent without one, or naming another, is
 /// refused. `None` for a person.
 fn agents_thread(actor: &Actor, named: Option<ThreadId>) -> Result<Option<ThreadId>, CommandError> {
@@ -106,10 +87,6 @@ async fn worktree_of(db: &Database, thread: ThreadId) -> Option<PathBuf> {
         .flatten()
 }
 
-fn schema<T: JsonSchema>() -> Value {
-    serde_json::to_value(schemars::schema_for!(T)).expect("schema serializes")
-}
-
 async fn report(
     deps: &EffortDeps,
     actor: Actor,
@@ -134,7 +111,7 @@ async fn report(
     let named = input.thread.as_deref().map(parse_thread_ref).transpose()?;
     let thread = match agents_thread(&actor, named)? {
         Some(own) => own,
-        None => named.ok_or_else(|| invalid("/thread", "name the thread".into()))?,
+        None => named.ok_or_else(|| invalid("/thread", "name the thread"))?,
     };
     // A close just before (the policy's, on the item finishing) settles
     // first, so the report lands on the effort it closed.

@@ -228,6 +228,14 @@ touched), sampled or on by setting, and approvals by capability.
 
 `CommandBus::run(actor, name, input, confirmed)`:
 
+First the **actor is resolved**, once (`CommandBus::resolved`): an agent
+— or a lens acting for one — whose transport carried its thread but not
+its stream runs with its thread's stream, so "the caller's stream" is
+`actor.stream_id()` in every handler, one answer; an agent claiming a
+thread that doesn't exist is `Denied` (audited). An agent with no thread
+has no stream, and a handler's own-stream check refuses it rather than
+skipping.
+
 0. **Offered** — what's active now (`with_capabilities`: the capability
    registry and the config, `capabilities::Active::refusal`) must meet the
    spec's `needs`, and a command an implementation owns runs only while
@@ -795,7 +803,10 @@ declared over them with `register_declared`.
 
 1. Define the input as a Rust struct with `JsonSchema`
    (`deny_unknown_fields`); the operation's `input_schema` is derived
-   from it.
+   from it (`commands::util::schema`). A handler reaches for
+   `commands::util` — `parse` its input, `invalid(field, …)` to refuse at
+   a field, `sql` for a SQLite error (so a busy database retries the run
+   instead of failing it), `failed` — never a private copy.
 2. Write the handler — `Tx` unless it must call a pre-existing service.
    Return the inverse (a call of the command that undoes it) when it is
    undoable, and any domain events as typed envelopes

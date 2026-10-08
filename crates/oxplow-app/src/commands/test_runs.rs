@@ -8,13 +8,13 @@
 use crate::commands::ops::Op;
 use std::sync::Arc;
 
-use oxplow_domain::CommandError;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::json;
 
 use super::comment::author_of;
 use super::thread::acting_thread_of;
+use super::util::{parse, schema};
 use super::{Handler, HandlerOutput, Invocation};
 use crate::collection::CollectionService;
 
@@ -36,17 +36,6 @@ pub struct RecordRunInput {
     pub failed: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub total: Option<i64>,
-}
-
-fn parse<T: serde::de::DeserializeOwned>(input: Value) -> Result<T, CommandError> {
-    serde_json::from_value(input).map_err(|e| CommandError::Invalid {
-        field: None,
-        message: e.to_string(),
-    })
-}
-
-fn schema<T: JsonSchema>() -> Value {
-    serde_json::to_value(schemars::schema_for!(T)).expect("schema serializes")
 }
 
 /// `test.record_run { thread?, command, duration_ms?, passed?, failed?, total? }`.
@@ -96,6 +85,8 @@ mod tests {
     use super::*;
     use crate::test_fixtures::{services_with_effort, EffortFixture};
     use oxplow_domain::Actor;
+    use oxplow_domain::CommandError;
+    use serde_json::Value;
 
     const COBERTURA: &str = r#"<?xml version="1.0"?>
 <coverage><packages><package name="p"><classes>

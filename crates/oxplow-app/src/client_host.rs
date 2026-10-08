@@ -26,6 +26,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::commands::ops::Op;
+use crate::commands::util::schema;
 use crate::commands::{Handler, HandlerOutput, Invocation};
 use crate::events::{EventBus, OxplowEvent};
 
@@ -257,10 +258,6 @@ pub struct OpenProjectInput {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct NoInput {}
-
-fn schema<T: JsonSchema>() -> Value {
-    serde_json::to_value(schemars::schema_for!(T)).expect("schema serializes")
-}
 
 /// The window's operations, run through `host` when the daemon runs them.
 pub fn ops(host: &Arc<ClientHost>) -> Vec<Op> {

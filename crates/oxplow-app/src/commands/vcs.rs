@@ -25,6 +25,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use super::util::{parse, schema};
 use super::{Handler, HandlerOutput, Invocation};
 use crate::events::{EventBus, OxplowEvent, WorkspaceChangeKind};
 use crate::vcs::GitProvider;
@@ -94,17 +95,13 @@ where
     Op::new(
         capability,
         name,
-        serde_json::to_value(schemars::schema_for!(I)).expect("schema serializes"),
+        schema::<I>(),
         false,
         Handler::External(Arc::new(move |invocation: Invocation, input: Value| {
             let target = target.clone();
             let op = op.clone();
             Box::pin(async move {
-                let input: I =
-                    serde_json::from_value(input).map_err(|e| CommandError::Invalid {
-                        field: None,
-                        message: e.to_string(),
-                    })?;
+                let input: I = parse(input)?;
                 let stream: StreamId =
                     input.stream().parse().map_err(|_| CommandError::Invalid {
                         field: Some("/stream".into()),

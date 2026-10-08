@@ -14,8 +14,8 @@ use oxplow_domain::refs::build::stream_ref;
 use oxplow_domain::{CommandError, Confirm, DomainError, StreamId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
+use super::util::{parse, schema};
 use super::{Handler, HandlerOutput, Invocation};
 use crate::worktrees::WorktreeRouter;
 
@@ -56,13 +56,6 @@ pub struct InstallDeps {
     pub worktrees: Arc<WorktreeRouter>,
 }
 
-fn parse<T: serde::de::DeserializeOwned>(input: Value) -> Result<T, CommandError> {
-    serde_json::from_value(input).map_err(|e| CommandError::Invalid {
-        field: None,
-        message: e.to_string(),
-    })
-}
-
 /// The stream named; `None` is the primary checkout. Never the actor's:
 /// these commands always ask, so the handler only runs as the person who
 /// confirmed — and the approval shows the input as it will run (tsk786).
@@ -78,10 +71,6 @@ fn stream_for(named: Option<&str>) -> Result<Option<StreamId>, CommandError> {
                 })
         })
         .transpose()
-}
-
-fn schema<T: JsonSchema>() -> Value {
-    serde_json::to_value(schemars::schema_for!(T)).expect("schema serializes")
 }
 
 fn result(ext: &crate::extensions::Extension) -> HandlerOutput {

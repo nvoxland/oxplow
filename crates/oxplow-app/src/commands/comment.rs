@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::thread::agent_scope;
+use super::util::{invalid, parse, schema};
 use super::{Handler, HandlerOutput, TxCtx};
 
 pub const ADD: &str = "oxplow.knowledge.add_comment";
@@ -109,20 +110,6 @@ pub struct CommentInput {
     pub comment: String,
 }
 
-fn invalid(field: &str, message: String) -> CommandError {
-    CommandError::Invalid {
-        field: Some(field.into()),
-        message,
-    }
-}
-
-fn parse<T: serde::de::DeserializeOwned>(input: Value) -> Result<T, CommandError> {
-    serde_json::from_value(input).map_err(|e| CommandError::Invalid {
-        field: None,
-        message: e.to_string(),
-    })
-}
-
 fn comment_id(value: &str) -> Result<CommentId, CommandError> {
     CommentId::try_from_str(value)
         .ok_or_else(|| invalid("/comment", format!("`{value}` isn't a comment id (cmt…)")))
@@ -179,10 +166,6 @@ fn on_own_stream(ctx: &TxCtx<'_>, stream: StreamId) -> Result<(), CommandError> 
         }),
         _ => Ok(()),
     }
-}
-
-fn schema<T: JsonSchema>() -> Value {
-    serde_json::to_value(schemars::schema_for!(T)).expect("schema serializes")
 }
 
 /// `oxplow.knowledge.add_comment`: a comment with its first message.
@@ -293,14 +276,14 @@ pub fn update_op() -> Op {
                 _ => {
                     return Err(invalid(
                         "/quote",
-                        "a relink names both `quote` and `selectors_json`".into(),
+                        "a relink names both `quote` and `selectors_json`",
                     ))
                 }
             }
             if undo.len() == 1 {
                 return Err(invalid(
                     "",
-                    "name what changes: `intent`, `status`, or `quote` + `selectors_json`".into(),
+                    "name what changes: `intent`, `status`, or `quote` + `selectors_json`",
                 ));
             }
             Ok(HandlerOutput {

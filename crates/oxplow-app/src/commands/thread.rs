@@ -31,6 +31,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use super::util::{invalid, parse, schema, sql};
 use super::{Handler, HandlerOutput, TxCtx};
 
 pub const CREATE: &str = "oxplow.thread.create";
@@ -93,24 +94,6 @@ pub struct ReorderInput {
     pub order: Vec<String>,
 }
 
-fn invalid(field: &str, message: String) -> CommandError {
-    CommandError::Invalid {
-        field: Some(field.into()),
-        message,
-    }
-}
-
-fn sql(e: rusqlite::Error) -> CommandError {
-    CommandError::from(oxplow_db::map_sql_err(e))
-}
-
-fn parse<T: serde::de::DeserializeOwned>(input: serde_json::Value) -> Result<T, CommandError> {
-    serde_json::from_value(input).map_err(|e| CommandError::Invalid {
-        field: None,
-        message: e.to_string(),
-    })
-}
-
 /// The id a `<kind>:<id>` ref names.
 fn id_of<T: FromStr>(value: &str, kind: &str, field: &str) -> Result<T, CommandError> {
     value
@@ -137,15 +120,13 @@ pub(super) fn agent_scope(ctx: &TxCtx<'_>) -> Result<Option<(ThreadId, StreamId)
         Some(None) => Err(CommandError::Denied {
             reason: "an agent without a thread can't change threads".into(),
         }),
-        Some(Some(own)) => {
-            let thread =
-                get_tx(ctx.conn, own)
-                    .map_err(sql)?
-                    .ok_or_else(|| CommandError::Denied {
-                        reason: format!("the agent's thread `{}` doesn't exist", thread_ref(own)),
-                    })?;
-            Ok(Some((own, thread.stream_id)))
-        }
+        // The bus resolved the agent's stream from its thread.
+        Some(Some(own)) => match ctx.actor.stream_id() {
+            Some(stream) => Ok(Some((own, stream))),
+            None => Err(CommandError::Denied {
+                reason: format!("the agent's thread `{}` has no stream", thread_ref(own)),
+            }),
+        },
     }
 }
 
@@ -172,7 +153,7 @@ fn record_thread(
 ) -> Result<ThreadId, CommandError> {
     let named = named.map(parse_thread_ref).transpose()?;
     match own {
-        None => named.ok_or_else(|| invalid("/thread", "name the thread".into())),
+        None => named.ok_or_else(|| invalid("/thread", "name the thread")),
         Some(None) => Err(CommandError::Denied {
             reason: "an agent without a thread can't record on one".into(),
         }),
@@ -255,10 +236,6 @@ fn call(name: &str, input: serde_json::Value) -> Option<CommandCall> {
     })
 }
 
-fn schema<T: JsonSchema>() -> serde_json::Value {
-    serde_json::to_value(schemars::schema_for!(T)).expect("schema serializes")
-}
-
 /// `thread.create { stream, title, agent?, acp_agent?, from? }`.
 pub fn create_op(config: Arc<RwLock<OxplowConfig>>) -> Op {
     Op::new(
@@ -276,7 +253,7 @@ pub fn create_op(config: Arc<RwLock<OxplowConfig>>) -> Op {
                     if input.agent.is_some() || input.acp_agent.is_some() {
                         return Err(invalid(
                             "/from",
-                            "a fork runs its source's agent; don't name one".into(),
+                            "a fork runs its source's agent; don't name one",
                         ));
                     }
                     let source = load(ctx, id_of(from, "thread", "/from")?, "/from")?;
@@ -316,13 +293,10 @@ pub fn create_op(config: Arc<RwLock<OxplowConfig>>) -> Op {
                             Some(name)
                         }
                         (AgentKind::Acp, None) => {
-                            return Err(invalid("/acp_agent", "an ACP thread needs one".into()))
+                            return Err(invalid("/acp_agent", "an ACP thread needs one"))
                         }
                         (_, Some(_)) => {
-                            return Err(invalid(
-                                "/acp_agent",
-                                "only an ACP thread names one".into(),
-                            ))
+                            return Err(invalid("/acp_agent", "only an ACP thread names one"))
                         }
                         (_, None) => None,
                     };
@@ -522,10 +496,8 @@ pub fn close_op(acp: Arc<crate::acp::manager::AcpManager>) -> Op {
             thread.updated_at = now;
             save(ctx, &thread)?;
             // Its work ended with it: its open effort closes too.
-            if let Some(effort) = oxplow_db::effort_store::open_for_thread_tx(ctx.conn, id)
-                .map_err(|e| CommandError::Failed {
-                    message: e.to_string(),
-                })?
+            if let Some(effort) =
+                oxplow_db::effort_store::open_for_thread_tx(ctx.conn, id).map_err(sql)?
             {
                 oxplow_db::effort_store::finish_tx(
                     ctx.conn,

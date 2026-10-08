@@ -13,6 +13,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use super::util::{parse, schema};
 use super::{Handler, HandlerOutput, TxCtx};
 
 pub const DISMISS: &str = "oxplow.hint.dismiss";
@@ -29,14 +30,10 @@ pub fn dismiss_op() -> Op {
     Op::new(
         "hints.write",
         "dismiss",
-        serde_json::to_value(schemars::schema_for!(DismissInput)).expect("schema serializes"),
+        schema::<DismissInput>(),
         false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
-            let input: DismissInput =
-                serde_json::from_value(input).map_err(|e| CommandError::Invalid {
-                    field: None,
-                    message: e.to_string(),
-                })?;
+            let input: DismissInput = parse(input)?;
             let result = json!({ "dismissed": input.nudge });
             if oxplow_db::agent_nudge_store::dismiss_tx(ctx.conn, input.nudge)? {
                 return Ok(HandlerOutput {

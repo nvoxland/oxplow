@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::ops::Op;
+use super::util::{parse, schema};
 use super::{Handler, HandlerOutput, Invocation};
 use crate::workspace_files::{WorkspaceError, WorkspaceFiles};
 
@@ -35,16 +36,12 @@ pub fn save_op(files: Arc<WorkspaceFiles>) -> Op {
     Op::new(
         "files.write",
         "save",
-        serde_json::to_value(schemars::schema_for!(SaveInput)).expect("schema serializes"),
+        schema::<SaveInput>(),
         false,
         Handler::External(Arc::new(move |invocation: Invocation, input: Value| {
             let files = files.clone();
             Box::pin(async move {
-                let input: SaveInput =
-                    serde_json::from_value(input).map_err(|e| CommandError::Invalid {
-                        field: None,
-                        message: e.to_string(),
-                    })?;
+                let input: SaveInput = parse(input)?;
                 // A person saves in any stream; anyone else only in its
                 // own — an agent's tools' rule (an effect has none).
                 if !invocation.actor.may_confirm()

@@ -38,6 +38,7 @@ pub mod stream;
 pub mod test_runs;
 pub mod thread;
 pub mod ui;
+pub mod util;
 pub mod vcs;
 pub mod work_item;
 
@@ -887,6 +888,14 @@ impl CommandBus {
         origin: RunOrigin,
     ) -> Result<CommandOutcome, CommandError> {
         let spec = &command.spec;
+        let actor = &match self.resolved(actor).await {
+            Ok(actor) => actor,
+            Err(err) => {
+                self.audit_only(actor, spec, &input, Outcome::Denied, Some(err.to_string()))
+                    .await;
+                return Err(err);
+            }
+        };
 
         // 0. It must be offered: what it needs is active, and so is the
         // implementation that owns it.
@@ -1215,6 +1224,36 @@ impl CommandBus {
                     .await;
                 Err(err)
             }
+        }
+    }
+
+    /// The actor a run is made as. An agent's — or a lens's acting for one —
+    /// whose transport carried its thread but not its stream gets its
+    /// thread's stream, so every handler's "the caller's stream" is
+    /// `actor.stream_id()`, one answer; an agent claiming a thread that
+    /// doesn't exist is refused.
+    async fn resolved(&self, actor: &Actor) -> Result<Actor, CommandError> {
+        let (Some(Some(thread)), None) = (actor.agent_thread(), actor.stream_id()) else {
+            return Ok(actor.clone());
+        };
+        use rusqlite::OptionalExtension as _;
+        let stream: Option<i64> = self
+            .db
+            .read(move |c| {
+                c.query_row(
+                    "SELECT stream_id FROM threads WHERE id = ?1",
+                    [thread.value()],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await?;
+        match stream {
+            Some(s) => Ok(with_stream(actor, oxplow_domain::StreamId::new(s))),
+            None => Err(CommandError::Denied {
+                reason: format!("the agent's thread `{thread}` doesn't exist"),
+            }),
         }
     }
 
@@ -1818,6 +1857,24 @@ pub(super) fn offered(
     }
 }
 
+/// `actor` with the agent behind it in `stream`.
+fn with_stream(actor: &Actor, stream: oxplow_domain::StreamId) -> Actor {
+    match actor {
+        Actor::Agent { thread_id, .. } => Actor::Agent {
+            thread_id: *thread_id,
+            stream_id: Some(stream),
+        },
+        Actor::Lens {
+            lens_id,
+            on_behalf_of,
+        } => Actor::Lens {
+            lens_id: lens_id.clone(),
+            on_behalf_of: Box::new(with_stream(on_behalf_of, stream)),
+        },
+        other => other.clone(),
+    }
+}
+
 /// Marking an undo or an approval failed with `e`: when the row was
 /// undone, or the proposal decided, by a concurrent run (an `Invariant` /
 /// `Invalid` from the store), the `Invalid` this run answers — not a failed
@@ -2056,8 +2113,9 @@ mod tests {
         let bus = CommandBus::new(db.clone(), log, Arc::new(AgentPolicy), pump);
         db.clone()
             .transaction(|tx| {
-                // The table the kv commands write, and the thread `agent()`
-                // runs in (a proposal names it).
+                // The table the kv commands write, and the threads the
+                // tests' agents run in (a proposal names one; the bus
+                // resolves an agent's stream from it).
                 tx.execute_batch(
                     "CREATE TABLE kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);
                      INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source,
@@ -2065,7 +2123,8 @@ mod tests {
                        VALUES (1, 'primary', 'p', 'main', 'refs/heads/main', 'local', '/tmp/x',
                                '2026-01-01', '2026-01-01');
                      INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
-                       VALUES (7, 1, 'T', 'active', '2026-01-01', '2026-01-01');",
+                       VALUES (7, 1, 'T', 'active', '2026-01-01', '2026-01-01'),
+                              (8, 1, 'U', 'queued', '2026-01-01', '2026-01-01');",
                 )
                 .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
             })
@@ -3319,6 +3378,57 @@ mod tests {
             assert_eq!(kv_value(&db, "a").await, None, "{why}: nothing landed");
             assert_eq!(kv_value(&db, "n").await, None, "{why}");
         }
+    }
+
+    /// A run's actor is resolved once: an agent whose transport carried its
+    /// thread but not its stream runs with its thread's stream — through a
+    /// lens too — so every handler's "the caller's stream" is the same
+    /// answer; an agent claiming a thread that doesn't exist is refused.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_agents_stream_is_its_threads() {
+        let (_db, bus) = bus();
+        let mut spec = kv_spec("oxplow.kv.whoami", Invokers::ALL, Confirm::Never);
+        spec.effect = CommandEffect::Read;
+        spec.input_schema = json!({ "type": "object" });
+        bus.register(
+            Command::new(
+                spec,
+                Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, _| {
+                    Ok(HandlerOutput {
+                        result: json!(ctx.actor.stream_id().map(|s| s.to_string())),
+                        ..HandlerOutput::default()
+                    })
+                })),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let agent = |thread| Actor::Agent {
+            thread_id: Some(ThreadId::new(thread)),
+            stream_id: None,
+        };
+        let out = bus
+            .run(&agent(7), "oxplow.kv.whoami", json!({}), false)
+            .await
+            .unwrap();
+        assert_eq!(out.result, json!("str1"));
+        let through_a_lens = Actor::Lens {
+            lens_id: "acme/x".into(),
+            on_behalf_of: Box::new(agent(7)),
+        };
+        let out = bus
+            .run(&through_a_lens, "oxplow.kv.whoami", json!({}), false)
+            .await
+            .unwrap();
+        assert_eq!(out.result, json!("str1"));
+        let err = bus
+            .run(&agent(99), "oxplow.kv.whoami", json!({}), false)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Denied { reason } if reason.contains("thr99")),
+            "{err:?}"
+        );
     }
 
     /// A composite is composed once — on the snapshot it's routed and

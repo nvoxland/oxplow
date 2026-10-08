@@ -17,6 +17,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
+use super::util::{parse, schema};
 use super::{Handler, HandlerOutput, TxCtx};
 
 pub const REPORT_ERROR: &str = "oxplow.ui.report_error";
@@ -56,13 +57,6 @@ pub struct ReportErrorInput {
     /// Captured stdout: stored as the event's `output` body.
     #[serde(default)]
     pub stdout: Option<String>,
-}
-
-fn parse(input: Value) -> Result<ReportErrorInput, CommandError> {
-    serde_json::from_value(input).map_err(|e| CommandError::Invalid {
-        field: None,
-        message: e.to_string(),
-    })
 }
 
 /// An empty string is nothing to show.
@@ -140,10 +134,10 @@ pub fn ops() -> Vec<Op> {
     vec![Op::new(
         "diagnostics.write",
         "report_error",
-        serde_json::to_value(schemars::schema_for!(ReportErrorInput)).expect("schema serializes"),
+        schema::<ReportErrorInput>(),
         false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
-            report(ctx, parse(input)?)
+            report(ctx, parse::<ReportErrorInput>(input)?)
         })),
     )
     .open_to(Invokers::HUMAN_ONLY)]

@@ -18,9 +18,10 @@ use oxplow_domain::{CommandError, ThreadId};
 use rusqlite::OptionalExtension;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::json;
 
 use super::thread::acting_thread;
+use super::util::{invalid, parse, schema, sql};
 use super::{Handler, HandlerOutput, TxCtx};
 
 pub const RECORD_DECISION: &str = "oxplow.effort.record_decision";
@@ -66,24 +67,6 @@ pub struct ClaimInput {
     /// What backs it (`run:<id>`, a test name, a file); absent, unbacked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evidence_ref: Option<String>,
-}
-
-fn invalid(field: &str, message: String) -> CommandError {
-    CommandError::Invalid {
-        field: Some(field.into()),
-        message,
-    }
-}
-
-fn parse<T: serde::de::DeserializeOwned>(input: Value) -> Result<T, CommandError> {
-    serde_json::from_value(input).map_err(|e| CommandError::Invalid {
-        field: None,
-        message: e.to_string(),
-    })
-}
-
-fn sql(e: rusqlite::Error) -> CommandError {
-    CommandError::from(oxplow_db::map_sql_err(e))
 }
 
 /// Where a record lands: its thread, work item and effort.
@@ -153,10 +136,6 @@ fn place(
         work_item: Some(work_item.to_string()),
         effort: open.map(|e| e.id.value()),
     })
-}
-
-fn schema<T: JsonSchema>() -> Value {
-    serde_json::to_value(schemars::schema_for!(T)).expect("schema serializes")
 }
 
 /// `effort.record_decision { thread?, work_item?, question, choice, … }`.

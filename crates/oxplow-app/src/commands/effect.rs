@@ -41,6 +41,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::json;
 
+use super::util::{invalid, parse, schema};
 use super::{Handler, HandlerOutput, Invocation};
 use crate::effect_triggers::{self, run_reaction, Reacted};
 use crate::effects::EffectDecl;
@@ -97,7 +98,7 @@ impl BackfillInput {
         if self.from_seq.is_some() && self.since.is_some() {
             return Err(invalid(
                 "/since",
-                "say where it starts one way: `from_seq` or `since`, not both".into(),
+                "say where it starts one way: `from_seq` or `since`, not both",
             ));
         }
         let since = self
@@ -114,13 +115,6 @@ impl BackfillInput {
             since,
             to_seq: self.to_seq,
         })
-    }
-}
-
-fn invalid(field: &str, message: String) -> CommandError {
-    CommandError::Invalid {
-        field: Some(field.into()),
-        message,
     }
 }
 
@@ -391,16 +385,12 @@ pub fn backfill_op(services: ServicesSlot) -> Op {
     Op::new(
         "effects.run",
         "backfill",
-        serde_json::to_value(schemars::schema_for!(BackfillInput)).expect("schema serializes"),
+        schema::<BackfillInput>(),
         false,
         Handler::External(Arc::new(move |_: Invocation, input| {
             let services = services.clone();
             Box::pin(async move {
-                let input: BackfillInput =
-                    serde_json::from_value(input).map_err(|e| CommandError::Invalid {
-                        field: None,
-                        message: e.to_string(),
-                    })?;
+                let input: BackfillInput = parse(input)?;
                 let range = input.range()?;
                 let svc = services.get().ok_or_else(|| CommandError::Failed {
                     message: "oxplow is shutting down".into(),
@@ -436,14 +426,10 @@ pub fn backfill_plan_op(services: ServicesSlot) -> Op {
     Op::new(
         "effects.read",
         "backfill_plan",
-        serde_json::to_value(schemars::schema_for!(BackfillInput)).expect("schema serializes"),
+        schema::<BackfillInput>(),
         false,
         Handler::Tx(Arc::new(move |ctx, input| {
-            let input: BackfillInput =
-                serde_json::from_value(input).map_err(|e| CommandError::Invalid {
-                    field: None,
-                    message: e.to_string(),
-                })?;
+            let input: BackfillInput = parse(input)?;
             let range = input.range()?;
             let svc = services.get().ok_or_else(|| CommandError::Failed {
                 message: "oxplow is shutting down".into(),
@@ -477,16 +463,12 @@ pub fn retry_op(services: ServicesSlot) -> Op {
     Op::new(
         "effects.run",
         "retry",
-        serde_json::to_value(schemars::schema_for!(RetryInput)).expect("schema serializes"),
+        schema::<RetryInput>(),
         false,
         Handler::External(Arc::new(move |_: Invocation, input| {
             let services = services.clone();
             Box::pin(async move {
-                let RetryInput { effect, event } =
-                    serde_json::from_value(input).map_err(|e| CommandError::Invalid {
-                        field: None,
-                        message: e.to_string(),
-                    })?;
+                let RetryInput { effect, event } = parse(input)?;
                 let svc = services.get().ok_or_else(|| CommandError::Failed {
                     message: "oxplow is shutting down".into(),
                 })?;

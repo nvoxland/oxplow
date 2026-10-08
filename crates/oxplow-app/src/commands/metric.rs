@@ -31,9 +31,10 @@ use oxplow_db::{NewFact, NewMetricCapture, SqliteFactStore};
 use oxplow_domain::{Actor, CommandError, StreamId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::json;
 
 use super::config_commands::{change, ConfigTarget};
+use super::util::{invalid, parse, schema, sql};
 use super::{Handler, HandlerOutput, Invocation, TxCtx};
 use crate::metric_engine::FactFilter;
 use crate::metrics_service::MetricsService;
@@ -104,24 +105,6 @@ pub struct MetricTarget {
     pub primary_stream: StreamId,
 }
 
-fn parse<T: for<'de> Deserialize<'de>>(input: Value) -> Result<T, CommandError> {
-    serde_json::from_value(input).map_err(|e| CommandError::Invalid {
-        field: None,
-        message: e.to_string(),
-    })
-}
-
-fn invalid(field: &str, message: impl Into<String>) -> CommandError {
-    CommandError::Invalid {
-        field: Some(field.into()),
-        message: message.into(),
-    }
-}
-
-fn storage(e: rusqlite::Error) -> CommandError {
-    CommandError::from(oxplow_db::map_sql_err(e))
-}
-
 /// The stream a run acts on: the one named, else the caller's, else the
 /// primary. An agent acts only within its own stream.
 fn stream_for(
@@ -130,6 +113,14 @@ fn stream_for(
     primary: StreamId,
 ) -> Result<StreamId, CommandError> {
     let own = actor.stream_id();
+    // The bus gives an agent with a thread its stream: one without either
+    // acts in no stream.
+    if own.is_none() && actor.is_agent_driven() {
+        return Err(invalid(
+            "/stream",
+            "an agent with no thread acts in no stream",
+        ));
+    }
     let Some(named) = named else {
         return Ok(own.unwrap_or(primary));
     };
@@ -155,7 +146,7 @@ fn record_tx(
 ) -> Result<(i64, i64), CommandError> {
     let stream = stream_for(ctx.actor, input.stream.as_deref(), primary)?;
     let spec = get_spec_tx(ctx.conn, &input.key)
-        .map_err(storage)?
+        .map_err(sql)?
         .ok_or_else(|| invalid("/key", crate::metric_engine::missing_metric(&input.key)))?;
     let measure_key = spec.source_measure.as_deref().ok_or_else(|| {
         invalid(
@@ -164,7 +155,7 @@ fn record_tx(
         )
     })?;
     let measure = get_measure_tx(ctx.conn, measure_key)
-        .map_err(storage)?
+        .map_err(sql)?
         .ok_or_else(|| {
             invalid(
                 "/key",
@@ -216,7 +207,7 @@ fn record_tx(
     capture.scan_kind = "asserted".into();
     capture.snapshot_id =
         oxplow_db::analytics_stores::latest_snapshot_id_for_stream_tx(ctx.conn, stream)
-            .map_err(storage)?;
+            .map_err(sql)?;
     // An agent's assertion is its thread's, made in its open turn
     // (tsk923); anyone else's is no turn's.
     if let Actor::Agent {
@@ -259,7 +250,7 @@ pub fn ops(target: MetricTarget) -> Vec<Op> {
         Op::new(
             "metrics.write",
             "record",
-            serde_json::to_value(schemars::schema_for!(RecordInput)).expect("schema serializes"),
+            schema::<RecordInput>(),
             false,
             Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
                 let input: RecordInput = parse(input)?;
@@ -282,7 +273,7 @@ pub fn ops(target: MetricTarget) -> Vec<Op> {
         Op::new(
             "metrics.write",
             "rebuild",
-            serde_json::to_value(schemars::schema_for!(RebuildInput)).expect("schema serializes"),
+            schema::<RebuildInput>(),
             false,
             Handler::External(Arc::new(move |_: Invocation, input| {
                 let metrics = metrics.clone();
@@ -305,7 +296,7 @@ pub fn ops(target: MetricTarget) -> Vec<Op> {
         Op::new(
             "metrics.read",
             "scaffold",
-            serde_json::to_value(schemars::schema_for!(ScaffoldInput)).expect("schema serializes"),
+            schema::<ScaffoldInput>(),
             false,
             Handler::Tx(Arc::new(move |_ctx: &TxCtx<'_>, input| {
                 let input: ScaffoldInput = parse(input)?;
@@ -323,14 +314,10 @@ pub fn ops(target: MetricTarget) -> Vec<Op> {
     let enable = Op::new(
         "metrics.write",
         "enable",
-        serde_json::to_value(schemars::schema_for!(EnableInput)).expect("schema serializes"),
+        schema::<EnableInput>(),
         true,
         Handler::Tx(Arc::new(move |ctx: &super::TxCtx<'_>, input| {
-            let input: EnableInput =
-                serde_json::from_value(input).map_err(|e| CommandError::Invalid {
-                    field: None,
-                    message: e.to_string(),
-                })?;
+            let input: EnableInput = parse(input)?;
             for key in &input.keys {
                 let known: bool = ctx
                     .conn
@@ -339,9 +326,7 @@ pub fn ops(target: MetricTarget) -> Vec<Op> {
                         [key],
                         |r| r.get(0),
                     )
-                    .map_err(|e| CommandError::Failed {
-                        message: e.to_string(),
-                    })?;
+                    .map_err(sql)?;
                 if !known {
                     return Err(CommandError::Invalid {
                         field: Some("/keys".into()),
@@ -377,6 +362,7 @@ pub fn ops(target: MetricTarget) -> Vec<Op> {
 mod tests {
     use super::*;
     use oxplow_domain::ThreadId;
+    use serde_json::Value;
 
     fn agent() -> Actor {
         Actor::Agent {
