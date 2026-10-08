@@ -252,6 +252,22 @@ impl Http {
         headers: Vec<(&'static str, String)>,
         body: serde_json::Value,
     ) -> Result<serde_json::Value, AiError> {
+        let headers = headers
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect();
+        self.post_with(provider, url, headers, body).await
+    }
+
+    /// [`Self::post`] with headers named at run time (a scripted
+    /// provider's).
+    pub async fn post_with(
+        &self,
+        provider: &str,
+        url: &str,
+        headers: Vec<(String, String)>,
+        body: serde_json::Value,
+    ) -> Result<serde_json::Value, AiError> {
         let id = || provider.to_string();
         let mut req = self.client.post(url).json(&body);
         for (k, v) in headers {

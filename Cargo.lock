@@ -4390,6 +4390,8 @@ dependencies = [
  "async-trait",
  "oxplow-ai",
  "oxplow-ai-fake",
+ "oxplow-domain",
+ "oxplow-script",
  "oxplow-workspace-hack",
  "serde",
  "serde_json",

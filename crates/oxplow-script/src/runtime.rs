@@ -551,6 +551,12 @@ fn helper_anyhow(e: crate::HelperError) -> anyhow::Error {
 /// what a loader checks before anything runs it. A message saying what's
 /// wrong.
 pub fn check_starlark(path: &str, script: &str) -> Result<(), String> {
+    check_starlark_defines(path, script, &["transform"])
+}
+
+/// Whether `script` parses and defines each of `functions` at the top
+/// level of its module; a message naming the first one missing.
+pub fn check_starlark_defines(path: &str, script: &str, functions: &[&str]) -> Result<(), String> {
     use starlark::syntax::ast::StmtP;
     use starlark::syntax::{AstModule, Dialect};
     let ast = AstModule::parse(path, script.to_string(), &Dialect::Standard)
@@ -559,14 +565,17 @@ pub fn check_starlark(path: &str, script: &str) -> Result<(), String> {
         StmtP::Statements(stmts) => stmts.iter().collect::<Vec<_>>(),
         _ => vec![ast.statement()],
     };
-    let defines = top
-        .iter()
-        .any(|s| matches!(&s.node, StmtP::Def(d) if d.name.ident == "transform"));
-    if defines {
-        Ok(())
-    } else {
-        Err("must define `transform` (`def transform(x):`) at the top level".into())
+    for name in functions {
+        let defines = top
+            .iter()
+            .any(|s| matches!(&s.node, StmtP::Def(d) if d.name.ident == *name));
+        if !defines {
+            return Err(format!(
+                "must define `{name}` (`def {name}(x):`) at the top level"
+            ));
+        }
     }
+    Ok(())
 }
 
 /// Run a Starlark script against `input`. The script must define
@@ -576,7 +585,13 @@ pub fn check_starlark(path: &str, script: &str) -> Result<(), String> {
 /// (`parse_xml`/`parse_json`/`lcov_records`/`lines`/`regex_find`/`xpath`) are
 /// available to the script.
 pub fn run_starlark(script: &str, input: &Value) -> Result<Value, CollectError> {
-    run_starlark_inner(script, input, Host::None)
+    run_starlark_inner(script, "transform", input, Host::None)
+}
+
+/// [`run_starlark`], calling the script's function `func` instead of
+/// `transform`, with no host.
+pub fn run_starlark_fn(script: &str, func: &str, input: &Value) -> Result<Value, CollectError> {
+    run_starlark_inner(script, func, input, Host::None)
 }
 
 /// [`run_starlark`] for a collector: the `ai_*` builtins answer through
@@ -586,7 +601,7 @@ pub fn run_starlark_with_ai(
     input: &Value,
     host: &crate::ai::AiHost,
 ) -> Result<Value, CollectError> {
-    run_starlark_inner(script, input, Host::Ai(host))
+    run_starlark_inner(script, "transform", input, Host::Ai(host))
 }
 
 /// What a run's `Evaluator::extra` holds.
@@ -605,11 +620,12 @@ pub fn run_starlark_with_host(
     input: &Value,
     host: &TreeHost,
 ) -> Result<Value, CollectError> {
-    run_starlark_inner(script, input, Host::Tree(host))
+    run_starlark_inner(script, "transform", input, Host::Tree(host))
 }
 
 pub(crate) fn run_starlark_inner(
     script: &str,
+    func: &str,
     input: &Value,
     host: Host<'_>,
 ) -> Result<Value, CollectError> {
@@ -624,7 +640,7 @@ pub(crate) fn run_starlark_inner(
         serde_json::to_string(input).map_err(|e| CollectError::Runtime(e.to_string()))?;
     let input_literal =
         serde_json::to_string(&input_doc).map_err(|e| CollectError::Runtime(e.to_string()))?;
-    let source = format!("{script}\njson.encode(transform(json.decode({input_literal})))\n");
+    let source = format!("{script}\njson.encode({func}(json.decode({input_literal})))\n");
 
     let ast = AstModule::parse("transform.star", source, &Dialect::Standard)
         .map_err(|e| CollectError::Runtime(format!("starlark parse: {e}")))?;
@@ -955,6 +971,28 @@ impl From<TestReportJson> for TestReport {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// A script may define several functions the host calls by name (an
+    /// AI provider's `request` and `response`); the check names what's
+    /// missing.
+    #[test]
+    fn a_script_runs_the_function_the_host_names() {
+        let script = "def request(x):\n    return {\"path\": \"/v1/\" + x[\"model\"]}\n\ndef response(x):\n    return {\"text\": x[\"body\"][\"t\"]}\n";
+        assert_eq!(
+            run_starlark_fn(script, "request", &json!({ "model": "m" })).unwrap(),
+            json!({ "path": "/v1/m" })
+        );
+        assert_eq!(
+            run_starlark_fn(script, "response", &json!({ "body": { "t": "hi" } })).unwrap(),
+            json!({ "text": "hi" })
+        );
+        assert_eq!(
+            check_starlark_defines("p.star", script, &["request", "response"]),
+            Ok(())
+        );
+        let err = check_starlark_defines("p.star", script, &["request", "decide"]).unwrap_err();
+        assert!(err.contains("`decide`"), "{err}");
+    }
 
     /// tsk161: the deadlock. A streaming filter that echoes its input can't be
     /// fed a payload larger than the pipe buffer unless stdout is drained

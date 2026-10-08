@@ -7,7 +7,10 @@
 mod anthropic;
 mod openai_compatible;
 mod openrouter;
+mod scripted;
 mod typesafe;
+
+pub use scripted::{scripted, FUNCTIONS};
 
 use std::sync::Arc;
 

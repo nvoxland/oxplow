@@ -66,7 +66,7 @@ pub fn run_starlark_serving(
     let host = ScopeHost { calls: tx.clone() };
     let (script, input) = (script.to_string(), input.clone());
     std::thread::spawn(move || {
-        let out = run_starlark_inner(&script, &input, Host::Scope(&host));
+        let out = run_starlark_inner(&script, "transform", &input, Host::Scope(&host));
         let _ = tx.send(Msg::Done(out));
     });
     let clock = RunClock::default();
