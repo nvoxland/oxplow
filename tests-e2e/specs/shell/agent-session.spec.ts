@@ -16,3 +16,20 @@ test("a session's tab closes the session once its close is confirmed", async ({ 
   await expect(page.getByTestId(tabTestId)).toHaveCount(0);
   await expect(page.getByTestId("page-new-session")).toBeVisible();
 });
+
+/// Search offers New Agent Session…; choosing it opens the session picker
+/// rather than starting anything.
+test("search offers a new agent session, which opens the picker", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("page-new-session")).toBeVisible();
+  await page.getByTestId("new-session-start").click();
+  const tab = page.locator('[data-testid^="center-tab-agent_session:"]').first();
+  await expect(tab).toBeVisible();
+  await expect(page.getByTestId("page-new-session")).toBeHidden();
+  await page.getByTestId("title-bar-search").click();
+  await page.keyboard.type("new agent session");
+  await page.getByTestId("launcher-command-oxplow.agent_session.open").click();
+  await expect(page.getByTestId("page-new-session")).toBeVisible();
+  // The session it started is still there: choosing it started nothing.
+  await expect(tab).toBeVisible();
+});

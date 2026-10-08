@@ -55,6 +55,7 @@ commands:
     scope: agent_sessions.write
     op: open
     invokers: { human: true, agent: true, lens: true }
+    ui: { label: "New Agent Session…", group: Tasks, keywords: [agent, session, start], form: "page:new-session", when: "threadShown" }
   - name: agent_session.rename
     summary: "Rename an agent session (`agent_session:ses3`)."
     scope: agent_sessions.write

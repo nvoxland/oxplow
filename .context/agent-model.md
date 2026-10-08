@@ -579,7 +579,10 @@ required for a chat harness (the project's first ACP agent when the harness
 isn't named either), refused otherwise, and must name a known agent. The
 session picker lists "<harness title> · <name>" per ACP agent for each
 enabled chat harness, flagged "not installed" or "needs approval"
-(`agentChoices` in `agentKinds.ts`).
+(`agentChoices` in `agentKinds.ts`). The picker is reached from a thread with no session, the thread's
+**New session…** menu item, and search: `agent_session.open` declares
+`ui: { label: "New Agent Session…", form: "page:new-session" }`, so
+choosing it opens the picker rather than running the command.
 
 **Not built yet:** a personal (user-global) `acpAgents` file; declared
 adapters and project entries only for now.
