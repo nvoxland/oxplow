@@ -17,15 +17,20 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use oxplow_domain::agent::tool::ToolUse;
 use oxplow_domain::ThreadId;
-use oxplow_runtime::policy::{IntentKind, PolicyDecision};
+use oxplow_runtime::policy::PolicyDecision;
 use parking_lot::Mutex;
 use serde::Serialize;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tracing::warn;
 
 use super::host::AcpHost;
-use super::mapping::{self, AcpIntent};
+
+/// What a write oxplow makes for an ACP agent (`fs/write_text_file`) is
+/// called, where a person reads it and in the record.
+const FS_WRITE: &str = "fs/write_text_file";
+use super::mapping;
 use super::model::{
     AcpUpdate, ContextUsage, PermissionAnswer, PermissionKind, PermissionOption, ToolCall,
     ToolStatus,
@@ -510,11 +515,18 @@ impl Actor {
                     .tool(&tool_id)
                     .cloned()
                     .unwrap_or_else(|| ToolCall::from_patch(&ask.tool));
-                let intent = mapping::intent_for(&tool);
-                let payload = self.payload(&tool, &intent);
+                let call = mapping::tool_use(&tool).unwrap_or_else(|| ToolUse {
+                    name: mapping::label(&tool),
+                    ..ToolUse::default()
+                });
                 match self
                     .host
-                    .check_tool(self.thread(), &self.session_id, &intent, &payload)
+                    .check_tool(
+                        self.thread(),
+                        &self.session_id,
+                        &call,
+                        &mapping::content(&tool),
+                    )
                     .await
                 {
                     PolicyDecision::Deny { reason, .. } => {
@@ -532,12 +544,12 @@ impl Actor {
                         self.rejected.insert(tool_id.clone());
                         self.push(ItemBody::PolicyDenied {
                             tool_call_id: tool_id,
-                            label: intent.label,
+                            label: call.name,
                             reason,
                         });
                     }
                     PolicyDecision::Allow => {
-                        let write = intent.kind == IntentKind::WorktreeWrite;
+                        let write = call.kind == oxplow_domain::agent::tool::ToolKind::Edit;
                         let options: Vec<PermissionOption> = ask
                             .options
                             .into_iter()
@@ -546,7 +558,7 @@ impl Actor {
                         self.next_request += 1;
                         let request_id = format!("perm-{}", self.next_request);
                         let title = if tool.title.is_empty() {
-                            intent.label.clone()
+                            call.name.clone()
                         } else {
                             tool.title.clone()
                         };
@@ -586,7 +598,7 @@ impl Actor {
                         if !self.replaying {
                             self.push(ItemBody::PolicyDenied {
                                 tool_call_id: String::new(),
-                                label: "Write".into(),
+                                label: FS_WRITE.into(),
                                 reason,
                             });
                         }
@@ -594,13 +606,14 @@ impl Actor {
                     }
                 };
                 let p = path.to_string_lossy().into_owned();
-                let intent = AcpIntent {
-                    label: "Write".into(),
-                    kind: IntentKind::WorktreeWrite,
+                // oxplow writes it for the agent: an edit of that file.
+                let call = ToolUse {
+                    name: FS_WRITE.into(),
+                    kind: oxplow_domain::agent::tool::ToolKind::Edit,
                     paths: vec![p.clone()],
+                    ..ToolUse::default()
                 };
-                let payload =
-                    serde_json::json!({"tool_name": "Write", "tool_input": {"file_path": p}});
+                let payload = serde_json::json!({"tool_input": {"path": p}});
                 let decision = if self.replaying {
                     PolicyDecision::Deny {
                         layer: oxplow_runtime::policy::DenyLayer::WriteGuard,
@@ -608,7 +621,7 @@ impl Actor {
                     }
                 } else {
                     self.host
-                        .check_tool(self.thread(), &self.session_id, &intent, &payload)
+                        .check_tool(self.thread(), &self.session_id, &call, &payload)
                         .await
                 };
                 match decision {
@@ -617,7 +630,7 @@ impl Actor {
                         if !self.replaying {
                             self.push(ItemBody::PolicyDenied {
                                 tool_call_id: String::new(),
-                                label: "Write".into(),
+                                label: FS_WRITE.into(),
                                 reason,
                             });
                         }
@@ -674,13 +687,6 @@ impl Actor {
         }
     }
 
-    fn payload(&self, tool: &ToolCall, intent: &AcpIntent) -> serde_json::Value {
-        mapping::canonical_events(tool, Some(&self.session_id))
-            .first()
-            .map(|e| e.to_payload())
-            .unwrap_or_else(|| serde_json::json!({"tool_name": intent.label, "tool_input": {}}))
-    }
-
     fn apply(&self, update: AcpUpdate) -> Option<TranscriptItem> {
         let usage = matches!(update, AcpUpdate::Usage(_));
         let item = self.view.lock().transcript.apply(update);
@@ -727,10 +733,9 @@ impl Actor {
             && tool.status == ToolStatus::Completed
             && self.rejected.contains(&id)
         {
-            let intent = mapping::intent_for(&tool);
             self.push(ItemBody::Bypass {
                 tool_call_id: id.clone(),
-                label: intent.label,
+                label: mapping::label(&tool),
                 reason: "it completed after being rejected; the agent ignored the answer".into(),
             });
         }
@@ -741,32 +746,41 @@ impl Actor {
             && tool.status == ToolStatus::Completed
             && !self.allowed.contains(&id)
         {
-            let intent = mapping::intent_for(&tool);
+            let paths = mapping::paths(&tool);
             let root = oxplow_runtime::policy::normalize_path(&self.spec.cwd, &self.spec.cwd);
-            let unseen = intent.paths.is_empty()
-                || intent.paths.iter().any(|p| {
+            let unseen = paths.is_empty()
+                || paths.iter().any(|p| {
                     let n = oxplow_runtime::policy::normalize_path(Path::new(p), &root);
                     !self.fs_written.contains(n.to_string_lossy().as_ref())
                 });
-            if unseen {
-                let payload = self.payload(&tool, &intent);
+            if let (true, Some(call)) = (unseen, mapping::tool_use(&tool)) {
                 if let PolicyDecision::Deny { reason, .. } = self
                     .host
-                    .check_tool(self.thread(), &self.session_id, &intent, &payload)
+                    .check_tool(
+                        self.thread(),
+                        &self.session_id,
+                        &call,
+                        &mapping::content(&tool),
+                    )
                     .await
                 {
                     self.push(ItemBody::Bypass {
                         tool_call_id: id.clone(),
-                        label: intent.label,
+                        label: call.name,
                         reason,
                     });
                 }
             }
         }
-        for ev in mapping::canonical_events(&tool, Some(&self.session_id)) {
+        if let Some(call) = mapping::tool_use(&tool) {
             if let Some(n) = self
                 .host
-                .tool_finished(self.thread(), &self.session_id, &ev)
+                .tool_finished(
+                    self.thread(),
+                    &self.session_id,
+                    &call,
+                    &mapping::content(&tool),
+                )
                 .await
             {
                 self.nudges.push(n);

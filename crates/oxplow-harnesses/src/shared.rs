@@ -8,6 +8,7 @@ use std::path::Path;
 use oxplow_domain::agent::harness::HarnessError;
 use oxplow_domain::agent::observe::HookAnswer;
 use oxplow_domain::agent::text::Text;
+use oxplow_domain::agent::tool::{ToolKind, ToolUse};
 use oxplow_domain::HookKind;
 use serde_json::json;
 
@@ -93,6 +94,85 @@ fn event_name(kind: HookKind) -> &'static str {
     }
 }
 
+/// A tool hook's body in Claude Code's shape (`tool_name`, `tool_input`,
+/// `tool_response`, `tool_use_id`) mapped onto oxplow's vocabulary — what
+/// Claude Code sends, and what opencode's bridge translates its calls to.
+pub fn claude_shaped_tool_use(body: &serde_json::Value) -> Option<ToolUse> {
+    let name = body.get("tool_name")?.as_str()?.to_string();
+    let kind = match name.as_str() {
+        "Write" | "Edit" | "MultiEdit" | "NotebookEdit" => ToolKind::Edit,
+        "Bash" => ToolKind::Shell,
+        "Task" | "Agent" => ToolKind::Subagent,
+        "AskUserQuestion" => ToolKind::Ask,
+        "ExitPlanMode" => ToolKind::Plan,
+        "Read" => ToolKind::Read,
+        "Grep" | "Glob" | "List" => ToolKind::Search,
+        "WebFetch" | "WebSearch" => ToolKind::Fetch,
+        n if n.starts_with("mcp__") => ToolKind::Mcp,
+        _ => ToolKind::Other,
+    };
+    let input = body.get("tool_input");
+    let field = |k: &str| input.and_then(|i| i.get(k)).and_then(|v| v.as_str());
+    // Every key naming a file, not just the first: a null `file_path`
+    // mustn't hide a `notebook_path`.
+    let paths = ["file_path", "notebook_path", "path"]
+        .iter()
+        .filter_map(|k| field(k))
+        .map(str::to_string)
+        .collect();
+    let command = (kind == ToolKind::Shell)
+        .then(|| field("command"))
+        .flatten()
+        .map(str::to_string);
+    let detail = field("command")
+        .or_else(|| field("pattern"))
+        .or_else(|| field("query"))
+        .or_else(|| field("url"))
+        .map(str::to_string);
+    let question = field("question")
+        .or_else(|| {
+            input
+                .and_then(|i| i.get("questions"))
+                .and_then(|q| q.get(0))
+                .and_then(|q| q.get("question"))
+                .and_then(|q| q.as_str())
+        })
+        .map(str::to_string);
+    let response = body.get("tool_response").filter(|r| !r.is_null());
+    let exit_code = response.and_then(|r| {
+        ["exit_code", "exitCode", "returnCode", "code"]
+            .iter()
+            .find_map(|k| r.get(*k).and_then(|x| x.as_i64()))
+    });
+    let ok = response.map(|r| {
+        let failed = r
+            .get("is_error")
+            .or_else(|| r.get("isError"))
+            .and_then(|e| e.as_bool())
+            .unwrap_or(false);
+        !failed && exit_code.is_none_or(|c| c == 0)
+    });
+    // A shell call with no exit code and no error says nothing of success.
+    let ok = match (kind, ok, exit_code) {
+        (ToolKind::Shell, Some(true), None) => None,
+        (_, ok, _) => ok,
+    };
+    Some(ToolUse {
+        name,
+        kind,
+        paths,
+        command,
+        detail,
+        call_id: body
+            .get("tool_use_id")
+            .and_then(|t| t.as_str())
+            .map(str::to_string),
+        ok,
+        exit_code,
+        question,
+    })
+}
+
 /// A runtime file that couldn't be written.
 pub fn runtime(e: io::Error) -> HarnessError {
     HarnessError::Runtime(e.to_string())
@@ -170,6 +250,66 @@ fn owner_only(_path: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Claude Code's names map onto oxplow's kinds, with the files, the
+    /// command, the call id and the outcome read from its shape.
+    #[test]
+    fn claude_shaped_bodies_map_onto_the_vocabulary() {
+        let edit = claude_shaped_tool_use(&json!({
+            "tool_name": "NotebookEdit", "tool_use_id": "tu1",
+            "tool_input": {"file_path": null, "notebook_path": "nb.ipynb"}
+        }))
+        .unwrap();
+        assert_eq!(
+            (edit.kind, edit.paths.clone(), edit.call_id.as_deref()),
+            (ToolKind::Edit, vec!["nb.ipynb".to_string()], Some("tu1"))
+        );
+        assert_eq!(edit.ok, None, "a request has no outcome");
+        let ran = claude_shaped_tool_use(&json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "cargo test"},
+            "tool_response": {"exit_code": 101}
+        }))
+        .unwrap();
+        assert_eq!(ran.kind, ToolKind::Shell);
+        assert_eq!(ran.command.as_deref(), Some("cargo test"));
+        assert_eq!((ran.exit_code, ran.ok), (Some(101), Some(false)));
+        let silent = claude_shaped_tool_use(&json!({
+            "tool_name": "Bash", "tool_input": {"command": "ls"}, "tool_response": {}
+        }))
+        .unwrap();
+        assert_eq!(silent.ok, None, "no exit code: success unknown");
+        let asked = claude_shaped_tool_use(&json!({
+            "tool_name": "AskUserQuestion",
+            "tool_input": {"questions": [{"question": "Which one?"}]}
+        }))
+        .unwrap();
+        assert_eq!(
+            (asked.kind, asked.question.as_deref()),
+            (ToolKind::Ask, Some("Which one?"))
+        );
+        for (name, kind) in [
+            ("Write", ToolKind::Edit),
+            ("MultiEdit", ToolKind::Edit),
+            ("Task", ToolKind::Subagent),
+            ("Agent", ToolKind::Subagent),
+            ("ExitPlanMode", ToolKind::Plan),
+            ("Read", ToolKind::Read),
+            ("Grep", ToolKind::Search),
+            ("WebFetch", ToolKind::Fetch),
+            ("mcp__oxplow__run_command", ToolKind::Mcp),
+            ("TodoWrite", ToolKind::Other),
+        ] {
+            assert_eq!(
+                claude_shaped_tool_use(&json!({ "tool_name": name }))
+                    .unwrap()
+                    .kind,
+                kind,
+                "{name}"
+            );
+        }
+        assert!(claude_shaped_tool_use(&json!({})).is_none());
+    }
 
     /// A deny and a context are Claude's `hookSpecificOutput`; an ack is
     /// an empty object (anything else prints a warning in Claude's

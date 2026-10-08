@@ -299,6 +299,7 @@ mod tests {
                 payload_json: "{}".into(),
                 prompt: Some("go".into()),
                 decision: None,
+                tool: None,
             })
             .await
             .unwrap();
@@ -325,6 +326,7 @@ mod tests {
             payload_json: "{}".into(),
             prompt: Some("go".into()),
             decision: None,
+            tool: None,
         };
         f.svc
             .hook_ingest

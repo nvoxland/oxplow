@@ -3,64 +3,8 @@
 //! worktree. The answer is core's; the agent's harness renders it.
 
 use std::path::Path;
-use std::sync::OnceLock;
-
-use serde_json::Value;
 
 use oxplow_domain::Thread;
-
-/// Tool names that mutate the shared worktree. Bash is intentionally
-/// excluded; see the TS source for rationale.
-pub fn worktree_mutating_tools() -> &'static [&'static str] {
-    static SET: OnceLock<[&'static str; 4]> = OnceLock::new();
-    SET.get_or_init(|| ["Write", "Edit", "MultiEdit", "NotebookEdit"])
-        .as_slice()
-}
-
-/// Convenience constant for callers that just want the slice.
-pub static WORKTREE_MUTATING_TOOLS: &[&str] = &["Write", "Edit", "MultiEdit", "NotebookEdit"];
-
-#[derive(Debug, Clone, Default)]
-pub struct WriteGuardContext<'a> {
-    /// Absolute path to the project root (the shared worktree root).
-    pub project_dir: Option<&'a Path>,
-    /// Raw `tool_input` JSON from the PreToolUse payload.
-    pub tool_input: Option<&'a Value>,
-}
-
-/// Why the call is refused, when the thread is not the stream's writer
-/// and the tool would mutate the shared worktree (or it writes a wiki
-/// page). `None` lets the call proceed.
-///
-/// "Writer" is `ThreadStatus::Active`; everything else
-/// (`Queued`, `Closed`) is read-only.
-pub fn write_guard_reason(
-    thread: Option<&Thread>,
-    tool_name: &str,
-    context: WriteGuardContext<'_>,
-) -> Option<String> {
-    let thread = thread?;
-    if tool_name.is_empty() || tool_name.starts_with("mcp__") {
-        return None;
-    }
-    if !WORKTREE_MUTATING_TOOLS.contains(&tool_name) {
-        return None;
-    }
-    let raw = context.tool_input.and_then(raw_target_path);
-    if let Some(reason) = wiki_page_reason(raw, context.project_dir) {
-        return Some(reason);
-    }
-    if thread.status.is_writer() {
-        return None;
-    }
-    // Without a project dir the path can't be placed: the generic reason.
-    let raw = if context.project_dir.is_some() {
-        raw
-    } else {
-        None
-    };
-    read_only_reason(thread, raw, context.project_dir)
-}
 
 /// Why an agent may not write `raw_path` itself, when it is a wiki page
 /// (`<project>/.oxplow/wiki/…`): pages are written with the
@@ -127,15 +71,6 @@ pub fn read_only_reason(
     )
 }
 
-/// The target path a Claude-shaped `tool_input` names.
-fn raw_target_path(tool_input: &Value) -> Option<&str> {
-    tool_input
-        .get("file_path")
-        .and_then(|v| v.as_str())
-        .or_else(|| tool_input.get("notebook_path").and_then(|v| v.as_str()))
-        .or_else(|| tool_input.get("path").and_then(|v| v.as_str()))
-}
-
 fn is_inside(path: &Path, root: &Path) -> bool {
     let path_canon = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let root_canon = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
@@ -146,7 +81,6 @@ fn is_inside(path: &Path, root: &Path) -> bool {
 mod tests {
     use super::*;
     use oxplow_domain::{StreamId, ThreadId, ThreadStatus, Timestamp};
-    use serde_json::json;
 
     fn read_only_thread() -> Thread {
         Thread {
@@ -165,142 +99,49 @@ mod tests {
         }
     }
 
-    fn writer_thread() -> Thread {
-        Thread {
+    #[test]
+    fn a_writer_is_never_read_only() {
+        let t = Thread {
             status: ThreadStatus::Active,
             ..read_only_thread()
-        }
+        };
+        assert!(read_only_reason(&t, Some("src/a.rs"), Some(Path::new("/p"))).is_none());
     }
 
     #[test]
-    fn no_thread_means_no_deny() {
-        let result = write_guard_reason(None, "Write", WriteGuardContext::default());
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn writer_thread_never_denied() {
-        let t = writer_thread();
-        let result = write_guard_reason(Some(&t), "Write", WriteGuardContext::default());
-        assert!(result.is_none(), "writer thread must be allowed to mutate");
-    }
-
-    #[test]
-    fn closed_thread_treated_as_read_only() {
+    fn a_closed_thread_is_read_only_like_a_queued_one() {
         let mut t = read_only_thread();
         t.status = ThreadStatus::Closed;
-        let result = write_guard_reason(Some(&t), "Write", WriteGuardContext::default());
-        assert!(result.is_some(), "closed thread must be denied like queued");
+        let reason = read_only_reason(&t, None, None).expect("refused");
+        assert!(reason.contains("read-only"), "{reason}");
     }
 
     #[test]
-    fn mcp_tool_never_denied() {
-        let t = read_only_thread();
-        let result = write_guard_reason(
-            Some(&t),
-            "mcp__oxplow__run_command",
-            WriteGuardContext::default(),
-        );
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn non_mutating_tool_never_denied() {
-        let t = read_only_thread();
-        let result = write_guard_reason(Some(&t), "Read", WriteGuardContext::default());
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn write_without_path_context_returns_generic_deny() {
-        let t = read_only_thread();
-        let result = write_guard_reason(Some(&t), "Write", WriteGuardContext::default());
-        assert!(result.expect("deny").contains("read-only"));
-    }
-
-    #[test]
-    fn write_outside_project_allowed_when_path_known() {
+    fn outside_the_project_is_allowed_inside_is_refused_naming_the_path() {
         let t = read_only_thread();
         let project = tempfile::tempdir().unwrap();
-        let outside = "/tmp/somewhere/else.txt";
-        let input = json!({"file_path": outside});
-        let result = write_guard_reason(
-            Some(&t),
-            "Write",
-            WriteGuardContext {
-                project_dir: Some(project.path()),
-                tool_input: Some(&input),
-            },
+        assert!(
+            read_only_reason(&t, Some("/tmp/somewhere/else.txt"), Some(project.path())).is_none()
         );
-        assert!(result.is_none(), "outside project should be allowed");
+        let target = project.path().join("src/foo.rs");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(&target, "").unwrap();
+        let reason = read_only_reason(&t, target.to_str(), Some(project.path())).expect("refused");
+        assert!(reason.contains("inside the shared worktree"), "{reason}");
+        std::fs::create_dir_all(project.path().join(".oxplow/runtime")).unwrap();
+        let state = project.path().join(".oxplow/runtime/local.sqlite");
+        std::fs::write(&state, "").unwrap();
+        assert!(read_only_reason(&t, state.to_str(), Some(project.path())).is_some());
     }
 
     #[test]
-    fn a_wiki_page_is_written_by_command_whatever_the_thread() {
-        let t = read_only_thread();
+    fn a_wiki_page_is_written_by_command() {
         let project = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(project.path().join(".oxplow/wiki")).unwrap();
         let target = project.path().join(".oxplow/wiki/captured.md");
         std::fs::write(&target, "").unwrap();
-        let input = json!({"file_path": target.to_str().unwrap()});
-        let result = write_guard_reason(
-            Some(&t),
-            "Write",
-            WriteGuardContext {
-                project_dir: Some(project.path()),
-                tool_input: Some(&input),
-            },
-        );
-        let reason = result.expect("a wiki page write is refused");
+        let reason = wiki_page_reason(target.to_str(), Some(project.path())).expect("refused");
         assert!(reason.contains("oxplow.knowledge.write_page"), "{reason}");
-        let mut writer = t.clone();
-        writer.status = ThreadStatus::Active;
-        assert!(write_guard_reason(
-            Some(&writer),
-            "Write",
-            WriteGuardContext {
-                project_dir: Some(project.path()),
-                tool_input: Some(&input),
-            },
-        )
-        .is_some());
-    }
-
-    #[test]
-    fn write_inside_project_denied_with_path_in_reason() {
-        let t = read_only_thread();
-        let project = tempfile::tempdir().unwrap();
-        let target = project.path().join("src/foo.rs");
-        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
-        std::fs::write(&target, "").unwrap();
-        let input = json!({"file_path": target.to_str().unwrap()});
-        let result = write_guard_reason(
-            Some(&t),
-            "Write",
-            WriteGuardContext {
-                project_dir: Some(project.path()),
-                tool_input: Some(&input),
-            },
-        );
-        assert!(result.expect("deny").contains("inside the shared worktree"));
-    }
-
-    #[test]
-    fn write_inside_oxplow_state_dir_denied() {
-        let t = read_only_thread();
-        let project = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(project.path().join(".oxplow/runtime")).unwrap();
-        let target = project.path().join(".oxplow/runtime/local.sqlite");
-        std::fs::write(&target, "").unwrap();
-        let input = json!({"file_path": target.to_str().unwrap()});
-        let result = write_guard_reason(
-            Some(&t),
-            "Write",
-            WriteGuardContext {
-                project_dir: Some(project.path()),
-                tool_input: Some(&input),
-            },
-        );
-        assert!(result.is_some(), ".oxplow runtime dir should be denied");
+        assert!(wiki_page_reason(Some("src/a.rs"), Some(project.path())).is_none());
     }
 }

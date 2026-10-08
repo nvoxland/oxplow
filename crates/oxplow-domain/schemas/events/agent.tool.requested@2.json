@@ -1,0 +1,142 @@
+{
+  "$defs": {
+    "ContentRef": {
+      "additionalProperties": false,
+      "description": "Where a large or sensitive body lives: `event_content.hash` (xxh3-128\nhex) and its length. Retention may delete the body; the ref stays.",
+      "properties": {
+        "hash": {
+          "type": "string"
+        },
+        "size": {
+          "description": "The whole body's length, stored or not.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "truncated": {
+          "description": "Only the first part was stored (bodies are capped).",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "hash",
+        "size"
+      ],
+      "type": "object"
+    },
+    "ToolDecision": {
+      "description": "What oxplow's agent policy said about a tool call.",
+      "enum": [
+        "allowed",
+        "denied"
+      ],
+      "type": "string"
+    },
+    "ToolKind": {
+      "description": "What a tool call does, as oxplow reads it.",
+      "oneOf": [
+        {
+          "const": "read",
+          "description": "Reads a file.",
+          "type": "string"
+        },
+        {
+          "const": "edit",
+          "description": "Writes, edits, deletes or moves files — the call names them.",
+          "type": "string"
+        },
+        {
+          "const": "shell",
+          "description": "Runs a shell command.",
+          "type": "string"
+        },
+        {
+          "const": "subagent",
+          "description": "Starts a subagent, which runs tools of its own.",
+          "type": "string"
+        },
+        {
+          "const": "ask",
+          "description": "Asks the person a question and waits for the answer.",
+          "type": "string"
+        },
+        {
+          "const": "plan",
+          "description": "Puts a plan to the person and waits for approval.",
+          "type": "string"
+        },
+        {
+          "const": "search",
+          "description": "Searches files (names or contents).",
+          "type": "string"
+        },
+        {
+          "const": "fetch",
+          "description": "Fetches or searches the web.",
+          "type": "string"
+        },
+        {
+          "const": "mcp",
+          "description": "Calls an MCP server's tool.",
+          "type": "string"
+        },
+        {
+          "const": "other",
+          "description": "Anything else (a to-do list, a mode switch, thinking).",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`agent.tool.requested@2`: the agent asked to run a tool (PreToolUse),\nand whether the policy let it. `tool` is the harness's own name for it;\n`kind` is what it does in oxplow's vocabulary\n(`oxplow_domain::agent::tool`), which is all core reads. v1 named the\ntool by Claude Code's names and one path; it upcasts by them.",
+  "properties": {
+    "decision": {
+      "$ref": "#/$defs/ToolDecision"
+    },
+    "detail": {
+      "description": "A short summary (a truncated command, a search pattern).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "input": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ContentRef"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "kind": {
+      "$ref": "#/$defs/ToolKind"
+    },
+    "paths": {
+      "description": "The files it names, repo-relative inside the worktree.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tool": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "tool",
+    "kind",
+    "decision"
+  ],
+  "title": "AgentToolRequestedV2",
+  "type": "object"
+}

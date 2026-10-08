@@ -13,8 +13,11 @@ use oxplow_domain::agent::harness::{
 };
 use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, TokenReading, Turn};
 use oxplow_domain::agent::text::AgentText;
+use oxplow_domain::agent::tool::ToolUse;
 
-use super::shared::{in_shell, program_and_guard, runtime, shell_escape, write_skills};
+use super::shared::{
+    claude_shaped_tool_use, in_shell, program_and_guard, runtime, shell_escape, write_skills,
+};
 use super::Named;
 
 pub(super) struct Opencode(pub(super) Named);
@@ -110,6 +113,11 @@ impl AgentHarness for Opencode {
 
     /// As its hook bridge names them (`opencode-hooks.js` maps `patch` to
     /// `Edit`).
+    /// Its bridge posts Claude Code's shape (`assets/opencode-hooks.js`).
+    fn tool_use(&self, body: &serde_json::Value) -> Option<ToolUse> {
+        claude_shaped_tool_use(body)
+    }
+
     fn writing_tools(&self) -> &[&str] {
         &["write", "edit", "bash", "task"]
     }

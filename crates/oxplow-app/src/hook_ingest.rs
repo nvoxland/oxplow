@@ -49,10 +49,12 @@ use oxplow_db::agent_stores::{
 };
 use oxplow_db::event_log_store::{append_unique_tx, EventCtx};
 use oxplow_db::{event_content_store, Database};
+use oxplow_domain::agent::registry::HarnessRegistry;
+use oxplow_domain::agent::tool::{ToolKind, ToolUse};
 use oxplow_domain::events::schema::{
     AgentPromptSubmitted, AgentPromptSubmittedV1, AgentSessionEnded, AgentSessionEndedV1,
-    AgentSessionStarted, AgentSessionStartedV2, AgentToolFinished, AgentToolFinishedV1,
-    AgentToolRequested, AgentToolRequestedV1, ContentRef, ToolDecision as Decision,
+    AgentSessionStarted, AgentSessionStartedV2, AgentToolFinished, AgentToolFinishedV2,
+    AgentToolRequested, AgentToolRequestedV2, ContentRef, ToolDecision as Decision,
 };
 use oxplow_domain::refs::build::{thread_ref, turn_ref};
 use oxplow_domain::{
@@ -104,6 +106,13 @@ pub struct HookEnvelope {
     /// PreToolUse only: the policy's verdict (`None` reads as allowed).
     #[serde(default)]
     pub decision: Option<ToolDecision>,
+    /// A tool hook's call in oxplow's vocabulary, when the sender mapped it
+    /// (the control plane, with the hook's harness; the ACP host). `None`:
+    /// the ingest maps the body with its session's harness. In-process
+    /// only: an envelope that crosses a wire carries none.
+    #[serde(skip)]
+    #[specta(skip)]
+    pub tool: Option<ToolUse>,
 }
 
 #[derive(Debug, Error)]
@@ -151,6 +160,9 @@ pub struct HookIngestService {
     pump: Option<Arc<crate::event_pump::EventPump>>,
     /// Snapshots the worktree when a turn ends (P2.3); `None` in bare tests.
     turn_snapshots: Option<Arc<dyn crate::turn_snapshots::TurnSnapshots>>,
+    /// Maps a tool hook's body the sender didn't map, by its session's
+    /// harness.
+    harnesses: HarnessRegistry,
 }
 
 impl HookIngestService {
@@ -159,6 +171,7 @@ impl HookIngestService {
         vocabulary: VocabularyHandle,
         project_dir: PathBuf,
         events: EventBus,
+        harnesses: HarnessRegistry,
     ) -> Self {
         Self {
             log: oxplow_db::SqliteEventLogStore::new(db.clone(), vocabulary.clone()),
@@ -169,6 +182,7 @@ impl HookIngestService {
             events,
             pump: None,
             turn_snapshots: None,
+            harnesses,
         }
     }
 
@@ -199,12 +213,13 @@ impl HookIngestService {
         let order = self.status_order.lock().await;
         let vocabulary = self.vocabulary.clone();
         let project_dir = self.project_dir.clone();
+        let harnesses = self.harnesses.clone();
         let applied = self
             .db
             .transaction(move |tx| {
                 let vocabulary = vocabulary.current();
                 let ev = EventCtx::system(&vocabulary, "hook_ingest");
-                record_tx(tx, &ev, &project_dir, thread, &env, now)
+                record_tx(tx, &ev, &project_dir, &harnesses, thread, &env, now)
             })
             .await?;
 
@@ -396,6 +411,7 @@ fn record_tx(
     conn: &rusqlite::Connection,
     ev: &EventCtx<'_>,
     project_dir: &Path,
+    harnesses: &HarnessRegistry,
     thread: ThreadId,
     env: &HookEnvelope,
     now: Timestamp,
@@ -474,15 +490,23 @@ fn record_tx(
             status = Some((AgentStatusState::Running, None));
         }
         HookKind::PreToolUse | HookKind::PostToolUse => {
-            log_tool_tx(conn, ev, thread, &row, env, &body, session)?;
-            let tool = body
-                .get("tool_name")
-                .and_then(|t| t.as_str())
-                .unwrap_or_default();
-            let asks = crate::agent_status_derive::is_user_input_tool(tool);
-            if env.kind == HookKind::PreToolUse && asks {
+            // The call as its harness maps it: the sender's, else the
+            // session's harness's reading of the body.
+            let tool = env.tool.clone().or_else(|| {
+                row.harness
+                    .as_deref()
+                    .and_then(|h| harnesses.get(h).ok())
+                    .and_then(|h| h.tool_use(&body))
+            });
+            // A body that names no tool records nothing.
+            if let Some(tool) = &tool {
+                log_tool_tx(conn, ev, thread, &row, env, tool, &body, session)?;
+            }
+            let asking = tool.filter(|t| t.kind.waits_on_person());
+            let asks = asking.is_some();
+            if let (HookKind::PreToolUse, Some(tool)) = (env.kind, &asking) {
                 // A question or a plan put to the person waits on them.
-                status = Some((AgentStatusState::AwaitingUser, Some(asked_of(tool, &body))));
+                status = Some((AgentStatusState::AwaitingUser, Some(asked_of(tool))));
             } else if env.kind == HookKind::PostToolUse
                 && (asks
                     || last_status_tx(conn, ev.vocabulary, thread, slot)?
@@ -610,16 +634,12 @@ fn stop_status(answer: Option<&str>) -> (AgentStatusState, Option<String>) {
     }
 }
 
-/// What a question tool asks: AskUserQuestion's first question, or that a
-/// plan waits for approval (ExitPlanMode).
-fn asked_of(tool: &str, body: &serde_json::Value) -> String {
-    let input = &body["tool_input"];
-    let question = input["questions"][0]["question"]
-        .as_str()
-        .or_else(|| input["question"].as_str());
-    match (tool, question) {
-        (_, Some(q)) => q.to_string(),
-        ("ExitPlanMode", None) => "A plan to approve".to_string(),
+/// What a call that waits on the person asks: its question, or that a
+/// plan waits for approval.
+fn asked_of(tool: &ToolUse) -> String {
+    match (&tool.question, tool.kind) {
+        (Some(q), _) => q.clone(),
+        (None, ToolKind::Plan) => "A plan to approve".to_string(),
         _ => "A question".to_string(),
     }
 }
@@ -746,27 +766,32 @@ fn end_session_tx(
 
 /// `agent.tool.requested` / `agent.tool.finished` for a tool hook, with
 /// the input (and output) stored by hash.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the hook, its call and where it lands, read by one writer"
+)]
 fn log_tool_tx(
     conn: &rusqlite::Connection,
     ev: &EventCtx<'_>,
     thread: ThreadId,
     row: &ThreadRow,
     env: &HookEnvelope,
+    tool: &ToolUse,
     body: &serde_json::Value,
     session: Option<&str>,
 ) -> Result<(), DomainError> {
-    let Some(parts) = crate::tool_calls::parse_tool_call(&env.payload_json, &row.worktree) else {
-        return Ok(()); // no tool name: nothing to record
-    };
+    let recorded = crate::tool_calls::recorded(tool, &row.worktree);
     let content = |key: &str| -> Result<Option<ContentRef>, DomainError> {
         match body.get(key) {
             Some(v) if !v.is_null() => event_content_store::put_json_tx(conn, "agent", v).map(Some),
             _ => Ok(None),
         }
     };
-    let tool_use = body.get("tool_use_id").and_then(|t| t.as_str());
-    let dedupe =
-        |phase: &str| tool_use.map(|id| format!("{}:{id}:{phase}", session.unwrap_or("-")));
+    let dedupe = |phase: &str| {
+        tool.call_id
+            .as_deref()
+            .map(|id| format!("{}:{id}:{phase}", session.unwrap_or("-")))
+    };
     let anchors = activity_anchors_tx(conn, thread, row.session)?;
     let subject = anchors
         .turn_id
@@ -777,10 +802,11 @@ fn log_tool_tx(
             allowed: true,
             reason: None,
         });
-        ev.typed::<AgentToolRequested>(&AgentToolRequestedV1 {
-            tool: parts.tool,
-            path: parts.path,
-            detail: parts.detail,
+        ev.typed::<AgentToolRequested>(&AgentToolRequestedV2 {
+            tool: tool.name.clone(),
+            kind: tool.kind,
+            paths: recorded.paths,
+            detail: recorded.detail,
             input: content("tool_input")?,
             decision: if decision.allowed {
                 Decision::Allowed
@@ -791,15 +817,15 @@ fn log_tool_tx(
         })
         .with_dedupe_key_opt(dedupe("requested"))
     } else {
-        let exit_code =
-            crate::collection::parse_bash_post_tool(&env.payload_json).and_then(|b| b.exit_code);
         let finished = ev
-            .typed::<AgentToolFinished>(&AgentToolFinishedV1 {
-                tool: parts.tool,
-                path: parts.path,
-                detail: parts.detail,
-                ok: parts.ok,
-                exit_code,
+            .typed::<AgentToolFinished>(&AgentToolFinishedV2 {
+                tool: tool.name.clone(),
+                kind: tool.kind,
+                paths: recorded.paths,
+                detail: recorded.detail,
+                command: tool.command.clone(),
+                ok: tool.ok,
+                exit_code: tool.exit_code,
                 input: content("tool_input")?,
                 output: content("tool_response")?,
             })
@@ -882,8 +908,20 @@ mod tests {
             oxplow_domain::vocabulary::VocabularyHandle::core(),
             std::path::PathBuf::from("/p"),
             EventBus::new(),
+            claude_registry(),
         );
         (svc, t.id)
+    }
+
+    /// The harnesses the fixture's sessions run: Claude Code, whose hook
+    /// bodies these tests post.
+    fn claude_registry() -> HarnessRegistry {
+        let registry = HarnessRegistry::new(std::sync::Arc::new(String::new));
+        registry.register(
+            oxplow_harnesses::built_in("oxplow:claude-code", "claude", "Claude")
+                .expect("the built-in"),
+        );
+        registry
     }
 
     /// A new service over the same database: a restarted daemon.
@@ -893,6 +931,7 @@ mod tests {
             svc.vocabulary.clone(),
             svc.project_dir.clone(),
             EventBus::new(),
+            svc.harnesses.clone(),
         )
     }
 
@@ -964,6 +1003,7 @@ mod tests {
                 .and_then(|p| p.as_str())
                 .map(str::to_string),
             decision: None,
+            tool: None,
         }
     }
 
@@ -1278,7 +1318,8 @@ mod tests {
         assert_eq!(e.anchors.effort_id.map(|e| e.value()), Some(effort));
         assert_eq!(e.anchors.agent_session_id, Some(first_session()));
         assert_eq!(e.payload["tool"], "Edit");
-        assert_eq!(e.payload["path"], "src/a.rs");
+        assert_eq!(e.payload["kind"], "edit");
+        assert_eq!(e.payload["paths"], json!(["src/a.rs"]));
         assert_eq!(e.payload["ok"], true);
         let hash = e.payload["input"]["hash"].as_str().unwrap().to_string();
         let input = oxplow_db::event_content_store::read(&svc.db, &hash)
@@ -1614,6 +1655,7 @@ mod tests {
             payload_json: "{}".into(),
             prompt: prompt.map(str::to_string),
             decision: None,
+            tool: None,
         };
         svc.ingest(envelope(HookKind::UserPromptSubmit, Some("p")))
             .await
@@ -1639,6 +1681,7 @@ mod tests {
             payload_json: "{}".into(),
             prompt: Some("do the thing".into()),
             decision: None,
+            tool: None,
         };
         svc.ingest(env).await.unwrap();
         // Spot-check via stores.
@@ -1661,6 +1704,7 @@ mod tests {
             payload_json: "{}".into(),
             prompt: Some("do".into()),
             decision: None,
+            tool: None,
         };
         svc.ingest(prompt_env).await.unwrap();
         let stop = HookEnvelope {
@@ -1672,6 +1716,7 @@ mod tests {
             payload_json: "{}".into(),
             prompt: None,
             decision: None,
+            tool: None,
         };
         svc.ingest(stop).await.unwrap();
         assert!(turns(&svc).list_open(&tid).await.unwrap().is_empty());
@@ -1691,6 +1736,7 @@ mod tests {
             payload_json: "{}".into(),
             prompt: Some("p".into()),
             decision: None,
+            tool: None,
         })
         .await
         .unwrap();
@@ -1703,6 +1749,7 @@ mod tests {
             payload_json: "{}".into(),
             prompt: None,
             decision: None,
+            tool: None,
         })
         .await
         .unwrap();
@@ -1726,6 +1773,7 @@ mod tests {
             payload_json: "{}".into(),
             prompt: None,
             decision: None,
+            tool: None,
         })
         .await
         .unwrap();
@@ -1746,6 +1794,7 @@ mod tests {
             payload_json: "{}".into(),
             prompt: Some("orphan".into()),
             decision: None,
+            tool: None,
         })
         .await
         .unwrap();
@@ -1768,6 +1817,7 @@ mod tests {
                 payload_json: "{}".into(),
                 prompt: Some(prompt.into()),
                 decision: None,
+                tool: None,
             })
             .await
             .unwrap();

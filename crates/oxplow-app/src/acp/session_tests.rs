@@ -9,18 +9,17 @@ use std::time::Duration;
 use async_trait::async_trait;
 use oxplow_acp_fake::{FakeOptions, FakeState, Shared};
 use oxplow_domain::ThreadId;
-use oxplow_runtime::policy::{DenyLayer, IntentKind, PolicyDecision};
+use oxplow_runtime::policy::{DenyLayer, PolicyDecision};
 use parking_lot::Mutex;
 use tokio::sync::broadcast;
 
 use super::host::AcpHost;
 use super::manager::AcpManager;
-use super::mapping::AcpIntent;
 use super::model::PermissionAnswer;
 use super::session::{AcpError, AcpEvent, AcpEventBody, AcpStatus, SessionSpec};
 use super::transcript::ItemBody;
 use super::wire::{McpHttp, TurnTokens};
-use crate::acp::mapping::CanonicalToolEvent;
+use oxplow_domain::agent::tool::{ToolKind as Kind, ToolUse};
 
 #[derive(Default)]
 struct Host {
@@ -46,14 +45,14 @@ impl AcpHost for Host {
         &self,
         _t: &ThreadId,
         _s: &str,
-        intent: &AcpIntent,
+        tool: &ToolUse,
         _p: &serde_json::Value,
     ) -> PolicyDecision {
         self.log
             .lock()
-            .push(format!("check {} {}", intent.label, intent.paths.join(",")));
-        match (&self.deny_writes, intent.kind) {
-            (Some(r), IntentKind::WorktreeWrite) => PolicyDecision::Deny {
+            .push(format!("check {} {}", tool.name, tool.paths.join(",")));
+        match (&self.deny_writes, tool.kind) {
+            (Some(r), Kind::Edit) => PolicyDecision::Deny {
                 layer: DenyLayer::WriteGuard,
                 reason: r.clone(),
             },
@@ -73,9 +72,10 @@ impl AcpHost for Host {
         &self,
         _t: &ThreadId,
         _s: &str,
-        e: &CanonicalToolEvent,
+        tool: &ToolUse,
+        _c: &serde_json::Value,
     ) -> Option<String> {
-        self.log.lock().push(format!("tool {}", e.tool_name));
+        self.log.lock().push(format!("tool {}", tool.kind.as_str()));
         self.nudge.clone()
     }
     async fn turn_ended(
@@ -274,7 +274,7 @@ async fn a_prompt_streams_the_reply_and_records_the_turn_once() {
         "{:?}",
         rig.host.log()
     );
-    assert!(rig.host.log().contains(&"tool Bash".to_string()));
+    assert!(rig.host.log().contains(&"tool shell".to_string()));
     assert_eq!(rig.prompts().len(), 1);
 }
 
@@ -598,7 +598,7 @@ async fn tool_calls_in_different_turns_stay_distinct() {
         .filter(|b| matches!(b, ItemBody::Tool { .. }))
         .count();
     assert_eq!(tools, 2);
-    assert_eq!(rig.host.count("tool Bash"), 2);
+    assert_eq!(rig.host.count("tool shell"), 2);
 }
 
 #[tokio::test]

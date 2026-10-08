@@ -33,10 +33,12 @@ use oxplow_domain::agent::harness::{
 };
 use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, TokenReading, Turn, UsageDelta};
 use oxplow_domain::agent::text::AgentText;
+use oxplow_domain::agent::tool::ToolUse;
 use oxplow_domain::events::schema::TokenKind;
 
 use super::shared::{
-    in_shell, program_and_guard, runtime, shell_escape, write_commands, write_json, write_skills,
+    claude_shaped_tool_use, in_shell, program_and_guard, runtime, shell_escape, write_commands,
+    write_json, write_skills,
 };
 use super::Named;
 
@@ -142,6 +144,10 @@ impl AgentHarness for Claude {
             write_commands(&commands_dir, &text.commands).map_err(runtime)?;
         }
         Ok(())
+    }
+
+    fn tool_use(&self, body: &serde_json::Value) -> Option<ToolUse> {
+        claude_shaped_tool_use(body)
     }
 
     fn writing_tools(&self) -> &[&str] {

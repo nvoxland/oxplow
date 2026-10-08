@@ -161,6 +161,9 @@ mod tests {
         fn writing_tools(&self) -> &[&str] {
             &[]
         }
+        fn tool_use(&self, _: &serde_json::Value) -> Option<crate::agent::tool::ToolUse> {
+            None
+        }
         fn turns(&self, _: &str) -> Vec<crate::agent::observe::Turn> {
             Vec::new()
         }

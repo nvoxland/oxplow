@@ -145,8 +145,8 @@ oxplow agent:
 
 ## Common pitfalls
 
-- **Write-guard blocks Edit/Write/MultiEdit/NotebookEdit from any
-  non-`active` thread.** See "Write guard" below. If the agent reports
+- **Write-guard blocks edits (`kind: edit`, whatever the harness calls
+  the tool) from any non-`active` thread.** See "Write guard" below. If the agent reports
   "permission denied" on a file write inside a non-writer thread,
   that's the hook doing its job — promote the thread to writer
   (`oxplow.thread.promote`, which a person or the agent itself may run;
@@ -291,6 +291,37 @@ directories that no fixed list can guess, so a GUI-launched agent can still miss
 `node`/`bun`. Fixing that needs a login-shell env capture (`$SHELL -ilc`), which
 was deliberately not taken here — it costs a subprocess per launch and can hang
 on a user's rc file.
+
+## Tool vocabulary
+
+Core never reads a harness's tool names. Each tool call is mapped onto
+oxplow's own vocabulary, `oxplow_domain::agent::tool`: a `ToolUse` with
+the harness's `name` for it (recorded, shown, never matched) and a
+`ToolKind` — `read`, `edit`, `shell`, `subagent`, `ask`, `plan`,
+`search`, `fetch`, `mcp`, `other` — plus the files it names (`paths`), a
+shell call's whole `command`, a short `detail`, the harness's `call_id`,
+its outcome (`ok`, `exit_code`) and an `ask`'s `question`.
+
+- **Who maps.** The harness: `AgentHarness::tool_use(body)`. Claude Code's
+  shape is mapped by `oxplow_harnesses::shared::claude_shaped_tool_use`
+  (Claude, and opencode, whose bridge translates its calls to that shape);
+  Codex maps its own (`apply_patch` → `edit` of every file its patch
+  names, `shell` / `exec_command` → `shell`, joining an argv list); an ACP
+  agent's calls are mapped by the protocol's kinds (`acp::mapping`).
+- **Where.** The hook route maps a PreToolUse / PostToolUse body with the
+  bearer's harness before the policy runs, and hands the call to the
+  ingest (`HookEnvelope.tool`); the ACP host does the same with its
+  mapping; a sender that didn't map (a test, an in-process caller) is
+  mapped by the ingest with its session's harness.
+- **What reads it.** The write guard (`kind == edit`, every path), the
+  status derivation (`subagent`, `ask`, `plan`), the ROLE CHANGE banner
+  (`plan`), effort claims (`edit`), test-run collection (`shell`, its
+  `command` and `exit_code`), and the events: `agent.tool.requested@2` /
+  `agent.tool.finished@2` carry `tool` (the harness's name), `kind` and
+  `paths`; a v1 event upcasts its kind from the Claude Code name it
+  carried — the one place core keeps those names
+  (`source_guards::only_harness_implementations_name_a_harness` pins it,
+  and its patterns refuse a harness's tool names anywhere else in core).
 
 ## Caller identity
 
@@ -549,10 +580,11 @@ one, and one that posts none (Codex) still ends.
    policy" below): the write guard (see Write guard below). It never
    asks for tracked work. A deny is a `HookAnswer::Deny` the session's
    harness renders (Claude's `hookSpecificOutput` for every built-in).
-   `claude_intent(body)` returns `None` for any tool outside the four
-   worktree-mutating edits, so `pre_tool_check` short-circuits
-   *before* any DB read or git-state stat — the common case (Read / Grep
-   / Bash / mcp / Task / …) does zero work here. Persistence is
+   The hook's harness maps the body onto oxplow's vocabulary first
+   ("Tool vocabulary"); `agent_policy::may_refuse` is false for anything
+   but an edit, so `pre_tool_check` short-circuits *before* any DB read
+   or git-state stat — the common case (reads, searches, shell, MCP,
+   subagents) does zero work here. Persistence is
    unaffected: the event is still ingested in `handle_hook_inner`
    regardless. (The HTTP round-trip itself still fires for every tool —
    the Claude Code plugin's `PreToolUse` matcher is `"*"`; narrowing that matcher to
@@ -658,17 +690,21 @@ a `BTreeMap` explicitly: `metric_cube::dims_key` does, and approval hashes
 never hash JSON. Hook response bodies changed key order only, which is
 the same JSON.
 
-**`acp/mapping.rs` (pure):**
-- `intent_for` makes the policy intent:
-  - edit, delete and move are `WorktreeWrite`, anything else is `Other`;
-  - paths come from `locations`, then the diffs, then path-like `rawInput` keys (`file_path`, `path`, `absolute_path`, `notebook_path`, `source`/`destination`, `old_path`/`new_path`), deduplicated.
-- `canonical_events` makes the Claude-shaped events the ingest records:
-  - read → `Read`;
-  - edit → `Edit`, or `Write` when every diff is a new file;
-  - delete and move → one `Edit` per path, so effort claims see them;
-  - search → `Grep`, execute → `Bash`, fetch → `WebFetch`;
-  - `mcp__…` titles or names pass through, and think / switch-mode record nothing.
-- The `tool_response` is `{is_error, …rawOutput}` once the call finishes, so a Bash `exit_code` survives.
+**`acp/mapping.rs` (pure):** the protocol's tool kinds map onto oxplow's
+vocabulary (`tool_use`), as any harness's names do:
+- edit, delete and move → `edit`; read → `read`; search → `search`;
+  execute → `shell` (its `command` from `rawInput.command` / `cmd`, else
+  the title); fetch → `fetch`; an `mcp__…` title or name → `mcp`; other
+  → `other`; think and switch-mode record nothing;
+- paths come from `locations`, then the diffs, then path-like `rawInput`
+  keys (`file_path`, `path`, `absolute_path`, `notebook_path`,
+  `source`/`destination`, `old_path`/`new_path`), deduplicated;
+- the call's name is its MCP tool, `Delete` / `Move`, else the agent's
+  name or title for it (`label`);
+- `content` is what the ingest stores by hash: `rawInput`, and once the
+  call finishes `{is_error, …rawOutput}`, so a shell call's `exit_code`
+  survives. The host hands the call and its content to the ingest
+  directly (`HookEnvelope.tool`).
 
 **`acp/transcript.rs`: the in-memory conversation (no table).**
 - **Items:**
@@ -882,7 +918,9 @@ destructive and waits for a person as a proposal.
   - `check_command(thread, spec)` is the command bus's agent gate
     ([commands.md](./commands.md)): an agent may run a command only when
     its spec admits agents. `DenyLayer::Command` names the refusal.
-  - `claude_intent(body)` maps a Claude-shaped payload to an intent.
+  - `intent_of(tool)` is a mapped call as a policy intent: an edit is a
+    worktree write of every file it names; nothing else can be refused
+    (`may_refuse`).
 - **Recording is the ingest's and the pump's; context is shared.** Every
   transport hands its envelopes to `HookIngestService::ingest`, which logs
   `agent.*` events; pump reactors record from them (tool-call rows, effort
@@ -896,10 +934,11 @@ destructive and waits for a person as a proposal.
     decisions, deduped per session.
   - `reset_session` clears the per-session baselines. Session and resume
     tracking live in the hook ingest (P3.3).
-  - Transports that don't speak Claude's tool vocabulary build a
-    `CanonicalToolEvent` (`crates/oxplow-app/src/acp/mapping.rs`) and ingest
-    its `to_payload()`. That is the one place the canonical shape is built;
-    the ingest and every reactor key on Claude's tool names.
+  - Every transport's tool calls arrive in oxplow's vocabulary
+    ("Tool vocabulary"): the hook route maps a body with the bearer's
+    harness, the ACP host with `acp::mapping`, and the ingest (for a
+    sender that didn't) with the session's. No reactor reads a harness's
+    tool names.
 - **Transports only render the answer.**
   - The hook route's answer is a neutral `HookAnswer` (`Ack`, `Deny {
     reason }`, `Context { event, text }`, `oxplow_domain::agent::observe`),
@@ -1410,7 +1449,7 @@ the delivery:** `AgentContext::post_tool_context` settles the two reactors (≤2
 s) and returns the thread's nudges with no `delivered_at`
 (`take_undelivered`, which stamps them) — oxplow's own kinds first, then
 advisories — so one that finishes after its hook answered reaches the agent
-on the thread's next tool call. The ExitPlanMode ROLE CHANGE banner still
+on the thread's next tool call. The ROLE CHANGE banner after a plan still
 wins its call; nudges wait for the next. **One-shot marks are durable**
 (`once_mark`, per effort or per thread): the report-less-run nudge fires
 once per effort, and an advisory once per its `once_per` scope, across
@@ -1529,9 +1568,10 @@ Non-writer threads share the writer's worktree (same checkout, separate
 agent panes). Letting their agents write would corrupt the writer's
 in-progress changes.
 
-- **Hook enforcement.** The shared agent policy (above) denies `Write`,
-  `Edit`, `MultiEdit`, `NotebookEdit` (and, for ACP agents, delete/move)
-  from any non-`active` thread; the reason comes from
+- **Hook enforcement.** The shared agent policy (above) denies an edit
+  (`kind: edit` — Claude's `Write`/`Edit`/`MultiEdit`/`NotebookEdit`,
+  Codex's `apply_patch`, an ACP agent's edit, delete or move) from any
+  non-`active` thread; the reason comes from
   `write_guard::read_only_reason` (`crates/oxplow-runtime/src/write_guard.rs`).
   "The worktree" is the thread's own stream's (see "Agent policy"
   above). A path in another stream's worktree is denied for every
@@ -1639,7 +1679,7 @@ input and appends a prominent `**Access changed:**` note before
 control plane (`crates/oxplow-control-plane/src/lib.rs::RoleState`)
 captures the role once per agent session id in
 `initial_role_by_session_id` on the first hook it sees for that
-session — UserPromptSubmit OR an ExitPlanMode PostToolUse, whichever
+session — UserPromptSubmit OR a plan's (`kind: plan`) PostToolUse, whichever
 fires first — so the comparison baseline is stable across subsequent
 turns. Both directions are covered:
 
@@ -1658,7 +1698,7 @@ The banner reaches the agent via two complementary injection points:
    has flipped) and returns it as
    `hookSpecificOutput.additionalContext`. Fires on every prompt
    when `inject_session_context: true` (default).
-2. **PostToolUse(ExitPlanMode).** When the user promotes the thread
+2. **A plan's PostToolUse** (`kind: plan`, Claude's `ExitPlanMode`). When the user promotes the thread
    while it's sitting on the plan-mode approval prompt, no
    UserPromptSubmit fires between "Leave plan mode" and the agent
    resuming. `role_change_banner_for` injects the banner via the
@@ -1756,8 +1796,8 @@ runs, so it opens no tool), `tool.finished`, `turn.ended` (completed vs
 interrupted/restart), `session.started`, and `status.changed`
 (`awaiting_user` parks the thread until a prompt or another status moves
 it). Hook ingest logs it from what it sees: a Stop whose final message
-ends in a question (its last line is the detail), a pending
-`AskUserQuestion` / `ExitPlanMode` (until its PostToolUse), and Claude's
+ends in a question (its last line is the detail), a pending call that
+waits on the person (`kind: ask` or `plan`, until its PostToolUse), and Claude's
 `Notification` hook with `notification_type` `permission_prompt` or
 `elicitation_dialog` (until the tool's PostToolUse); ACP permission
 cards log it through `HookIngestService::set_status`. It
@@ -1771,21 +1811,21 @@ completed turns, a session (re)start and user interrupts all collapse to
 `waiting`.
 
 **Subagent-in-flight carve-out.** The reducer counts unreturned subagent
-tool calls (`SUBAGENT_TOOLS`: `Task`, `Agent`; requested + / finished -). When a `stop` event arrives
+tool calls (`kind: subagent`; requested + / finished -). When a `stop` event arrives
 while the count is >0, status stays `working` instead of flipping to
 `waiting`. Without this the tab icon would flip the moment the parent
 paused for a subagent, even though the subagent was still doing real
-work. The status flips to `waiting` once the final `Task` PostToolUse
+work. The status flips to `waiting` once the final subagent's PostToolUse
 returns and a subsequent `stop` lands. See the original ticket history.
 
-**User-input-pending carve-out.** Two Claude Code built-in tools block
-the turn waiting on a human answer: `ExitPlanMode` (the plan-approval
-prompt — "should I implement this plan?") and `AskUserQuestion` (the
-clarifying-question prompt). Each fires `PreToolUse` when the agent
+**User-input-pending carve-out.** Two kinds of call block the turn
+waiting on a human answer: `plan` (Claude Code's `ExitPlanMode`, the
+plan-approval prompt — "should I implement this plan?") and `ask` (its
+`AskUserQuestion`, the clarifying-question prompt). Each fires `PreToolUse` when the agent
 invokes it, but the matching `PostToolUse` only arrives once the user
 answers. Until then no `Stop` hook fires either — the agent is
 genuinely waiting on the user. `derive_session_status` counts unreturned
-calls to either tool (`is_user_input_tool` in
+calls of either kind (`ToolKind::waits_on_person`, read in
 `crates/oxplow-app/src/agent_status_derive.rs`) and, if the count is >0
 at the end of replay, overrides the derived state to `AwaitingUser` so
 the dot shows "Waiting for input" instead of staying yellow — and the
@@ -1852,7 +1892,7 @@ spawned for an agent session (`attach_or_create_for_agent` with an
 activity, and `AgentStallWatch` reads it. The single shared
 instance lives on `Services::output_activity`.
 
-The `AwaitingUser` override (ExitPlanMode / AskUserQuestion — see the
+The `AwaitingUser` override (`plan` / `ask` calls — see the
 user-input-pending carve-out) is exempt from both: waiting on the user
 indefinitely is legitimate. Because no hook will ever arrive to trigger
 a re-derive, `AgentStallWatch`
@@ -1940,11 +1980,11 @@ when takes happen.
 An effort's files (`effort_file`, see data-model.md) are recorded as the
 work happens, never declared by the agent.
 
-**Claimed: structured writes (a pump reactor).** Every structured write
-tool — `Edit` / `Write` / `MultiEdit` / `NotebookEdit` — claims the file
-it wrote for the effort it was written in. The `effort.claim` async
+**Claimed: edits (a pump reactor).** Every edit (`kind: edit`, whatever
+its harness calls it) claims every file it names for the effort it was
+written in. The `effort.claim` async
 consumer (`crates/oxplow-app/src/tool_call_reactors.rs`) reacts to
-`agent.tool.finished`; the ingest already made `path` relative to the
+`agent.tool.finished`; the ingest already made `paths` relative to the
 thread's own tree (its stream's worktree), and an absolute path (outside
 it) is never claimed. It calls `EffortService::claim_effort_file` with the
 event's **effort anchor**, so a claim that lands after that effort closed

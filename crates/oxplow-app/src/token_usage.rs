@@ -757,6 +757,7 @@ mod tests {
             payload_json: body.to_string(),
             prompt: None,
             decision: None,
+            tool: None,
         }
     }
 
@@ -771,6 +772,7 @@ mod tests {
                 payload_json: "{}".into(),
                 prompt: Some("count me".into()),
                 decision: None,
+                tool: None,
             })
             .await
             .unwrap();

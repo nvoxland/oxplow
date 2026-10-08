@@ -15,6 +15,7 @@
 //! "running"; the activity says what actually happened (and silence past
 //! a threshold reads as stalled), so the indicator self-heals.
 
+use oxplow_domain::agent::tool::ToolKind;
 use oxplow_domain::{AgentStatusState, StoredEvent, ThreadId, Timestamp};
 
 /// One step of a thread's activity, as the status reducer reads it.
@@ -24,8 +25,8 @@ pub struct Activity {
     /// Log order — breaks ties between events logged in the same instant.
     pub seq: i64,
     pub at: Timestamp,
-    /// The tool, for tool steps (canonical names: `Task`, `ExitPlanMode`, …).
-    pub tool: Option<String>,
+    /// What the tool does, for tool steps (oxplow's vocabulary).
+    pub tool: Option<ToolKind>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,7 +60,9 @@ pub fn activity_of(event: &StoredEvent) -> Option<Activity> {
     }
     let env = &event.envelope;
     let p = &env.payload;
-    let tool = p.get("tool").and_then(|t| t.as_str()).map(str::to_string);
+    let tool = p
+        .get("kind")
+        .and_then(|k| serde_json::from_value::<ToolKind>(k.clone()).ok());
     let kind = match env.event_type.as_str() {
         "agent.prompt.submitted" => ActivityKind::Prompt,
         "agent.tool.requested" if p["decision"] == "allowed" => ActivityKind::ToolStarted,
@@ -90,11 +93,15 @@ pub async fn recent_activity(
     thread: ThreadId,
     session: Option<oxplow_domain::AgentSessionId>,
 ) -> Result<Vec<Activity>, oxplow_domain::DomainError> {
+    // Read at each type's newest version, as the pump hands events over:
+    // an older tool event says what it did by its kind.
+    let vocabulary = log.vocabulary().current();
     Ok(log
         .recent_in_session("agent", thread, session, RECENT_ACTIVITY)
         .await?
         .iter()
-        .filter_map(activity_of)
+        .filter_map(|e| crate::event_pump::at_latest(&vocabulary, e).ok())
+        .filter_map(|e| activity_of(&e))
         .collect())
 }
 
@@ -219,11 +226,9 @@ pub fn derive_session_status_with_activity(
             ActivityKind::ToolStarted => {
                 state = AgentStatusState::Running;
                 open_tools += 1;
-                match ev.tool.as_deref() {
-                    Some(t) if crate::agent_policy::SUBAGENT_TOOLS.contains(&t) => {
-                        pending_tasks += 1
-                    }
-                    Some(t) if is_user_input_tool(t) => pending_user_input += 1,
+                match ev.tool {
+                    Some(ToolKind::Subagent) => pending_tasks += 1,
+                    Some(k) if k.waits_on_person() => pending_user_input += 1,
                     _ => {}
                 }
             }
@@ -232,14 +237,9 @@ pub fn derive_session_status_with_activity(
                 if open_tools > 0 {
                     open_tools -= 1;
                 }
-                match ev.tool.as_deref() {
-                    Some(t)
-                        if crate::agent_policy::SUBAGENT_TOOLS.contains(&t)
-                            && pending_tasks > 0 =>
-                    {
-                        pending_tasks -= 1
-                    }
-                    Some(t) if is_user_input_tool(t) && pending_user_input > 0 => {
+                match ev.tool {
+                    Some(ToolKind::Subagent) if pending_tasks > 0 => pending_tasks -= 1,
+                    Some(k) if k.waits_on_person() && pending_user_input > 0 => {
                         pending_user_input -= 1;
                     }
                     _ => {}
@@ -296,13 +296,6 @@ pub fn derive_session_status_with_activity(
     state
 }
 
-/// Built-in tools that block the turn waiting on a human answer. A
-/// PreToolUse for one of these with no matching PostToolUse means the
-/// agent is parked on the user, not working and not dead.
-pub(crate) fn is_user_input_tool(tool_name: &str) -> bool {
-    matches!(tool_name, "ExitPlanMode" | "AskUserQuestion")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -317,11 +310,8 @@ mod tests {
     fn ev(kind: HookKind, ms: i64, payload: &str) -> Activity {
         let tool = serde_json::from_str::<serde_json::Value>(payload)
             .ok()
-            .and_then(|v| {
-                v.get("tool_name")
-                    .and_then(|t| t.as_str())
-                    .map(str::to_string)
-            });
+            .and_then(|v| v.get("kind").cloned())
+            .and_then(|k| serde_json::from_value::<ToolKind>(k).ok());
         let kind = match kind {
             HookKind::UserPromptSubmit => ActivityKind::Prompt,
             HookKind::PreToolUse => ActivityKind::ToolStarted,
@@ -360,7 +350,7 @@ mod tests {
     fn user_prompt_running_then_tool_use_keeps_running() {
         let events = [
             ev(HookKind::UserPromptSubmit, 1, "{}"),
-            ev(HookKind::PreToolUse, 2, r#"{"tool_name":"Edit"}"#),
+            ev(HookKind::PreToolUse, 2, r#"{"kind":"edit"}"#),
         ];
         assert_eq!(
             derive_session_status(&events, at(10)),
@@ -374,7 +364,7 @@ mod tests {
         // the subagent's PostToolUse. Parent is still working.
         let events = [
             ev(HookKind::UserPromptSubmit, 1, "{}"),
-            ev(HookKind::PreToolUse, 2, r#"{"tool_name":"Task"}"#),
+            ev(HookKind::PreToolUse, 2, r#"{"kind":"subagent"}"#),
             ev(HookKind::Stop, 3, "{}"),
         ];
         assert_eq!(
@@ -387,8 +377,8 @@ mod tests {
     fn task_completes_then_stop_idles() {
         let events = [
             ev(HookKind::UserPromptSubmit, 1, "{}"),
-            ev(HookKind::PreToolUse, 2, r#"{"tool_name":"Task"}"#),
-            ev(HookKind::PostToolUse, 3, r#"{"tool_name":"Task"}"#),
+            ev(HookKind::PreToolUse, 2, r#"{"kind":"subagent"}"#),
+            ev(HookKind::PostToolUse, 3, r#"{"kind":"subagent"}"#),
             ev(HookKind::Stop, 4, "{}"),
         ];
         assert_eq!(
@@ -402,8 +392,8 @@ mod tests {
         // Same events as the prior test but handed in DESC order.
         let events = [
             ev(HookKind::Stop, 4, "{}"),
-            ev(HookKind::PostToolUse, 3, r#"{"tool_name":"Task"}"#),
-            ev(HookKind::PreToolUse, 2, r#"{"tool_name":"Task"}"#),
+            ev(HookKind::PostToolUse, 3, r#"{"kind":"subagent"}"#),
+            ev(HookKind::PreToolUse, 2, r#"{"kind":"subagent"}"#),
             ev(HookKind::UserPromptSubmit, 1, "{}"),
         ];
         assert_eq!(
@@ -416,7 +406,7 @@ mod tests {
     fn interrupt_drops_to_idle_and_clears_pending() {
         let events = [
             ev(HookKind::UserPromptSubmit, 1, "{}"),
-            ev(HookKind::PreToolUse, 2, r#"{"tool_name":"Task"}"#),
+            ev(HookKind::PreToolUse, 2, r#"{"kind":"subagent"}"#),
             ev(HookKind::Interrupt, 3, "{}"),
         ];
         assert_eq!(
@@ -433,7 +423,7 @@ mod tests {
         // then, we are waiting on the user, not working.
         let events = [
             ev(HookKind::UserPromptSubmit, 1, "{}"),
-            ev(HookKind::PreToolUse, 2, r#"{"tool_name":"ExitPlanMode"}"#),
+            ev(HookKind::PreToolUse, 2, r#"{"kind":"plan"}"#),
         ];
         assert_eq!(
             derive_session_status(&events, at(10)),
@@ -447,8 +437,8 @@ mod tests {
         // status falls back to whatever the last hook implies.
         let events = [
             ev(HookKind::UserPromptSubmit, 1, "{}"),
-            ev(HookKind::PreToolUse, 2, r#"{"tool_name":"ExitPlanMode"}"#),
-            ev(HookKind::PostToolUse, 3, r#"{"tool_name":"ExitPlanMode"}"#),
+            ev(HookKind::PreToolUse, 2, r#"{"kind":"plan"}"#),
+            ev(HookKind::PostToolUse, 3, r#"{"kind":"plan"}"#),
         ];
         assert_eq!(
             derive_session_status(&events, at(10)),
@@ -463,7 +453,7 @@ mod tests {
         // threshold the derivation must stop claiming Running.
         let events = [
             ev(HookKind::UserPromptSubmit, 1, "{}"),
-            ev(HookKind::PreToolUse, 2, r#"{"tool_name":"Edit"}"#),
+            ev(HookKind::PreToolUse, 2, r#"{"kind":"edit"}"#),
         ];
         assert_eq!(
             derive_session_status(&events, at(2 + AGENT_STALL_AFTER_MS + 1)),
@@ -475,7 +465,7 @@ mod tests {
     fn running_within_threshold_stays_running() {
         let events = [
             ev(HookKind::UserPromptSubmit, 1, "{}"),
-            ev(HookKind::PreToolUse, 2, r#"{"tool_name":"Edit"}"#),
+            ev(HookKind::PreToolUse, 2, r#"{"kind":"edit"}"#),
         ];
         assert_eq!(
             derive_session_status(&events, at(2 + AGENT_STALL_AFTER_MS)),
@@ -504,8 +494,8 @@ mod tests {
         // to wait out → short threshold applies.
         let events = [
             ev(HookKind::UserPromptSubmit, 1, "{}"),
-            ev(HookKind::PreToolUse, 2, r#"{"tool_name":"Edit"}"#),
-            ev(HookKind::PostToolUse, 3, r#"{"tool_name":"Edit"}"#),
+            ev(HookKind::PreToolUse, 2, r#"{"kind":"edit"}"#),
+            ev(HookKind::PostToolUse, 3, r#"{"kind":"edit"}"#),
         ];
         assert_eq!(
             derive_session_status(&events, at(3 + AGENT_DEAD_AFTER_MS + 1)),
@@ -533,7 +523,7 @@ mod tests {
         // window applies.
         let events = [
             ev(HookKind::UserPromptSubmit, 1, "{}"),
-            ev(HookKind::PreToolUse, 2, r#"{"tool_name":"Bash"}"#),
+            ev(HookKind::PreToolUse, 2, r#"{"kind":"shell"}"#),
         ];
         // Past the short death threshold, but under the long stall one.
         assert_eq!(
@@ -567,7 +557,7 @@ mod tests {
         // approval gap must not degrade to Stalled.
         let events = [
             ev(HookKind::UserPromptSubmit, 1, "{}"),
-            ev(HookKind::PreToolUse, 2, r#"{"tool_name":"ExitPlanMode"}"#),
+            ev(HookKind::PreToolUse, 2, r#"{"kind":"plan"}"#),
         ];
         assert_eq!(
             derive_session_status(&events, at(2 + AGENT_STALL_AFTER_MS * 10)),
@@ -584,11 +574,7 @@ mod tests {
         // must surface AwaitingUser, never Running (and never Stalled).
         let events = [
             ev(HookKind::UserPromptSubmit, 1, "{}"),
-            ev(
-                HookKind::PreToolUse,
-                2,
-                r#"{"tool_name":"AskUserQuestion"}"#,
-            ),
+            ev(HookKind::PreToolUse, 2, r#"{"kind":"ask"}"#),
         ];
         assert_eq!(
             derive_session_status(&events, at(10)),
@@ -604,11 +590,7 @@ mod tests {
         // legitimate, so the stall threshold must NOT degrade it.
         let events = [
             ev(HookKind::UserPromptSubmit, 1, "{}"),
-            ev(
-                HookKind::PreToolUse,
-                2,
-                r#"{"tool_name":"AskUserQuestion"}"#,
-            ),
+            ev(HookKind::PreToolUse, 2, r#"{"kind":"ask"}"#),
         ];
         assert_eq!(
             derive_session_status(&events, at(2 + AGENT_STALL_AFTER_MS * 10)),
@@ -622,16 +604,8 @@ mod tests {
         // status falls back to Running like any other completed tool.
         let events = [
             ev(HookKind::UserPromptSubmit, 1, "{}"),
-            ev(
-                HookKind::PreToolUse,
-                2,
-                r#"{"tool_name":"AskUserQuestion"}"#,
-            ),
-            ev(
-                HookKind::PostToolUse,
-                3,
-                r#"{"tool_name":"AskUserQuestion"}"#,
-            ),
+            ev(HookKind::PreToolUse, 2, r#"{"kind":"ask"}"#),
+            ev(HookKind::PostToolUse, 3, r#"{"kind":"ask"}"#),
         ];
         assert_eq!(
             derive_session_status(&events, at(10)),
@@ -648,8 +622,8 @@ mod tests {
         // Stalled. A frozen updated_at alone must not flip it.
         let events = [
             ev(HookKind::UserPromptSubmit, 1, "{}"),
-            ev(HookKind::PreToolUse, 2, r#"{"tool_name":"Edit"}"#),
-            ev(HookKind::PostToolUse, 3, r#"{"tool_name":"Edit"}"#),
+            ev(HookKind::PreToolUse, 2, r#"{"kind":"edit"}"#),
+            ev(HookKind::PostToolUse, 3, r#"{"kind":"edit"}"#),
         ];
         let now = at(3 + AGENT_STALL_AFTER_MS + 1);
         // Hook-only view (no output): would wrongly read as Stalled.
@@ -672,8 +646,8 @@ mod tests {
         // the short death threshold applies — degrade to Stalled.
         let events = [
             ev(HookKind::UserPromptSubmit, 1, "{}"),
-            ev(HookKind::PreToolUse, 2, r#"{"tool_name":"Edit"}"#),
-            ev(HookKind::PostToolUse, 3, r#"{"tool_name":"Edit"}"#),
+            ev(HookKind::PreToolUse, 2, r#"{"kind":"edit"}"#),
+            ev(HookKind::PostToolUse, 3, r#"{"kind":"edit"}"#),
         ];
         let last_output = at(100);
         let now = at(last_output.unix_ms() + AGENT_DEAD_AFTER_MS + 1);
@@ -719,14 +693,10 @@ mod tests {
         // subsequent work derives Running.
         let events = [
             ev(HookKind::UserPromptSubmit, 1, "{}"),
-            ev(
-                HookKind::PreToolUse,
-                2,
-                r#"{"tool_name":"AskUserQuestion"}"#,
-            ),
+            ev(HookKind::PreToolUse, 2, r#"{"kind":"ask"}"#),
             // (no PostToolUse — the question was rejected)
             ev(HookKind::UserPromptSubmit, 3, "{}"),
-            ev(HookKind::PreToolUse, 4, r#"{"tool_name":"Edit"}"#),
+            ev(HookKind::PreToolUse, 4, r#"{"kind":"edit"}"#),
         ];
         assert_eq!(
             derive_session_status(&events, at(10)),
@@ -776,7 +746,7 @@ mod tests {
                 "agent.tool.requested",
                 1,
                 "test",
-                serde_json::json!({"tool": "AskUserQuestion", "decision": "denied"}),
+                serde_json::json!({"tool": "AskUserQuestion", "kind": "ask", "decision": "denied"}),
             )
             .unwrap(),
             payload_expired_at: None,
@@ -788,7 +758,7 @@ mod tests {
                 "agent.tool.requested",
                 1,
                 "test",
-                serde_json::json!({"tool": "AskUserQuestion", "decision": "allowed"}),
+                serde_json::json!({"tool": "AskUserQuestion", "kind": "ask", "decision": "allowed"}),
             )
             .unwrap(),
             payload_expired_at: None,

@@ -2440,7 +2440,8 @@ export function userInterruptEnvelope(sessionId: string, threadId: string, strea
     payload_json: JSON.stringify({ source: "user-escape" }),
     prompt: null,
     decision: null,
-  };
+  };,
+    tool: None,
 }
 
 export async function recordUserInterrupt(sessionId: string, threadId: string, streamId: string | null): Promise<void> {

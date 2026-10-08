@@ -14,6 +14,7 @@ use oxplow_domain::agent::harness::{
 };
 use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, TokenReading, Turn};
 use oxplow_domain::agent::text::AgentText;
+use oxplow_domain::agent::tool::{ToolKind, ToolUse};
 use oxplow_domain::events::schema::TokenKind;
 
 /// Its registry key.
@@ -90,6 +91,29 @@ impl AgentHarness for FakeHarness {
 
     fn refresh_text(&self, _: &Path, _: &AgentText) -> Result<(), HarnessError> {
         Ok(())
+    }
+
+    /// Its scripted session posts one edit, `{"tool_name": "Edit",
+    /// "tool_input": {"file_path": …}}`.
+    fn tool_use(&self, body: &serde_json::Value) -> Option<ToolUse> {
+        let name = body.get("tool_name")?.as_str()?.to_string();
+        let kind = if name == "Edit" {
+            ToolKind::Edit
+        } else {
+            ToolKind::Other
+        };
+        Some(ToolUse {
+            paths: body["tool_input"]["file_path"]
+                .as_str()
+                .map(|p| vec![p.to_string()])
+                .unwrap_or_default(),
+            ok: body
+                .get("tool_response")
+                .map(|r| r["success"].as_bool().unwrap_or(false)),
+            name,
+            kind,
+            ..ToolUse::default()
+        })
     }
 
     fn writing_tools(&self) -> &[&str] {

@@ -11,22 +11,22 @@ use oxplow_domain::{AgentStatusState, HookKind, StreamId, ThreadId};
 use oxplow_runtime::policy::PolicyDecision;
 use tracing::warn;
 
-use super::mapping::AcpIntent;
+use oxplow_domain::agent::tool::ToolUse;
+
 use super::wire::TurnTokens;
-use crate::acp::mapping::CanonicalToolEvent;
 use crate::hook_ingest::HookEnvelope;
 use crate::Services;
 
 #[async_trait]
 pub trait AcpHost: Send + Sync + 'static {
-    /// May the thread run this tool call? `payload` is the canonical
-    /// event, logged as the call's PreToolUse.
+    /// May the thread run this tool call? Logged as the call's PreToolUse;
+    /// `content` is its input as the agent sent it (`mapping::content`).
     async fn check_tool(
         &self,
         thread: &ThreadId,
         session_id: &str,
-        intent: &AcpIntent,
-        payload: &serde_json::Value,
+        tool: &ToolUse,
+        content: &serde_json::Value,
     ) -> PolicyDecision;
     /// A session is up (new or loaded): remember it for the next resume.
     async fn session_started(&self, thread: &ThreadId, session_id: &str);
@@ -38,7 +38,8 @@ pub trait AcpHost: Send + Sync + 'static {
         &self,
         thread: &ThreadId,
         session_id: &str,
-        event: &CanonicalToolEvent,
+        tool: &ToolUse,
+        content: &serde_json::Value,
     ) -> Option<String>;
     /// The turn ended: record it, with its final answer and the counts the
     /// agent reported.
@@ -103,6 +104,7 @@ impl ServicesAcpHost {
             payload_json: payload.to_string(),
             prompt,
             decision: None,
+            tool: None,
         }
     }
 
@@ -119,23 +121,24 @@ impl AcpHost for ServicesAcpHost {
         &self,
         thread: &ThreadId,
         session_id: &str,
-        intent: &AcpIntent,
-        payload: &serde_json::Value,
+        tool: &ToolUse,
+        content: &serde_json::Value,
     ) -> PolicyDecision {
         let Some(svc) = self.svc.upgrade() else {
             return PolicyDecision::Allow;
         };
         let decision = svc
             .agent_policy
-            .check_tool(&svc, thread, &intent.as_intent())
+            .check_tool(&svc, thread, &crate::agent_policy::intent_of(tool))
             .await;
         let mut env = self.envelope(
             HookKind::PreToolUse,
             thread,
             session_id,
-            payload.clone(),
+            content.clone(),
             None,
         );
+        env.tool = Some(tool.clone());
         env.decision = Some(crate::hook_ingest::ToolDecision {
             allowed: matches!(decision, PolicyDecision::Allow),
             reason: match &decision {
@@ -187,20 +190,21 @@ impl AcpHost for ServicesAcpHost {
         &self,
         thread: &ThreadId,
         session_id: &str,
-        event: &CanonicalToolEvent,
+        tool: &ToolUse,
+        content: &serde_json::Value,
     ) -> Option<String> {
         let svc = self.svc.upgrade()?;
-        let body = event.to_payload();
-        let env = self.envelope(
+        let mut env = self.envelope(
             HookKind::PostToolUse,
             thread,
             session_id,
-            body.clone(),
+            content.clone(),
             None,
         );
+        env.tool = Some(tool.clone());
         self.ingest(&svc, env).await;
         svc.agent_context
-            .post_tool_context(&svc, thread, Some(session_id), &body)
+            .post_tool_context(&svc, thread, Some(session_id), Some(tool))
             .await
     }
 
@@ -303,6 +307,7 @@ impl AcpHost for ServicesAcpHost {
             payload_json: "{}".into(),
             prompt: None,
             decision: None,
+            tool: None,
         };
         self.ingest(&svc, env).await;
     }

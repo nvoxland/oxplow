@@ -11,6 +11,7 @@ use oxplow_domain::agent::harness::{
 
 use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, TokenReading, Turn};
 use oxplow_domain::agent::text::AgentText;
+use oxplow_domain::agent::tool::ToolUse;
 
 use super::Named;
 
@@ -80,6 +81,12 @@ impl AgentHarness for Acp {
 
     /// The canonical names its tool calls are recorded under
     /// (`acp::mapping::canonical_name`).
+    /// An ACP agent's calls arrive already mapped, by the protocol's tool
+    /// kinds (`oxplow_app::acp::mapping`); it posts no hook bodies.
+    fn tool_use(&self, _: &serde_json::Value) -> Option<ToolUse> {
+        None
+    }
+
     fn writing_tools(&self) -> &[&str] {
         &["write", "edit", "bash"]
     }

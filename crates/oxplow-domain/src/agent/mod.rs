@@ -15,6 +15,7 @@ pub mod harness;
 pub mod observe;
 pub mod registry;
 pub mod text;
+pub mod tool;
 
 /// How much a status asks of the person, for [`roll_up_status`]: what they
 /// owe ranks first (an answer, then the next move after a dead turn), then

@@ -865,7 +865,10 @@ fn only_workspace_providers_take_a_local_path() {
 /// whichever harnesses are declared (`.context/agent-model.md`). Each file
 /// still here says why.
 #[rustfmt::skip]
-const HARNESS_IMPLEMENTATION: &[(&str, &str)] = &[];
+const HARNESS_IMPLEMENTATION: &[(&str, &str)] = &[
+    ("crates/oxplow-domain/src/events/schema.rs",
+     "a v1 `agent.tool.*` named its tool by Claude Code's names, then the vocabulary every transport mapped onto; its upcast reads its kind from them"),
+];
 
 /// The crates that implement harnesses.
 const HARNESS_CRATES: &[&str] = &["crates/oxplow-harnesses/", "crates/oxplow-harness-fake/"];
@@ -887,6 +890,18 @@ fn harness_namers() -> BTreeSet<String> {
         "--append-system-prompt",
         ".claude/",
         "CLAUDE.md",
+        // Its tools' names: core reads a call's kind
+        // (`oxplow_domain::agent::tool`), never what a harness calls it.
+        "\"Edit\"",
+        "\"Write\"",
+        "\"MultiEdit\"",
+        "\"NotebookEdit\"",
+        "\"Bash\"",
+        "\"Task\"",
+        "\"ExitPlanMode\"",
+        "\"AskUserQuestion\"",
+        "\"WebFetch\"",
+        "\"tool_name\"",
     ];
     let mut out = BTreeSet::new();
     for (path, text) in production_sources() {

@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use super::observe::{HookAnswer, OtlpRecord, TokenReading, Turn};
 use super::text::AgentText;
+use super::tool::ToolUse;
 use crate::ids::{AgentSessionId, StreamId, ThreadId};
 
 /// How a person interacts with a harness's session — flags the UI reads,
@@ -171,6 +172,9 @@ pub trait AgentHarness: Send + Sync {
     /// shell commands, subagents (which run their own tools). Every other
     /// call only reads or talks.
     fn writing_tools(&self) -> &[&str];
+    /// One of its tool hooks' bodies (a PreToolUse or PostToolUse) mapped
+    /// onto oxplow's vocabulary; `None` when the body names no tool.
+    fn tool_use(&self, body: &serde_json::Value) -> Option<ToolUse>;
     /// The recordable turns in a chunk of its transcript; none when it
     /// keeps no transcript core reads.
     fn turns(&self, transcript: &str) -> Vec<Turn>;

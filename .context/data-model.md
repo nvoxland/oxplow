@@ -658,8 +658,8 @@ Re-opening a task (done → in_progress) on a thread gives it a second effort. A
 `change_kind`, `local_snapshot_id`, `closest_vcs_rev`, `vcs_rev_exact`,
 `source` (V7: `claimed` | `observed`), primary key `(effort_id, path)`;
 read as `v_effort_file`. Two writers, both as the work happens: the
-`effort.claim` reactor claims each structured edit
-(Edit/Write/MultiEdit/NotebookEdit) for the effort it happened in
+`effort.claim` reactor claims each file an edit names (`kind: edit`,
+whatever its harness calls it) for the effort it happened in
 (`record_file`, `INSERT OR REPLACE`, `source = 'claimed'` — a claim
 replaces an observation); the `effort.observe` consumer records every
 other path a thread's turn changed as `observed` on the effort holding
@@ -1711,7 +1711,7 @@ run and its change-only per-case facts. Published as `v_test_case_stat`
 
 The persisted record of the informational **nudges** oxplow surfaces to the
 agent from the PostToolUse hook (`crates/oxplow-app/src/collection.rs`
-`on_post_tool_use`) — the report-less-test-run nudge and post-tool-use
+`on_shell_run`) — the report-less-test-run nudge and post-tool-use
 advisories.
 Previously fully ephemeral (returned as `additionalContext`, then
 lost); persisting gives a reviewer/human-facing answer to "what did oxplow

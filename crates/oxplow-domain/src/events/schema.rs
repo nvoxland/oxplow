@@ -160,7 +160,11 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<AgentPromptSubmitted>()
             .expect("core type registers");
+        r.register::<AgentToolRequestedAtV1>()
+            .expect("core type registers");
         r.register::<AgentToolRequested>()
+            .expect("core type registers");
+        r.register::<AgentToolFinishedAtV1>()
             .expect("core type registers");
         r.register::<AgentToolFinished>()
             .expect("core type registers");
@@ -1438,11 +1442,50 @@ pub struct AgentToolRequestedV1 {
     pub reason: Option<String>,
 }
 
-pub struct AgentToolRequested;
-impl EventType for AgentToolRequested {
+/// The v1 shape of `agent.tool.requested`, as a registry entry.
+pub struct AgentToolRequestedAtV1;
+impl EventType for AgentToolRequestedAtV1 {
     const TYPE: &'static str = "agent.tool.requested";
     const V: u32 = 1;
     type Payload = AgentToolRequestedV1;
+}
+
+/// `agent.tool.requested@2`: the agent asked to run a tool (PreToolUse),
+/// and whether the policy let it. `tool` is the harness's own name for it;
+/// `kind` is what it does in oxplow's vocabulary
+/// (`oxplow_domain::agent::tool`), which is all core reads. v1 named the
+/// tool by Claude Code's names and one path; it upcasts by them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AgentToolRequestedV2 {
+    pub tool: String,
+    pub kind: crate::agent::tool::ToolKind,
+    /// The files it names, repo-relative inside the worktree.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paths: Vec<String>,
+    /// A short summary (a truncated command, a search pattern).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<ContentRef>,
+    pub decision: ToolDecision,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+pub struct AgentToolRequested;
+impl EventType for AgentToolRequested {
+    const TYPE: &'static str = "agent.tool.requested";
+    const V: u32 = 2;
+    type Payload = AgentToolRequestedV2;
+    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
+        match from_v {
+            1 => Ok(tool_v1_to_v2(payload)),
+            _ => Err(DomainError::Invalid(format!(
+                "no upcast of agent.tool.requested from v{from_v}"
+            ))),
+        }
+    }
 }
 
 /// `agent.tool.finished@1`: a tool call returned (PostToolUse). The
@@ -1467,11 +1510,83 @@ pub struct AgentToolFinishedV1 {
     pub output: Option<ContentRef>,
 }
 
-pub struct AgentToolFinished;
-impl EventType for AgentToolFinished {
+/// The v1 shape of `agent.tool.finished`, as a registry entry.
+pub struct AgentToolFinishedAtV1;
+impl EventType for AgentToolFinishedAtV1 {
     const TYPE: &'static str = "agent.tool.finished";
     const V: u32 = 1;
     type Payload = AgentToolFinishedV1;
+}
+
+/// `agent.tool.finished@2`: a tool call returned (PostToolUse). The
+/// recorders — tool-call rows, effort claims, collection — react to this.
+/// As `agent.tool.requested@2`: the harness's name, oxplow's `kind`, the
+/// files it names; and a shell call's whole `command`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AgentToolFinishedV2 {
+    pub tool: String,
+    pub kind: crate::agent::tool::ToolKind,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paths: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    /// A shell call's command line, whole.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    /// Whether it succeeded, when the harness said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ok: Option<bool>,
+    /// A shell command's exit code.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<ContentRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<ContentRef>,
+}
+
+pub struct AgentToolFinished;
+impl EventType for AgentToolFinished {
+    const TYPE: &'static str = "agent.tool.finished";
+    const V: u32 = 2;
+    type Payload = AgentToolFinishedV2;
+    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
+        match from_v {
+            1 => Ok(tool_v1_to_v2(payload)),
+            _ => Err(DomainError::Invalid(format!(
+                "no upcast of agent.tool.finished from v{from_v}"
+            ))),
+        }
+    }
+}
+
+/// A v1 tool event at v2: its one `path` as `paths`, and its kind read
+/// from its tool name. v1's names were Claude Code's — the vocabulary every
+/// transport mapped onto then — so this is the one place core reads them;
+/// a v1 shell call's command was only its `detail`, so that stands in.
+fn tool_v1_to_v2(mut payload: Value) -> Value {
+    use crate::agent::tool::ToolKind;
+    let Some(obj) = payload.as_object_mut() else {
+        return payload;
+    };
+    let kind = match obj.get("tool").and_then(|t| t.as_str()).unwrap_or("") {
+        "Write" | "Edit" | "MultiEdit" | "NotebookEdit" => ToolKind::Edit,
+        "Bash" => ToolKind::Shell,
+        "Task" | "Agent" => ToolKind::Subagent,
+        "AskUserQuestion" => ToolKind::Ask,
+        "ExitPlanMode" => ToolKind::Plan,
+        "Read" => ToolKind::Read,
+        "Grep" | "Glob" | "List" => ToolKind::Search,
+        "WebFetch" | "WebSearch" => ToolKind::Fetch,
+        n if n.starts_with("mcp__") => ToolKind::Mcp,
+        _ => ToolKind::Other,
+    };
+    obj.insert("kind".into(), Value::String(kind.as_str().into()));
+    if let Some(path) = obj.remove("path") {
+        obj.insert("paths".into(), Value::Array(vec![path]));
+    }
+    payload
 }
 
 /// `agent.status.changed@1`: a thread's agent moved to another state.
@@ -2251,7 +2366,9 @@ mod tests {
                 ("agent.status.changed", 1),
                 ("agent.tokens.reported", 1),
                 ("agent.tool.finished", 1),
+                ("agent.tool.finished", 2),
                 ("agent.tool.requested", 1),
+                ("agent.tool.requested", 2),
                 ("agent.turn.ended", 1),
                 ("agent.turn.ended", 2),
                 ("agent.turn.started", 1),
@@ -2592,5 +2709,33 @@ mod tests {
         assert!(r.upcast_to_latest("acme.thing", 3, json!({})).is_err());
         // The default upcast refuses: a type that bumps V must define one.
         assert!(WorkItemStateChanged::upcast(0, json!({})).is_err());
+    }
+
+    /// A v1 tool event reads at v2 with its kind (from the Claude Code
+    /// name v1 carried) and its one path as `paths`.
+    #[test]
+    fn a_v1_tool_event_upcasts_with_its_kind_and_paths() {
+        let r = EventSchemaRegistry::core();
+        let (v, up) = r
+            .upcast_to_latest(
+                "agent.tool.finished",
+                1,
+                json!({"tool": "Bash", "detail": "cargo test", "exit_code": 0, "ok": true}),
+            )
+            .unwrap();
+        assert_eq!(v, 2);
+        assert_eq!(up["kind"], "shell");
+        let (_, up) = r
+            .upcast_to_latest(
+                "agent.tool.requested",
+                1,
+                json!({"tool": "MultiEdit", "path": "src/a.rs", "decision": "allowed"}),
+            )
+            .unwrap();
+        assert_eq!(up["kind"], "edit");
+        assert_eq!(up["paths"], json!(["src/a.rs"]));
+        assert!(up.get("path").is_none());
+        let typed: AgentToolRequestedV2 = serde_json::from_value(up).unwrap();
+        assert_eq!(typed.kind, crate::agent::tool::ToolKind::Edit);
     }
 }

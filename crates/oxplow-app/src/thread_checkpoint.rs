@@ -161,6 +161,7 @@ pub(crate) mod tests {
             payload_json: "{}".into(),
             prompt: Some("go".into()),
             decision: None,
+            tool: None,
         }
     }
 

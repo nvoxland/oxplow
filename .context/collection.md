@@ -109,7 +109,7 @@ section for the column.
   one that isn't.
 
   Both commands are also treated as implicit `runPatterns` by
-  `on_post_tool_use`, so a fast command whose script name contains no
+  `on_shell_run`, so a fast command whose script name contains no
   built-in pattern (`bun run test:fast`) is still detected as a test run
   without having to be restated. All optional. Edits hot-reload via the
   config watcher (`ConfigWatcher`, see `git-integration.md`), so
@@ -174,10 +174,10 @@ hook + MCP wiring):
   *returns*; a **backgrounded** `test:collect` returns at launch (before its
   reports regenerate), so nothing fresh is ingested — run it in the FOREGROUND.
   **The recording is a pump reactor, not part of the hook (P3.6, tsk476).**
-  The ingest logs `agent.tool.finished` (the command and its output in
-  `event_content`); the `collection` async consumer
-  (`crates/oxplow-app/src/post_tool_reactors.rs`) rebuilds the Bash payload
-  from it and runs `CollectionService::on_post_tool_use`. A run's
+  The ingest logs `agent.tool.finished` (for a `shell` call, its whole
+  `command` and `exit_code`, the output in `event_content`); the
+  `collection` async consumer (`crates/oxplow-app/src/post_tool_reactors.rs`)
+  runs `CollectionService::on_shell_run` with them, whatever harness ran it. A run's
   recording can outlive the hook's 5 s budget (a debug-build junit ingest +
   a multi-MB lcov parse) and always completes; a crash re-delivers the
   event. **Redelivery records nothing twice:** the test-run capture's
@@ -278,7 +278,7 @@ hook + MCP wiring):
 
 **Observe-always (tsk269/tsk270).** Tests, analysis, **and coverage** are recorded
 **whether or not an effort is open** — attribution is the capture's
-`effort_id`, never a precondition for recording. `on_post_tool_use`
+`effort_id`, never a precondition for recording. `on_shell_run`
 resolves a single open effort only for the effort-RELATIVE *advisories*
 (the report-less nudge and post-tool-use advisories), which legitimately
 no-op under 0/N efforts; every OBSERVE call runs unconditionally. Report freshness
@@ -406,7 +406,7 @@ Nudge persistence below.
 
 ## Commits get no nudge of their own
 
-`on_post_tool_use` detects a `git commit` (`detect_git_commit` — token-aware,
+`on_shell_run` detects a `git commit` (`detect_git_commit` — token-aware,
 so `git -c user.email=… commit` and `git commit --amend` match, `git add` /
 `git log --grep commit` don't) only to drive the revert/token-waste leg and to
 return early. There is **no commit-hygiene guard** (removed in tsk250): a
@@ -428,7 +428,7 @@ PostToolUse nudges (report-less-run, and post-tool-use advisories) are
 **persisted**
 as well as returned to the agent, so a reviewer can see "what oxplow told the
 agent this effort" after the fact, and the persisted row is what delivers it
-(the next tool-hook response takes the thread's undelivered nudges). When `on_post_tool_use` decides to
+(the next tool-hook response takes the thread's undelivered nudges). When `on_shell_run` decides to
 return a nudge, it also calls `persist_nudge` (best-effort — a write error is
 logged via `tracing::warn!` and swallowed, never failing the hook), which
 records a row in the `agent_nudge` table tagged with `kind`

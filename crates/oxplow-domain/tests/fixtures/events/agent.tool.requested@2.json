@@ -1,0 +1,12 @@
+{
+  "tool": "apply_patch",
+  "kind": "edit",
+  "paths": ["src/lib.rs", "src/parser.rs"],
+  "detail": "replace the parser's error type",
+  "input": {
+    "hash": "3f2a9c1e5b7d4680a1b2c3d4e5f60718",
+    "size": 412
+  },
+  "decision": "denied",
+  "reason": "no effort is open in this stream"
+}

@@ -8,9 +8,9 @@
 //! nudges (`AgentContext::post_tool_context`), so a nudge that finishes after
 //! its hook's window goes out on the next one instead of being lost.
 //!
-//! - `collection` — a Bash command's test / analysis / coverage runs
-//!   (`CollectionService::on_post_tool_use`), reading the command
-//!   and its output back from `event_content`.
+//! - `collection` — a shell call's test / analysis / coverage runs
+//!   (`CollectionService::on_shell_run`), from the command and exit code
+//!   its `agent.tool.finished` carries.
 //! - `advisories.post_tool` — the enabled extensions' post-tool-use
 //!   advisories for the effort the tool ran in.
 //! - `collection.run_reports` — a run reported any other way
@@ -19,7 +19,7 @@
 //!   tsk1015).
 
 use async_trait::async_trait;
-use oxplow_db::{event_content_store, Database};
+use oxplow_db::Database;
 use oxplow_domain::events::schema::{
     AgentToolFinished, AgentToolRequested, EventType, TestRunRecorded,
 };
@@ -54,21 +54,6 @@ async fn cause_of(db: &Database, event: &StoredEvent) -> Result<RunCause, Domain
     })
 }
 
-/// A stored body as JSON (`Null` when retention removed it).
-async fn content(
-    db: &Database,
-    event: &StoredEvent,
-    key: &str,
-) -> Result<serde_json::Value, DomainError> {
-    let Some(hash) = event.envelope.payload[key]["hash"].as_str() else {
-        return Ok(serde_json::Value::Null);
-    };
-    Ok(event_content_store::read(db, hash)
-        .await?
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or(serde_json::Value::Null))
-}
-
 pub struct CollectionConsumer {
     pub collection: CollectionService,
     pub db: Database,
@@ -88,19 +73,22 @@ impl AsyncEventConsumer for CollectionConsumer {
         let Some(thread) = event.envelope.anchors.thread_id else {
             return Ok(());
         };
-        if event.envelope.payload["tool"].as_str() != Some("Bash") {
+        let p = &event.envelope.payload;
+        if p["kind"].as_str() != Some("shell") {
             return Ok(());
         }
-        // The hook payload the collector parses, rebuilt from the event.
-        let payload = serde_json::json!({
-            "tool_name": "Bash",
-            "tool_input": content(&self.db, event, "input").await?,
-            "tool_response": content(&self.db, event, "output").await?,
-        });
+        // The whole command; a call logged before it was kept (v1) has
+        // its detail.
+        let Some(command) = p["command"].as_str().or_else(|| p["detail"].as_str()) else {
+            return Ok(());
+        };
         self.collection
-            .on_post_tool_use(
+            .on_shell_run(
                 &thread,
-                &payload.to_string(),
+                crate::collection::ShellRun {
+                    command,
+                    exit_code: p["exit_code"].as_i64(),
+                },
                 crate::collection::RunOrigin::Event(&cause_of(&self.db, event).await?),
             )
             .await
@@ -186,6 +174,7 @@ mod tests {
                 allowed: true,
                 reason: None,
             }),
+            tool: None,
         }
     }
 
@@ -328,10 +317,9 @@ mod tests {
             .ingest(hook(f.thread, HookKind::PostToolUse, bash("bun test")))
             .await
             .unwrap();
-        let body = bash("bun test");
         let first = svc
             .agent_context
-            .post_tool_context(svc, &f.thread, Some("s"), &body)
+            .post_tool_context(svc, &f.thread, Some("s"), None)
             .await;
         assert!(
             first
@@ -341,7 +329,7 @@ mod tests {
         );
         assert_eq!(
             svc.agent_context
-                .post_tool_context(svc, &f.thread, Some("s"), &body)
+                .post_tool_context(svc, &f.thread, Some("s"), None)
                 .await,
             None,
             "delivered once"
@@ -357,7 +345,7 @@ mod tests {
             .await;
         assert_eq!(
             svc.agent_context
-                .post_tool_context(svc, &f.thread, Some("s"), &json!({"tool_name": "Read"}))
+                .post_tool_context(svc, &f.thread, Some("s"), None)
                 .await
                 .as_deref(),
             Some("a late nudge")

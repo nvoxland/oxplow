@@ -340,6 +340,7 @@ impl TerminalSessionRegistry {
                                 payload_json: serde_json::json!({ "reason": "exit" }).to_string(),
                                 prompt: None,
                                 decision: None,
+                                tool: None,
                             };
                             if let Err(err) = ingest.ingest(exit).await {
                                 warn!(?err, "recording an agent's exit failed");
