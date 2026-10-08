@@ -31,6 +31,8 @@ oxplow-dev task update <id> [--title T] [--body B] [--parent ID]
 oxplow-dev task comment <id> <body>
 oxplow-dev task link <id> <target-id> <blocks|discovered_from|relates_to|duplicates|supersedes|replies_to>
 
+oxplow-dev --help                            this
+
 <id> is a task's id (tsk12) or ref (work_item:oxplow:tsk12). The project is
 the current directory's (or --project <dir>); the acting thread is
 --thread <thrN>, else $OXPLOW_THREAD_ID, else none (as a person).";
@@ -55,6 +57,13 @@ async fn run(mut args: Vec<String>, env_thread: Option<String>) -> Result<String
         .map(PathBuf::from)
         .unwrap_or(std::env::current_dir().map_err(|e| e.to_string())?);
     let thread = take_flag(&mut args, "--thread").or(env_thread);
+    // Asking how to call it is answered before anything opens the
+    // database — at any schema version — and never taken as an argument
+    // (it once filed tasks titled `--help`).
+    if args.first().is_some_and(|a| a == "help") || args.iter().any(|a| a == "--help" || a == "-h")
+    {
+        return Ok(USAGE.to_string());
+    }
     match args.first().map(String::as_str) {
         Some("task") => {
             let tasks = Tasks::open(&project, thread.as_deref())?;
@@ -152,6 +161,11 @@ impl Tasks {
         let title = take_flag(&mut args, "--title");
         let all = args.iter().any(|a| a == "--all");
         args.retain(|a| a != "--all");
+        // What's left is positional: an option it doesn't take would
+        // otherwise become a title or an id.
+        if let Some(unknown) = args.iter().find(|a| a.starts_with("--")) {
+            return Err(format!("unknown option `{unknown}`\nusage:\n{USAGE}"));
+        }
         let arg = |i: usize, what: &str| {
             args.get(i)
                 .cloned()
@@ -378,6 +392,41 @@ mod tests {
             .await
             .unwrap();
         assert!(logged >= 2, "{logged}");
+    }
+
+    /// `--help` anywhere prints how to call, before the database is
+    /// opened (so it works at any schema version) — it used to become the
+    /// title of a task named `--help`.
+    #[tokio::test]
+    async fn help_prints_the_usage_and_does_nothing() {
+        let nowhere = std::path::Path::new("/nonexistent/oxplow-dev-help");
+        for args in [
+            &["--help"][..],
+            &["-h"],
+            &["help"],
+            &["task", "--help"],
+            &["task", "create", "--help"],
+            &["task", "create", "A title", "-h"],
+        ] {
+            let out = dev(nowhere, args).await.unwrap();
+            assert!(out.contains("oxplow-dev task create"), "{args:?}: {out}");
+        }
+    }
+
+    /// An option the command doesn't take is refused, not filed as a title.
+    #[tokio::test]
+    async fn an_unknown_option_is_refused() {
+        let dir = project().await;
+        let err = dev(dir.path(), &["task", "create", "--titel", "x"])
+            .await
+            .unwrap_err();
+        assert!(err.contains("unknown option `--titel`"), "{err}");
+        let err = dev(dir.path(), &["task", "create", "Real", "--prio", "high"])
+            .await
+            .unwrap_err();
+        assert!(err.contains("unknown option `--prio`"), "{err}");
+        let list = dev(dir.path(), &["task", "list", "--all"]).await.unwrap();
+        assert!(list.is_empty(), "nothing filed: {list}");
     }
 
     #[tokio::test]
