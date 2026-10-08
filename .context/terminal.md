@@ -49,9 +49,9 @@ and an xterm font-metrics race at mount (a resize changes nothing).
 `apps/desktop/src/components/TerminalPane.tsx` is the **only** xterm.js
 consumer. It's mounted by two page renderers:
 
-- `apps/desktop/src/pages/AgentPage.tsx` — the agent tab, `paneTarget`
-  `"working"` / `"talking"`. The backend spawns the thread's assigned
-  agent CLI (Claude or Codex).
+- `apps/desktop/src/pages/AgentPage.tsx` — an agent session's tab,
+  `paneTarget` the session id (`ses3`). The backend spawns the session's
+  harness CLI (Claude, Codex or opencode).
 - `apps/desktop/src/pages/TerminalPage.tsx` — the "Terminal" Page (rail
   entry + `indexRef("terminal")`). Hosts **multiple** shells: it mounts
   one `TerminalPane` per terminal, stacked and toggled `display:none`
@@ -74,30 +74,31 @@ consumer. It's mounted by two page renderers:
 Both go through the same component; only the `paneTarget` (and thus the
 server-side spawn) differs.
 
-Agent sessions key their backend PTY on `(stream, thread, agent, pane)`
-only — see `agent_session_key` in `commands/terminal.rs`. The thread's
-`agent` is in the key, so Claude and Codex threads on the same stream/pane
-never reattach to the same PTY. The **transport mode is deliberately NOT in
-the agent key** (tsk138): a re-attach that negotiated a different transport
-(e.g. a second daemon/browser client) must resume the one live agent PTY,
-not spawn a duplicate `claude` in the same worktree. (The shell path keeps
-transport in its key via `shell_session_key` — shell sessions may
-legitimately differ by transport.) Agent-specific runtime files are
-generated under `.oxplow/runtime/` by `oxplow-plugin`; shell terminals skip
-that path entirely.
+An agent PTY is keyed by its **agent session** only (`agent_session_key`
+in `commands/terminal.rs`, `session|ses3`): `open_terminal_session` reads
+the session, then its thread and stream (never the person's selection),
+refuses a closed session or a `chat` one (an ACP agent has no terminal),
+resumes from the session's resume id and passes `OXPLOW_SESSION`. Two
+sessions in one thread are two PTYs; a re-attach from another window or
+transport resumes the one live agent PTY, never a duplicate `claude` in
+the same worktree. (The shell path keeps transport in its key via
+`shell_session_key` — shell sessions may legitimately differ by
+transport.) The spawn binds the PTY to its `AgentPane { thread, session }`:
+its output stamps the session's liveness and its exit ingests a
+`SessionEnd` for the session. Agent-specific runtime files are generated
+under `.oxplow/runtime/` by `oxplow-plugin` (the Claude MCP config and the
+opencode prompt file per session); shell terminals skip that path
+entirely.
 
-**Read-only session lookup (tsk139).** `lookup_terminal_session({ threadId,
-pane? })` (core in `crates/oxplow-rpc/src/commands/terminal.rs`; Tauri shim +
-`bindings.ts` `lookupTerminalSession`) returns the live agent `sessionId` for
-a thread's pane **without spawning** — `pane` defaults to `"working"`, only
-`working`/`talking` are valid. It rebuilds the same `agent_session_key`
-`open_terminal_session` uses (resolving the thread's stream + agent from
-`thread_store.get`), then calls the registry's read-only
-`TerminalSessionRegistry::session_id_for_key` (reads `by_key`, validates the
-id still lives in `inner`; a killed-but-stale entry reads as `None`). Returns
-`None` when no live session exists (or the thread is unknown). This is the
-spawn-free path a second client / automation uses to resolve a thread's agent
-PTY before `forward_terminal_input` (the human-keystroke transport), instead
+**Read-only session lookup (tsk139).** `lookup_terminal_session({ sessionId })`
+(core in `crates/oxplow-rpc/src/commands/terminal.rs`; Tauri shim +
+`bindings.ts` `lookupTerminalSession`) returns the live PTY `sessionId` of
+an agent session **without spawning**: the registry's read-only
+`TerminalSessionRegistry::session_id_for_key` under the same
+`agent_session_key` (reads `by_key`, validates the id still lives in
+`inner`; a killed-but-stale entry reads as `None`). Returns `None` when no
+live PTY exists. This is the spawn-free path a second client uses to
+resolve a session's agent PTY before `forward_terminal_input` (the human-keystroke transport), instead
 of the spawn-capable `open_terminal_session` — which, since tsk138, is safe to
 call twice but still *can* spawn. Like `forward_terminal_input`, the lookup is
 UI/second-client only (`ui(...)` in the surface-parity manifest); it is **not**

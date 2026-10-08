@@ -358,7 +358,7 @@ macro_rules! oxplow_command_table {
                 close_terminal_session => $crate::commands::terminal::close_terminal_session { session_id: String } -> (),
                 terminal_session_cwd => $crate::commands::terminal::terminal_session_cwd { session_id: String } -> Option<String>,
                 terminate_terminal_session => $crate::commands::terminal::terminate_terminal_session { session_id: String } -> (),
-                lookup_terminal_session => $crate::commands::terminal::lookup_terminal_session { thread_id: ::oxplow_domain::ThreadId, pane: Option<String> } -> Option<String>,
+                lookup_terminal_session => $crate::commands::terminal::lookup_terminal_session { session_id: ::oxplow_domain::AgentSessionId } -> Option<String>,
                 // snapshot
                 list_file_snapshots => $crate::commands::snapshot::list_file_snapshots { path: String } -> Vec<::oxplow_db::FileSnapshot>,
                 list_snapshots_for_stream => $crate::commands::snapshot::list_snapshots_for_stream { stream_id: ::oxplow_domain::StreamId, limit: Option<usize> } -> Vec<::oxplow_db::Snapshot>,

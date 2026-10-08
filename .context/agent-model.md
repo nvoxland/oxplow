@@ -198,8 +198,9 @@ concurrently.
   yet).
 
 The command runs as `sh -lc <command>` in a PTY
-(`oxplow_rpc::commands::terminal::open_terminal_session`, keyed by stream,
-thread, agent and pane so a re-attach resumes the live session). Switching
+(`oxplow_rpc::commands::terminal::open_terminal_session`, keyed by the
+agent session — the pane target is its id, `ses3` — so a re-attach resumes
+the live process and two sessions in a thread are two processes). Switching
 streams or threads doesn't kill existing agent sessions: the daemon keeps
 them, and a re-attach replays their buffer. They end with the daemon; the
 next open resumes the agent's own session (`--resume`). There is no tmux

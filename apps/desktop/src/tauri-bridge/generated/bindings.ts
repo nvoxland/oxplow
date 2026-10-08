@@ -1044,7 +1044,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	lookupTerminalSession: (threadId: ThreadId, pane: string | null) => typedError<string | null, IpcError>(__TAURI_INVOKE("lookup_terminal_session", { threadId, pane })),
+	lookupTerminalSession: (sessionId: AgentSessionId) => typedError<string | null, IpcError>(__TAURI_INVOKE("lookup_terminal_session", { sessionId })),
 	/**
 	 *  Replace the native menu with the calling window's snapshot. Each
 	 *  activation fires `menu:command` with `{ id: "<command-id>" }` back

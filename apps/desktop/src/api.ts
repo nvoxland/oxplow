@@ -4,6 +4,7 @@ import type {
   BegunSignIn,
   ChangeScopes,
   ExtensionChange,
+  HookEnvelope,
   OpOutcome,
   OxplowConfig,
   OxplowEvent,
@@ -2371,24 +2372,27 @@ export function collapseAgentStatusState(raw: string | undefined): AgentStatus {
   return "waiting";
 }
 
-/// Synthesize an Interrupt hook for `threadId`. Used by the agent
-/// terminal's Escape handler — Claude Code cancels the in-flight turn
-/// on Escape but does not emit a Stop/Interrupt hook itself, so the
-/// working-dot would stay Running until the next user prompt.
-/// Posting an Interrupt envelope here closes any open agent_turn and
-/// flips the derived status back to Idle immediately.
-export async function recordUserInterrupt(threadId: string, streamId: string | null): Promise<void> {
-  unwrap(
-    await commands.ingestHookEvent({
-      kind: "interrupt",
-      thread_id: threadId,
-      stream_id: streamId,
-      session_id: null,
-      payload_json: JSON.stringify({ source: "user-escape" }),
-      prompt: null,
-      decision: null,
-    }),
-  );
+/// The Interrupt hook the agent terminal's Escape synthesizes for agent
+/// session `sessionId` (on `threadId`). Claude Code cancels the in-flight
+/// turn on Escape but does not emit a Stop/Interrupt hook itself, so the
+/// working-dot would stay Running until the next user prompt. Posting this
+/// closes the session's open agent_turn and flips its derived status back
+/// to Idle immediately.
+export function userInterruptEnvelope(sessionId: string, threadId: string, streamId: string | null): HookEnvelope {
+  return {
+    kind: "interrupt",
+    thread_id: threadId,
+    stream_id: streamId,
+    agent_session_id: sessionId,
+    session_id: null,
+    payload_json: JSON.stringify({ source: "user-escape" }),
+    prompt: null,
+    decision: null,
+  };
+}
+
+export async function recordUserInterrupt(sessionId: string, threadId: string, streamId: string | null): Promise<void> {
+  unwrap(await commands.ingestHookEvent(userInterruptEnvelope(sessionId, threadId, streamId)));
 }
 
 export async function listAgentStatuses(_streamId?: string): Promise<AgentStatusEntry[]> {

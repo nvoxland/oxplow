@@ -92,16 +92,11 @@ export function AgentPage({
           *  item doesn't resolve, so the terminal kept its own height when
           *  the strip grew, was clipped, and never refit (tsk1042). */}
         <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-          {/* Key on thread.id so switching to a different thread
-            *  remounts the terminal — the pane target alone collides
-            *  ("working" for every thread), so without the key
-            *  React reuses the same xterm + PTY session and the
-            *  user keeps seeing the old thread's transcript even
-            *  though the backend would happily attach a different
-            *  per-thread session. */}
+          {/* Keyed on the session: another session's pane is another
+            *  agent, so React must not reuse this xterm for it. */}
           <TerminalPane
-            key={thread.id}
-            paneTarget="working"
+            key={session.id}
+            paneTarget={session.id}
             visible={visible}
             worktreePath={stream?.worktree_path}
             onOpenFile={onOpenFile}
@@ -117,7 +112,7 @@ export function AgentPage({
                 : undefined
             }
             onUserInterrupt={() => {
-              void recordUserInterrupt(thread.id, stream?.id ?? null);
+              void recordUserInterrupt(session.id, thread.id, stream?.id ?? null);
             }}
           />
         </div>

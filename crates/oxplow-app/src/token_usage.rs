@@ -328,6 +328,9 @@ pub struct TurnRecord {
     pub turn_id: Option<i64>,
     /// The effort open when the turn ran (the event's anchor).
     pub effort: Option<oxplow_domain::EffortId>,
+    /// The agent session it ran in (the event's anchor): its harness says
+    /// how to read the transcript.
+    pub agent_session: Option<oxplow_domain::AgentSessionId>,
     /// The `agent.turn.ended` event id. It keys the `oxplow.turn` facts
     /// capture, and — only for counts the turn reported itself (one row per
     /// event) — the row, so a redelivery records them once. Transcript rows
@@ -379,14 +382,15 @@ impl TokenUsageService {
         }
     }
 
-    /// The harness that ran on `thread`: its newest session's.
-    async fn harness_of(&self, thread: ThreadId) -> Result<AgentKind, DomainError> {
-        Ok(self
-            .sessions
-            .newest_for_thread(thread)
-            .await?
-            .map(|s| s.harness)
-            .unwrap_or_default())
+    /// The harness that ran a turn: its agent session's; a turn no session
+    /// claims reads as the default harness's.
+    async fn harness_of(&self, rec: &TurnRecord) -> Result<AgentKind, DomainError> {
+        use oxplow_domain::stores::AgentSessionStore as _;
+        Ok(match rec.agent_session {
+            Some(id) => self.sessions.get(&id).await?.map(|s| s.harness),
+            None => None,
+        }
+        .unwrap_or_default())
     }
 
     /// On Stop: parse the transcript tail since the last cursor, sum usage,
@@ -410,7 +414,7 @@ impl TokenUsageService {
         let Some(thread_row) = self.threads.get(thread).await? else {
             return Ok(None);
         };
-        let kind = self.harness_of(*thread).await?;
+        let kind = self.harness_of(rec).await?;
         let stream_id = thread_row.stream_id.to_string();
 
         // Cursor key: the session id (1:1 with the transcript for Claude),
@@ -487,7 +491,7 @@ impl TokenUsageService {
             .insert_turns(
                 thread,
                 &stream_id,
-                self.harness_of(*thread).await?,
+                self.harness_of(rec).await?,
                 session_id,
                 vec![turn],
                 rec,
@@ -850,6 +854,7 @@ impl crate::event_pump::AsyncEventConsumer for TurnTokensConsumer {
         let rec = TurnRecord {
             turn_id: Some(turn_id),
             effort: env.anchors.effort_id,
+            agent_session: env.anchors.agent_session_id,
             cause: Some(env.id.as_str().to_string()),
         };
         if let Some(u) = payload.usage {
@@ -1404,6 +1409,7 @@ mod tests {
         let rec = TurnRecord {
             turn_id: None,
             effort: None,
+            agent_session: None,
             cause: Some("evt-stop-1".into()),
         };
         assert!(svc
