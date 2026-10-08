@@ -138,8 +138,9 @@ oxplow agent:
 - **Write-guard blocks Edit/Write/MultiEdit/NotebookEdit from any
   non-`active` thread.** See "Write guard" below. If the agent reports
   "permission denied" on a file write inside a non-writer thread,
-  that's the hook doing its job — promote the thread to writer or
-  switch to the writer thread instead.
+  that's the hook doing its job — promote the thread to writer
+  (`oxplow.thread.promote`, which a person or the agent itself may run;
+  it queues the current writer) or switch to the writer thread instead.
 - **Queueing work without a prompt does nothing if the agent is
   idle.** See the first-turn caveat above.
 - **Runtime never commits.** The harness has no `git commit` path —
