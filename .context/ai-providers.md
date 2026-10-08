@@ -178,6 +178,7 @@ or unusable answer is never recorded. Tokens only; no cost.
 |---|---|---|---|
 | `classify(caller, text, labels)` | `decide` (a `choice` question) | `{ label, probabilities }` | `classify@1` |
 | `score(caller, text, levels)` | `decide` (a `score` question, levels lowest first) | `{ level, score, probabilities }` | `score@1` |
+| `decide(caller, state, questions)` | `decide` (any named `noul` / `choice` / `score` questions) — MCP `ai_decide` asks it | answers by question name (a reply missing one is refused) | `decide@1` |
 | `summarize(caller, text, focus?)` | `summarize` (`summarize_system`) — the one summarize path: MCP `ai_summarize` asks it too | the summary | `summarize@1` |
 | `extract(caller, instructions, text, schema)` | `main`, JSON mode; the schema is in the system prompt | JSON matching `schema` (checked with `InputValidator`; a mismatch is refused, naming the pointer) | `extract@1` |
 
@@ -203,7 +204,10 @@ a synchronous `dyn AiOracle`; the app's is `ai_compute::CollectorOracle`,
 which blocks the script's worker thread on the runtime and asks
 `AiCompute` as caller `collector:<owner>/<id>` — so every answer is a
 recorded computation (the same question on the same text is one call,
-ever). The time a script waits on the oracle is left out of its sandbox
+ever). Only a script a person approved gets it: one that names an `ai_*`
+builtin runs only once approved, like an exec program
+([semantic-layer.md](./semantic-layer.md) "Sandbox"), and every other
+derived run gets `RefusingOracle`. The time a script waits on the oracle is left out of its sandbox
 `timeout` (`RunClock`, the in-flight call included;
 `run_sandboxed_excluding`) but not out of its `ceiling` (10 min of wall
 clock, model time included), so a per-row loop of calls can't run for
@@ -223,13 +227,20 @@ turn's prompt (`turn_kind`).
 - `list_ai_roles`: providers (with `keySet`, never keys) and every role's
   binding.
 - `ai_decide`: typed questions (`noul` / `choice` / `score`) about some
-  text, on the `decide` role unless another is named.
+  text, on the `decide` role (an agent can't pick a costlier one) — a
+  recorded computation (`AiCompute::decide`), returning `{ answers,
+  cached }`.
 - `ai_summarize`: text through the `summarize` role, with an optional focus
   — a recorded computation (`AiCompute::summarize`, tsk571), so the same
   text and focus is one call.
 
-Agents can't change providers, roles or keys: those IPC commands are
-UI-only in the surface-parity manifest. Calls record caller `mcp:<tool>`.
+Each is paid with the person's key, so neither is a read-only tool (no
+`read_only_hint`: a harness doesn't auto-approve it), each takes at most
+`AI_TEXT_MAX` (100,000) characters of text, and each records as the
+asking thread (caller `thread:<id>`, from the session's bearer); a
+connection with no thread identity is refused. Agents can't change
+providers, roles or keys: those IPC commands are UI-only in the
+surface-parity manifest.
 
 ## Inferred decisions (current)
 

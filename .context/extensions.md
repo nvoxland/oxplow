@@ -298,8 +298,9 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       git-installed extensions.
     - Installing is a write tool on MCP. The skill says to do it only when
       the user asks, and to offer to commit the result.
-    - Installing runs nothing. An exec source (and a shared extension's
-      advisories) runs only after a person approves it in Settings →
+    - Installing runs nothing. An exec source, a Starlark one that calls
+      a model (`ai_*`) and a shared extension's
+      advisories run only after a person approves them in Settings →
       Data. Approvals are stored per machine outside the repo, MACed under
       a keychain key, and bound to a hash of that version of the program,
       so a changed script needs approving again (`exec_consent.rs`,
@@ -2735,7 +2736,8 @@ tool list stable no matter how many extensions are installed.
   `preview_collector(owner, id, stream_id)`: `collector_runner::
   preview_collector` runs that worktree's version through the same
   `produce` step (same consent: an exec collector needs a person's
-  approval of that exact hash; derived collectors don't) and returns the coerced
+  approval of that exact hash, and so does a Starlark one that calls a
+  model; other derived collectors don't) and returns the coerced
   rows per entity (first 50, plus totals), storing nothing and recording
   no run.
 

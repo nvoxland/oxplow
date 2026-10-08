@@ -102,6 +102,19 @@ describe("collectorRowModel", () => {
     expect(m.trigger).toBe("every 10m");
   });
 
+  // A Starlark collector asks for approval only when it calls a model: each
+  // run spends the AI provider's key, on its trigger, as nobody.
+  test("an unapproved Starlark collector's approval says it calls a model on its trigger", () => {
+    const m = collectorRowModel(
+      listing({ spec: { ...listing().spec, runtime: "starlark", entry: "kind.star", env: [] } }),
+    );
+    expect(m.action).toBe("approve");
+    expect(m.actionTitle).toContain("my-gh/kind.star");
+    expect(m.actionTitle).toContain("calls a model through your AI provider");
+    expect(m.actionTitle).toContain("every 10m");
+    expect(m.actionTitle).not.toContain("network");
+  });
+
   test("the approval names the hosts a collector may reach, and whether that's enforced", () => {
     const withHosts = (networkEnforced: boolean) =>
       listing({ networkEnforced, spec: { ...listing().spec, network: ["api.github.com"] } });

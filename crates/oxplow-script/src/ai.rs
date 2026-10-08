@@ -61,6 +61,34 @@ impl AiHost {
     }
 }
 
+/// The builtins that ask a model.
+pub const AI_BUILTINS: &[&str] = &["ai_classify", "ai_score", "ai_summarize", "ai_extract"];
+
+/// Whether Starlark `script` names an `ai_*` builtin anywhere — a call,
+/// an alias, inside a def or a lambda — and so can spend a model call
+/// each run. Starlark reaches a global only by its name, so this is every
+/// way in; a script that doesn't parse runs nothing.
+pub fn calls_ai(script: &str) -> bool {
+    use starlark::syntax::ast::{AstExpr, ExprP};
+    use starlark::syntax::{AstModule, Dialect};
+    fn names_ai(e: &AstExpr) -> bool {
+        if let ExprP::Identifier(id) = &e.node {
+            if AI_BUILTINS.contains(&id.node.ident.as_str()) {
+                return true;
+            }
+        }
+        let mut found = false;
+        e.node.visit_expr(|child| found = found || names_ai(child));
+        found
+    }
+    let Ok(ast) = AstModule::parse("script.star", script.to_string(), &Dialect::Standard) else {
+        return false;
+    };
+    let mut found = false;
+    ast.statement().visit_expr(|e| found = found || names_ai(e));
+    found
+}
+
 fn host<'a>(
     eval: &starlark::eval::Evaluator<'_, 'a, '_>,
     builtin: &str,
@@ -220,6 +248,28 @@ def transform(input):
 
     /// P5.E2's red (the refusal half): no host — a gauge, a parser — and
     /// the builtin says where it works.
+    /// A script that names an `ai_*` builtin anywhere — a call, an alias,
+    /// inside a def or a lambda — can spend a model call; a mention in a
+    /// string or comment can't, and neither can a script that doesn't parse.
+    #[test]
+    fn a_script_calls_ai_when_it_names_an_ai_builtin() {
+        for script in [
+            "def transform(x):\n    return ai_summarize(\"t\")\n",
+            "f = ai_classify\ndef transform(x):\n    return f(\"t\", [\"a\"])\n",
+            "def transform(x):\n    g = lambda t: ai_score(t, [\"lo\", \"hi\"])\n    return [g(r) for r in x[\"rows\"]]\n",
+            "def transform(x):\n    if x:\n        for r in x:\n            return {\"a\": ai_extract(r, {})}\n",
+        ] {
+            assert!(calls_ai(script), "{script}");
+        }
+        for script in [
+            "def transform(x):\n    return {\"note\": \"ai_summarize\"}  # ai_classify\n",
+            "def transform(x):\n    return summarize(x)\n",
+            "def transform(x:\n",
+        ] {
+            assert!(!calls_ai(script), "{script}");
+        }
+    }
+
     #[test]
     fn a_fact_collector_or_a_parser_cant_call_a_model() {
         for run in [

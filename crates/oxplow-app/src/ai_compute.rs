@@ -6,7 +6,8 @@
 //! and reads stay deterministic. Tokens only; there is no cost.
 //!
 //! - `classify(caller, text, labels)` and `score(caller, text, levels)`
-//!   ask the `decide` role a typed question;
+//!   ask the `decide` role a typed question, and `decide(caller, state,
+//!   questions)` asks it any set of them;
 //! - `summarize(caller, text, focus)` runs on the `summarize` role;
 //! - `extract(caller, instructions, text, schema)` asks the `main` role
 //!   for JSON matching `schema`, and refuses a reply that doesn't.
@@ -26,6 +27,7 @@ use crate::ai_service::{AiService, AiServiceError, CallSite};
 /// One prompt version per op: a changed prompt is a new result.
 pub const CLASSIFY_V: &str = "classify@1";
 pub const SCORE_V: &str = "score@1";
+pub const DECIDE_V: &str = "decide@1";
 pub const SUMMARIZE_V: &str = "summarize@1";
 pub const EXTRACT_V: &str = "extract@1";
 
@@ -282,6 +284,44 @@ impl AiCompute {
         .await
     }
 
+    /// Answers to typed `questions` about `state` (the `decide` role), by
+    /// question name. A reply missing an answer is refused.
+    pub async fn decide(
+        &self,
+        caller: &str,
+        state: &str,
+        questions: &BTreeMap<String, Question>,
+    ) -> Result<Recorded<BTreeMap<String, Answer>>, AiComputeError> {
+        let op = Op {
+            name: "decide",
+            prompt_version: DECIDE_V,
+            role: Role::Decide,
+            caller,
+            args: json!({ "state": state, "questions": questions }),
+        };
+        self.recorded(op, |hash| async move {
+            let (decision, call) = self
+                .ai
+                .decide_as(Role::Decide, site(caller, &hash), state, questions)
+                .await?;
+            if let Some(missing) = questions
+                .keys()
+                .find(|q| !decision.answers.contains_key(*q))
+            {
+                return Err(AiComputeError::BadOutput(format!(
+                    "no answer to question `{missing}`"
+                )));
+            }
+            Ok((
+                decision.answers,
+                decision.input_tokens,
+                decision.output_tokens,
+                call,
+            ))
+        })
+        .await
+    }
+
     /// A summary of `text` (the `summarize` role), focused on `focus`.
     pub async fn summarize(
         &self,
@@ -531,6 +571,52 @@ mod tests {
             .unwrap();
         assert!(!other.cached);
         assert_eq!(calls(&fx.svc).await.len(), 2);
+    }
+
+    /// Typed questions about a text are a recorded computation on the
+    /// `decide` role: asked twice, one call, recorded as its caller; a
+    /// reply that leaves a question unanswered isn't recorded.
+    #[tokio::test]
+    async fn decide_is_a_recorded_computation() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let reply = json!({ "answers": { "risky": { "type": "noul", "probability": 0.8 } } });
+        with_model(&fx.svc, Role::Decide, chat(&reply.to_string())).await;
+        let questions = BTreeMap::from([(
+            "risky".to_string(),
+            Question::Noul {
+                instructions: "Is it risky?".into(),
+            },
+        )]);
+        for cached in [false, true] {
+            let out = fx
+                .svc
+                .ai_compute
+                .decide("thread:thr1", "a diff", &questions)
+                .await
+                .unwrap();
+            assert_eq!(out.cached, cached);
+            assert_eq!(out.value["risky"], Answer::Noul { probability: 0.8 });
+        }
+        let recorded = calls(&fx.svc).await;
+        assert_eq!(recorded.len(), 1, "{recorded:?}");
+        assert_eq!(recorded[0].0, "thread:thr1");
+
+        let more = BTreeMap::from([
+            ("risky".to_string(), questions["risky"].clone()),
+            (
+                "big".to_string(),
+                Question::Noul {
+                    instructions: "Is it big?".into(),
+                },
+            ),
+        ]);
+        let err = fx
+            .svc
+            .ai_compute
+            .decide("thread:thr1", "a diff", &more)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("`big`"), "{err}");
     }
 
     /// A result is the provider's as well as the model's: rebinding a role

@@ -558,7 +558,11 @@ to a read-only SQL query:
   matches nothing all give it none; with `sync: replace` an entity it
   leaves out is emptied.
 - **Approval.** It runs sandboxed (no network, files, env or credentials),
-  so it needs no approval and you can `run_collector` it yourself.
+  so it needs no approval and you can `run_collector` it yourself —
+  unless it calls a model (`ai_*`, below): that spends the user's key on
+  every run, so the user approves it first (Settings → Data → Approve &
+  Run), and each changed version again. Until then a run or a preview is
+  refused, and `extension test` skips its examples.
 - **Input limits.** `input` can't read the collector's own views, and more
   than 10,000 input rows fails the run.
 - **Asking a model.** A starlark collector can call `ai_classify(text,

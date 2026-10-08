@@ -604,10 +604,16 @@ async fn collector_example(
     if !spec.facts.is_empty() {
         return fact_collector_example(host, ext, ex, spec, report).await;
     }
-    if !spec.runtime.is_derived() {
+    if oxplow_app::collector_runner::needs_approval(&host.root, &ext.name, spec) {
+        use oxplow_config::collectors::CollectorRuntime as R;
+        let does = match spec.runtime {
+            R::Starlark | R::Jaq => "calls a model",
+            R::Read => "reads a provider",
+            R::Exec => "runs a program",
+        };
         report.warnings.push(format!(
-            "{shown}:1: example `{example}` runs exec collector `{id}`, which `extension test` \
-             doesn't run (it needs a person's approval) — fix: none; run it from Settings → Data"
+            "{shown}:1: example `{example}` runs collector `{id}`, which {does}: `extension test` \
+             doesn't run it (it needs a person's approval) — fix: none; run it from Settings → Data"
         ));
         return;
     }
@@ -1534,6 +1540,38 @@ commands:
         );
     }
 
+    /// A collector that calls a model is a program a person approves, like
+    /// an exec one: `extension test` doesn't run its example, so it never
+    /// spends a key.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn extension_test_doesnt_run_a_collector_that_calls_a_model() {
+        let dir = tempfile::tempdir().unwrap();
+        tally(
+            dir.path(),
+            "{ entities: { thing: 2 } }",
+            "[oxplow.work_item.comment]",
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/tally/collectors/things.star",
+            "def transform(x):\n    return {\"entities\": {\"thing\": [{\"id\": r[\"id\"], \"label\": ai_summarize(\"t\")} for r in x[\"rows\"]]}}\n",
+        );
+        let report = test_extension(dir.path(), "tally", false).await.unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
+        assert!(
+            !report.ran.iter().any(|r| r == "example things"),
+            "{:?}",
+            report.ran
+        );
+        let warnings = report.warnings.join("\n");
+        assert!(
+            warnings.contains(
+                "fixtures/things.yaml:1: example `things` runs collector `things`, which calls a model"
+            ),
+            "{warnings}"
+        );
+    }
+
     /// P7.C6: `extension test` runs every kind's examples on a throwaway
     /// oxplow — a lens's rows, a starlark collector's typed entities from
     /// its fixture rows, a command's composition against the real
@@ -1558,7 +1596,9 @@ commands:
         }
         let warnings = report.warnings.join("\n");
         assert!(
-            warnings.contains("fixtures/shell.yaml:1: example `shell` runs exec collector `shell`"),
+            warnings.contains(
+                "fixtures/shell.yaml:1: example `shell` runs collector `shell`, which runs a program"
+            ),
             "{warnings}"
         );
 

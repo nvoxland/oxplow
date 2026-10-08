@@ -108,6 +108,39 @@ const ANONYMOUS_WRITE: &str = "this MCP connection carries no thread identity (i
     through an agent session's bearer), so it may not run commands; oxplow's own harness \
     configs connect with one — reconnect through one";
 
+/// The most text an agent's model call takes (`ai_decide`'s `state`,
+/// `ai_summarize`'s `text`), in characters: each call is paid with the
+/// person's key.
+const AI_TEXT_MAX: usize = 100_000;
+
+/// What an agent's model call is recorded as: the asking thread's ref. A
+/// connection with no thread identity asks nothing — the call is paid
+/// with the person's key, and someone must have asked for it.
+fn ai_caller(extensions: &rmcp::model::Extensions) -> Result<String, McpError> {
+    caller_of(extensions)
+        .thread_id
+        .map(oxplow_domain::refs::build::thread_ref)
+        .ok_or_else(|| {
+            McpError::invalid_request(
+                "this MCP connection carries no thread identity (it didn't come through an \
+                 agent session's bearer), so it may not call a model; oxplow's own harness \
+                 configs connect with one — reconnect through one",
+                None,
+            )
+        })
+}
+
+fn check_ai_text(field: &str, text: &str) -> Result<(), McpError> {
+    let n = text.chars().count();
+    if n > AI_TEXT_MAX {
+        return Err(McpError::invalid_params(
+            format!("`{field}` is {n} characters; a model call takes at most {AI_TEXT_MAX}"),
+            None,
+        ));
+    }
+    Ok(())
+}
+
 // ---------- request shapes ----------
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -501,8 +534,6 @@ pub struct AiDecideParams {
     pub state: String,
     /// Questions by a short name you choose (e.g. `risky`).
     pub questions: std::collections::BTreeMap<String, AiQuestionParam>,
-    /// Role to use; defaults to `decide`.
-    pub role: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -963,26 +994,20 @@ impl OxplowMcp {
     #[tool(
         description = "Ask a model a typed question about some text, cheaply: yes/no (`noul`, \
                        returns the probability of yes), `choice` among options, or `score` on \
-                       ordered levels, each with probabilities. Uses the `decide` role (e.g. \
-                       TypeSafe Jev) unless you name another. Good for second opinions like \
-                       \"is this diff risky?\". Fails if the role has no model; the person \
-                       assigns one in Settings → AI."
+                       ordered levels, each with probabilities, on the `decide` role. Good for \
+                       second opinions like \"is this diff risky?\". Recorded: the same \
+                       questions on the same text are answered once (`cached`). Fails if the \
+                       role has no model; the person assigns one in Settings → AI."
     )]
     async fn ai_decide(
         &self,
+        extensions: rmcp::model::Extensions,
         params: Parameters<AiDecideParams>,
     ) -> Result<CallToolResult, McpError> {
-        use oxplow_app::ai_service::{Question, Role};
+        use oxplow_app::ai_service::Question;
+        let caller = ai_caller(&extensions)?;
         let p = params.0;
-        let role: Role = match p.role.as_deref() {
-            None => Role::Decide,
-            Some(r) => serde_json::from_value(serde_json::json!(r)).map_err(|_| {
-                McpError::invalid_params(
-                    format!("unknown role `{r}` (main, fast, summarize, embed, decide, review)"),
-                    None,
-                )
-            })?,
-        };
+        check_ai_text("state", &p.state)?;
         let mut questions = std::collections::BTreeMap::new();
         for (name, q) in p.questions {
             let bad = |m: &str| McpError::invalid_params(format!("question `{name}`: {m}"), None);
@@ -1010,27 +1035,34 @@ impl OxplowMcp {
         }
         let decision = self
             .services
-            .ai
-            .decide(role, "mcp:ai_decide", &p.state, &questions)
+            .ai_compute
+            .decide(&caller, &p.state, &questions)
             .await
-            .map_err(ai_error)?;
-        json_result(&decision)
+            .map_err(compute_error)?;
+        json_result(&serde_json::json!({
+            "answers": decision.value,
+            "cached": decision.cached,
+        }))
     }
 
     #[tool(
         description = "Summarize text with oxplow's `summarize` role (a model the person \
                        configured in Settings → AI), optionally with a focus. Useful for long \
-                       logs or documents you don't need verbatim."
+                       logs or documents you don't need verbatim. Recorded: the same text and \
+                       focus are summarized once."
     )]
     async fn ai_summarize(
         &self,
+        extensions: rmcp::model::Extensions,
         params: Parameters<AiSummarizeParams>,
     ) -> Result<CallToolResult, McpError> {
+        let caller = ai_caller(&extensions)?;
         let p = params.0;
+        check_ai_text("text", &p.text)?;
         let summary = self
             .services
             .ai_compute
-            .summarize("mcp:ai_summarize", &p.text, p.focus.as_deref())
+            .summarize(&caller, &p.text, p.focus.as_deref())
             .await
             .map_err(compute_error)?;
         Ok(CallToolResult::success(vec![ContentBlock::text(
@@ -4814,9 +4846,27 @@ mod tests {
             .unwrap();
     }
 
+    fn risky() -> std::collections::BTreeMap<String, AiQuestionParam> {
+        std::collections::BTreeMap::from([(
+            "risky".to_string(),
+            AiQuestionParam {
+                kind: "choice".into(),
+                instructions: "Is it risky?".into(),
+                options: Some(vec!["yes".into(), "no".into()]),
+                levels: None,
+            },
+        )])
+    }
+
+    /// The model calls an agent asks for are paid with the person's key:
+    /// each is a recorded computation, recorded as the asking thread — the
+    /// same question twice is one call — on its tool's own role, with its
+    /// text capped; a connection with no thread identity asks nothing.
     #[tokio::test]
     async fn ai_tools_list_roles_decide_and_summarize() {
         let (_proj, services, server) = boot();
+        let me = as_writer(&services).await;
+        let thread = oxplow_domain::refs::build::thread_ref(caller_of(&me).thread_id.unwrap());
         let roles: serde_json::Value =
             serde_json::from_str(&text_payload(server.list_ai_roles().await.unwrap())).unwrap();
         assert_eq!(roles["roles"].as_array().unwrap().len(), 6);
@@ -4824,10 +4874,13 @@ mod tests {
 
         // Unassigned role: a clear error, not a crash.
         let err = server
-            .ai_summarize(Parameters(AiSummarizeParams {
-                text: "t".into(),
-                focus: None,
-            }))
+            .ai_summarize(
+                me.clone(),
+                Parameters(AiSummarizeParams {
+                    text: "t".into(),
+                    focus: None,
+                }),
+            )
             .await
             .unwrap_err();
         assert!(err.message.contains("summarize"), "{}", err.message);
@@ -4840,47 +4893,69 @@ mod tests {
         )
         .await;
         assign_mock_role(&services, base.clone(), "decide");
-        let out: serde_json::Value = serde_json::from_str(&text_payload(
-            server
-                .ai_decide(Parameters(AiDecideParams {
-                    state: "a diff".into(),
-                    questions: std::collections::BTreeMap::from([(
-                        "risky".to_string(),
-                        AiQuestionParam {
-                            kind: "choice".into(),
-                            instructions: "Is it risky?".into(),
-                            options: Some(vec!["yes".into(), "no".into()]),
-                            levels: None,
-                        },
-                    )]),
-                    role: None,
-                }))
-                .await
-                .unwrap(),
-        ))
-        .unwrap();
-        assert_eq!(out["answers"]["risky"]["choice"], "yes");
+        for cached in [false, true] {
+            let out: serde_json::Value = serde_json::from_str(&text_payload(
+                server
+                    .ai_decide(
+                        me.clone(),
+                        Parameters(AiDecideParams {
+                            state: "a diff".into(),
+                            questions: risky(),
+                        }),
+                    )
+                    .await
+                    .unwrap(),
+            ))
+            .unwrap();
+            assert_eq!(out["answers"]["risky"]["choice"], "yes");
+            assert_eq!(out["cached"], cached);
+        }
+        assert_eq!(seen.lock().unwrap().len(), 1);
         assert!(seen.lock().unwrap()[0].2["messages"]
             .to_string()
             .contains("Is it risky?"));
 
         let err = server
-            .ai_decide(Parameters(AiDecideParams {
-                state: "s".into(),
-                questions: std::collections::BTreeMap::from([(
-                    "x".to_string(),
-                    AiQuestionParam {
-                        kind: "maybe".into(),
-                        instructions: "?".into(),
-                        options: None,
-                        levels: None,
-                    },
-                )]),
-                role: None,
-            }))
+            .ai_decide(
+                me.clone(),
+                Parameters(AiDecideParams {
+                    state: "s".into(),
+                    questions: std::collections::BTreeMap::from([(
+                        "x".to_string(),
+                        AiQuestionParam {
+                            kind: "maybe".into(),
+                            instructions: "?".into(),
+                            options: None,
+                            levels: None,
+                        },
+                    )]),
+                }),
+            )
             .await
             .unwrap_err();
         assert!(err.message.contains("maybe"), "{}", err.message);
+        let err = server
+            .ai_decide(
+                me.clone(),
+                Parameters(AiDecideParams {
+                    state: "x".repeat(AI_TEXT_MAX + 1),
+                    questions: risky(),
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("characters"), "{}", err.message);
+        let err = server
+            .ai_decide(
+                rmcp::model::Extensions::new(),
+                Parameters(AiDecideParams {
+                    state: "a diff".into(),
+                    questions: risky(),
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("thread identity"), "{}", err.message);
 
         let (base, seen) = oxplow_ai_fake::mock(
             "/chat/completions",
@@ -4893,10 +4968,13 @@ mod tests {
         for _ in 0..2 {
             let out = text_payload(
                 server
-                    .ai_summarize(Parameters(AiSummarizeParams {
-                        text: "long".into(),
-                        focus: Some("risks".into()),
-                    }))
+                    .ai_summarize(
+                        me.clone(),
+                        Parameters(AiSummarizeParams {
+                            text: "long".into(),
+                            focus: Some("risks".into()),
+                        }),
+                    )
                     .await
                     .unwrap(),
             );
@@ -4906,6 +4984,15 @@ mod tests {
         assert!(seen.lock().unwrap()[0].2["messages"]
             .to_string()
             .contains("risks"));
+        let callers = services
+            .sql
+            .query_sql("SELECT DISTINCT caller FROM v_ai_call", vec![], None)
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&callers.rows).unwrap(),
+            serde_json::json!([[thread]])
+        );
     }
 
     #[tokio::test]
