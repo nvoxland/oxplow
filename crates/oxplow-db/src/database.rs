@@ -1660,6 +1660,77 @@ mod tests {
         );
     }
 
+    /// V32: a thread's agent becomes one `agent_session` (closed with the
+    /// thread, or with its stream's archive), its turns and its `agent.*`
+    /// events carry that session, and the thread loses the agent columns.
+    #[test]
+    fn v32_moves_agent_columns_onto_one_session_per_thread() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::models::drop_all(&conn).unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(31))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            r#"INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+                 VALUES (1, 'primary', 'a', 'main', 'refs/heads/main', 'main', '/r', 't0', 't0');
+               INSERT INTO threads (id, stream_id, title, status, agent, acp_agent, resume_session_id, created_at, updated_at, closed_at, archived_at) VALUES
+                 (1, 1, 'open', 'active', 'claude', NULL, 'r1', 't1', 't1u', NULL, NULL),
+                 (2, 1, 'chat', 'closed', 'acp', 'gemini', '', 't2', 't2u', 't2c', NULL),
+                 (3, 1, 'gone', 'queued', 'codex', NULL, '', 't3', 't3u', NULL, 't3a');
+               INSERT INTO agent_turn (id, thread_id, prompt, started_at) VALUES (7, 1, 'p', 't1'), (8, 2, 'q', 't2');
+               INSERT INTO thread_note (thread_id, body, author, created_at) VALUES (1, 'n', 'agent', 't1');
+               INSERT INTO event_log (id, type, v, at, source, thread_id, subject, payload) VALUES
+                 ('a', 'agent.status.changed', 1, 't', 'agent:thr1', 1, '[]', '{"state":"running"}'),
+                 ('b', 'thread.renamed', 1, 't', 'human', 1, '[]', '{}'),
+                 ('c', 'agent.status.changed', 1, 't', 'agent:thr3', 3, '[]', '{"state":"idle"}'),
+                 ('d', 'agent.status.changed', 1, 't', 'system', NULL, '[]', '{"state":"idle"}');"#,
+        )
+        .unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(32))
+            .run(&mut conn)
+            .unwrap();
+        let rows = |sql: &str| -> Vec<String> {
+            conn.prepare(sql)
+                .unwrap()
+                .query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        assert_eq!(
+            rows("SELECT thread_id || ' ' || kind || ' ' || harness || ' ' || coalesce(acp_agent, '-')
+                         || ' ' || resume_session_id || ' ' || opened_at || ' ' || updated_at
+                         || ' ' || coalesce(closed_at, '-') || ' ' || coalesce(closed_reason, '-')
+                    FROM agent_session ORDER BY thread_id"),
+            vec![
+                "1 terminal claude - r1 t1 t1u - -",
+                "2 chat acp gemini  t2 t2u t2c thread_closed",
+                "3 terminal codex -  t3 t3u t3a stream_archived",
+            ]
+        );
+        assert_eq!(
+            rows(
+                "SELECT t.id || ' ' || s.thread_id FROM agent_turn t
+                    JOIN agent_session s ON s.id = t.agent_session_id ORDER BY t.id"
+            ),
+            vec!["7 1", "8 2"]
+        );
+        assert_eq!(
+            rows(
+                "SELECT e.id || ' ' || coalesce(s.thread_id, '-') FROM event_log e
+                    LEFT JOIN agent_session s ON s.id = e.agent_session_id ORDER BY e.seq"
+            ),
+            vec!["a 1", "b -", "c 3", "d -"]
+        );
+        let columns = rows("SELECT name FROM pragma_table_info('threads')");
+        for gone in ["agent", "acp_agent", "resume_session_id", "pane_target"] {
+            assert!(!columns.iter().any(|c| c == gone), "threads.{gone} remains");
+        }
+        assert_eq!(rows("SELECT body FROM thread_note"), vec!["n"]);
+    }
+
     /// V8: effort events are v2 only and lose `retroactive`.
     #[test]
     fn v8_moves_effort_events_to_v2_without_retroactive() {

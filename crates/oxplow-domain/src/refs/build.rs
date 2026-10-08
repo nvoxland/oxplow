@@ -5,7 +5,7 @@
 //! `turn:trn3`, `work_item:oxplow:tsk42`) lives in one place instead of a
 //! `format!` per call site. A work list builds its own items' refs.
 
-use crate::ids::{AgentTurnId, EffortId, StreamId, ThreadId};
+use crate::ids::{AgentSessionId, AgentTurnId, EffortId, StreamId, ThreadId};
 
 pub fn stream_ref(id: StreamId) -> String {
     format!("stream:{id}")
@@ -53,6 +53,11 @@ pub fn effort_ref(id: EffortId) -> String {
 /// [`effort_ref`]; `None` for any other string, a bare id included.
 pub fn effort_of_ref(r: &str) -> Option<EffortId> {
     r.strip_prefix("effort:").and_then(EffortId::try_from_str)
+}
+
+/// An agent slot on a thread (`agent_session.id`).
+pub fn agent_session_ref(id: AgentSessionId) -> String {
+    format!("agent_session:{id}")
 }
 
 pub fn turn_ref(id: AgentTurnId) -> String {

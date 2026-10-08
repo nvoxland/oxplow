@@ -47,6 +47,7 @@ fn the_core_kinds_are_registered_and_validate_ids() {
         "command",
         "finding",
         "thread_note",
+        "agent_session",
         "run",
         "proposal",
     ] {
@@ -56,6 +57,9 @@ fn the_core_kinds_are_registered_and_validate_ids() {
     assert!(reg.get("task_note").is_none());
     assert!(reg.validate(&canon("thread_note:not4")).is_ok());
     assert!(reg.validate(&canon("thread_note:4")).is_err());
+    // An agent session is its own kind (`agent_session.id`).
+    assert!(reg.validate(&canon("agent_session:ses3")).is_ok());
+    assert!(reg.validate(&canon("agent_session:thr3")).is_err());
     // A pending command waiting for a person (`command_proposal.id`, P6b).
     assert!(reg.validate(&canon("proposal:12")).is_ok());
     assert!(reg.validate(&canon("proposal:x")).is_err());

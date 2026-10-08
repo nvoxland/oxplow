@@ -286,14 +286,6 @@ impl HookIngestService {
     }
 }
 
-/// A timestamp as every table stores it (fixed-width RFC 3339).
-fn ts_string(ts: Timestamp) -> String {
-    serde_json::to_value(ts)
-        .ok()
-        .and_then(|v| v.as_str().map(str::to_string))
-        .unwrap_or_default()
-}
-
 /// Whether moving to `state`/`detail` is a change from `current`.
 fn changed(current: Option<&AgentStatus>, state: AgentStatusState, detail: Option<&str>) -> bool {
     match current {
@@ -331,40 +323,50 @@ fn log_status_tx(
     Ok(())
 }
 
-/// The thread row fields the ingest needs.
+/// What the ingest needs of the thread and its agent session.
 struct ThreadRow {
+    /// The thread's newest agent session, when it has one.
+    session: Option<oxplow_domain::AgentSessionId>,
     resume_session_id: String,
     agent: AgentKind,
     worktree: PathBuf,
 }
 
-fn thread_row_tx(
+/// The thread's row as the ingest reads it, with its newest agent session
+/// standing in for "the session this hook came from".
+fn session_row_tx(
     conn: &rusqlite::Connection,
     thread: ThreadId,
     project_dir: &Path,
 ) -> Result<Option<ThreadRow>, DomainError> {
     use rusqlite::OptionalExtension as _;
-    conn.query_row(
-        "SELECT th.resume_session_id, th.agent, COALESCE(s.worktree_path, '')
-           FROM threads th LEFT JOIN streams s ON s.id = th.stream_id
-          WHERE th.id = ?1",
-        [thread.value()],
-        |r| {
-            let agent: String = r.get(1)?;
-            let worktree: String = r.get(2)?;
-            Ok(ThreadRow {
-                resume_session_id: r.get(0)?,
-                agent: serde_json::from_value(serde_json::Value::String(agent)).unwrap_or_default(),
-                worktree: if worktree.is_empty() {
-                    project_dir.to_path_buf()
-                } else {
-                    PathBuf::from(worktree)
-                },
-            })
+    let Some(worktree) = conn
+        .query_row(
+            "SELECT COALESCE(s.worktree_path, '')
+               FROM threads th LEFT JOIN streams s ON s.id = th.stream_id
+              WHERE th.id = ?1",
+            [thread.value()],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(oxplow_db::map_sql_err)?
+    else {
+        return Ok(None);
+    };
+    let session = oxplow_db::agent_session_store::newest_for_thread_tx(conn, thread)?;
+    Ok(Some(ThreadRow {
+        session: session.as_ref().map(|s| s.id),
+        resume_session_id: session
+            .as_ref()
+            .map(|s| s.resume_session_id.clone())
+            .unwrap_or_default(),
+        agent: session.map(|s| s.harness).unwrap_or_default(),
+        worktree: if worktree.is_empty() {
+            project_dir.to_path_buf()
+        } else {
+            PathBuf::from(worktree)
         },
-    )
-    .optional()
-    .map_err(oxplow_db::map_sql_err)
+    }))
 }
 
 /// The envelope's state changes and events, in one transaction.
@@ -376,7 +378,7 @@ fn record_tx(
     env: &HookEnvelope,
     now: Timestamp,
 ) -> Result<Applied, DomainError> {
-    let Some(row) = thread_row_tx(conn, thread, project_dir)? else {
+    let Some(row) = session_row_tx(conn, thread, project_dir)? else {
         return Ok(Applied::default()); // an unknown thread: the hook log only
     };
     let body: serde_json::Value = serde_json::from_str(&env.payload_json).unwrap_or_default();
@@ -633,12 +635,8 @@ fn track_session_tx(
     if !append_unique_tx(conn, ev.vocabulary, &first)? && starts {
         ev.append(conn, &env)?;
     }
-    if row.resume_session_id != session {
-        conn.execute(
-            "UPDATE threads SET resume_session_id = ?2, updated_at = ?3 WHERE id = ?1",
-            rusqlite::params![thread.value(), session, ts_string(now)],
-        )
-        .map_err(oxplow_db::map_sql_err)?;
+    if let Some(id) = row.session.filter(|_| row.resume_session_id != session) {
+        oxplow_db::agent_session_store::set_resume_tx(conn, id, session, now)?;
     }
     Ok(())
 }
@@ -667,12 +665,8 @@ fn end_session_tx(
         .with_anchors(activity_anchors_tx(conn, thread)?)
         .with_subject([thread_ref(thread)]);
     ev.append(conn, &env)?;
-    if reason == Some("clear") && row.resume_session_id == session {
-        conn.execute(
-            "UPDATE threads SET resume_session_id = '', updated_at = ?2 WHERE id = ?1",
-            rusqlite::params![thread.value(), ts_string(now)],
-        )
-        .map_err(oxplow_db::map_sql_err)?;
+    if let Some(id) = row.session.filter(|_| reason == Some("clear")) {
+        oxplow_db::agent_session_store::forget_resume_tx(conn, id, session, now)?;
     }
     Ok(())
 }
@@ -791,10 +785,6 @@ mod tests {
             title: "x".into(),
             status: ThreadStatus::Active,
             sort_index: 0,
-            pane_target: "working".into(),
-            agent: oxplow_domain::AgentKind::Claude,
-            acp_agent: None,
-            resume_session_id: String::new(),
             summary: String::new(),
             summary_updated_at: None,
             closed_at: None,
@@ -804,6 +794,15 @@ mod tests {
             archived_at: None,
         };
         threads.upsert(&t).await.unwrap();
+        db.transaction(move |tx| {
+            oxplow_db::agent_session_store::insert_tx(
+                tx,
+                &oxplow_domain::agent_session::NewAgentSession::of(t.id, AgentKind::Claude, None),
+                now,
+            )
+        })
+        .await
+        .unwrap();
         let svc = HookIngestService::new(
             db,
             oxplow_domain::vocabulary::VocabularyHandle::core(),
@@ -1047,7 +1046,7 @@ mod tests {
             let db = svc.db.clone();
             db.transaction(move |c| {
                 c.query_row(
-                    "SELECT resume_session_id FROM threads WHERE id = 1",
+                    "SELECT resume_session_id FROM agent_session WHERE thread_id = 1",
                     [],
                     |r| r.get::<_, String>(0),
                 )

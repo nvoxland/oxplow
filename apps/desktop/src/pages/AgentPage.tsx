@@ -7,9 +7,12 @@ import { AcpAgentView } from "../components/acp/AcpAgentView.js";
 import { AnswersStrip } from "../components/Answers/AnswersStrip.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
 import type { TabRef } from "../tabs/tabState.js";
+import type { AgentSessionRow } from "../agentSessions.js";
 
 interface AgentPageProps {
   thread: Thread | null;
+  /** The thread's agent session; `null` while it loads or when it has none. */
+  session: AgentSessionRow | null;
   stream: Stream | null;
   visible: boolean;
   /** Click-through handler for file paths detected in terminal output. */
@@ -36,6 +39,7 @@ interface AgentPageProps {
  */
 export function AgentPage({
   thread,
+  session,
   stream,
   visible,
   onOpenFile,
@@ -53,9 +57,16 @@ export function AgentPage({
       </Page>
     );
   }
-  // ACP threads talk to their agent as a structured conversation, not a
-  // terminal (tsk281). Keyed on the thread like the terminal below.
-  if (thread.agent === "acp") {
+  if (!session) {
+    return (
+      <Page testId="page-agent" showNavBar={false} showHeader={false}>
+        <div style={{ padding: 12, color: "var(--muted)" }}>This thread has no agent session.</div>
+      </Page>
+    );
+  }
+  // ACP sessions talk to their agent as a structured conversation, not a
+  // terminal. Keyed on the thread like the terminal below.
+  if (session.harness === "acp") {
     return (
       <Page testId="page-agent" showNavBar={false} showHeader={false}>
         <AcpAgentView
@@ -82,7 +93,7 @@ export function AgentPage({
           *  the strip grew, was clipped, and never refit (tsk1042). */}
         <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
           {/* Key on thread.id so switching to a different thread
-            *  remounts the terminal — pane_target alone collides
+            *  remounts the terminal — the pane target alone collides
             *  ("working" for every thread), so without the key
             *  React reuses the same xterm + PTY session and the
             *  user keeps seeing the old thread's transcript even
@@ -90,7 +101,7 @@ export function AgentPage({
             *  per-thread session. */}
           <TerminalPane
             key={thread.id}
-            paneTarget={thread.pane_target}
+            paneTarget="working"
             visible={visible}
             worktreePath={stream?.worktree_path}
             onOpenFile={onOpenFile}

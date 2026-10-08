@@ -302,10 +302,15 @@ pub async fn open_terminal_session(
         None => None,
     };
 
+    // The thread's agent session: what runs here and what it resumes.
+    let session = match thread_id {
+        Some(id) => ctx.agent_session_store.newest_for_thread(id).await?,
+        None => None,
+    };
     let config = read_config(&ctx.config);
-    let agent = thread
+    let agent = session
         .as_ref()
-        .map(|t| t.agent)
+        .map(|s| s.harness)
         .unwrap_or_else(|| config.agents.first().copied().unwrap_or(AgentKind::Claude));
     // An ACP agent speaks the protocol on its stdio: it has no terminal
     // (the thread's agent tab shows the ACP view instead).
@@ -458,14 +463,12 @@ pub async fn open_terminal_session(
     }
 
     let result = {
-        // Resume from the THREAD's resume_session_id (populated by
-        // the resume-tracker in the control plane), not the
-        // stream's working_session_id. Each thread runs an
-        // independent Claude session even though they share the
-        // working pane slot.
-        let mut resume_session_id = thread
+        // Resume from the agent session's resume_session_id (populated
+        // by the resume-tracker in the hook ingest), not the stream's
+        // working_session_id.
+        let mut resume_session_id = session
             .as_ref()
-            .map(|t| t.resume_session_id.clone())
+            .map(|s| s.resume_session_id.clone())
             .unwrap_or_default();
 
         // Proactively drop a stale Claude resume pointer. If the
@@ -485,10 +488,10 @@ pub async fn open_terminal_session(
                     &resume_session_id,
                 );
                 if state == oxplow_app::resume_check::ResumeState::Missing {
-                    if let Some(t) = thread.as_ref() {
+                    if let Some(s) = session.as_ref() {
                         if let Err(err) = oxplow_app::resume_check::forget_missing(
                             &ctx.db,
-                            t.id,
+                            s.id,
                             &resume_session_id,
                         )
                         .await
@@ -574,10 +577,16 @@ pub async fn lookup_terminal_session(
         Some(t) => t,
         None => return Ok(None),
     };
+    let harness = svc
+        .agent_session_store
+        .newest_for_thread(thread_id)
+        .await?
+        .map(|s| s.harness)
+        .unwrap_or_default();
     let key = agent_session_key(
         &thread.stream_id.to_string(),
         Some(&thread_id.to_string()),
-        thread.agent,
+        harness,
         &pane_target,
     );
     Ok(svc.terminal_sessions.session_id_for_key(&key).await)

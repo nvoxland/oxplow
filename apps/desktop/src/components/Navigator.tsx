@@ -854,8 +854,8 @@ type Guide = "none" | "stream" | "mid" | "last";
 
 /** A row's icon column, the same in the strip and the panel so their rows
  *  line up: the glyph, and the guide line that ties a stream's threads to
- *  it — down the column's left from under the stream's square, with a tick
- *  into each thread's circle, ending at the last one. */
+ *  it — down the column's left from under the stream's tile, with a tick
+ *  into each thread's tab, ending at the last one. */
 function IconColumn({ guide, children }: { guide: Guide; children: ReactNode }) {
   const line = (style: CSSProperties) => (
     <span aria-hidden style={{ position: "absolute", background: "var(--text-muted)", ...style }} />
@@ -903,28 +903,31 @@ function IconCell({
   status: AgentStatusDotState | undefined;
   question?: string;
 }) {
-  // Shape says which is which at a glance: a stream is a filled rounded
-  // square, a thread an outlined circle (the writer's outline the accent).
+  // A stream is an inverted tile (light, dark letters) heading its
+  // threads; a thread is a tab, indented off the stream's guide line — a
+  // faint fill, the writer's in the accent.
   const shape: CSSProperties = isStream
     ? {
         width: ICON_BOX,
         height: ICON_BOX,
         borderRadius: 6,
         background: "var(--surface-stream-tile)",
+        color: "var(--text-on-stream-tile)",
         borderWidth: 1,
         borderStyle: "solid",
-        borderColor: "var(--border-strong)",
+        borderColor: "transparent",
         fontSize: LETTER_FONT,
         fontWeight: 700,
       }
     : {
         width: THREAD_BOX,
         height: THREAD_BOX,
-        borderRadius: "50%",
-        background: "transparent",
-        borderWidth: 1.5,
+        borderRadius: 5,
+        background: isWriter ? "var(--accent-soft-bg)" : "var(--surface-thread-tab)",
+        color: "var(--text-primary)",
+        borderWidth: 1,
         borderStyle: "solid",
-        borderColor: isWriter ? "var(--accent)" : "var(--text-muted)",
+        borderColor: isWriter ? "var(--accent)" : "var(--border-strong)",
         fontSize: THREAD_LETTER_FONT,
         fontWeight: 600,
       };
@@ -938,7 +941,6 @@ function IconCell({
         justifyContent: "center",
         boxSizing: "border-box",
         lineHeight: 1,
-        color: "var(--text-primary)",
         ...shape,
       }}
     >
@@ -1103,15 +1105,15 @@ function InlineNewThread({
 // cell sits comfortably with breathing room on both sides.
 const LETTER_FONT = 15;
 const ICON_BOX = 30;
-// A thread's circle sits right of its stream's guide line, a touch smaller
-// than the stream's square so the two read as parent and child.
-const THREAD_BOX = 24;
-const THREAD_LETTER_FONT = 12;
+// A thread's tab sits right of its stream's guide line, a touch smaller
+// than the stream's tile so the two read as parent and child.
+const THREAD_BOX = 25;
+const THREAD_LETTER_FONT = 13;
 const STRIP_WIDTH = 40;
 // The icon column: the strip's width less the selection line's 3px.
 const ICON_COLUMN = STRIP_WIDTH - 3;
-// The guide line's x, and where a thread's circle starts.
-// (The circle and its status dot stay clear of the panel's right edge.)
+// The guide line's x, and where a thread's tab starts.
+// (The tab and its status dot stay clear of the panel's right edge.)
 const GUIDE_X = 5;
 const THREAD_LEFT = 9;
 const STRIP_PADDING_Y = 6;

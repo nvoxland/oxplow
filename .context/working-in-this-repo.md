@@ -92,7 +92,12 @@ cargo run -q -p oxplow-dev -- task transition tsk12 done
 cargo run -q -p oxplow-dev -- task update tsk12 [--title …] [--body …] [--parent …]
 cargo run -q -p oxplow-dev -- task comment tsk12 "…"
 cargo run -q -p oxplow-dev -- task link tsk12 tsk13 blocks
+cargo run -q -p oxplow-dev -- --help
 ```
+
+`--help` / `-h` / `help` print this and do nothing, before the database
+is opened; an option a command doesn't take is refused (both used to
+become a task's title — tasks named `--help`).
 
 It runs the task system's own `work_item.*` commands on a command bus
 over the project's database (validation, audit and events as the app

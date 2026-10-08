@@ -45,8 +45,15 @@ pub async fn acp_open_session(
         .await
         .map_err(|e| IpcError::internal(e.to_string()))?
         .ok_or_else(IpcError::not_found)?;
-    let name = match (thread.agent, thread.acp_agent.as_deref()) {
-        (AgentKind::Acp, Some(name)) => name.to_string(),
+    let session = svc
+        .agent_session_store
+        .newest_for_thread(thread_id)
+        .await
+        .map_err(|e| IpcError::internal(e.to_string()))?;
+    let (name, resume) = match session {
+        Some(s) if s.harness == AgentKind::Acp && s.acp_agent.is_some() => {
+            (s.acp_agent.unwrap_or_default(), s.resume_session_id)
+        }
         _ => return Err(IpcError::invalid("this thread doesn't run an ACP agent")),
     };
     let stream = svc
@@ -101,7 +108,7 @@ pub async fn acp_open_session(
         agent: name,
         cwd: std::path::PathBuf::from(&stream.worktree_path),
         mcp,
-        resume_session_id: Some(thread.resume_session_id.clone()).filter(|s| !s.is_empty()),
+        resume_session_id: Some(resume).filter(|s| !s.is_empty()),
         system_prompt: Some(system_prompt),
         system_prompt_via_meta: agents::system_prompt_via_meta(&agent),
     };

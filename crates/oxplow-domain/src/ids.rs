@@ -35,11 +35,12 @@ pub enum EntityKind {
     UsageEvent,
     Dashboard,
     DashboardItem,
+    AgentSession,
 }
 
 impl EntityKind {
     /// Every kind, for reverse lookups.
-    pub const ALL: [EntityKind; 12] = [
+    pub const ALL: [EntityKind; 13] = [
         EntityKind::Stream,
         EntityKind::Thread,
         EntityKind::Note,
@@ -52,6 +53,7 @@ impl EntityKind {
         EntityKind::UsageEvent,
         EntityKind::Dashboard,
         EntityKind::DashboardItem,
+        EntityKind::AgentSession,
     ];
 
     /// The fixed 3-letter prefix that opens every id of this kind.
@@ -69,6 +71,7 @@ impl EntityKind {
             EntityKind::UsageEvent => "usg",
             EntityKind::Dashboard => "dsh",
             EntityKind::DashboardItem => "dti",
+            EntityKind::AgentSession => "ses",
         }
     }
 
@@ -88,6 +91,7 @@ impl EntityKind {
             EntityKind::UsageEvent => "usage-event id (usg…)",
             EntityKind::Dashboard => "dashboard id (dsh…)",
             EntityKind::DashboardItem => "dashboard-item id (dti…)",
+            EntityKind::AgentSession => "agent-session id (ses…)",
         }
     }
 
@@ -301,6 +305,7 @@ id_type!(PageVisitId, PageVisit);
 id_type!(UsageEventId, UsageEvent);
 id_type!(DashboardId, Dashboard);
 id_type!(DashboardItemId, DashboardItem);
+id_type!(AgentSessionId, AgentSession);
 
 #[cfg(test)]
 mod tests {
@@ -361,6 +366,15 @@ mod tests {
         // Downcast to the matching newtype succeeds; mismatched fails.
         assert_eq!(EffortId::try_from(any), Ok(EffortId::new(9)));
         assert!(StreamId::try_from(any).is_err());
+    }
+
+    #[test]
+    fn an_agent_session_id_is_ses() {
+        assert_eq!(AgentSessionId::new(3).to_string(), "ses3");
+        assert_eq!(
+            EntityKind::from_prefix("ses"),
+            Some(EntityKind::AgentSession)
+        );
     }
 
     #[test]

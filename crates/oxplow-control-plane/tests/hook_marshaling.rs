@@ -20,7 +20,7 @@ use oxplow_tasks::work_item_ref;
 
 use oxplow_app::Services;
 use oxplow_control_plane::ControlPlane;
-use oxplow_domain::stores::{StreamStore, ThreadStore};
+use oxplow_domain::stores::{AgentSessionStore, StreamStore, ThreadStore};
 use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadId, ThreadStatus, Timestamp};
 use oxplow_tasks::TaskId;
 use oxplow_tasks::TaskStore;
@@ -55,10 +55,6 @@ async fn seed_thread(services: &Services, status: ThreadStatus) -> ThreadId {
         title: "t".into(),
         status,
         sort_index: 0,
-        pane_target: "working".into(),
-        agent: oxplow_domain::AgentKind::Claude,
-        acp_agent: None,
-        resume_session_id: String::new(),
         summary: String::new(),
         summary_updated_at: None,
         closed_at: None,
@@ -68,6 +64,15 @@ async fn seed_thread(services: &Services, status: ThreadStatus) -> ThreadId {
         archived_at: None,
     };
     services.thread_store.upsert(&thread).await.unwrap();
+    services
+        .agent_session_store
+        .open(&oxplow_domain::agent_session::NewAgentSession::of(
+            thread.id,
+            oxplow_domain::AgentKind::Claude,
+            None,
+        ))
+        .await
+        .unwrap();
     thread.id
 }
 
@@ -238,21 +243,32 @@ async fn a_stop_is_never_refused_and_keeps_the_final_message() {
     );
 }
 
-async fn set_resume_session_id(services: &Services, thread_id: ThreadId, session: &str) {
-    let mut thread = services
-        .thread_store
-        .get(&thread_id)
+async fn session_of(services: &Services, thread_id: ThreadId) -> oxplow_domain::AgentSessionId {
+    services
+        .agent_session_store
+        .newest_for_thread(thread_id)
         .await
         .unwrap()
+        .unwrap()
+        .id
+}
+
+async fn set_resume_session_id(services: &Services, thread_id: ThreadId, session: &str) {
+    let id = session_of(services, thread_id).await;
+    let session = session.to_string();
+    services
+        .db
+        .transaction(move |tx| {
+            oxplow_db::agent_session_store::set_resume_tx(tx, id, &session, Timestamp::now())
+        })
+        .await
         .unwrap();
-    thread.resume_session_id = session.to_string();
-    services.thread_store.upsert(&thread).await.unwrap();
 }
 
 async fn resume_session_id(services: &Services, thread_id: ThreadId) -> String {
     services
-        .thread_store
-        .get(&thread_id)
+        .agent_session_store
+        .newest_for_thread(thread_id)
         .await
         .unwrap()
         .unwrap()

@@ -41,6 +41,7 @@ pub const BUILT_INS: &[BuiltIn] = &[
     BuiltIn {
         entry: "oxplow:tasks",
         capability: "work_items",
+        provider: Some("oxplow"),
         title: "oxplow's tasks",
         features: &[
             "hierarchy",
@@ -72,6 +73,7 @@ pub const BUILT_INS: &[BuiltIn] = &[
     BuiltIn {
         entry: "oxplow:commit-or-switch",
         capability: "effort_policy",
+        provider: None,
         title: "A commit lands it, or the task switches",
         features: &[],
         id_pattern: None,
@@ -80,6 +82,7 @@ pub const BUILT_INS: &[BuiltIn] = &[
     BuiltIn {
         entry: "oxplow:snapshots",
         capability: "snapshots",
+        provider: None,
         title: "Keep every version",
         features: &["contents"],
         id_pattern: None,
@@ -92,6 +95,10 @@ pub const BUILT_INS: &[BuiltIn] = &[
 pub struct BuiltIn {
     pub entry: &'static str,
     pub capability: &'static str,
+    /// The provider id its items' refs carry (`work_item:oxplow:…`), which
+    /// a declaration of it must use; `None` for a built-in whose
+    /// implementation has no id of its own.
+    pub provider: Option<&'static str>,
     pub title: &'static str,
     /// The features it has — core's to say, since it's core's code.
     pub features: &'static [&'static str],

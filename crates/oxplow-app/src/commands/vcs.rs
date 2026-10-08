@@ -2,9 +2,9 @@
 //! `.context/vcs.md`, `.context/commands.md`). Each drives the VCS — a
 //! system the bus doesn't own — so each is `External`: it runs, then the
 //! bus audits it, the result (the VCS's `OpOutcome`, conflicts included)
-//! on the audit row. All are a person's: agents keep no VCS mutations
-//! (they run `git` in their own terminal, which oxplow doesn't police).
-//! None is undoable. Each names the stream it acts on; the router resolves
+//! on the audit row. A person's or an agent's — an agent's on its own
+//! stream only, as its terminal's `git` reaches only its own worktree; a
+//! destructive one asks a person first. None is undoable. Each names the stream it acts on; the router resolves
 //! it strictly, so a missing stream never lands on the primary's branch.
 //!
 //! `vcs.*` go through the `Vcs` trait; `git.*` (rebase, cherry-pick,
@@ -74,8 +74,8 @@ macro_rules! stream_input {
 
 /// One VCS operation of `capability`: parse the input, resolve the
 /// stream's workspace strictly, run `op`, announce what it touched. A
-/// person's only (agents run `git` in their terminal); `confirm` is the
-/// least a command over it asks.
+/// person's or an agent's — an agent's on its own stream only — never a
+/// lens's; `confirm` is the least a command over it asks.
 fn vcs_op<I, F, Fut>(
     capability: &str,
     name: &str,
@@ -96,7 +96,7 @@ where
         name,
         serde_json::to_value(schemars::schema_for!(I)).expect("schema serializes"),
         false,
-        Handler::External(Arc::new(move |_: Invocation, input: Value| {
+        Handler::External(Arc::new(move |invocation: Invocation, input: Value| {
             let target = target.clone();
             let op = op.clone();
             Box::pin(async move {
@@ -110,6 +110,16 @@ where
                         field: Some("/stream".into()),
                         message: format!("`{}` is not a stream id (`str1`)", input.stream()),
                     })?;
+                if matches!(invocation.actor, oxplow_domain::Actor::Agent { .. })
+                    && invocation.actor.stream_id() != Some(stream)
+                {
+                    return Err(CommandError::Denied {
+                        reason: format!(
+                            "an agent runs VCS commands on its own stream only, not `{}`",
+                            input.stream()
+                        ),
+                    });
+                }
                 let ws = target
                     .worktrees
                     .resolve_strict(Some(input.stream()))
@@ -123,7 +133,11 @@ where
             })
         })),
     )
-    .open_to(Invokers::HUMAN_ONLY)
+    .open_to(Invokers {
+        human: true,
+        agent: true,
+        lens: false,
+    })
     .confirm_at_least(confirm)
 }
 
@@ -561,34 +575,49 @@ mod tests {
         assert!(silent.contains("git reported a failure"), "{silent}");
     }
 
-    /// P5.B6 (tsk525): VCS mutations are a person's — an agent is denied;
-    /// a destructive one needs the person's confirmation; the audit row
-    /// holds what the VCS reported.
+    /// P5.B6 (tsk525): an agent runs VCS commands on its own stream only
+    /// (as its terminal's git reaches only its own worktree); a destructive
+    /// one needs a person's confirmation; the audit row holds what the VCS
+    /// reported.
     #[tokio::test]
-    async fn vcs_commands_are_a_persons_confirmed_and_audited() {
+    async fn vcs_commands_are_an_agents_on_its_own_stream_confirmed_and_audited() {
         let f = services_with_effort().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         std::fs::write(root.join("a.txt"), "one\n").unwrap();
         commit_all(&root, "base");
-        let stream = svc.stream_store.list().await.unwrap()[0].id.to_string();
-        std::fs::write(root.join("a.txt"), "two\n").unwrap();
+        let own = svc.stream_store.list().await.unwrap()[0].id;
+        let stream = own.to_string();
 
-        let agent = Actor::Agent {
-            thread_id: None,
-            stream_id: None,
+        let agent = |stream_id| Actor::Agent {
+            thread_id: Some(f.thread),
+            stream_id,
         };
-        let err = svc
-            .commands
+        std::fs::write(root.join("a.txt"), "by an agent\n").unwrap();
+        svc.commands
             .run(
-                &agent,
+                &agent(Some(own)),
                 "oxplow.vcs.commit",
                 json!({ "stream": stream, "message": "by an agent" }),
                 false,
             )
             .await
+            .expect("an agent commits on its own stream");
+        let elsewhere = oxplow_domain::StreamId::new(own.value() + 1);
+        let err = svc
+            .commands
+            .run(
+                &agent(Some(elsewhere)),
+                "oxplow.vcs.commit",
+                json!({ "stream": stream, "message": "not its stream" }),
+                false,
+            )
+            .await
             .unwrap_err();
         assert!(format!("{err:?}").contains("Denied"), "{err:?}");
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        commit_all(&root, "base again");
+        std::fs::write(root.join("a.txt"), "two\n").unwrap();
 
         let discard = json!({ "stream": stream, "paths": ["a.txt"] });
         let err = svc

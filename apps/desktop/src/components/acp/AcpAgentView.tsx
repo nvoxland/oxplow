@@ -149,7 +149,7 @@ export function AcpAgentView({ thread, worktreePath, visible, onOpenDiff, onOpen
           fontSize: 12,
         }}
       >
-        <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>ACP · {thread.acp_agent ?? state.agent}</span>
+        <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>ACP · {state.agent}</span>
         <span data-testid="acp-status" style={{ color: statusColor(state.status) }}>
           {statusLabel(state.status)}
         </span>

@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use specta::Type;
 
-use crate::ids::{EffortId, StreamId, ThreadId};
+use crate::ids::{AgentSessionId, EffortId, StreamId, ThreadId};
 use crate::time::Timestamp;
 use crate::DomainError;
 
@@ -51,6 +51,9 @@ pub struct Anchors {
     pub effort_id: Option<EffortId>,
     /// `agent_turn.id`.
     pub turn_id: Option<i64>,
+    /// The agent session it happened in (`agent_session.id`) — not the
+    /// harness's own session id, which `agent_turn.session_id` holds.
+    pub agent_session_id: Option<AgentSessionId>,
     /// `snapshot.id`.
     pub snapshot_id: Option<i64>,
 }

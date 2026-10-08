@@ -1,7 +1,8 @@
 import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 import { setThreadPrompt, type Thread } from "../api.js";
-import { agentLabel } from "../agentKinds.js";
+import { sessionLabel } from "../agentKinds.js";
+import { useThreadSessions } from "../agentSessions.js";
 import { Page } from "../tabs/Page.js";
 import { normalizePromptForSave } from "./StreamSettingsPage.js";
 
@@ -18,6 +19,7 @@ export interface ThreadSettingsPageProps {
  * than re-introducing a modal.
  */
 export function ThreadSettingsPage({ streamId, thread, onClose, onSaved }: ThreadSettingsPageProps) {
+  const sessions = useThreadSessions(thread?.id ?? null);
   const [prompt, setPrompt] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,7 +68,9 @@ export function ThreadSettingsPage({ streamId, thread, onClose, onSaved }: Threa
           <>
             <Section title="Agent">
               <Hint>
-                This thread runs {agentLabel(thread.agent)}. Agent assignment is fixed after thread creation.
+                {sessions && sessions.length > 0
+                  ? `This thread runs ${sessions.map(sessionLabel).join(", ")}. Agent assignment is fixed after thread creation.`
+                  : "This thread has no agent session."}
               </Hint>
             </Section>
 

@@ -488,6 +488,7 @@ mod tests {
             .open(&oxplow_domain::AgentTurn {
                 id: oxplow_domain::AgentTurnId::placeholder(),
                 thread_id: f.thread,
+                agent_session_id: None,
                 prompt: "Add CSV export".into(),
                 answer: None,
                 session_id: None,

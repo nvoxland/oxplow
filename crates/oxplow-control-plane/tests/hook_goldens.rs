@@ -21,7 +21,7 @@ use common::boot;
 use oxplow_app::Services;
 use oxplow_control_plane::ControlPlane;
 use oxplow_db::EffortStore as _;
-use oxplow_domain::stores::{StreamStore, ThreadStore};
+use oxplow_domain::stores::{AgentSessionStore, StreamStore, ThreadStore};
 use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadId, ThreadStatus, Timestamp};
 use oxplow_tasks::TaskId;
 use oxplow_tasks::TaskStore as _;
@@ -71,10 +71,6 @@ async fn seed_thread(services: &Services, status: ThreadStatus) -> ThreadId {
         title: "t".into(),
         status,
         sort_index: 0,
-        pane_target: "working".into(),
-        agent: oxplow_domain::AgentKind::Claude,
-        acp_agent: None,
-        resume_session_id: String::new(),
         summary: String::new(),
         summary_updated_at: None,
         closed_at: None,
@@ -84,6 +80,15 @@ async fn seed_thread(services: &Services, status: ThreadStatus) -> ThreadId {
         archived_at: None,
     };
     services.thread_store.upsert(&thread).await.unwrap();
+    services
+        .agent_session_store
+        .open(&oxplow_domain::agent_session::NewAgentSession::of(
+            thread.id,
+            oxplow_domain::AgentKind::Claude,
+            None,
+        ))
+        .await
+        .unwrap();
     thread.id
 }
 

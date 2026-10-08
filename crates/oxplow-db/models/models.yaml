@@ -44,11 +44,12 @@
     - { name: "detail", type: "", doc: "What it's waiting on (the question, the permission asked), or why it stopped." }
     - { name: "since", type: "TEXT", doc: "When it moved to this status (RFC 3339)." }
 - name: agent_turn
-  version: 1
-  description: "Agent turns: each human prompt and the agent's answer, per thread. start_snapshot_id → snapshot_id is what the turn changed (the snapshot the worktree was at when it opened and when it ended)."
+  version: 2
+  description: "Agent turns: each human prompt and the agent's answer, per thread and agent session. start_snapshot_id → snapshot_id is what the turn changed (the snapshot the worktree was at when it opened and when it ended)."
   columns:
     - { name: "id", type: "INTEGER", doc: "Turn id." }
     - { name: "thread_id", type: "INTEGER", doc: "Thread the turn ran in." }
+    - { name: "agent_session_id", type: "INTEGER", doc: "The agent session it ran in (v_agent_session.id); NULL for a turn no session claims (a hook from an agent oxplow didn't start)." }
     - { name: "prompt", type: "TEXT", doc: "What the human typed." }
     - { name: "answer", type: "TEXT", doc: "The agent's final answer, once the turn ended." }
     - { name: "session_id", type: "TEXT", doc: "The harness session id, when it reported one." }
@@ -469,12 +470,12 @@
     - { name: "local_snapshot_id", type: "INTEGER", doc: "Snapshot it was captured against." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
 - name: event
-  version: 1
+  version: 2
   description: "The event log: every activity and state change, oldest first by `seq`, written in the same transaction as the change it records (.context/data-model.md \"event_log\")."
   columns:
     - { name: "seq", type: "INTEGER", doc: "Insert order — the delivery order consumers checkpoint on." }
     - { name: "id", type: "TEXT", doc: "Public identity (UUIDv7; sorts by time)." }
-    - { name: "type", type: "TEXT", doc: "`namespace.name`, e.g. `work_item.transitioned`." }
+    - { name: "type", type: "TEXT", doc: "`namespace.name`, e.g. `work_item.state_changed`." }
     - { name: "v", type: "INTEGER", doc: "Schema version of `type`." }
     - { name: "at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "source", type: "TEXT", doc: "What emitted it: `human`, `agent:thr3`, `task_service`, …" }
@@ -483,6 +484,7 @@
     - { name: "effort_id", type: "INTEGER", doc: "Anchor, when known." }
     - { name: "turn_id", type: "INTEGER", doc: "Anchor (agent_turn), when known." }
     - { name: "snapshot_id", type: "INTEGER", doc: "Anchor, when known." }
+    - { name: "agent_session_id", type: "INTEGER", doc: "Anchor (v_agent_session.id): the agent session it happened in, when known." }
     - { name: "subject", type: "TEXT", doc: "JSON array of the canonical refs the event is about." }
     - { name: "payload", type: "TEXT", doc: "JSON, validated against `type@v`'s schema." }
     - { name: "payload_hash", type: "TEXT", doc: "Content hash when the body lives in the content store." }
@@ -877,23 +879,41 @@
     - { name: "captured_at", type: "TEXT", doc: "When it was recorded (RFC 3339)." }
     - { name: "turn_id", type: "INTEGER", doc: "The agent turn it ran in (v_agent_turn.id), if it ran in one." }
 - name: thread
-  version: 1
-  description: "Threads: independent lines of thought inside a stream, each with its own agent session."
+  version: 2
+  description: "Threads: independent lines of the person's work inside a stream. A thread needs no agent and may have several: its agent sessions are v_agent_session rows."
   columns:
     - { name: "id", type: "INTEGER", doc: "Thread id." }
     - { name: "stream_id", type: "INTEGER", doc: "Owning stream (v_stream.id)." }
     - { name: "title", type: "TEXT", doc: "Display name." }
     - { name: "status", type: "TEXT", doc: "`active` (the stream's writer), `queued` (read-only) or `closed`." }
-    - { name: "agent", type: "TEXT", doc: "Agent harness: `claude`, `codex`, `opencode`, or `acp` (an Agent Client Protocol agent)." }
     - { name: "sort_index", type: "INTEGER", doc: "Order within the stream." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "closed_at", type: "TEXT", doc: "Set when the thread was closed." }
     - { name: "archived_at", type: "TEXT", doc: "Set when the thread was archived." }
-    - { name: "acp_agent", type: "TEXT", doc: "For an `acp` thread, which ACP agent it runs (`claude`, `gemini`, a project `acpAgents` name); NULL otherwise." }
   tests:
     - { not_null: id }
     - { unique: id }
+- name: agent_session
+  version: 1
+  description: "Agent sessions: the agent slots a person opened on a thread — a terminal agent, an ACP chat, or a one-shot action. The row is the slot, not the process: a harness process ending leaves it open; closing the session, its thread or its stream's archive closes it."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Session id (its ref is `agent_session:ses<id>`)." }
+    - { name: "thread_id", type: "INTEGER", doc: "The thread it's on (v_thread.id)." }
+    - { name: "kind", type: "TEXT", doc: "`terminal` (a harness in a PTY), `chat` (an ACP agent) or `action` (a one-shot session)." }
+    - { name: "harness", type: "TEXT", doc: "What runs in it: `claude`, `codex`, `opencode`, or `acp` (an Agent Client Protocol agent)." }
+    - { name: "acp_agent", type: "TEXT", doc: "For an `acp` session, which ACP agent it runs (`claude`, `gemini`, a project `acpAgents` name); NULL otherwise." }
+    - { name: "title", type: "TEXT", doc: "What the person called it; empty until renamed." }
+    - { name: "resume_session_id", type: "TEXT", doc: "The harness's own session id, to resume it; empty when unknown." }
+    - { name: "host", type: "TEXT", doc: "The host it runs on; NULL is the local machine." }
+    - { name: "opened_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "closed_at", type: "TEXT", doc: "When its slot was closed; NULL while open." }
+    - { name: "closed_reason", type: "TEXT", doc: "`closed` (closed itself), `thread_closed` or `stream_archived`; NULL while open." }
+    - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+  tests:
+    - { not_null: id }
+    - { unique: id }
+    - { relationships: { column: thread_id, to: thread, field: id } }
 - name: asset
   version: 1
   description: "Each asset's last recompute: derived data computed from tables — the metric cube, a materialized model — recomputed when a commit touches one of its inputs, or on its clock; and its last failure, until one succeeds."
@@ -1182,7 +1202,7 @@
     - { not_null: page }
     - { relationships: { column: page, to: knowledge_page, field: ref } }
 - name: model
-  version: 1
+  version: 2
   description: "Models: every published view, as compiled at this open — core ones and each extension's. Read a model's columns in `v_model_column`, what it reads in `v_model_lineage` and its declared tests' results in `v_model_test`."
   columns:
     - { name: view, type: TEXT, doc: "The view to query (`v_work_item`)." }

@@ -178,7 +178,11 @@ pub fn create_worktree_op(deps: StreamDeps) -> Op {
             })
         })),
     )
-    .open_to(Invokers::HUMAN_ONLY)
+    .open_to(Invokers {
+        human: true,
+        agent: true,
+        lens: false,
+    })
 }
 
 /// `stream.adopt_worktree { path, title }`.

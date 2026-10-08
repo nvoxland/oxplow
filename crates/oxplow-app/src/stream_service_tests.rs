@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use oxplow_db::{Database, SqliteStreamStore, SqliteThreadStore};
+use oxplow_db::{Database, SqliteAgentSessionStore, SqliteStreamStore, SqliteThreadStore};
 use oxplow_domain::stores::ThreadStore as _;
 use oxplow_domain::{AgentKind, DomainError, StreamKind};
 use oxplow_session::{SessionError, StreamService, WorkspaceLayout};
@@ -63,7 +63,8 @@ fn service_running(project: &Path, agent: AgentKind, acp_agent: Option<&str>) ->
         WorkspaceLayout::for_project(project),
         Arc::new(GitProvider),
         Arc::new(SqliteStreamStore::new(db.clone())),
-        Arc::new(SqliteThreadStore::new(db)),
+        Arc::new(SqliteThreadStore::new(db.clone())),
+        Arc::new(SqliteAgentSessionStore::new(db)),
         Arc::new(move || (agent, acp_agent.clone())),
     )
 }
@@ -81,15 +82,21 @@ async fn the_seeded_thread_runs_the_projects_default_agent() {
     let svc = StreamService::new(
         WorkspaceLayout::for_project(&project),
         Arc::new(GitProvider),
-        Arc::new(SqliteStreamStore::new(db)),
+        Arc::new(SqliteStreamStore::new(db.clone())),
         thread_store.clone(),
+        Arc::new(SqliteAgentSessionStore::new(db.clone())),
         Arc::new(|| (AgentKind::Acp, Some("fake".to_string()))),
     );
     let primary = svc.ensure_primary().await.unwrap();
     let threads = thread_store.list_for_stream(&primary.id).await.unwrap();
     assert_eq!(threads.len(), 1);
+    let session = SqliteAgentSessionStore::new(db)
+        .newest_for_thread(threads[0].id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(
-        (threads[0].agent, threads[0].acp_agent.as_deref()),
+        (session.harness, session.acp_agent.as_deref()),
         (AgentKind::Acp, Some("fake"))
     );
 }

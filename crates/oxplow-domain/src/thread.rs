@@ -1,15 +1,15 @@
 //! Thread domain type (was "batch" in earlier TS code).
 //!
-//! A thread is a unit of agent work scoped to a stream. Multiple
-//! threads can run concurrently per stream; one is "selected" at a
-//! time for UI focus.
+//! A thread is a line of the person's work inside a stream. It needs no
+//! agent and may have several (its `agent_session`s, see
+//! [`crate::agent_session`]). Multiple threads can run concurrently per
+//! stream; one is "selected" at a time for UI focus.
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::ids::{NoteId, StreamId, ThreadId};
 use crate::time::Timestamp;
-use crate::AgentKind;
 
 /// Thread lifecycle status — mirrors the TS `ThreadState` shape.
 ///
@@ -51,15 +51,6 @@ pub struct Thread {
     pub title: String,
     pub status: ThreadStatus,
     pub sort_index: i64,
-    /// Which pane (working/talking) is the agent's primary attach point.
-    pub pane_target: String,
-    /// Agent implementation assigned to this thread at creation time.
-    pub agent: AgentKind,
-    /// For an `Acp` thread, the ACP agent's name (see `acpAgents`);
-    /// `None` otherwise.
-    #[serde(default)]
-    pub acp_agent: Option<String>,
-    pub resume_session_id: String,
     pub summary: String,
     pub summary_updated_at: Option<Timestamp>,
     /// Timestamp when the thread was closed (status transitions to
@@ -76,6 +67,27 @@ pub struct Thread {
     pub archived_at: Option<Timestamp>,
 }
 
+impl Thread {
+    /// A new, active thread titled `title` on `stream`, not yet stored
+    /// (its id is the placeholder).
+    pub fn seed(stream_id: StreamId, title: impl Into<String>, now: Timestamp) -> Self {
+        Thread {
+            id: ThreadId::placeholder(),
+            stream_id,
+            title: title.into(),
+            status: ThreadStatus::Active,
+            sort_index: 0,
+            summary: String::new(),
+            summary_updated_at: None,
+            closed_at: None,
+            custom_prompt: None,
+            created_at: now,
+            updated_at: now,
+            archived_at: None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -85,21 +97,7 @@ mod tests {
         let now = Timestamp::from_unix_ms(1_700_000_000_000);
         let t = Thread {
             id: ThreadId::new(1),
-            stream_id: StreamId::new(1),
-            title: "explore".into(),
-            status: ThreadStatus::Active,
-            sort_index: 0,
-            pane_target: "working".into(),
-            agent: AgentKind::Claude,
-            acp_agent: None,
-            resume_session_id: String::new(),
-            summary: String::new(),
-            summary_updated_at: None,
-            closed_at: None,
-            custom_prompt: None,
-            created_at: now,
-            updated_at: now,
-            archived_at: None,
+            ..Thread::seed(StreamId::new(1), "explore", now)
         };
         let json = serde_json::to_string(&t).unwrap();
         let back: Thread = serde_json::from_str(&json).unwrap();

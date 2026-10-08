@@ -39,8 +39,8 @@ use std::sync::Arc;
 
 use oxplow_db::EffortStore;
 use oxplow_db::{
-    NewAgentTokenUsage, NewFact, NewMetricCapture, SqliteEffortStore, SqliteFactStore,
-    SqliteThreadStore, SqliteTokenUsageStore,
+    NewAgentTokenUsage, NewFact, NewMetricCapture, SqliteAgentSessionStore, SqliteEffortStore,
+    SqliteFactStore, SqliteThreadStore, SqliteTokenUsageStore,
 };
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::{AgentKind, DomainError, StreamId, ThreadId};
@@ -356,6 +356,7 @@ pub struct TokenUsageService {
     usage: Arc<SqliteTokenUsageStore>,
     efforts: Arc<SqliteEffortStore>,
     threads: Arc<SqliteThreadStore>,
+    sessions: Arc<SqliteAgentSessionStore>,
     /// Durable fact layer (epic tsk12): per-kind token totals land as facts
     /// on the `oxplow.tokens` measure.
     facts: Arc<SqliteFactStore>,
@@ -366,14 +367,26 @@ impl TokenUsageService {
         usage: Arc<SqliteTokenUsageStore>,
         efforts: Arc<SqliteEffortStore>,
         threads: Arc<SqliteThreadStore>,
+        sessions: Arc<SqliteAgentSessionStore>,
         facts: Arc<SqliteFactStore>,
     ) -> Self {
         Self {
             usage,
             efforts,
             threads,
+            sessions,
             facts,
         }
+    }
+
+    /// The harness that ran on `thread`: its newest session's.
+    async fn harness_of(&self, thread: ThreadId) -> Result<AgentKind, DomainError> {
+        Ok(self
+            .sessions
+            .newest_for_thread(thread)
+            .await?
+            .map(|s| s.harness)
+            .unwrap_or_default())
     }
 
     /// On Stop: parse the transcript tail since the last cursor, sum usage,
@@ -397,7 +410,7 @@ impl TokenUsageService {
         let Some(thread_row) = self.threads.get(thread).await? else {
             return Ok(None);
         };
-        let kind = thread_row.agent;
+        let kind = self.harness_of(*thread).await?;
         let stream_id = thread_row.stream_id.to_string();
 
         // Cursor key: the session id (1:1 with the transcript for Claude),
@@ -474,7 +487,7 @@ impl TokenUsageService {
             .insert_turns(
                 thread,
                 &stream_id,
-                thread_row.agent,
+                self.harness_of(*thread).await?,
                 session_id,
                 vec![turn],
                 rec,

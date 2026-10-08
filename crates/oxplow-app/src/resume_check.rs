@@ -1,6 +1,6 @@
-//! Launch-time validation of a thread's Claude resume pointer.
+//! Launch-time validation of an agent session's Claude resume pointer.
 //!
-//! `thread.resume_session_id` drives `claude --resume <id>`. When the
+//! `agent_session.resume_session_id` drives `claude --resume <id>`. When the
 //! id points at a session whose transcript is gone (machine moved, id
 //! rotted, history pruned), Claude prints a raw `No conversation found
 //! with session ID …` error before our shell `||` net falls back to a
@@ -58,27 +58,25 @@ pub fn claude_resume_state(home: &Path, cwd: &str, session_id: &str) -> ResumeSt
     }
 }
 
-/// Forget thread `thread`'s resume pointer when it is still `session` —
-/// the launch found that session's transcript gone. Only that column, and
-/// only if nothing replaced it meanwhile: agent-session state, written the
-/// way hook ingest writes it (off the bus, `ipc-and-stores.md`).
+/// Forget agent session `session`'s resume pointer when it is still
+/// `resume` — the launch found that harness session's transcript gone.
+/// Only that column, and only if nothing replaced it meanwhile:
+/// agent-session state, written the way hook ingest writes it (off the
+/// bus, `ipc-and-stores.md`).
 pub async fn forget_missing(
     db: &oxplow_db::Database,
-    thread: oxplow_domain::ThreadId,
-    session: &str,
+    session: oxplow_domain::AgentSessionId,
+    resume: &str,
 ) -> Result<(), oxplow_domain::DomainError> {
-    let (session, now) = (
-        session.to_string(),
-        oxplow_domain::Timestamp::now().to_string(),
-    );
+    let resume = resume.to_string();
     db.transaction(move |tx| {
-        tx.execute(
-            "UPDATE threads SET resume_session_id = '', updated_at = ?3
-              WHERE id = ?1 AND resume_session_id = ?2",
-            rusqlite::params![thread.value(), session, now],
+        oxplow_db::agent_session_store::forget_resume_tx(
+            tx,
+            session,
+            &resume,
+            oxplow_domain::Timestamp::now(),
         )
         .map(|_| ())
-        .map_err(oxplow_db::map_sql_err)
     })
     .await
 }
@@ -87,33 +85,47 @@ pub async fn forget_missing(
 mod tests {
     use super::*;
 
-    /// tsk785: the stale pointer is forgotten only while it is still the
-    /// one the launch found gone — a session that replaced it stays.
+    /// The stale pointer is forgotten only while it is still the one the
+    /// launch found gone — a harness session that replaced it stays.
     #[tokio::test]
     async fn forgetting_a_missing_session_leaves_a_newer_one() {
-        use oxplow_domain::stores::ThreadStore as _;
+        use oxplow_db::agent_session_store::{get_tx, newest_for_thread_tx, set_resume_tx};
         let fx = crate::test_fixtures::services_with_effort().await;
-        let svc = &fx.svc;
-        let set = |session: &'static str| async move {
-            let mut t = svc.thread_store.get(&fx.thread).await.unwrap().unwrap();
-            t.resume_session_id = session.into();
-            svc.thread_store.upsert(&t).await.unwrap();
-        };
-        let now = || async {
-            svc.thread_store
-                .get(&fx.thread)
+        let (db, thread) = (fx.svc.db.clone(), fx.thread);
+        let session = db
+            .read(move |c| newest_for_thread_tx(c, thread))
+            .await
+            .unwrap()
+            .expect("the seeded thread has a session")
+            .id;
+        let set = |resume: &'static str| {
+            let db = db.clone();
+            async move {
+                db.transaction(move |tx| {
+                    set_resume_tx(tx, session, resume, oxplow_domain::Timestamp::now())
+                })
                 .await
                 .unwrap()
-                .unwrap()
-                .resume_session_id
+            }
+        };
+        let now = || {
+            let db = db.clone();
+            async move {
+                db.read(move |c| get_tx(c, session))
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .resume_session_id
+            }
         };
         set("newer").await;
-        forget_missing(&svc.db, fx.thread, "gone").await.unwrap();
+        forget_missing(&db, session, "gone").await.unwrap();
         assert_eq!(now().await, "newer");
         set("gone").await;
-        forget_missing(&svc.db, fx.thread, "gone").await.unwrap();
+        forget_missing(&db, session, "gone").await.unwrap();
         assert_eq!(now().await, "");
     }
+
     use std::fs;
 
     #[test]

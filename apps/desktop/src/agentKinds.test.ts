@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import type { AcpAgentListing } from "./tauri-bridge/generated/bindings.js";
-import { agentChoices, parseAgentChoice, threadAgentLabel } from "./agentKinds.js";
+import { agentChoices, parseAgentChoice, sessionLabel } from "./agentKinds.js";
 
 const acp = (name: string, over: Partial<AcpAgentListing> = {}): AcpAgentListing => ({
   name,
@@ -33,7 +33,7 @@ test("a choice value parses back to the agent and ACP agent", () => {
   expect(parseAgentChoice("acp:gemini")).toEqual({ agent: "acp", acpAgent: "gemini" });
 });
 
-test("an ACP thread's label names its ACP agent", () => {
-  expect(threadAgentLabel({ agent: "acp", acp_agent: "gemini" })).toBe("ACP · gemini");
-  expect(threadAgentLabel({ agent: "claude", acp_agent: null })).toBe("Claude");
+test("an ACP session's label names its ACP agent", () => {
+  expect(sessionLabel({ harness: "acp", acpAgent: "gemini" })).toBe("ACP · gemini");
+  expect(sessionLabel({ harness: "claude", acpAgent: null })).toBe("Claude");
 });

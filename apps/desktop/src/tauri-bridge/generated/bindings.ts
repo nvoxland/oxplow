@@ -612,8 +612,14 @@ export const commands = {
 	getAgentTurn: (turnId: AgentTurnId) => typedError<{
 	id: AgentTurnId,
 	thread_id: ThreadId,
+	/**
+	 *  The agent session it ran in; `None` for a turn no session claims
+	 *  (a hook from an agent oxplow didn't start).
+	 */
+	agent_session_id: AgentSessionId | null,
 	prompt: string,
 	answer: string | null,
+	// The harness's own session id, when it reported one.
 	session_id: string | null,
 	started_at: Timestamp,
 	ended_at: Timestamp | null,
@@ -1250,6 +1256,8 @@ export type AgentKind = "claude" | "codex" | "opencode" |
  */
 "acp";
 
+export type AgentSessionId = string;
+
 export type AgentStatus = {
 	thread_id: ThreadId,
 	state: AgentStatusState,
@@ -1274,8 +1282,14 @@ export type AgentStatusState = "idle" | "running" | "awaiting_user" | "stopped" 
 export type AgentTurn = {
 	id: AgentTurnId,
 	thread_id: ThreadId,
+	/**
+	 *  The agent session it ran in; `None` for a turn no session claims
+	 *  (a hook from an agent oxplow didn't start).
+	 */
+	agent_session_id: AgentSessionId | null,
 	prompt: string,
 	answer: string | null,
+	// The harness's own session id, when it reported one.
 	session_id: string | null,
 	started_at: Timestamp,
 	ended_at: Timestamp | null,
@@ -1328,6 +1342,11 @@ export type Anchors = {
 	effort_id: EffortId | null,
 	// `agent_turn.id`.
 	turn_id: number | null,
+	/**
+	 *  The agent session it happened in (`agent_session.id`) — not the
+	 *  harness's own session id, which `agent_turn.session_id` holds.
+	 */
+	agent_session_id: AgentSessionId | null,
 	// `snapshot.id`.
 	snapshot_id: number | null,
 };
@@ -5524,16 +5543,6 @@ export type Thread = {
 	title: string,
 	status: ThreadStatus,
 	sort_index: number,
-	// Which pane (working/talking) is the agent's primary attach point.
-	pane_target: string,
-	// Agent implementation assigned to this thread at creation time.
-	agent: AgentKind,
-	/**
-	 *  For an `Acp` thread, the ACP agent's name (see `acpAgents`);
-	 *  `None` otherwise.
-	 */
-	acp_agent?: string | null,
-	resume_session_id: string,
 	summary: string,
 	summary_updated_at: Timestamp | null,
 	/**

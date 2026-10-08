@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use rusqlite::params;
 
 use oxplow_domain::stores::ThreadStore;
-use oxplow_domain::{AgentKind, DomainError, StreamId, Thread, ThreadId, ThreadStatus, Timestamp};
+use oxplow_domain::{DomainError, StreamId, Thread, ThreadId, ThreadStatus, Timestamp};
 
 use crate::database::Database;
 use crate::database::{string_to_ts, ts_to_string};
@@ -37,32 +37,12 @@ fn str_to_status(s: &str) -> Result<ThreadStatus, DomainError> {
     }
 }
 
-fn agent_to_str(agent: AgentKind) -> &'static str {
-    agent.as_str()
-}
-
-fn str_to_agent(s: &str) -> Result<AgentKind, DomainError> {
-    match s {
-        "claude" => Ok(AgentKind::Claude),
-        "codex" => Ok(AgentKind::Codex),
-        "opencode" => Ok(AgentKind::Opencode),
-        "acp" => Ok(AgentKind::Acp),
-        other => Err(DomainError::Invalid(format!(
-            "unknown thread agent: {other}"
-        ))),
-    }
-}
-
 fn row_to_thread(row: &rusqlite::Row<'_>) -> rusqlite::Result<Thread> {
     let id: i64 = row.get("id")?;
     let stream_id: i64 = row.get("stream_id")?;
     let title: String = row.get("title")?;
     let status: String = row.get("status")?;
     let sort_index: i64 = row.get("sort_index")?;
-    let pane_target: String = row.get("pane_target")?;
-    let agent: String = row.get("agent")?;
-    let acp_agent: Option<String> = row.get("acp_agent")?;
-    let resume_session_id: String = row.get("resume_session_id")?;
     let summary: String = row.get("summary")?;
     let summary_updated_at: Option<String> = row.get("summary_updated_at")?;
     let closed_at: Option<String> = row.get("closed_at")?;
@@ -79,10 +59,6 @@ fn row_to_thread(row: &rusqlite::Row<'_>) -> rusqlite::Result<Thread> {
         title,
         status: str_to_status(&status).map_err(map_err)?,
         sort_index,
-        pane_target,
-        agent: str_to_agent(&agent).map_err(map_err)?,
-        acp_agent,
-        resume_session_id,
         summary,
         summary_updated_at: summary_updated_at
             .map(|s| string_to_ts(&s))
@@ -135,18 +111,13 @@ pub fn upsert_tx(conn: &rusqlite::Connection, thread: &Thread) -> rusqlite::Resu
     };
     conn.execute(
         "INSERT INTO threads (
-            id, stream_id, title, status, sort_index, pane_target, agent,
-            resume_session_id, summary, summary_updated_at, closed_at,
-            custom_prompt, created_at, updated_at, acp_agent
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+            id, stream_id, title, status, sort_index, summary, summary_updated_at,
+            closed_at, custom_prompt, created_at, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
          ON CONFLICT(id) DO UPDATE SET
             title = excluded.title,
             status = excluded.status,
             sort_index = excluded.sort_index,
-            pane_target = excluded.pane_target,
-            agent = excluded.agent,
-            acp_agent = excluded.acp_agent,
-            resume_session_id = excluded.resume_session_id,
             summary = excluded.summary,
             summary_updated_at = excluded.summary_updated_at,
             closed_at = excluded.closed_at,
@@ -158,16 +129,12 @@ pub fn upsert_tx(conn: &rusqlite::Connection, thread: &Thread) -> rusqlite::Resu
             thread.title,
             status_to_str(thread.status),
             thread.sort_index,
-            thread.pane_target,
-            agent_to_str(thread.agent),
-            thread.resume_session_id,
             thread.summary,
             thread.summary_updated_at.map(ts_to_string),
             thread.closed_at.map(ts_to_string),
             thread.custom_prompt,
             ts_to_string(thread.created_at),
             ts_to_string(thread.updated_at),
-            thread.acp_agent,
         ],
     )?;
     Ok(if thread.id.is_placeholder() {
@@ -303,21 +270,7 @@ mod tests {
     fn thread(stream_id: StreamId) -> Thread {
         Thread {
             id: ThreadId::new(1),
-            stream_id,
-            title: "explore".into(),
-            status: ThreadStatus::Active,
-            sort_index: 0,
-            pane_target: "working".into(),
-            agent: oxplow_domain::AgentKind::Claude,
-            acp_agent: None,
-            resume_session_id: String::new(),
-            summary: String::new(),
-            summary_updated_at: None,
-            closed_at: None,
-            custom_prompt: None,
-            created_at: ts(),
-            updated_at: ts(),
-            archived_at: None,
+            ..Thread::seed(stream_id, "explore", ts())
         }
     }
 
@@ -327,29 +280,6 @@ mod tests {
         let t = thread(sid);
         store.upsert(&t).await.unwrap();
         assert_eq!(store.get(&t.id).await.unwrap().unwrap(), t);
-    }
-
-    #[tokio::test]
-    async fn every_agent_kind_round_trips() {
-        let (store, sid) = make_store().await;
-        for (i, agent) in [
-            oxplow_domain::AgentKind::Claude,
-            oxplow_domain::AgentKind::Codex,
-            oxplow_domain::AgentKind::Opencode,
-            oxplow_domain::AgentKind::Acp,
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let mut t = thread(sid);
-            t.id = ThreadId::new(100 + i as i64);
-            t.status = ThreadStatus::Queued;
-            t.agent = agent;
-            t.acp_agent = (agent == oxplow_domain::AgentKind::Acp).then(|| "gemini".to_string());
-            store.upsert(&t).await.unwrap();
-            let back = store.get(&t.id).await.unwrap().unwrap();
-            assert_eq!((back.agent, back.acp_agent), (agent, t.acp_agent));
-        }
     }
 
     #[tokio::test]

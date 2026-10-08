@@ -236,6 +236,8 @@ pub fn core_kinds() -> KindRegistry {
         KindSpec::new("config", r"^[A-Za-z][A-Za-z0-9]*$"),
         KindSpec::new("finding", r"^\S+$"),
         KindSpec::new("thread_note", &prefixed("not")),
+        // An agent slot opened on a thread (`agent_session.id`).
+        KindSpec::new("agent_session", &prefixed("ses")),
         KindSpec::new("run", r"^\d+$"),
         // A command waiting for a person's decision (`command_proposal.id`, P6b).
         KindSpec::new("proposal", r"^[0-9]+$"),

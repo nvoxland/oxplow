@@ -283,7 +283,12 @@ pub fn create_op(config: Arc<RwLock<OxplowConfig>>) -> Op {
                     if source.stream_id != stream {
                         return Err(invalid("/from", format!("`{from}` is on another stream")));
                     }
-                    (source.agent, source.acp_agent)
+                    let session =
+                        oxplow_db::agent_session_store::newest_for_thread_tx(ctx.conn, source.id)?;
+                    (
+                        session.as_ref().map(|s| s.harness).unwrap_or_default(),
+                        session.and_then(|s| s.acp_agent),
+                    )
                 }
                 None => {
                     // Named or not, one rule for the default (tsk970).
@@ -344,10 +349,6 @@ pub fn create_op(config: Arc<RwLock<OxplowConfig>>) -> Op {
                     ThreadStatus::Active
                 },
                 sort_index: next_sort,
-                pane_target: "working".into(),
-                agent,
-                acp_agent,
-                resume_session_id: String::new(),
                 summary: String::new(),
                 summary_updated_at: None,
                 closed_at: None,
@@ -357,6 +358,11 @@ pub fn create_op(config: Arc<RwLock<OxplowConfig>>) -> Op {
                 archived_at: None,
             };
             thread.id = save(ctx, &thread)?;
+            oxplow_db::agent_session_store::insert_tx(
+                ctx.conn,
+                &oxplow_domain::agent_session::NewAgentSession::of(thread.id, agent, acp_agent),
+                now,
+            )?;
             Ok(result(&thread))
         })),
     )
@@ -413,9 +419,10 @@ pub fn set_prompt_op() -> Op {
     .open_to(Invokers::NO_AGENT)
 }
 
-/// `thread.promote { thread }` — a person's: the writer is who may change
-/// the worktree. The current writer is demoted in the same transaction;
-/// undone by promoting it back.
+/// `thread.promote { thread }` — a person's or an agent's: the writer is
+/// who may change the worktree, and handing it to the thread that should
+/// write next is part of an agent's work. The current writer is demoted in
+/// the same transaction; undone by promoting it back.
 pub fn promote_op() -> Op {
     Op::new(
         "threads.write",
@@ -462,11 +469,11 @@ pub fn promote_op() -> Op {
             })
         })),
     )
-    .open_to(Invokers::NO_AGENT)
 }
 
-/// `thread.demote { thread }` — a person's: the stream's writer joins the
-/// queue, leaving the stream with none. Undone by promoting it back; the
+/// `thread.demote { thread }` — a person's or an agent's (handing the
+/// worktree back): the stream's writer joins the queue, leaving the stream
+/// with none. Undone by promoting it back; the
 /// inverse of a promote onto a stream that had no writer.
 pub fn demote_op() -> Op {
     Op::new(
@@ -489,7 +496,6 @@ pub fn demote_op() -> Op {
             })
         })),
     )
-    .open_to(Invokers::NO_AGENT)
 }
 
 /// `thread.close { thread }`: its open effort closes in the same
@@ -532,14 +538,15 @@ pub fn close_op(acp: Arc<crate::acp::manager::AcpManager>) -> Op {
                 )
                 .map_err(CommandError::from)?;
             }
-            let after_commit: Option<Box<dyn FnOnce() + Send + Sync>> =
-                (thread.agent == AgentKind::Acp).then(|| {
-                    let acp = acp.clone();
-                    // Not open is fine: there's nothing to stop.
-                    Box::new(move || {
-                        let _ = acp.close(&id);
-                    }) as Box<dyn FnOnce() + Send + Sync>
-                });
+            let runs_acp = oxplow_db::agent_session_store::newest_for_thread_tx(ctx.conn, id)?
+                .is_some_and(|s| s.harness == AgentKind::Acp);
+            let after_commit: Option<Box<dyn FnOnce() + Send + Sync>> = runs_acp.then(|| {
+                let acp = acp.clone();
+                // Not open is fine: there's nothing to stop.
+                Box::new(move || {
+                    let _ = acp.close(&id);
+                }) as Box<dyn FnOnce() + Send + Sync>
+            });
             Ok(HandlerOutput {
                 inverse: call(REOPEN, json!({ "thread": input.thread })),
                 after_commit,
@@ -691,6 +698,19 @@ mod tests {
         fx.svc.thread_store.get(&id).await.unwrap().unwrap()
     }
 
+    /// The thread's agent session.
+    async fn session(
+        fx: &EffortFixture,
+        id: ThreadId,
+    ) -> oxplow_domain::agent_session::AgentSession {
+        fx.svc
+            .agent_session_store
+            .newest_for_thread(id)
+            .await
+            .unwrap()
+            .expect("the thread has a session")
+    }
+
     async fn create(fx: &EffortFixture, title: &str) -> ThreadId {
         let stream = thread(fx, fx.thread).await.stream_id;
         let out = run(
@@ -722,28 +742,23 @@ mod tests {
         .await
         .unwrap();
         let fork: Thread = serde_json::from_value(fork.result).unwrap();
-        assert_eq!(fork.agent, thread(&fx, fx.thread).await.agent);
+        assert_eq!(
+            session(&fx, fork.id).await.harness,
+            session(&fx, fx.thread).await.harness
+        );
         assert_eq!(fork.status, ThreadStatus::Queued);
     }
 
     /// Promoting demotes the writer in the same run; undoing it promotes
-    /// the old writer back. An agent may not promote.
+    /// the old writer back. An agent may promote too: handing the worktree
+    /// to the thread that should write next is part of its work.
     #[tokio::test]
-    async fn promote_is_one_run_undoable_and_a_persons() {
+    async fn promote_is_one_run_and_undoable_by_a_person_or_an_agent() {
         let fx = services_with_effort().await;
         let second = create(&fx, "second").await;
-        let denied = run(
-            &fx,
-            &agent(&fx),
-            PROMOTE,
-            json!({ "thread": thread_ref(second) }),
-        )
-        .await
-        .unwrap_err();
-        assert!(matches!(denied, CommandError::Denied { .. }), "{denied:?}");
         let out = run(
             &fx,
-            &Actor::Human,
+            &agent(&fx),
             PROMOTE,
             json!({ "thread": thread_ref(second) }),
         )
@@ -782,16 +797,13 @@ mod tests {
     }
 
     /// tsk787: promoting onto a stream with no writer undoes by demoting
-    /// it back; `oxplow.thread.demote` is a person's, and undoes by promoting.
+    /// it back; `oxplow.thread.demote` (anyone's: an agent hands the
+    /// worktree back when it's done) undoes by promoting.
     #[tokio::test]
     async fn promote_from_no_writer_undoes_by_demoting() {
         let fx = services_with_effort().await;
         let me = thread_ref(fx.thread);
-        let denied = run(&fx, &agent(&fx), DEMOTE, json!({ "thread": me }))
-            .await
-            .unwrap_err();
-        assert!(matches!(denied, CommandError::Denied { .. }), "{denied:?}");
-        let demoted = run(&fx, &Actor::Human, DEMOTE, json!({ "thread": me }))
+        let demoted = run(&fx, &agent(&fx), DEMOTE, json!({ "thread": me }))
             .await
             .unwrap();
         assert_eq!(thread(&fx, fx.thread).await.status, ThreadStatus::Queued);
@@ -1027,8 +1039,9 @@ mod tests {
         .await
         .unwrap();
         let fork: Thread = serde_json::from_value(fork.result).unwrap();
+        let fork = session(&fx, fork.id).await;
         assert_eq!(
-            (fork.agent, fork.acp_agent.as_deref()),
+            (fork.harness, fork.acp_agent.as_deref()),
             (AgentKind::Acp, Some("gemini"))
         );
     }

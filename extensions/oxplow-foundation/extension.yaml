@@ -418,15 +418,15 @@ commands:
     invokers: { human: true, agent: true, lens: true }
     ui: { label: "New Thread…", group: Tasks, form: new-thread }
   - name: thread.demote
-    summary: "Move a stream's writer back into the queue, leaving the stream with no writer. A person's."
+    summary: "Move a stream's writer back into the queue, leaving the stream with no writer."
     capability: threads.write
     op: demote
-    invokers: { human: true, agent: false, lens: true }
+    invokers: { human: true, agent: true, lens: true }
   - name: thread.promote
-    summary: "Make a thread its stream's writer (the one thread whose agent may change the worktree); the current writer joins the queue. A person's."
+    summary: "Make a thread its stream's writer (the one thread whose agent may change the worktree); the current writer joins the queue. Undo hands the worktree back."
     capability: threads.write
     op: promote
-    invokers: { human: true, agent: false, lens: true }
+    invokers: { human: true, agent: true, lens: true }
   - name: thread.rename
     summary: "Rename a thread (`thread:thr12`)."
     capability: threads.write
@@ -452,86 +452,86 @@ commands:
     summary: "Fetch from a remote."
     capability: vcs.remote
     op: fetch
-    invokers: { human: true, agent: false, lens: false }
+    invokers: { human: true, agent: true, lens: false }
   - name: vcs.pull
     summary: "Pull into the stream's branch (its upstream, or a named remote branch)."
     capability: vcs.remote
     op: pull
-    invokers: { human: true, agent: false, lens: false }
+    invokers: { human: true, agent: true, lens: false }
     ui: {"label": "Pull Changes", "group": "Git", "input": {"stream": "{{stream}}"}, "background": true}
   - name: vcs.push
     summary: "Push the stream's branch (to its upstream, or a named remote branch)."
     capability: vcs.remote
     op: push
-    invokers: { human: true, agent: false, lens: false }
+    invokers: { human: true, agent: true, lens: false }
     ui: {"label": "Push Changes", "group": "Git", "input": {"stream": "{{stream}}"}, "background": true}
   # vcs.write
   - name: git.cherry_pick
     summary: "Apply one commit onto the stream's branch."
     capability: vcs.write
     op: cherry_pick
-    invokers: { human: true, agent: false, lens: false }
+    invokers: { human: true, agent: true, lens: false }
   - name: git.ignore
     summary: "Add a pattern to the workspace's `.gitignore`."
     capability: vcs.write
     op: ignore
-    invokers: { human: true, agent: false, lens: false }
+    invokers: { human: true, agent: true, lens: false }
   - name: git.rebase
     summary: "Rebase the stream's branch onto a revision (rewrites its commits)."
     capability: vcs.write
     op: rebase
-    invokers: { human: true, agent: false, lens: false }
+    invokers: { human: true, agent: true, lens: false }
     confirm: destructive
   - name: git.revert
     summary: "Commit the inverse of one commit onto the stream's branch."
     capability: vcs.write
     op: revert
-    invokers: { human: true, agent: false, lens: false }
+    invokers: { human: true, agent: true, lens: false }
     confirm: destructive
   - name: vcs.checkout_branch
     summary: "Switch the stream's workspace to a branch (creating it with `create`)."
     capability: vcs.write
     op: checkout_branch
-    invokers: { human: true, agent: false, lens: false }
+    invokers: { human: true, agent: true, lens: false }
   - name: vcs.commit
     summary: "Commit the stream's changes (untracked files too, unless `include_untracked: false`); returns the new revision."
     capability: vcs.write
     op: commit
-    invokers: { human: true, agent: false, lens: false }
+    invokers: { human: true, agent: true, lens: false }
     ui: { label: "Commit Changes…", group: Git, form: commit }
   - name: vcs.delete_branch
     summary: "Delete a branch (`force` even when unmerged)."
     capability: vcs.write
     op: delete_branch
-    invokers: { human: true, agent: false, lens: false }
+    invokers: { human: true, agent: true, lens: false }
     confirm: destructive
   - name: vcs.discard
     summary: "Throw away the workspace's changes to paths, back to the head's version."
     capability: vcs.write
     op: discard
-    invokers: { human: true, agent: false, lens: false }
+    invokers: { human: true, agent: true, lens: false }
     confirm: destructive
   - name: vcs.merge
     summary: "Merge a revision into the stream's branch; the result lists any conflicts left after oxplow's smart merge."
     capability: vcs.write
     op: merge
-    invokers: { human: true, agent: false, lens: false }
+    invokers: { human: true, agent: true, lens: false }
     confirm: destructive
   - name: vcs.rename_branch
     summary: "Rename a branch."
     capability: vcs.write
     op: rename_branch
-    invokers: { human: true, agent: false, lens: false }
+    invokers: { human: true, agent: true, lens: false }
   - name: vcs.resolve_conflict
     summary: "Settle one conflicted path: take `ours`, `theirs`, or `auto` (smart merge)."
     capability: vcs.write
     op: resolve_conflict
-    invokers: { human: true, agent: false, lens: false }
+    invokers: { human: true, agent: true, lens: false }
   - name: vcs.stage
     summary: "Stage paths for the next commit."
     capability: vcs.write
     op: stage
-    invokers: { human: true, agent: false, lens: false }
+    invokers: { human: true, agent: true, lens: false }
   # window.show — the window's; a person's.
   - name: window.find
     summary: "Show the find bar in the file the window shows."
@@ -606,8 +606,8 @@ commands:
     invokers: { human: true, agent: false, lens: false }
     confirm: destructive
   - name: stream.create_worktree
-    summary: "Create a stream on a new worktree beside the project (`git worktree add`), on a new branch forked from `branch_source`. A person's."
+    summary: "Create a stream on a new worktree beside the project (`git worktree add`), on a new branch forked from `branch_source`."
     capability: worktrees.write
     op: create_worktree
-    invokers: { human: true, agent: false, lens: false }
+    invokers: { human: true, agent: true, lens: false }
     ui: {"label": "New Stream…", "group": "Tasks", "keywords": ["worktree", "branch"], "form": "page:new-stream"}

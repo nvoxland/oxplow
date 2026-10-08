@@ -12,7 +12,7 @@ const LABELS: Record<AgentKind, string> = {
   // The brand styles itself lowercase, but next to "Claude" / "Codex"
   // a lowercase entry reads as a bug — match the picker's casing.
   opencode: "OpenCode",
-  // Agent Client Protocol: which agent is the thread's `acp_agent`.
+  // Agent Client Protocol: which agent is the session's `acp_agent`.
   acp: "ACP",
 };
 
@@ -20,10 +20,10 @@ export function agentLabel(agent: AgentKind): string {
   return LABELS[agent] ?? agent;
 }
 
-/// A thread's agent as the agent tab names it: "ACP · gemini" for an ACP
-/// thread.
-export function threadAgentLabel(thread: { agent: AgentKind; acp_agent?: string | null }): string {
-  return thread.agent === "acp" && thread.acp_agent ? `ACP · ${thread.acp_agent}` : agentLabel(thread.agent);
+/// An agent session as its tab names it: "ACP · gemini" for an ACP
+/// session.
+export function sessionLabel(session: { harness: AgentKind; acpAgent: string | null }): string {
+  return session.harness === "acp" && session.acpAgent ? `ACP · ${session.acpAgent}` : agentLabel(session.harness);
 }
 
 export interface AgentChoice {

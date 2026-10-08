@@ -1316,6 +1316,7 @@ fn record_take_tx(
         effort_id: take.effort_id,
         turn_id: take.turn_id,
         snapshot_id: Some(snapshot_id),
+        ..Anchors::default()
     })
     .with_subject([stream, snapshot_ref(snapshot_id)]);
     append_tx(tx, vocabulary, &env)?;
