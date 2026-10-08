@@ -745,8 +745,8 @@ provider (`ExternalWorkItems::provider`: id, declared features, and the
 implements, oxplow's own tasks included (`oxplow_tasks::OxplowTasks`) — each verb's
 input checked against its declared schema first) in
 `Services.work_items`, and its **other** declared commands on the bus as
-`<id>.<name>` (`External`, `Experimental`, all invokers; confirm /
-effect / undoable as declared). Its capability's verbs are never
+`<id>.<name>` (`External`, `Experimental`; the manifest's `invokers`,
+required like any command's; confirm / effect / undoable as declared). Its capability's verbs are never
 commands of their own: `work_item.<verb>` is the one write surface
 (P7.A1). A refusal —
 unapproved, unconfigured, a handshake that doesn't match — registers
@@ -757,7 +757,7 @@ doubles from `MachineEnv.provider_backoff` (1 s in the app, 0 in
 kills the process. **Its commands are its extension's**: the manifest
 declares each once over an operation its declarations list
 (`commands:` → `{ name: item.estimate, provider: fake, op: estimate,
-ui, … }`, [extensions.md](./extensions.md) "Commands"), so it has one id
+invokers, ui, … }`, [extensions.md](./extensions.md) "Commands"), so it has one id
 for every instance (`tracker.item.estimate`), registered by the
 extension reconciler whether or not an instance runs. Its spec takes the
 operation's input schema (plus an optional `instance`), effect and

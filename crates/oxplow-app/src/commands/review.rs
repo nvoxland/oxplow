@@ -17,7 +17,7 @@ use oxplow_domain::events::schema::{
     EffortClaimVerified, EffortClaimVerifiedV1, EffortDecisionReviewed, EffortDecisionReviewedV1,
 };
 use oxplow_domain::refs::build::{claim_ref, decision_ref, effort_ref};
-use oxplow_domain::{CommandCall, CommandError};
+use oxplow_domain::{CommandCall, CommandError, Invokers};
 use rusqlite::OptionalExtension;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -166,6 +166,7 @@ pub fn verify_claim_op() -> Op {
             )
         })),
     )
+    .open_to(Invokers::NO_AGENT)
 }
 
 /// `effort.unverify_claim { claim }`: take a verification back.
@@ -197,6 +198,7 @@ pub fn unverify_claim_op() -> Op {
             )
         })),
     )
+    .open_to(Invokers::NO_AGENT)
 }
 
 /// Move a decision's provenance from `from` to `to`, logging the
@@ -275,6 +277,9 @@ fn decision_op(op: &'static str, from: &'static [&'static str], to: &'static str
             review_decision(ctx, parse(input)?, from, to)
         })),
     )
+    // A person's review (through a lens too), never the agent's of its
+    // own work.
+    .open_to(oxplow_domain::Invokers::NO_AGENT)
 }
 
 /// `effort.confirm_decision { decision }`: an inferred decision is right.

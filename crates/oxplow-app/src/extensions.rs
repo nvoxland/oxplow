@@ -5454,6 +5454,7 @@ commands:
     summary: Note a thing.
     input_schema: { type: object, required: [id], properties: { id: { type: integer } } }
     entry: handlers/note.star
+    invokers: { human: true, agent: true, lens: true }
 ",
         );
         write(
@@ -7012,7 +7013,7 @@ commands:
             }
         };
         let manifest = "manifest: 2\nname: acme\nintent:\n  purpose: Count.\n  origin: thread:thr1\n  examples: []\n";
-        let command = "commands:\n  - name: spin\n    summary: Spin.\n    input_schema: { type: object }\n    entry: handlers/spin.star\n    examples:\n      - { name: once, input: {}, expect_commands: [] }\n";
+        let command = "commands:\n  - name: spin\n    summary: Spin.\n    input_schema: { type: object }\n    entry: handlers/spin.star\n    invokers: { human: true, agent: true, lens: true }\n    examples:\n      - { name: once, input: {}, expect_commands: [] }\n";
         let start = snapshot(vec![
             (
                 "oxplow/extensions/acme/extension.yaml",

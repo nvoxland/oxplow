@@ -4,6 +4,7 @@
 //! person confirms it and an agent's run becomes a proposal.
 
 use crate::commands::ops::Op;
+use oxplow_domain::Confirm;
 use std::sync::Arc;
 
 use oxplow_domain::CommandError;
@@ -57,6 +58,7 @@ pub fn restore_file_op(files: SnapshotFiles) -> Op {
             })
         })),
     )
+    .confirm_at_least(Confirm::Destructive)
 }
 
 #[cfg(test)]

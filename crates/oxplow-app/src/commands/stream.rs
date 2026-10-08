@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use oxplow_db::stream_store::{get_tx, upsert_tx};
 use oxplow_domain::refs::build::stream_ref;
-use oxplow_domain::{CommandCall, CommandError, Stream, StreamId, Timestamp};
+use oxplow_domain::{CommandCall, CommandError, Confirm, Invokers, Stream, StreamId, Timestamp};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -178,6 +178,7 @@ pub fn create_worktree_op(deps: StreamDeps) -> Op {
             })
         })),
     )
+    .open_to(Invokers::HUMAN_ONLY)
 }
 
 /// `stream.adopt_worktree { path, title }`.
@@ -201,6 +202,7 @@ pub fn adopt_worktree_op(deps: StreamDeps) -> Op {
             })
         })),
     )
+    .open_to(Invokers::HUMAN_ONLY)
 }
 
 /// `stream.archive { stream, delete_worktree? }`: refused while an agent
@@ -279,6 +281,8 @@ pub fn archive_op(deps: StreamDeps) -> Op {
             })
         })),
     )
+    .open_to(Invokers::HUMAN_ONLY)
+    .confirm_at_least(Confirm::Destructive)
 }
 
 /// `stream.rename { stream, title }`; an agent renames only its own
@@ -343,6 +347,7 @@ pub fn set_prompt_op() -> Op {
             })
         })),
     )
+    .open_to(Invokers::NO_AGENT)
 }
 
 /// The stream commands, for the bus.

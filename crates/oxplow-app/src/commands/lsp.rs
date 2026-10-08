@@ -5,6 +5,7 @@
 //! proposal. Each pushes `LspServersChanged` so the settings list
 //! refreshes (the server list isn't a model).
 
+use oxplow_domain::Confirm;
 use std::sync::Arc;
 
 use oxplow_domain::CommandError;
@@ -93,6 +94,7 @@ pub fn install_op(deps: LspDeps) -> Op {
             })
         })),
     )
+    .confirm_at_least(Confirm::Always)
 }
 
 /// `lsp.remove_server { package }`.
@@ -115,6 +117,7 @@ pub fn remove_op(deps: LspDeps) -> Op {
             })
         })),
     )
+    .confirm_at_least(Confirm::Always)
 }
 
 pub fn ops(deps: LspDeps) -> Vec<Op> {

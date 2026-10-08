@@ -2075,7 +2075,9 @@ export type ConfigProblem = {
 
 /**
  *  Whether a run must be confirmed by a person first. An agent can never
- *  confirm: it receives `NeedsConfirmation` and writes nothing.
+ *  confirm: it receives `NeedsConfirmation` and writes nothing. Ordered
+ *  weakest first, so an operation's floor compares: a declaration may
+ *  ask more than its operation's `confirm_at_least`, never less.
  */
 export type Confirm = "never" | "always" | 
 // Irreversible; presented as destructive and always confirmed.

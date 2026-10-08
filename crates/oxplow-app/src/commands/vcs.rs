@@ -13,6 +13,7 @@
 //! announced, the way the watchers would.
 
 use crate::commands::ops::Op;
+use oxplow_domain::{Confirm, Invokers};
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -72,11 +73,14 @@ macro_rules! stream_input {
 }
 
 /// One VCS operation of `capability`: parse the input, resolve the
-/// stream's workspace strictly, run `op`, announce what it touched.
+/// stream's workspace strictly, run `op`, announce what it touched. A
+/// person's only (agents run `git` in their terminal); `confirm` is the
+/// least a command over it asks.
 fn vcs_op<I, F, Fut>(
     capability: &str,
     name: &str,
     touched: Touched,
+    confirm: Confirm,
     target: &VcsTarget,
     op: F,
 ) -> Op
@@ -119,6 +123,8 @@ where
             })
         })),
     )
+    .open_to(Invokers::HUMAN_ONLY)
+    .confirm_at_least(confirm)
 }
 
 async fn announce(target: &VcsTarget, stream: StreamId, touched: Touched) {
@@ -284,6 +290,7 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
             "vcs.write",
             "commit",
             Touched::Refs,
+            Confirm::Never,
             t,
             |t, ws, i: CommitInput| async move {
                 let rev = t
@@ -304,6 +311,7 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
             "vcs.write",
             "stage",
             Touched::Workspace,
+            Confirm::Never,
             t,
             |t, ws, i: PathsInput| async move {
                 t.vcs.stage(&ws, &i.paths).await.map_err(vcs_err)?;
@@ -314,6 +322,7 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
             "vcs.write",
             "discard",
             Touched::Workspace,
+            Confirm::Destructive,
             t,
             |t, ws, i: PathsInput| async move {
                 t.vcs.discard(&ws, &i.paths).await.map_err(vcs_err)?;
@@ -324,6 +333,7 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
             "vcs.remote",
             "fetch",
             Touched::AllRefs,
+            Confirm::Never,
             t,
             |t, ws, i: FetchInput| async move {
                 outcome(
@@ -338,6 +348,7 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
             "vcs.remote",
             "pull",
             Touched::Refs,
+            Confirm::Never,
             t,
             |t, ws, i: RemoteBranchInput| async move {
                 let from = i.remote_branch()?;
@@ -348,6 +359,7 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
             "vcs.remote",
             "push",
             Touched::AllRefs,
+            Confirm::Never,
             t,
             |t, ws, i: RemoteBranchInput| async move {
                 let to = i.remote_branch()?;
@@ -358,6 +370,7 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
             "vcs.write",
             "merge",
             Touched::Refs,
+            Confirm::Destructive,
             t,
             |t, ws, i: RevInput| async move {
                 outcome(t.vcs.merge(&ws, &i.rev).await.map_err(vcs_err)?)
@@ -367,6 +380,7 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
             "vcs.write",
             "checkout_branch",
             Touched::Refs,
+            Confirm::Never,
             t,
             |t, ws, i: CheckoutInput| async move {
                 t.vcs
@@ -380,6 +394,7 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
             "vcs.write",
             "rename_branch",
             Touched::AllRefs,
+            Confirm::Never,
             t,
             |t, ws, i: RenameBranchInput| async move {
                 t.vcs
@@ -393,6 +408,7 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
             "vcs.write",
             "delete_branch",
             Touched::AllRefs,
+            Confirm::Destructive,
             t,
             |t, ws, i: DeleteBranchInput| async move {
                 t.vcs
@@ -406,6 +422,7 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
             "vcs.write",
             "resolve_conflict",
             Touched::Workspace,
+            Confirm::Never,
             t,
             |t, ws, i: ResolveConflictInput| async move {
                 t.vcs
@@ -419,6 +436,7 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
             "vcs.write",
             "rebase",
             Touched::Refs,
+            Confirm::Destructive,
             t,
             |t, ws, i: RevInput| async move {
                 outcome(t.git.rebase(&ws, &i.rev).await.map_err(vcs_err)?)
@@ -428,6 +446,7 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
             "vcs.write",
             "cherry_pick",
             Touched::Refs,
+            Confirm::Never,
             t,
             |t, ws, i: RevInput| async move {
                 outcome(t.git.cherry_pick(&ws, &i.rev).await.map_err(vcs_err)?)
@@ -437,6 +456,7 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
             "vcs.write",
             "revert",
             Touched::Refs,
+            Confirm::Destructive,
             t,
             |t, ws, i: RevInput| async move {
                 outcome(t.git.revert(&ws, &i.rev).await.map_err(vcs_err)?)
@@ -446,6 +466,7 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
             "vcs.write",
             "ignore",
             Touched::Workspace,
+            Confirm::Never,
             t,
             |t, ws, i: IgnoreInput| async move {
                 t.git.ignore(&ws, &i.entry).await.map_err(vcs_err)?;

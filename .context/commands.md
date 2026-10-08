@@ -174,6 +174,24 @@ alone). An extension may declare a command over the same operation in
 its own namespace. A script reaches record and write operations only by
 composing commands.
 
+**The floor is the operation's.** Who may run a command and whether a
+person confirms it are bounded by the operation, not by whoever
+declares it: an `Op` says who may run it at most (`open_to`:
+`Invokers::HUMAN_ONLY` for git, installs, the window's chrome;
+`Invokers::NO_AGENT` — a person, directly or through a lens — for
+bookmarks, hints, reviews, another thread's prompt or rank) and the
+least it is confirmed (`confirm_at_least`: `Destructive` for a delete, a
+discard, a merge; `Always` for an install), and `Op::command` refuses a
+declaration that admits anyone more or asks less (`Invalid` at
+`/invokers` / `/confirm`), from `oxplow-foundation` and from any other
+extension alike — so a project extension can't re-declare
+`lsp.install/install_server` open to agents with no confirmation. A
+declaration may narrow. An operation that says nothing is open to
+everyone unconfirmed; `CommandBus::open_ops` lists those, pinned by
+`the_open_ops_are_the_reviewed_ones`, so leaving one open is a reviewed
+choice. A manifest command's `invokers` is **required** (an omitted one
+once meant everyone, agents included).
+
 **The per-run trace.** Each run has a `CapabilityTrace` (`TxCtx::trace`):
 fresh per transaction attempt, shared by the runs nested in it; steps
 add each step's to the composing pass's. An `External` run's is its
@@ -740,12 +758,16 @@ declared over them with `register_declared`.
    (`Envelope::typed::<T>`).
 3. Make it an operation of the capability whose scope it falls under
    (`Op::new(capability, name, schema, undoable, handler)`, plus
-   `with_confirm_for` / `with_precheck`), add the scope to
+   `with_confirm_for` / `with_precheck`), give it its floor — who may
+   run it at most (`open_to`) and the least it is confirmed
+   (`confirm_at_least`) — or, leaving it open to everyone unconfirmed,
+   add it to `the_open_ops_are_the_reviewed_ones`; add the scope to
    `HOST_CAPABILITIES` if it's new (its class decides the command's
    effect), and add the op in `Services::new` (`commands.add_op`).
 4. Declare the command in `extensions/oxplow-foundation/extension.yaml`:
-   `name: <area>.<verb>`, `summary`, `capability`, `op`, `invokers`,
-   `confirm`, `needs` (features), `ui`.
+   `name: <area>.<verb>`, `summary`, `capability`, `op`, `invokers`
+   (required; within the floor), `confirm` (at least the floor's),
+   `needs` (features), `ui`.
 5. Route the existing RPC/MCP entry points through `commands.run(...)`
    rather than calling the service directly, so the human's and the
    agent's runs are audited alike.

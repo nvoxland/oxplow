@@ -31,12 +31,41 @@ impl Invokers {
         agent: false,
         lens: false,
     };
+    /// A person, directly or through a lens — never an agent.
+    pub const NO_AGENT: Invokers = Invokers {
+        human: true,
+        agent: false,
+        lens: true,
+    };
 
     pub fn allows(&self, invoker: Invoker) -> bool {
         match invoker {
             Invoker::Human => self.human,
             Invoker::Agent => self.agent,
             Invoker::Lens => self.lens,
+        }
+    }
+
+    /// Whether this admits no one `floor` doesn't: a declaration narrows
+    /// an operation's floor, never widens it.
+    pub fn within(&self, floor: &Invokers) -> bool {
+        (!self.human || floor.human) && (!self.agent || floor.agent) && (!self.lens || floor.lens)
+    }
+
+    /// Who it admits, for a message: `human, lens`; `no one`.
+    pub fn names(&self) -> String {
+        let names: Vec<&str> = [
+            (self.human, "human"),
+            (self.agent, "agent"),
+            (self.lens, "lens"),
+        ]
+        .into_iter()
+        .filter_map(|(on, name)| on.then_some(name))
+        .collect();
+        if names.is_empty() {
+            "no one".into()
+        } else {
+            names.join(", ")
         }
     }
 }
@@ -51,8 +80,12 @@ pub enum Invoker {
 }
 
 /// Whether a run must be confirmed by a person first. An agent can never
-/// confirm: it receives `NeedsConfirmation` and writes nothing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, JsonSchema)]
+/// confirm: it receives `NeedsConfirmation` and writes nothing. Ordered
+/// weakest first, so an operation's floor compares: a declaration may
+/// ask more than its operation's `confirm_at_least`, never less.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Type, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Confirm {
     Never,

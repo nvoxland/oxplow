@@ -16,7 +16,7 @@ use oxplow_db::dashboard_store::{
     reorder_items_tx, update_item_tx,
 };
 use oxplow_db::Database;
-use oxplow_domain::{CommandCall, CommandError, DashboardId, DashboardItemId};
+use oxplow_domain::{CommandCall, CommandError, Confirm, DashboardId, DashboardItemId, Invokers};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -213,6 +213,8 @@ pub fn delete_op() -> Op {
             })
         })),
     )
+    .open_to(Invokers::NO_AGENT)
+    .confirm_at_least(Confirm::Destructive)
 }
 
 /// `dashboard.add_item { dashboard, kind, sql?, display?, lens_id?,

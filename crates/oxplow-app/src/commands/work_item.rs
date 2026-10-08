@@ -713,6 +713,7 @@ pub fn delete_op(registry: WorkItemsRegistry) -> Op {
         undoable: false,
     };
     dispatching(shape, registry, "delete", delete_target, None)
+        .confirm_at_least(oxplow_domain::Confirm::Destructive)
 }
 
 // ---- oxplow.work_item.reorder / oxplow.work_item.move: a list's order ----

@@ -36,7 +36,7 @@ use crate::commands::ops::Op;
 use std::sync::{Arc, OnceLock, Weak};
 
 use oxplow_db::effect_run_store::ReactionOrigin;
-use oxplow_domain::{CommandError, DomainError, StoredEvent};
+use oxplow_domain::{CommandError, Confirm, DomainError, Invokers, StoredEvent};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::json;
@@ -426,6 +426,8 @@ pub fn backfill_op(services: ServicesSlot) -> Op {
             })
         })),
     )
+    .open_to(Invokers::HUMAN_ONLY)
+    .confirm_at_least(Confirm::Always)
 }
 
 /// `oxplow.effect.backfill_plan { effect, from_seq? | since?, to_seq? }`: what
@@ -524,4 +526,6 @@ pub fn retry_op(services: ServicesSlot) -> Op {
             })
         })),
     )
+    .open_to(Invokers::HUMAN_ONLY)
+    .confirm_at_least(Confirm::Always)
 }

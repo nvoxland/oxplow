@@ -24,7 +24,7 @@ use oxplow_domain::events::schema::{
 };
 use oxplow_domain::knowledge::{KnowledgeError, KnowledgeProvider, PageDraft, RefFreshness};
 use oxplow_domain::vcs::{Revision, Vcs};
-use oxplow_domain::{Anchors, CommandError, DomainError, Timestamp};
+use oxplow_domain::{Anchors, CommandError, Confirm, DomainError, Timestamp};
 use rusqlite::{params, OptionalExtension};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -836,7 +836,8 @@ pub fn ops(target: KnowledgeTarget) -> Vec<Op> {
             serde_json::to_value(schemars::schema_for!(SlugInput)).expect("schema"),
             false,
             delete,
-        ),
+        )
+        .confirm_at_least(Confirm::Destructive),
         Op::new(
             "knowledge.write",
             "link",

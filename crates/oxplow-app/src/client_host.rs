@@ -198,6 +198,8 @@ fn schema<T: JsonSchema>() -> Value {
 
 /// The window's operations, run through `host` when the daemon runs them.
 pub fn ops(host: &Arc<ClientHost>) -> Vec<Op> {
+    use oxplow_domain::Invokers;
+    // An agent's in its own thread; a person's anywhere.
     let mut ops: Vec<Op> = ["open", "close", "focus"]
         .into_iter()
         .map(|op| ClientHost::op(host, "tabs.write", op, schema::<TabInput>()))
@@ -208,37 +210,29 @@ pub fn ops(host: &Arc<ClientHost>) -> Vec<Op> {
         "save",
         schema::<SaveInput>(),
     ));
-    ops.push(ClientHost::op(
-        host,
-        "window.show",
-        "find",
-        schema::<NoInput>(),
-    ));
-    ops.push(ClientHost::op(
-        host,
-        "window.show",
-        "quick_open",
-        schema::<NoInput>(),
-    ));
-    ops.push(ClientHost::op(
-        host,
-        "agent_input.write",
-        "draft",
-        schema::<DraftInput>(),
-    ));
-    // The shell's, reached through the window.
-    ops.push(ClientHost::op(
-        host,
-        "projects.write",
-        "create",
-        schema::<NoInput>(),
-    ));
-    ops.push(ClientHost::op(
-        host,
-        "projects.write",
-        "open",
-        schema::<OpenProjectInput>(),
-    ));
+    // The window's own chrome: a person's.
+    ops.push(
+        ClientHost::op(host, "window.show", "find", schema::<NoInput>())
+            .open_to(Invokers::HUMAN_ONLY),
+    );
+    ops.push(
+        ClientHost::op(host, "window.show", "quick_open", schema::<NoInput>())
+            .open_to(Invokers::HUMAN_ONLY),
+    );
+    // A person's, through a lens too: oxplow never types for the agent.
+    ops.push(
+        ClientHost::op(host, "agent_input.write", "draft", schema::<DraftInput>())
+            .open_to(Invokers::NO_AGENT),
+    );
+    // The shell's, reached through the window: a person's.
+    ops.push(
+        ClientHost::op(host, "projects.write", "create", schema::<NoInput>())
+            .open_to(Invokers::HUMAN_ONLY),
+    );
+    ops.push(
+        ClientHost::op(host, "projects.write", "open", schema::<OpenProjectInput>())
+            .open_to(Invokers::HUMAN_ONLY),
+    );
     ops
 }
 

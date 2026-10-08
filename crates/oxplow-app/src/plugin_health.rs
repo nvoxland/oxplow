@@ -19,7 +19,7 @@ use oxplow_db::Database;
 use oxplow_domain::events::schema::{
     PluginDisabled, PluginDisabledV1, PluginEnabled, PluginEnabledV1,
 };
-use oxplow_domain::{CommandError, DomainError, Envelope};
+use oxplow_domain::{CommandError, DomainError, Envelope, Invokers};
 use serde::Deserialize;
 
 use crate::commands::{Handler, HandlerOutput, Invocation};
@@ -314,6 +314,7 @@ pub fn enable_op(
             })
         })),
     )
+    .open_to(Invokers::HUMAN_ONLY)
 }
 
 #[cfg(test)]

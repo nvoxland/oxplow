@@ -175,6 +175,8 @@ pub fn set_op() -> Op {
             })
         })),
     )
+    // The person's navigation, through a lens too — never the agent's.
+    .open_to(oxplow_domain::Invokers::NO_AGENT)
 }
 
 /// `remove { ref, thread?, stream? }`.
@@ -198,6 +200,7 @@ pub fn remove_op() -> Op {
             })
         })),
     )
+    .open_to(oxplow_domain::Invokers::NO_AGENT)
 }
 
 /// The bookmark operations, for the bus.

@@ -11,7 +11,7 @@ use crate::commands::ops::Op;
 use std::sync::Arc;
 
 use oxplow_domain::refs::build::stream_ref;
-use oxplow_domain::{CommandError, DomainError, StreamId};
+use oxplow_domain::{CommandError, Confirm, DomainError, StreamId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -125,6 +125,7 @@ pub fn install_op(deps: InstallDeps) -> Op {
             })
         })),
     )
+    .confirm_at_least(Confirm::Always)
 }
 
 /// `extension.update { name, reviewed_sha, stream? }`.
@@ -167,6 +168,7 @@ pub fn update_op(deps: InstallDeps) -> Op {
             })
         })),
     )
+    .confirm_at_least(Confirm::Always)
 }
 
 pub fn ops(deps: InstallDeps) -> Vec<Op> {

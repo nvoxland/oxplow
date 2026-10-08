@@ -671,6 +671,14 @@ impl CommandBus {
         self.ops.read().get(capability, op)
     }
 
+    /// The operations with no floor — anyone may declare a command over
+    /// one that runs with no confirmation (`cap/op`, sorted): pinned by a
+    /// test, like [`Self::external_commands`], so each is a reviewed
+    /// choice rather than a forgotten `open_to`.
+    pub fn open_ops(&self) -> Vec<String> {
+        self.ops.read().fully_open()
+    }
+
     /// Remove every command `source` registered (an extension disabled, a
     /// provider instance stopped); returns their ids. A namespace left
     /// with no commands is free again.

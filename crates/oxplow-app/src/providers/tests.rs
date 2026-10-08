@@ -42,7 +42,7 @@ fn write_extension(project: &Path, hooks: &str) {
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
-        "manifest: 2\nname: tracker\nsharing: private\nintent:\n  purpose: the fake tracker\n  examples: [{ name: a }]\ncommands:\n  - name: item.estimate\n    summary: Set a work item's points.\n    provider: fake\n    op: estimate\n    ui: { label: \"Estimate in Fake…\", group: Tracker, about: work_item, input: { ref: \"{{ref}}\", points: 3 } }\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/provider\n    declarations: provider.json\n",
+        "manifest: 2\nname: tracker\nsharing: private\nintent:\n  purpose: the fake tracker\n  examples: [{ name: a }]\ncommands:\n  - name: item.estimate\n    summary: Set a work item's points.\n    provider: fake\n    op: estimate\n    invokers: { human: true, agent: true, lens: true }\n    ui: { label: \"Estimate in Fake…\", group: Tracker, about: work_item, input: { ref: \"{{ref}}\", points: 3 } }\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/provider\n    declarations: provider.json\n",
     )
     .unwrap();
     let script = dir.join("bin/provider");
@@ -984,11 +984,11 @@ async fn a_provider_command_is_declared_over_an_operation_it_lists() {
     let base = std::fs::read_to_string(&manifest).unwrap();
     for (entry, says) in [
         (
-            "  - { name: item.comment, summary: S., provider: fake, op: comment }\n",
+            "  - { name: item.comment, summary: S., provider: fake, op: comment, invokers: { human: true, agent: true, lens: true } }\n",
             "`comment` is a work-item verb",
         ),
         (
-            "  - { name: item.nope, summary: S., provider: fake, op: nope }\n",
+            "  - { name: item.nope, summary: S., provider: fake, op: nope, invokers: { human: true, agent: true, lens: true } }\n",
             "its declarations have no command `nope`",
         ),
         (

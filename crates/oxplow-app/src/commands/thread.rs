@@ -24,7 +24,8 @@ use oxplow_config::OxplowConfig;
 use oxplow_db::thread_store::{get_tx, list_for_stream_tx, upsert_tx};
 use oxplow_domain::refs::build::{stream_ref, thread_ref};
 use oxplow_domain::{
-    AgentKind, CommandCall, CommandError, StreamId, Thread, ThreadId, ThreadStatus, Timestamp,
+    AgentKind, CommandCall, CommandError, Invokers, StreamId, Thread, ThreadId, ThreadStatus,
+    Timestamp,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -400,6 +401,7 @@ pub fn set_prompt_op() -> Op {
             })
         })),
     )
+    .open_to(Invokers::NO_AGENT)
 }
 
 /// `thread.promote { thread }` — a person's: the writer is who may change
@@ -451,6 +453,7 @@ pub fn promote_op() -> Op {
             })
         })),
     )
+    .open_to(Invokers::NO_AGENT)
 }
 
 /// `thread.demote { thread }` — a person's: the stream's writer joins the
@@ -477,6 +480,7 @@ pub fn demote_op() -> Op {
             })
         })),
     )
+    .open_to(Invokers::NO_AGENT)
 }
 
 /// `thread.close { thread }`: its open effort closes in the same
@@ -605,6 +609,7 @@ pub fn reorder_op() -> Op {
             })
         })),
     )
+    .open_to(Invokers::NO_AGENT)
 }
 
 /// The thread commands, for the bus.

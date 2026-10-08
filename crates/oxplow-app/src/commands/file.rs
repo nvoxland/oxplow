@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use oxplow_domain::events::schema::{FileSaved, FileSavedV1};
-use oxplow_domain::{CommandError, Envelope};
+use oxplow_domain::{CommandError, Envelope, Invokers};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -74,6 +74,7 @@ pub fn save_op(files: Arc<WorkspaceFiles>) -> Op {
             })
         })),
     )
+    .open_to(Invokers::HUMAN_ONLY)
     .with_unrecorded(&["content"])
 }
 

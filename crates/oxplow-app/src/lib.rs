@@ -1858,6 +1858,79 @@ mod tests {
         );
     }
 
+    /// The operations with no floor: anyone may declare a command over
+    /// one — any extension, with any `invokers` — that runs with no
+    /// confirmation. Pinned, so an operation is left open on purpose, not
+    /// by a forgotten `open_to`; everything a person alone should run
+    /// (git, installs, the window's chrome, another thread's prompt) has a
+    /// floor and is absent here.
+    #[tokio::test]
+    async fn the_open_ops_are_the_reviewed_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::test_fixtures::init_git_repo(dir.path());
+        let services = Services::in_memory(dir.path()).unwrap();
+        assert_eq!(
+            services.commands.open_ops(),
+            [
+                "collectors.sync/sync",
+                "config.read/get",
+                "config.read/list_keys",
+                // A person-only key asks per input (`confirm_for`).
+                "config.write/set",
+                "config.write/unset",
+                "dashboards.write/add_item",
+                "dashboards.write/create",
+                "dashboards.write/remove_item",
+                "dashboards.write/rename",
+                "dashboards.write/reorder_items",
+                "dashboards.write/update_item",
+                // The window saves what its thread shows.
+                "editor.write/save",
+                "effects.read/backfill_plan",
+                "efforts.write/close",
+                "efforts.write/link",
+                "efforts.write/open",
+                "efforts.write/record_claim",
+                "efforts.write/record_decision",
+                "efforts.write/report",
+                "efforts.write/update",
+                "knowledge.write/add_comment",
+                "knowledge.write/add_note",
+                "knowledge.write/link",
+                "knowledge.write/reply_comment",
+                "knowledge.write/resync",
+                "knowledge.write/update_comment",
+                "knowledge.write/update_note",
+                "knowledge.write/write_page",
+                "lenses.show/show",
+                "lenses.write/keep",
+                "metrics.read/scaffold",
+                "metrics.write/enable",
+                "metrics.write/rebuild",
+                "metrics.write/record",
+                "providers.sync/sync",
+                "streams.write/rename",
+                // An agent's in its own thread (`client_host`).
+                "tabs.write/close",
+                "tabs.write/focus",
+                "tabs.write/open",
+                "test_runs.write/record_run",
+                "threads.write/close",
+                "threads.write/create",
+                "threads.write/rename",
+                "threads.write/reopen",
+                // Every work list's verbs; `delete` asks.
+                "work_items.write/comment",
+                "work_items.write/create",
+                "work_items.write/link",
+                "work_items.write/move",
+                "work_items.write/reorder",
+                "work_items.write/transition",
+                "work_items.write/update",
+            ]
+        );
+    }
+
     /// Every composite — whose calls decide, per input, whether it runs in
     /// the transaction or as steps — is listed here on purpose, like the
     /// `External` commands.

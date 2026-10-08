@@ -445,7 +445,14 @@ fn command_of(
         handler,
         confirm,
         effect,
-        invokers: f.invokers.unwrap_or(Invokers::ALL),
+        // Who may run it is said, never assumed: an omitted `invokers`
+        // once meant everyone, agents included.
+        invokers: f.invokers.ok_or_else(|| {
+            at_name(
+                "`invokers` says who may run it: `{ human: true, agent: false, lens: true }`"
+                    .into(),
+            )
+        })?,
         needs: f.needs,
         ui: f.ui,
         stable,
@@ -1220,6 +1227,7 @@ mod tests {
     summary: Mark the task done.
     input_schema: { type: object, required: [ref], properties: { ref: { type: string } }, additionalProperties: false }
     entry: handlers/finish_review.star
+    invokers: { human: true, agent: true, lens: true }
     examples:
       - { name: happy, input: { ref: \"work_item:oxplow:tsk1\" }, expect_commands: [oxplow.work_item.transition] }
 ";
@@ -1312,7 +1320,7 @@ mod tests {
     fn a_broken_command_is_an_error_at_its_line() {
         let entry = |name: &str, tail: &str| {
             format!(
-                "  - name: {name}\n    summary: S.\n    input_schema: {{ type: object }}\n    entry: handlers/h.star\n{tail}"
+                "  - name: {name}\n    summary: S.\n    input_schema: {{ type: object }}\n    entry: handlers/h.star\n    invokers: {{ human: true, agent: true, lens: true }}\n{tail}"
             )
         };
         for (block, files, says) in [
@@ -1392,6 +1400,12 @@ mod tests {
                 "  - name: a.b\n    summary: S.\n    input_schema: { type: nope }\n    entry: handlers/h.star\n".into(),
                 vec![("handlers/h.star", HANDLER)],
                 "input_schema",
+            ),
+            // Who may run it is said, never assumed.
+            (
+                "  - name: a.b\n    summary: S.\n    input_schema: { type: object }\n    entry: handlers/h.star\n".into(),
+                vec![("handlers/h.star", HANDLER)],
+                "`invokers` says who may run it",
             ),
             (
                 format!("{}{}", entry("a.b", ""), entry("a.b", "")),
@@ -1683,6 +1697,7 @@ mod tests {
     summary: Finish the task.
     input_schema: { type: object, required: [ref], properties: { ref: { type: string } }, additionalProperties: false }
     entry: handlers/finish.star
+    invokers: { human: true, agent: true, lens: true }
     needs: [sql.read]
 ",
             &[("handlers/finish.star", script)],
@@ -1724,7 +1739,7 @@ mod tests {
         write(
             root,
             "oxplow/extensions/my-review/extension.yaml",
-            "manifest: 2\nname: my-review\nintent:\n  purpose: p\nevent_types:\n  types:\n    - { type: my_review.finished, v: 1, schema: finished.json, summary: A review finished. }\ncommands:\n  - name: review.finish\n    summary: Finish the review.\n    input_schema: { type: object, required: [ref], properties: { ref: { type: string } } }\n    entry: finish.star\n",
+            "manifest: 2\nname: my-review\nintent:\n  purpose: p\nevent_types:\n  types:\n    - { type: my_review.finished, v: 1, schema: finished.json, summary: A review finished. }\ncommands:\n  - name: review.finish\n    summary: Finish the review.\n    input_schema: { type: object, required: [ref], properties: { ref: { type: string } } }\n    entry: finish.star\n    invokers: { human: true, agent: true, lens: true }\n",
         );
         write(
             root,
@@ -1848,6 +1863,49 @@ mod tests {
         assert!(out.inverse.is_none());
     }
 
+    /// An operation's floor holds for any extension's declaration over
+    /// it: one that opens `bookmarks.write/set` (a person's, through a
+    /// lens too) to agents, or asks less than `vcs.write/discard`'s
+    /// `destructive`, isn't registered, and the problem says the floor.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_declaration_over_an_operation_stays_within_its_floor() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let declare = |block: &str| {
+            write_ext(fx._dir.path(), "acme", block, &[]);
+        };
+        declare(
+            "  - name: page.star\n    summary: Star the page.\n    capability: bookmarks.write\n    op: set\n    invokers: { human: true, agent: true, lens: true }\n",
+        );
+        fx.svc.extension_commands.reconcile().await;
+        assert!(fx.svc.commands.spec("acme.page.star").is_none());
+        let problem = fx.svc.extension_commands.problem("acme").unwrap();
+        assert!(
+            problem.contains("`bookmarks.write/set` is open to human, lens at most")
+                && problem.contains("`acme.page.star` admits human, agent, lens"),
+            "{problem}"
+        );
+
+        declare(
+            "  - name: files.drop\n    summary: Discard.\n    capability: vcs.write\n    op: discard\n    invokers: { human: true, agent: false, lens: false }\n",
+        );
+        fx.svc.extension_commands.reconcile().await;
+        assert!(fx.svc.commands.spec("acme.files.drop").is_none());
+        let problem = fx.svc.extension_commands.problem("acme").unwrap();
+        assert!(
+            problem.contains("`vcs.write/discard` is confirmed `destructive` at least")
+                && problem.contains("`acme.files.drop` declares `never`"),
+            "{problem}"
+        );
+
+        // Narrowing is fine: a person-only star over a person-or-lens op.
+        declare(
+            "  - name: page.star\n    summary: Star the page.\n    capability: bookmarks.write\n    op: set\n    invokers: { human: true, agent: false, lens: false }\n",
+        );
+        fx.svc.extension_commands.reconcile().await;
+        assert!(fx.svc.commands.spec("acme.page.star").is_some());
+        assert!(fx.svc.extension_commands.problem("acme").is_none());
+    }
+
     /// A project extension declares its own command over one of the
     /// operations oxplow's commands are backed by: nothing about
     /// oxplow's is special. Its spec is the operation's (schema, undo,
@@ -1902,7 +1960,7 @@ mod tests {
         write_ext(
             fx._dir.path(),
             "my-review",
-            "  - name: review.finish\n    summary: Finish the task.\n    input_schema: { type: object }\n    entry: handlers/finish.star\n",
+            "  - name: review.finish\n    summary: Finish the task.\n    input_schema: { type: object }\n    entry: handlers/finish.star\n    invokers: { human: true, agent: true, lens: true }\n",
             &[("handlers/finish.star", FINISH)],
         );
         fx.svc.extension_commands.reconcile().await;
@@ -1935,7 +1993,7 @@ mod tests {
             write_ext(
                 fx._dir.path(),
                 "my-review",
-                "  - name: work.count\n    summary: Count the work items.\n    input_schema: { type: object }\n    entry: handlers/count.star\n    effect: read\n    needs: [sql.read]\n",
+                "  - name: work.count\n    summary: Count the work items.\n    input_schema: { type: object }\n    entry: handlers/count.star\n    invokers: { human: true, agent: true, lens: true }\n    effect: read\n    needs: [sql.read]\n",
                 &[("handlers/count.star", script)],
             );
         };
@@ -2231,6 +2289,7 @@ mod tests {
     summary: Mark the task done.
     input_schema: {{ type: object, required: [ref], properties: {{ ref: {{ type: string }} }} }}
     entry: handlers/finish_review.star
+    invokers: {{ human: true, agent: true, lens: true }}
     needs: [sql.read]
     examples:
 {examples}"

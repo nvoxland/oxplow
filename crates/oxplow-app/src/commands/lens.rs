@@ -17,7 +17,7 @@ use oxplow_db::SqlCell;
 use oxplow_domain::events::schema::{LensKept, LensKeptV2, LensShown, LensShownV1};
 use oxplow_domain::events::Envelope;
 use oxplow_domain::refs::build::{answer_ref, lens_ref, thread_ref};
-use oxplow_domain::{CommandError, DomainError, ThreadId};
+use oxplow_domain::{CommandError, DomainError, Invokers, ThreadId};
 use rusqlite::OptionalExtension;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -582,6 +582,7 @@ fn share(target: LensTarget) -> Op {
         false,
         handler,
     )
+    .open_to(Invokers::HUMAN_ONLY)
 }
 
 /// Move lens `id` into shared extension `to` under `root`; its new id.

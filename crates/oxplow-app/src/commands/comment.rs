@@ -18,7 +18,7 @@ use oxplow_db::comment_store::{
 use oxplow_domain::refs::build::{stream_ref, thread_ref};
 use oxplow_domain::{
     Actor, CommandCall, CommandError, CommentId, CommentIntent, CommentStatus, CommentTarget,
-    CommentThread, StreamId, ThreadId,
+    CommentThread, Confirm, Invokers, StreamId, ThreadId,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -336,6 +336,8 @@ pub fn delete_op() -> Op {
             })
         })),
     )
+    .open_to(Invokers::NO_AGENT)
+    .confirm_at_least(Confirm::Destructive)
 }
 
 /// `knowledge.relocate_comment { comment, selectors_json, orphaned }`:
@@ -368,6 +370,7 @@ pub fn relocate_op() -> Op {
             })
         })),
     )
+    .open_to(Invokers::NO_AGENT)
 }
 
 /// The comment commands, for the bus.

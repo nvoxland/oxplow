@@ -210,6 +210,8 @@ pub fn scaffold(
              \x20       ref: {{ type: string, description: \"The work item (work_item:<provider>:<id>).\" }}\n\
              \x20     additionalProperties: false\n\
              \x20   entry: handlers/note.star\n\
+             \x20   # Who may run it: a person, an agent, a lens (each child command checks its own too).\n\
+             \x20   invokers: {{ human: true, agent: true, lens: true }}\n\
              \x20   # On a work item's page (Commands) and a row's right-click.\n\
              \x20   ui: {{ label: Add Note, about: work_item, input: {{ ref: \"{{{{ref}}}}\" }} }}\n\
              \x20   examples:\n\

@@ -2196,7 +2196,7 @@ commands:
     entry: handlers/finish_review.star # defines transform(x), x = { input }
     confirm: never                     # never (default) | always | destructive; children only add
     effect: write                      # write (default) | record | read (composes nothing, returns a result)
-    invokers: { human: true, agent: true, lens: true }   # default: all
+    invokers: { human: true, agent: true, lens: true }   # required: who may run it (within its operation's floor, for a capability command)
     needs: [sql.read, work_items.comments]   # host capabilities it calls; capabilities / features it needs active
     ui:                                # how a person meets it (`.context/commands.md` "Offering a command")
       label: Finish Review

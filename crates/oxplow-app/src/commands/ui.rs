@@ -12,7 +12,7 @@ use oxplow_db::event_content_store::put_json_tx;
 use oxplow_db::event_log_store::anchors_for_thread_tx;
 use oxplow_domain::events::schema::{UiOpFailed, UiOpFailedV1};
 use oxplow_domain::refs::build::thread_ref;
-use oxplow_domain::{Anchors, CommandError, StreamId, ThreadId};
+use oxplow_domain::{Anchors, CommandError, Invokers, StreamId, ThreadId};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
@@ -145,7 +145,8 @@ pub fn ops() -> Vec<Op> {
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             report(ctx, parse(input)?)
         })),
-    )]
+    )
+    .open_to(Invokers::HUMAN_ONLY)]
 }
 
 #[cfg(test)]

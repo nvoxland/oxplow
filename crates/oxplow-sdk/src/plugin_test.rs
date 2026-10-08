@@ -1474,6 +1474,7 @@ commands:
     summary: Note a work item.
     input_schema: {{ type: object, required: [ref], properties: {{ ref: {{ type: string }} }} }}
     entry: handlers/note.star
+    invokers: {{ human: true, agent: true, lens: true }}
     examples:
       - {{ name: happy, input: {{ ref: \"work_item:oxplow:tsk1\" }}, expect_commands: {command_expect} }}
 "
