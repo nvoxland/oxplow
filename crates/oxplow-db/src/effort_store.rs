@@ -1535,12 +1535,12 @@ fn effort_slice_on(
 mod tests {
     use super::*;
     use crate::stream_store::SqliteStreamStore;
-    use crate::test_tasks::{a_task, work_item_ref};
+    use crate::test_tasks::a_task;
     use crate::thread_store::SqliteThreadStore;
     use oxplow_domain::stores::{StreamStore, ThreadStore};
-    use oxplow_domain::{Stream, StreamId, StreamKind, TaskId, Thread, ThreadStatus};
+    use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadStatus};
 
-    async fn fixture() -> (SqliteEffortStore, TaskId, ThreadId) {
+    async fn fixture() -> (SqliteEffortStore, String, ThreadId) {
         let (store, _db, tid, thread) = fixture_with_db().await;
         (store, tid, thread)
     }
@@ -1776,7 +1776,7 @@ mod tests {
         );
     }
 
-    async fn fixture_with_db() -> (SqliteEffortStore, Database, TaskId, ThreadId) {
+    async fn fixture_with_db() -> (SqliteEffortStore, Database, String, ThreadId) {
         let db = Database::in_memory();
         let now = Timestamp::from_unix_ms(1);
         let s = Stream {
@@ -1825,7 +1825,7 @@ mod tests {
     #[tokio::test]
     async fn efforts_are_keyed_by_work_item_ref() {
         let (store, tid, t) = fixture().await;
-        let ours = work_item_ref(tid);
+        let ours = tid.clone();
         let eff = store.start(&ours, &t, None).await.unwrap();
         assert_eq!(eff.work_item.as_deref(), Some(ours.as_str()));
 
@@ -1877,13 +1877,13 @@ mod tests {
     #[tokio::test]
     async fn start_then_finish_round_trips() {
         let (store, tid, t) = fixture().await;
-        let eff = store.start(&work_item_ref(tid), &t, None).await.unwrap();
+        let eff = store.start(&tid, &t, None).await.unwrap();
         assert!(eff.ended_at.is_none());
         store
             .finish(&eff.id, None, Some("done".into()))
             .await
             .unwrap();
-        let list = store.list_for_work_item(&work_item_ref(tid)).await.unwrap();
+        let list = store.list_for_work_item(&tid).await.unwrap();
         assert_eq!(list.len(), 1);
         assert!(list[0].ended_at.is_some());
         assert_eq!(list[0].summary.as_deref(), Some("done"));
@@ -2018,7 +2018,7 @@ mod tests {
         // A thread holds one open effort (V5): opening another closes the
         // one it had, as a switch.
         let (store, tid, t) = fixture().await;
-        let first = store.start(&work_item_ref(tid), &t, None).await.unwrap();
+        let first = store.start(&tid, &t, None).await.unwrap();
         let second = store
             .start("work_item:issues:ENG-1", &t, None)
             .await
@@ -2043,10 +2043,7 @@ mod tests {
         // Zero open → None.
         assert!(store.find_open_for_thread(&thread).await.unwrap().is_none());
         // Exactly one open → Some.
-        store
-            .start(&work_item_ref(tid), &thread, None)
-            .await
-            .unwrap();
+        store.start(&tid, &thread, None).await.unwrap();
         assert!(store.find_open_for_thread(&thread).await.unwrap().is_some());
         // Opening another moves the thread on: still exactly one open.
         let _ = db;
@@ -2060,7 +2057,7 @@ mod tests {
     #[tokio::test]
     async fn record_then_list_files() {
         let (store, tid, t) = fixture().await;
-        let eff = store.start(&work_item_ref(tid), &t, None).await.unwrap();
+        let eff = store.start(&tid, &t, None).await.unwrap();
         let v = FileRefVersion {
             local_snapshot_id: 0,
             closest_vcs_rev: None,
@@ -2093,7 +2090,7 @@ mod tests {
             db,
             oxplow_domain::vocabulary::VocabularyHandle::new(vocabulary),
         );
-        let eff = store.start(&work_item_ref(tid), &t, None).await.unwrap();
+        let eff = store.start(&tid, &t, None).await.unwrap();
         store
             .finish(
                 &eff.id,
@@ -2109,7 +2106,7 @@ mod tests {
             .unwrap();
         assert!(
             wiki_back.iter().any(|e| e.source_kind == "work_item"
-                && e.source_id == format!("oxplow:{tid}")
+                && e.source_id == tid.trim_start_matches("work_item:")
                 && e.ref_type == "summary_wikilink"),
             "wiki backlink missing; got {wiki_back:?}"
         );
@@ -2119,9 +2116,8 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            file_back
-                .iter()
-                .any(|e| e.ref_type == "summary_file_ref" && e.source_id == format!("oxplow:{tid}")),
+            file_back.iter().any(|e| e.ref_type == "summary_file_ref"
+                && e.source_id == tid.trim_start_matches("work_item:")),
             "file backlink missing; got {file_back:?}"
         );
 
@@ -2133,7 +2129,7 @@ mod tests {
             task_back
                 .iter()
                 .any(|e| e.ref_type == "summary_work_item_mention"
-                    && e.source_id == format!("oxplow:{tid}")),
+                    && e.source_id == tid.trim_start_matches("work_item:")),
             "task backlink missing; got {task_back:?}"
         );
     }
@@ -2145,7 +2141,7 @@ mod tests {
         let (_, db, tid, t) = fixture_with_db().await;
         let page_refs = SqlitePageRefStore::new(db.clone());
         let store = SqliteEffortStore::new(db);
-        let eff = store.start(&work_item_ref(tid), &t, None).await.unwrap();
+        let eff = store.start(&tid, &t, None).await.unwrap();
         let impacts = vec![
             EffortImpact {
                 kind: "wiki".into(),
@@ -2171,7 +2167,7 @@ mod tests {
             .unwrap();
         let row = wiki
             .iter()
-            .find(|e| e.source_id == format!("oxplow:{tid}"))
+            .find(|e| e.source_id == tid.trim_start_matches("work_item:"))
             .expect("wiki impact edge missing");
         assert_eq!(row.ref_type, "impact");
         assert!(row
@@ -2183,9 +2179,12 @@ mod tests {
             .list_backlinks("commit", "abc1234", None)
             .await
             .unwrap();
-        assert!(commit
-            .iter()
-            .any(|e| e.source_id == format!("oxplow:{tid}") && e.ref_type == "impact"));
+        assert!(
+            commit
+                .iter()
+                .any(|e| e.source_id == tid.trim_start_matches("work_item:")
+                    && e.ref_type == "impact")
+        );
 
         // Replacing the impact set clears old edges
         store
@@ -2204,7 +2203,8 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            wiki.iter().all(|e| e.source_id != tid.to_string()),
+            wiki.iter()
+                .all(|e| e.source_id != tid.rsplit(':').next().unwrap()),
             "old wiki impact edge wasn't replaced: {wiki:?}"
         );
 
@@ -2214,7 +2214,9 @@ mod tests {
             .list_backlinks("wiki", "other-page", None)
             .await
             .unwrap();
-        assert!(wiki.iter().all(|e| e.source_id != tid.to_string()));
+        assert!(wiki
+            .iter()
+            .all(|e| e.source_id != tid.rsplit(':').next().unwrap()));
         assert!(store.list_impacts(&eff.id).await.unwrap().is_empty());
     }
 
@@ -2227,13 +2229,13 @@ mod tests {
         let (_, db, tid, t) = fixture_with_db().await;
         let page_refs = SqlitePageRefStore::new(db.clone());
         let store = SqliteEffortStore::new(db);
-        let first = store.start(&work_item_ref(tid), &t, None).await.unwrap();
+        let first = store.start(&tid, &t, None).await.unwrap();
         store
             .finish(&first.id, None, Some("Filed [[url-schemes]]".into()))
             .await
             .unwrap();
 
-        let second = store.start(&work_item_ref(tid), &t, None).await.unwrap();
+        let second = store.start(&tid, &t, None).await.unwrap();
         let v = FileRefVersion {
             local_snapshot_id: 0,
             closest_vcs_rev: None,
@@ -2251,7 +2253,7 @@ mod tests {
         assert!(
             wiki_back
                 .iter()
-                .any(|e| e.source_id == format!("oxplow:{tid}")),
+                .any(|e| e.source_id == tid.trim_start_matches("work_item:")),
             "summary slice was clobbered by record_file: {wiki_back:?}"
         );
     }
@@ -2309,17 +2311,11 @@ mod tests {
         let store = SqliteEffortStore::new(db);
         // Effort A: start@snap1, end@snap2 — active at snap1 AND snap2
         // (ends exactly there); not active at snap3.
-        let a = store
-            .start(&work_item_ref(tid), &t.id, Some(snap1))
-            .await
-            .unwrap();
+        let a = store.start(&tid, &t.id, Some(snap1)).await.unwrap();
         store.finish(&a.id, Some(snap2), None).await.unwrap();
         // Effort B: start@snap2, still open — active at snap2 and
         // snap3.
-        let b = store
-            .start(&work_item_ref(tid), &t.id, Some(snap2))
-            .await
-            .unwrap();
+        let b = store.start(&tid, &t.id, Some(snap2)).await.unwrap();
 
         let rows = store
             .list_efforts_at_snapshots(vec![snap1, snap2, snap3])
@@ -2390,34 +2386,19 @@ mod tests {
 
         // Range under test: (s2, s4].
         // A [s1,s2] — ends exactly at range start → excluded.
-        let a = store
-            .start(&work_item_ref(tid), &t.id, Some(s1))
-            .await
-            .unwrap();
+        let a = store.start(&tid, &t.id, Some(s1)).await.unwrap();
         store.finish(&a.id, Some(s2), None).await.unwrap();
         // B [s2,s4] — straddles the range end → included.
-        let b = store
-            .start(&work_item_ref(tid), &t.id, Some(s2))
-            .await
-            .unwrap();
+        let b = store.start(&tid, &t.id, Some(s2)).await.unwrap();
         store.finish(&b.id, Some(s4), None).await.unwrap();
         // C [s4,s5] — starts exactly at range end → excluded.
-        let c = store
-            .start(&work_item_ref(tid), &t.id, Some(s4))
-            .await
-            .unwrap();
+        let c = store.start(&tid, &t.id, Some(s4)).await.unwrap();
         store.finish(&c.id, Some(s5), None).await.unwrap();
         // D [s1,s5] — fully contains the range → included.
-        let d = store
-            .start(&work_item_ref(tid), &t.id, Some(s1))
-            .await
-            .unwrap();
+        let d = store.start(&tid, &t.id, Some(s1)).await.unwrap();
         store.finish(&d.id, Some(s5), None).await.unwrap();
         // E [s2,open] — still in progress → included.
-        let e = store
-            .start(&work_item_ref(tid), &t.id, Some(s2))
-            .await
-            .unwrap();
+        let e = store.start(&tid, &t.id, Some(s2)).await.unwrap();
 
         let rows = store.list_efforts_overlapping_range(s2, s4).await.unwrap();
         let ids: std::collections::HashSet<i64> = rows.iter().map(|r| r.id.value()).collect();
@@ -2437,7 +2418,7 @@ mod tests {
     /// Build a stream (`n`) + one thread + one task, all keyed off `n`.
     /// Stream 1 is the Primary; any other `n` is a Worktree (the unique
     /// partial index allows only one Primary).
-    async fn stream_thread_task(db: &Database, n: i64) -> (StreamId, ThreadId, TaskId) {
+    async fn stream_thread_task(db: &Database, n: i64) -> (StreamId, ThreadId, String) {
         let now = Timestamp::from_unix_ms(1);
         let s = Stream {
             id: StreamId::new(n),
@@ -2505,15 +2486,9 @@ mod tests {
         let b2 = snap.create_snapshot(sb).await.unwrap();
 
         let store = SqliteEffortStore::new(db);
-        let ea = store
-            .start(&work_item_ref(tida), &ta, Some(a1))
-            .await
-            .unwrap();
+        let ea = store.start(&tida, &ta, Some(a1)).await.unwrap();
         store.finish(&ea.id, Some(a2), None).await.unwrap();
-        let eb = store
-            .start(&work_item_ref(tidb), &tb, Some(b1))
-            .await
-            .unwrap();
+        let eb = store.start(&tidb, &tb, Some(b1)).await.unwrap();
         store.finish(&eb.id, Some(b2), None).await.unwrap();
 
         // Diff range is stream A's (a1, a2]; range_end (a2) is a stream-A

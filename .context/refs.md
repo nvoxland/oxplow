@@ -58,8 +58,9 @@ never change an existing case's expectation without changing both parsers.
 revisioned, provider_scoped, wikilink_prefixes }` and
 `KindRegistry` (`register` refuses a collision; `validate` checks a ref's
 kind, id shape and whether it may carry `@rev`). `core_kinds()` registers
-the §4.2 vocabulary plus `finding`, `task_note` (a comment on an oxplow
-task), `thread_note` and `run`. Only
+the §4.2 vocabulary plus `finding`, `thread_note` and `run` (a work
+item's comment has no kind of its own: its mentions are its item's
+edges). Only
 `work_item` is provider-scoped in P1 (`oxplow:tsk42`,
 `issues:ENG-12`); `wiki`, `commit` and `symbol` keep bare ids and use the
 capability's active provider.
@@ -84,11 +85,11 @@ its `collector.synced@1` (P7.B3); `build::collector_ref`.
 
 Producers never hand-format a ref. `oxplow_domain::refs::build` has one
 builder per kind oxplow emits: `stream_ref`, `thread_ref`, `effort_ref`,
-`turn_ref`, `snapshot_ref`, `commit_ref`, `command_ref`, `config_ref`,
-`work_item_ref(TaskId)` (`work_item:oxplow:tsk42`) and `work_item_id`
-(the provider-scoped id alone, `oxplow:tsk42`, for `page_ref` rows).
-The inverse is `task_of_work_item_ref` (strict: a full ref naming an
-oxplow task), for oxplow's own implementation. `system_source(component)` gives
+`turn_ref`, `snapshot_ref`, `commit_ref`, `command_ref`, `config_ref`
+and `proposal_ref`; `work_item_id_of_ref` reads a work item's
+provider-scoped id. A work list builds its own items' refs (oxplow's
+tasks: `oxplow_tasks::{work_item_ref, work_item_id,
+task_of_work_item_ref}`). `system_source(component)` gives
 the `system:<component>` event source a system producer uses; an
 actor's runs use `Actor::source()`.
 

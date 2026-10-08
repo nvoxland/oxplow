@@ -3,8 +3,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use rusqlite::params;
 
+use crate::ids::TaskId;
 use oxplow_db::{map_sql_err, string_to_ts, ts_to_string, Database};
-use oxplow_domain::{DomainError, TaskId, ThreadId, Timestamp};
+use oxplow_domain::{DomainError, ThreadId, Timestamp};
 
 use crate::model::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
 

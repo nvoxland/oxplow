@@ -9,12 +9,13 @@
 use rusqlite::OptionalExtension;
 use serde_json::{json, Value};
 
+use crate::ids::TaskId;
 use oxplow_domain::work_items::{
     provider_of, List, WorkItemCommentInput, WorkItemCreateInput, WorkItemDeleteInput,
     WorkItemLinkInput, WorkItemMoveInput, WorkItemReorderInput, WorkItemTransitionInput,
     WorkItemUpdateInput,
 };
-use oxplow_domain::{Actor, CommandCall, CommandError, DomainError, TaskId, ThreadId, Timestamp};
+use oxplow_domain::{Actor, CommandCall, CommandError, DomainError, ThreadId, Timestamp};
 
 use crate::mapping::{canonical_of, native_status, oxplow_native, oxplow_status, status_str};
 use crate::model::{Task, TaskActorKind, TaskAuthor, TaskLinkType, TaskPriority, TaskStatus};

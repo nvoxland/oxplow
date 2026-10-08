@@ -235,7 +235,6 @@ pub fn core_kinds() -> KindRegistry {
         // A `.oxplow/project.yaml` key (`config.changed`'s subject).
         KindSpec::new("config", r"^[A-Za-z][A-Za-z0-9]*$"),
         KindSpec::new("finding", r"^\S+$"),
-        KindSpec::new("task_note", &prefixed("not")),
         KindSpec::new("thread_note", &prefixed("not")),
         KindSpec::new("run", r"^\d+$"),
         // A command waiting for a person's decision (`command_proposal.id`, P6b).

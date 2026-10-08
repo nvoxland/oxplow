@@ -25,8 +25,6 @@ use std::str::FromStr;
 pub enum EntityKind {
     Stream,
     Thread,
-    Task,
-    TaskLink,
     Note,
     Effort,
     AgentTurn,
@@ -41,11 +39,9 @@ pub enum EntityKind {
 
 impl EntityKind {
     /// Every kind, for reverse lookups.
-    pub const ALL: [EntityKind; 14] = [
+    pub const ALL: [EntityKind; 12] = [
         EntityKind::Stream,
         EntityKind::Thread,
-        EntityKind::Task,
-        EntityKind::TaskLink,
         EntityKind::Note,
         EntityKind::Effort,
         EntityKind::AgentTurn,
@@ -63,8 +59,6 @@ impl EntityKind {
         match self {
             EntityKind::Stream => "str",
             EntityKind::Thread => "thr",
-            EntityKind::Task => "tsk",
-            EntityKind::TaskLink => "lnk",
             EntityKind::Note => "not",
             EntityKind::Effort => "eff",
             EntityKind::AgentTurn => "trn",
@@ -84,8 +78,6 @@ impl EntityKind {
         match self {
             EntityKind::Stream => "stream id (str…)",
             EntityKind::Thread => "thread id (thr…)",
-            EntityKind::Task => "task id (tsk…)",
-            EntityKind::TaskLink => "task-link id (lnk…)",
             EntityKind::Note => "note id (not…)",
             EntityKind::Effort => "effort id (eff…)",
             EntityKind::AgentTurn => "agent-turn id (trn…)",
@@ -196,8 +188,8 @@ impl TryFrom<String> for AnyId {
 ///
 /// Each type serializes as the string `"<prefix><int>"`, gives compile-
 /// time safety against id mix-ups, and exposes the same surface as the
-/// hand-written [`TaskId`] used to: `new`/`value`/`placeholder`/
-/// `is_placeholder`/`try_from_str`.
+/// one id surface: `new`/`value`/`placeholder`/`is_placeholder`/
+/// `try_from_str`.
 macro_rules! id_type {
     ($name:ident, $kind:ident) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
@@ -299,8 +291,6 @@ macro_rules! id_type {
 
 id_type!(StreamId, Stream);
 id_type!(ThreadId, Thread);
-id_type!(TaskId, Task);
-id_type!(TaskLinkId, TaskLink);
 id_type!(NoteId, Note);
 id_type!(EffortId, Effort);
 id_type!(AgentTurnId, AgentTurn);
@@ -320,15 +310,15 @@ mod tests {
     fn display_uses_prefix_and_int() {
         assert_eq!(StreamId::new(5).to_string(), "str5");
         assert_eq!(ThreadId::new(21).to_string(), "thr21");
-        assert_eq!(TaskId::new(38).to_string(), "tsk38");
+        assert_eq!(EffortId::new(38).to_string(), "eff38");
     }
 
     #[test]
     fn serializes_as_prefixed_string() {
-        let json = serde_json::to_string(&TaskId::new(42)).unwrap();
-        assert_eq!(json, "\"tsk42\"");
-        let back: TaskId = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, TaskId::new(42));
+        let json = serde_json::to_string(&EffortId::new(42)).unwrap();
+        assert_eq!(json, "\"eff42\"");
+        let back: EffortId = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, EffortId::new(42));
     }
 
     #[test]
@@ -341,25 +331,25 @@ mod tests {
 
     #[test]
     fn try_from_str_requires_matching_prefix() {
-        assert_eq!(TaskId::try_from_str("tsk42"), Some(TaskId::new(42)));
-        // A thread id is not a task id.
-        assert_eq!(TaskId::try_from_str("thr42"), None);
-        assert_eq!(TaskId::try_from_str(""), None);
-        assert_eq!(TaskId::try_from_str("tsk"), None);
-        assert_eq!(TaskId::try_from_str("tsk4a"), None);
-        assert_eq!(TaskId::try_from_str("42"), None);
+        assert_eq!(EffortId::try_from_str("eff42"), Some(EffortId::new(42)));
+        // A thread id is not an effort id.
+        assert_eq!(EffortId::try_from_str("thr42"), None);
+        assert_eq!(EffortId::try_from_str(""), None);
+        assert_eq!(EffortId::try_from_str("eff"), None);
+        assert_eq!(EffortId::try_from_str("eff4a"), None);
+        assert_eq!(EffortId::try_from_str("42"), None);
     }
 
     #[test]
     fn deserialize_rejects_wrong_kind() {
-        let err = serde_json::from_str::<TaskId>("\"thr1\"");
+        let err = serde_json::from_str::<EffortId>("\"thr1\"");
         assert!(err.is_err());
     }
 
     #[test]
     fn placeholder_round_trips_through_predicate() {
-        assert!(TaskId::placeholder().is_placeholder());
-        assert!(!TaskId::new(1).is_placeholder());
+        assert!(EffortId::placeholder().is_placeholder());
+        assert!(!EffortId::new(1).is_placeholder());
     }
 
     #[test]

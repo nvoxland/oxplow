@@ -763,7 +763,7 @@ mod tests {
     use oxplow_db::EffortStore as _;
     use oxplow_domain::Actor;
     use oxplow_domain::StreamId;
-    use oxplow_domain::TaskId;
+    use oxplow_tasks::TaskId;
     use oxplow_tasks::{work_item_ref, TaskPriority, TaskStatus};
 
     /// tsk775: filing or editing an oxplow task answers with the

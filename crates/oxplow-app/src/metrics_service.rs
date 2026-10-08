@@ -4723,7 +4723,7 @@ def transform(input):
         // `record_collector_facts` stamps the capture's `effort_id` so the T-D
         // attribution spine (`captures_for_effort`) sees the run. Snapshot scans
         // (the other fixtures, `effort_id: None`) stay unstamped.
-        use oxplow_domain::TaskId;
+        use oxplow_tasks::TaskId;
         use oxplow_tasks::TaskStore as _;
         use oxplow_tasks::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
         let (svc, dir) = fixture().await;
@@ -4798,7 +4798,7 @@ def transform(input):
     async fn effort_finished_runs_on_effort_complete_gauges() {
         // Effort-triggered collectors run from the `collector.triggers` pump
         // consumer on `effort.finished` (P7.B3).
-        use oxplow_domain::TaskId;
+        use oxplow_tasks::TaskId;
         use oxplow_tasks::TaskStore as _;
         use oxplow_tasks::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
         let (svc, dir) = fixture().await;

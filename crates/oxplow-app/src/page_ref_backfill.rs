@@ -283,9 +283,8 @@ mod tests {
     use super::*;
     use oxplow_db::Database;
     use oxplow_domain::stores::{StreamStore, ThreadStore};
-    use oxplow_domain::{
-        Stream, StreamId, StreamKind, TaskId, Thread, ThreadId, ThreadStatus, Timestamp,
-    };
+    use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadId, ThreadStatus, Timestamp};
+    use oxplow_tasks::TaskId;
     use oxplow_tasks::TaskStore;
     use oxplow_tasks::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
 

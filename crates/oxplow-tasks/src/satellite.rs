@@ -7,8 +7,9 @@
 use async_trait::async_trait;
 use rusqlite::params;
 
+use crate::ids::{TaskId, TaskLinkId};
 use oxplow_db::{map_sql_err, string_to_ts, ts_to_string, Database};
-use oxplow_domain::{DomainError, NoteId, TaskId, TaskLinkId, ThreadId, Timestamp};
+use oxplow_domain::{DomainError, NoteId, ThreadId, Timestamp};
 
 use crate::model::{TaskLink, TaskLinkType, TaskNote};
 

@@ -8,6 +8,7 @@
 //! active.
 
 mod db;
+pub mod ids;
 pub mod mapping;
 pub mod model;
 pub mod provider;
@@ -17,6 +18,7 @@ pub mod satellite;
 pub mod store;
 pub mod verbs;
 
+pub use ids::{TaskId, TaskLinkId};
 pub use model::{
     Task, TaskActorKind, TaskAuthor, TaskLink, TaskLinkType, TaskNote, TaskPriority, TaskStatus,
 };

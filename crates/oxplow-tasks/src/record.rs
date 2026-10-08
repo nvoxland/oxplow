@@ -6,9 +6,10 @@
 use rusqlite::{params, OptionalExtension};
 use serde_json::json;
 
+use crate::ids::TaskId;
 use oxplow_db::map_sql_err;
 use oxplow_domain::work_items::{CommentRecord, LinkRecord, List, WorkItemRecord};
-use oxplow_domain::{DomainError, NoteId, TaskId, ThreadId};
+use oxplow_domain::{DomainError, NoteId, ThreadId};
 
 use crate::mapping::state_pair;
 use crate::model::TaskStatus;

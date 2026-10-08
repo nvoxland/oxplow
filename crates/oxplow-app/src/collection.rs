@@ -4220,9 +4220,10 @@ mod tests {
         use oxplow_db::{Database, SqliteSnapshotStore, SqliteStreamStore};
         use oxplow_domain::stores::StreamStore;
         use oxplow_domain::{
-            EffortId, Stream, StreamId, StreamKind, TaskId, Thread, ThreadStatus, Timestamp,
+            EffortId, Stream, StreamId, StreamKind, Thread, ThreadStatus, Timestamp,
         };
         use oxplow_tasks::SqliteTaskStore;
+        use oxplow_tasks::TaskId;
         use oxplow_tasks::TaskStore;
         use oxplow_tasks::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
 

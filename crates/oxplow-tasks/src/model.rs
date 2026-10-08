@@ -5,7 +5,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use oxplow_domain::{NoteId, TaskId, TaskLinkId, ThreadId, Timestamp};
+use oxplow_domain::{NoteId, ThreadId, Timestamp};
+
+use crate::ids::{TaskId, TaskLinkId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]

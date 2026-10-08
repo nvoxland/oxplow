@@ -975,7 +975,7 @@ mod tests {
         svc.event_log_store.get(id).await.unwrap().unwrap()
     }
 
-    fn state_changed(task: oxplow_domain::TaskId, to: CanonicalState) -> Envelope {
+    fn state_changed(task: oxplow_tasks::TaskId, to: CanonicalState) -> Envelope {
         Envelope::typed::<WorkItemStateChanged>(
             "human",
             &WorkItemStateChangedV1 {

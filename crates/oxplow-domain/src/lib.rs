@@ -46,8 +46,7 @@ pub use events::{Anchors, Envelope, EventId, StoredEvent};
 pub use hook::{AgentStatus, AgentStatusState, AgentTurn, HookKind};
 pub use ids::{
     AgentTurnId, AnyId, CommentId, CommentMessageId, DashboardId, DashboardItemId, EffortId,
-    EntityKind, FollowupId, IdParseError, NoteId, PageVisitId, StreamId, TaskId, TaskLinkId,
-    ThreadId, UsageEventId,
+    EntityKind, FollowupId, IdParseError, NoteId, PageVisitId, StreamId, ThreadId, UsageEventId,
 };
 pub use json::Json;
 pub use stream::{Stream, StreamKind};
