@@ -791,6 +791,7 @@ mod tests {
         let provider = fx.svc.work_items.get("oxplow").unwrap();
         // The writer thread, so moving to in_progress may claim.
         let actor = Actor::Agent {
+            session_id: None,
             thread_id: Some(ThreadId::new(fx.thread.value())),
             stream_id: None,
         };

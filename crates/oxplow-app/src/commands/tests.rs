@@ -187,6 +187,7 @@ async fn kv_value(db: &Database, k: &str) -> Option<String> {
 
 fn agent() -> Actor {
     Actor::Agent {
+        session_id: None,
         thread_id: Some(ThreadId::new(7)),
         stream_id: None,
     }
@@ -274,6 +275,7 @@ async fn an_agent_thread_that_may_not_write_is_refused_writes_not_reads() {
     assert_eq!(kv_value(&db, "a").await, None);
     // Another thread may; a person is never gated.
     let other = Actor::Agent {
+        session_id: None,
         thread_id: Some(ThreadId::new(8)),
         stream_id: None,
     };
@@ -334,6 +336,7 @@ async fn a_thread_that_may_not_write_cant_write_through_a_composite() {
     assert_eq!(kv_value(&db, "a").await, None);
     // A thread that may write gets through the same composite.
     let other = Actor::Agent {
+        session_id: None,
         thread_id: Some(ThreadId::new(8)),
         stream_id: None,
     };
@@ -1345,6 +1348,7 @@ async fn an_agents_stream_is_its_threads() {
     )
     .unwrap();
     let agent = |thread| Actor::Agent {
+        session_id: None,
         thread_id: Some(ThreadId::new(thread)),
         stream_id: None,
     };
@@ -1512,6 +1516,7 @@ async fn a_child_that_changed_nothing_doesnt_keep_the_composite_from_undoing() {
 async fn a_nested_run_applies_each_childs_own_checks() {
     let (db, bus) = composing_bus();
     let agent = Actor::Agent {
+        session_id: None,
         thread_id: Some(oxplow_domain::ThreadId::new(7)),
         stream_id: None,
     };

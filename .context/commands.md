@@ -325,12 +325,14 @@ skipping.
    **undo** that needs a person is `Denied` (a proposal is a plain call
    and would lose the row it undoes).
 5. **Run and record in one transaction**: the handler, a `command_audit`
-   row (`crates/oxplow-db/src/command_audit_store.rs`: actor, input,
+   row (`crates/oxplow-db/src/command_audit_store.rs`: actor — an
+   agent's session too, `session_id`, V40 — input,
    outcome, the handler's `result` — V114, so a run's answer, such as a
    merge's conflicts, stays readable after the fact — inverse, and the
    scopes it called, "Scopes"), `command.executed@2` in the event log
    pointing at the audit row, the handler's domain events (with `cause` =
-   the executed event, and the actor's thread/stream — `Actor::anchors()` —
+   the executed event, and the actor's thread/stream/agent session —
+   `Actor::anchors()` —
    filled into any anchor the handler left empty), and the audit row's
    `event_id`. A handler failure
    rolls all of it back and is audited as `error` in a transaction of its

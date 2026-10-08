@@ -598,6 +598,7 @@ actions:
         .unwrap_err();
         assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
         let agent = Actor::Agent {
+            session_id: None,
             thread_id: Some(fx.thread),
             stream_id: None,
         };

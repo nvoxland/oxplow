@@ -1384,6 +1384,7 @@ mod tests {
     async fn a_written_page_is_attributed_to_the_writing_thread() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let agent = Actor::Agent {
+            session_id: None,
             thread_id: Some(fx.thread),
             stream_id: None,
         };

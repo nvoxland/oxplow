@@ -431,6 +431,7 @@ mod tests {
     async fn an_agent_may_not_verify_a_claim_or_review_a_decision() {
         let (fx, claim, decision) = fixture().await;
         let agent = Actor::Agent {
+            session_id: None,
             thread_id: Some(ThreadId::new(fx.thread.value())),
             stream_id: None,
         };

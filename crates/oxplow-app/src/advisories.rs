@@ -937,6 +937,7 @@ mod tests {
                 .unwrap()
         };
         let agent = oxplow_domain::Actor::Agent {
+            session_id: None,
             thread_id: Some(f.thread),
             stream_id: Some(f.svc.streams.list_streams().await.unwrap()[0].id),
         };

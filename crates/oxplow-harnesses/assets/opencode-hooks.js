@@ -4,8 +4,8 @@
 /// var oxplow sets at spawn. Translates opencode plugin hooks into the
 /// Claude-shaped lifecycle payloads the oxplow control plane already
 /// parses (`session_id` / `prompt` / `tool_name` / `tool_input`), and
-/// POSTs them to `$OXPLOW_HOOK_BASE_URL/<Event>` with the same
-/// bearer-token + X-Oxplow-* headers the Claude and Codex bridges use.
+/// POSTs them to `$OXPLOW_HOOK_BASE_URL/<Event>` with the session's
+/// bearer, which is the whole of who they come from.
 ///
 /// Mappings:
 ///   chat.message        -> UserPromptSubmit
@@ -24,9 +24,6 @@ export const OxplowHooks = async ({ client }) => {
   const headers = {
     "Content-Type": "application/json",
     Authorization: `Bearer ${env.OXPLOW_HOOK_TOKEN || ""}`,
-    "X-Oxplow-Stream": env.OXPLOW_STREAM_ID || "",
-    "X-Oxplow-Thread": env.OXPLOW_THREAD_ID || "",
-    "X-Oxplow-Session": env.OXPLOW_SESSION || "",
   };
 
   async function post(event, payload) {

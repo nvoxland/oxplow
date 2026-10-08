@@ -263,6 +263,7 @@ mod tests {
             .next()
             .unwrap();
         let agent = oxplow_domain::Actor::Agent {
+            session_id: None,
             thread_id: Some(thread.id),
             stream_id: Some(stream.id),
         };

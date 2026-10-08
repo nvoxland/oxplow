@@ -191,6 +191,7 @@ mod tests {
         let f = crate::test_fixtures::services_with_effort().await;
         let svc = &f.svc;
         let agent = Actor::Agent {
+            session_id: None,
             thread_id: Some(ThreadId::new(1)),
             stream_id: Some(StreamId::new(1)),
         };

@@ -162,7 +162,8 @@ oxplow agent:
 Each harness launches its own sessions: `AgentHarness::launch(&LaunchInput)`
 (`crates/oxplow-domain/src/agent/harness.rs`) writes whatever runtime files
 the agent needs and returns a `Launch { spec, resume_dropped }`. The spec is
-`LaunchSpec::Pty { command }` (a shell command for the PTY) or
+`LaunchSpec::Pty { command, env }` (a shell command for the PTY and the
+env the spawn sets — anything secret goes in `env`, never in `command`) or
 `LaunchSpec::Acp { program, args, env, system_prompt_via_meta }` (a process
 the ACP manager speaks to). The built-in harnesses live in
 `crates/oxplow-harnesses/` (`claude.rs`, `codex.rs`, `opencode.rs`,
@@ -311,13 +312,29 @@ as another, and two sessions on one thread are told apart.
   new one and retires the old. Closing the session, its thread or its
   stream revokes it (`SessionProcesses::kill`). Bearers live in memory and
   end with the daemon; a session's next launch mints a fresh one.
-- **Where it rides.** The agent's env (`OXPLOW_HOOK_TOKEN`), its
-  per-session MCP config, its OTLP exporter's headers, and an ACP
-  agent's `McpHttp` entry.
+- **Where it rides.** The agent's env (`OXPLOW_HOOK_TOKEN`, set by the
+  PTY spawn from `LaunchSpec::Pty.env`, never spelled in the `sh -lc`
+  command line), Claude's per-session `mcp-config.<ses>.json` (owner-only,
+  like every runtime JSON file `shared::write_json` writes; no runtime
+  file every session shares holds a bearer), its OTLP exporter's headers,
+  and an ACP agent's `McpHttp` entry. The one exception is Codex's OTLP
+  exporter: Codex reads its exporter's headers only from config, so that
+  bearer is a `--config` argument on its command line.
+- **What it protects.** One agent posting, exporting or calling as
+  another by naming it, and agents being told apart. It is not a wall
+  between processes of the same OS user: such a process can read another
+  agent's env or its owner-only files. Agents run as the person, so that
+  boundary is the OS's, not oxplow's.
 - **In process.** The ACP host and the UI's interrupt build their hook
   envelopes directly, naming the session; they don't go through a route.
 - A hook's harness is the bearer's, so even a hook that times out is
   answered in its harness's shape.
+- **The actor carries its session.** An MCP call's actor is
+  `Actor::Agent { session_id, thread_id, stream_id }` from the bearer;
+  its audit row records the session (`command_audit.session_id`) and the
+  events its run causes are anchored to it (`Actor::anchors()`), so two
+  sessions on one thread are two actors in the record. `source` stays
+  `agent:thr<n>`.
 
 ## Harness runtimes
 

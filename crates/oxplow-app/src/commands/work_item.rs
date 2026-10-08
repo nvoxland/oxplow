@@ -1179,6 +1179,7 @@ mod tests {
     async fn a_create_is_filed_on_a_thread_by_the_common_field() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let agent = Actor::Agent {
+            session_id: None,
             thread_id: Some(fx.thread),
             stream_id: None,
         };
@@ -1314,6 +1315,7 @@ mod tests {
                 .commands
                 .run(
                     &Actor::Agent {
+                        session_id: None,
                         thread_id: Some(fx.thread),
                         stream_id: None,
                     },
@@ -1336,6 +1338,7 @@ mod tests {
     async fn links_and_comments_are_commands_with_their_events() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let agent = Actor::Agent {
+            session_id: None,
             thread_id: Some(fx.thread),
             stream_id: None,
         };
@@ -1505,6 +1508,7 @@ mod tests {
     async fn a_transition_commits_with_its_audit_and_names_its_cause() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let agent = Actor::Agent {
+            session_id: None,
             thread_id: Some(fx.thread),
             stream_id: Some(StreamId::new(1)),
         };
@@ -1564,6 +1568,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let bus = &fx.svc.commands;
         let agent = Actor::Agent {
+            session_id: None,
             thread_id: Some(fx.thread),
             stream_id: Some(StreamId::new(1)),
         };
@@ -1697,6 +1702,7 @@ mod tests {
     async fn a_create_is_audited_and_its_start_switches_the_effort() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let agent = Actor::Agent {
+            session_id: None,
             thread_id: Some(fx.thread),
             stream_id: Some(StreamId::new(1)),
         };
@@ -1790,6 +1796,7 @@ mod tests {
             .await
             .unwrap();
         Actor::Agent {
+            session_id: None,
             thread_id: Some(ThreadId::new(9)),
             stream_id: Some(StreamId::new(1)),
         }

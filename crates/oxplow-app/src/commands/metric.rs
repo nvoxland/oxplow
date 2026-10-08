@@ -364,6 +364,7 @@ mod tests {
 
     fn agent() -> Actor {
         Actor::Agent {
+            session_id: None,
             thread_id: Some(ThreadId::new(1)),
             stream_id: Some(StreamId::new(1)),
         }
@@ -472,6 +473,7 @@ mod tests {
             .await
             .unwrap();
         let agent = Actor::Agent {
+            session_id: None,
             thread_id: Some(fx.thread),
             stream_id: None,
         };

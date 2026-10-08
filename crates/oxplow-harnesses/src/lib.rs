@@ -63,6 +63,30 @@ mod test_launch {
         _dir: tempfile::TempDir,
     }
 
+    /// A PTY launch's command and env. Its bearer (`secret-bearer`) is in
+    /// the env only: the command's text any process can list.
+    pub fn pty(launch: &Launch) -> (&str, std::collections::HashMap<&str, &str>) {
+        match &launch.spec {
+            oxplow_domain::agent::harness::LaunchSpec::Pty { command, env } => {
+                assert!(
+                    !command.contains("secret-bearer"),
+                    "the bearer is in the command: {command}"
+                );
+                (
+                    command,
+                    env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect(),
+                )
+            }
+            other => panic!("not a PTY launch: {other:?}"),
+        }
+    }
+
+    /// Whether only its owner may read `path`.
+    pub fn owner_only(path: &Path) -> bool {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::metadata(path).unwrap().permissions().mode() & 0o077 == 0
+    }
+
     pub fn harness(entry: &str, id: &str) -> Arc<dyn AgentHarness> {
         super::built_in(entry, id, id).expect("a built-in harness")
     }
@@ -133,9 +157,10 @@ mod test_launch {
             hook_base_url: "http://127.0.0.1:9/hook".into(),
             mcp_endpoint_url: "http://127.0.0.1:9/mcp".into(),
             otlp_base_url: "http://127.0.0.1:9".into(),
-            hook_token: "tok".into(),
+            hook_token: "secret-bearer".into(),
         };
         let identity = vec![
+            ("OXPLOW_HOOK_TOKEN".to_string(), "secret-bearer".to_string()),
             ("OXPLOW_THREAD_ID".to_string(), "thr2".to_string()),
             ("OXPLOW_SESSION".to_string(), "ses3".to_string()),
         ];

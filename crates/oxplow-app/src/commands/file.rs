@@ -148,6 +148,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_effort().await;
         let stream = fx.svc.streams.list_streams().await.unwrap()[0].id;
         let agent = Actor::Agent {
+            session_id: None,
             thread_id: Some(fx.thread),
             stream_id: Some(stream),
         };
@@ -211,6 +212,7 @@ mod tests {
         let stream = fx.svc.streams.list_streams().await.unwrap()[0].id;
         let input = json!({ "stream": oxplow_domain::refs::build::stream_ref(stream), "path": "n.txt", "content": "x" });
         let elsewhere = Actor::Agent {
+            session_id: None,
             thread_id: Some(fx.thread),
             stream_id: Some(oxplow_domain::StreamId::new(99)),
         };

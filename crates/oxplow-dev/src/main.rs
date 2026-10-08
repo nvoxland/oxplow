@@ -143,6 +143,7 @@ impl Tasks {
         oxplow_app::extension_commands::register_declared(&bus);
         let actor = match thread {
             Some(t) => Actor::Agent {
+                session_id: None,
                 thread_id: Some(
                     t.parse::<ThreadId>()
                         .map_err(|_| format!("`{t}` isn't a thread id (thr1)"))?,

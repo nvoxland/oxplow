@@ -63,17 +63,14 @@ impl AgentHarness for FakeHarness {
             "OXPLOW_FAKE_OTLP_URL".to_string(),
             format!("{}/v1/metrics", ep.otlp_base_url),
         ));
-        let env: String = env
-            .iter()
-            .map(|(k, v)| format!("{k}={} ", quote(v)))
-            .collect();
         Ok(Launch {
             spec: LaunchSpec::Pty {
                 command: format!(
-                    "cd {} && {env}exec {}",
+                    "cd {} && exec {}",
                     quote(&input.workspace.to_string_lossy()),
                     quote(&program)
                 ),
+                env,
             },
             resume_dropped: false,
         })

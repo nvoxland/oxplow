@@ -88,6 +88,7 @@ impl McpCaller {
 
     pub fn actor(&self) -> oxplow_domain::Actor {
         oxplow_domain::Actor::Agent {
+            session_id: self.session_id,
             thread_id: self.thread_id,
             stream_id: self.stream_id,
         }
@@ -3231,6 +3232,7 @@ impl OxplowMcp {
             }
         }
         Ok(oxplow_domain::Actor::Agent {
+            session_id: caller.session_id,
             thread_id: Some(thread_id),
             stream_id: Some(thread.stream_id),
         })

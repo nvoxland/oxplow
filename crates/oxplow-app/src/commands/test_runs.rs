@@ -113,6 +113,7 @@ mod tests {
                 "test",
             )];
         let agent = Actor::Agent {
+            session_id: None,
             thread_id: Some(fx.thread),
             stream_id: None,
         };
@@ -163,6 +164,7 @@ mod tests {
             .commands
             .run(
                 &Actor::Agent {
+                    session_id: None,
                     thread_id: Some(fx.thread),
                     stream_id: None,
                 },
@@ -270,6 +272,7 @@ mod tests {
             .commands
             .run(
                 &Actor::Agent {
+                    session_id: None,
                     thread_id: Some(fx.thread),
                     stream_id: None,
                 },

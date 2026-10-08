@@ -403,6 +403,7 @@ mod tests {
 
     fn agent(fx: &EffortFixture) -> Actor {
         Actor::Agent {
+            session_id: None,
             thread_id: Some(fx.thread),
             stream_id: Some(StreamId::new(1)),
         }

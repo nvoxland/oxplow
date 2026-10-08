@@ -236,6 +236,7 @@ mod tests {
     async fn a_claim_lands_on_the_agents_own_thread() {
         let fx = services_with_effort().await;
         let agent = Actor::Agent {
+            session_id: None,
             thread_id: Some(fx.thread),
             stream_id: None,
         };
@@ -282,6 +283,7 @@ mod tests {
     async fn a_decision_attaches_to_its_work_items_effort() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let agent = Actor::Agent {
+            session_id: None,
             thread_id: Some(fx.thread),
             stream_id: None,
         };
@@ -341,6 +343,7 @@ mod tests {
             .commands
             .run(
                 &Actor::Agent {
+                    session_id: None,
                     thread_id: Some(fx.thread),
                     stream_id: None,
                 },

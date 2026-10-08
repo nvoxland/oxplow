@@ -307,6 +307,7 @@ mod tests {
 
     fn agent(thread: Option<i64>) -> Actor {
         Actor::Agent {
+            session_id: None,
             thread_id: thread.map(ThreadId::new),
             stream_id: None,
         }
@@ -397,6 +398,7 @@ mod tests {
             .commands
             .run(
                 &Actor::Agent {
+                    session_id: None,
                     thread_id: Some(fx.thread),
                     stream_id: None,
                 },

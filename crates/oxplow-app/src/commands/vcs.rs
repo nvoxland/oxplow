@@ -611,6 +611,7 @@ mod tests {
         let stream = oxplow_domain::refs::build::stream_ref(own);
 
         let agent = |stream_id| Actor::Agent {
+            session_id: None,
             thread_id: Some(f.thread),
             stream_id,
         };

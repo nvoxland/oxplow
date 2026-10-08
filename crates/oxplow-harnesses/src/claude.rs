@@ -36,8 +36,7 @@ use oxplow_domain::agent::text::AgentText;
 use oxplow_domain::events::schema::TokenKind;
 
 use super::shared::{
-    env_prefix, in_shell, program_and_guard, runtime, shell_escape, write_commands, write_json,
-    write_skills,
+    in_shell, program_and_guard, runtime, shell_escape, write_commands, write_json, write_skills,
 };
 use super::Named;
 
@@ -80,35 +79,19 @@ impl AgentHarness for Claude {
 
     fn launch(&self, input: &LaunchInput<'_>) -> Result<Launch, HarnessError> {
         let ep = input.endpoints;
-        let plugin_dir = write_plugin(
-            input.project_dir,
-            &ep.hook_base_url,
-            &ep.mcp_endpoint_url,
-            &ep.hook_token,
-            input.text,
-        )
-        .map_err(runtime)?;
-        let ids = input.session;
-        let (thread, stream, session) = (
-            ids.thread.to_string(),
-            ids.stream.to_string(),
-            ids.session.to_string(),
-        );
-        // Its MCP config can't read env vars, so the session's identity is
-        // baked into a per-session file (like the token).
+        let plugin_dir =
+            write_plugin(input.project_dir, &ep.hook_base_url, input.text).map_err(runtime)?;
+        // Its MCP config can't read env vars, so the session's bearer is
+        // written into a per-session file only its owner can read.
         let mcp_config = write_mcp_config(
             &plugin_dir,
             &ep.mcp_endpoint_url,
             &ep.hook_token,
-            McpIdentity {
-                thread_id: &thread,
-                stream_id: &stream,
-                session_id: Some(&session),
-            },
+            &input.session.session.to_string(),
         )
         .map_err(runtime)?;
         let mut env = input.identity_env.to_vec();
-        env.extend(otel_env(ep, &thread, &session));
+        env.extend(otel_env(ep));
         let cwd = input.workspace.to_string_lossy();
         // A resume id whose transcript is gone launches fresh, with no raw
         // "No conversation found" error, and core forgets the id.
@@ -126,11 +109,11 @@ impl AgentHarness for Claude {
                     cwd: &cwd,
                     resume,
                     program: program.as_deref(),
-                    env: &env,
                     plugin_dir: Some(&plugin_dir.to_string_lossy()),
                     system_prompt: input.system_prompt,
                     mcp_config: Some(&mcp_config.to_string_lossy()),
                 }),
+                env,
             },
             resume_dropped,
         })
@@ -330,25 +313,15 @@ const HOOK_EVENTS: &[&str] = &[
 ];
 
 /// Env vars the hooks header-interpolate from. Claude Code requires
-/// explicit allowlisting via `allowedEnvVars`.
-const HOOK_ENV_VARS: &[&str] = &[
-    "OXPLOW_HOOK_TOKEN",
-    "OXPLOW_STREAM_ID",
-    "OXPLOW_THREAD_ID",
-    "OXPLOW_SESSION",
-];
+/// explicit allowlisting via `allowedEnvVars`. The bearer is the whole of
+/// who a hook comes from.
+const HOOK_ENV_VARS: &[&str] = &["OXPLOW_HOOK_TOKEN"];
 
-/// Materialize the plugin directory, returning it. `hook_base_url` and
-/// `mcp_endpoint_url` are absolute URLs to the in-process control plane
-/// (e.g. `http://127.0.0.1:51823/hook` and `…/mcp`). Re-running against
-/// the same `project_dir` overwrites in place.
-fn write_plugin(
-    project_dir: &Path,
-    hook_base_url: &str,
-    mcp_endpoint_url: &str,
-    hook_token: &str,
-    text: &AgentText,
-) -> io::Result<PathBuf> {
+/// Materialize the plugin directory, returning it. `hook_base_url` is the
+/// control plane's absolute hook URL (e.g. `http://127.0.0.1:51823/hook`).
+/// It holds no bearer: each session's is in its own MCP config and env.
+/// Re-running against the same `project_dir` overwrites in place.
+fn write_plugin(project_dir: &Path, hook_base_url: &str, text: &AgentText) -> io::Result<PathBuf> {
     let plugin_dir = project_dir.join(PLUGIN_DIR_REL);
     let manifest_dir = plugin_dir.join(".claude-plugin");
     let hooks_dir = plugin_dir.join("hooks");
@@ -367,10 +340,6 @@ fn write_plugin(
     write_json(
         &hooks_dir.join("hooks.json"),
         &build_hooks_json(hook_base_url),
-    )?;
-    write_json(
-        &plugin_dir.join("mcp-config.json"),
-        &build_mcp_config(mcp_endpoint_url, hook_token, None),
     )?;
     fs::write(
         plugin_dir.join("AGENT_GUIDE.md"),
@@ -397,9 +366,6 @@ fn build_hooks_json(hook_base_url: &str) -> serde_json::Value {
             "timeout": 8,
             "headers": {
                 "Authorization": "Bearer $OXPLOW_HOOK_TOKEN",
-                "X-Oxplow-Stream": "$OXPLOW_STREAM_ID",
-                "X-Oxplow-Thread": "$OXPLOW_THREAD_ID",
-                "X-Oxplow-Session": "$OXPLOW_SESSION",
             },
             "allowedEnvVars": HOOK_ENV_VARS,
         });
@@ -415,69 +381,35 @@ fn build_hooks_json(hook_base_url: &str) -> serde_json::Value {
     json!({ "hooks": serde_json::Value::Object(hooks) })
 }
 
-/// The thread, stream and agent session an MCP connection acts for, as the
-/// control plane reads them (`X-Oxplow-Thread` / `X-Oxplow-Stream` /
-/// `X-Oxplow-Session`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct McpIdentity<'a> {
-    thread_id: &'a str,
-    stream_id: &'a str,
-    session_id: Option<&'a str>,
-}
-
-fn build_mcp_config(
-    mcp_endpoint_url: &str,
-    hook_token: &str,
-    identity: Option<McpIdentity<'_>>,
-) -> serde_json::Value {
-    // Bake the literal token — and the identity — into the file. Claude
-    // Code's MCP config schema does not env-var-interpolate `headers`
-    // (unlike hooks, which opt in via `allowedEnvVars`), so
-    // `"Bearer $VAR"` would be sent verbatim and the control plane would
-    // 401. The file lives under `.oxplow/runtime/claude-plugin/`
-    // (gitignored) and is rewritten per launch, so it tracks the current
-    // boot's token.
-    let mut headers = serde_json::Map::new();
-    headers.insert(
-        "Authorization".into(),
-        format!("Bearer {hook_token}").into(),
-    );
-    if let Some(id) = identity {
-        headers.insert("X-Oxplow-Thread".into(), id.thread_id.into());
-        headers.insert("X-Oxplow-Stream".into(), id.stream_id.into());
-        if let Some(session) = id.session_id {
-            headers.insert("X-Oxplow-Session".into(), session.into());
-        }
-    }
+fn build_mcp_config(mcp_endpoint_url: &str, hook_token: &str) -> serde_json::Value {
+    // Bake the session's literal bearer into the file. Claude Code's MCP
+    // config schema does not env-var-interpolate `headers` (unlike hooks,
+    // which opt in via `allowedEnvVars`), so `"Bearer $VAR"` would be sent
+    // verbatim and the control plane would 401. The file lives under
+    // `.oxplow/runtime/claude-plugin/` (gitignored, owner-only) and is
+    // rewritten per launch, so it holds the session's current bearer.
     json!({
         "mcpServers": {
             "oxplow": {
                 "type": "http",
                 "url": mcp_endpoint_url,
-                "headers": headers,
+                "headers": { "Authorization": format!("Bearer {hook_token}") },
             },
         },
     })
 }
 
-/// A per-session MCP config (`mcp-config.<session>.json`, beside the
-/// shared `mcp-config.json`) carrying its identity headers, so
-/// `run_command` and every audited write know who is acting. Returns the
-/// path to pass as `--mcp-config`.
+/// A session's MCP config (`mcp-config.<session>.json`) carrying its
+/// bearer, which is who its MCP calls come from. Returns the path to pass
+/// as `--mcp-config`.
 fn write_mcp_config(
     plugin_dir: &Path,
     mcp_endpoint_url: &str,
     hook_token: &str,
-    identity: McpIdentity<'_>,
+    session: &str,
 ) -> io::Result<PathBuf> {
-    let path = plugin_dir.join(format!(
-        "mcp-config.{}.json",
-        identity.session_id.unwrap_or(identity.thread_id)
-    ));
-    write_json(
-        &path,
-        &build_mcp_config(mcp_endpoint_url, hook_token, Some(identity)),
-    )?;
+    let path = plugin_dir.join(format!("mcp-config.{session}.json"));
+    write_json(&path, &build_mcp_config(mcp_endpoint_url, hook_token))?;
     Ok(path)
 }
 
@@ -493,7 +425,6 @@ struct Command<'a> {
     cwd: &'a str,
     resume: Option<&'a str>,
     program: Option<&'a str>,
-    env: &'a [(String, String)],
     plugin_dir: Option<&'a str>,
     system_prompt: Option<&'a str>,
     mcp_config: Option<&'a str>,
@@ -502,7 +433,6 @@ struct Command<'a> {
 /// `claude` with its plugin, prompt and MCP config, resuming `resume`
 /// with a fallback to a fresh session when the id is stale.
 fn command(c: &Command<'_>) -> String {
-    let prefix = env_prefix(c.env);
     let plugin_arg = c
         .plugin_dir
         .map(|p| format!(" --plugin-dir {}", shell_escape(p)))
@@ -518,11 +448,11 @@ fn command(c: &Command<'_>) -> String {
         .unwrap_or_default();
     let (prog, guard) = program_and_guard(c.program, "claude");
     let base = format!("{prog}{plugin_arg}{prompt_arg}{mcp_arg}");
-    let fresh = format!("{prefix}exec {base}");
+    let fresh = format!("exec {base}");
     let command = match c.resume {
         None => fresh,
         Some(id) => format!(
-            "{prefix}{base} --resume {} || {{ echo '[oxplow] saved resume id was stale; starting a fresh Claude session' >&2; {fresh}; }}",
+            "{base} --resume {} || {{ echo '[oxplow] saved resume id was stale; starting a fresh Claude session' >&2; {fresh}; }}",
             shell_escape(id)
         ),
     };
@@ -530,12 +460,11 @@ fn command(c: &Command<'_>) -> String {
 }
 
 /// OTEL env that points Claude Code's OTLP metrics exporter at oxplow's
-/// receiver. Only metrics are exported. The owning thread and agent
-/// session ride custom OTLP headers so the receiver attributes token facts
-/// to the session's turn. Temporality is the SDK default (delta): each
-/// export is the per-interval increment, additive as `oxplow.tokens`
-/// facts.
-fn otel_env(ep: &Endpoints, thread: &str, session: &str) -> Vec<(String, String)> {
+/// receiver. Only metrics are exported. The session's bearer rides the
+/// OTLP headers, so the receiver attributes token facts to the session's
+/// turn. Temporality is the SDK default (delta): each export is the
+/// per-interval increment, additive as `oxplow.tokens` facts.
+fn otel_env(ep: &Endpoints) -> Vec<(String, String)> {
     vec![
         ("CLAUDE_CODE_ENABLE_TELEMETRY".into(), "1".into()),
         ("OTEL_METRICS_EXPORTER".into(), "otlp".into()),
@@ -547,10 +476,7 @@ fn otel_env(ep: &Endpoints, thread: &str, session: &str) -> Vec<(String, String)
         ),
         (
             "OTEL_EXPORTER_OTLP_HEADERS".into(),
-            format!(
-                "Authorization=Bearer {},X-Oxplow-Thread={thread},X-Oxplow-Session={session}",
-                ep.hook_token
-            ),
+            format!("Authorization=Bearer {}", ep.hook_token),
         ),
         // 10s (default is 60s) — snappier token updates in the UI.
         ("OTEL_METRIC_EXPORT_INTERVAL".into(), "10000".into()),
@@ -598,20 +524,17 @@ fn resume_state(home: &Path, cwd: &str, session_id: &str) -> ResumeState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_launch::{harness, launch_in};
+    use crate::test_launch::{harness, launch_in, owner_only};
     use oxplow_domain::agent::text::Text;
     use tempfile::TempDir;
 
     fn pty(launch: &Launch) -> &str {
-        match &launch.spec {
-            LaunchSpec::Pty { command } => command,
-            other => panic!("not a PTY launch: {other:?}"),
-        }
+        crate::test_launch::pty(launch).0
     }
 
-    /// The launch writes its plugin and per-session MCP config, and its
-    /// command carries the identity, the OTEL exporter, the prompt, the
-    /// plugin and the MCP config.
+    /// The launch writes its plugin and per-session MCP config; its env
+    /// carries the session's bearer and identity and the OTEL exporter, its
+    /// command the prompt, the plugin and the MCP config — and no secret.
     #[test]
     fn launch_builds_the_command_and_env() {
         let h = harness("oxplow:claude-code", "claude");
@@ -622,11 +545,16 @@ mod tests {
             &serde_json::json!({}),
         );
         assert!(!l.launch.resume_dropped);
-        let cmd = pty(&l.launch);
+        let (cmd, env) = crate::test_launch::pty(&l.launch);
+        assert_eq!(env["OXPLOW_HOOK_TOKEN"], "secret-bearer");
+        assert_eq!(env["OXPLOW_SESSION"], "ses3");
+        assert_eq!(env["CLAUDE_CODE_ENABLE_TELEMETRY"], "1");
+        assert_eq!(
+            env["OTEL_EXPORTER_OTLP_HEADERS"],
+            "Authorization=Bearer secret-bearer"
+        );
+        assert!(!cmd.contains("OXPLOW_"), "{cmd}");
         for want in [
-            "OXPLOW_SESSION=",
-            "X-Oxplow-Session=ses3",
-            "CLAUDE_CODE_ENABLE_TELEMETRY=",
             "--plugin-dir",
             "--append-system-prompt",
             "be terse",
@@ -638,10 +566,15 @@ mod tests {
         ] {
             assert!(cmd.contains(want), "{want}: {cmd}");
         }
-        assert!(l
+        let config = l
             .project
-            .join(".oxplow/runtime/claude-plugin/mcp-config.ses3.json")
-            .is_file());
+            .join(".oxplow/runtime/claude-plugin/mcp-config.ses3.json");
+        assert!(owner_only(&config));
+        let body = fs::read_to_string(&config).unwrap();
+        assert!(
+            body.contains("Bearer secret-bearer") && !body.contains("X-Oxplow"),
+            "{body}"
+        );
     }
 
     /// A resume id whose transcript is gone launches fresh and is dropped.
@@ -668,14 +601,13 @@ mod tests {
             otlp_base_url: "http://127.0.0.1:9".into(),
             hook_token: "tok123".into(),
         };
-        let env: std::collections::HashMap<String, String> =
-            otel_env(&ep, "thr1", "ses3").into_iter().collect();
+        let env: std::collections::HashMap<String, String> = otel_env(&ep).into_iter().collect();
         assert_eq!(env["OTEL_METRICS_EXPORTER"], "otlp");
         assert_eq!(env["OTEL_EXPORTER_OTLP_PROTOCOL"], "http/protobuf");
         assert_eq!(env["OTEL_EXPORTER_OTLP_ENDPOINT"], "http://127.0.0.1:9");
         assert_eq!(
             env["OTEL_EXPORTER_OTLP_HEADERS"],
-            "Authorization=Bearer tok123,X-Oxplow-Thread=thr1,X-Oxplow-Session=ses3"
+            "Authorization=Bearer tok123"
         );
         assert_eq!(env["OTEL_METRIC_EXPORT_INTERVAL"], "10000");
     }
@@ -686,7 +618,6 @@ mod tests {
             cwd: "/repo",
             resume: None,
             program: None,
-            env: &[],
             plugin_dir: None,
             system_prompt: None,
             mcp_config: None,
@@ -722,18 +653,17 @@ mod tests {
         assert_eq!(resume_state(tmp.path(), cwd, ""), ResumeState::Unknown);
     }
 
-    fn plugin(project: &Path, token: &str, text: &AgentText) -> PathBuf {
-        write_plugin(project, "http://h/hook", "http://h/mcp", token, text).unwrap()
+    fn plugin(project: &Path, text: &AgentText) -> PathBuf {
+        write_plugin(project, "http://h/hook", text).unwrap()
     }
 
     #[test]
     fn write_plugin_emits_expected_files() {
         let tmp = TempDir::new().unwrap();
-        let dir = plugin(tmp.path(), "tok", &oxplow_agent_text::core_text());
+        let dir = plugin(tmp.path(), &oxplow_agent_text::core_text());
         for file in [
             ".claude-plugin/plugin.json",
             "hooks/hooks.json",
-            "mcp-config.json",
             "AGENT_GUIDE.md",
             "commands/review-comments.md",
             "commands/configure.md",
@@ -767,7 +697,7 @@ mod tests {
             name: "work-next".into(),
             body: "next".into(),
         });
-        let dir = plugin(tmp.path(), "tok", &text);
+        let dir = plugin(tmp.path(), &text);
         let skills = dir.join("skills");
         let commands = dir.join("commands");
         fs::create_dir_all(skills.join("someone-elses")).unwrap();
@@ -810,7 +740,7 @@ mod tests {
         // leak into the skills / prompts / hooks / commands oxplow writes
         // into a user's project (those docs don't exist downstream).
         let tmp = TempDir::new().unwrap();
-        plugin(tmp.path(), "tok", &oxplow_agent_text::core_text());
+        plugin(tmp.path(), &oxplow_agent_text::core_text());
         let mut offenders = Vec::new();
         let mut stack = vec![tmp.path().to_path_buf()];
         while let Some(dir) = stack.pop() {
@@ -837,7 +767,7 @@ mod tests {
         // commands surface as `/<name>:<command>`. Keep it `oxplow`
         // so users type `/oxplow:configure`, not `/oxplow-runtime:…`.
         let tmp = TempDir::new().unwrap();
-        let dir = plugin(tmp.path(), "tok", &oxplow_agent_text::core_text());
+        let dir = plugin(tmp.path(), &oxplow_agent_text::core_text());
         let body = fs::read_to_string(dir.join(".claude-plugin/plugin.json")).unwrap();
         let v: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(v["name"], "oxplow");
@@ -851,9 +781,14 @@ mod tests {
         let entry = &pre["hooks"][0];
         assert_eq!(entry["type"], "http");
         assert_eq!(entry["url"], "http://h/hook/PreToolUse");
+        // The bearer is the whole of who a hook comes from.
         assert_eq!(
-            entry["headers"]["Authorization"],
-            "Bearer $OXPLOW_HOOK_TOKEN"
+            entry["headers"],
+            serde_json::json!({ "Authorization": "Bearer $OXPLOW_HOOK_TOKEN" })
+        );
+        assert_eq!(
+            entry["allowedEnvVars"],
+            serde_json::json!(["OXPLOW_HOOK_TOKEN"])
         );
     }
 
@@ -881,7 +816,7 @@ mod tests {
 
     #[test]
     fn mcp_config_uses_http_transport() {
-        let v = build_mcp_config("http://127.0.0.1:8/mcp", "tok", None);
+        let v = build_mcp_config("http://127.0.0.1:8/mcp", "tok");
         assert_eq!(v["mcpServers"]["oxplow"]["type"], "http");
         assert_eq!(v["mcpServers"]["oxplow"]["url"], "http://127.0.0.1:8/mcp");
     }
@@ -891,10 +826,10 @@ mod tests {
         // Regression: Claude Code does not env-var-interpolate MCP
         // header values, so the token must land in the file as a
         // literal string — not "Bearer $OXPLOW_HOOK_TOKEN".
-        let v = build_mcp_config("http://x/mcp", "abc123", None);
+        let v = build_mcp_config("http://x/mcp", "abc123");
         assert_eq!(
-            v["mcpServers"]["oxplow"]["headers"]["Authorization"],
-            "Bearer abc123"
+            v["mcpServers"]["oxplow"]["headers"],
+            serde_json::json!({ "Authorization": "Bearer abc123" })
         );
     }
 
@@ -902,12 +837,12 @@ mod tests {
     fn write_plugin_is_idempotent() {
         let tmp = TempDir::new().unwrap();
         let text = oxplow_agent_text::core_text();
-        write_plugin(tmp.path(), "http://h/hook", "http://h/mcp", "t1", &text).unwrap();
-        let dir = write_plugin(tmp.path(), "http://h2/hook", "http://h2/mcp", "t2", &text).unwrap();
+        write_plugin(tmp.path(), "http://h/hook", &text).unwrap();
+        let dir = write_plugin(tmp.path(), "http://h2/hook", &text).unwrap();
         let body = fs::read_to_string(dir.join("hooks/hooks.json")).unwrap();
         assert!(body.contains("http://h2/hook"));
-        let mcp_body = fs::read_to_string(dir.join("mcp-config.json")).unwrap();
-        assert!(mcp_body.contains("Bearer t2"));
+        // No file every session shares holds a bearer.
+        assert!(!dir.join("mcp-config.json").exists());
     }
 
     const ASSISTANT_LINE: &str = r#"{"type":"assistant","message":{"model":"claude-opus-4-8","usage":{"input_tokens":100,"output_tokens":20,"cache_creation_input_tokens":50,"cache_read_input_tokens":200}}}"#;
