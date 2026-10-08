@@ -365,9 +365,21 @@ aws-lc-rs).
   install cargo-sweep --locked`) drops artifacts of toolchains no longer
   installed, then the oldest artifacts until `target/` is under 60 GB.
   Coverage builds live apart in `target/llvm-cov-target` (`cargo cov`).
-- Debug info isn't the lever: a fresh workspace build is ~17 GB, its
+- **`split-debuginfo = "off"`.** A fresh workspace build is ~17 GB, its
   object files 1.8 GB (`debug = "line-tables-only"`, none for
-  dependencies), so `split-debuginfo` isn't set.
+  dependencies), but that isn't where `target/` grew. macOS's default
+  `unpacked` keeps every codegen unit's `.rcgu.o` in `deps/` for the
+  debugger, and each incremental rebuild writes them under a new
+  session suffix without deleting the old: after one day of rebuilds the
+  main worktree held 44 copies of each `oxplow_app` unit, 88 GB of
+  object files in a 79 GB-on-disk `target/`. cargo-sweep can't help: the
+  copies belong to one artifact. `off` (Linux's default already) links
+  `oxplow-app`'s test lib as fast (7–8 s) and leaves none; `packed` also
+  leaves none but runs `dsymutil` per link (+4 s, a 468 MB `.dSYM`). The
+  cost of `off` on macOS: backtraces name functions without file:line
+  (panic messages keep theirs). For a debugging session that needs them,
+  `CARGO_PROFILE_DEV_SPLIT_DEBUGINFO=packed`. Object files already
+  leaked stay until a `cargo clean`.
 
 ## Recording a fresh agent (`scripts/record-just-works.sh`)
 
