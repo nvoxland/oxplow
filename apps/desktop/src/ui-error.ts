@@ -43,7 +43,7 @@ export function reportUiError(label: string, cause: unknown): void {
  * banner. Use this anywhere you would have written
  * `void op.catch(() => {})`.
  *
- *   runWithError("Reorder threads", reorderThreads(...));
+ *   runWithError("Close the thread", closeThread(...));
  */
 export function runWithError<T>(label: string, promise: Promise<T>): void {
   // Catch the common bug of passing a thunk instead of a started promise:

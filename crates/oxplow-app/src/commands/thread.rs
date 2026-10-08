@@ -533,8 +533,9 @@ pub fn reopen_op() -> Op {
     )
 }
 
-/// `thread.reorder { stream, order }`: the named threads take the positions
-/// they're listed in. Undone by their previous order.
+/// `thread.reorder { stream, order }`: the stream's threads take the
+/// positions `order` lists them in — every one of them, once. Undone by
+/// their previous order.
 pub fn reorder_op() -> Op {
     Op::new(
         "threads.write",
@@ -554,11 +555,33 @@ pub fn reorder_op() -> Op {
                         format!("`{r}` isn't on `{}`", input.stream),
                     ));
                 }
+                if threads.iter().any(|t: &Thread| t.id == thread.id) {
+                    return Err(invalid(
+                        "/order",
+                        format!("`order` names `{r}` twice; it names each thread once"),
+                    ));
+                }
                 threads.push(thread);
             }
-            let mut before: Vec<&Thread> = threads.iter().collect();
-            before.sort_by_key(|t| (t.sort_index, t.created_at));
-            let previous: Vec<String> = before.iter().map(|t| thread_ref(t.id)).collect();
+            // The stream's whole order, so every thread has its place and
+            // the undo puts each back where it was.
+            let listed = list_for_stream_tx(ctx.conn, stream).map_err(sql)?;
+            let missing: Vec<String> = listed
+                .iter()
+                .filter(|t| !threads.iter().any(|n| n.id == t.id))
+                .map(|t| format!("`{}`", thread_ref(t.id)))
+                .collect();
+            if !missing.is_empty() {
+                return Err(invalid(
+                    "/order",
+                    format!(
+                        "`order` leaves out {}: it names every thread of `{}` once",
+                        missing.join(", "),
+                        input.stream
+                    ),
+                ));
+            }
+            let previous: Vec<String> = listed.iter().map(|t| thread_ref(t.id)).collect();
             let now = Timestamp::now();
             for (i, mut thread) in threads.clone().into_iter().enumerate() {
                 thread.sort_index = i as i64;
@@ -942,6 +965,34 @@ mod tests {
             matches!(&err, CommandError::Invalid { field: Some(f), .. } if f == "/order/0"),
             "{err:?}"
         );
+        // The order is the stream's whole order: each of its threads once,
+        // so the undo puts every one back where it was.
+        for (order, says) in [
+            (vec![thread_ref(c), thread_ref(b)], "leaves out"),
+            (
+                vec![
+                    thread_ref(c),
+                    thread_ref(c),
+                    thread_ref(b),
+                    thread_ref(fx.thread),
+                ],
+                "names `thread:thr",
+            ),
+        ] {
+            let err = run(
+                &fx,
+                &Actor::Human,
+                REORDER,
+                json!({ "stream": stream, "order": order }),
+            )
+            .await
+            .unwrap_err();
+            assert!(
+                matches!(&err, CommandError::Invalid { field: Some(f), message }
+                    if f == "/order" && message.contains(says)),
+                "{err:?}"
+            );
+        }
     }
 
     /// An ACP thread names a known ACP agent, and only an ACP thread names

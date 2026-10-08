@@ -1325,13 +1325,6 @@ export async function createThread(
   return getThreadState(streamId);
 }
 
-export async function reorderThreads(streamId: string, orderedThreadIds: string[]): Promise<void> {
-  await runCommand("oxplow.thread.reorder", {
-    stream: streamRef(streamId),
-    order: orderedThreadIds.map(threadRef),
-  });
-}
-
 export async function selectThread(streamId: string, threadId: string): Promise<ThreadState> {
   unwrap(await commands.selectThread({ streamId, threadId }));
   return getThreadState(streamId);

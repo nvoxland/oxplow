@@ -27,7 +27,6 @@ import {
   selectThread,
   promoteThread,
   recordUsage,
-  reorderThreads,
   switchStream,
   runCommand,
   runCommandForCall,
@@ -865,15 +864,6 @@ export function App() {
     }
   }
 
-  async function handleReorderThreads(orderedThreadIds: string[]) {
-    if (!stream) return;
-    try {
-      await reorderThreads(stream.id, orderedThreadIds);
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-    }
-  }
 
   // Work-item writes are work_item.* commands, by ref; the thread's and
   // the backlog's lists re-read from the models when they change
