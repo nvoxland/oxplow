@@ -16,7 +16,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::manifest_v2::{at, entry_line, key_line, line_under};
+use super::manifest_v2::{at, item_lines, key_line, line_under};
 use super::Lens;
 
 /// A replacement (valid ones; invalid ones are in the extension's
@@ -38,9 +38,10 @@ pub struct UiReplacement {
     pub label: String,
 }
 
-#[derive(Debug, Deserialize)]
+/// A `ui.replacements` entry as the manifest holds it.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct ReplacementFile {
+pub(crate) struct ReplacementFile {
     target: String,
     lens: String,
 }
@@ -65,15 +66,17 @@ pub fn parse_replacements(
     };
     let mut out: Vec<UiReplacement> = Vec::new();
     let mut errors = Vec::new();
-    for item in items {
+    let lines = item_lines(manifest, "ui.replacements");
+    for (i, item) in items.iter().enumerate() {
+        let item_line = lines.get(i).copied().or(block);
         let r: ReplacementFile = match serde_yaml::from_value(item.clone()) {
             Ok(r) => r,
             Err(e) => {
-                errors.push(at(file, block, format!("`ui.replacements`: {e}")));
+                errors.push(at(file, item_line, format!("`ui.replacements`: {e}")));
                 continue;
             }
         };
-        let line = entry_line(manifest, "ui", "target", &r.target).or(block);
+        let line = item_line;
         let target = oxplow_domain::replaceable::replaceable(&r.target);
         let lens = lenses.iter().find(|l| l.slug == r.lens);
         let problem = match (target, lens) {

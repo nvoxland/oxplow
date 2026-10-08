@@ -29,7 +29,7 @@ use oxplow_domain::{Access, CommandCall, CommandSpec, Confirm, InputValidator, I
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::extensions::manifest_v2::{at, entry_line, key_line};
+use crate::extensions::manifest_v2::{at, item_lines, key_line};
 use crate::extensions::{CommandSchemas, Extension};
 
 /// An example run of a command: its input, and the commands its script
@@ -136,9 +136,9 @@ fn with_instance(mut schema: Value) -> Value {
 }
 
 /// A `commands:` entry as the manifest holds it.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct CommandFile {
+pub(crate) struct CommandFile {
     name: String,
     summary: String,
     #[serde(default)]
@@ -168,7 +168,7 @@ struct CommandFile {
     examples: Vec<ExampleFile>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ExampleFile {
     name: String,
@@ -255,15 +255,16 @@ pub fn parse_commands(
     };
     let mut out: Vec<ExtensionCommand> = Vec::new();
     let mut errors = Vec::new();
-    for item in items {
+    let lines = item_lines(manifest, "commands");
+    for (i, item) in items.iter().enumerate() {
+        let line = lines.get(i).copied().or(block_line);
         let entry: CommandFile = match serde_yaml::from_value(item.clone()) {
             Ok(e) => e,
             Err(e) => {
-                errors.push(at(file, block_line, format!("command: {e}")));
+                errors.push(at(file, line, format!("command: {e}")));
                 continue;
             }
         };
-        let line = entry_line(manifest, "commands", "name", &entry.name).or(block_line);
         match command_of(namespace, shared, entry, read, provider_ops) {
             Ok(c) if out.iter().any(|o| o.name == c.name) => errors.push(at(
                 file,

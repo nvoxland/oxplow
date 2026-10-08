@@ -21,7 +21,18 @@ pub const CURRENT: u32 = 2;
 /// Who the extension is for. Explicit and checked: a shared extension
 /// (committed for a team, installed from git, bundled) may use stable
 /// kinds only and must name the engine it targets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, Default)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    specta::Type,
+    Default,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum Sharing {
     #[default]
@@ -31,7 +42,7 @@ pub enum Sharing {
 
 /// One acceptance example: an input and what the extension should make
 /// of it. Fixtures for `oxplow extension test`; data here.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct IntentExample {
     pub name: String,
@@ -45,7 +56,7 @@ pub struct IntentExample {
 
 /// Why the extension exists — what makes it regenerable, repairable and
 /// reviewable against what it was for.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Intent {
     /// The question it answers, or the job it does.
@@ -61,9 +72,25 @@ pub struct Intent {
     pub prompts: Vec<IntentPrompt>,
 }
 
-/// A question an extension helps answer (P6.D2). `about` is a ref kind
+/// `intent:` as written: its examples and prompts are typed one by one
+/// ([`intent_of`]), so a broken one is that entry's error and the rest
+/// of the extension still loads. Its schema is [`Intent`]'s.
+#[derive(Debug, Clone, PartialEq, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(with = "Intent")]
+pub struct IntentFile {
+    pub purpose: String,
+    #[serde(default)]
+    pub origin: Option<String>,
+    #[serde(default)]
+    pub examples: Vec<Value>,
+    #[serde(default)]
+    pub prompts: Vec<Value>,
+}
+
+/// A question an extension helps answer. `about` is a ref kind
 /// (`commit`, `file`, `effort`): a page for a ref of that kind suggests it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct IntentPrompt {
     pub prompt: String,
@@ -72,26 +99,33 @@ pub struct IntentPrompt {
 }
 
 /// A slot mount: a lens into a core page.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SlotMount {
     pub slot: String,
     pub lens: String,
 }
 
-/// `ui:` — everything an extension adds to the core UI (P6b): lenses
-/// mounted into core pages (`slots`, stable), decorations on core refs
-/// (`decorators`, stable since P10) and replaced sub-components
-/// (`replacements`, experimental; `extensions/replacements.rs`). Its
-/// commands meet a person through their own `ui` (`commands:`).
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+/// `ui:` — everything an extension adds to the core UI: lenses mounted
+/// into core pages (`slots`), decorations on core refs (`decorators`) and
+/// replaced sub-components (`replacements`, experimental). Its commands
+/// meet a person through their own `ui` (`commands:`).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UiBlock {
+    /// Lenses mounted into core pages: `{ slot, lens }`, typed one by one
+    /// ([`slots_of`]).
     #[serde(default)]
-    pub slots: Vec<SlotMount>,
+    #[schemars(with = "Vec<SlotMount>")]
+    pub slots: Vec<Value>,
+    /// Labels from its models on core refs.
     #[serde(default)]
+    #[schemars(with = "Option<Vec<super::decorators::DecoratorFile>>")]
     pub decorators: Option<Value>,
+    /// Experimental (a private extension only): a lens in place of a
+    /// named core component.
     #[serde(default)]
+    #[schemars(with = "Option<Vec<super::replacements::ReplacementFile>>")]
     pub replacements: Option<Value>,
 }
 
@@ -106,10 +140,12 @@ fn prompt_line_problem(prompt: &str) -> Option<String> {
 }
 
 /// `extension.yaml` at `manifest: 2`, as written on disk.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ManifestV2 {
+    /// The manifest version: `2`.
     pub manifest: u32,
+    /// The extension's name; must equal its folder's.
     pub name: String,
     /// The namespace its commands' ids are under
     /// (`<namespace>.<area>.<verb>`); defaults to the name with `-` → `_`.
@@ -118,71 +154,91 @@ pub struct ManifestV2 {
     pub namespace: Option<String>,
     #[serde(default)]
     pub description: String,
+    /// `private` (the default: this project, experimental kinds allowed)
+    /// or `shared` (stable kinds only, `engine` required).
     #[serde(default)]
     pub sharing: Sharing,
     /// The oxplow version range it targets, `>=MAJOR.MINOR[.PATCH]`.
     /// Required when shared.
     #[serde(default)]
     pub engine: Option<String>,
-    pub intent: Option<Intent>,
+    /// Why it exists: its purpose, the ref that created it, and examples.
+    /// Required.
+    #[schemars(required)]
+    pub intent: Option<IntentFile>,
 
     // ---- stable kinds ----
-    /// SQL models (§9.1): `ModelDecl`s, each with `models/<name>.sql`,
-    /// published as `v_<extension>_<name>` (P4.9).
+    /// SQL models: each with `models/<name>.sql`, published as
+    /// `v_<extension>_<name>`.
     #[serde(default)]
+    #[schemars(with = "Option<Vec<oxplow_db::models::ModelDecl>>")]
     pub models: Option<Value>,
-    /// The metric catalog contributions, in `.oxplow/project.yaml`'s
-    /// vocabulary; validated per block by the loader.
+    /// Measures, in `.oxplow/project.yaml`'s vocabulary.
     #[serde(default)]
+    #[schemars(with = "Option<Vec<oxplow_config::MeasureEntry>>")]
     pub measures: Option<Value>,
+    /// Metric definitions (`key:`), in `.oxplow/project.yaml`'s vocabulary.
     #[serde(default)]
+    #[schemars(with = "Option<Vec<oxplow_config::MetricEntry>>")]
     pub metrics: Option<Value>,
+    /// Dimensions, in `.oxplow/project.yaml`'s vocabulary.
     #[serde(default)]
+    #[schemars(with = "Option<Vec<oxplow_config::DimensionEntry>>")]
     pub dimensions: Option<Value>,
-    /// Collectors (P7.B3): exec / starlark /
-    /// jaq / read, writing entities or recording facts. Parsed by
-    /// `oxplow_config::collectors`.
+    /// Collectors (exec / starlark / jaq / read), writing entities or
+    /// recording facts.
     #[serde(default)]
+    #[schemars(with = "Option<Vec<oxplow_config::collectors::RawCollector>>")]
     pub collectors: Option<Value>,
-    /// Commands whose handler is a Starlark script composing core commands
-    /// (§7, P6b). Parsed by `extension_commands`.
+    /// Commands: a Starlark script composing core commands, a scope's
+    /// operation, or one of its provider's.
     #[serde(default)]
+    #[schemars(with = "Option<Vec<crate::extension_commands::CommandFile>>")]
     pub commands: Option<Value>,
-    /// Pages and left-nav panels (§11.3). Parsed as data in P1.
+    /// Full pages, each showing one of its lenses.
     #[serde(default)]
+    #[schemars(with = "Option<Vec<super::PageFile>>")]
     pub pages: Option<Value>,
+    /// Left-nav panels, each showing its lenses compact.
     #[serde(default)]
+    #[schemars(with = "Option<Vec<super::PanelFile>>")]
     pub panels: Option<Value>,
-    /// What it adds to the core UI: slots, commands in menus, decorators.
+    /// What it adds to the core UI: slots, decorators, replacements.
     #[serde(default)]
     pub ui: UiBlock,
-    /// Guidance queries for the agent; parsed one by one by the loader.
-    /// Stable: bundled `oxplow-bundled` ships on it, which is the
-    /// evidence a kind needs to be promoted.
+    /// Guidance queries run at a moment (`on`), whose rows reach the
+    /// agent or a person.
     #[serde(default)]
+    #[schemars(with = "Vec<super::AdvisoryFile>")]
     pub advisories: Vec<Value>,
-    /// The event types it may log (P9.D6). Stable.
+    /// The event types it may log, under its own namespace.
     #[serde(default)]
+    #[schemars(with = "Option<crate::extension_event_types::EventTypesFile>")]
     pub event_types: Option<Value>,
-
-    /// Kinds of thing a ref can name (stable since P10).
+    /// Kinds of thing a ref can name.
     #[serde(default)]
+    #[schemars(with = "Option<Vec<crate::extension_ref_kinds::RefKindFile>>")]
     pub ref_kinds: Option<Value>,
-    /// Capability implementations: built-ins of core's it declares
-    /// (stable; `oxplow-bundled` declares the defaults).
+    /// Capability implementations: built-ins of core's it declares.
     #[serde(default)]
+    #[schemars(with = "Option<Vec<super::implementations::ImplementationFile>>")]
     pub implementations: Option<Value>,
-    /// Skills and slash commands for the coding agent (stable).
+    /// Skills and slash commands for the coding agent.
     #[serde(default)]
+    #[schemars(with = "Option<Vec<super::skills::SkillFile>>")]
     pub skills: Option<Value>,
-
     /// External providers: programs implementing a capability, whose
-    /// operations its `commands:` declare (stable).
+    /// operations its `commands:` declare.
     #[serde(default)]
+    #[schemars(with = "Option<Vec<crate::providers::spec::ProviderSpec>>")]
     pub providers: Option<Value>,
+    /// Scripts reacting to logged events by composing commands.
     #[serde(default)]
+    #[schemars(with = "Option<Vec<crate::effects::EffectFile>>")]
     pub effects: Option<Value>,
+    /// Sandboxed web components for `viz: custom` lenses.
     #[serde(default)]
+    #[schemars(with = "Option<Vec<super::custom_components::ComponentFile>>")]
     pub custom_components: Option<Value>,
 }
 
@@ -289,12 +345,98 @@ pub fn entry_line(text: &str, block: &str, key: &str, value: &str) -> Option<usi
         .map(|(i, _)| i + 1)
 }
 
-/// The line of a kind's key: a top-level key, or `ui.<key>` under `ui:`.
+/// The line of a kind's key: a top-level key, or `<key>.<sub>` — a key
+/// under a top-level one (`ui.decorators`, `event_types.types`).
 pub fn kind_line(text: &str, kind: &str) -> Option<usize> {
-    match kind.strip_prefix("ui.") {
-        Some(sub) => line_under(text, "ui", &format!("{sub}:")).or(key_line(text, "ui")),
+    match kind.split_once('.') {
+        Some((top, sub)) => line_under(text, top, &format!("{sub}:")).or(key_line(text, top)),
         None => key_line(text, kind),
     }
+}
+
+/// The 1-based line of each item of the block list `kind` (a top-level
+/// key, or `<key>.<sub>`): where an entry's own error goes — a shape error
+/// included, which has no name to look the entry up by. Empty for a flow
+/// list (`[a, b]`) or a block that isn't a list; the caller falls back
+/// to the block's line.
+pub fn item_lines(text: &str, kind: &str) -> Vec<usize> {
+    let indent = |l: &str| l.len() - l.trim_start().len();
+    let lines: Vec<&str> = text.lines().collect();
+    let Some(key) = kind_line(text, kind) else {
+        return Vec::new();
+    };
+    let key_indent = indent(lines[key - 1]);
+    let mut out = Vec::new();
+    let mut item_indent = None;
+    for (i, line) in lines.iter().enumerate().skip(key) {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let at = indent(line);
+        // A sibling key at the block's own indent ends it; a list under a
+        // top-level key may sit at that indent (`key:\n- a`).
+        if at < key_indent || (at == key_indent && !trimmed.starts_with('-')) {
+            break;
+        }
+        if trimmed.starts_with("- ") || trimmed == "-" {
+            match item_indent {
+                None => {
+                    item_indent = Some(at);
+                    out.push(i + 1);
+                }
+                Some(n) if at == n => out.push(i + 1),
+                _ => {}
+            }
+        }
+    }
+    out
+}
+
+/// Each entry of list `kind` (`intent.examples`, `ui.slots`, …) typed as
+/// `T`: the good ones, and an error at its own line for each broken one.
+fn entries<T: serde::de::DeserializeOwned>(
+    items: &[Value],
+    kind: &str,
+    file: &str,
+    text: &str,
+) -> (Vec<T>, Vec<String>) {
+    let lines = item_lines(text, kind);
+    let mut out = Vec::new();
+    let mut errors = Vec::new();
+    for (i, item) in items.iter().enumerate() {
+        match serde_yaml::from_value(item.clone()) {
+            Ok(t) => out.push(t),
+            Err(e) => {
+                let line = lines.get(i).copied().or(kind_line(text, kind));
+                errors.push(at(file, line, format!("`{kind}`: {e}")));
+            }
+        }
+    }
+    (out, errors)
+}
+
+/// The manifest's intent, its examples and prompts typed one by one: a
+/// broken one is left out and is an error at its line.
+pub fn intent_of(m: &ManifestV2, file: &str, text: &str) -> (Option<Intent>, Vec<String>) {
+    let Some(raw) = &m.intent else {
+        return (None, Vec::new());
+    };
+    let (examples, mut errors) = entries(&raw.examples, "intent.examples", file, text);
+    let (prompts, more) = entries(&raw.prompts, "intent.prompts", file, text);
+    errors.extend(more);
+    let intent = Intent {
+        purpose: raw.purpose.clone(),
+        origin: raw.origin.clone(),
+        examples,
+        prompts,
+    };
+    (Some(intent), errors)
+}
+
+/// The manifest's `ui.slots`, typed one by one.
+pub fn slots_of(m: &ManifestV2, file: &str, text: &str) -> (Vec<SlotMount>, Vec<String>) {
+    entries(&m.ui.slots, "ui.slots", file, text)
 }
 
 /// `file:line: message`, or `file: message` when no line is known.
@@ -354,7 +496,9 @@ pub fn check(m: &ManifestV2, file: &str, text: &str, bundled: bool) -> (Vec<Stri
             ),
         ));
     }
-    match &m.intent {
+    let (intent, intent_errors) = intent_of(m, file, text);
+    errors.extend(intent_errors);
+    match &intent {
         None => errors.push(at(
             file,
             Some(1),
@@ -590,6 +734,18 @@ mod tests {
         );
     }
 
+    /// Each list item's own line, under a top-level key or under `ui:`,
+    /// nested lists and other keys aside.
+    #[test]
+    fn each_items_line_is_found() {
+        let text = "manifest: 2\ncommands:\n  - name: a\n    examples:\n      - { name: x }\n  # gone\n  - name: b\nui:\n  slots: []\n  decorators:\n    - { model: m }\n    - { model: n }\neffects:\n- id: e\n";
+        assert_eq!(item_lines(text, "commands"), vec![3, 7]);
+        assert_eq!(item_lines(text, "ui.decorators"), vec![11, 12]);
+        assert_eq!(item_lines(text, "effects"), vec![14]);
+        assert!(item_lines(text, "ui.slots").is_empty());
+        assert!(item_lines(text, "skills").is_empty());
+    }
+
     #[test]
     fn unknown_keys_and_bad_versions_are_errors() {
         assert!(serde_yaml::from_str::<ManifestV2>("manifest: 2\nname: a\nslots: []\n").is_err());
@@ -615,7 +771,7 @@ mod tests {
         let m = parse(text);
         let (errors, _) = check(&m, "e/extension.yaml", text, false);
         assert!(errors.is_empty(), "{errors:?}");
-        let prompts = &m.intent.as_ref().unwrap().prompts;
+        let prompts = intent_of(&m, "e/extension.yaml", text).0.unwrap().prompts;
         assert_eq!(
             prompts[1],
             IntentPrompt {

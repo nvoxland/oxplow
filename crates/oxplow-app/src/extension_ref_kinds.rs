@@ -19,7 +19,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::extensions::manifest_v2::{at, entry_line, key_line};
+use crate::extensions::manifest_v2::{at, item_lines, key_line};
 use crate::extensions::ExtensionPage;
 
 /// The icons a ref kind may name (lucide names; the desktop maps each).
@@ -77,9 +77,10 @@ pub struct RefKindDecl {
     pub declared_at: String,
 }
 
-#[derive(Deserialize)]
+/// A `ref_kinds:` entry as the manifest holds it.
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct RefKindFile {
+pub(crate) struct RefKindFile {
     kind: String,
     label: String,
     id: String,
@@ -125,15 +126,17 @@ pub fn parse_ref_kinds(
     };
     let mut out: Vec<RefKindDecl> = Vec::new();
     let mut errors = Vec::new();
-    for item in items {
+    let lines = item_lines(manifest, "ref_kinds");
+    for (i, item) in items.iter().enumerate() {
+        let item_line = lines.get(i).copied().or(block);
         let f: RefKindFile = match serde_yaml::from_value(item.clone()) {
             Ok(f) => f,
             Err(e) => {
-                errors.push(at(file, block, format!("ref kind: {e}")));
+                errors.push(at(file, item_line, format!("ref kind: {e}")));
                 continue;
             }
         };
-        let line = entry_line(manifest, "ref_kinds", "kind", &f.kind).or(block);
+        let line = item_line;
         let declared_at = at(file, line, "").trim_end_matches(": ").to_string();
         match decl_of(extension, models, pages, f, declared_at) {
             Ok(d) if out.iter().any(|o| o.kind == d.kind) => errors.push(at(

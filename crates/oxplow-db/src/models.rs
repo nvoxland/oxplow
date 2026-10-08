@@ -45,7 +45,7 @@ mod core_files {
 pub const CORE: &str = "core";
 
 /// One model as its owner declares it (an entry of `models.yaml`).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ModelDecl {
     pub name: String,
@@ -53,7 +53,7 @@ pub struct ModelDecl {
     pub description: String,
     /// The contract: the view's columns, in order.
     pub columns: Vec<ColumnDecl>,
-    /// The columns whose values name one row (P8.B1): declared columns,
+    /// The columns whose values name one row: declared columns,
     /// part of the contract. A key implies its test (never null, never
     /// repeated), and a materialized model's table takes it as its
     /// primary key.
@@ -74,7 +74,9 @@ pub struct ModelDecl {
 
 /// A model's freshness policy beyond the default (computed on read):
 /// `on_change`, or `{ every: 1h }`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
 #[serde(untagged)]
 pub enum Materialize {
     /// A named policy: `on_change`.
@@ -86,12 +88,14 @@ pub enum Materialize {
     Every { every: String },
     /// Stored, and kept by appending the rows past its watermark —
     /// `{ incremental: <column> }`, a declared INTEGER that only grows —
-    /// refilled whole when an input saw a rewrite (P8.B4).
+    /// refilled whole when an input saw a rewrite.
     Incremental { incremental: String },
 }
 
 /// The named materialization policies.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum MaterializePolicy {
     /// Stored in its table and recomputed, whole, when an input changes.
@@ -159,7 +163,9 @@ fn is_materialized_table(table: &str) -> bool {
 /// An earlier version kept after a breaking change: its SQL (in `file`,
 /// beside the model's) still keeps the contract that version published,
 /// until `until` (`YYYY-MM-DD`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct Deprecated {
     pub version: u32,
@@ -176,7 +182,9 @@ pub struct Twin {
 }
 
 /// One promised column.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct ColumnDecl {
     pub name: String,
@@ -191,7 +199,7 @@ pub struct ColumnDecl {
 /// `{ unique: id }`, `{ accepted_values: { column, values } }`,
 /// `{ relationships: { column, to, field } }` or `{ sql: "SELECT …" }` (a
 /// query returning the failing rows).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TestDecl {
     #[serde(default)]
@@ -206,14 +214,14 @@ pub struct TestDecl {
     pub sql: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AcceptedValues {
     pub column: String,
     pub values: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Relationship {
     pub column: String,

@@ -92,6 +92,8 @@ proptest = "1"
 # tsk903: the store-write guard reads oxplow-db's functions to tell which
 # write.
 syn = { version = "2", features = ["full", "visit"] }
+# The extension and lens schemas are checked against the bundled files.
+jsonschema = { version = "0.58", default-features = false }
 
 [lints]
 workspace = true

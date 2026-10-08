@@ -1,0 +1,2686 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "oxplow extension.yaml",
+  "description": "`extension.yaml` at `manifest: 2`, as written on disk.",
+  "type": "object",
+  "properties": {
+    "manifest": {
+      "description": "The manifest version: `2`.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "name": {
+      "description": "The extension's name; must equal its folder's.",
+      "type": "string"
+    },
+    "namespace": {
+      "description": "The namespace its commands' ids are under\n(`<namespace>.<area>.<verb>`); defaults to the name with `-` → `_`.\n`oxplow` is reserved for the extensions that ship with oxplow.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "description": {
+      "type": "string",
+      "default": ""
+    },
+    "sharing": {
+      "description": "`private` (the default: this project, experimental kinds allowed)\nor `shared` (stable kinds only, `engine` required).",
+      "default": "private",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Sharing"
+        }
+      ]
+    },
+    "engine": {
+      "description": "The oxplow version range it targets, `>=MAJOR.MINOR[.PATCH]`.\nRequired when shared.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "intent": {
+      "description": "Why it exists: its purpose, the ref that created it, and examples.\nRequired.",
+      "type": "object",
+      "properties": {
+        "purpose": {
+          "description": "The question it answers, or the job it does.",
+          "type": "string"
+        },
+        "origin": {
+          "description": "The thread or effort ref that created it (`effort:eff42`), when known.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "examples": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IntentExample"
+          },
+          "default": []
+        },
+        "prompts": {
+          "description": "Questions it helps answer, offered to the person with an Ask\nbutton (the catalog; pages for a ref of `about`'s kind).",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IntentPrompt"
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "purpose"
+      ]
+    },
+    "models": {
+      "description": "SQL models: each with `models/<name>.sql`, published as\n`v_<extension>_<name>`.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/ModelDecl"
+      },
+      "default": null
+    },
+    "measures": {
+      "description": "Measures, in `.oxplow/project.yaml`'s vocabulary.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/MeasureEntry"
+      },
+      "default": null
+    },
+    "metrics": {
+      "description": "Metric definitions (`key:`), in `.oxplow/project.yaml`'s vocabulary.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/MetricEntry"
+      },
+      "default": null
+    },
+    "dimensions": {
+      "description": "Dimensions, in `.oxplow/project.yaml`'s vocabulary.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/DimensionEntry"
+      },
+      "default": null
+    },
+    "collectors": {
+      "description": "Collectors (exec / starlark / jaq / read), writing entities or\nrecording facts.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/RawCollector"
+      },
+      "default": null
+    },
+    "commands": {
+      "description": "Commands: a Starlark script composing core commands, a scope's\noperation, or one of its provider's.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/CommandFile"
+      },
+      "default": null
+    },
+    "pages": {
+      "description": "Full pages, each showing one of its lenses.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/PageFile"
+      },
+      "default": null
+    },
+    "panels": {
+      "description": "Left-nav panels, each showing its lenses compact.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/PanelFile"
+      },
+      "default": null
+    },
+    "ui": {
+      "description": "What it adds to the core UI: slots, decorators, replacements.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/UiBlock"
+        }
+      ]
+    },
+    "advisories": {
+      "description": "Guidance queries run at a moment (`on`), whose rows reach the\nagent or a person.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/AdvisoryFile"
+      },
+      "default": []
+    },
+    "event_types": {
+      "description": "The event types it may log, under its own namespace.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/EventTypesFile"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "ref_kinds": {
+      "description": "Kinds of thing a ref can name.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/RefKindFile"
+      },
+      "default": null
+    },
+    "implementations": {
+      "description": "Capability implementations: built-ins of core's it declares.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/ImplementationFile"
+      },
+      "default": null
+    },
+    "skills": {
+      "description": "Skills and slash commands for the coding agent.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/SkillFile"
+      },
+      "default": null
+    },
+    "providers": {
+      "description": "External providers: programs implementing a capability, whose\noperations its `commands:` declare.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/ProviderSpec"
+      },
+      "default": null
+    },
+    "effects": {
+      "description": "Scripts reacting to logged events by composing commands.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/EffectFile"
+      },
+      "default": null
+    },
+    "custom_components": {
+      "description": "Sandboxed web components for `viz: custom` lenses.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/ComponentFile"
+      },
+      "default": null
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "manifest",
+    "name",
+    "intent"
+  ],
+  "definitions": {
+    "Sharing": {
+      "description": "Who the extension is for. Explicit and checked: a shared extension\n(committed for a team, installed from git, bundled) may use stable\nkinds only and must name the engine it targets.",
+      "type": "string",
+      "enum": [
+        "private",
+        "shared"
+      ]
+    },
+    "IntentExample": {
+      "description": "One acceptance example: an input and what the extension should make\nof it. Fixtures for `oxplow extension test`; data here.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "input": {
+          "default": null
+        },
+        "expect": {
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ]
+    },
+    "IntentPrompt": {
+      "description": "A question an extension helps answer. `about` is a ref kind\n(`commit`, `file`, `effort`): a page for a ref of that kind suggests it.",
+      "type": "object",
+      "properties": {
+        "prompt": {
+          "type": "string"
+        },
+        "about": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "prompt"
+      ]
+    },
+    "ModelDecl": {
+      "description": "One model as its owner declares it (an entry of `models.yaml`).",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "description": {
+          "type": "string"
+        },
+        "columns": {
+          "description": "The contract: the view's columns, in order.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ColumnDecl"
+          }
+        },
+        "key": {
+          "description": "The columns whose values name one row: declared columns,\npart of the contract. A key implies its test (never null, never\nrepeated), and a materialized model's table takes it as its\nprimary key.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "tests": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TestDecl"
+          },
+          "default": []
+        },
+        "deprecated": {
+          "description": "Earlier versions kept published beside this one after a breaking\nchange, each as `<view>_v<version>` until its date.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Deprecated"
+          },
+          "default": []
+        },
+        "materialize": {
+          "description": "How it is computed: absent, on read (a view); `on_change`, stored\nand recomputed when one of its inputs changes; `{ every: 1h }`,\nstored and recomputed on that clock.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Materialize"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version",
+        "description",
+        "columns"
+      ]
+    },
+    "ColumnDecl": {
+      "description": "One promised column.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "description": "The declared type SQLite reports for the view's column\n(`PRAGMA table_info`); empty for a computed column.",
+          "type": "string",
+          "default": ""
+        },
+        "doc": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "doc"
+      ]
+    },
+    "TestDecl": {
+      "description": "One declared test, written as a one-key map: `{ not_null: id }`,\n`{ unique: id }`, `{ accepted_values: { column, values } }`,\n`{ relationships: { column, to, field } }` or `{ sql: \"SELECT …\" }` (a\nquery returning the failing rows).",
+      "type": "object",
+      "properties": {
+        "not_null": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "unique": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "accepted_values": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AcceptedValues"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "relationships": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Relationship"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sql": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "AcceptedValues": {
+      "type": "object",
+      "properties": {
+        "column": {
+          "type": "string"
+        },
+        "values": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "column",
+        "values"
+      ]
+    },
+    "Relationship": {
+      "type": "object",
+      "properties": {
+        "column": {
+          "type": "string"
+        },
+        "to": {
+          "description": "The model the column points into.",
+          "type": "string"
+        },
+        "field": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "column",
+        "to",
+        "field"
+      ]
+    },
+    "Deprecated": {
+      "description": "An earlier version kept after a breaking change: its SQL (in `file`,\nbeside the model's) still keeps the contract that version published,\nuntil `until` (`YYYY-MM-DD`).",
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "file": {
+          "type": "string"
+        },
+        "until": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "file",
+        "until"
+      ]
+    },
+    "Materialize": {
+      "description": "A model's freshness policy beyond the default (computed on read):\n`on_change`, or `{ every: 1h }`.",
+      "anyOf": [
+        {
+          "description": "A named policy: `on_change`.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/MaterializePolicy"
+            }
+          ]
+        },
+        {
+          "description": "Stored and recomputed, whole, on a clock — `{ every: 1h }` (the\ncollectors' grammar: minutes `15m` or hours `2h`) — whatever its\ninputs do: for SQL that reads the time (`'now'`), whose answer\nmoves without a write.",
+          "type": "object",
+          "properties": {
+            "every": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "every"
+          ]
+        },
+        {
+          "description": "Stored, and kept by appending the rows past its watermark —\n`{ incremental: <column> }`, a declared INTEGER that only grows —\nrefilled whole when an input saw a rewrite.",
+          "type": "object",
+          "properties": {
+            "incremental": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "incremental"
+          ]
+        }
+      ]
+    },
+    "MaterializePolicy": {
+      "description": "The named materialization policies.",
+      "oneOf": [
+        {
+          "description": "Stored in its table and recomputed, whole, when an input changes.",
+          "type": "string",
+          "const": "on_change"
+        }
+      ]
+    },
+    "MeasureEntry": {
+      "description": "One entry in the top-level `measures:` block — the **measure catalog**\nauthoring surface. A measure is a *type of atomic\nfact* a collector may emit (`oxplow.complexity`, `acme.api_latency`, …); the\n`oxplow.*` built-ins are seeded by the DB migration, so config only *adds*\nglobal/project measures. Unlike [`MetricEntry`] there is no `use:`/`key:`\nsplit — a measure entry is always a definition (you declare the fact type,\nyou don't \"enable\" one). Resolved across the global+project scopes by\n[`resolve_measures`] and seeded into the `measure` table at boot.",
+      "type": "object",
+      "properties": {
+        "key": {
+          "description": "The new measure's namespaced key (`<vendor>.<id>`). Required.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "unit": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "subjectKind": {
+          "description": "The grain's subject kind (`symbol` | `file` | `test` | `model` | …).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "temporalSemantics": {
+          "description": "`additive` | `semi-additive` | `non-additive` — additivity OVER TIME\n(default `semi-additive`).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "captureScope": {
+          "description": "`complete` | `per-path` — what ONE capture restates (default `complete`).\nA SEPARATE AXIS from `temporalSemantics`: `complete` means every capture\nrestates the whole population (a coverage report, a test run), so the\ntemporal fold applies directly. `per-path` means a capture restates only the\npaths in its snapshot — which is what a **tree collector over a per-commit delta**\ndoes. Such a measure is folded to the latest capture per (producer, path)\nbefore aggregating, so a repo-wide total stays correct while only changed\nfiles are rescanned. Set this on any measure a snapshot-triggered collector\nemits per-file facts on.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "MetricEntry": {
+      "description": "One entry in the top-level `metrics:` block — a **pure read-time SPEC** over a\nmeasure. A metric no longer *computes* anything: it names a\n`sourceMeasure` + an `aggregation` (+ optional `filter`), or a `formula` over\nother metrics, and the engine aggregates the durable facts a `collectors:` entry\nemitted. Two forms, distinguished by which key is set:\n- **`use:`** — enable an existing catalog metric by key (built-in/global),\n  optionally overriding `target`/thresholds for this project.\n- **`key:`** — define a NEW spec (`sourceMeasure` + `aggregation`, or `formula`).\n\nResolved across the three scopes into [`ResolvedSpec`]s. All non-discriminant\nfields are optional so both forms share one struct; validation enforces the\nper-form rules.",
+      "type": "object",
+      "properties": {
+        "use": {
+          "description": "`use:` form — the catalog key to enable.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "key": {
+          "description": "`key:` form — the new metric's namespaced key.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "enabled": {
+          "description": "Active flag. `None`/`Some(true)` = active (a bare `use:`/`key:` entry is\non); `Some(false)` = an explicit **disable marker** kept in config so a\ndefault-ON metric (producer/extension) or a config-defined metric can be\nturned off without deleting its definition. Not a structural field, so a\n`use:` entry may carry it (unlike measure/aggregation/filter/formula).",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "sourceMeasure": {
+          "description": "The measure whose facts this metric aggregates (required for a `key:`\nmetric unless it sets `formula`). NULL for a pure formula metric.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "aggregation": {
+          "description": "`count` | `sum` | `avg` | `min` | `max` | `last` | `ratio` (default `last`).\nCombines the facts WITHIN a capture; cross-time collapse is governed by the\nsource measure's `temporalSemantics`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "filter": {
+          "description": "Fact predicate applied before aggregation (`minValue` / `severity` / `dimEq`).",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FilterConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "formula": {
+          "description": "Derived-metric formula over other metric keys (mutually exclusive with\n`sourceMeasure`).",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FormulaConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "unit": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "direction": {
+          "description": "`higher-better` | `lower-better` | `neutral` (default `neutral`).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "displayKind": {
+          "description": "Read-time presentation: `gauge` | `findings` | `test` | `coverage` |\n`event` (default `gauge`).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "category": {
+          "description": "Catalog grouping: `operational` | `testing` | `coverage` | `static-quality` | `custom`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "language": {
+          "description": "Language this metric measures (e.g. `rust`), for the catalog filter.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "description": {
+          "description": "One-line human description (shown atop the Metric Detail page). Inherent to\nthe definition — a `use:` can't override.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "sliceableDims": {
+          "description": "Conformed-dimension keys this metric can be sliced by (drill-across).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "target": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double",
+          "default": null
+        },
+        "warnAt": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double",
+          "default": null
+        },
+        "failAt": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double",
+          "default": null
+        },
+        "entity": {
+          "description": "Entity metric: the `v_*` view it aggregates, instead of a\nmeasure's facts. Fragments below are SQL over that view, aliased `e`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "where": {
+          "description": "Entity metric: which rows count (a SQL condition).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "time": {
+          "description": "Entity metric: the timestamp column/expression that makes it an EVENT\nmetric (rows bucketed by when they happened). Without it the metric is\na STATE metric: its current value, captured over time.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "value": {
+          "description": "Entity metric: the value expression aggregated (not needed for `count`).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "FilterConfig": {
+      "description": "A fact predicate on a `metrics:` spec (the `filter:` block) — the config\nmirror of the engine's `FactFilter`. A conjunctive predicate\nkeeping only the facts that match before aggregation: `minValue` for a\ncount-over-threshold (complexity ≥ N), `severity` for a lint slice, `dimEq`\nfor a conformed-dimension slice (`[oxplow.rule, unsafe_block]`).",
+      "type": "object",
+      "properties": {
+        "minValue": {
+          "description": "Keep facts with `value >= minValue`.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double",
+          "default": null
+        },
+        "severity": {
+          "description": "Keep facts whose reported severity equals this (e.g. `error`).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "dimEq": {
+          "description": "Keep facts whose dimension `[key]` equals `[value]` — a 2-element list.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "FormulaConfig": {
+      "description": "A derived-metric formula on a `metrics:` spec (the `formula:` block) — a\nconstrained binary op over two OTHER metric keys (no source measure). The\nengine aligns the two metrics on their shared rollup key and applies `op`\n(`div` is the ratio primitive: bugs-per-KLOC, cost-per-token).",
+      "type": "object",
+      "properties": {
+        "op": {
+          "description": "`add` | `sub` | `mul` | `div` (`ratio` aliases `div`).",
+          "type": "string"
+        },
+        "left": {
+          "description": "The left operand metric key.",
+          "type": "string"
+        },
+        "right": {
+          "description": "The right operand metric key.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "op",
+        "left",
+        "right"
+      ]
+    },
+    "DimensionEntry": {
+      "description": "One entry in the top-level `dimensions:` block — the **conformed-dimension\ncatalog** authoring surface. A dimension is a\nslice axis that means the same thing to every fact that carries it\n(`oxplow.severity`, `acme.license`, …), enabling cross-metric drill-across.\nLike [`MeasureEntry`] it is definition-only; the `oxplow.*` built-ins are the\nmigration seed. Resolved by [`resolve_dimensions`] and seeded into the\n`dimension` table at boot; `promote` requests a generated column + index\n(catalog teeth).",
+      "type": "object",
+      "properties": {
+        "key": {
+          "description": "The new dimension's namespaced key (`<vendor>.<id>`). Required.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "valueType": {
+          "description": "`categorical` | `numeric` | `temporal` | `entity-ref` (default\n`categorical`).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "subjectKind": {
+          "description": "For `entity-ref` dims — the subject kind the value points at.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "vocabulary": {
+          "description": "Optional controlled vocabulary (the allowed value set).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "promote": {
+          "description": "Request a generated column + expression index on `fact` for this dim\n(fast group-by/filter). Off by default — the long tail lives in\n`dims_json`, promoted only when hot.",
+          "type": "boolean",
+          "default": false
+        },
+        "entity": {
+          "description": "Entity dimension: the `v_*` view it slices, for entity\nmetrics over the same view.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "expr": {
+          "description": "Entity dimension: the SQL expression (over the view, aliased `e`).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "join": {
+          "description": "Entity dimension: an optional join, e.g.\n`LEFT JOIN v_thread t ON t.id = e.thread_id`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawCollector": {
+      "description": "A `collectors:` entry as written (an extension's manifest, or\n`.oxplow/project.yaml`); `validate` makes it a `CollectorSpec`.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Unique in its owner; a dotted id (`repo.scan_clone`) is fine.",
+          "type": "string"
+        },
+        "doc": {
+          "type": "string",
+          "default": ""
+        },
+        "runtime": {
+          "description": "What runs it (`jq` is `jaq`).",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "entry": {
+          "description": "The program or script, relative to its owner's folder; a report\ncollector's `oxplow:<parser>`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "provider": {
+          "description": "For `read`: the provider collector it runs.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProviderRead"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "trigger": {
+          "description": "When it runs by itself; absent, `manual`.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TriggerFile"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "after": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "input": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "report": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RawReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sync": {
+          "description": "How a run's entities land; absent, `replace`.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CollectorSync"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "env": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "credentials": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "network": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "entities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RawEntity"
+          }
+        },
+        "facts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "records": {
+          "description": "A report collector's kind.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Records"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ]
+    },
+    "RuntimeName": {
+      "description": "The names `runtime:` takes. Its schema only: `validate` reads the\ntext, to say what's wrong in its own words.",
+      "type": "string",
+      "enum": [
+        "exec",
+        "starlark",
+        "jaq",
+        "jq",
+        "read"
+      ]
+    },
+    "ProviderRead": {
+      "description": "A provider's collector a `read` collector runs.",
+      "type": "object",
+      "properties": {
+        "instance": {
+          "description": "The instance, `<extension>/<instance id>` (a provider's default\ninstance has the provider's id).",
+          "type": "string"
+        },
+        "collector": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "instance",
+        "collector"
+      ]
+    },
+    "TriggerFile": {
+      "description": "`trigger:` as written: `manual`, or a map of a trigger's keys.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Manual"
+        },
+        {
+          "$ref": "#/definitions/TriggerMap"
+        }
+      ]
+    },
+    "Manual": {
+      "description": "`manual`: only when someone runs it.",
+      "type": "string",
+      "enum": [
+        "manual"
+      ]
+    },
+    "TriggerMap": {
+      "description": "A trigger's keys. Which go together `parse_trigger` checks, and says\nin its own words.",
+      "type": "object",
+      "properties": {
+        "every": {
+          "description": "A clock: `15m`, `2h`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "on": {
+          "description": "The event types it runs on.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EventTypeList"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "where": {
+          "description": "With `on`: payload fields and the values they must equal.",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "$ref": "#/definitions/PayloadScalar"
+          },
+          "default": null
+        },
+        "on_run": {
+          "description": "A report collector's: after a `test` or `analysis` run.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RunKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "settle": {
+          "description": "With `on`: run once no triggering event has arrived for this long.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "at_most": {
+          "description": "With `on`: run at most this often.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "idle": {
+          "description": "With `on`: run once nothing has happened for this long.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "force": {
+          "description": "With `on` and a pacing key: event types that run at once.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EventTypeList"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "EventTypeList": {
+      "description": "One event type, or a list of them.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "PayloadScalar": {
+      "description": "A `where:` value.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "number",
+          "format": "double"
+        }
+      ]
+    },
+    "RunKind": {
+      "description": "The kind of run a report collector reads after.",
+      "type": "string",
+      "enum": [
+        "test",
+        "analysis"
+      ]
+    },
+    "RawReport": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "format": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    },
+    "CollectorSync": {
+      "description": "How a run's entities land.",
+      "oneOf": [
+        {
+          "description": "Each run restates every entity (one it doesn't mention is emptied).",
+          "type": "string",
+          "const": "replace"
+        },
+        {
+          "description": "Each run adds or updates rows by key, and removes the keys it lists\nunder `deleted`; an entity it doesn't mention is left alone.",
+          "type": "string",
+          "const": "upsert"
+        }
+      ]
+    },
+    "RawEntity": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "doc": {
+          "type": "string",
+          "default": ""
+        },
+        "key": {
+          "type": "string"
+        },
+        "columns": {
+          "description": "Ordered `name: type` or `name: {type, doc}`.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/ColumnShape"
+          }
+        },
+        "relations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/EntityRelation"
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "key",
+        "columns"
+      ]
+    },
+    "ColumnShape": {
+      "description": "An entity column as written: its type, or `{ type, doc }`. Its schema\nonly: `validate` reads the two, to say what's wrong in its own words.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ColumnType"
+        },
+        {
+          "$ref": "#/definitions/RawColumn"
+        }
+      ]
+    },
+    "ColumnType": {
+      "description": "Declared type of an entity column.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "text",
+            "int",
+            "real",
+            "bool"
+          ]
+        },
+        {
+          "description": "An RFC 3339 timestamp, stored as text.",
+          "type": "string",
+          "const": "time"
+        }
+      ]
+    },
+    "RawColumn": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "$ref": "#/definitions/ColumnType"
+        },
+        "doc": {
+          "type": "string",
+          "default": ""
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ]
+    },
+    "EntityRelation": {
+      "description": "A documented join from an entity to another view. Not executed; it\ntells agents and lens authors how the data connects.",
+      "type": "object",
+      "properties": {
+        "to": {
+          "description": "The view it joins to, e.g. `v_work_item` or `v_github_review`.",
+          "type": "string"
+        },
+        "on": {
+          "description": "The SQL join condition, e.g. `v_github_pr.head_branch = v_stream.branch`.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "to",
+        "on"
+      ]
+    },
+    "Records": {
+      "description": "What a report collector records: its parser's typed output, merged\ninto the run (`.context/collection.md`).",
+      "oneOf": [
+        {
+          "description": "A suite/case tree of test outcomes (a `test-run`).",
+          "type": "string",
+          "const": "tests"
+        },
+        {
+          "description": "Per-file instrumented/covered lines (a coverage capture).",
+          "type": "string",
+          "const": "coverage"
+        },
+        {
+          "description": "Linter/analyzer findings (a `static-analysis` capture).",
+          "type": "string",
+          "const": "analysis"
+        }
+      ]
+    },
+    "CommandFile": {
+      "description": "A `commands:` entry as the manifest holds it.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "input_schema": {
+          "default": null
+        },
+        "entry": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "scope": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "provider": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "op": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "confirm": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "access": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "invokers": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Invokers"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "needs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "ui": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CommandUi"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "lifecycle": {
+          "description": "`experimental` keeps a shared extension's command experimental.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "examples": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ExampleFile"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "summary"
+      ]
+    },
+    "Invokers": {
+      "description": "Which surfaces may invoke a command.",
+      "type": "object",
+      "properties": {
+        "human": {
+          "type": "boolean"
+        },
+        "agent": {
+          "type": "boolean"
+        },
+        "lens": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "human",
+        "agent",
+        "lens"
+      ]
+    },
+    "CommandUi": {
+      "description": "A command as a person meets it (`.context/commands.md` \"Offering a\ncommand to a person\"). Agents ignore it.",
+      "type": "object",
+      "properties": {
+        "label": {
+          "description": "What a person reads: `Pull Changes`, `New Task…`.",
+          "type": "string"
+        },
+        "group": {
+          "description": "What search lists it under: `Git`, `Tasks`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "keywords": {
+          "description": "More words search matches it by.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "about": {
+          "description": "The ref kind it acts on (`work_item`, `effort`): offered on that\nref's page and rows. `None`: it needs no ref, and search offers it.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "input": {
+          "description": "The input it runs with. A string that is exactly `{{stream}}`,\n`{{thread}}`, `{{ref}}` or `{{ref.id}}` is bound from where it runs;\na binding there's nothing for makes it unavailable there.",
+          "default": null
+        },
+        "form": {
+          "description": "What gathers its input — a page (a tab id, `page:new-task`) or one\nof the window's own forms (`new-thread`, `commit`): choosing it\nopens that rather than running it.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "open_after": {
+          "description": "The page to open once it ran: a tab id whose `{{result.<field>}}`\ntakes the result's field (`page:custom-dashboard?id={{result.id}}`).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "background": {
+          "description": "It runs as a background task (a slow call out: pull, push) whose\nfailure is reported, rather than awaited where it was chosen.",
+          "type": "boolean",
+          "default": false
+        },
+        "shortcut": {
+          "description": "The key that runs it, as `Ctrl/Cmd+S` / `Ctrl/Cmd+Shift+N`\n(`Ctrl/Cmd` is Cmd on macOS, Ctrl elsewhere).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "while_typing": {
+          "description": "Its shortcut runs it while the person types in a field too (Save,\nFind); otherwise typing keeps it.",
+          "type": "boolean",
+          "default": false
+        },
+        "menu": {
+          "description": "Where the menu bar shows it.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MenuPlace"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "when": {
+          "description": "When it's offered — in search, the menu bar and by its shortcut —\nin VS Code's when-clause syntax over the window's context keys\n(`crate::when`): `fileShown && fileDirty`, `streamKind == worktree`.\nAbsent, always.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "label"
+      ]
+    },
+    "MenuPlace": {
+      "description": "A command's place in the menu bar: which menu, the group it sits in\n(VS Code's: groups are sorted by name and drawn apart by a separator)\nand where in the group (lowest first).",
+      "type": "object",
+      "properties": {
+        "bar": {
+          "description": "`file` or `edit`.",
+          "type": "string"
+        },
+        "group": {
+          "description": "Its group (`1_project`, `2_save`); absent, the menu's first.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "order": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "bar",
+        "order"
+      ]
+    },
+    "ExampleFile": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "input": {
+          "default": null
+        },
+        "answers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": true
+          },
+          "default": {}
+        },
+        "expect_commands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "refuses": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ]
+    },
+    "PageFile": {
+      "description": "A `pages:` entry as the manifest holds it.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "icon": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "category": {
+          "$ref": "#/definitions/LauncherCategory"
+        },
+        "lens": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "category",
+        "lens"
+      ]
+    },
+    "LauncherCategory": {
+      "description": "Launcher (Cmd+K) sections a lens can be listed under. Mirrors the\nrenderer's `PageCategory`.",
+      "type": "string",
+      "enum": [
+        "Work",
+        "Code",
+        "Git",
+        "Activity",
+        "Knowledge",
+        "Data",
+        "Lenses",
+        "System"
+      ]
+    },
+    "PanelFile": {
+      "description": "A `panels:` entry as the manifest holds it.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "icon": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "scope": {
+          "$ref": "#/definitions/PanelScope"
+        },
+        "body": {
+          "type": "string"
+        },
+        "badge": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "open": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "collapsed": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "count": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "scope",
+        "body"
+      ]
+    },
+    "PanelScope": {
+      "description": "What a left-nav panel is bound to: the project, the current stream, or\nthe current thread — which of `stream_id` / `thread_id` its lenses get.",
+      "type": "string",
+      "enum": [
+        "project",
+        "stream",
+        "thread"
+      ]
+    },
+    "UiBlock": {
+      "description": "`ui:` — everything an extension adds to the core UI: lenses mounted\ninto core pages (`slots`), decorations on core refs (`decorators`) and\nreplaced sub-components (`replacements`, experimental). Its commands\nmeet a person through their own `ui` (`commands:`).",
+      "type": "object",
+      "properties": {
+        "slots": {
+          "description": "Lenses mounted into core pages: `{ slot, lens }`, typed one by one\n([`slots_of`]).",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SlotMount"
+          },
+          "default": []
+        },
+        "decorators": {
+          "description": "Labels from its models on core refs.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/DecoratorFile"
+          },
+          "default": null
+        },
+        "replacements": {
+          "description": "Experimental (a private extension only): a lens in place of a\nnamed core component.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/ReplacementFile"
+          },
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "SlotMount": {
+      "description": "A slot mount: a lens into a core page.",
+      "type": "object",
+      "properties": {
+        "slot": {
+          "type": "string"
+        },
+        "lens": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "slot",
+        "lens"
+      ]
+    },
+    "DecoratorFile": {
+      "description": "A `ui.decorators` entry as the manifest holds it.",
+      "type": "object",
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "placement": {
+          "$ref": "#/definitions/DecoratorPlacement"
+        },
+        "label": {
+          "type": "string"
+        },
+        "color": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "model",
+        "kind",
+        "placement",
+        "label"
+      ]
+    },
+    "DecoratorPlacement": {
+      "description": "Where a decoration shows.",
+      "oneOf": [
+        {
+          "description": "A chip in the header of a page whose ref the model lists.",
+          "type": "string",
+          "const": "ref-chip"
+        },
+        {
+          "description": "A badge after a lens cell that links to a listed ref.",
+          "type": "string",
+          "const": "row-badge"
+        }
+      ]
+    },
+    "ReplacementFile": {
+      "description": "A `ui.replacements` entry as the manifest holds it.",
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string"
+        },
+        "lens": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "lens"
+      ]
+    },
+    "AdvisoryFile": {
+      "description": "An advisory as written in `extension.yaml`.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "on": {
+          "$ref": "#/definitions/AdvisoryOn"
+        },
+        "query": {
+          "type": "string"
+        },
+        "once_per": {
+          "default": "effort",
+          "allOf": [
+            {
+              "$ref": "#/definitions/AdvisoryOncePer"
+            }
+          ]
+        },
+        "heading": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "audience": {
+          "default": "agent",
+          "allOf": [
+            {
+              "$ref": "#/definitions/AdvisoryAudience"
+            }
+          ]
+        },
+        "needs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "on",
+        "query"
+      ]
+    },
+    "AdvisoryOn": {
+      "description": "When core runs an advisory.",
+      "oneOf": [
+        {
+          "description": "After each agent tool call; results go to the agent as that call's\ncontext and are recorded as nudges.",
+          "type": "string",
+          "const": "post-tool-use"
+        },
+        {
+          "description": "On each prompt the human sends; results join the prompt's context.",
+          "type": "string",
+          "const": "prompt"
+        },
+        {
+          "description": "When a turn ends (its `thread.checkpoint`): what the turn left\nbehind, delivered when the agent next hears from oxplow (the next\nprompt, else the next tool call).",
+          "type": "string",
+          "const": "turn-end"
+        }
+      ]
+    },
+    "AdvisoryOncePer": {
+      "description": "How often the same advisory may reach the agent.",
+      "oneOf": [
+        {
+          "description": "Once per effort, the first time the query returns rows.",
+          "type": "string",
+          "const": "effort"
+        },
+        {
+          "description": "Once per thread per `key` value: each row's `key` column fires\nonce (put `:effort_id` in the key for once per effort per row).",
+          "type": "string",
+          "const": "row"
+        },
+        {
+          "description": "Every time, whenever the query returns rows.",
+          "type": "string",
+          "const": "turn"
+        },
+        {
+          "description": "Once per thread, the first time the query returns rows.",
+          "type": "string",
+          "const": "thread"
+        },
+        {
+          "description": "Once per agent session on the thread (the harness's session id).",
+          "type": "string",
+          "const": "session"
+        },
+        {
+          "description": "Once per thread per day (UTC).",
+          "type": "string",
+          "const": "day"
+        }
+      ]
+    },
+    "AdvisoryAudience": {
+      "description": "Who a hint is for.",
+      "oneOf": [
+        {
+          "description": "The coding agent: delivered on its next prompt or tool call.",
+          "type": "string",
+          "const": "agent"
+        },
+        {
+          "description": "A person: raised in Alerts until they dismiss it.",
+          "type": "string",
+          "const": "person"
+        }
+      ]
+    },
+    "EventTypesFile": {
+      "description": "`event_types:` as the manifest holds it; each type is read on its own\n(one that doesn't parse is its error, not the block's).",
+      "type": "object",
+      "properties": {
+        "types": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TypeFile"
+          },
+          "default": []
+        },
+        "retention": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RetentionFile"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "TypeFile": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "v": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "schema": {
+          "description": "A JSON file in the folder.",
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "upcast": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "v",
+        "schema",
+        "summary"
+      ]
+    },
+    "RetentionFile": {
+      "type": "object",
+      "properties": {
+        "payload_days": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "content_days": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "RefKindFile": {
+      "description": "A `ref_kinds:` entry as the manifest holds it.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "resolve": {
+          "type": "string"
+        },
+        "page": {
+          "type": "string"
+        },
+        "wikilink": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "searchable": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "icon": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "label",
+        "id",
+        "resolve",
+        "page",
+        "icon"
+      ]
+    },
+    "ImplementationFile": {
+      "description": "An `implementations:` entry as the manifest holds it.",
+      "type": "object",
+      "properties": {
+        "capability": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "entry": {
+          "type": "string"
+        },
+        "skills": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "config": {
+          "description": "What it configures, checked against the built-in's schema.",
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "capability",
+        "id",
+        "entry"
+      ]
+    },
+    "SkillFile": {
+      "description": "A `skills:` entry as the manifest holds it.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "default": "skill",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SkillKind"
+            }
+          ]
+        },
+        "file": {
+          "type": "string"
+        },
+        "needs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "file"
+      ]
+    },
+    "SkillKind": {
+      "description": "What the agent's runtime makes of it.",
+      "oneOf": [
+        {
+          "description": "A skill the agent loads when it's relevant: `<name>/SKILL.md`.",
+          "type": "string",
+          "const": "skill"
+        },
+        {
+          "description": "A slash command the person runs: `/oxplow:<name>`.",
+          "type": "string",
+          "const": "command"
+        }
+      ]
+    },
+    "ProviderSpec": {
+      "description": "One declared provider.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "The provider's id: its program's approval (`<extension>/<id>`) and\nthe id of its default instance — an instance's id is its refs'\nsegment (`work_item:<id>:…`) and its commands' namespace\n(`<id>.estimate`).",
+          "type": "string"
+        },
+        "capability": {
+          "type": "string"
+        },
+        "entry": {
+          "description": "The program, relative to the extension folder — or `adapter`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "adapter": {
+          "description": "An MCP server run through oxplow's adapter, instead of an `entry`.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AdapterSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "env": {
+          "description": "Host environment variables passed through by name.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "credentials": {
+          "description": "Credentials it gets from the keychain, as environment variables:\neach a name (a value the person pastes) or `{ name, oauth }` (one\nthey sign in for; the variable holds the access token).",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CredentialDecl"
+          },
+          "default": []
+        },
+        "network": {
+          "description": "Hosts it may reach (enforced where the OS can).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "declarations": {
+          "description": "The checked-in `InitializeResult` (JSON), relative to the folder.",
+          "type": "string"
+        },
+        "idPattern": {
+          "description": "What a work list's own ids look like (a regex matched whole:\n`[A-Z]+-\\d+`), so a loose id resolves to its item while it's the\nactive work list.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "fields": {
+          "description": "A work list's own fields (kept in an item's `native`), so screens\nrender and edit them: `[{ name, title, kind: enum|text|number,\nvalues? }]`.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/FieldDecl"
+          },
+          "default": []
+        },
+        "needs": {
+          "description": "The scopes it calls over the protocol (`host/call`,\n`sql.read`): part of what its approval covers, and the only ones it\nmay call.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "capability",
+        "declarations"
+      ]
+    },
+    "AdapterSpec": {
+      "description": "An MCP server as a provider: oxplow's adapter runs `mcp`'s\nserver and translates through `mapping`, refusing a server whose tools\naren't `tools`.",
+      "type": "object",
+      "properties": {
+        "mcp": {
+          "$ref": "#/definitions/McpServer"
+        },
+        "mapping": {
+          "description": "The Starlark mapping (`transform(x)`), relative to the folder.",
+          "type": "string"
+        },
+        "tools": {
+          "description": "The pinned tools (`[{ name, description, inputSchema }]`, JSON).",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "mcp",
+        "mapping",
+        "tools"
+      ]
+    },
+    "McpServer": {
+      "description": "How the adapter reaches the MCP server: exactly one of the two.",
+      "anyOf": [
+        {
+          "description": "A program in the folder, spoken to over its stdio.",
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "command"
+          ]
+        },
+        {
+          "description": "A server reached over streamable HTTP. `auth` names the\ncredential whose value is sent as its bearer token.",
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string"
+            },
+            "auth": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "url"
+          ]
+        }
+      ]
+    },
+    "CredentialDecl": {
+      "description": "A credential's name (a value the person pastes), or `{ name, oauth }` (one they sign in for).",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/definitions/CredentialFile"
+        }
+      ]
+    },
+    "CredentialFile": {
+      "description": "A credential written out: `{ name, oauth? }`.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "The environment variable the provider reads it from.",
+          "type": "string"
+        },
+        "oauth": {
+          "description": "Obtained by signing in rather than pasted.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/OAuthDecl"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ]
+    },
+    "OAuthDecl": {
+      "description": "How a credential is obtained by signing in: OAuth 2.1's\nauthorization-code flow with PKCE, run by oxplow — the provider only\never sees the access token.",
+      "type": "object",
+      "properties": {
+        "authorize_url": {
+          "description": "Where the person signs in.",
+          "type": "string"
+        },
+        "token_url": {
+          "description": "Where a code, or a refresh token, is exchanged for an access token.",
+          "type": "string"
+        },
+        "client_id": {
+          "type": "string"
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "client_secret": {
+          "description": "The **name** of another (static) credential of this provider that\nholds the client secret, for a service that requires one.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "redirect_port": {
+          "description": "The loopback port the redirect comes back on, for a service that\nwants one registered; any free port otherwise.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "minimum": 0,
+          "maximum": 65535,
+          "default": null
+        },
+        "client_auth": {
+          "description": "How the client secret is sent with a token request: `basic` (an\n`Authorization` header, RFC 6749 §2.3.1 — what every service must\ntake; the default) or `post` (in the form, for a service that wants\nthat).",
+          "default": "basic",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ClientAuth"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "authorize_url",
+        "token_url",
+        "client_id"
+      ]
+    },
+    "ClientAuth": {
+      "description": "How a client authenticates to a token endpoint.",
+      "type": "string",
+      "enum": [
+        "basic",
+        "post"
+      ]
+    },
+    "FieldDecl": {
+      "description": "One of a work list's own fields: kept in an item's `native` under\n`name`, declared so screens render and edit it without knowing which\nlist is active.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Its key in `native` (snake_case).",
+          "type": "string"
+        },
+        "title": {
+          "description": "How a person names it.",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/FieldKind"
+        },
+        "values": {
+          "description": "An `enum`'s values, in the order they're offered (empty for any\nother kind).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "read_only": {
+          "description": "Set by the list itself (who filed it, when it synced): shown, never\nedited — a `oxplow.work_item.update` that names it is refused.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "title",
+        "kind"
+      ]
+    },
+    "FieldKind": {
+      "description": "What kind of value a declared field holds.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "text",
+            "number"
+          ]
+        },
+        {
+          "description": "One of `values`.",
+          "type": "string",
+          "const": "enum"
+        }
+      ]
+    },
+    "EffectFile": {
+      "description": "An `effects:` entry as the manifest holds it; `on` and `where` are read\nby the collectors' trigger rules (`parse_trigger`).",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "on": {
+          "description": "The event types it reacts to.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/EventTypeList"
+            }
+          ]
+        },
+        "where": {
+          "description": "Payload fields and the values they must equal.",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "$ref": "#/definitions/PayloadScalar"
+          },
+          "default": null
+        },
+        "needs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "entry": {
+          "type": "string"
+        },
+        "after": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "summary",
+        "on",
+        "entry"
+      ]
+    },
+    "ComponentFile": {
+      "description": "A `custom_components:` entry as the manifest holds it.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "bundle": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "assets": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ]
+    }
+  },
+  "$id": "https://nvoxland.github.io/oxplow/reference/schemas/extension.schema.json"
+}

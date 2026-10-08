@@ -73,6 +73,8 @@ nav:
   - Reference:
       - Keybindings: reference/keybindings.md
       - Settings: reference/settings.md
+      - Extensions: reference/extensions.md
+      - Provider protocol: reference/provider-protocol.md
   - Philosophy:
       - Pair programming, inverted: philosophy/pair-programming.md
       - Beyond vibe coding: philosophy/beyond-vibe-coding.md

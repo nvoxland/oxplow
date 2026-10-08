@@ -46,7 +46,7 @@ or the path to that folder. --root names the project (default: the
 current directory, or the project the path sits in).
 ";
 
-/// Run with `args` = everything after `plugin`; returns the exit code.
+/// Run with `args` = everything after `extension`; returns the exit code.
 pub fn run(args: &[String]) -> i32 {
     let mut out = std::io::stdout().lock();
     let mut err = std::io::stderr().lock();

@@ -27,7 +27,7 @@
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 
-use super::manifest_v2::{at, entry_line, key_line};
+use super::manifest_v2::{at, item_lines, key_line};
 
 /// One implementation as the extension declares it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
@@ -49,9 +49,10 @@ pub struct ImplementationDecl {
     pub config: serde_json::Value,
 }
 
-#[derive(Deserialize)]
+/// An `implementations:` entry as the manifest holds it.
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct ImplementationFile {
+pub(crate) struct ImplementationFile {
     capability: String,
     id: String,
     #[serde(default)]
@@ -59,7 +60,9 @@ struct ImplementationFile {
     entry: String,
     #[serde(default)]
     skills: Vec<String>,
+    /// What it configures, checked against the built-in's schema.
     #[serde(default)]
+    #[schemars(with = "Option<serde_json::Value>")]
     config: Option<Value>,
 }
 
@@ -79,15 +82,17 @@ pub fn parse_implementations(
     };
     let mut out: Vec<ImplementationDecl> = Vec::new();
     let mut errors = Vec::new();
-    for item in items {
+    let lines = item_lines(manifest, "implementations");
+    for (i, item) in items.iter().enumerate() {
+        let item_line = lines.get(i).copied().or(block);
         let f: ImplementationFile = match serde_yaml::from_value(item.clone()) {
             Ok(f) => f,
             Err(e) => {
-                errors.push(at(file, block, format!("implementation: {e}")));
+                errors.push(at(file, item_line, format!("implementation: {e}")));
                 continue;
             }
         };
-        let line = entry_line(manifest, "implementations", "id", &f.id).or(block);
+        let line = item_line;
         match decl_of(f) {
             Ok(d)
                 if out

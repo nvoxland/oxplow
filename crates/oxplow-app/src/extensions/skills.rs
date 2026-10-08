@@ -18,11 +18,22 @@
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 
-use super::manifest_v2::{at, entry_line, key_line};
+use super::manifest_v2::{at, item_lines, key_line};
 use super::ExtensionFiles;
 
 /// What the agent's runtime makes of it.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    specta::Type,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SkillKind {
     /// A skill the agent loads when it's relevant: `<name>/SKILL.md`.
@@ -43,9 +54,10 @@ pub struct SkillDecl {
     pub needs: Vec<String>,
 }
 
-#[derive(Deserialize)]
+/// A `skills:` entry as the manifest holds it.
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct SkillFile {
+pub(crate) struct SkillFile {
     name: String,
     #[serde(default)]
     kind: SkillKind,
@@ -69,15 +81,17 @@ pub(crate) fn parse_skills(
     let core = oxplow_agent_text::core_text();
     let mut out: Vec<SkillDecl> = Vec::new();
     let mut errors = Vec::new();
-    for item in items {
+    let lines = item_lines(manifest, "skills");
+    for (i, item) in items.iter().enumerate() {
+        let item_line = lines.get(i).copied().or(block);
         let f: SkillFile = match serde_yaml::from_value(item.clone()) {
             Ok(f) => f,
             Err(e) => {
-                errors.push(at(file, block, format!("skill: {e}")));
+                errors.push(at(file, item_line, format!("skill: {e}")));
                 continue;
             }
         };
-        let line = entry_line(manifest, "skills", "name", &f.name).or(block);
+        let line = item_line;
         let problem = if !well_formed(&f.name) {
             Some(format!(
                 "skill name `{}` must be lowercase letters, digits and `-`, starting with a letter",

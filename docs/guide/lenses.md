@@ -35,7 +35,8 @@ intent:
 
 `intent` is required: what the extension is for, and examples that
 `oxplow extension test` runs. `oxplow extension new extension review` writes this
-file for you.
+file for you. The [Extensions reference](../reference/extensions.md) covers
+everything else an extension can declare.
 
 ```yaml
 # oxplow/extensions/review/lenses/blocked.yaml

@@ -720,6 +720,31 @@ its line.
   **warning** (it may come from the project's or another extension's
   `measures:`, which resolves when the catalog is assembled).
 
+**Each entry's error is at its own line.** Every list block — `commands`,
+`effects`, `collectors`, `pages`, `panels`, `implementations`, `skills`,
+`ref_kinds`, `custom_components`, `event_types.types`,
+`ui.decorators`, `ui.replacements` — and the manifest's own nested lists
+(`intent.examples`, `intent.prompts`, `ui.slots`) type their entries one
+at a time: a broken entry is left out with an error at its own line
+(`manifest_v2::item_lines`, the line of each `- ` item, so a shape error
+with no name to look the entry up by lands there too), and the rest of
+the extension loads. `intent` and `ui.slots` are read raw
+(`IntentFile`, `Vec<Value>`) and typed by `intent_of` / `slots_of`,
+which `check` and the loader share.
+
+**Schemas.** `extension.yaml` and `lenses/*.yaml` have JSON Schemas
+generated from the loader's own serde types (`extensions/schema.rs`:
+`ManifestV2` with `#[schemars(with = …)]` naming each kind's on-disk
+struct, and `LensFile`), checked in at `docs/reference/schemas/` and
+published with the docs. A test keeps them current (`OXPLOW_BLESS=1`
+regenerates them), and every bundled manifest and lens must validate.
+Scaffolds and kept lenses start with a `# yaml-language-server:
+$schema=…` modeline. A schema holds the shape only; cross-references and
+which keys go together stay the loader's to check. When you add a kind
+or a key, derive `JsonSchema` on its file struct. The user-facing
+reference is `docs/reference/extensions.md` and
+`docs/reference/provider-protocol.md`.
+
 **Decision (2026-09-28): `advisories` is a stable kind.** The plan sketch
 had it experimental, but `oxplow-bundled` — bundled, so shared by
 definition — ships on it, and a first-party extension depending on a

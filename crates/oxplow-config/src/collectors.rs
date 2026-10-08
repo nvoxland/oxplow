@@ -42,7 +42,9 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// Declared type of an entity column.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum ColumnType {
     Text,
@@ -63,7 +65,7 @@ pub struct EntityColumn {
 
 /// A documented join from an entity to another view. Not executed; it
 /// tells agents and lens authors how the data connects.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EntityRelation {
     /// The view it joins to, e.g. `v_work_item` or `v_github_review`.
@@ -145,7 +147,9 @@ impl Pacing {
 }
 
 /// The kind of run a report collector reads after.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum RunKind {
     Test,
@@ -154,7 +158,9 @@ pub enum RunKind {
 
 /// What a report collector records: its parser's typed output, merged
 /// into the run (`.context/collection.md`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum Records {
     /// A suite/case tree of test outcomes (a `test-run`).
@@ -254,7 +260,9 @@ impl CollectorRuntime {
 }
 
 /// How a run's entities land.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum CollectorSync {
     /// Each run restates every entity (one it doesn't mention is emptied).
@@ -265,7 +273,9 @@ pub enum CollectorSync {
 }
 
 /// A provider's collector a `read` collector runs.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProviderRead {
     /// The instance, `<extension>/<instance id>` (a provider's default
@@ -373,31 +383,53 @@ pub const BUILT_IN: &str = "built-in";
 
 /// Parse a `collectors:` list owned by `owner` (an extension's name, or
 /// [`PROJECT`]). `knows_event` says whether an `on:` type is registered.
-/// Invalid collectors are skipped and described in the errors; valid
-/// ones still load.
+/// Invalid collectors are skipped and described in the errors, each
+/// prefixed by its entry (`collectors[<i>]: …`); valid ones still load.
 pub fn parse_collectors(
     owner: &str,
     value: &serde_yaml::Value,
     knows_event: &dyn Fn(&str) -> bool,
 ) -> (Vec<CollectorSpec>, Vec<String>) {
+    let (specs, errors) = parse_collectors_indexed(owner, value, knows_event);
+    let errors = errors
+        .into_iter()
+        .map(|(i, e)| match i {
+            Some(i) => format!("collectors[{i}]: {e}"),
+            None => e,
+        })
+        .collect();
+    (specs, errors)
+}
+
+/// Parse a `collectors:` list: the valid collectors, and each error with
+/// the index of the entry it is about (`None` for the list itself), so a
+/// manifest's loader can put it on that entry's line.
+pub fn parse_collectors_indexed(
+    owner: &str,
+    value: &serde_yaml::Value,
+    knows_event: &dyn Fn(&str) -> bool,
+) -> (Vec<CollectorSpec>, Vec<(Option<usize>, String)>) {
     let mut out: Vec<CollectorSpec> = Vec::new();
     let mut errors = Vec::new();
     let Some(items) = value.as_sequence() else {
-        return (out, vec!["collectors: must be a list".into()]);
+        return (out, vec![(None, "collectors: must be a list".into())]);
     };
     let mut seen_entities = std::collections::HashSet::new();
     for (i, item) in items.iter().enumerate() {
         let raw: RawCollector = match serde_yaml::from_value(item.clone()) {
             Ok(r) => r,
             Err(e) => {
-                errors.push(format!("collectors[{i}]: {e}"));
+                errors.push((Some(i), e.to_string()));
                 continue;
             }
         };
         match validate(owner, raw, knows_event) {
             Ok(spec) => {
                 if out.iter().any(|s| s.id == spec.id) {
-                    errors.push(format!("collector `{}` is declared twice", spec.id));
+                    errors.push((
+                        Some(i),
+                        format!("collector `{}` is declared twice", spec.id),
+                    ));
                     continue;
                 }
                 if let Some(dup) = spec
@@ -405,33 +437,46 @@ pub fn parse_collectors(
                     .iter()
                     .find(|e| !seen_entities.insert(e.name.clone()))
                 {
-                    errors.push(format!(
-                        "entity `{}` is declared by more than one collector",
-                        dup.name
+                    errors.push((
+                        Some(i),
+                        format!(
+                            "entity `{}` is declared by more than one collector",
+                            dup.name
+                        ),
                     ));
                     continue;
                 }
                 out.push(spec);
             }
-            Err(e) => errors.push(e),
+            Err(e) => errors.push((Some(i), e)),
         }
     }
     (out, errors)
 }
 
-#[derive(Deserialize)]
+/// A `collectors:` entry as written (an extension's manifest, or
+/// `.oxplow/project.yaml`); `validate` makes it a `CollectorSpec`.
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct RawCollector {
+pub struct RawCollector {
+    /// Unique in its owner; a dotted id (`repo.scan_clone`) is fine.
     id: String,
     #[serde(default)]
     doc: String,
+    /// What runs it (`jq` is `jaq`).
     #[serde(default)]
+    #[schemars(with = "Option<RuntimeName>")]
     runtime: Option<String>,
+    /// The program or script, relative to its owner's folder; a report
+    /// collector's `oxplow:<parser>`.
     #[serde(default)]
     entry: Option<String>,
+    /// For `read`: the provider collector it runs.
     #[serde(default)]
     provider: Option<ProviderRead>,
+    /// When it runs by itself; absent, `manual`.
     #[serde(default)]
+    #[schemars(with = "Option<TriggerFile>")]
     trigger: Option<serde_yaml::Value>,
     #[serde(default)]
     after: Vec<String>,
@@ -439,7 +484,9 @@ struct RawCollector {
     input: Option<String>,
     #[serde(default)]
     report: Option<RawReport>,
+    /// How a run's entities land; absent, `replace`.
     #[serde(default)]
+    #[schemars(with = "Option<CollectorSync>")]
     sync: Option<String>,
     #[serde(default)]
     env: Vec<String>,
@@ -451,11 +498,25 @@ struct RawCollector {
     entities: Vec<RawEntity>,
     #[serde(default)]
     facts: Vec<String>,
+    /// A report collector's kind.
     #[serde(default)]
+    #[schemars(with = "Option<Records>")]
     records: Option<String>,
 }
 
-#[derive(Deserialize)]
+/// The names `runtime:` takes. Its schema only: `validate` reads the
+/// text, to say what's wrong in its own words.
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+enum RuntimeName {
+    Exec,
+    Starlark,
+    Jaq,
+    Jq,
+    Read,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct RawReport {
     path: String,
@@ -463,7 +524,7 @@ struct RawReport {
     format: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct RawEntity {
     name: String,
@@ -471,18 +532,103 @@ struct RawEntity {
     doc: String,
     key: String,
     /// Ordered `name: type` or `name: {type, doc}`.
+    #[schemars(with = "BTreeMap<String, ColumnShape>")]
     columns: serde_yaml::Mapping,
     #[serde(default)]
     relations: Vec<EntityRelation>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct RawColumn {
+pub struct RawColumn {
     #[serde(rename = "type")]
+    #[schemars(with = "ColumnType")]
     col_type: String,
     #[serde(default)]
     doc: String,
+}
+
+/// An entity column as written: its type, or `{ type, doc }`. Its schema
+/// only: `validate` reads the two, to say what's wrong in its own words.
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum ColumnShape {
+    Type(ColumnType),
+    Full(RawColumn),
+}
+
+/// `trigger:` as written: `manual`, or a map of a trigger's keys.
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum TriggerFile {
+    Manual(Manual),
+    Map(Box<TriggerMap>),
+}
+
+/// `manual`: only when someone runs it.
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum Manual {
+    Manual,
+}
+
+/// A trigger's keys. Which go together `parse_trigger` checks, and says
+/// in its own words.
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TriggerMap {
+    /// A clock: `15m`, `2h`.
+    #[serde(default)]
+    #[schemars(with = "Option<String>")]
+    every: Option<serde_yaml::Value>,
+    /// The event types it runs on.
+    #[serde(default)]
+    #[schemars(with = "Option<EventTypeList>")]
+    on: Option<serde_yaml::Value>,
+    /// With `on`: payload fields and the values they must equal.
+    #[serde(default, rename = "where")]
+    #[schemars(with = "Option<PayloadFilter>")]
+    filter: Option<serde_yaml::Value>,
+    /// A report collector's: after a `test` or `analysis` run.
+    #[serde(default)]
+    #[schemars(with = "Option<RunKind>")]
+    on_run: Option<serde_yaml::Value>,
+    /// With `on`: run once no triggering event has arrived for this long.
+    #[serde(default)]
+    #[schemars(with = "Option<String>")]
+    settle: Option<serde_yaml::Value>,
+    /// With `on`: run at most this often.
+    #[serde(default)]
+    #[schemars(with = "Option<String>")]
+    at_most: Option<serde_yaml::Value>,
+    /// With `on`: run once nothing has happened for this long.
+    #[serde(default)]
+    #[schemars(with = "Option<String>")]
+    idle: Option<serde_yaml::Value>,
+    /// With `on` and a pacing key: event types that run at once.
+    #[serde(default)]
+    #[schemars(with = "Option<EventTypeList>")]
+    force: Option<serde_yaml::Value>,
+}
+
+/// One event type, or a list of them.
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum EventTypeList {
+    One(String),
+    Many(Vec<String>),
+}
+
+/// `where:` — payload fields and the scalar each must equal.
+pub type PayloadFilter = BTreeMap<String, PayloadScalar>;
+
+/// A `where:` value.
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum PayloadScalar {
+    Text(String),
+    Bool(bool),
+    Number(f64),
 }
 
 /// Lowercase SQL-safe identifier: `[a-z][a-z0-9_]*`.
@@ -531,20 +677,18 @@ pub fn parse_trigger(
     if value.as_str() == Some("manual") {
         return Ok(Trigger::Manual);
     }
-    let Some(map) = value.as_mapping() else {
+    if !value.is_mapping() {
         return Err(format!("trigger: {shapes}"));
-    };
-    let get = |k: &str| map.get(Value::String(k.into()));
-    if let Some(stray) = map.keys().filter_map(Value::as_str).find(|k| {
-        !matches!(
-            *k,
-            "every" | "on" | "where" | "on_run" | "settle" | "at_most" | "idle" | "force"
-        )
-    }) {
-        return Err(format!("trigger: unknown key `{stray}`; {shapes}"));
     }
-    if let Some(run) = get("on_run") {
-        if map.len() > 1 {
+    let t: TriggerMap =
+        serde_yaml::from_value(value.clone()).map_err(|e| format!("trigger: {e}; {shapes}"))?;
+    if let Some(run) = &t.on_run {
+        let alone = [
+            &t.every, &t.on, &t.filter, &t.settle, &t.at_most, &t.idle, &t.force,
+        ]
+        .iter()
+        .all(|v| v.is_none());
+        if !alone {
             return Err(format!("trigger: `on_run` stands alone; {shapes}"));
         }
         return match run.as_str() {
@@ -555,14 +699,14 @@ pub fn parse_trigger(
             _ => Err("trigger: `on_run` is `test` or `analysis`".into()),
         };
     }
-    match (get("every"), get("on")) {
+    match (&t.every, &t.on) {
         (Some(every), None) => {
-            if get("where").is_some() {
+            if t.filter.is_some() {
                 return Err("trigger: `where` goes with `on`".into());
             }
-            if ["settle", "at_most", "idle", "force"]
+            if [&t.settle, &t.at_most, &t.idle, &t.force]
                 .iter()
-                .any(|k| get(k).is_some())
+                .any(|v| v.is_some())
             {
                 return Err("trigger: `settle`, `at_most`, `idle` and `force` go with `on`".into());
             }
@@ -601,7 +745,7 @@ pub fn parse_trigger(
                 ));
             }
             let mut filter = BTreeMap::new();
-            if let Some(w) = get("where") {
+            if let Some(w) = &t.filter {
                 let w = w
                     .as_mapping()
                     .ok_or_else(|| "trigger: `where` maps payload fields to values".to_string())?;
@@ -612,8 +756,9 @@ pub fn parse_trigger(
                     filter.insert(k.to_string(), v);
                 }
             }
-            let secs = |key: &str| -> Result<Option<u32>, String> {
-                get(key)
+            let secs = |key: &str, value: &Option<Value>| -> Result<Option<u32>, String> {
+                value
+                    .as_ref()
                     .map(|v| {
                         v.as_str()
                             .and_then(oxplow_domain::time::parse_duration)
@@ -627,12 +772,12 @@ pub fn parse_trigger(
                     .transpose()
             };
             let mut pacing = Pacing {
-                settle_secs: secs("settle")?,
-                at_most_secs: secs("at_most")?,
-                idle_secs: secs("idle")?,
+                settle_secs: secs("settle", &t.settle)?,
+                at_most_secs: secs("at_most", &t.at_most)?,
+                idle_secs: secs("idle", &t.idle)?,
                 force: Vec::new(),
             };
-            if let Some(force) = get("force") {
+            if let Some(force) = &t.force {
                 if pacing.is_immediate() {
                     return Err(
                         "trigger: `force` needs `settle`, `at_most` or `idle` (without them every \
@@ -1306,7 +1451,7 @@ mod tests {
                 "`where` goes with `on`",
             ),
             ("trigger: { every: 5m }\n  after: [x]", "`after` goes with"),
-            ("trigger: { at: noon }", "unknown key `at`"),
+            ("trigger: { at: noon }", "unknown field `at`"),
             (
                 "trigger: { on: [collector.synced] }",
                 "can't run on `collector.synced`",

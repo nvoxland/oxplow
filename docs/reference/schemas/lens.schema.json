@@ -1,0 +1,825 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "oxplow lens",
+  "description": "A lens file as written on disk (`lenses/<slug>.yaml`).",
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string",
+      "default": ""
+    },
+    "query": {
+      "description": "Required, except by a `form` (whose query, if any, prefills it).",
+      "type": "string",
+      "default": ""
+    },
+    "viz": {
+      "default": "table",
+      "allOf": [
+        {
+          "$ref": "#/definitions/LensViz"
+        }
+      ]
+    },
+    "params": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/LensParam"
+      },
+      "default": []
+    },
+    "columns": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/LensColumn"
+      },
+      "default": []
+    },
+    "empty": {
+      "description": "Shown instead of an empty result.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "chart": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/LensChart"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "tree": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/LensTree"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "timeline": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/LensTimeline"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "steps": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/LensSteps"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "hunks": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/LensHunks"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "form": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/LensForm"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "custom": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/LensCustom"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "group": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/LensGroup"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "emphasis": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "depth": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "children": {
+      "description": "For `grid`: lens slugs in this extension, or `<ext>/<slug>` ids.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "launcher": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/LauncherFile"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "hidden": {
+      "description": "Keep it out of the launcher (e.g. a lens only a slot shows).",
+      "type": "boolean",
+      "default": false
+    },
+    "actions": {
+      "description": "Commands the lens offers (`{ id, label, command, input, row }`).\nParsed by [`parse_actions`].",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/ActionFile"
+      },
+      "default": []
+    },
+    "alert": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/AlertFile"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "needs": {
+      "description": "Capabilities or features it needs (`work_items`,\n`snapshots.contents`).",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "title"
+  ],
+  "definitions": {
+    "LensViz": {
+      "description": "How a lens renders its rows.",
+      "oneOf": [
+        {
+          "description": "Rows and columns.",
+          "type": "string",
+          "const": "table"
+        },
+        {
+          "description": "One line per row: the first column (or the first `columns` entry)\nis the headline, the rest are secondary.",
+          "type": "string",
+          "const": "list"
+        },
+        {
+          "description": "A single value: the first column of the first row.",
+          "type": "string",
+          "const": "number"
+        },
+        {
+          "description": "The first column of the first row, rendered as markdown.",
+          "type": "string",
+          "const": "markdown"
+        },
+        {
+          "description": "Bars: `chart.x` labels, `chart.y` values.",
+          "type": "string",
+          "const": "bar"
+        },
+        {
+          "description": "A line over `chart.x` (a time or number), `chart.y` values, one\nline per `chart.series` value when set.",
+          "type": "string",
+          "const": "line"
+        },
+        {
+          "description": "Nested rectangles sized by `chart.size`, labelled by `chart.label`,\ngrouped (and coloured) by `chart.group`.",
+          "type": "string",
+          "const": "treemap"
+        },
+        {
+          "description": "Other lenses (`children`), stacked, each given the params it\ndeclares from this lens's params.",
+          "type": "string",
+          "const": "grid"
+        },
+        {
+          "description": "Rows nested by `tree.parent` (a row's parent is the row whose\n`tree.id` it names; none, or one not in the result, is a root),\neach shown as `tree.label`.",
+          "type": "string",
+          "const": "tree"
+        },
+        {
+          "description": "Rows in time order (`timeline.at`), each shown as\n`timeline.label`, linked through `timeline.ref` when set.",
+          "type": "string",
+          "const": "timeline"
+        },
+        {
+          "description": "The first row as label/value pairs (the displayed columns).",
+          "type": "string",
+          "const": "detail"
+        },
+        {
+          "description": "An ordered checklist: `steps.label`, with `steps.status` (`done`,\n`active`, `failed`, anything else pending).",
+          "type": "string",
+          "const": "steps"
+        },
+        {
+          "description": "Per row, the diff of the file `hunks.path` between the revisions\n`hunks.from` and `hunks.to` (`working`, `snap:<id>`,\n`<vcs>:<rev>`), read-only.",
+          "type": "string",
+          "const": "hunks"
+        },
+        {
+          "description": "A form for command `form.command`: its fields from the command's\ninput schema, prefilled from `form.defaults` (placeholders bound\nlike an action's) and the query's first row, if the lens has one.\nSubmitting runs the command as the lens.",
+          "type": "string",
+          "const": "form"
+        },
+        {
+          "description": "The extension's own web component (`custom.component`), in\na sandboxed frame; its rows are what it shows and what an agent\nreads (as a table).",
+          "type": "string",
+          "const": "custom"
+        }
+      ]
+    },
+    "LensParam": {
+      "description": "A value the viewer (or an agent) can set when running the lens,\nbound into the query as `:name`.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "default": {
+          "description": "Used when the caller doesn't supply the param.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SqlCell"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "options": {
+          "description": "The values it takes, when it's a choice: a panel shows\nthem as a toggle in its header, a lens page as a select. Its\n`default` must be one; a run supplying another is refused.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/LensParamOption"
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ]
+    },
+    "SqlCell": {
+      "description": "One SQL value, serialized as a plain JSON scalar (`null`, boolean,\nnumber or string) so the TS binding is `null | boolean | number |\nstring` rather than serde_json's tagged-enum shape.",
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "integer",
+          "format": "int64"
+        },
+        {
+          "type": "number",
+          "format": "double"
+        },
+        {
+          "type": "string"
+        }
+      ]
+    },
+    "LensParamOption": {
+      "description": "One value a choice param takes, and what the viewer sees for it.",
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "label"
+      ]
+    },
+    "LensColumn": {
+      "description": "How one result column is shown.",
+      "type": "object",
+      "properties": {
+        "key": {
+          "description": "Result column name.",
+          "type": "string"
+        },
+        "label": {
+          "description": "Header text; defaults to `key`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "link": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LensLink"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "unit": {
+          "description": "A column of the same row holding this one's unit (`ms`, `%`,\n`lines`): a number shows as a metric value in it.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "icon": {
+          "description": "A column of the same row naming an icon drawn before the cell\n(`done`, `in_progress`, `epic`, `wiki`, …; the UI's fixed\nvocabulary, `lens/lensIcons.tsx` — an unknown name draws none).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "tone": {
+          "description": "A column of the same row naming the cell's tone: `accent`,\n`success`, `warning`, `danger` or `muted` (anything else is plain).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "key"
+      ]
+    },
+    "LensLink": {
+      "description": "Makes a column's cells link to a page.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/LensLinkKind"
+        },
+        "from": {
+          "description": "Result column holding the target id. Defaults to the column itself.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "line": {
+          "description": "For `file` / `diff-at`: result column holding a line number to open at.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "base": {
+          "description": "For `diff-at`: column holding the older side's label.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "head": {
+          "description": "For `diff-at` / `compare`: column holding the newer side's label.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind"
+      ]
+    },
+    "LensLinkKind": {
+      "description": "A page a column value can link to.",
+      "oneOf": [
+        {
+          "description": "`file:<path>`; the value is a repo-relative path.",
+          "type": "string",
+          "const": "file"
+        },
+        {
+          "description": "`wiki:<slug>`.",
+          "type": "string",
+          "const": "wiki"
+        },
+        {
+          "description": "The effort's diff view; the value is an effort id.",
+          "type": "string",
+          "const": "effort-diff"
+        },
+        {
+          "description": "A git commit; the value is a sha.",
+          "type": "string",
+          "const": "commit"
+        },
+        {
+          "description": "A metric's page; the value is a metric key.",
+          "type": "string",
+          "const": "metric"
+        },
+        {
+          "description": "Any oxplow page by its tab id (`work_item:oxplow:<id>`,\n`commit:<sha>`, `page:git-dashboard`, …),\ne.g. `v_page_visit.page_id`.",
+          "type": "string",
+          "const": "page"
+        },
+        {
+          "description": "A file's diff within a change: the value is the path; `line`,\n`base` and `head` name the columns holding the line and the\nchange's `base_revision` / `head_revision` (join `v_change`).",
+          "type": "string",
+          "const": "diff-at"
+        },
+        {
+          "description": "Two line ranges side by side: the value is\n`path:start-end|peer:start-end`; `head` names a column with the\nrevision to read (`working`, `snap:<id>`, `git:<rev>`; the working\ntree if absent).",
+          "type": "string",
+          "const": "compare"
+        }
+      ]
+    },
+    "LensChart": {
+      "description": "Which result columns a chart viz draws from.",
+      "type": "object",
+      "properties": {
+        "x": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "y": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "series": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "size": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "group": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "LensTree": {
+      "description": "`tree` viz: which columns nest the rows.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parent": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "LensTimeline": {
+      "description": "`timeline` viz: when each row happened and what it says.",
+      "type": "object",
+      "properties": {
+        "at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ref": {
+          "description": "A column holding a canonical ref each entry links to.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "LensSteps": {
+      "description": "`steps` viz: each step's text and status.",
+      "type": "object",
+      "properties": {
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "LensHunks": {
+      "description": "`hunks` viz: the file and the two revisions each row diffs.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "from": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "to": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "LensForm": {
+      "description": "`form` viz: the command it submits and the values it starts from.",
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "defaults": {
+          "description": "Input values the form starts with (`{{param.x}}` placeholders bound).",
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "LensCustom": {
+      "description": "A `custom` lens's component and the props it starts with.",
+      "type": "object",
+      "properties": {
+        "component": {
+          "description": "One of the extension's `custom_components` ids.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "props": {
+          "description": "Handed to the component as is.",
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "LensGroup": {
+      "description": "`group` on a `list` or `table`: the rows under a heading per distinct\nvalue of `by`, in the order each first appears; `link` makes the\nheading a link, read from the group's first row.",
+      "type": "object",
+      "properties": {
+        "by": {
+          "description": "The column whose value groups the rows (not shown as a cell).",
+          "type": "string"
+        },
+        "link": {
+          "description": "The heading's link; `from` defaults to `by`.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LensLink"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "by"
+      ]
+    },
+    "LauncherFile": {
+      "type": "object",
+      "properties": {
+        "category": {
+          "$ref": "#/definitions/LauncherCategory"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "category"
+      ]
+    },
+    "LauncherCategory": {
+      "description": "Launcher (Cmd+K) sections a lens can be listed under. Mirrors the\nrenderer's `PageCategory`.",
+      "type": "string",
+      "enum": [
+        "Work",
+        "Code",
+        "Git",
+        "Activity",
+        "Knowledge",
+        "Data",
+        "Lenses",
+        "System"
+      ]
+    },
+    "ActionFile": {
+      "description": "A lens action as written in a lens file.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Unique within the lens.",
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "command": {
+          "description": "The command it runs (`oxplow.work_item.transition`).",
+          "type": "string"
+        },
+        "input": {
+          "description": "The command's input; `{{param.<name>}}` / `{{row.<column>}}` bound.",
+          "default": null
+        },
+        "row": {
+          "description": "Offered on each row (right-click), `{{row.*}}` bound to it.",
+          "type": "boolean",
+          "default": false
+        },
+        "group": {
+          "description": "The `group` heading (its `by` value) it's a button in.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "command"
+      ]
+    },
+    "AlertFile": {
+      "description": "`alert:` as written in a lens file (snake_case keys).",
+      "type": "object",
+      "properties": {
+        "min_rows": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "column": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "above": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "below": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$id": "https://nvoxland.github.io/oxplow/reference/schemas/lens.schema.json"
+}

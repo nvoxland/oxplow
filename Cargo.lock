@@ -4410,6 +4410,7 @@ dependencies = [
  "hex",
  "hmac",
  "indexmap 2.14.2",
+ "jsonschema",
  "libc",
  "opentelemetry-proto",
  "oxplow-acp-fake",
@@ -4995,6 +4996,7 @@ dependencies = [
 name = "oxplow-sdk"
 version = "0.7.0"
 dependencies = [
+ "jsonschema",
  "oxplow-agent-text",
  "oxplow-ai",
  "oxplow-app",

@@ -15,10 +15,12 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::manifest_v2::{at, entry_line, key_line, line_under};
+use super::manifest_v2::{at, item_lines, key_line, line_under};
 
 /// Where a decoration shows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum DecoratorPlacement {
     /// A chip in the header of a page whose ref the model lists.
@@ -45,9 +47,10 @@ pub struct UiDecorator {
     pub color: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+/// A `ui.decorators` entry as the manifest holds it.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct DecoratorFile {
+pub(crate) struct DecoratorFile {
     model: String,
     kind: String,
     placement: DecoratorPlacement,
@@ -82,15 +85,17 @@ pub fn parse_decorators(
     let kinds = oxplow_domain::refs::kind::core_kinds();
     let mut out = Vec::new();
     let mut errors = Vec::new();
+    let lines = item_lines(manifest, "ui.decorators");
     for (i, item) in items.iter().enumerate() {
+        let item_line = lines.get(i).copied().or(block);
         let d: DecoratorFile = match serde_yaml::from_value(item.clone()) {
             Ok(d) => d,
             Err(e) => {
-                errors.push(at(file, block, format!("`ui.decorators`: {e}")));
+                errors.push(at(file, item_line, format!("`ui.decorators`: {e}")));
                 continue;
             }
         };
-        let line = entry_line(manifest, "ui", "model", &d.model).or(block);
+        let line = item_line;
         let model = models.iter().find(|m| m.decl.name == d.model);
         let has = |col: &str| model.is_some_and(|m| m.decl.columns.iter().any(|c| c.name == col));
         let wanted: Vec<&str> = ["ref", d.label.as_str()]

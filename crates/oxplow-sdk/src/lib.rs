@@ -132,6 +132,8 @@ pub fn scaffold(
         Ok(())
     };
     let ns = oxplow_app::extension_commands::command_namespace(name);
+    // Each lens file names its schema, as the manifest does.
+    let lens_modeline = extensions::schema::modeline(extensions::schema::LENS_SCHEMA_URL);
     // The intent example, and its fixture (what `extension test` runs).
     let (example_input, example_expect, fixture_expect) = match kind {
         Kind::Lens | Kind::Component => (
@@ -279,7 +281,7 @@ pub fn scaffold(
         Kind::Lens => write(
             &format!("{rel_dir}/lenses/{name}.yaml"),
             format!(
-                "title: {title}\n\
+                "{modeline}title: {title}\n\
                  description: \"TODO: what this lens answers.\"\n\
                  params:\n\
                  \x20 # Filled in with the viewer's stream unless a value is given.\n\
@@ -299,7 +301,8 @@ pub fn scaffold(
                  \x20 - {{ id: start, label: Start, command: oxplow.work_item.transition, input: {{ ref: \"{{{{row.ref}}}}\", to: in_progress }}, row: true }}\n\
                  empty: No open work items in this stream.\n\
                  launcher: {{ category: Work }}\n",
-                title = title_case(name)
+                modeline = lens_modeline,
+                    title = title_case(name)
             ),
         )?,
         Kind::Collector => {
@@ -322,7 +325,7 @@ pub fn scaffold(
             write(
                 &format!("{rel_dir}/lenses/{name}.yaml"),
                 format!(
-                    "title: {title}\n\
+                    "{modeline}title: {title}\n\
                      description: \"TODO: what this lens answers.\"\n\
                      query: SELECT ref, title FROM v_{ns}_open_items ORDER BY title\n\
                      viz: table\n\
@@ -330,6 +333,7 @@ pub fn scaffold(
                      \x20 - {{ key: title, label: Item, link: {{ kind: page, from: ref }} }}\n\
                      empty: Nothing collected yet — sync the collector (Settings → Data).\n\
                      launcher: {{ category: Work }}\n",
+                    modeline = lens_modeline,
                     title = title_case(name)
                 ),
             )?;
@@ -359,7 +363,7 @@ pub fn scaffold(
             write(
                 &format!("{rel_dir}/lenses/{name}.yaml"),
                 format!(
-                    "title: {title}\n\
+                    "{modeline}title: {title}\n\
                      description: \"TODO: what this view answers.\"\n\
                      params:\n\
                      \x20 # Filled in with the viewer's stream unless a value is given.\n\
@@ -374,6 +378,7 @@ pub fn scaffold(
                      viz: custom\n\
                      custom: {{ component: {name} }}\n\
                      launcher: {{ category: Work }}\n",
+                    modeline = lens_modeline,
                     title = title_case(name)
                 ),
             )?;
@@ -746,6 +751,49 @@ mod tests {
         let p = root.join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(p, body).unwrap();
+    }
+
+    /// Every kind's scaffold names its schema on each file's first line,
+    /// and validates against it.
+    #[test]
+    fn scaffolds_name_and_satisfy_their_schemas() {
+        use oxplow_app::extensions::schema;
+        let manifest_schema =
+            jsonschema::validator_for(&schema::manifest_schema()).expect("compiles");
+        let lens_schema = jsonschema::validator_for(&schema::lens_schema()).expect("compiles");
+        for kind in [
+            Kind::Lens,
+            Kind::Extension,
+            Kind::Provider,
+            Kind::Collector,
+            Kind::Command,
+            Kind::Effect,
+            Kind::Component,
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let made = scaffold(dir.path(), kind, "demo", None).unwrap();
+            for file in made.files.iter().filter(|f| f.ends_with(".yaml")) {
+                let (url, validator) = if file.ends_with("/extension.yaml") {
+                    (schema::MANIFEST_SCHEMA_URL, &manifest_schema)
+                } else if file.contains("/lenses/") {
+                    (schema::LENS_SCHEMA_URL, &lens_schema)
+                } else {
+                    continue;
+                };
+                let text = std::fs::read_to_string(dir.path().join(file)).unwrap();
+                assert!(
+                    text.starts_with(&schema::modeline(url)),
+                    "{kind:?} {file}: {text}"
+                );
+                let yaml: serde_yaml::Value = serde_yaml::from_str(&text).unwrap();
+                let value = serde_json::to_value(yaml).unwrap();
+                let problems: Vec<String> = validator
+                    .iter_errors(&value)
+                    .map(|e| e.to_string())
+                    .collect();
+                assert!(problems.is_empty(), "{kind:?} {file}: {problems:?}");
+            }
+        }
     }
 
     #[tokio::test]

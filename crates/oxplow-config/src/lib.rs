@@ -172,7 +172,7 @@ pub struct LspServerConfig {
 }
 
 /// A fact predicate on a `metrics:` spec (the `filter:` block) — the config
-/// mirror of the engine's `FactFilter` (epic tsk12). A conjunctive predicate
+/// mirror of the engine's `FactFilter`. A conjunctive predicate
 /// keeping only the facts that match before aggregation: `minValue` for a
 /// count-over-threshold (complexity ≥ N), `severity` for a lint slice, `dimEq`
 /// for a conformed-dimension slice (`[oxplow.rule, unsafe_block]`).
@@ -206,7 +206,7 @@ pub struct FormulaConfig {
 }
 
 /// One entry in the top-level `metrics:` block — a **pure read-time SPEC** over a
-/// measure (epic tsk12, E). A metric no longer *computes* anything: it names a
+/// measure. A metric no longer *computes* anything: it names a
 /// `sourceMeasure` + an `aggregation` (+ optional `filter`), or a `formula` over
 /// other metrics, and the engine aggregates the durable facts a `collectors:` entry
 /// emitted. Two forms, distinguished by which key is set:
@@ -279,7 +279,7 @@ pub struct MetricEntry {
     pub warn_at: Option<f64>,
     #[serde(rename = "failAt", default)]
     pub fail_at: Option<f64>,
-    /// Entity metric (tsk322): the `v_*` view it aggregates, instead of a
+    /// Entity metric: the `v_*` view it aggregates, instead of a
     /// measure's facts. Fragments below are SQL over that view, aliased `e`.
     #[serde(default)]
     pub entity: Option<String>,
@@ -355,7 +355,7 @@ pub struct EntityDimensionSpec {
 }
 
 /// One entry in the top-level `measures:` block — the **measure catalog**
-/// authoring surface (epic tsk12, workstream E). A measure is a *type of atomic
+/// authoring surface. A measure is a *type of atomic
 /// fact* a collector may emit (`oxplow.complexity`, `acme.api_latency`, …); the
 /// `oxplow.*` built-ins are seeded by the DB migration, so config only *adds*
 /// global/project measures. Unlike [`MetricEntry`] there is no `use:`/`key:`
@@ -387,7 +387,7 @@ pub struct MeasureEntry {
     /// does. Such a measure is folded to the latest capture per (producer, path)
     /// before aggregating, so a repo-wide total stays correct while only changed
     /// files are rescanned. Set this on any measure a snapshot-triggered collector
-    /// emits per-file facts on (tsk41).
+    /// emits per-file facts on.
     #[serde(rename = "captureScope", default)]
     pub capture_scope: Option<String>,
     #[serde(default)]
@@ -412,7 +412,7 @@ pub struct ResolvedMeasure {
 }
 
 /// One entry in the top-level `dimensions:` block — the **conformed-dimension
-/// catalog** authoring surface (epic tsk12, workstream E). A dimension is a
+/// catalog** authoring surface. A dimension is a
 /// slice axis that means the same thing to every fact that carries it
 /// (`oxplow.severity`, `acme.license`, …), enabling cross-metric drill-across.
 /// Like [`MeasureEntry`] it is definition-only; the `oxplow.*` built-ins are the
@@ -442,7 +442,7 @@ pub struct DimensionEntry {
     /// `dims_json`, promoted only when hot.
     #[serde(default)]
     pub promote: bool,
-    /// Entity dimension (tsk322): the `v_*` view it slices, for entity
+    /// Entity dimension: the `v_*` view it slices, for entity
     /// metrics over the same view.
     #[serde(default)]
     pub entity: Option<String>,

@@ -26,7 +26,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::exec_consent::{ApprovalStore, ProgramKind, ProjectProgram};
-use crate::extensions::manifest_v2::{at, entry_line, key_line};
+use crate::extensions::manifest_v2::{at, item_lines, key_line};
 use crate::extensions::Extension;
 
 /// An effect as loaded (valid ones; invalid ones are in the extension's
@@ -62,13 +62,19 @@ impl EffectDecl {
     }
 }
 
-#[derive(Deserialize)]
+/// An `effects:` entry as the manifest holds it; `on` and `where` are read
+/// by the collectors' trigger rules (`parse_trigger`).
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct EffectFile {
+pub(crate) struct EffectFile {
     id: String,
     summary: String,
+    /// The event types it reacts to.
+    #[schemars(with = "oxplow_config::collectors::EventTypeList")]
     on: serde_yaml::Value,
+    /// Payload fields and the values they must equal.
     #[serde(default, rename = "where")]
+    #[schemars(with = "Option<oxplow_config::collectors::PayloadFilter>")]
     filter: Option<serde_yaml::Value>,
     #[serde(default)]
     needs: Vec<String>,
@@ -104,15 +110,17 @@ pub fn parse_effects(
     };
     let mut out: Vec<EffectDecl> = Vec::new();
     let mut errors = Vec::new();
-    for item in items {
+    let lines = item_lines(manifest, "effects");
+    for (i, item) in items.iter().enumerate() {
+        let item_line = lines.get(i).copied().or(block);
         let f: EffectFile = match serde_yaml::from_value(item.clone()) {
             Ok(f) => f,
             Err(e) => {
-                errors.push(at(file, block, format!("effect: {e}")));
+                errors.push(at(file, item_line, format!("effect: {e}")));
                 continue;
             }
         };
-        let line = entry_line(manifest, "effects", "id", &f.id).or(block);
+        let line = item_line;
         let declared_at = at(file, line, "").trim_end_matches(": ").to_string();
         match decl_of(extension, f, read, knows_event, declared_at) {
             Ok(d) if out.iter().any(|o| o.id == d.id) => errors.push(at(

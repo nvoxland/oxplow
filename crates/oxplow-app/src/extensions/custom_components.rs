@@ -21,7 +21,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use super::manifest_v2::{at, entry_line, key_line};
+use super::manifest_v2::{at, item_lines, key_line};
 
 /// The most a bundle may hold.
 pub const MAX_BUNDLE_BYTES: u64 = 5 * 1024 * 1024;
@@ -45,9 +45,10 @@ pub struct CustomComponent {
     pub commands: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
+/// A `custom_components:` entry as the manifest holds it.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct ComponentFile {
+pub(crate) struct ComponentFile {
     id: String,
     #[serde(default)]
     title: Option<String>,
@@ -466,15 +467,17 @@ pub fn parse_custom_components(
     let kinds = oxplow_domain::refs::kind::core_kinds();
     let mut out: Vec<CustomComponent> = Vec::new();
     let mut errors = Vec::new();
-    for item in items {
+    let lines = item_lines(manifest, "custom_components");
+    for (i, item) in items.iter().enumerate() {
+        let item_line = lines.get(i).copied().or(block);
         let c: ComponentFile = match serde_yaml::from_value(item.clone()) {
             Ok(c) => c,
             Err(e) => {
-                errors.push(at(file, block, format!("custom component: {e}")));
+                errors.push(at(file, item_line, format!("custom component: {e}")));
                 continue;
             }
         };
-        let line = entry_line(manifest, "custom_components", "id", &c.id).or(block);
+        let line = item_line;
         let bundle = c
             .bundle
             .clone()

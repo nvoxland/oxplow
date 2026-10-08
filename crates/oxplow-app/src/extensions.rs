@@ -21,8 +21,9 @@ pub mod decorators;
 pub mod implementations;
 pub mod manifest_v2;
 pub mod replacements;
+pub mod schema;
 pub mod skills;
-use manifest_v2::{at, entry_line, key_line, line_under, ManifestV2};
+use manifest_v2::{at, entry_line, item_lines, key_line, line_under, ManifestV2};
 pub use manifest_v2::{Intent, IntentExample, IntentPrompt, Sharing};
 
 /// Where project extensions live, relative to a worktree root.
@@ -73,9 +74,9 @@ pub enum LensViz {
     /// A form for command `form.command`: its fields from the command's
     /// input schema, prefilled from `form.defaults` (placeholders bound
     /// like an action's) and the query's first row, if the lens has one.
-    /// Submitting runs the command as the lens (P6.B2).
+    /// Submitting runs the command as the lens.
     Form,
-    /// The extension's own web component (`custom.component`, P6b.D1), in
+    /// The extension's own web component (`custom.component`), in
     /// a sandboxed frame; its rows are what it shows and what an agent
     /// reads (as a table).
     Custom,
@@ -110,7 +111,7 @@ pub struct LensAlert {
 }
 
 /// `alert:` as written in a lens file (snake_case keys).
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct AlertFile {
     min_rows: Option<i64>,
@@ -349,7 +350,9 @@ impl LensChart {
 
 /// Launcher (Cmd+K) sections a lens can be listed under. Mirrors the
 /// renderer's `PageCategory`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
 pub enum LauncherCategory {
     Work,
     Code,
@@ -361,7 +364,7 @@ pub enum LauncherCategory {
     System,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct LauncherFile {
     category: LauncherCategory,
@@ -383,7 +386,7 @@ pub enum LensLinkKind {
     Commit,
     /// A metric's page; the value is a metric key.
     Metric,
-    /// Any oxplow page by its tab id (`work_item:oxplow:tsk42`,
+    /// Any oxplow page by its tab id (`work_item:oxplow:<id>`,
     /// `commit:<sha>`, `page:git-dashboard`, …),
     /// e.g. `v_page_visit.page_id`.
     Page,
@@ -429,7 +432,7 @@ pub struct LensColumn {
     #[serde(default)]
     pub link: Option<LensLink>,
     /// A column of the same row holding this one's unit (`ms`, `%`,
-    /// `lines`): a number shows as a metric value in it (tsk1038).
+    /// `lines`): a number shows as a metric value in it.
     #[serde(default)]
     pub unit: Option<String>,
     /// A column of the same row naming an icon drawn before the cell
@@ -517,7 +520,7 @@ fn param_problem(lens: &Lens) -> Option<String> {
 }
 
 /// A lens file as written on disk (`lenses/<slug>.yaml`).
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct LensFile {
     title: String,
@@ -566,6 +569,7 @@ struct LensFile {
     /// Commands the lens offers (`{ id, label, command, input, row }`).
     /// Parsed by [`parse_actions`].
     #[serde(default)]
+    #[schemars(with = "Vec<ActionFile>")]
     actions: Vec<serde_yaml::Value>,
     #[serde(default)]
     alert: Option<AlertFile>,
@@ -613,6 +617,26 @@ pub fn action_templates(input: &serde_json::Value) -> Vec<(String, String)> {
         .collect()
 }
 
+/// A lens action as written in a lens file.
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ActionFile {
+    /// Unique within the lens.
+    id: String,
+    label: String,
+    /// The command it runs (`oxplow.work_item.transition`).
+    command: String,
+    /// The command's input; `{{param.<name>}}` / `{{row.<column>}}` bound.
+    #[serde(default)]
+    input: Option<serde_json::Value>,
+    /// Offered on each row (right-click), `{{row.*}}` bound to it.
+    #[serde(default)]
+    row: bool,
+    /// The `group` heading (its `by` value) it's a button in.
+    #[serde(default)]
+    group: Option<String>,
+}
+
 /// Parse a lens's `actions:`: each `{ id, label, command, input?, row? }`.
 /// A placeholder must name a declared param (`{{param.x}}`) or, in a row
 /// action, a column (`{{row.x}}`, checked against the result when the
@@ -622,22 +646,9 @@ fn parse_actions(
     params: &[LensParam],
     grouped: bool,
 ) -> Result<Vec<LensAction>, String> {
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Full {
-        id: String,
-        label: String,
-        command: String,
-        #[serde(default)]
-        input: Option<serde_json::Value>,
-        #[serde(default)]
-        row: bool,
-        #[serde(default)]
-        group: Option<String>,
-    }
     let mut out: Vec<LensAction> = Vec::new();
     for v in raw {
-        let f = serde_yaml::from_value::<Full>(v).map_err(|e| format!("actions: {e}"))?;
+        let f = serde_yaml::from_value::<ActionFile>(v).map_err(|e| format!("actions: {e}"))?;
         if f.id.trim().is_empty() {
             return Err("actions: an action needs an `id`".into());
         }
@@ -709,7 +720,9 @@ fn default_viz() -> LensViz {
 }
 
 /// When core runs an advisory.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum AdvisoryOn {
     /// After each agent tool call; results go to the agent as that call's
@@ -724,7 +737,9 @@ pub enum AdvisoryOn {
 }
 
 /// How often the same advisory may reach the agent.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum AdvisoryOncePer {
     /// Once per effort, the first time the query returns rows.
@@ -743,7 +758,18 @@ pub enum AdvisoryOncePer {
 }
 
 /// Who a hint is for.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    specta::Type,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum AdvisoryAudience {
     /// The coding agent: delivered on its next prompt or tool call.
@@ -778,7 +804,7 @@ pub struct Advisory {
 }
 
 /// An advisory as written in `extension.yaml`.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct AdvisoryFile {
     id: String,
@@ -827,7 +853,9 @@ pub const SLOTS: &[(&str, &[&str])] = &[
 
 /// What a left-nav panel is bound to: the project, the current stream, or
 /// the current thread — which of `stream_id` / `thread_id` its lenses get.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum PanelScope {
     Project,
@@ -882,7 +910,7 @@ pub struct ExtensionPage {
 }
 
 /// A `pages:` entry as the manifest holds it.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct PageFile {
     id: String,
@@ -894,7 +922,7 @@ struct PageFile {
 }
 
 /// A `panels:` entry as the manifest holds it.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct PanelFile {
     id: String,
@@ -1714,7 +1742,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         }
     }
     ext.sharing = m.sharing;
-    ext.intent = m.intent.clone();
+    ext.intent = manifest_v2::intent_of(&m, &file, &manifest).0;
     ext.description = m.description.clone();
     let (errors, warnings) = manifest_v2::check(&m, &file, &manifest, origin == "bundled");
     ext.errors.extend(errors);
@@ -1800,10 +1828,13 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             // A collector may follow core types, its own extension's, and
             // another's.
             let (collectors, errors) =
-                oxplow_config::collectors::parse_collectors(name, v, &subscribable);
+                oxplow_config::collectors::parse_collectors_indexed(name, v, &subscribable);
             let line = key_line(&manifest, "collectors");
-            ext.errors
-                .extend(errors.into_iter().map(|e| at(&file, line, e)));
+            let lines = item_lines(&manifest, "collectors");
+            ext.errors.extend(errors.into_iter().map(|(i, e)| {
+                let at_entry = i.and_then(|i| lines.get(i).copied());
+                at(&file, at_entry.or(line), format!("collector: {e}"))
+            }));
             // A script or program the collector runs must be in the folder,
             // and a Starlark script must parse and define `transform`.
             for c in collectors {
@@ -2052,7 +2083,9 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 }
             }
         }
-        m.ui.slots.clone()
+        let (slots, errors) = manifest_v2::slots_of(&m, &file, &manifest);
+        ext.errors.extend(errors);
+        slots
     };
     if let Some(text) = files.read(SOURCE_FILE) {
         match serde_yaml::from_str::<ExtensionSource>(&text) {
@@ -2245,12 +2278,10 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     if let Some(v) = page_files {
         let (pages, errors) = parse_pages(name, &ext.lenses, v);
         ext.pages = pages;
-        ext.errors.extend(errors.into_iter().map(|(needle, e)| {
-            at(
-                &file,
-                line_under(&manifest, "pages", &needle).or(key_line(&manifest, "pages")),
-                e,
-            )
+        let lines = item_lines(&manifest, "pages");
+        ext.errors.extend(errors.into_iter().map(|(i, e)| {
+            let line = i.and_then(|i| lines.get(i).copied());
+            at(&file, line.or(key_line(&manifest, "pages")), e)
         }));
     }
     // After models and pages: a ref kind names one of each.
@@ -2269,48 +2300,38 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     if let Some(v) = panel_files {
         let (panels, errors) = parse_panels(name, &ext.lenses, v);
         ext.panels = panels;
-        ext.errors.extend(errors.into_iter().map(|(needle, e)| {
-            at(
-                &file,
-                line_under(&manifest, "panels", &needle).or(key_line(&manifest, "panels")),
-                e,
-            )
+        let lines = item_lines(&manifest, "panels");
+        ext.errors.extend(errors.into_iter().map(|(i, e)| {
+            let line = i.and_then(|i| lines.get(i).copied());
+            at(&file, line.or(key_line(&manifest, "panels")), e)
         }));
     }
     ext
 }
 
 /// Check the manifest's `pages:`: a kebab-case, unique id, a launcher
-/// category, and a lens that exists. Errors carry text to find the line.
+/// category, and a lens that exists. Each error names the entry's index.
 fn parse_pages(
     extension: &str,
     lenses: &[Lens],
     raw: serde_yaml::Value,
-) -> (Vec<ExtensionPage>, Vec<(String, String)>) {
+) -> (Vec<ExtensionPage>, Vec<(Option<usize>, String)>) {
     let mut pages: Vec<ExtensionPage> = Vec::new();
     let mut errors = Vec::new();
     let Some(list) = raw.as_sequence() else {
-        return (
-            pages,
-            vec![(String::new(), "`pages` must be a list".into())],
-        );
+        return (pages, vec![(None, "`pages` must be a list".into())]);
     };
-    for v in list {
-        let needle = v
-            .get("id")
-            .and_then(|i| i.as_str())
-            .unwrap_or_default()
-            .to_string();
+    for (i, v) in list.iter().enumerate() {
         let p = match serde_yaml::from_value::<PageFile>(v.clone()) {
             Ok(p) => p,
             Err(e) => {
-                errors.push((needle, format!(
+                errors.push((Some(i), format!(
                     "pages: {e} (a page is `{{ id, title, icon?, category, lens }}`; a category is one of Work, Code, Git, Activity, Knowledge, Data, Lenses, System)"
                 )));
                 continue;
             }
         };
-        let err = |e: String| (p.id.clone(), format!("page `{}`: {e}", p.id));
+        let err = |e: String| (Some(i), format!("page `{}`: {e}", p.id));
         if !is_advisory_id(&p.id) {
             errors.push(err("a page id is lowercase letters, digits and `-`".into()));
         } else if pages.iter().any(|q| q.id == p.id) {
@@ -2335,34 +2356,26 @@ fn parse_pages(
 /// Check the manifest's `panels:` against the extension's lenses: a panel
 /// id is kebab-case and unique, its lenses exist, a badge declares an
 /// `alert`, and a `stream` / `thread` scope's lenses declare `stream_id` /
-/// `thread_id` (what the nav binds). Errors carry text to find the line.
+/// `thread_id` (what the nav binds). Each error names the entry's index.
 fn parse_panels(
     extension: &str,
     lenses: &[Lens],
     raw: serde_yaml::Value,
-) -> (Vec<ExtensionPanel>, Vec<(String, String)>) {
+) -> (Vec<ExtensionPanel>, Vec<(Option<usize>, String)>) {
     let mut panels: Vec<ExtensionPanel> = Vec::new();
     let mut errors = Vec::new();
     let Some(list) = raw.as_sequence() else {
-        return (
-            panels,
-            vec![(String::new(), "`panels` must be a list".into())],
-        );
+        return (panels, vec![(None, "`panels` must be a list".into())]);
     };
-    for v in list {
+    for (i, v) in list.iter().enumerate() {
         let p = match serde_yaml::from_value::<PanelFile>(v.clone()) {
             Ok(p) => p,
             Err(e) => {
-                let needle = v
-                    .get("id")
-                    .and_then(|i| i.as_str())
-                    .unwrap_or_default()
-                    .to_string();
-                errors.push((needle, format!("panels: {e} (a panel is `{{ id, title, icon?, scope: project | stream | thread, body, badge?, open?, collapsed?, count? }}`)")));
+                errors.push((Some(i), format!("panels: {e} (a panel is `{{ id, title, icon?, scope: project | stream | thread, body, badge?, open?, collapsed?, count? }}`)")));
                 continue;
             }
         };
-        let err = |e: String| (p.id.clone(), format!("panel `{}`: {e}", p.id));
+        let err = |e: String| (Some(i), format!("panel `{}`: {e}", p.id));
         if !is_advisory_id(&p.id) {
             errors.push(err("a panel id is lowercase letters, digits and `-`".into()));
             continue;
@@ -3925,8 +3938,9 @@ pub fn save_lens(
     }
 }
 
-/// `spec` as a lens file: what it sets, without the empty and absent
-/// keys at any depth (the file reads like one written by hand). Built as
+/// `spec` as a lens file, naming its schema on the first line: what it
+/// sets, without the empty and absent keys at any depth (the file reads
+/// like one written by hand). Built as
 /// YAML directly — a JSON detour would carry serde_json's number
 /// representation into the file.
 fn lens_file_yaml(spec: &LensSpec) -> Result<String, DomainError> {
@@ -3951,8 +3965,9 @@ fn lens_file_yaml(spec: &LensSpec) -> Result<String, DomainError> {
     }
     let value =
         serde_yaml::to_value(spec).map_err(|e| DomainError::Storage(format!("save lens: {e}")))?;
-    serde_yaml::to_string(&prune(value).unwrap_or(serde_yaml::Value::Null))
-        .map_err(|e| DomainError::Storage(format!("save lens: {e}")))
+    let body = serde_yaml::to_string(&prune(value).unwrap_or(serde_yaml::Value::Null))
+        .map_err(|e| DomainError::Storage(format!("save lens: {e}")))?;
+    Ok(schema::modeline(schema::LENS_SCHEMA_URL) + &body)
 }
 
 /// What a scaffolded `extension.yaml` says. One template for
@@ -3974,7 +3989,7 @@ pub struct ManifestScaffold<'a> {
 }
 
 /// A v2 manifest with an `intent` and one example — private, or shared
-/// with the `engine` it targets.
+/// with the `engine` it targets — naming its schema on the first line.
 pub fn scaffold_manifest(m: &ManifestScaffold<'_>) -> String {
     let quote = |s: &str| {
         serde_yaml::to_string(s)
@@ -3983,7 +3998,7 @@ pub fn scaffold_manifest(m: &ManifestScaffold<'_>) -> String {
             .to_string()
     };
     format!(
-        "manifest: 2\nname: {name}\ndescription: {description}\n{sharing}intent:\n  purpose: {purpose}\n  origin: {origin}\n  examples:\n    - name: {example_name}\n      input: {input}\n      expect: {expect}\n",
+        "{modeline}manifest: 2\nname: {name}\ndescription: {description}\n{sharing}intent:\n  purpose: {purpose}\n  origin: {origin}\n  examples:\n    - name: {example_name}\n      input: {input}\n      expect: {expect}\n",
         sharing = if m.shared {
             let version = manifest_v2::current_engine();
             let major_minor: Vec<&str> = version.split('.').take(2).collect();
@@ -3991,6 +4006,7 @@ pub fn scaffold_manifest(m: &ManifestScaffold<'_>) -> String {
         } else {
             "sharing: private\n".to_string()
         },
+        modeline = schema::modeline(schema::MANIFEST_SCHEMA_URL),
         name = m.name,
         description = quote(m.description),
         purpose = quote(m.purpose),
@@ -4003,6 +4019,76 @@ pub fn scaffold_manifest(m: &ManifestScaffold<'_>) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// A malformed list entry is reported on its own line — the shape
+    /// error too, which has no name to find it by — in every list block.
+    #[test]
+    fn a_broken_list_entry_is_an_error_at_its_own_line() {
+        for (block, says) in [
+            ("commands:\n  - name: a.b\n    summary: S.\n    entry: h.star\n  - name: c.d\n    bogus: 1\n", "command"),
+            ("effects:\n  - id: a\n    summary: S.\n    on: [work_item.state_changed]\n    entry: e.star\n  - id: b\n    bogus: 1\n", "effect"),
+            ("collectors:\n  - id: a\n    runtime: starlark\n    entry: c.star\n  - id: b\n    bogus: 1\n", "collector"),
+            ("skills:\n  - name: a\n    file: a.md\n  - name: b\n    bogus: 1\n", "skill"),
+            ("implementations:\n  - id: a\n    capability: work_items\n  - id: b\n    bogus: 1\n", "implementation"),
+            ("pages:\n  - { id: a, title: A, category: Work, lens: x }\n  - id: b\n    bogus: 1\n", "page"),
+        ] {
+            let d = tempfile::tempdir().unwrap();
+            let manifest = format!("manifest: 2\nname: x\nintent:\n  purpose: p\n{block}");
+            let second = manifest
+                .lines()
+                .position(|l| l.contains("bogus"))
+                .expect("a broken entry")
+                // Its `- ` line is the one before.
+                ;
+            std::fs::create_dir_all(d.path().join("oxplow/extensions/x")).unwrap();
+            std::fs::write(d.path().join("oxplow/extensions/x/extension.yaml"), &manifest).unwrap();
+            let ext = load_extensions(d.path())
+                .into_iter()
+                .find(|e| e.name == "x")
+                .unwrap();
+            let errors = ext.errors.join("\n");
+            assert!(
+                errors.contains(&format!("extension.yaml:{second}:")) && errors.contains("bogus"),
+                "{says}: want line {second}\n{errors}"
+            );
+        }
+    }
+
+    /// A broken entry inside the manifest's own nested lists — a slot, an
+    /// intent example — is that entry's error: the rest of the extension
+    /// still loads.
+    #[test]
+    fn a_broken_nested_entry_doesnt_sink_the_manifest() {
+        let d = tempfile::tempdir().unwrap();
+        let manifest = "manifest: 2\nname: x\nintent:\n  purpose: p\n  examples:\n    - { name: a }\n    - { name: b, bogus: 1 }\nui:\n  slots:\n    - { slot: effort.review.details, lens: l, bogus: 1 }\nskills:\n  - name: s\n    file: s.md\n";
+        std::fs::create_dir_all(d.path().join("oxplow/extensions/x")).unwrap();
+        std::fs::write(
+            d.path().join("oxplow/extensions/x/extension.yaml"),
+            manifest,
+        )
+        .unwrap();
+        std::fs::write(
+            d.path().join("oxplow/extensions/x/s.md"),
+            "---\nname: s\ndescription: S.\n---\n# s\n",
+        )
+        .unwrap();
+        let ext = load_extensions(d.path())
+            .into_iter()
+            .find(|e| e.name == "x")
+            .unwrap();
+        let errors = ext.errors.join("\n");
+        assert!(
+            errors.contains("extension.yaml:7:") && errors.contains("bogus"),
+            "{errors}"
+        );
+        assert!(errors.contains("extension.yaml:10:"), "{errors}");
+        assert_eq!(ext.skills.len(), 1, "{errors}");
+        assert_eq!(
+            ext.intent.as_ref().map(|i| i.examples.len()),
+            Some(1),
+            "the good example stays"
+        );
+    }
 
     /// The user guide's hand-written extension loads as written, lens and
     /// all: following it never makes a dead extension.
@@ -5005,6 +5091,51 @@ empty: No items.
             "{err}"
         );
         assert!(!project.path().join("oxplow/extensions/mine").exists());
+    }
+
+    /// What a scaffold or a kept lens writes points an editor at its
+    /// schema on the first line.
+    #[test]
+    fn written_files_name_their_schema() {
+        let manifest = scaffold_manifest(&ManifestScaffold {
+            name: "mine",
+            description: "d",
+            purpose: "p",
+            origin: None,
+            example_name: "e",
+            example_input: "{}",
+            example_expect: "x",
+            shared: false,
+        });
+        assert!(
+            manifest.starts_with(&schema::modeline(schema::MANIFEST_SCHEMA_URL)),
+            "{manifest}"
+        );
+        let project = tempfile::tempdir().unwrap();
+        let spec = LensSpec {
+            title: "Open Tasks".into(),
+            query: "SELECT ref, title FROM v_work_item".into(),
+            ..spec_base()
+        };
+        save_lens(
+            project.path(),
+            project.path(),
+            "mine",
+            "open-tasks",
+            &spec,
+            &todo_origin(),
+        )
+        .unwrap();
+        let lens = fs::read_to_string(
+            project
+                .path()
+                .join("oxplow/extensions/mine/lenses/open-tasks.yaml"),
+        )
+        .unwrap();
+        assert!(
+            lens.starts_with(&schema::modeline(schema::LENS_SCHEMA_URL)),
+            "{lens}"
+        );
     }
 
     #[test]

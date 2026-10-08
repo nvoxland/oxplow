@@ -10,7 +10,7 @@ use oxplow_domain::DomainError;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::extensions::manifest_v2::{at, entry_line, key_line, line_under};
+use crate::extensions::manifest_v2::{at, item_lines, key_line, line_under};
 
 /// An extension's `event_types:` as loaded: its valid types, and the
 /// retention window it declares for its namespace.
@@ -67,23 +67,26 @@ impl EventTypeDecl {
     }
 }
 
-#[derive(Deserialize)]
+/// `event_types:` as the manifest holds it; each type is read on its own
+/// (one that doesn't parse is its error, not the block's).
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct EventTypesFile {
+pub(crate) struct EventTypesFile {
     #[serde(default)]
+    #[schemars(with = "Vec<TypeFile>")]
     types: Vec<serde_yaml::Value>,
     #[serde(default)]
     retention: Option<RetentionFile>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct RetentionFile {
     payload_days: Option<u32>,
     content_days: Option<u32>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct TypeFile {
     #[serde(rename = "type")]
@@ -140,15 +143,16 @@ pub fn parse_event_types(
     // the running vocabulary would.
     let mut scratch = EventSchemaRegistry::new();
     let mut out = Vec::new();
-    for item in block.types {
+    let lines = item_lines(manifest, "event_types.types");
+    for (i, item) in block.types.into_iter().enumerate() {
+        let line = lines.get(i).copied().or(block_line);
         let t: TypeFile = match serde_yaml::from_value(item) {
             Ok(t) => t,
             Err(e) => {
-                errors.push(at(file, block_line, format!("event type: {e}")));
+                errors.push(at(file, line, format!("event type: {e}")));
                 continue;
             }
         };
-        let line = entry_line(manifest, "event_types", "type", &t.event_type).or(block_line);
         match decl_of(extension, t, file, line, read, &mut scratch) {
             Ok(d) => out.push(d),
             Err(e) => errors.push(at(file, line, e)),

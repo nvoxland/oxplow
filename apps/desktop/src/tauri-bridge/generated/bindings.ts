@@ -1230,7 +1230,7 @@ export type AcpSnapshot = {
 export type AcpStatus = "starting" | "idle" | "running" | "awaiting_permission" | "stopped";
 
 /**
- *  An MCP server as a provider (P7.A6): oxplow's adapter runs `mcp`'s
+ *  An MCP server as a provider: oxplow's adapter runs `mcp`'s
  *  server and translates through `mapping`, refusing a server whose tools
  *  aren't `tools`.
  */
@@ -2319,7 +2319,7 @@ export type DiffEntry = {
 
 /**
  *  One entry in the top-level `dimensions:` block — the **conformed-dimension
- *  catalog** authoring surface (epic tsk12, workstream E). A dimension is a
+ *  catalog** authoring surface. A dimension is a
  *  slice axis that means the same thing to every fact that carries it
  *  (`oxplow.severity`, `acme.license`, …), enabling cross-metric drill-across.
  *  Like [`MeasureEntry`] it is definition-only; the `oxplow.*` built-ins are the
@@ -2347,7 +2347,7 @@ export type DimensionEntry = {
 	 */
 	promote?: boolean,
 	/**
-	 *  Entity dimension (tsk322): the `v_*` view it slices, for entity
+	 *  Entity dimension: the `v_*` view it slices, for entity
 	 *  metrics over the same view.
 	 */
 	entity?: string | null,
@@ -3186,7 +3186,7 @@ export type FileStatus = "added" | "modified" | "deleted" | "renamed" | "untrack
 
 /**
  *  A fact predicate on a `metrics:` spec (the `filter:` block) — the config
- *  mirror of the engine's `FactFilter` (epic tsk12). A conjunctive predicate
+ *  mirror of the engine's `FactFilter`. A conjunctive predicate
  *  keeping only the facts that match before aggregation: `minValue` for a
  *  count-over-threshold (complexity ≥ N), `severity` for a lint slice, `dimEq`
  *  for a conformed-dimension slice (`[oxplow.rule, unsafe_block]`).
@@ -3521,7 +3521,7 @@ export type IntentExample = {
 };
 
 /**
- *  A question an extension helps answer (P6.D2). `about` is a ref kind
+ *  A question an extension helps answer. `about` is a ref kind
  *  (`commit`, `file`, `effort`): a page for a ref of that kind suggests it.
  */
 export type IntentPrompt = {
@@ -3648,7 +3648,7 @@ export type LensColumn = {
 	link?: LensLink | null,
 	/**
 	 *  A column of the same row holding this one's unit (`ms`, `%`,
-	 *  `lines`): a number shows as a metric value in it (tsk1038).
+	 *  `lines`): a number shows as a metric value in it.
 	 */
 	unit?: string | null,
 	/**
@@ -3763,7 +3763,7 @@ export type LensLinkKind =
 // A metric's page; the value is a metric key.
 "metric" | 
 /**
- *  Any oxplow page by its tab id (`work_item:oxplow:tsk42`,
+ *  Any oxplow page by its tab id (`work_item:oxplow:<id>`,
  *  `commit:<sha>`, `page:git-dashboard`, …),
  *  e.g. `v_page_visit.page_id`.
  */
@@ -4006,11 +4006,11 @@ export type LensViz =
  *  A form for command `form.command`: its fields from the command's
  *  input schema, prefilled from `form.defaults` (placeholders bound
  *  like an action's) and the query's first row, if the lens has one.
- *  Submitting runs the command as the lens (P6.B2).
+ *  Submitting runs the command as the lens.
  */
 "form" | 
 /**
- *  The extension's own web component (`custom.component`, P6b.D1), in
+ *  The extension's own web component (`custom.component`), in
  *  a sandboxed frame; its rows are what it shows and what an agent
  *  reads (as a table).
  */
@@ -4175,7 +4175,7 @@ MaterializePolicy |
 /**
  *  Stored, and kept by appending the rows past its watermark —
  *  `{ incremental: <column> }`, a declared INTEGER that only grows —
- *  refilled whole when an input saw a rewrite (P8.B4).
+ *  refilled whole when an input saw a rewrite.
  */
 ({ incremental: string }) & { every?: never };
 
@@ -4189,14 +4189,14 @@ export type McpServer =
 // A program in the folder, spoken to over its stdio.
 ({ command: string[] }) & { auth?: never; url?: never } | 
 /**
- *  A server reached over streamable HTTP (P9.B4). `auth` names the
+ *  A server reached over streamable HTTP. `auth` names the
  *  credential whose value is sent as its bearer token.
  */
 ({ url: string; auth: string | null }) & { command?: never };
 
 /**
  *  One entry in the top-level `measures:` block — the **measure catalog**
- *  authoring surface (epic tsk12, workstream E). A measure is a *type of atomic
+ *  authoring surface. A measure is a *type of atomic
  *  fact* a collector may emit (`oxplow.complexity`, `acme.api_latency`, …); the
  *  `oxplow.*` built-ins are seeded by the DB migration, so config only *adds*
  *  global/project measures. Unlike [`MetricEntry`] there is no `use:`/`key:`
@@ -4225,7 +4225,7 @@ export type MeasureEntry = {
 	 *  does. Such a measure is folded to the latest capture per (producer, path)
 	 *  before aggregating, so a repo-wide total stays correct while only changed
 	 *  files are rescanned. Set this on any measure a snapshot-triggered collector
-	 *  emits per-file facts on (tsk41).
+	 *  emits per-file facts on.
 	 */
 	captureScope?: string | null,
 	description?: string | null,
@@ -4274,7 +4274,7 @@ export type MergeReadiness =
 
 /**
  *  One entry in the top-level `metrics:` block — a **pure read-time SPEC** over a
- *  measure (epic tsk12, E). A metric no longer *computes* anything: it names a
+ *  measure. A metric no longer *computes* anything: it names a
  *  `sourceMeasure` + an `aggregation` (+ optional `filter`), or a `formula` over
  *  other metrics, and the engine aggregates the durable facts a `collectors:` entry
  *  emitted. Two forms, distinguished by which key is set:
@@ -4341,7 +4341,7 @@ export type MetricEntry = {
 	warnAt?: number | null,
 	failAt?: number | null,
 	/**
-	 *  Entity metric (tsk322): the `v_*` view it aggregates, instead of a
+	 *  Entity metric: the `v_*` view it aggregates, instead of a
 	 *  measure's facts. Fragments below are SQL over that view, aliased `e`.
 	 */
 	entity?: string | null,
@@ -4365,7 +4365,7 @@ export type ModelDecl = {
 	// The contract: the view's columns, in order.
 	columns: ColumnDecl[],
 	/**
-	 *  The columns whose values name one row (P8.B1): declared columns,
+	 *  The columns whose values name one row: declared columns,
 	 *  part of the contract. A key implies its test (never null, never
 	 *  repeated), and a materialized model's table takes it as its
 	 *  primary key.
@@ -4430,7 +4430,7 @@ export type ModelSource = {
 export type NoteId = string;
 
 /**
- *  How a credential is obtained by signing in (P9.B3): OAuth 2.1's
+ *  How a credential is obtained by signing in: OAuth 2.1's
  *  authorization-code flow with PKCE, run by oxplow — the provider only
  *  ever sees the access token.
  */

@@ -56,7 +56,9 @@ pub fn allowed_event_types(capability: &str) -> &'static [(&'static str, u32)] {
 pub const WORK_ITEMS_COMMANDS: &[&str] = &["create", "update", "transition"];
 
 /// One declared provider.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProviderSpec {
     /// The provider's id: its program's approval (`<extension>/<id>`) and
@@ -103,10 +105,12 @@ pub struct ProviderSpec {
     pub needs: Vec<String>,
 }
 
-/// How a credential is obtained by signing in (P9.B3): OAuth 2.1's
+/// How a credential is obtained by signing in: OAuth 2.1's
 /// authorization-code flow with PKCE, run by oxplow — the provider only
 /// ever sees the access token.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct OAuthDecl {
     /// Where the person signs in.
@@ -133,7 +137,18 @@ pub struct OAuthDecl {
 }
 
 /// How a client authenticates to a token endpoint.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    specta::Type,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ClientAuth {
     #[default]
@@ -181,16 +196,20 @@ impl CredentialDecl {
     }
 }
 
+/// A credential written out: `{ name, oauth? }`.
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CredentialFile {
+    /// The environment variable the provider reads it from.
+    name: String,
+    /// Obtained by signing in rather than pasted.
+    #[serde(default)]
+    oauth: Option<OAuthDecl>,
+}
+
 /// In the manifest a credential is a bare name or `{ name, oauth? }`.
 impl<'de> Deserialize<'de> for CredentialDecl {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Full {
-            name: String,
-            #[serde(default)]
-            oauth: Option<OAuthDecl>,
-        }
         struct Either;
         impl<'de> serde::de::Visitor<'de> for Either {
             type Value = CredentialDecl;
@@ -207,7 +226,8 @@ impl<'de> Deserialize<'de> for CredentialDecl {
                 self,
                 map: A,
             ) -> Result<CredentialDecl, A::Error> {
-                let full = Full::deserialize(serde::de::value::MapAccessDeserializer::new(map))?;
+                let full =
+                    CredentialFile::deserialize(serde::de::value::MapAccessDeserializer::new(map))?;
                 Ok(CredentialDecl {
                     name: full.name,
                     oauth: full.oauth,
@@ -215,6 +235,23 @@ impl<'de> Deserialize<'de> for CredentialDecl {
             }
         }
         deserializer.deserialize_any(Either)
+    }
+}
+
+/// The two shapes [`CredentialDecl`]'s `Deserialize` reads.
+impl schemars::JsonSchema for CredentialDecl {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "CredentialDecl".into()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "description": "A credential's name (a value the person pastes), or `{ name, oauth }` (one they sign in for).",
+            "anyOf": [
+                { "type": "string" },
+                generator.subschema_for::<CredentialFile>(),
+            ],
+        })
     }
 }
 
@@ -260,10 +297,12 @@ fn credentials_problem(spec: &ProviderSpec) -> Option<String> {
     None
 }
 
-/// An MCP server as a provider (P7.A6): oxplow's adapter runs `mcp`'s
+/// An MCP server as a provider: oxplow's adapter runs `mcp`'s
 /// server and translates through `mapping`, refusing a server whose tools
 /// aren't `tools`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AdapterSpec {
     pub mcp: McpServer,
@@ -274,12 +313,13 @@ pub struct AdapterSpec {
 }
 
 /// How the adapter reaches the MCP server: exactly one of the two.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type, schemars::JsonSchema)]
 #[serde(untagged)]
+#[schemars(deny_unknown_fields)]
 pub enum McpServer {
     /// A program in the folder, spoken to over its stdio.
     Command { command: Vec<String> },
-    /// A server reached over streamable HTTP (P9.B4). `auth` names the
+    /// A server reached over streamable HTTP. `auth` names the
     /// credential whose value is sent as its bearer token.
     Url { url: String, auth: Option<String> },
 }
