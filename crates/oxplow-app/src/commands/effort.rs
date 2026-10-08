@@ -18,6 +18,7 @@
 //! row, its event and the audit commit together. Opening and closing aren't
 //! undoable (a reopened effort is a new one); linking and retitling are.
 
+use crate::commands::ops::Op;
 use std::sync::Arc;
 
 use oxplow_db::effort_store::{
@@ -27,16 +28,13 @@ use oxplow_domain::refs::build::validate_work_item_ref;
 use oxplow_domain::work_items::WorkItemsRegistry;
 
 use super::work_item::with_loose_refs;
-use oxplow_domain::{
-    Actor, Atomicity, CommandCall, CommandError, CommandSpec, Confirm, EffortId, Invokers,
-    Lifecycle, StreamId, ThreadId, Timestamp,
-};
+use oxplow_domain::{Actor, CommandCall, CommandError, EffortId, StreamId, ThreadId, Timestamp};
 use rusqlite::OptionalExtension;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use super::{Command, Handler, HandlerOutput, TxCtx};
+use super::{Handler, HandlerOutput, TxCtx};
 
 pub const OPEN: &str = "oxplow.effort.open";
 pub const CLOSE: &str = "oxplow.effort.close";
@@ -113,22 +111,6 @@ pub struct EffortUpdateInput {
     pub effort: String,
     /// Its own title; `null` clears it back to the default.
     pub title: Option<String>,
-}
-
-fn spec(name: &str, summary: &str, schema: serde_json::Value, undoable: bool) -> CommandSpec {
-    CommandSpec {
-        id: name.into(),
-        summary: summary.into(),
-        input_schema: schema,
-        invokers: Invokers::ALL,
-        confirm: Confirm::Never,
-        undoable,
-        lifecycle: Lifecycle::Stable,
-        atomicity: Atomicity::Tx,
-        effect: oxplow_domain::CommandEffect::Record,
-        needs: Vec::new(),
-        ui: None,
-    }
 }
 
 fn parse<T: serde::de::DeserializeOwned>(input: serde_json::Value) -> Result<T, CommandError> {
@@ -234,7 +216,7 @@ fn output(result: serde_json::Value, inverse: Option<CommandCall>) -> HandlerOut
     }
 }
 
-pub fn open_command(work_items: WorkItemsRegistry) -> Command {
+pub fn open_op(work_items: WorkItemsRegistry) -> Op {
     let handler = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
         let input: EffortOpenInput = parse(with_loose_refs(&work_items, input)?)?;
         if let Some(w) = &input.work_item {
@@ -274,21 +256,16 @@ pub fn open_command(work_items: WorkItemsRegistry) -> Command {
             None,
         ))
     }));
-    Command::new(
-        spec(
-            OPEN,
-            "Open an effort — a span of a thread's work — on a thread (yours by default), \
-             optionally linked to a work item. The thread's current effort closes first. \
-             oxplow opens efforts itself; this is for policies, people and corrections.",
-            serde_json::to_value(schemars::schema_for!(EffortOpenInput)).expect("schema"),
-            false,
-        ),
+    Op::new(
+        "efforts.write",
+        "open",
+        serde_json::to_value(schemars::schema_for!(EffortOpenInput)).expect("schema"),
+        false,
         handler,
     )
-    .expect("effort.open registers")
 }
 
-pub fn close_command() -> Command {
+pub fn close_op() -> Op {
     let handler = Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
         let input: EffortCloseInput = parse(input)?;
         let (id, _) = target_effort(ctx, input.effort.as_deref(), input.thread.as_deref())?;
@@ -334,20 +311,16 @@ pub fn close_command() -> Command {
         }
         Ok(output(json!({ "effort": id.to_string() }), None))
     }));
-    Command::new(
-        spec(
-            CLOSE,
-            "Close an effort (by id, or a thread's open one), optionally as of a past point and \
-             with a summary.",
-            serde_json::to_value(schemars::schema_for!(EffortCloseInput)).expect("schema"),
-            false,
-        ),
+    Op::new(
+        "efforts.write",
+        "close",
+        serde_json::to_value(schemars::schema_for!(EffortCloseInput)).expect("schema"),
+        false,
         handler,
     )
-    .expect("effort.close registers")
 }
 
-pub fn link_command(work_items: WorkItemsRegistry) -> Command {
+pub fn link_op(work_items: WorkItemsRegistry) -> Op {
     let handler = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
         let input: EffortLinkInput = parse(with_loose_refs(&work_items, input)?)?;
         if let Some(w) = &input.work_item {
@@ -363,20 +336,16 @@ pub fn link_command(work_items: WorkItemsRegistry) -> Command {
             }),
         ))
     }));
-    Command::new(
-        spec(
-            LINK,
-            "Link an effort (by id, or a thread's open one) to a work item, or unlink it with \
-             `work_item: null`.",
-            serde_json::to_value(schemars::schema_for!(EffortLinkInput)).expect("schema"),
-            true,
-        ),
+    Op::new(
+        "efforts.write",
+        "link",
+        serde_json::to_value(schemars::schema_for!(EffortLinkInput)).expect("schema"),
+        true,
         handler,
     )
-    .expect("effort.link registers")
 }
 
-pub fn update_command() -> Command {
+pub fn update_op() -> Op {
     let handler = Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
         let input: EffortUpdateInput = parse(input)?;
         let (id, _) = target_effort(ctx, Some(&input.effort), None)?;
@@ -389,26 +358,23 @@ pub fn update_command() -> Command {
             }),
         ))
     }));
-    Command::new(
-        spec(
-            UPDATE,
-            "Set an effort's own title, or clear it back to its default with `title: null`.",
-            serde_json::to_value(schemars::schema_for!(EffortUpdateInput)).expect("schema"),
-            true,
-        ),
+    Op::new(
+        "efforts.write",
+        "update",
+        serde_json::to_value(schemars::schema_for!(EffortUpdateInput)).expect("schema"),
+        true,
         handler,
     )
-    .expect("effort.update registers")
 }
 
 /// The effort commands, for the bus. A loose id in `work_item` is the
 /// active work list's (`work_item::with_loose_refs`).
-pub fn commands(work_items: WorkItemsRegistry) -> Vec<Command> {
+pub fn ops(work_items: WorkItemsRegistry) -> Vec<Op> {
     vec![
-        open_command(work_items.clone()),
-        close_command(),
-        link_command(work_items),
-        update_command(),
+        open_op(work_items.clone()),
+        close_op(),
+        link_op(work_items),
+        update_op(),
     ]
 }
 

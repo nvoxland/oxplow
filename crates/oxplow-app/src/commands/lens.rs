@@ -7,6 +7,7 @@
 //! The rows live in `thread_answer` (`v_thread_answer`); `run_answer`
 //! runs one for the Answers strip and for `show_lens`'s text.
 
+use crate::commands::ops::Op;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -16,16 +17,13 @@ use oxplow_db::SqlCell;
 use oxplow_domain::events::schema::{LensKept, LensKeptV2, LensShown, LensShownV1};
 use oxplow_domain::events::Envelope;
 use oxplow_domain::refs::build::{answer_ref, lens_ref, thread_ref};
-use oxplow_domain::{
-    Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, DomainError, Invokers, Lifecycle,
-    ThreadId,
-};
+use oxplow_domain::{CommandError, DomainError, ThreadId};
 use rusqlite::OptionalExtension;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::{Command, Handler, HandlerOutput, Invocation, TxCtx};
+use super::{Handler, HandlerOutput, Invocation, TxCtx};
 use crate::extension_catalog::ExtensionCatalog;
 use crate::extensions::{self, LensContext, LensOrigin, LensSpec};
 
@@ -225,7 +223,7 @@ fn answer_id(raw: &str) -> Result<i64, CommandError> {
         })
 }
 
-fn show(target: LensTarget) -> Command {
+fn show(target: LensTarget) -> Op {
     // A spec's query is checked before the transaction: resolving a metric
     // query takes the metric engine, which a transaction can't (tsk1010).
     let sql = target.sql.clone();
@@ -309,27 +307,13 @@ fn show(target: LensTarget) -> Command {
             unchanged: false,
         })
     }));
-    Command::new(
-        CommandSpec {
-            id: SHOW.into(),
-            summary: "Show the person an answer in their thread: an existing lens with params, \
-                      or a lens of your own (title, query, viz). It renders beside the \
-                      conversation, where they can keep it."
-                .into(),
-            input_schema: serde_json::to_value(schemars::schema_for!(ShowInput))
-                .expect("schema serializes"),
-            invokers: Invokers::ALL,
-            confirm: Confirm::Never,
-            undoable: false,
-            lifecycle: Lifecycle::Stable,
-            atomicity: Atomicity::Tx,
-            effect: CommandEffect::Record,
-            needs: Vec::new(),
-            ui: None,
-        },
+    Op::new(
+        "lenses.show",
+        "show",
+        serde_json::to_value(schemars::schema_for!(ShowInput)).expect("schema serializes"),
+        false,
         handler,
     )
-    .expect("lens.show registers")
     .with_precheck(precheck)
 }
 
@@ -467,7 +451,7 @@ async fn keeping_spec(
 /// row marked kept in another; when that fails the file is removed again,
 /// so nothing is left half done. The bus records the run and its
 /// `lens.kept@2` after it returns.
-fn keep(target: LensTarget) -> Command {
+fn keep(target: LensTarget) -> Op {
     let handler = Handler::External(Arc::new(move |Invocation { actor, .. }, input| {
         let target = target.clone();
         Box::pin(async move {
@@ -552,34 +536,19 @@ fn keep(target: LensTarget) -> Command {
             })
         })
     }));
-    Command::new(
-        CommandSpec {
-            id: KEEP.into(),
-            summary: "Keep an answer from a thread, or a lens spec of your own, as a private \
-                      lens (a page the person can reopen, pin and share), recording where it \
-                      came from. Kept in another stream's worktree, it shows in the app once \
-                      that stream is merged (`live: false`)."
-                .into(),
-            input_schema: serde_json::to_value(schemars::schema_for!(KeepInput))
-                .expect("schema serializes"),
-            invokers: Invokers::ALL,
-            confirm: Confirm::Never,
-            undoable: false,
-            lifecycle: Lifecycle::Stable,
-            atomicity: Atomicity::External,
-            effect: CommandEffect::Write,
-            needs: Vec::new(),
-            ui: None,
-        },
+    Op::new(
+        "lenses.write",
+        "keep",
+        serde_json::to_value(schemars::schema_for!(KeepInput)).expect("schema serializes"),
+        false,
         handler,
     )
-    .expect("lens.keep registers")
 }
 
 /// `oxplow.lens.share` writes, load-checks, then removes the private copy —
 /// filesystem work that must happen before the check can run, so it's an
 /// `External` command (see `keep`).
-fn share(target: LensTarget) -> Command {
+fn share(target: LensTarget) -> Op {
     let handler = Handler::External(Arc::new(move |_: Invocation, input| {
         let target = target.clone();
         Box::pin(async move {
@@ -606,27 +575,13 @@ fn share(target: LensTarget) -> Command {
             })
         })
     }));
-    Command::new(
-        CommandSpec {
-            id: SHARE.into(),
-            summary: "Move a private lens into a shared extension (created shared when \
-                      missing), refused unless it passes the shared checks; committing it is \
-                      how the team gets it."
-                .into(),
-            input_schema: serde_json::to_value(schemars::schema_for!(ShareInput))
-                .expect("schema serializes"),
-            invokers: Invokers::HUMAN_ONLY,
-            confirm: Confirm::Never,
-            undoable: false,
-            lifecycle: Lifecycle::Stable,
-            atomicity: Atomicity::External,
-            effect: CommandEffect::Write,
-            needs: Vec::new(),
-            ui: None,
-        },
+    Op::new(
+        "lenses.write",
+        "share",
+        serde_json::to_value(schemars::schema_for!(ShareInput)).expect("schema serializes"),
+        false,
         handler,
     )
-    .expect("lens.share registers")
 }
 
 /// Move lens `id` into shared extension `to` under `root`; its new id.
@@ -742,7 +697,7 @@ async fn share_lens(
     Ok(format!("{to}/{}", lens.slug))
 }
 
-pub fn commands(target: LensTarget) -> Vec<Command> {
+pub fn ops(target: LensTarget) -> Vec<Op> {
     vec![show(target.clone()), keep(target.clone()), share(target)]
 }
 

@@ -8,6 +8,7 @@
 //! bus's transaction; the write that follows is one statement. Dashboards
 //! and tiles are named by id (`dsh3`, `dti7`).
 
+use crate::commands::ops::Op;
 use std::sync::Arc;
 
 use oxplow_db::dashboard_store::{
@@ -15,15 +16,12 @@ use oxplow_db::dashboard_store::{
     reorder_items_tx, update_item_tx,
 };
 use oxplow_db::Database;
-use oxplow_domain::{
-    Atomicity, CommandCall, CommandEffect, CommandError, CommandSpec, Confirm, DashboardId,
-    DashboardItemId, Invokers, Lifecycle,
-};
+use oxplow_domain::{CommandCall, CommandError, DashboardId, DashboardItemId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::{Command, Handler, HandlerOutput, Invocation, TxCtx};
+use super::{Handler, HandlerOutput, Invocation, TxCtx};
 use crate::dashboard_tiles::{new_tile, TileInput};
 use crate::sql_gateway::SqlGateway;
 
@@ -34,13 +32,6 @@ pub const ADD_ITEM: &str = "oxplow.dashboard.add_item";
 pub const UPDATE_ITEM: &str = "oxplow.dashboard.update_item";
 pub const REMOVE_ITEM: &str = "oxplow.dashboard.remove_item";
 pub const REORDER_ITEMS: &str = "oxplow.dashboard.reorder_items";
-
-/// A person, or a lens acting for one.
-const PEOPLE: Invokers = Invokers {
-    human: true,
-    agent: false,
-    lens: true,
-};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -158,42 +149,13 @@ fn schema<T: JsonSchema>() -> Value {
     serde_json::to_value(schemars::schema_for!(T)).expect("schema serializes")
 }
 
-fn spec(
-    name: &str,
-    summary: &str,
-    schema: Value,
-    invokers: Invokers,
-    confirm: Confirm,
-    undoable: bool,
-    atomicity: Atomicity,
-) -> CommandSpec {
-    CommandSpec {
-        id: name.into(),
-        summary: summary.into(),
-        input_schema: schema,
-        invokers,
-        confirm,
-        undoable,
-        lifecycle: Lifecycle::Stable,
-        atomicity,
-        effect: CommandEffect::Record,
-        needs: Vec::new(),
-        ui: None,
-    }
-}
-
 /// `dashboard.create { title }`: an empty dashboard at the end of the list.
-pub fn create_command() -> Command {
-    Command::new(
-        spec(
-            CREATE,
-            "Create an empty dashboard (a grid of tiles); fill it with `oxplow.dashboard.add_item`.",
-            schema::<CreateInput>(),
-            Invokers::ALL,
-            Confirm::Never,
-            false,
-            Atomicity::Tx,
-        ),
+pub fn create_op() -> Op {
+    Op::new(
+        "dashboards.write",
+        "create",
+        schema::<CreateInput>(),
+        false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: CreateInput = parse(input)?;
             let id = create_tx(ctx.conn, &input.title)?;
@@ -204,29 +166,15 @@ pub fn create_command() -> Command {
             })
         })),
     )
-    .expect("oxplow.dashboard.create is a valid command")
-    // Choosing it makes one ready to fill: create, then open it.
-    .with_ui(oxplow_domain::CommandUi {
-        label: "New Dashboard…".into(),
-        group: Some("Tasks".into()),
-        input: Some(json!({ "title": "Untitled dashboard" })),
-        open_after: Some("page:custom-dashboard?id={{result.id}}".into()),
-        ..Default::default()
-    })
 }
 
 /// `dashboard.rename { dashboard, title }`; undone by renaming it back.
-pub fn rename_command() -> Command {
-    Command::new(
-        spec(
-            RENAME,
-            "Rename a dashboard (`dsh3`).",
-            schema::<RenameInput>(),
-            Invokers::ALL,
-            Confirm::Never,
-            true,
-            Atomicity::Tx,
-        ),
+pub fn rename_op() -> Op {
+    Op::new(
+        "dashboards.write",
+        "rename",
+        schema::<RenameInput>(),
+        true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: RenameInput = parse(input)?;
             let id = dashboard_id(&input.dashboard, "/dashboard")?;
@@ -244,22 +192,16 @@ pub fn rename_command() -> Command {
             })
         })),
     )
-    .expect("oxplow.dashboard.rename is a valid command")
 }
 
 /// `dashboard.delete { dashboard }`: it and its tiles. A person's,
 /// confirmed; not undoable.
-pub fn delete_command() -> Command {
-    Command::new(
-        spec(
-            DELETE,
-            "Delete a dashboard and its tiles. A person's, confirmed.",
-            schema::<DashboardInput>(),
-            PEOPLE,
-            Confirm::Destructive,
-            false,
-            Atomicity::Tx,
-        ),
+pub fn delete_op() -> Op {
+    Op::new(
+        "dashboards.write",
+        "delete",
+        schema::<DashboardInput>(),
+        false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: DashboardInput = parse(input)?;
             let id = dashboard_id(&input.dashboard, "/dashboard")?;
@@ -271,27 +213,17 @@ pub fn delete_command() -> Command {
             })
         })),
     )
-    .expect("oxplow.dashboard.delete is a valid command")
 }
 
 /// `dashboard.add_item { dashboard, kind, sql?, display?, lens_id?,
 /// options_json?, position? }`: the tile checked (a query tile's SQL by the
 /// semantic engine), then written. Undone by removing it.
-pub fn add_item_command(db: Database, sql: SqlGateway) -> Command {
-    Command::new(
-        spec(
-            ADD_ITEM,
-            "Add a tile to a dashboard: `query` (pinned `sql`, checked like query_sql, shown \
-             per `display` — a lens viz, or `metric` for the metric card with its key as \
-             `metric` in `options_json`), `lens` (`lens_id`) or `text` (`options_json` \
-             `{\"text\": …}`). `options_json` may also set its size and title; `position` \
-             where it goes.",
-            schema::<AddItemInput>(),
-            Invokers::ALL,
-            Confirm::Never,
-            true,
-            Atomicity::External,
-        ),
+pub fn add_item_op(db: Database, sql: SqlGateway) -> Op {
+    Op::new(
+        "dashboards.write",
+        "add_item",
+        schema::<AddItemInput>(),
+        true,
         Handler::External(Arc::new(move |_: Invocation, input| {
             let (db, sql) = (db.clone(), sql.clone());
             Box::pin(async move {
@@ -332,22 +264,16 @@ pub fn add_item_command(db: Database, sql: SqlGateway) -> Command {
             })
         })),
     )
-    .expect("oxplow.dashboard.add_item is a valid command")
 }
 
 /// `dashboard.update_item { item, options_json? }`: a query tile's SQL is
 /// checked again. Undone by its previous options.
-pub fn update_item_command(db: Database, sql: SqlGateway) -> Command {
-    Command::new(
-        spec(
-            UPDATE_ITEM,
-            "Change a tile's options (`dti7`); a query tile's `sql` is checked again.",
-            schema::<UpdateItemInput>(),
-            Invokers::ALL,
-            Confirm::Never,
-            true,
-            Atomicity::External,
-        ),
+pub fn update_item_op(db: Database, sql: SqlGateway) -> Op {
+    Op::new(
+        "dashboards.write",
+        "update_item",
+        schema::<UpdateItemInput>(),
+        true,
         Handler::External(Arc::new(move |_: Invocation, input| {
             let (db, sql) = (db.clone(), sql.clone());
             Box::pin(async move {
@@ -387,21 +313,15 @@ pub fn update_item_command(db: Database, sql: SqlGateway) -> Command {
             })
         })),
     )
-    .expect("oxplow.dashboard.update_item is a valid command")
 }
 
 /// `dashboard.remove_item { item }`; undone by adding it back where it was.
-pub fn remove_item_command() -> Command {
-    Command::new(
-        spec(
-            REMOVE_ITEM,
-            "Remove a tile from its dashboard (`dti7`).",
-            schema::<ItemInput>(),
-            Invokers::ALL,
-            Confirm::Never,
-            true,
-            Atomicity::Tx,
-        ),
+pub fn remove_item_op() -> Op {
+    Op::new(
+        "dashboards.write",
+        "remove_item",
+        schema::<ItemInput>(),
+        true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: ItemInput = parse(input)?;
             let id = item_id(&input.item, "/item")?;
@@ -427,22 +347,16 @@ pub fn remove_item_command() -> Command {
             })
         })),
     )
-    .expect("oxplow.dashboard.remove_item is a valid command")
 }
 
 /// `dashboard.reorder_items { dashboard, order }`; undone by the previous
 /// order.
-pub fn reorder_items_command() -> Command {
-    Command::new(
-        spec(
-            REORDER_ITEMS,
-            "Reorder a dashboard's tiles (`order`: tile ids in their new order).",
-            schema::<ReorderItemsInput>(),
-            Invokers::ALL,
-            Confirm::Never,
-            true,
-            Atomicity::Tx,
-        ),
+pub fn reorder_items_op() -> Op {
+    Op::new(
+        "dashboards.write",
+        "reorder_items",
+        schema::<ReorderItemsInput>(),
+        true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: ReorderItemsInput = parse(input)?;
             let dashboard = dashboard_id(&input.dashboard, "/dashboard")?;
@@ -469,19 +383,18 @@ pub fn reorder_items_command() -> Command {
             })
         })),
     )
-    .expect("oxplow.dashboard.reorder_items is a valid command")
 }
 
 /// The dashboard commands, for the bus.
-pub fn commands(db: Database, sql: SqlGateway) -> Vec<Command> {
+pub fn ops(db: Database, sql: SqlGateway) -> Vec<Op> {
     vec![
-        create_command(),
-        rename_command(),
-        delete_command(),
-        add_item_command(db.clone(), sql.clone()),
-        update_item_command(db, sql),
-        remove_item_command(),
-        reorder_items_command(),
+        create_op(),
+        rename_op(),
+        delete_op(),
+        add_item_op(db.clone(), sql.clone()),
+        update_item_op(db, sql),
+        remove_item_op(),
+        reorder_items_op(),
     ]
 }
 

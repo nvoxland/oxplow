@@ -121,6 +121,9 @@ struct CommandFile {
     needs: Vec<String>,
     #[serde(default)]
     ui: Option<oxplow_domain::CommandUi>,
+    /// `experimental` keeps a shared extension's command experimental.
+    #[serde(default)]
+    lifecycle: Option<String>,
     #[serde(default)]
     examples: Vec<ExampleFile>,
 }
@@ -332,6 +335,17 @@ fn command_of(
             f.examples.len()
         )));
     }
+    // Stable when shared, unless it says it's experimental; a private
+    // extension's are experimental.
+    let stable = match f.lifecycle.as_deref() {
+        None | Some("stable") => shared,
+        Some("experimental") => false,
+        Some(other) => {
+            return Err(at_name(format!(
+                "`lifecycle` must be `stable` or `experimental`, not `{other}`"
+            )))
+        }
+    };
     Ok(ExtensionCommand {
         name,
         summary: f.summary,
@@ -342,7 +356,7 @@ fn command_of(
         invokers: f.invokers.unwrap_or(Invokers::ALL),
         needs: f.needs,
         ui: f.ui,
-        stable: shared,
+        stable,
         examples: f
             .examples
             .into_iter()
@@ -716,6 +730,42 @@ pub fn register_required(bus: &std::sync::Arc<crate::commands::CommandBus>) -> R
             .map_err(|e| format!("{file}: {e}"))?;
     }
     Ok(())
+}
+
+/// The commands oxplow's required extensions declare over the operations
+/// `bus` has, skipping the rest — a bus with one area's operations (a
+/// test's, `oxplow-dev`'s). Services register them all
+/// (`register_required`).
+pub fn register_declared(bus: &std::sync::Arc<crate::commands::CommandBus>) {
+    for b in crate::bundled_extensions::BUNDLED
+        .iter()
+        .filter(|b| b.required)
+    {
+        let manifest = b.file("extension.yaml").expect("a manifest");
+        let doc: serde_yaml::Value = serde_yaml::from_str(manifest).expect("it parses");
+        let (decls, _) = parse_commands(
+            doc["namespace"].as_str().expect("a namespace"),
+            true,
+            &doc["commands"],
+            "extension.yaml",
+            manifest,
+            &|path| b.file(path).map(str::to_string),
+        );
+        let built: Vec<_> = decls
+            .iter()
+            .filter(|d| match &d.handler {
+                CommandHandler::Capability { capability, op } => bus.op(capability, op).is_some(),
+                CommandHandler::Script { .. } => false,
+            })
+            .map(|d| extension_command(bus, b.name, d).expect("it builds"))
+            .collect();
+        bus.register_namespace(
+            oxplow_domain::OXPLOW_NAMESPACE,
+            &format!("extension:{}", b.name),
+            built,
+        )
+        .expect("they register");
+    }
 }
 
 /// Keeps the bus's extension commands matching the enabled extensions of

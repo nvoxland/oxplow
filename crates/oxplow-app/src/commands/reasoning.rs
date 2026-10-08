@@ -7,22 +7,21 @@
 //! open for `work_item` (which must be its stream's work), else its
 //! thread's open effort.
 
+use crate::commands::ops::Op;
 use std::sync::Arc;
 
 use oxplow_db::effort_store::find_open_for_work_item_tx;
 use oxplow_db::reasoning_store::{record_claim_tx, record_decision_tx, NewClaim, NewDecision};
 use oxplow_db::thread_store::get_tx as thread_tx;
 use oxplow_domain::refs::build::validate_work_item_ref;
-use oxplow_domain::{
-    Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, Invokers, Lifecycle, ThreadId,
-};
+use oxplow_domain::{CommandError, ThreadId};
 use rusqlite::OptionalExtension;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::thread::acting_thread;
-use super::{Command, Handler, HandlerOutput, TxCtx};
+use super::{Handler, HandlerOutput, TxCtx};
 
 pub const RECORD_DECISION: &str = "oxplow.effort.record_decision";
 pub const RECORD_CLAIM: &str = "oxplow.effort.record_claim";
@@ -160,34 +159,13 @@ fn schema<T: JsonSchema>() -> Value {
     serde_json::to_value(schemars::schema_for!(T)).expect("schema serializes")
 }
 
-fn spec(name: &str, summary: &str, schema: Value) -> CommandSpec {
-    CommandSpec {
-        id: name.into(),
-        summary: summary.into(),
-        input_schema: schema,
-        invokers: Invokers::ALL,
-        confirm: Confirm::Never,
-        undoable: false,
-        lifecycle: Lifecycle::Stable,
-        atomicity: Atomicity::Tx,
-        effect: CommandEffect::Record,
-        needs: Vec::new(),
-        ui: None,
-    }
-}
-
 /// `effort.record_decision { thread?, work_item?, question, choice, … }`.
-pub fn record_decision_command() -> Command {
-    Command::new(
-        spec(
-            RECORD_DECISION,
-            "Record a DECISION you made while working: a fork where you picked one approach \
-             over others without asking (where to put something, which library, what to leave \
-             out, how to read an ambiguous ask). People review these first, so record the \
-             non-obvious ones as you make them — not trivia. Attaches to `work_item`'s open \
-             effort, else your thread's. Returns `{ id, effort }`.",
-            schema::<DecisionInput>(),
-        ),
+pub fn record_decision_op() -> Op {
+    Op::new(
+        "efforts.write",
+        "record_decision",
+        schema::<DecisionInput>(),
+        false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: DecisionInput = parse(input)?;
             let at = place(ctx, input.thread.as_deref(), input.work_item.as_deref())?;
@@ -211,20 +189,15 @@ pub fn record_decision_command() -> Command {
             })
         })),
     )
-    .expect("oxplow.effort.record_decision is a valid command")
 }
 
 /// `effort.record_claim { thread?, work_item?, statement, kind, evidence_ref? }`.
-pub fn record_claim_command() -> Command {
-    Command::new(
-        spec(
-            RECORD_CLAIM,
-            "Record a CLAIM about your work before you report it done: \"tests pass\", \"no \
-             behavior change\", \"handles empty input\". Cite `evidence_ref` (`run:<id>`, a \
-             test name) when you have it — an unbacked claim shows as unverified for a person \
-             to check, so don't claim what you didn't verify. Returns `{ id, effort }`.",
-            schema::<ClaimInput>(),
-        ),
+pub fn record_claim_op() -> Op {
+    Op::new(
+        "efforts.write",
+        "record_claim",
+        schema::<ClaimInput>(),
+        false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: ClaimInput = parse(input)?;
             let at = place(ctx, input.thread.as_deref(), input.work_item.as_deref())?;
@@ -246,12 +219,11 @@ pub fn record_claim_command() -> Command {
             })
         })),
     )
-    .expect("oxplow.effort.record_claim is a valid command")
 }
 
 /// The reasoning commands, for the bus.
-pub fn commands() -> Vec<Command> {
-    vec![record_decision_command(), record_claim_command()]
+pub fn ops() -> Vec<Op> {
+    vec![record_decision_op(), record_claim_op()]
 }
 
 #[cfg(test)]

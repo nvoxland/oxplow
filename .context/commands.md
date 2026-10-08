@@ -38,7 +38,7 @@ ids. A command declares (`oxplow_domain::commands::CommandSpec`):
 |---|---|
 | `input_schema` | JSON Schema; the bus validates the input first and names the failing field |
 | `invokers` | which surfaces may run it: `human`, `agent`, `lens` |
-| `confirm` | `Never`, `Always`, or `Destructive` — a person confirms; an agent never can. A `Read` command may not ask (`Command::new` / `with_confirm_for` refuse it): it runs unrecorded, so nothing would resolve its proposal |
+| `confirm` | `Never`, `Always`, or `Destructive` — a person confirms; an agent never can. A `Read` command may not ask (`Command::new` / `with_confirm_for` refuse it — so a read capability's command can't declare `confirm`): it runs unrecorded, so nothing would resolve its proposal |
 | `undoable` | the handler returns an inverse call that `undo` applies |
 | `lifecycle` | `Stable` / `Experimental` |
 | `atomicity` | `Tx` (handler runs inside the bus's transaction), `External`, or `Dispatch` — one or the other, decided per input (see below) |
@@ -52,7 +52,7 @@ ids. A command declares (`oxplow_domain::commands::CommandSpec`):
 ## Offering a command to a person
 
 A command says how a person meets it with an optional `ui`
-(`oxplow_domain::CommandUi`; agents ignore it; `Command::with_ui`):
+(`oxplow_domain::CommandUi`; agents ignore it; a manifest command's `ui:` — oxplow's own in `extensions/oxplow-foundation`):
 
 | Field | Meaning |
 |---|---|
@@ -526,6 +526,11 @@ is a second command of the same name.
 
 ## Commands so far
 
+Each `oxplow.*` row below is declared in `extensions/oxplow-foundation`
+(or, where it says so, `oxplow-bundled`) over an operation of the host
+capability its area falls under (`threads.write`, `vcs.write`, …;
+`HOST_CAPABILITIES`); "Handler" describes that operation.
+
 | Command | Handler | Notes |
 |---|---|---|
 | `<extension namespace>.<name>` (an enabled extension's `commands:`) | `Tx`: the extension's Starlark script composes core commands, run through `run_nested` (`extension_commands.rs`, P6b.B2) | declared invokers / confirm / effect, undoable, `Experimental`; registered while the extension is enabled (primary worktree). See [extensions.md](./extensions.md) → "Commands" |
@@ -564,7 +569,7 @@ is a second command of the same name.
 | `<provider>.<name>` (an enabled external provider's own declared commands — not its capability's verbs, which run as `work_item.<verb>`: the fake's `estimate`) | `External` over the provider process's `invoke` (`providers/registry.rs`, P5.D3) | registered while its instance is enabled (and removed when it stops), all invokers, `Experimental`; `confirm`, `effect` and `undoable` as the provider declares (its `inverse` becomes `<provider>.<command>`). The events its `invoke` returns are logged caused by the run — only types it declares, and a `work_item.recorded` only for its own items. See [providers.md](./providers.md) |
 | `oxplow.collector.sync { owner, id, thread? }` | `External` over the collector's program or script (`collector_runner.rs`, P7.B3; was `source.sync`) | all invokers, `Write`, not undoable. Runs an approved collector from the primary worktree and commits its rows, its `collector_run` row and `collector.synced@1` in one transaction (a failed run commits the failure). It never approves: an unapproved exec collector is `Invalid` at `/id`. Run by the system it's the `every:` schedule's run (`trigger: every`); by anyone else, `manual`. **The one manual run for every collector** (it replaced `source.sync` and `metric.run`): a fact collector (`facts:`, owner `project` / an extension / `built-in`) runs through the fact engine (`MetricsService::run_collector_by_key`) against the stream's latest snapshot, recording its capture, `collector_run` and `collector.synced@1` (the engine's own writes). Result `{ owner, id, rowCounts, facts }` — `rowCounts` for an entity collector, `facts` (count recorded) for a fact collector. A project **report collector** (`records:`, tsk863) is read by the collection service in `thread` (an agent's own; a person names one): `{ owner, id, recorded: { status, records, run, … } }` |
 | `oxplow.provider.sync { instance, collector? }` | `External` over the provider process's `read` (`providers/sync.rs`, P7.A3) | all invokers, `Record` (it restates items, never claims), not undoable. Reads a running instance's collectors (all, or one — an undeclared one is `Invalid` at `/collector`) from their last checkpoints; the records land as `work_item.recorded@1`, each batch committed with its `$/state`. The one way to read: Settings → Integrations' Sync Now, an agent, the schedule (as the system) and the read an instance gets when it starts. Result `{ reads: [{ collector, records }] }`. See [providers.md](./providers.md) |
-| `oxplow.effect.retry { effect, event }` | `External` over `effect_triggers::run_reaction` (`commands/effect.rs`, P9.D4; registered at boot with the `effect.triggers` consumer) | a person's only, `Confirm::Always`, not undoable. Has an extension's effect react again to an event its reaction to **failed** (its latest attempt, `v_effect_run.latest`), as the next attempt, run as the effect is now — enabled and approved as it is, composing afresh. Asked every time: a failed attempt interrupted with a step outside oxplow under way may have landed it, and a retry sends it again. `Invalid` for a reaction that didn't fail or was never made, a disabled or unapproved effect, an unknown effect or event. Result `{ effect, event, attempt, outcome, reason? }` — the retry's own outcome, which may be `failed` again. See [extensions.md](./extensions.md) "Effects" |
+| `oxplow.effect.retry { effect, event }` | `External` over `effect_triggers::run_reaction` (`commands/effect.rs`, P9.D4; the `effects.run` operation, its services filled at boot when the `effect.triggers` consumer registers) | a person's only, `Confirm::Always`, not undoable. Has an extension's effect react again to an event its reaction to **failed** (its latest attempt, `v_effect_run.latest`), as the next attempt, run as the effect is now — enabled and approved as it is, composing afresh. Asked every time: a failed attempt interrupted with a step outside oxplow under way may have landed it, and a retry sends it again. `Invalid` for a reaction that didn't fail or was never made, a disabled or unapproved effect, an unknown effect or event. Result `{ effect, event, attempt, outcome, reason? }` — the retry's own outcome, which may be `failed` again. See [extensions.md](./extensions.md) "Effects" |
 | `oxplow.effect.backfill { effect, from_seq? \| since?, to_seq? }` | `External` over `commands/effect.rs::backfill` (P9.D5) | a person's only, `Confirm::Always`, not undoable. Has an effect react to the matching events in the range it never reacted to (those logged before its approval), oldest first, once each, as it is now — at most 200 a run. Each is an attempt with `origin: backfill`, under the same dedupe, loop guard and health as a live reaction; three failures in a row disable the effect and stop the run. `Invalid` for an unknown, disabled or unapproved effect, or both `from_seq` and `since`. Result `{ effect, planned, ran, skipped, proposed, failed, remaining, stopped? }` |
 | `oxplow.effect.backfill_plan { effect, from_seq? \| since?, to_seq? }` | `Tx`, `Read` (P9.D5) | all invokers. What `oxplow.effect.backfill` would react to: `{ effect, planned, from_seq, to_seq }`. The count a person is shown before running one (a confirmation carries a command's summary and input, not a computed count) |
 | `oxplow.plugin.enable { plugin, kind, contribution }` | `External` over `plugin_health.rs` and the provider registry (P7.C1; replaced `provider.enable`) | a person's only, not undoable. Enables a disabled contribution on this machine again — clearing an automatic disable (`plugin_health` back to `ok`, its count starting over). `kind` (`provider` \| `collector`) is part of its name — a provider and a collector may share an id (tsk721); there must be a failed one of that kind, or a provider instance the registry knows. A provider instance resets its backoff and reconciles, so it starts when `extensionInstances` enables it; a collector runs at its next trigger. Logs `plugin.enabled@1 { plugin, contribution, kind }`; the result is its `plugin_health` row. See [providers.md](./providers.md) |
@@ -671,9 +676,12 @@ headers reach `command.executed`'s `source = agent:thr…`.
 ## Adding a command
 
 oxplow's own commands are declared in `extensions/oxplow-foundation`
-over operations of the host capabilities (below, "Operations"); being
-moved there area by area — an area not moved yet still registers Rust
-commands in `Services::new`.
+over operations of the host capabilities ("Host capabilities" →
+"Operations"); `Services::new` adds the operations and registers the
+declarations (`register_required`). Only `oxplow.command.sequence`, the
+bus's composition primitive, is registered as a Rust command. A bus with
+one area's operations (a test's, `oxplow-dev`'s) registers what's
+declared over them with `register_declared`.
 
 1. Define the input as a Rust struct with `JsonSchema`
    (`deny_unknown_fields`); the operation's `input_schema` is derived

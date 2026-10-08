@@ -32,18 +32,16 @@
 //! every consumer would re-fire collectors noisily and effects without
 //! consent. Reacting to the past exists only as `oxplow.effect.backfill`.
 
-use std::sync::{Arc, Weak};
+use crate::commands::ops::Op;
+use std::sync::{Arc, OnceLock, Weak};
 
 use oxplow_db::effect_run_store::ReactionOrigin;
-use oxplow_domain::{
-    Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, DomainError, Invokers, Lifecycle,
-    StoredEvent,
-};
+use oxplow_domain::{CommandError, DomainError, StoredEvent};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::json;
 
-use super::{Command, Handler, HandlerOutput, Invocation};
+use super::{Handler, HandlerOutput, Invocation};
 use crate::effect_triggers::{self, run_reaction, Reacted};
 use crate::effects::EffectDecl;
 use crate::extensions::Extension;
@@ -363,28 +361,38 @@ pub async fn backfill(
     Ok(out)
 }
 
-const BACKFILL_SUMMARY: &str = "Have an effect react to the matching events it never reacted to \
-     — those logged before its approval, or while it waited to be approved again — oldest \
-     first, once each. The effect may call outside oxplow for every one of them. It runs as it \
-     is now; `oxplow.effect.backfill_plan` says how many events that is.";
+/// The services the effect operations run against, filled when they
+/// start (`effect_triggers::register`): the operations are added while
+/// services are being built, before there's an `Arc` to point at.
+#[derive(Clone, Default)]
+pub struct ServicesSlot(Arc<OnceLock<Weak<Services>>>);
+
+impl ServicesSlot {
+    pub fn fill(&self, services: &Arc<Services>) {
+        let _ = self.0.set(Arc::downgrade(services));
+    }
+
+    fn get(&self) -> Option<Arc<Services>> {
+        self.0.get().and_then(Weak::upgrade)
+    }
+}
+
+/// The effect operations (`effects.run`, `effects.read`).
+pub fn ops(services: ServicesSlot) -> Vec<Op> {
+    vec![
+        retry_op(services.clone()),
+        backfill_op(services.clone()),
+        backfill_plan_op(services),
+    ]
+}
 
 /// `oxplow.effect.backfill { effect, from_seq? | since?, to_seq? }`.
-pub fn backfill_command(services: Weak<Services>) -> Command {
-    Command::new(
-        CommandSpec {
-            id: BACKFILL.into(),
-            summary: BACKFILL_SUMMARY.into(),
-            input_schema: serde_json::to_value(schemars::schema_for!(BackfillInput))
-                .expect("schema serializes"),
-            invokers: Invokers::HUMAN_ONLY,
-            confirm: Confirm::Always,
-            undoable: false,
-            lifecycle: Lifecycle::Experimental,
-            atomicity: Atomicity::External,
-            effect: CommandEffect::Write,
-            needs: Vec::new(),
-            ui: None,
-        },
+pub fn backfill_op(services: ServicesSlot) -> Op {
+    Op::new(
+        "effects.run",
+        "backfill",
+        serde_json::to_value(schemars::schema_for!(BackfillInput)).expect("schema serializes"),
+        false,
         Handler::External(Arc::new(move |_: Invocation, input| {
             let services = services.clone();
             Box::pin(async move {
@@ -394,7 +402,7 @@ pub fn backfill_command(services: Weak<Services>) -> Command {
                         message: e.to_string(),
                     })?;
                 let range = input.range()?;
-                let svc = services.upgrade().ok_or_else(|| CommandError::Failed {
+                let svc = services.get().ok_or_else(|| CommandError::Failed {
                     message: "oxplow is shutting down".into(),
                 })?;
                 let (ext, decl, _) = ready(&svc, &input.effect).await?;
@@ -418,32 +426,16 @@ pub fn backfill_command(services: Weak<Services>) -> Command {
             })
         })),
     )
-    .expect("oxplow.effect.backfill is a valid command")
 }
 
 /// `oxplow.effect.backfill_plan { effect, from_seq? | since?, to_seq? }`: what
 /// `oxplow.effect.backfill` would react to — a read.
-pub fn backfill_plan_command(services: Weak<Services>) -> Command {
-    Command::new(
-        CommandSpec {
-            id: BACKFILL_PLAN.into(),
-            summary:
-                "How many events an `oxplow.effect.backfill` would have an effect react to: the \
-                      matching ones it never reacted to, the log positions they span (pass \
-                      `to_seq` to the backfill to run on just these), and how many one run \
-                      reacts to (`batch`)."
-                    .into(),
-            input_schema: serde_json::to_value(schemars::schema_for!(BackfillInput))
-                .expect("schema serializes"),
-            invokers: Invokers::ALL,
-            confirm: Confirm::Never,
-            undoable: false,
-            lifecycle: Lifecycle::Experimental,
-            atomicity: Atomicity::Tx,
-            effect: CommandEffect::Read,
-            needs: Vec::new(),
-            ui: None,
-        },
+pub fn backfill_plan_op(services: ServicesSlot) -> Op {
+    Op::new(
+        "effects.read",
+        "backfill_plan",
+        serde_json::to_value(schemars::schema_for!(BackfillInput)).expect("schema serializes"),
+        false,
         Handler::Tx(Arc::new(move |ctx, input| {
             let input: BackfillInput =
                 serde_json::from_value(input).map_err(|e| CommandError::Invalid {
@@ -451,7 +443,7 @@ pub fn backfill_plan_command(services: Weak<Services>) -> Command {
                     message: e.to_string(),
                 })?;
             let range = input.range()?;
-            let svc = services.upgrade().ok_or_else(|| CommandError::Failed {
+            let svc = services.get().ok_or_else(|| CommandError::Failed {
                 message: "oxplow is shutting down".into(),
             })?;
             let (_, decl) = effect_triggers::find_effect(&svc, &input.effect).ok_or_else(|| {
@@ -476,30 +468,15 @@ pub fn backfill_plan_command(services: Weak<Services>) -> Command {
             })
         })),
     )
-    .expect("oxplow.effect.backfill_plan is a valid command")
 }
 
 /// `oxplow.effect.retry { effect, event }`.
-pub fn retry_command(services: Weak<Services>) -> Command {
-    Command::new(
-        CommandSpec {
-            id: RETRY.into(),
-            summary: "Have an effect react again to an event its reaction to failed, as its \
-                      next attempt. If the failed attempt was interrupted with a step outside \
-                      oxplow under way, that step may already have run: retrying sends it \
-                      again. It runs the effect as it is now, composing afresh from the event."
-                .into(),
-            input_schema: serde_json::to_value(schemars::schema_for!(RetryInput))
-                .expect("schema serializes"),
-            invokers: Invokers::HUMAN_ONLY,
-            confirm: Confirm::Always,
-            undoable: false,
-            lifecycle: Lifecycle::Experimental,
-            atomicity: Atomicity::External,
-            effect: CommandEffect::Write,
-            needs: Vec::new(),
-            ui: None,
-        },
+pub fn retry_op(services: ServicesSlot) -> Op {
+    Op::new(
+        "effects.run",
+        "retry",
+        serde_json::to_value(schemars::schema_for!(RetryInput)).expect("schema serializes"),
+        false,
         Handler::External(Arc::new(move |_: Invocation, input| {
             let services = services.clone();
             Box::pin(async move {
@@ -508,7 +485,7 @@ pub fn retry_command(services: Weak<Services>) -> Command {
                         field: None,
                         message: e.to_string(),
                     })?;
-                let svc = services.upgrade().ok_or_else(|| CommandError::Failed {
+                let svc = services.get().ok_or_else(|| CommandError::Failed {
                     message: "oxplow is shutting down".into(),
                 })?;
                 let (ext, decl, health) = ready(&svc, &effect).await?;
@@ -547,5 +524,4 @@ pub fn retry_command(services: Weak<Services>) -> Command {
             })
         })),
     )
-    .expect("oxplow.effect.retry is a valid command")
 }

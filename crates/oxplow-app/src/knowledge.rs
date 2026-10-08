@@ -10,6 +10,7 @@
 //! A hand edit of the file converges through the same core
 //! ([`crate::wiki_pages::sync_page`], logged as `system:wiki_watch`).
 
+use crate::commands::ops::Op;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -23,16 +24,13 @@ use oxplow_domain::events::schema::{
 };
 use oxplow_domain::knowledge::{KnowledgeError, KnowledgeProvider, PageDraft, RefFreshness};
 use oxplow_domain::vcs::{Revision, Vcs};
-use oxplow_domain::{
-    Anchors, Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, DomainError, Invokers,
-    Lifecycle, Timestamp,
-};
+use oxplow_domain::{Anchors, CommandError, DomainError, Timestamp};
 use rusqlite::{params, OptionalExtension};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::commands::{Command, Handler, HandlerOutput, TxCtx};
+use crate::commands::{Handler, HandlerOutput, TxCtx};
 use crate::link_check::{check_links_in, LinkWorld};
 use crate::wiki_pages::{
     extract_title, parse_refs, path_under_any_dir, strip_body_version_literals, wiki_pages_dir,
@@ -644,24 +642,6 @@ fn write_file(path: &Path, body: &str) -> Result<(), CommandError> {
         })
 }
 
-fn spec(name: &str, summary: &str, schema: serde_json::Value, confirm: Confirm) -> CommandSpec {
-    CommandSpec {
-        id: name.into(),
-        summary: summary.into(),
-        input_schema: schema,
-        invokers: Invokers::ALL,
-        confirm,
-        undoable: false,
-        lifecycle: Lifecycle::Stable,
-        atomicity: Atomicity::Tx,
-        // oxplow's own records, like work items: a read-only thread
-        // captures what it explored, too.
-        effect: CommandEffect::Record,
-        needs: Vec::new(),
-        ui: None,
-    }
-}
-
 /// Write a page.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -700,7 +680,7 @@ pub struct LinkInput {
     pub target: String,
 }
 
-pub fn commands(target: KnowledgeTarget) -> Vec<Command> {
+pub fn ops(target: KnowledgeTarget) -> Vec<Op> {
     let t = target.clone();
     let write = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
         let input: WritePageInput = parse(input)?;
@@ -843,49 +823,34 @@ pub fn commands(target: KnowledgeTarget) -> Vec<Command> {
     }));
 
     vec![
-        Command::new(
-            spec(
-                WRITE_PAGE,
-                "Write a knowledge (wiki) page: its body, every [[link]] resolving, and the \
-                 files you re-read against it (verified_refs) or took out (removed_refs).",
-                serde_json::to_value(schemars::schema_for!(WritePageInput)).expect("schema"),
-                Confirm::Never,
-            ),
+        Op::new(
+            "knowledge.write",
+            "write_page",
+            serde_json::to_value(schemars::schema_for!(WritePageInput)).expect("schema"),
+            false,
             write,
-        )
-        .expect("knowledge.write_page registers"),
-        Command::new(
-            spec(
-                DELETE_PAGE,
-                "Delete a knowledge (wiki) page and its links.",
-                serde_json::to_value(schemars::schema_for!(SlugInput)).expect("schema"),
-                Confirm::Destructive,
-            ),
+        ),
+        Op::new(
+            "knowledge.write",
+            "delete_page",
+            serde_json::to_value(schemars::schema_for!(SlugInput)).expect("schema"),
+            false,
             delete,
-        )
-        .expect("knowledge.delete_page registers"),
-        Command::new(
-            spec(
-                LINK,
-                "Link a knowledge page to a page, file, directory, task or commit (added under \
-                 its Related heading).",
-                serde_json::to_value(schemars::schema_for!(LinkInput)).expect("schema"),
-                Confirm::Never,
-            ),
+        ),
+        Op::new(
+            "knowledge.write",
+            "link",
+            serde_json::to_value(schemars::schema_for!(LinkInput)).expect("schema"),
+            false,
             link,
-        )
-        .expect("knowledge.link registers"),
-        Command::new(
-            spec(
-                RESYNC,
-                "Restate a knowledge page from its file on disk (the repair when a row and its \
-                 file disagree); a missing file deletes the page.",
-                serde_json::to_value(schemars::schema_for!(SlugInput)).expect("schema"),
-                Confirm::Never,
-            ),
+        ),
+        Op::new(
+            "knowledge.write",
+            "resync",
+            serde_json::to_value(schemars::schema_for!(SlugInput)).expect("schema"),
+            false,
             resync,
-        )
-        .expect("knowledge.resync registers"),
+        ),
     ]
 }
 

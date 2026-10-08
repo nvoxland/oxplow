@@ -5,18 +5,17 @@
 //! on its own thread whatever it names, a person names one. A report file
 //! oxplow parses itself is a report collector's, run by `oxplow.collector.sync`.
 
+use crate::commands::ops::Op;
 use std::sync::Arc;
 
-use oxplow_domain::{
-    Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, Invokers, Lifecycle,
-};
+use oxplow_domain::CommandError;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::comment::author_of;
 use super::thread::acting_thread_of;
-use super::{Command, Handler, HandlerOutput, Invocation};
+use super::{Handler, HandlerOutput, Invocation};
 use crate::collection::CollectionService;
 
 pub const RECORD_RUN: &str = "oxplow.test.record_run";
@@ -50,33 +49,13 @@ fn schema<T: JsonSchema>() -> Value {
     serde_json::to_value(schemars::schema_for!(T)).expect("schema serializes")
 }
 
-fn spec(name: &str, summary: &str, schema: Value) -> CommandSpec {
-    CommandSpec {
-        id: name.into(),
-        summary: summary.into(),
-        input_schema: schema,
-        invokers: Invokers::ALL,
-        confirm: Confirm::Never,
-        undoable: false,
-        lifecycle: Lifecycle::Stable,
-        atomicity: Atomicity::External,
-        effect: CommandEffect::Record,
-        needs: Vec::new(),
-        ui: None,
-    }
-}
-
 /// `test.record_run { thread?, command, duration_ms?, passed?, failed?, total? }`.
-pub fn record_run_command(collection: CollectionService) -> Command {
-    Command::new(
-        spec(
-            RECORD_RUN,
-            "Record a test run with pass/fail counts oxplow couldn't read from its output, \
-             marked `asserted`. oxplow records runs it sees in shell commands itself; this is \
-             for runs it couldn't parse. The run is the thread's open effort's. Returns \
-             `{ recorded, observationId }`.",
-            schema::<RecordRunInput>(),
-        ),
+pub fn record_run_op(collection: CollectionService) -> Op {
+    Op::new(
+        "test_runs.write",
+        "record_run",
+        schema::<RecordRunInput>(),
+        false,
         Handler::External(Arc::new(move |Invocation { actor, .. }, input| {
             let collection = collection.clone();
             Box::pin(async move {
@@ -105,12 +84,11 @@ pub fn record_run_command(collection: CollectionService) -> Command {
             })
         })),
     )
-    .expect("oxplow.test.record_run is a valid command")
 }
 
 /// The test-evidence commands, for the bus.
-pub fn commands(collection: CollectionService) -> Vec<Command> {
-    vec![record_run_command(collection)]
+pub fn ops(collection: CollectionService) -> Vec<Op> {
+    vec![record_run_op(collection)]
 }
 
 #[cfg(test)]

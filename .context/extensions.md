@@ -2072,8 +2072,9 @@ its latest attempt's (`v_effect_run.latest`). The live consumer makes one
 attempt and never another; a failed one is sent again **by itself** only
 when that is safe (below). Otherwise a failed reaction is attempted
 again only by a person: `oxplow.effect.retry { effect, event }` (`commands/effect.rs` —
-human-only, `Confirm::Always`, `External`, registered with the consumer
-at boot) runs `effect_triggers::run_reaction(…, ReactionOrigin::Retry)`,
+human-only, `Confirm::Always`, `External`; an `effects.run` operation
+declared in `oxplow-foundation`, its services filled when the consumer
+registers at boot — `ServicesSlot`) runs `effect_triggers::run_reaction(…, ReactionOrigin::Retry)`,
 the same steps as a live reaction from the loop guard on, as the next
 attempt:
 - the reaction's latest attempt must be `failed` (`Invalid` otherwise: one

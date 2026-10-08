@@ -7,18 +7,16 @@
 //! ordinary project files in `oxplow/extensions/<name>/`, to commit for
 //! the team.
 
+use crate::commands::ops::Op;
 use std::sync::Arc;
 
 use oxplow_domain::refs::build::stream_ref;
-use oxplow_domain::{
-    Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, DomainError, Invokers, Lifecycle,
-    StreamId,
-};
+use oxplow_domain::{CommandError, DomainError, StreamId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{Command, Handler, HandlerOutput, Invocation};
+use super::{Handler, HandlerOutput, Invocation};
 use crate::worktrees::WorktreeRouter;
 
 pub const INSTALL: &str = "oxplow.extension.install";
@@ -82,22 +80,6 @@ fn stream_for(named: Option<&str>) -> Result<Option<StreamId>, CommandError> {
         .transpose()
 }
 
-fn spec(name: &str, summary: &str, schema: Value) -> CommandSpec {
-    CommandSpec {
-        id: name.into(),
-        summary: summary.into(),
-        input_schema: schema,
-        invokers: Invokers::ALL,
-        confirm: Confirm::Always,
-        undoable: false,
-        lifecycle: Lifecycle::Stable,
-        atomicity: Atomicity::External,
-        effect: CommandEffect::Write,
-        needs: Vec::new(),
-        ui: None,
-    }
-}
-
 fn schema<T: JsonSchema>() -> Value {
     serde_json::to_value(schemars::schema_for!(T)).expect("schema serializes")
 }
@@ -110,16 +92,12 @@ fn result(ext: &crate::extensions::Extension) -> HandlerOutput {
 }
 
 /// `extension.install { git_url, git_ref?, reviewed_sha, stream? }`.
-pub fn install_command(deps: InstallDeps) -> Command {
-    Command::new(
-        spec(
-            INSTALL,
-            "Install a published extension from a git repo (its root holds `extension.yaml`) \
-             into `oxplow/extensions/<name>/` of a stream's worktree, at the commit a person \
-             reviewed (`reviewed_sha`, from `review_extension`). Always a person's decision: an \
-             agent's run becomes a proposal. Refuses to overwrite — `oxplow.extension.update` does that.",
-            schema::<InstallInput>(),
-        ),
+pub fn install_op(deps: InstallDeps) -> Op {
+    Op::new(
+        "extensions.install",
+        "install",
+        schema::<InstallInput>(),
+        false,
         Handler::External(Arc::new(move |_: Invocation, input| {
             let deps = deps.clone();
             Box::pin(async move {
@@ -147,19 +125,15 @@ pub fn install_command(deps: InstallDeps) -> Command {
             })
         })),
     )
-    .expect("oxplow.extension.install is a valid command")
 }
 
 /// `extension.update { name, reviewed_sha, stream? }`.
-pub fn update_command(deps: InstallDeps) -> Command {
-    Command::new(
-        spec(
-            UPDATE,
-            "Update an installed extension to the reviewed commit of the git URL and ref it was \
-             installed from. Only for extensions installed with `oxplow.extension.install`; ones \
-             written in this repo are edited in place. Always a person's decision.",
-            schema::<UpdateInput>(),
-        ),
+pub fn update_op(deps: InstallDeps) -> Op {
+    Op::new(
+        "extensions.install",
+        "update",
+        schema::<UpdateInput>(),
+        false,
         Handler::External(Arc::new(move |_: Invocation, input| {
             let deps = deps.clone();
             Box::pin(async move {
@@ -193,11 +167,10 @@ pub fn update_command(deps: InstallDeps) -> Command {
             })
         })),
     )
-    .expect("oxplow.extension.update is a valid command")
 }
 
-pub fn commands(deps: InstallDeps) -> Vec<Command> {
-    vec![install_command(deps.clone()), update_command(deps)]
+pub fn ops(deps: InstallDeps) -> Vec<Op> {
+    vec![install_op(deps.clone()), update_op(deps)]
 }
 
 #[cfg(test)]

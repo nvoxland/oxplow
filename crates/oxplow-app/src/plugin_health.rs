@@ -19,13 +19,10 @@ use oxplow_db::Database;
 use oxplow_domain::events::schema::{
     PluginDisabled, PluginDisabledV1, PluginEnabled, PluginEnabledV1,
 };
-use oxplow_domain::{
-    Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, DomainError, Envelope, Invokers,
-    Lifecycle,
-};
+use oxplow_domain::{CommandError, DomainError, Envelope};
 use serde::Deserialize;
 
-use crate::commands::{Command, Handler, HandlerOutput, Invocation};
+use crate::commands::{Handler, HandlerOutput, Invocation};
 
 /// Failures in a row that disable a contribution.
 pub const FAILURES_TO_DISABLE: i64 = 3;
@@ -258,28 +255,15 @@ struct EnableInput {
 /// collector runs at its next trigger. Human
 /// only (an agent can't undo what stopped a failing plugin); logs
 /// `plugin.enabled@1`.
-pub fn enable_command(
+pub fn enable_op(
     health: PluginHealth,
     providers: Weak<crate::providers::ProviderRegistry>,
-) -> Command {
-    Command::new(
-        CommandSpec {
-            id: ENABLE.into(),
-            summary: "Enable a disabled extension provider, collector or effect on this machine \
-                      again, clearing an automatic disable (a provider's process restarts, a \
-                      system the bus doesn't own)."
-                .into(),
-            input_schema: serde_json::to_value(schemars::schema_for!(EnableInput))
-                .expect("schema serializes"),
-            invokers: Invokers::HUMAN_ONLY,
-            confirm: Confirm::Never,
-            undoable: false,
-            lifecycle: Lifecycle::Experimental,
-            atomicity: Atomicity::External,
-            effect: CommandEffect::Write,
-            needs: Vec::new(),
-            ui: None,
-        },
+) -> crate::commands::ops::Op {
+    crate::commands::ops::Op::new(
+        "extensions.enable",
+        "enable",
+        serde_json::to_value(schemars::schema_for!(EnableInput)).expect("schema serializes"),
+        false,
         Handler::External(Arc::new(move |Invocation { actor, .. }, input| {
             let (health, providers) = (health.clone(), providers.clone());
             Box::pin(async move {
@@ -330,7 +314,6 @@ pub fn enable_command(
             })
         })),
     )
-    .expect("oxplow.plugin.enable is a valid command")
 }
 
 #[cfg(test)]

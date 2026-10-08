@@ -7,18 +7,18 @@
 
 use std::sync::Arc;
 
-use oxplow_domain::{
-    Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, Invokers, Lifecycle,
-};
+use oxplow_domain::CommandError;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::{Command, Handler, HandlerOutput, Invocation};
+use super::ops::Op;
+use super::{Handler, HandlerOutput, Invocation};
 use crate::background_task::{BackgroundTaskKind, BackgroundTaskStore, StartInput};
 use crate::events::{EventBus, OxplowEvent};
 use crate::lsp_installer::LspInstallerService;
 
+/// The commands its operations are declared as.
 pub const INSTALL_SERVER: &str = "oxplow.lsp.install_server";
 pub const REMOVE_SERVER: &str = "oxplow.lsp.remove_server";
 
@@ -37,21 +37,8 @@ pub struct LspDeps {
     pub events: EventBus,
 }
 
-fn spec(name: &str, summary: &str) -> CommandSpec {
-    CommandSpec {
-        id: name.into(),
-        summary: summary.into(),
-        input_schema: serde_json::to_value(schemars::schema_for!(PackageInput))
-            .expect("schema serializes"),
-        invokers: Invokers::ALL,
-        confirm: Confirm::Always,
-        undoable: false,
-        lifecycle: Lifecycle::Stable,
-        atomicity: Atomicity::External,
-        effect: CommandEffect::Write,
-        needs: Vec::new(),
-        ui: None,
-    }
+fn schema() -> Value {
+    serde_json::to_value(schemars::schema_for!(PackageInput)).expect("schema serializes")
 }
 
 fn parse(input: Value) -> Result<PackageInput, CommandError> {
@@ -68,13 +55,12 @@ fn failed(e: impl std::fmt::Display) -> CommandError {
 }
 
 /// `lsp.install_server { package }`.
-pub fn install_command(deps: LspDeps) -> Command {
-    Command::new(
-        spec(
-            INSTALL_SERVER,
-            "Download and install a language server (a Mason package) and register its \
-             binary. A person's decision: an agent's run becomes a proposal.",
-        ),
+pub fn install_op(deps: LspDeps) -> Op {
+    Op::new(
+        "lsp.install",
+        "install_server",
+        schema(),
+        false,
         Handler::External(Arc::new(move |_: Invocation, input| {
             let deps = deps.clone();
             Box::pin(async move {
@@ -107,17 +93,15 @@ pub fn install_command(deps: LspDeps) -> Command {
             })
         })),
     )
-    .expect("oxplow.lsp.install_server is a valid command")
 }
 
 /// `lsp.remove_server { package }`.
-pub fn remove_command(deps: LspDeps) -> Command {
-    Command::new(
-        spec(
-            REMOVE_SERVER,
-            "Uninstall a language server: delete its files, manifest entry and registrations. \
-             A person's decision.",
-        ),
+pub fn remove_op(deps: LspDeps) -> Op {
+    Op::new(
+        "lsp.install",
+        "remove_server",
+        schema(),
+        false,
         Handler::External(Arc::new(move |_: Invocation, input| {
             let deps = deps.clone();
             Box::pin(async move {
@@ -131,11 +115,10 @@ pub fn remove_command(deps: LspDeps) -> Command {
             })
         })),
     )
-    .expect("oxplow.lsp.remove_server is a valid command")
 }
 
-pub fn commands(deps: LspDeps) -> Vec<Command> {
-    vec![install_command(deps.clone()), remove_command(deps)]
+pub fn ops(deps: LspDeps) -> Vec<Op> {
+    vec![install_op(deps.clone()), remove_op(deps)]
 }
 
 #[cfg(test)]

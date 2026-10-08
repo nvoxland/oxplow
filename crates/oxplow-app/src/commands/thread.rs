@@ -16,6 +16,7 @@
 //! promoting a thread and setting a prompt steer an agent, so they are a
 //! person's.
 
+use crate::commands::ops::Op;
 use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 
@@ -23,14 +24,13 @@ use oxplow_config::OxplowConfig;
 use oxplow_db::thread_store::{get_tx, list_for_stream_tx, upsert_tx};
 use oxplow_domain::refs::build::{stream_ref, thread_ref};
 use oxplow_domain::{
-    AgentKind, Atomicity, CommandCall, CommandEffect, CommandError, CommandSpec, Confirm, Invokers,
-    Lifecycle, StreamId, Thread, ThreadId, ThreadStatus, Timestamp,
+    AgentKind, CommandCall, CommandError, StreamId, Thread, ThreadId, ThreadStatus, Timestamp,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use super::{Command, Handler, HandlerOutput, TxCtx};
+use super::{Handler, HandlerOutput, TxCtx};
 
 pub const CREATE: &str = "oxplow.thread.create";
 pub const RENAME: &str = "oxplow.thread.rename";
@@ -40,13 +40,6 @@ pub const DEMOTE: &str = "oxplow.thread.demote";
 pub const CLOSE: &str = "oxplow.thread.close";
 pub const REOPEN: &str = "oxplow.thread.reopen";
 pub const REORDER: &str = "oxplow.thread.reorder";
-
-/// A person, or a lens acting for one.
-const PEOPLE: Invokers = Invokers {
-    human: true,
-    agent: false,
-    lens: true,
-};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -252,44 +245,17 @@ fn call(name: &str, input: serde_json::Value) -> Option<CommandCall> {
     })
 }
 
-fn spec(
-    name: &str,
-    summary: &str,
-    schema: serde_json::Value,
-    invokers: Invokers,
-    undoable: bool,
-) -> CommandSpec {
-    CommandSpec {
-        id: name.into(),
-        summary: summary.into(),
-        input_schema: schema,
-        invokers,
-        confirm: Confirm::Never,
-        undoable,
-        lifecycle: Lifecycle::Stable,
-        atomicity: Atomicity::Tx,
-        effect: CommandEffect::Record,
-        needs: Vec::new(),
-        ui: None,
-    }
-}
-
 fn schema<T: JsonSchema>() -> serde_json::Value {
     serde_json::to_value(schemars::schema_for!(T)).expect("schema serializes")
 }
 
 /// `thread.create { stream, title, agent?, acp_agent?, from? }`.
-pub fn create_command(config: Arc<RwLock<OxplowConfig>>) -> Command {
-    Command::new(
-        spec(
-            CREATE,
-            "Start a thread on a stream (`stream:str1`) — or fork one (`from: thread:thr3`), \
-             running the same agent. It becomes the stream's writer when it has none, else \
-             joins the queue.",
-            schema::<CreateInput>(),
-            Invokers::ALL,
-            false,
-        ),
+pub fn create_op(config: Arc<RwLock<OxplowConfig>>) -> Op {
+    Op::new(
+        "threads.write",
+        "create",
+        schema::<CreateInput>(),
+        false,
         Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
             let input: CreateInput = parse(input)?;
             let stream: StreamId = id_of(&input.stream, "stream", "/stream")?;
@@ -384,19 +350,15 @@ pub fn create_command(config: Arc<RwLock<OxplowConfig>>) -> Command {
             Ok(result(&thread))
         })),
     )
-    .expect("oxplow.thread.create is a valid command")
 }
 
 /// `thread.rename { thread, title }`; undone by renaming it back.
-pub fn rename_command() -> Command {
-    Command::new(
-        spec(
-            RENAME,
-            "Rename a thread (`thread:thr12`).",
-            schema::<RenameInput>(),
-            Invokers::ALL,
-            true,
-        ),
+pub fn rename_op() -> Op {
+    Op::new(
+        "threads.write",
+        "rename",
+        schema::<RenameInput>(),
+        true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: RenameInput = parse(input)?;
             let mut thread = load(ctx, id_of(&input.thread, "thread", "/thread")?, "/thread")?;
@@ -410,21 +372,16 @@ pub fn rename_command() -> Command {
             })
         })),
     )
-    .expect("oxplow.thread.rename is a valid command")
 }
 
 /// `thread.set_prompt { thread, prompt? }` — a person's: it steers the
 /// thread's agent. Undone by setting it back.
-pub fn set_prompt_command() -> Command {
-    Command::new(
-        spec(
-            SET_PROMPT,
-            "Set (or clear) the text appended to a thread's agent prompt. A person's: it \
-             steers the agent.",
-            schema::<SetPromptInput>(),
-            PEOPLE,
-            true,
-        ),
+pub fn set_prompt_op() -> Op {
+    Op::new(
+        "threads.write",
+        "set_prompt",
+        schema::<SetPromptInput>(),
+        true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: SetPromptInput = parse(input)?;
             let mut thread = load(ctx, id_of(&input.thread, "thread", "/thread")?, "/thread")?;
@@ -443,22 +400,17 @@ pub fn set_prompt_command() -> Command {
             })
         })),
     )
-    .expect("oxplow.thread.set_prompt is a valid command")
 }
 
 /// `thread.promote { thread }` — a person's: the writer is who may change
 /// the worktree. The current writer is demoted in the same transaction;
 /// undone by promoting it back.
-pub fn promote_command() -> Command {
-    Command::new(
-        spec(
-            PROMOTE,
-            "Make a thread its stream's writer (the one thread whose agent may change the \
-             worktree); the current writer joins the queue. A person's.",
-            schema::<ThreadInput>(),
-            PEOPLE,
-            true,
-        ),
+pub fn promote_op() -> Op {
+    Op::new(
+        "threads.write",
+        "promote",
+        schema::<ThreadInput>(),
+        true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: ThreadInput = parse(input)?;
             let mut thread = load(ctx, id_of(&input.thread, "thread", "/thread")?, "/thread")?;
@@ -499,22 +451,17 @@ pub fn promote_command() -> Command {
             })
         })),
     )
-    .expect("oxplow.thread.promote is a valid command")
 }
 
 /// `thread.demote { thread }` — a person's: the stream's writer joins the
 /// queue, leaving the stream with none. Undone by promoting it back; the
 /// inverse of a promote onto a stream that had no writer.
-pub fn demote_command() -> Command {
-    Command::new(
-        spec(
-            DEMOTE,
-            "Move a stream's writer back into the queue, leaving the stream with no writer. \
-             A person's.",
-            schema::<ThreadInput>(),
-            PEOPLE,
-            true,
-        ),
+pub fn demote_op() -> Op {
+    Op::new(
+        "threads.write",
+        "demote",
+        schema::<ThreadInput>(),
+        true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: ThreadInput = parse(input)?;
             let mut thread = load(ctx, id_of(&input.thread, "thread", "/thread")?, "/thread")?;
@@ -530,24 +477,18 @@ pub fn demote_command() -> Command {
             })
         })),
     )
-    .expect("oxplow.thread.demote is a valid command")
 }
 
 /// `thread.close { thread }`: its open effort closes in the same
 /// transaction (by `system`), and an ACP thread's session stops once the
 /// close commits. An agent closes only its own thread. Undone by reopening
 /// it (the effort stays closed).
-pub fn close_command(acp: Arc<crate::acp::manager::AcpManager>) -> Command {
-    Command::new(
-        spec(
-            CLOSE,
-            "Close a thread (`thread:thr12`) — history, reopenable. Its open effort closes, \
-             and an ACP thread's agent session stops with it. An agent closes only its own \
-             thread.",
-            schema::<ThreadInput>(),
-            Invokers::ALL,
-            true,
-        ),
+pub fn close_op(acp: Arc<crate::acp::manager::AcpManager>) -> Op {
+    Op::new(
+        "threads.write",
+        "close",
+        schema::<ThreadInput>(),
+        true,
         Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
             let input: ThreadInput = parse(input)?;
             let id = id_of(&input.thread, "thread", "/thread")?;
@@ -593,20 +534,15 @@ pub fn close_command(acp: Arc<crate::acp::manager::AcpManager>) -> Command {
             })
         })),
     )
-    .expect("oxplow.thread.close is a valid command")
 }
 
 /// `thread.reopen { thread }` → `queued`; undone by closing it.
-pub fn reopen_command() -> Command {
-    Command::new(
-        spec(
-            REOPEN,
-            "Reopen a closed thread (`thread:thr12`); it joins its stream's queue. An agent \
-             reopens only its own thread.",
-            schema::<ThreadInput>(),
-            Invokers::ALL,
-            true,
-        ),
+pub fn reopen_op() -> Op {
+    Op::new(
+        "threads.write",
+        "reopen",
+        schema::<ThreadInput>(),
+        true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: ThreadInput = parse(input)?;
             let id = id_of(&input.thread, "thread", "/thread")?;
@@ -625,20 +561,16 @@ pub fn reopen_command() -> Command {
             })
         })),
     )
-    .expect("oxplow.thread.reopen is a valid command")
 }
 
 /// `thread.reorder { stream, order }`: the named threads take the positions
 /// they're listed in. Undone by their previous order.
-pub fn reorder_command() -> Command {
-    Command::new(
-        spec(
-            REORDER,
-            "Reorder a stream's threads (`order`: thread refs in their new order).",
-            schema::<ReorderInput>(),
-            PEOPLE,
-            true,
-        ),
+pub fn reorder_op() -> Op {
+    Op::new(
+        "threads.write",
+        "reorder",
+        schema::<ReorderInput>(),
+        true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: ReorderInput = parse(input)?;
             let stream: StreamId = id_of(&input.stream, "stream", "/stream")?;
@@ -673,23 +605,22 @@ pub fn reorder_command() -> Command {
             })
         })),
     )
-    .expect("oxplow.thread.reorder is a valid command")
 }
 
 /// The thread commands, for the bus.
-pub fn commands(
+pub fn ops(
     config: Arc<RwLock<OxplowConfig>>,
     acp: Arc<crate::acp::manager::AcpManager>,
-) -> Vec<Command> {
+) -> Vec<Op> {
     vec![
-        create_command(config),
-        rename_command(),
-        set_prompt_command(),
-        promote_command(),
-        demote_command(),
-        close_command(acp),
-        reopen_command(),
-        reorder_command(),
+        create_op(config),
+        rename_op(),
+        set_prompt_op(),
+        promote_op(),
+        demote_op(),
+        close_op(acp),
+        reopen_op(),
+        reorder_op(),
     ]
 }
 

@@ -5,21 +5,19 @@
 //! only: the app reports what it showed, and an agent never reports one.
 //! The `ui` namespace expires like the agent's (30 days, output 14).
 
+use crate::commands::ops::Op;
 use std::sync::Arc;
 
 use oxplow_db::event_content_store::put_json_tx;
 use oxplow_db::event_log_store::anchors_for_thread_tx;
 use oxplow_domain::events::schema::{UiOpFailed, UiOpFailedV1};
 use oxplow_domain::refs::build::thread_ref;
-use oxplow_domain::{
-    Anchors, Atomicity, CommandEffect, CommandError, CommandSpec, Confirm, Invokers, Lifecycle,
-    StreamId, ThreadId,
-};
+use oxplow_domain::{Anchors, CommandError, StreamId, ThreadId};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
-use super::{Command, Handler, HandlerOutput, TxCtx};
+use super::{Handler, HandlerOutput, TxCtx};
 
 pub const REPORT_ERROR: &str = "oxplow.ui.report_error";
 
@@ -138,30 +136,16 @@ fn report(ctx: &TxCtx<'_>, input: ReportErrorInput) -> Result<HandlerOutput, Com
 }
 
 /// Every `ui.*` command.
-pub fn commands() -> Vec<Command> {
-    vec![Command::new(
-        CommandSpec {
-            id: REPORT_ERROR.into(),
-            summary: "Record an operation that failed in front of the person in the app, as \
-                      the app showed it, so the agent can read it in `v_op_error`. The app's \
-                      own: a person's only."
-                .into(),
-            input_schema: serde_json::to_value(schemars::schema_for!(ReportErrorInput))
-                .expect("schema serializes"),
-            invokers: Invokers::HUMAN_ONLY,
-            confirm: Confirm::Never,
-            undoable: false,
-            lifecycle: Lifecycle::Stable,
-            atomicity: Atomicity::Tx,
-            effect: CommandEffect::Record,
-            needs: Vec::new(),
-            ui: None,
-        },
+pub fn ops() -> Vec<Op> {
+    vec![Op::new(
+        "diagnostics.write",
+        "report_error",
+        serde_json::to_value(schemars::schema_for!(ReportErrorInput)).expect("schema serializes"),
+        false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             report(ctx, parse(input)?)
         })),
-    )
-    .expect("oxplow.ui.report_error is a valid command")]
+    )]
 }
 
 #[cfg(test)]
