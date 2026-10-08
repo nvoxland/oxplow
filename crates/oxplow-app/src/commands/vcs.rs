@@ -144,7 +144,23 @@ async fn announce(target: &VcsTarget, stream: StreamId, touched: Touched) {
     }
 }
 
+/// A VCS op's answer. One that failed outright — a rejected push, a
+/// remote it couldn't reach — is the run's failure, git's log its message,
+/// so its audit row says `error` rather than `ok` with a result that says
+/// otherwise. One that stopped at conflicts did what it does — the
+/// repository is mid-merge for a person to resolve — and answers with them,
+/// readable on its row after the fact.
 fn outcome(o: OpOutcome) -> Result<Value, CommandError> {
+    if !o.success && o.conflicts.is_empty() {
+        let log = o.log.trim();
+        return Err(CommandError::Failed {
+            message: if log.is_empty() {
+                "git reported a failure and said nothing more".into()
+            } else {
+                log.to_string()
+            },
+        });
+    }
     Ok(serde_json::to_value(o).expect("OpOutcome serializes"))
 }
 
@@ -483,6 +499,67 @@ mod tests {
     use serde_json::json;
 
     use crate::test_fixtures::{commit_all, services_with_effort};
+
+    /// A git op that failed outright — a push with nowhere to go — is the
+    /// run's failure, its log the message, and its audit row says `error`:
+    /// never an `ok` row whose result says it failed.
+    #[tokio::test]
+    async fn a_failed_git_op_is_a_failed_run() {
+        let f = services_with_effort().await;
+        let svc = &f.svc;
+        let root = svc.layout.project_dir.clone();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        commit_all(&root, "base");
+        let stream = svc.stream_store.list().await.unwrap()[0].id.to_string();
+        let err = svc
+            .commands
+            .run(
+                &Actor::Human,
+                "oxplow.vcs.push",
+                json!({ "stream": stream, "remote": "nowhere", "branch": "main" }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, oxplow_domain::CommandError::Failed { message } if message.contains("nowhere")),
+            "{err:?}"
+        );
+        let audits = oxplow_db::SqliteCommandAuditStore::new(svc.db.clone())
+            .list_recent(5)
+            .await
+            .unwrap();
+        let push = audits
+            .iter()
+            .find(|a| a.command == "oxplow.vcs.push")
+            .expect("the push is audited");
+        assert_eq!(
+            push.outcome,
+            oxplow_domain::events::schema::CommandOutcome::Error
+        );
+    }
+
+    /// An op that stopped at conflicts did what it does — the repository is
+    /// mid-merge for a person — and answers with them; one that failed with
+    /// nothing to say still says so.
+    #[test]
+    fn an_outcome_fails_unless_it_stopped_at_conflicts() {
+        use oxplow_domain::vcs::OpOutcome;
+        let conflicted = OpOutcome {
+            success: false,
+            log: "CONFLICT".into(),
+            conflicts: vec!["a.txt".into()],
+            auto_resolved: 0,
+        };
+        assert_eq!(
+            super::outcome(conflicted).unwrap()["conflicts"],
+            json!(["a.txt"])
+        );
+        let silent = super::outcome(OpOutcome::default())
+            .unwrap_err()
+            .to_string();
+        assert!(silent.contains("git reported a failure"), "{silent}");
+    }
 
     /// P5.B6 (tsk525): VCS mutations are a person's — an agent is denied;
     /// a destructive one needs the person's confirmation; the audit row

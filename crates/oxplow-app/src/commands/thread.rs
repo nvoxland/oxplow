@@ -239,6 +239,15 @@ fn result(thread: &Thread) -> HandlerOutput {
     }
 }
 
+/// `thread`, already where the call would move it: nothing to record or
+/// undo.
+fn unchanged(thread: &Thread) -> HandlerOutput {
+    HandlerOutput {
+        unchanged: true,
+        ..result(thread)
+    }
+}
+
 fn call(name: &str, input: serde_json::Value) -> Option<CommandCall> {
     Some(CommandCall {
         name: name.into(),
@@ -423,7 +432,7 @@ pub fn promote_op() -> Op {
                         format!("`{}` is closed; reopen it first", input.thread),
                     ))
                 }
-                ThreadStatus::Active => return Ok(result(&thread)),
+                ThreadStatus::Active => return Ok(unchanged(&thread)),
                 ThreadStatus::Queued => {}
             }
             let now = Timestamp::now();
@@ -469,7 +478,7 @@ pub fn demote_op() -> Op {
             let input: ThreadInput = parse(input)?;
             let mut thread = load(ctx, id_of(&input.thread, "thread", "/thread")?, "/thread")?;
             if thread.status != ThreadStatus::Active {
-                return Ok(result(&thread));
+                return Ok(unchanged(&thread));
             }
             thread.status = ThreadStatus::Queued;
             thread.updated_at = Timestamp::now();
@@ -499,7 +508,7 @@ pub fn close_op(acp: Arc<crate::acp::manager::AcpManager>) -> Op {
             own_thread_only(ctx, id, "closes")?;
             let mut thread = load(ctx, id, "/thread")?;
             if thread.status == ThreadStatus::Closed {
-                return Ok(result(&thread));
+                return Ok(unchanged(&thread));
             }
             let now = Timestamp::now();
             thread.status = ThreadStatus::Closed;
@@ -553,7 +562,7 @@ pub fn reopen_op() -> Op {
             own_thread_only(ctx, id, "reopens")?;
             let mut thread = load(ctx, id, "/thread")?;
             if thread.status != ThreadStatus::Closed {
-                return Ok(result(&thread));
+                return Ok(unchanged(&thread));
             }
             thread.status = ThreadStatus::Queued;
             thread.closed_at = None;
@@ -749,6 +758,27 @@ mod tests {
             .unwrap();
         assert_eq!(thread(&fx, fx.thread).await.status, ThreadStatus::Active);
         assert_eq!(thread(&fx, second).await.status, ThreadStatus::Queued);
+    }
+
+    /// Moving a thread to the state it's in changes nothing, so it leaves
+    /// no record — no audit row, nothing to undo — like any such call.
+    #[tokio::test]
+    async fn a_move_to_the_state_a_thread_is_in_leaves_no_record() {
+        let fx = services_with_effort().await;
+        let me = json!({ "thread": thread_ref(fx.thread) });
+        let second = create(&fx, "second").await;
+        let queued = json!({ "thread": thread_ref(second) });
+        // The writer promoted, a queued thread demoted or reopened.
+        for (name, input) in [(PROMOTE, &me), (DEMOTE, &queued), (REOPEN, &queued)] {
+            let out = run(&fx, &Actor::Human, name, input.clone()).await.unwrap();
+            assert_eq!(out.audit_id, None, "{name}");
+            assert!(out.inverse.is_none(), "{name}");
+        }
+        run(&fx, &Actor::Human, CLOSE, queued.clone())
+            .await
+            .unwrap();
+        let again = run(&fx, &Actor::Human, CLOSE, queued).await.unwrap();
+        assert_eq!(again.audit_id, None, "closing a closed thread");
     }
 
     /// tsk787: promoting onto a stream with no writer undoes by demoting

@@ -176,10 +176,19 @@ async fn plugin_namespaces(db: &Database) -> Result<Vec<String>, DomainError> {
 pub struct SweepReport {
     pub content_deleted: usize,
     pub payloads_expired: usize,
+    /// Refused runs' audit rows past [`REFUSED_AUDIT_DAYS`], deleted.
+    pub refused_audit_deleted: usize,
     /// A project's windows naming a namespace nothing logs (tsk985): kept
     /// for a plugin not installed yet, and said, since a typo does nothing.
     pub unused: Vec<String>,
 }
+
+/// How long a refused run's audit row — input that didn't fit, a caller
+/// denied — is kept. It wrote nothing and nothing points at it (no
+/// `command.executed`, no inverse, no proposal or effect run), so it is
+/// only a record of an attempt; a confused or polling agent makes many.
+/// Runs that did something stay.
+pub const REFUSED_AUDIT_DAYS: i64 = 30;
 
 /// Rows one sweep transaction touches: small enough that a hook waiting on
 /// the writer lock waits milliseconds, not the whole backlog.
@@ -264,6 +273,26 @@ async fn sweep_in_batches(
             }
         }
     }
+    // Refused runs past their window, through `command_audit_refused`.
+    let cutoff = before(REFUSED_AUDIT_DAYS);
+    loop {
+        let cutoff = cutoff.clone();
+        let n = db
+            .transaction(move |tx| {
+                tx.execute(
+                    "DELETE FROM command_audit WHERE id IN (
+                       SELECT id FROM command_audit INDEXED BY command_audit_refused
+                        WHERE outcome IN ('invalid', 'denied') AND at < ?1 LIMIT ?2)",
+                    params![cutoff, batch],
+                )
+                .map_err(map_sql_err)
+            })
+            .await?;
+        report.refused_audit_deleted += n;
+        if (n as i64) < batch {
+            break;
+        }
+    }
     // A parked event whose payload expired can never be retried.
     db.transaction(|tx| {
         tx.execute(
@@ -286,6 +315,59 @@ mod tests {
 
     /// A backlog larger than one batch is swept in several transactions,
     /// all of it, and nothing outside the namespace's type range moves.
+    /// A refused run — input that didn't fit, a caller denied — writes
+    /// nothing but its audit row, and nothing points at that row: past
+    /// [`REFUSED_AUDIT_DAYS`] it goes. Runs that did something (`ok`,
+    /// `error`) stay — undo, approvals, effects and `command.executed`
+    /// name them — as does a recent refusal.
+    #[tokio::test]
+    async fn old_refused_runs_leave_the_audit_and_the_rest_stay() {
+        let db = Database::in_memory();
+        let now = oxplow_domain::Timestamp::from_unix_ms(400 * DAY_MS);
+        let at = |days: i64| {
+            crate::database::ts_to_string(oxplow_domain::Timestamp::from_unix_ms(
+                now.unix_ms() - days * DAY_MS,
+            ))
+        };
+        let rows: Vec<(&str, String)> = vec![
+            ("invalid", at(REFUSED_AUDIT_DAYS + 1)),
+            ("denied", at(REFUSED_AUDIT_DAYS + 1)),
+            ("ok", at(365)),
+            ("error", at(365)),
+            ("invalid", at(1)),
+        ];
+        db.transaction(move |tx| {
+            for (outcome, at) in &rows {
+                tx.execute(
+                    "INSERT INTO command_audit (at, command, actor_kind, input_json, outcome)
+                       VALUES (?1, 'oxplow.x.y', 'agent', '{}', ?2)",
+                    params![at, outcome],
+                )
+                .map_err(map_sql_err)?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let report = sweep(&db, now, &BTreeMap::new()).await.unwrap();
+        assert_eq!(report.refused_audit_deleted, 2);
+        let left: Vec<String> = db
+            .read(|tx| {
+                let mut st = tx
+                    .prepare("SELECT outcome FROM command_audit ORDER BY id")
+                    .map_err(map_sql_err)?;
+                let rows = st
+                    .query_map([], |r| r.get(0))
+                    .map_err(map_sql_err)?
+                    .collect::<Result<Vec<String>, _>>()
+                    .map_err(map_sql_err)?;
+                Ok(rows)
+            })
+            .await
+            .unwrap();
+        assert_eq!(left, ["ok", "error", "invalid"]);
+    }
+
     #[tokio::test]
     async fn a_backlog_is_swept_in_batches() {
         let db = Database::in_memory();
@@ -331,6 +413,7 @@ mod tests {
             SweepReport {
                 content_deleted: 5,
                 payloads_expired: 5,
+                refused_audit_deleted: 0,
                 unused: Vec::new(),
             }
         );

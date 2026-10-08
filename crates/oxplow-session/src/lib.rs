@@ -413,11 +413,9 @@ impl StreamService {
     /// is true and the stream is a worktree (not primary), the
     /// on-disk working copy is removed too (`Vcs::remove_workspace`).
     /// Primary streams cannot be archived.
-    pub async fn archive_stream(
-        &self,
-        id: &StreamId,
-        delete_worktree: bool,
-    ) -> Result<(), SessionError> {
+    /// Stream `id`, when it may be archived: it exists and isn't the
+    /// primary. Asked before archiving changes anything.
+    pub async fn archivable(&self, id: &StreamId) -> Result<Stream, SessionError> {
         let stream = self
             .streams
             .get(id)
@@ -428,6 +426,15 @@ impl StreamService {
                 "cannot archive primary stream".into(),
             )));
         }
+        Ok(stream)
+    }
+
+    pub async fn archive_stream(
+        &self,
+        id: &StreamId,
+        delete_worktree: bool,
+    ) -> Result<(), SessionError> {
+        let stream = self.archivable(id).await?;
         // Archive every thread first so the rail+work surfaces drop
         // them in lockstep with the stream.
         let threads = self.threads.list_for_stream(id).await?;

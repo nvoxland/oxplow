@@ -355,6 +355,16 @@ pub fn dismiss_tx(conn: &rusqlite::Connection, id: i64) -> Result<bool, DomainEr
     Ok(n == 1)
 }
 
+/// Whether `id` is a hint raised to the person (dismissed or not).
+pub fn person_hint_tx(conn: &rusqlite::Connection, id: i64) -> Result<bool, DomainError> {
+    conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM agent_nudge WHERE id = ?1 AND audience = 'person')",
+        params![id],
+        |r| r.get(0),
+    )
+    .map_err(crate::database::map_sql_err)
+}
+
 /// Claim `mark` in `scope` in the caller's transaction: `true` the first
 /// time, `false` when it has already fired.
 pub fn claim_once_tx(

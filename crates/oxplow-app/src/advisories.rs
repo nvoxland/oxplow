@@ -965,6 +965,35 @@ mod tests {
             nudges(&f.svc).await,
             serde_json::json!([["guide/tell", "person", 1]])
         );
+        // Dismissing it again (a double click) changes nothing and leaves
+        // no record; a hint that was never raised is still refused.
+        let again = f
+            .svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                crate::commands::hint::DISMISS,
+                serde_json::json!({ "nudge": id }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(again.audit_id, None);
+        let err = f
+            .svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                crate::commands::hint::DISMISS,
+                serde_json::json!({ "nudge": id + 1000 }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, oxplow_domain::CommandError::Invalid { field: Some(f), .. } if f == "/nudge"),
+            "{err:?}"
+        );
     }
 
     /// `once_per: session` fires once per agent session on the thread;

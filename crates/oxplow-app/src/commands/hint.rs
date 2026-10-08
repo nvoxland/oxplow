@@ -37,18 +37,24 @@ pub fn dismiss_op() -> Op {
                     field: None,
                     message: e.to_string(),
                 })?;
-            if !oxplow_db::agent_nudge_store::dismiss_tx(ctx.conn, input.nudge)? {
-                return Err(CommandError::Invalid {
-                    field: Some("/nudge".into()),
-                    message: format!(
-                        "no hint {} raised to the person and not yet dismissed",
-                        input.nudge
-                    ),
+            let result = json!({ "dismissed": input.nudge });
+            if oxplow_db::agent_nudge_store::dismiss_tx(ctx.conn, input.nudge)? {
+                return Ok(HandlerOutput {
+                    result,
+                    ..HandlerOutput::default()
                 });
             }
-            Ok(HandlerOutput {
-                result: json!({ "dismissed": input.nudge }),
-                ..HandlerOutput::default()
+            // Dismissed already (a double click): nothing to record.
+            if oxplow_db::agent_nudge_store::person_hint_tx(ctx.conn, input.nudge)? {
+                return Ok(HandlerOutput {
+                    result,
+                    unchanged: true,
+                    ..HandlerOutput::default()
+                });
+            }
+            Err(CommandError::Invalid {
+                field: Some("/nudge".into()),
+                message: format!("no hint {} was raised to the person", input.nudge),
             })
         })),
     )

@@ -1233,7 +1233,10 @@ retention differs (and the blob store's GC only knows snapshot rows).
 `v_event_content` exposes everything but the bytes. `event_log` gained
 `payload_expired_at`: `payload` is NOT NULL, so payload expiry writes `'{}'`
 and stamps it. The sweep is `oxplow_db::event_retention::sweep` (P3.11,
-ten minutes after boot, then daily; batches of 5,000 rows per transaction
+ten minutes after boot, then daily; it also deletes refused runs'
+`command_audit` rows — `invalid` / `denied`, which nothing points at —
+older than `REFUSED_AUDIT_DAYS` (30), through the partial index
+`command_audit_refused` (V32), [commands.md](./commands.md) "Retention"; batches of 5,000 rows per transaction
 through the partial index `event_log_live_payload (type, at) WHERE
 payload_expired_at IS NULL`, V103, read as a `type` range because a `LIKE`
 can't use a BINARY index; windows in `oxplow_domain::events::retention`'s

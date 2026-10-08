@@ -222,6 +222,9 @@ pub fn archive_op(deps: StreamDeps) -> Op {
                 use oxplow_domain::stores::ThreadStore as _;
                 let input: ArchiveInput = parse(input)?;
                 let id = stream_of(&input.stream)?;
+                // Refused before anything changes: nothing below runs for a
+                // stream that can't be archived.
+                deps.streams.archivable(&id).await.map_err(session)?;
                 // Running as the rail shows it: derived from the logged
                 // activity, so an agent that died mid-turn doesn't pin it.
                 let threads = deps.threads.list_for_stream(&id).await?;
@@ -476,6 +479,15 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().contains("primary"), "{err}");
         assert!(primary(&fx).await.archived_at.is_none());
+        // Refused before anything ran: its thread's effort is still open.
+        use oxplow_db::EffortStore as _;
+        let open = fx
+            .svc
+            .effort_store
+            .find_open_for_thread(&fx.thread)
+            .await
+            .unwrap();
+        assert_eq!(open.map(|e| e.id), Some(fx.effort), "the effort stays open");
     }
 
     /// Archiving a stream closes its threads' open efforts with an end
