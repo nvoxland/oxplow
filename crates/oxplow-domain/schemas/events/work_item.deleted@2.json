@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`work_item.deleted@2`: an item was deleted from its work list.",
+  "properties": {
+    "work_item": {
+      "description": "`work_item:<list>:<id>`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "work_item"
+  ],
+  "title": "WorkItemDeletedV2",
+  "type": "object"
+}

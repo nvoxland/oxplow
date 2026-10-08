@@ -117,14 +117,14 @@ snapshot requests — runs AFTER commit, never inside the closure. Don't
 convert existing single-op methods preemptively — extract a `_tx` core
 the first time an op needs to join a transaction. Current users:
 the task-store status cores (`set_status_tx`,
-`update_with_status_tx`, `insert_logged_tx`), the effort cores
+`update_with_status_tx`, `insert_tx`), the effort cores
 (`start_tx` / `finish_tx`), `record_take`, and every `Tx` command
 handler (which runs in the bus's transaction).
 
 **Lifecycle invariant.** At most one effort is open per thread (the
 V5 unique index `idx_effort_open_per_thread`), and a task's status never
-opens or closes one: `task_store::apply_status_tx` (the core of
-`set_status_tx` / `update_with_status_tx` / `insert_logged_tx`, behind
+opens or closes one: `task_store::write_status_tx` (the core of
+`set_status_tx` / `update_with_status_tx`, behind
 `oxplow.work_item.transition` / `update` / `create`), `soft_delete` and
 `move_task` touch the task alone — `get_task_tx` sees live rows only, so
 a deleted task takes no edits. Efforts open, close and link through the
@@ -1403,11 +1403,10 @@ layer (V94). Nothing is skipped silently.
 
 **Consumers so far.** `PageRefWorkItemConsumer` (`page_ref.work_item`,
 `crates/oxplow-app/src/page_ref_consumers.rs`) re-projects a task's
-body-mention `page_ref` edges on `work_item.transitioned` through the
-`replace_source_for_ref_types_tx` core — the projection the transition
-used to run post-commit, now checkpointed and dead-lettered like any
-other consumer. Task insert/update still project inline until they log
-events of their own.
+body-mention `page_ref` edges on core's `work_item.created` /
+`work_item.edited` through the `replace_source_for_ref_types_tx` core,
+checkpointed and dead-lettered like any other consumer. The task
+store's own insert/update (not the commands') still project inline.
 
 `command_audit` (who ran which command, the input, outcome, the undo as
 `inverse_json`, and `undone_by`) is written by the command bus through
@@ -1420,42 +1419,21 @@ Harmless while nothing deletes audit rows; a future rebuild that must
 keep it copies the old `sqlite_sequence` row too.
 
 **Status is written only by the status core.** `update_task_tx` writes
-a task's fields, never `status` / `completed_at`; `write_status_tx`
-(inside `apply_status_tx`) is their only writer, and a status change
-reads the committed status inside its transaction (`set_status_tx`), so a
-copy read before a concurrent status change can't revert it (review of
-P2.6, tsk460). `update_with_status_tx` writes fields, logs
-`work_item.edited@1 { work_item, fields }` when title / description /
-priority / parent / thread changed (`move_task` logs `thread` too, anchored
-to the destination), then moves the status — the core of
-`oxplow.work_item.update` and `TaskService::update`. Filing a task
-(`insert_logged_tx`, the core of `oxplow.work_item.create` and
-`TaskService::create`) logs **`work_item.created@1 { work_item, status }`**;
-filing into a status is a creation
-with that status, not a `ready →` transition. Every provider's state
-change also logs core's `work_item.state_changed@1 { work_item, to }`
-([work-items.md](./work-items.md)). The `page_ref.work_item`
-pump consumer projects a task's body-mention edges on `work_item.created`
-and re-projects them on `work_item.edited` (it used to follow
-`work_item.transitioned`, whose status change moves no body edge).
+a task's fields, never `status` / `completed_at`; `write_status_tx` is
+their only writer, and a status change reads the committed status inside
+its transaction (`set_status_tx`), so a copy read before a concurrent
+status change can't revert it. `update_with_status_tx` writes fields,
+then moves the status — the core of `oxplow.work_item.update`.
 
-**Producers so far.** Every task status change (P2.6.3, tsk455 — not
-only in_progress crossings, thread-less tasks too) goes through one
-core, `task_store::apply_status_tx`, via `update_logged_tx` (an edited
-row), `insert_logged_tx` (filing straight into a status logs it as a
-change from `ready`) or `set_status_tx` (read-modify-write, the core of
-the `oxplow.work_item.transition` command). It appends `work_item.transitioned@1`
-in the same transaction as the status flip — subject
-`work_item:oxplow:tskN`, anchors `stream` (looked up from the thread
-inside the transaction; none for a backlog task) / `thread`, payload
-`{ work_item, from, to }`. Run as
-`oxplow.work_item.transition`, its source is the actor and its cause the run's
-`command.executed`; from `TaskService` directly it is
-`system:task_service`. A same-status re-issue logs
-nothing; a failed transition rolls the row back with the rest. It sets
-no dedupe key: a transactional producer's retry has already rolled back,
-so keys are for at-least-once producers. `TaskService` keeps its
-post-commit `TasksChanged` broadcast as the UI wake-up.
+**The task store logs nothing.** A work list's events are core's,
+logged by the `oxplow.work_item.*` commands for every list alike —
+`work_item.created` / `edited` / `state_changed` / `linked` /
+`commented` / `deleted`, caused by the run's `command.executed`
+([work-items.md](./work-items.md)). `TaskService` and the store's own
+async writes (tests, fixtures) log none; a write made for someone runs
+the command. The `page_ref.work_item` pump consumer projects an item's
+body-mention edges on `work_item.created` and re-projects them on
+`work_item.edited`.
 
 **Effort events.** `effort_store::start_tx` and `finish_tx` — the only
 cores that open or close an effort — append

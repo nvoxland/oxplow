@@ -157,7 +157,7 @@ pub fn scaffold(
             Some("{ commands: [oxplow.work_item.comment] }".to_string()),
         ),
         Kind::Effect => (
-            "{ effect: on-done, event: { type: work_item.transitioned, payload: { work_item: \"work_item:oxplow:tsk1\", from: in_progress, to: done } } }"
+            "{ effect: on-done, event: { type: work_item.state_changed, payload: { work_item: \"work_item:oxplow:tsk1\", to: done } } }"
                 .to_string(),
             "a comment on the finished work item",
             Some("{ commands: [oxplow.work_item.comment] }".to_string()),
@@ -224,7 +224,7 @@ pub fn scaffold(
              \x20 # events logged after; a command that asks becomes a proposal.\n\
              \x20 - id: on-done\n\
              \x20   summary: \"TODO: what it does. Here: comment on a work item when it's done.\"\n\
-             \x20   on: [work_item.transitioned]\n\
+             \x20   on: [work_item.state_changed]\n\
              \x20   where: { to: done }\n\
              \x20   entry: effects/on-done.star\n",
         ),

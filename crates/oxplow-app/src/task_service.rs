@@ -6,10 +6,10 @@
 //! status with the associated timestamp side-effects, moving a task
 //! between thread and backlog) lives here.
 //!
-//! The service does not emit events itself — the Tauri command layer
-//! does, after a successful service call. That keeps `oxplow-app`
-//! independent of the tauri-specta layering and lets the MCP surface
-//! reuse the same service without paying for renderer notifications.
+//! It logs nothing: a work list's events are core's, logged by the
+//! `oxplow.work_item.*` commands for every list alike
+//! (`.context/work-items.md`). Writes made for someone run those
+//! commands instead.
 
 use std::sync::Arc;
 
@@ -57,33 +57,11 @@ pub struct UpdateTaskChanges {
 #[derive(Clone)]
 pub struct TaskService {
     store: Arc<SqliteTaskStore>,
-    /// Woken after a transition commits so the `work_item.transitioned`
-    /// event it logged is delivered now rather than on the idle timer —
-    /// and an effort it opens or closes is pinned before this returns.
-    event_pump: Option<Arc<crate::event_pump::EventPump>>,
 }
 
 impl TaskService {
     pub fn new(store: Arc<SqliteTaskStore>) -> Self {
-        Self {
-            store,
-            event_pump: None,
-        }
-    }
-
-    /// Attach the event pump so a committed transition is delivered to
-    /// its consumers right away.
-    pub fn with_event_pump(mut self, pump: Arc<crate::event_pump::EventPump>) -> Self {
-        self.event_pump = Some(pump);
-        self
-    }
-
-    /// A status change may open or close an effort (the effort policy
-    /// reacts to it): let its lifecycle settle before returning.
-    async fn settle_lifecycle(&self) {
-        if let Some(pump) = self.event_pump.as_ref() {
-            crate::effort_lifecycle::settle(pump).await;
-        }
+        Self { store }
     }
 
     /// Create a task attached to `thread` (or to the backlog if
@@ -113,16 +91,11 @@ impl TaskService {
             note_count: 0,
             author: input.author.or(Some(TaskAuthor::User)),
         };
-        // Filing straight into a status is that change from `ready`: any
-        // status but `ready` logs `work_item.transitioned`.
         if item.status == TaskStatus::Done {
             item.completed_at = Some(now);
         }
-        let id = self.store.insert_logged(&item).await?;
+        let id = self.store.insert(&item).await?;
         item.id = id;
-        if item.status != TaskStatus::Ready {
-            self.settle_lifecycle().await;
-        }
         Ok(item)
     }
 
@@ -148,18 +121,8 @@ impl TaskService {
         }
         item.updated_at = Timestamp::now();
         // Fields and any status change commit together; the status moves
-        // from what's committed (read in the transaction), with what it
-        // implies — the effort open/close and `work_item.transitioned`. The
-        // effort's snapshot pin, reconciliation and lifecycle metrics are
-        // the effort-lifecycle consumer's; settle so they're done when this
-        // returns. Changes made for someone (MCP, RPC) run the
-        // `oxplow.work_item.update` command instead, which audits the actor.
-        let prior_status = item.status;
-        let after = self.store.update_with_status(&item, changes.status).await?;
-        if after.status != prior_status {
-            self.settle_lifecycle().await;
-        }
-        Ok(after)
+        // from what's committed (read in the transaction).
+        Ok(self.store.update_with_status(&item, changes.status).await?)
     }
 
     pub async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<Task>, TaskServiceError> {

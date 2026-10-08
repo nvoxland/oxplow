@@ -932,16 +932,17 @@ mod tests {
     use oxplow_domain::events::schema::EventType as _;
     use oxplow_domain::events::schema::{
         ActorKind, CommandExecuted, CommandExecutedV2, CommandOutcome, WorkItemEdited,
-        WorkItemTransitioned, WorkItemTransitionedV1,
+        WorkItemStateChanged, WorkItemStateChangedV1,
     };
-    use oxplow_domain::{Envelope, TaskStatus};
+    use oxplow_domain::work_items::CanonicalState;
+    use oxplow_domain::Envelope;
     use serde_json::Value;
     use std::path::Path;
 
     const HEAD: &str = "manifest: 2\nname: acme\nsharing: private\nintent: { purpose: Effects., origin: null, examples: [] }\neffects:\n";
 
     /// Marks a finished item's title.
-    const MARK_DONE: &str = "  - id: mark-done\n    summary: Mark a finished item.\n    on: [work_item.transitioned]\n    where: { to: done }\n    input: \"SELECT title FROM v_work_item WHERE ref = :work_item\"\n    entry: mark.star\n";
+    const MARK_DONE: &str = "  - id: mark-done\n    summary: Mark a finished item.\n    on: [work_item.state_changed]\n    where: { to: done }\n    input: \"SELECT title FROM v_work_item WHERE ref = :work_item\"\n    entry: mark.star\n";
     const MARK: &str = "def transform(x):\n    ref = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": ref, \"title\": x[\"rows\"][0][\"title\"] + \" (done)\"}}]}\n";
 
     fn extension(root: &Path, effects: &str, files: &[(&str, &str)]) {
@@ -980,12 +981,11 @@ mod tests {
         svc.event_log_store.get(id).await.unwrap().unwrap()
     }
 
-    fn transitioned(task: oxplow_domain::TaskId, to: TaskStatus) -> Envelope {
-        Envelope::typed::<WorkItemTransitioned>(
+    fn state_changed(task: oxplow_domain::TaskId, to: CanonicalState) -> Envelope {
+        Envelope::typed::<WorkItemStateChanged>(
             "human",
-            &WorkItemTransitionedV1 {
+            &WorkItemStateChangedV1 {
                 work_item: oxplow_domain::refs::build::work_item_ref(task),
-                from: TaskStatus::InProgress,
                 to,
             },
         )
@@ -1011,8 +1011,8 @@ mod tests {
         approve(svc).await;
         let before = title(&fx).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
-        let ev = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
-        assert!(consumer.handles("work_item.transitioned"));
+        let ev = log(svc, state_changed(fx.task, CanonicalState::Done)).await;
+        assert!(consumer.handles("work_item.state_changed"));
         consumer.handle(&ev).await.unwrap();
         consumer.handle(&ev).await.unwrap();
         assert_eq!(title(&fx).await, format!("{before} (done)"));
@@ -1044,18 +1044,18 @@ mod tests {
     async fn an_effects_input_binds_the_events_id_and_seq() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
-        let stamp = "  - id: stamp\n    summary: Stamp the event's seq.\n    on: [work_item.transitioned]\n    where: { to: done }\n    input: \"SELECT seq, type FROM v_event WHERE id = :event_id AND seq = :event_seq\"\n    entry: stamp.star\n";
+        let stamp = "  - id: stamp\n    summary: Stamp the event's seq.\n    on: [work_item.state_changed]\n    where: { to: done }\n    input: \"SELECT seq, type FROM v_event WHERE id = :event_id AND seq = :event_seq\"\n    entry: stamp.star\n";
         let script = "def transform(x):\n    ref = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": ref, \"title\": x[\"rows\"][0][\"type\"] + \" #\" + str(x[\"rows\"][0][\"seq\"])}}]}\n";
         extension(&svc.layout.project_dir, stamp, &[("stamp.star", script)]);
         approve(svc).await;
-        let ev = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        let ev = log(svc, state_changed(fx.task, CanonicalState::Done)).await;
         EffectTriggers::new(Arc::downgrade(svc))
             .handle(&ev)
             .await
             .unwrap();
         assert_eq!(
             title(&fx).await,
-            format!("work_item.transitioned #{}", ev.seq)
+            format!("work_item.state_changed #{}", ev.seq)
         );
         // The dry run (`plugin test`, a change's review) binds them alike.
         let (_, decl) = effects(svc).into_iter().next().unwrap();
@@ -1070,7 +1070,7 @@ mod tests {
         .await
         .unwrap();
         assert!(
-            format!("{reaction:?}").contains(&format!("work_item.transitioned #{}", ev.seq)),
+            format!("{reaction:?}").contains(&format!("work_item.state_changed #{}", ev.seq)),
             "{reaction:?}"
         );
     }
@@ -1086,7 +1086,7 @@ mod tests {
         approve(svc).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
         for _ in 0..2 {
-            let ev = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+            let ev = log(svc, state_changed(fx.task, CanonicalState::Done)).await;
             consumer.handle(&ev).await.unwrap();
         }
         assert_eq!(consumer.folder_hashes(), 1);
@@ -1097,7 +1097,7 @@ mod tests {
             format!("{MARK}# edited\n"),
         )
         .unwrap();
-        let ev = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        let ev = log(svc, state_changed(fx.task, CanonicalState::Done)).await;
         consumer.handle(&ev).await.unwrap();
         assert_eq!(consumer.folder_hashes(), 2);
         assert_eq!(
@@ -1121,7 +1121,7 @@ mod tests {
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
         for _ in 0..3 {
             assert!(consumer.after().is_empty());
-            assert!(consumer.after_for("work_item.transitioned").is_empty());
+            assert!(consumer.after_for("work_item.state_changed").is_empty());
         }
         assert_eq!(consumer.unknown_after_warnings(), 1);
     }
@@ -1146,11 +1146,11 @@ mod tests {
         let svc = &fx.svc;
         extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
-        let early = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        let early = log(svc, state_changed(fx.task, CanonicalState::Done)).await;
         consumer.handle(&early).await.unwrap();
         approve(svc).await;
         consumer.handle(&early).await.unwrap();
-        let blocked = log(svc, transitioned(fx.task, TaskStatus::Blocked)).await;
+        let blocked = log(svc, state_changed(fx.task, CanonicalState::Blocked)).await;
         consumer.handle(&blocked).await.unwrap();
         assert_eq!(
             rows(svc, "SELECT count(*) FROM v_effect_run").await,
@@ -1167,7 +1167,7 @@ mod tests {
         extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
         approve(svc).await;
         let before = title(&fx).await;
-        let ev = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        let ev = log(svc, state_changed(fx.task, CanonicalState::Done)).await;
         interrupt(svc, &ev).await;
         assert_eq!(title(&fx).await, before, "not sent again");
         let run = rows(svc, "SELECT state, reason FROM v_effect_run").await;
@@ -1199,12 +1199,12 @@ mod tests {
                     .unwrap()
             }
         };
-        let cut_off = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        let cut_off = log(svc, state_changed(fx.task, CanonicalState::Done)).await;
         claim(&cut_off, ReactionOrigin::Backfill).await;
-        let live = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        let live = log(svc, state_changed(fx.task, CanonicalState::Done)).await;
         claim(&live, ReactionOrigin::Live).await;
         // tsk935: an automatic attempt cut off the same way is recovered too.
-        let auto = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        let auto = log(svc, state_changed(fx.task, CanonicalState::Done)).await;
         claim(&auto, ReactionOrigin::Auto).await;
 
         assert_eq!(recover_interrupted(svc).await.unwrap(), 2);
@@ -1308,7 +1308,7 @@ mod tests {
         let keys: Arc<parking_lot::Mutex<Vec<Option<String>>>> = Arc::default();
         let fail = Arc::new(std::sync::atomic::AtomicBool::new(true));
         register_probe(svc, keys.clone(), fail.clone());
-        let ev = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        let ev = log(svc, state_changed(fx.task, CanonicalState::Done)).await;
         EffectTriggers::new(Arc::downgrade(svc))
             .handle(&ev)
             .await
@@ -1391,7 +1391,7 @@ mod tests {
         )
         .unwrap();
         svc.commands.register(note).unwrap();
-        let ev = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        let ev = log(svc, state_changed(fx.task, CanonicalState::Done)).await;
         EffectTriggers::new(Arc::downgrade(svc))
             .handle(&ev)
             .await
@@ -1440,7 +1440,7 @@ mod tests {
         approve(svc).await;
         register(svc);
         let before = title(&fx).await;
-        let ev = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        let ev = log(svc, state_changed(fx.task, CanonicalState::Done)).await;
         interrupt(svc, &ev).await;
         assert_eq!(title(&fx).await, before);
 
@@ -1502,7 +1502,7 @@ mod tests {
             .unwrap();
         assert_eq!(title(&fx).await, format!("{before} (done)"));
         // A reaction never made isn't one to retry either.
-        let other = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        let other = log(svc, state_changed(fx.task, CanonicalState::Done)).await;
         let refused = retry(svc, &human, &other, true).await.unwrap_err();
         assert!(refused.to_string().contains("hasn't reacted"), "{refused}");
     }
@@ -1516,7 +1516,7 @@ mod tests {
         extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
         approve(svc).await;
         register(svc);
-        let ev = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        let ev = log(svc, state_changed(fx.task, CanonicalState::Done)).await;
         interrupt(svc, &ev).await;
         let human = oxplow_domain::Actor::Human;
 
@@ -1648,7 +1648,7 @@ mod tests {
             &[("drop.star", script)],
         );
         approve(svc).await;
-        let ev = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        let ev = log(svc, state_changed(fx.task, CanonicalState::Done)).await;
         EffectTriggers::new(Arc::downgrade(svc))
             .handle(&ev)
             .await
@@ -1682,7 +1682,7 @@ mod tests {
         approve(svc).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
         for _ in 0..3 {
-            let ev = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+            let ev = log(svc, state_changed(fx.task, CanonicalState::Done)).await;
             consumer.handle(&ev).await.unwrap();
         }
         assert_eq!(
@@ -1693,7 +1693,7 @@ mod tests {
             .await,
             json!([["effect", "disabled"]])
         );
-        let fourth = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        let fourth = log(svc, state_changed(fx.task, CanonicalState::Done)).await;
         consumer.handle(&fourth).await.unwrap();
         assert_eq!(
             rows(svc, "SELECT count(*) FROM v_effect_run").await,
@@ -1746,7 +1746,7 @@ mod tests {
         approve(svc).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
         for _ in 0..3 {
-            let ev = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+            let ev = log(svc, state_changed(fx.task, CanonicalState::Done)).await;
             consumer.handle(&ev).await.unwrap();
         }
         assert_eq!(
@@ -1929,10 +1929,10 @@ mod tests {
         let svc = &fx.svc;
         extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
         register(svc);
-        let past = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        let past = log(svc, state_changed(fx.task, CanonicalState::Done)).await;
         approve(svc).await;
         // The live consumer hasn't reached this one yet.
-        let after = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        let after = log(svc, state_changed(fx.task, CanonicalState::Done)).await;
         let plan = run_as_person(svc, BACKFILL_PLAN, json!({ "effect": "acme/mark-done" }))
             .await
             .unwrap();
@@ -1992,10 +1992,10 @@ mod tests {
         let svc = &fx.svc;
         extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
         for _ in 0..5 {
-            log(svc, transitioned(fx.task, TaskStatus::Blocked)).await;
+            log(svc, state_changed(fx.task, CanonicalState::Blocked)).await;
         }
-        let first = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
-        let last = log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+        let first = log(svc, state_changed(fx.task, CanonicalState::Done)).await;
+        let last = log(svc, state_changed(fx.task, CanonicalState::Done)).await;
         approve(svc).await;
         let (_, decl) = find_effect(svc, "acme/mark-done").unwrap();
         let vocabulary = svc.vocabulary.current();
@@ -2072,9 +2072,9 @@ mod tests {
         // excludes.
         let mut past = Vec::new();
         for _ in 0..3 {
-            past.push(log(svc, transitioned(fx.task, TaskStatus::Done)).await);
+            past.push(log(svc, state_changed(fx.task, CanonicalState::Done)).await);
         }
-        log(svc, transitioned(fx.task, TaskStatus::Blocked)).await;
+        log(svc, state_changed(fx.task, CanonicalState::Blocked)).await;
         approve(svc).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
         for ev in &past {
@@ -2169,7 +2169,7 @@ mod tests {
         register(svc);
         let mut past = Vec::new();
         for _ in 0..3 {
-            past.push(log(svc, transitioned(fx.task, TaskStatus::Done)).await);
+            past.push(log(svc, state_changed(fx.task, CanonicalState::Done)).await);
         }
         approve(svc).await;
         let planned = |input: Value| async move {
@@ -2221,7 +2221,7 @@ mod tests {
         extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", broken)]);
         register(svc);
         for _ in 0..5 {
-            log(svc, transitioned(fx.task, TaskStatus::Done)).await;
+            log(svc, state_changed(fx.task, CanonicalState::Done)).await;
         }
         let input = json!({ "effect": "acme/mark-done" });
         let unapproved = run_as_person(svc, BACKFILL, input.clone())

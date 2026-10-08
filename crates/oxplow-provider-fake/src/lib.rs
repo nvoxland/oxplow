@@ -885,6 +885,7 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
                     field: "/ref".into(),
                     message: format!("no item `{item_ref}`"),
                 })?;
+            let mut result = json!({ "ref": item_ref });
             match command {
                 "update" => {
                     if let Some(t) = input.get("title").and_then(Value::as_str) {
@@ -933,8 +934,11 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
                 }
                 "comment" => {
                     let comments = item.record.comments.get_or_insert_with(Vec::new);
+                    let id = format!("c{}", comments.len() + 1);
+                    // The answer names it: the list's own id for the comment.
+                    result["comment"] = Value::String(id.clone());
                     comments.push(CommentRecord {
-                        id: format!("c{}", comments.len() + 1),
+                        id,
                         body: str_field(&input, "body")?,
                         author: None,
                         created_at: None,
@@ -954,7 +958,7 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
             // Only a write that happened moves its revision.
             item.rev = rev;
             let events = vec![recorded(&item.record)];
-            (json!({ "ref": item_ref }), events)
+            (result, events)
         }
         other => {
             return Err(ProtocolError::InvalidInput {

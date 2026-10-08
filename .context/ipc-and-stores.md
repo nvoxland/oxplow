@@ -703,7 +703,8 @@ each other:
    or a writer's drift is undone at the next start after a migration or
    under a new build (it doesn't rerun when neither changed).
 4. **Event-driven projection** where the write logs an event. A task
-   transition logs `work_item.transitioned` in its transaction, and
+   work-item command logs core's `work_item.created` / `edited` in its
+   transaction (`.context/work-items.md`), and
    `PageRefWorkItemConsumer` (`oxplow-app/src/page_ref_consumers.rs`)
    re-projects the body slice through the
    `replace_source_for_ref_types_tx` core when the pump delivers it —

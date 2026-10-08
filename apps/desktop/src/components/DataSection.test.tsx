@@ -28,7 +28,7 @@ mock.module("../api.js", () => ({
     return sql.includes("FROM v_effect_run")
       ? {
           columns: ["effect", "event_id", "event_seq", "attempt", "reason", "event_type"],
-          rows: [["acme/mark-done", "e1", 52, 1, "interrupted: a step outside oxplow may have run", "work_item.transitioned"]],
+          rows: [["acme/mark-done", "e1", 52, 1, "interrupted: a step outside oxplow may have run", "work_item.state_changed"]],
           truncated: false,
           reads: { models: ["v_effect_run", "v_event"], tables: [], measures: [] },
           freshness: {},
@@ -158,7 +158,7 @@ test("Delivery retries at once and discards only once confirmed", async () => {
 test("Delivery lists a failed reaction and retries it only once confirmed", async () => {
   const view = render(<DataSection />);
   const row = await waitFor(() => view.getByTestId("reaction-row-acme/mark-done-e1"));
-  expect(row.textContent).toContain("acme/mark-done failed on work_item.transitioned (event 52)");
+  expect(row.textContent).toContain("acme/mark-done failed on work_item.state_changed (event 52)");
   expect(row.textContent).toContain("interrupted: a step outside oxplow may have run");
   fireEvent.click(view.getByTestId("reaction-retry-acme/mark-done-e1-trigger"));
   expect(ran).toEqual([]);

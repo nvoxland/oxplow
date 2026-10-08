@@ -18,20 +18,23 @@
 //! ([`filing_thread`]). `reorder` and `move` stay
 //! oxplow's own (`Tx`): they place an item in oxplow's lists.
 //!
-//! oxplow's cores: `oxplow.work_item.transition` is `task_store::set_status_tx`
-//! — the row and `work_item.transitioned` commit in the bus's transaction
-//! with the audit row, caused by the run's `command.executed`.
+//! oxplow's cores: `oxplow.work_item.transition` is
+//! `task_store::set_status_tx`, run in the bus's transaction with the
+//! audit row.
 //!
-//! Every provider's `create`, `update` and `transition` log
-//! `work_item.state_changed` when they put an item in a state: core logs
-//! it here, the same way for oxplow and for an external provider. An item's
-//! state never opens or closes an effort here; the effort policy reacts to
-//! the event (`crate::effort_policy`).
+//! What every verb did is logged in the interface's words, the same way
+//! for every list ([`canonical_events`]): `work_item.created`, `.edited`,
+//! `.state_changed`, `.linked`, `.commented` and `.deleted`, caused by the
+//! run's `command.executed`. A list logs none of them itself; another
+//! list's answer adds `work_item.recorded`. An item's state never opens
+//! or closes an effort here; the effort policy reacts to
+//! `work_item.state_changed` (`crate::effort_policy`).
 
 use crate::link_check::LinkDeps;
 use oxplow_domain::events::schema::{
-    EventType as _, WorkItemCommented, WorkItemCommentedV1, WorkItemLinked, WorkItemLinkedV1,
-    WorkItemRecorded, WorkItemStateChanged, WorkItemStateChangedV1,
+    EventType as _, WorkItemCommented, WorkItemCommentedV2, WorkItemCreated, WorkItemCreatedV2,
+    WorkItemDeleted, WorkItemDeletedV2, WorkItemEdited, WorkItemEditedV2, WorkItemLinked,
+    WorkItemLinkedV2, WorkItemRecorded, WorkItemStateChanged, WorkItemStateChangedV1,
 };
 use oxplow_domain::events::Envelope;
 use oxplow_domain::refs::build::{task_of_work_item_ref, work_item_ref};
@@ -535,11 +538,7 @@ fn dispatching(
     target: Target,
     tx: Arc<TxHandler>,
 ) -> Command {
-    let tx = if STATE_VERBS.contains(&verb) {
-        logging_state(verb, tx)
-    } else {
-        tx
-    };
+    let tx = logging_canonical(verb, tx);
     // A loose id is the active list's, on every path (route, inside the
     // transaction, through the provider).
     let tx = resolving(registry.clone(), tx);
@@ -600,12 +599,14 @@ fn dispatching(
                 })
                 .transpose()?;
             let mut events = out.events;
-            if let Some(changed) = external_state_change(verb, &input, &out.result, &events) {
-                events.push(
-                    Envelope::typed::<WorkItemStateChanged>(invocation.actor.source(), &changed)
-                        .with_subject([changed.work_item.clone()]),
-                );
-            }
+            let state = external_state(verb, &input, &out.result, &events);
+            events.extend(canonical_events(
+                &invocation.actor.source(),
+                verb,
+                &input,
+                &out.result,
+                state,
+            ));
             Ok(HandlerOutput {
                 result: out.result,
                 inverse,
@@ -626,20 +627,20 @@ fn dispatching(
     .expect("a work_item command registers")
 }
 
-/// The verbs that can put an item in a state, each logging
-/// `work_item.state_changed` when it does — for every provider alike.
+/// The verbs that can put an item in a state.
 const STATE_VERBS: [&str; 3] = ["create", "update", "transition"];
 
-/// The item a state verb wrote: a create's from its result, else the
-/// input's `ref`.
+/// The item a verb wrote: a create's from its result, else the input's
+/// `ref`.
 fn written_ref(verb: &str, input: &Value, result: &Value) -> Option<String> {
     let source = if verb == "create" { result } else { input };
     source["ref"].as_str().map(str::to_string)
 }
 
 /// A provider's core in the bus's transaction: the item's state is read
-/// before and after it runs, and a change is logged.
-fn logging_state(verb: &'static str, tx: Arc<TxHandler>) -> Arc<TxHandler> {
+/// before and after it runs, and the interface's events for what it did
+/// are logged with it ([`canonical_events`]).
+fn logging_canonical(verb: &'static str, tx: Arc<TxHandler>) -> Arc<TxHandler> {
     Arc::new(move |ctx: &TxCtx<'_>, input: Value| {
         let state_of = |item_ref: &str| -> Result<Option<CanonicalState>, CommandError> {
             use rusqlite::OptionalExtension;
@@ -656,36 +657,38 @@ fn logging_state(verb: &'static str, tx: Arc<TxHandler>) -> Arc<TxHandler> {
                 })?;
             Ok(state.and_then(|s| serde_json::from_value(Value::String(s)).ok()))
         };
+        let states = STATE_VERBS.contains(&verb);
         let before = match input["ref"].as_str() {
-            Some(item_ref) if verb != "create" => state_of(item_ref)?,
+            Some(item_ref) if states && verb != "create" => state_of(item_ref)?,
             _ => None,
         };
         let mut out = tx(ctx, input.clone())?;
-        if let Some(item_ref) = written_ref(verb, &input, &out.result) {
-            if let Some(to) = state_of(&item_ref)?.filter(|&to| Some(to) != before) {
-                out.events.push(
-                    ctx.events
-                        .typed::<WorkItemStateChanged>(&WorkItemStateChangedV1 {
-                            work_item: item_ref.clone(),
-                            to,
-                        })
-                        .with_subject([item_ref]),
-                );
-            }
-        }
+        let state = match written_ref(verb, &input, &out.result) {
+            Some(item_ref) if states => state_of(&item_ref)?.filter(|&to| Some(to) != before),
+            _ => None,
+        };
+        out.events.extend(canonical_events(
+            &ctx.actor.source(),
+            verb,
+            &input,
+            &out.result,
+            state,
+        ));
         Ok(out)
     })
 }
 
-/// What another provider's state verb did, from the item its answer
-/// recorded. oxplow can't read that provider's prior state, so a create,
-/// a transition and an update naming a state each count as a change.
-fn external_state_change(
+/// The state another provider's state verb put its item in, from the item
+/// its answer recorded. oxplow can't read that provider's prior state, so
+/// a create, a transition and an update naming a state each count as a
+/// change; a create its answer recorded no item for is in the state it
+/// asked for.
+fn external_state(
     verb: &str,
     input: &Value,
     result: &Value,
     events: &[Envelope],
-) -> Option<WorkItemStateChangedV1> {
+) -> Option<CanonicalState> {
     let names_state = match verb {
         "create" | "transition" => true,
         "update" => input.get("state").is_some() || input.get("native_state").is_some(),
@@ -695,7 +698,7 @@ fn external_state_change(
         return None;
     }
     let item_ref = written_ref(verb, input, result)?;
-    let to = events
+    let recorded = events
         .iter()
         .filter(|e| e.event_type == WorkItemRecorded::TYPE)
         .filter_map(|e| {
@@ -704,13 +707,121 @@ fn external_state_change(
             )
             .ok()
         })
-        .find(|r| r.item.item_ref == item_ref)?
-        .item
-        .state;
-    Some(WorkItemStateChangedV1 {
-        work_item: item_ref,
-        to,
-    })
+        .find(|r| r.item.item_ref == item_ref)
+        .map(|r| r.item.state);
+    match verb {
+        "create" => recorded.or_else(|| {
+            Some(serde_json::from_value(input["state"].clone()).unwrap_or(CanonicalState::Todo))
+        }),
+        _ => recorded,
+    }
+}
+
+/// The interface's events for what `verb` did, logged by core the same
+/// way for every list (`.context/work-items.md`): from the verb, its
+/// input, the list's answer and `state` — the state the verb put the item
+/// in, when it changed (always, for a create).
+///
+/// - `create`: `work_item.created` and `work_item.state_changed`.
+/// - `update`: `work_item.edited` naming the fields the input set
+///   (`title`, `body`, `parent`, `native.<name>`), and
+///   `work_item.state_changed` when the state moved.
+/// - `transition`: `work_item.state_changed` when the state moved.
+/// - `link`, `comment`, `delete`: `work_item.linked`, `.commented`
+///   (naming the answer's `comment`, when it gives one), `.deleted`.
+/// - `reorder`, `move`: `work_item.edited` naming `rank`, or `list` and
+///   `rank`.
+fn canonical_events(
+    source: &str,
+    verb: &str,
+    input: &Value,
+    result: &Value,
+    state: Option<CanonicalState>,
+) -> Vec<Envelope> {
+    let Some(item_ref) = written_ref(verb, input, result) else {
+        return Vec::new();
+    };
+    let about = |env: Envelope| env.with_subject([item_ref.clone()]);
+    let edited = |fields: Vec<String>| {
+        about(Envelope::typed::<WorkItemEdited>(
+            source,
+            &WorkItemEditedV2 {
+                work_item: item_ref.clone(),
+                fields,
+            },
+        ))
+    };
+    let mut events = Vec::new();
+    match verb {
+        "create" => {
+            if let Some(state) = state {
+                events.push(about(Envelope::typed::<WorkItemCreated>(
+                    source,
+                    &WorkItemCreatedV2 {
+                        work_item: item_ref.clone(),
+                        state,
+                    },
+                )));
+            }
+        }
+        "update" => {
+            let mut fields: Vec<String> = [
+                ("title", "title"),
+                ("body", "body"),
+                ("parent_ref", "parent"),
+            ]
+            .into_iter()
+            .filter(|(key, _)| input.get(key).is_some())
+            .map(|(_, field)| field.to_string())
+            .collect();
+            if let Some(Value::Object(native)) = input.get("native") {
+                fields.extend(native.keys().map(|k| format!("native.{k}")));
+            }
+            if !fields.is_empty() {
+                events.push(edited(fields));
+            }
+        }
+        "link" => {
+            let target = input["target"].as_str().unwrap_or_default().to_string();
+            events.push(
+                Envelope::typed::<WorkItemLinked>(
+                    source,
+                    &WorkItemLinkedV2 {
+                        work_item: item_ref.clone(),
+                        target: target.clone(),
+                        link_type: input["link_type"].as_str().unwrap_or_default().into(),
+                    },
+                )
+                .with_subject([item_ref.clone(), target]),
+            );
+        }
+        "comment" => events.push(about(Envelope::typed::<WorkItemCommented>(
+            source,
+            &WorkItemCommentedV2 {
+                work_item: item_ref.clone(),
+                comment: result["comment"].as_str().map(str::to_string),
+            },
+        ))),
+        "delete" => events.push(about(Envelope::typed::<WorkItemDeleted>(
+            source,
+            &WorkItemDeletedV2 {
+                work_item: item_ref.clone(),
+            },
+        ))),
+        "reorder" => events.push(edited(vec!["rank".into()])),
+        "move" => events.push(edited(vec!["list".into(), "rank".into()])),
+        _ => {}
+    }
+    if let Some(to) = state {
+        events.push(about(Envelope::typed::<WorkItemStateChanged>(
+            source,
+            &WorkItemStateChangedV1 {
+                work_item: item_ref.clone(),
+                to,
+            },
+        )));
+    }
+    events
 }
 
 fn spec_name(verb: &str) -> String {
@@ -800,14 +911,12 @@ fn tx_transition(registry: WorkItemsRegistry) -> Arc<TxHandler> {
             })?;
         let now = Timestamp::now();
         let set = |status: TaskStatus| {
-            oxplow_db::task_store::set_status_tx(ctx.conn, &ctx.events, id, status, now).map_err(
-                |e| match e {
-                    oxplow_domain::DomainError::NotFound => CommandError::Failed {
-                        message: format!("task {id} not found"),
-                    },
-                    other => CommandError::from(other),
+            oxplow_db::task_store::set_status_tx(ctx.conn, id, status, now).map_err(|e| match e {
+                oxplow_domain::DomainError::NotFound => CommandError::Failed {
+                    message: format!("task {id} not found"),
                 },
-            )
+                other => CommandError::from(other),
+            })
         };
         // An archive keeps whether the task was completed; archiving it
         // as `done` (or `canceled`) when it isn't (or is) passes through
@@ -912,13 +1021,10 @@ pub fn create_spec() -> CommandSpec {
     )
 }
 
-/// oxplow's core: `insert_logged_tx` — the row (at the end of its list)
-/// and `work_item.created`, caused by the run. An agent's task is authored
-/// `agent`. The result carries the body's `link_warnings`.
 /// Who authored a task an actor files: a person (`user`), an agent
 /// (`agent`, a lens acting for one included), or neither — an effect or
-/// oxplow itself (P11, tsk956): the creating actor is on the run's audit
-/// and its `work_item.created`, and the task isn't shown as the person's.
+/// oxplow itself: the creating actor is on the run's audit and its
+/// `work_item.created`, and the task isn't shown as the person's.
 fn task_author(actor: &oxplow_domain::Actor) -> Option<oxplow_domain::TaskAuthor> {
     use oxplow_domain::Actor;
     match actor {
@@ -944,6 +1050,8 @@ fn note_author(actor: &oxplow_domain::Actor) -> String {
     }
 }
 
+/// oxplow's core: the row, at the end of its list. An agent's task is
+/// authored `agent`. The result carries the body's `link_warnings`.
 fn tx_create(registry: WorkItemsRegistry, links: LinkDeps) -> Arc<TxHandler> {
     Arc::new(move |ctx: &TxCtx<'_>, input| {
         let input: WorkItemCreateInput = parse(input)?;
@@ -975,8 +1083,7 @@ fn tx_create(registry: WorkItemsRegistry, links: LinkDeps) -> Arc<TxHandler> {
             note_count: 0,
             author: task_author(ctx.actor),
         };
-        let id = oxplow_db::task_store::insert_logged_tx(ctx.conn, &ctx.events, &item)
-            .map_err(CommandError::from)?;
+        let id = oxplow_db::task_store::insert_tx(ctx.conn, &item).map_err(CommandError::from)?;
         let row = oxplow_db::task_store::get_task_tx(ctx.conn, id)
             .map_err(CommandError::from)?
             .ok_or_else(|| CommandError::Failed {
@@ -1052,10 +1159,9 @@ pub fn update_spec() -> CommandSpec {
     )
 }
 
-/// oxplow's core: `update_with_status_tx` — `work_item.edited` for the
-/// fields, then the status move with everything it implies, all caused
-/// by the run. The inverse restores exactly what was given. The result
-/// carries the body's `link_warnings` (tsk775).
+/// oxplow's core: `update_with_status_tx` — the fields, then the status
+/// move. The inverse restores exactly what was given. The result carries
+/// the body's `link_warnings`.
 fn tx_update(registry: WorkItemsRegistry, links: LinkDeps) -> Arc<TxHandler> {
     Arc::new(move |ctx: &TxCtx<'_>, input| {
         let input: WorkItemUpdateInput = parse(input)?;
@@ -1091,9 +1197,8 @@ fn tx_update(registry: WorkItemsRegistry, links: LinkDeps) -> Arc<TxHandler> {
             item.parent_id = p;
         }
         item.updated_at = now;
-        let after =
-            oxplow_db::task_store::update_with_status_tx(ctx.conn, &ctx.events, &item, status, now)
-                .map_err(not_found)?;
+        let after = oxplow_db::task_store::update_with_status_tx(ctx.conn, &item, status, now)
+            .map_err(not_found)?;
         let inverse = WorkItemUpdateInput {
             item_ref: input.item_ref.clone(),
             title: input.title.as_ref().map(|_| before.title.clone()),
@@ -1151,9 +1256,8 @@ pub struct WorkItemLinkInput {
     pub link_type: String,
 }
 
-/// oxplow's core: `task_satellite::create_link_tx`, logging
-/// `work_item.linked`. The link belongs to a thread: the caller's, else
-/// the linked task's, else the target's.
+/// oxplow's core: `task_satellite::create_link_tx`. The link belongs to a
+/// thread: the caller's, else the linked task's, else the target's.
 fn tx_link(registry: WorkItemsRegistry) -> Arc<TxHandler> {
     Arc::new(move |ctx: &TxCtx<'_>, input| {
         let input: WorkItemLinkInput = parse(input)?;
@@ -1190,18 +1294,10 @@ fn tx_link(registry: WorkItemsRegistry) -> Arc<TxHandler> {
         };
         let link = oxplow_db::task_satellite::create_link_tx(ctx.conn, thread, from, to, link_type)
             .map_err(CommandError::from)?;
-        let event = ctx
-            .events
-            .typed::<WorkItemLinked>(&WorkItemLinkedV1 {
-                work_item: input.item_ref.clone(),
-                target: input.target.clone(),
-                link_type: input.link_type.clone(),
-            })
-            .with_subject([input.item_ref.clone(), input.target.clone()]);
         Ok(HandlerOutput {
             result: serde_json::to_value(&link).expect("TaskLink serializes"),
             inverse: None,
-            events: vec![event],
+            events: Vec::new(),
             after_commit: None,
             unchanged: false,
         })
@@ -1241,8 +1337,9 @@ pub struct WorkItemCommentInput {
     pub body: String,
 }
 
-/// oxplow's core: `task_satellite::add_task_note_tx`, logging
-/// `work_item.commented`; the note is authored by the actor's kind.
+/// oxplow's core: `task_satellite::add_task_note_tx`; the note is
+/// authored by the actor's kind. The result names it as `comment`, the
+/// list's own id for it.
 fn tx_comment(registry: WorkItemsRegistry) -> Arc<TxHandler> {
     Arc::new(move |ctx: &TxCtx<'_>, input| {
         let input: WorkItemCommentInput = parse(input)?;
@@ -1259,17 +1356,12 @@ fn tx_comment(registry: WorkItemsRegistry) -> Arc<TxHandler> {
             &note_author(ctx.actor),
         )
         .map_err(CommandError::from)?;
-        let event = ctx
-            .events
-            .typed::<WorkItemCommented>(&WorkItemCommentedV1 {
-                work_item: input.item_ref.clone(),
-                comment: format!("task_note:{}", note.id),
-            })
-            .with_subject([input.item_ref.clone()]);
+        let mut result = serde_json::to_value(&note).expect("TaskNote serializes");
+        result["comment"] = Value::String(note.id.to_string());
         Ok(HandlerOutput {
-            result: serde_json::to_value(&note).expect("TaskNote serializes"),
+            result,
             inverse: None,
-            events: vec![event],
+            events: Vec::new(),
             after_commit: None,
             unchanged: false,
         })
@@ -1305,19 +1397,19 @@ pub struct WorkItemDeleteInput {
     pub item_ref: String,
 }
 
-/// oxplow's core: `soft_delete_tx`; `work_item.deleted@1` is logged
-/// caused by the run.
+/// oxplow's core: `soft_delete_tx`.
 fn tx_delete(registry: WorkItemsRegistry) -> Arc<TxHandler> {
     Arc::new(move |ctx: &TxCtx<'_>, input| {
         let input: WorkItemDeleteInput = parse(input)?;
         let id = oxplow_task(&registry, &input.item_ref, "/ref")?;
-        oxplow_db::task_store::soft_delete_tx(ctx.conn, &ctx.events, id, Timestamp::now())
-            .map_err(|e| match e {
+        oxplow_db::task_store::soft_delete_tx(ctx.conn, id, Timestamp::now()).map_err(
+            |e| match e {
                 oxplow_domain::DomainError::NotFound => {
                     invalid_at("/ref", format!("no work item `{}`", input.item_ref))
                 }
                 other => CommandError::from(other),
-            })?;
+            },
+        )?;
         Ok(HandlerOutput {
             result: json!({ "ref": input.item_ref }),
             inverse: None,
@@ -1457,18 +1549,17 @@ fn place(
             return Err(invalid_at("/to", format!("no thread `{thread}`")));
         }
     }
-    let placed =
-        oxplow_db::task_store::place_task_tx(ctx.conn, &ctx.events, id, dest, at, Timestamp::now())
-            .map_err(|e| match e {
-                oxplow_domain::DomainError::NotFound => {
-                    invalid_at("/ref", format!("no work item {}", work_item_ref(id)))
-                }
-                oxplow_domain::DomainError::Invalid(message) => CommandError::Invalid {
-                    field: None,
-                    message,
-                },
-                other => CommandError::from(other),
-            })?;
+    let placed = oxplow_db::task_store::place_task_tx(ctx.conn, id, dest, at, Timestamp::now())
+        .map_err(|e| match e {
+            oxplow_domain::DomainError::NotFound => {
+                invalid_at("/ref", format!("no work item {}", work_item_ref(id)))
+            }
+            oxplow_domain::DomainError::Invalid(message) => CommandError::Invalid {
+                field: None,
+                message,
+            },
+            other => CommandError::from(other),
+        })?;
     Ok(placed)
 }
 
@@ -2138,6 +2229,17 @@ mod tests {
             .unwrap();
         assert_eq!(commented.result["author"], "agent");
         let events = fx.svc.event_log_store.read_after(0, 500).await.unwrap();
+        // The comment event names the note by the list's own id for it.
+        let note = commented.result["comment"].as_str().unwrap().to_string();
+        assert!(note.starts_with("not"), "{note}");
+        let logged = events
+            .iter()
+            .find(|e| e.envelope.cause == commented.event_id)
+            .unwrap();
+        assert_eq!(
+            logged.envelope.payload,
+            json!({ "work_item": from, "comment": note })
+        );
         for (out, event_type) in [
             (&linked, "work_item.linked"),
             (&commented, "work_item.commented"),
@@ -2158,9 +2260,9 @@ mod tests {
         assert!(err.to_string().contains("body"), "{err}");
     }
 
-    /// A transition is one transaction with its audit: the status,
-    /// `work_item.transitioned` and core's `work_item.state_changed` carry
-    /// the actor's source and are caused by the run's `command.executed`.
+    /// A transition is one transaction with its audit: the status and
+    /// core's `work_item.state_changed` carry the actor's source and are
+    /// caused by the run's `command.executed`.
     /// The effort policy closes the item's effort after it, as a reaction.
     #[tokio::test]
     async fn a_transition_commits_with_its_audit_and_names_its_cause() {
@@ -2191,13 +2293,7 @@ mod tests {
             .map(|e| (e.envelope.event_type.as_str(), e.envelope.source.as_str()))
             .collect();
         let source = format!("agent:{}", fx.thread);
-        assert_eq!(
-            caused,
-            vec![
-                ("work_item.transitioned", source.as_str()),
-                ("work_item.state_changed", source.as_str()),
-            ]
-        );
+        assert_eq!(caused, vec![("work_item.state_changed", source.as_str())]);
         assert!(events
             .iter()
             .any(|e| e.envelope.id == executed && e.envelope.event_type == "command.executed"));
@@ -2245,17 +2341,23 @@ mod tests {
         assert_eq!(out.result["priority"], "urgent");
         let executed = out.event_id.clone().unwrap();
         let events = fx.svc.event_log_store.read_after(0, 100).await.unwrap();
-        let caused: Vec<&str> = events
+        let caused: Vec<(&str, &serde_json::Value)> = events
             .iter()
             .filter(|e| e.envelope.cause.as_ref() == Some(&executed))
-            .map(|e| e.envelope.event_type.as_str())
+            .map(|e| (e.envelope.event_type.as_str(), &e.envelope.payload))
             .collect();
+        let item = work_item_ref(fx.task);
         assert_eq!(
             caused,
             vec![
-                "work_item.edited",
-                "work_item.transitioned",
-                "work_item.state_changed"
+                (
+                    "work_item.edited",
+                    &json!({ "work_item": item, "fields": ["title", "native.priority"] })
+                ),
+                (
+                    "work_item.state_changed",
+                    &json!({ "work_item": item, "to": "blocked" })
+                ),
             ]
         );
 

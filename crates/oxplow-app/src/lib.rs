@@ -858,7 +858,7 @@ impl Services {
             },
         );
         let threads = ThreadService::new(thread_store.clone());
-        let tasks = TaskService::new(task_store.clone()).with_event_pump(event_pump.clone());
+        let tasks = TaskService::new(task_store.clone());
 
         let hook_ingest = HookIngestService::new(
             db.clone(),

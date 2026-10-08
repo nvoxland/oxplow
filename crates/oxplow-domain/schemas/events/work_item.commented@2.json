@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`work_item.commented@2`: a comment was added to an item.",
+  "properties": {
+    "comment": {
+      "description": "The list's own id for the comment, unique on the item, when its\nanswer named one (the `comment` verb's `result.comment`).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "work_item": {
+      "description": "`work_item:<list>:<id>`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "work_item"
+  ],
+  "title": "WorkItemCommentedV2",
+  "type": "object"
+}

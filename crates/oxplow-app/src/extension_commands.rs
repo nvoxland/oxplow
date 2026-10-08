@@ -1477,15 +1477,12 @@ mod tests {
         assert_eq!(ok.len(), 1, "one audit row for the run");
         assert_eq!(ok[0].command, "my_review.review.finish");
         let events = fx.svc.event_log_store.read_after(0, 200).await.unwrap();
-        let transitioned = events
+        let changed = events
             .iter()
             .rev()
-            .find(|e| e.envelope.event_type == "work_item.transitioned")
+            .find(|e| e.envelope.event_type == "work_item.state_changed")
             .expect("the child's event");
-        assert_eq!(
-            transitioned.envelope.cause, out.event_id,
-            "caused by the run"
-        );
+        assert_eq!(changed.envelope.cause, out.event_id, "caused by the run");
         // One undo reverses both children.
         fx.svc
             .commands

@@ -731,7 +731,7 @@ and one calling MCP read identical `file:line: what — fix` lines.
   - `command` — `commands: [note]` whose `handlers/note.star` composes
     `oxplow.work_item.comment`, with an example and a `ui.commands` entry on
     `work_item`; its intent example dry-runs it;
-  - `effect` (P8.D12) — `effects: [on-done]` on `work_item.transitioned`
+  - `effect` (P8.D12) — `effects: [on-done]` on `work_item.state_changed`
     `where: { to: done }`, whose `effects/on-done.star` composes
     `oxplow.work_item.comment`; its intent example dry-runs it on a fixture
     event;
@@ -1953,7 +1953,7 @@ confirms"):
 effects:
   - id: announce-done          # [a-z0-9-]+, unique in the extension
     summary: Note a finished item on its thread.
-    on: [work_item.transitioned]   # core types, its own, or another extension's ("Event types")
+    on: [work_item.state_changed]  # core types, its own, or another extension's ("Event types")
     where: { to: done }            # optional: payload fields equal to these
     input: "SELECT title FROM v_work_item WHERE ref = :work_item"   # optional; payload fields bound, and :event_id / :event_seq
     entry: effects/announce.star   # transform({event, rows}) → {commands, events?} | {skip}

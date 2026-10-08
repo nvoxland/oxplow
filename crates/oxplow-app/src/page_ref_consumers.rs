@@ -1,12 +1,11 @@
 //! Event consumers that keep the `page_ref` graph current
 //! (`.context/data-model.md` "page_ref", "event_log").
 //!
-//! When a task's own fields are edited (`work_item.edited`), re-project
-//! its body-mention edges in the pump's transaction — checkpointed,
-//! retried and dead-lettered like any other consumer, so a crash between
-//! the edit and the projection can't leave the graph stale. (It used to
-//! follow `work_item.transitioned`, whose status change moves no body
-//! edge.)
+//! When an item is filed or its fields are edited (`work_item.created`,
+//! `work_item.edited`, logged by core for every list), re-project its
+//! body-mention edges in the pump's transaction — checkpointed, retried
+//! and dead-lettered like any other consumer, so a crash between the edit
+//! and the projection can't leave the graph stale.
 
 use oxplow_db::page_ref_projections::{task_body_ref_types, work_item_edges, KIND_WORK_ITEM};
 use oxplow_db::page_ref_store::replace_source_for_ref_types_tx;
@@ -81,7 +80,7 @@ impl EventConsumer for PageRefWorkItemConsumer {
 mod tests {
     use super::*;
     use oxplow_db::Database;
-    use oxplow_domain::events::schema::WorkItemEditedV1;
+    use oxplow_domain::events::schema::WorkItemEditedV2;
     use oxplow_domain::Envelope;
 
     fn edited(item: &str) -> StoredEvent {
@@ -89,9 +88,9 @@ mod tests {
             seq: 1,
             envelope: Envelope::typed::<WorkItemEdited>(
                 "test",
-                &WorkItemEditedV1 {
+                &WorkItemEditedV2 {
                     work_item: item.into(),
-                    fields: vec!["description".into()],
+                    fields: vec!["body".into()],
                 },
             ),
             payload_expired_at: None,

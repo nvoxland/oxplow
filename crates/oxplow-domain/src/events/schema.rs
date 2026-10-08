@@ -171,6 +171,8 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<TestCoverageRecorded>()
             .expect("core type registers");
+        r.register::<WorkItemDeletedAtV1>()
+            .expect("core type registers");
         r.register::<WorkItemDeleted>()
             .expect("core type registers");
         r.register::<EffortOpened>().expect("core type registers");
@@ -184,10 +186,18 @@ impl EventSchemaRegistry {
         r.register::<EffortFinished>().expect("core type registers");
         r.register::<CollectorSynced>()
             .expect("core type registers");
+        r.register::<WorkItemEditedAtV1>()
+            .expect("core type registers");
         r.register::<WorkItemEdited>().expect("core type registers");
+        r.register::<WorkItemCreatedAtV1>()
+            .expect("core type registers");
         r.register::<WorkItemCreated>()
             .expect("core type registers");
+        r.register::<WorkItemLinkedAtV1>()
+            .expect("core type registers");
         r.register::<WorkItemLinked>().expect("core type registers");
+        r.register::<WorkItemCommentedAtV1>()
+            .expect("core type registers");
         r.register::<WorkItemCommented>()
             .expect("core type registers");
         r.register::<WorkItemRecordedAtV1>()
@@ -1762,6 +1772,13 @@ impl EventType for EffortClosed {
     type Payload = EffortClosedV2;
 }
 
+// The work-item events' v1 spoke oxplow's task list (its statuses, field
+// names and note refs), and only oxplow's tasks logged them. v2 is the
+// interface's: core logs it for every list, from the verb a
+// `oxplow.work_item.*` command ran and what the list answered
+// (`.context/work-items.md`). v1 stays registered, as published, for the
+// events already in the log; each reads at v2.
+
 /// `work_item.created@1`: a task was filed, in `status`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -1771,11 +1788,46 @@ pub struct WorkItemCreatedV1 {
     pub status: TaskStatus,
 }
 
-pub struct WorkItemCreated;
-impl EventType for WorkItemCreated {
+/// The v1 shape of `work_item.created`, as a registry entry.
+pub struct WorkItemCreatedAtV1;
+impl EventType for WorkItemCreatedAtV1 {
     const TYPE: &'static str = "work_item.created";
     const V: u32 = 1;
     type Payload = WorkItemCreatedV1;
+}
+
+/// `work_item.created@2`: an item was filed on a work list, in `state`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemCreatedV2 {
+    /// `work_item:<list>:<id>`.
+    pub work_item: String,
+    /// The canonical state it was filed in.
+    pub state: crate::work_items::CanonicalState,
+}
+
+pub struct WorkItemCreated;
+impl EventType for WorkItemCreated {
+    const TYPE: &'static str = "work_item.created";
+    const V: u32 = 2;
+    type Payload = WorkItemCreatedV2;
+
+    /// v1's oxplow status as its canonical state: `ready` is `todo`, and
+    /// a task filed `archived` was never completed, so `canceled`.
+    fn upcast(from_v: u32, mut payload: Value) -> Result<Value, DomainError> {
+        work_item_v1(Self::TYPE, from_v)?;
+        if let Value::Object(fields) = &mut payload {
+            if let Some(Value::String(status)) = fields.remove("status") {
+                let state = match status.as_str() {
+                    "ready" => "todo",
+                    "archived" => "canceled",
+                    other => other,
+                };
+                fields.insert("state".into(), Value::String(state.into()));
+            }
+        }
+        Ok(payload)
+    }
 }
 
 /// `work_item.deleted@1`: a task was deleted (soft: its row stays, hidden).
@@ -1785,11 +1837,33 @@ pub struct WorkItemDeletedV1 {
     pub work_item: String,
 }
 
-pub struct WorkItemDeleted;
-impl EventType for WorkItemDeleted {
+/// The v1 shape of `work_item.deleted`, as a registry entry.
+pub struct WorkItemDeletedAtV1;
+impl EventType for WorkItemDeletedAtV1 {
     const TYPE: &'static str = "work_item.deleted";
     const V: u32 = 1;
     type Payload = WorkItemDeletedV1;
+}
+
+/// `work_item.deleted@2`: an item was deleted from its work list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemDeletedV2 {
+    /// `work_item:<list>:<id>`.
+    pub work_item: String,
+}
+
+pub struct WorkItemDeleted;
+impl EventType for WorkItemDeleted {
+    const TYPE: &'static str = "work_item.deleted";
+    const V: u32 = 2;
+    type Payload = WorkItemDeletedV2;
+
+    /// v1's payload is v2's.
+    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
+        work_item_v1(Self::TYPE, from_v)?;
+        Ok(payload)
+    }
 }
 
 /// `work_item.edited@1`: a task's own fields changed (not its status —
@@ -1803,11 +1877,50 @@ pub struct WorkItemEditedV1 {
     pub fields: Vec<String>,
 }
 
-pub struct WorkItemEdited;
-impl EventType for WorkItemEdited {
+/// The v1 shape of `work_item.edited`, as a registry entry.
+pub struct WorkItemEditedAtV1;
+impl EventType for WorkItemEditedAtV1 {
     const TYPE: &'static str = "work_item.edited";
     const V: u32 = 1;
     type Payload = WorkItemEditedV1;
+}
+
+/// `work_item.edited@2`: a command changed an item's fields — not its
+/// state, which is `work_item.state_changed`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemEditedV2 {
+    /// `work_item:<list>:<id>`.
+    pub work_item: String,
+    /// The fields the command set: `title`, `body`, `parent`, `rank` (its
+    /// place in its list), `list` (moved to another), and
+    /// `native.<name>` for each of the list's own fields.
+    pub fields: Vec<String>,
+}
+
+pub struct WorkItemEdited;
+impl EventType for WorkItemEdited {
+    const TYPE: &'static str = "work_item.edited";
+    const V: u32 = 2;
+    type Payload = WorkItemEditedV2;
+
+    /// v1's oxplow field names as the interface's.
+    fn upcast(from_v: u32, mut payload: Value) -> Result<Value, DomainError> {
+        work_item_v1(Self::TYPE, from_v)?;
+        if let Some(Value::Array(fields)) = payload.get_mut("fields") {
+            for field in fields {
+                let renamed = match field.as_str() {
+                    Some("description") => "body",
+                    Some("priority") => "native.priority",
+                    Some("thread") => "list",
+                    Some("position") => "rank",
+                    _ => continue,
+                };
+                *field = Value::String(renamed.into());
+            }
+        }
+        Ok(payload)
+    }
 }
 
 /// `work_item.linked@1`: a typed link from one work item to another.
@@ -1823,11 +1936,38 @@ pub struct WorkItemLinkedV1 {
     pub link_type: String,
 }
 
-pub struct WorkItemLinked;
-impl EventType for WorkItemLinked {
+/// The v1 shape of `work_item.linked`, as a registry entry.
+pub struct WorkItemLinkedAtV1;
+impl EventType for WorkItemLinkedAtV1 {
     const TYPE: &'static str = "work_item.linked";
     const V: u32 = 1;
     type Payload = WorkItemLinkedV1;
+}
+
+/// `work_item.linked@2`: a typed link from one item to another of the
+/// same list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemLinkedV2 {
+    /// The item linked from (`work_item:<list>:<id>`).
+    pub work_item: String,
+    /// The item linked to.
+    pub target: String,
+    /// One of the list's own link types.
+    pub link_type: String,
+}
+
+pub struct WorkItemLinked;
+impl EventType for WorkItemLinked {
+    const TYPE: &'static str = "work_item.linked";
+    const V: u32 = 2;
+    type Payload = WorkItemLinkedV2;
+
+    /// v1's payload is v2's.
+    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
+        work_item_v1(Self::TYPE, from_v)?;
+        Ok(payload)
+    }
 }
 
 /// `work_item.commented@1`: a comment on a work item.
@@ -1839,11 +1979,53 @@ pub struct WorkItemCommentedV1 {
     pub comment: String,
 }
 
-pub struct WorkItemCommented;
-impl EventType for WorkItemCommented {
+/// The v1 shape of `work_item.commented`, as a registry entry.
+pub struct WorkItemCommentedAtV1;
+impl EventType for WorkItemCommentedAtV1 {
     const TYPE: &'static str = "work_item.commented";
     const V: u32 = 1;
     type Payload = WorkItemCommentedV1;
+}
+
+/// `work_item.commented@2`: a comment was added to an item.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemCommentedV2 {
+    /// `work_item:<list>:<id>`.
+    pub work_item: String,
+    /// The list's own id for the comment, unique on the item, when its
+    /// answer named one (the `comment` verb's `result.comment`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
+}
+
+pub struct WorkItemCommented;
+impl EventType for WorkItemCommented {
+    const TYPE: &'static str = "work_item.commented";
+    const V: u32 = 2;
+    type Payload = WorkItemCommentedV2;
+
+    /// v1 named an oxplow note by its ref; v2 by the list's own id.
+    fn upcast(from_v: u32, mut payload: Value) -> Result<Value, DomainError> {
+        work_item_v1(Self::TYPE, from_v)?;
+        if let Some(comment) = payload.get_mut("comment") {
+            if let Some(id) = comment.as_str().and_then(|c| c.strip_prefix("task_note:")) {
+                *comment = Value::String(id.to_string());
+            }
+        }
+        Ok(payload)
+    }
+}
+
+/// The work-item events upcast from v1 only.
+fn work_item_v1(ty: &str, from_v: u32) -> Result<(), DomainError> {
+    if from_v == 1 {
+        Ok(())
+    } else {
+        Err(DomainError::Invalid(format!(
+            "{ty}@{from_v} cannot be upcast to v2"
+        )))
+    }
 }
 
 // v1 as published (its schema is compared exactly to providers'
@@ -2359,10 +2541,15 @@ mod tests {
                 ("vcs.commit.indexed", 1),
                 ("vcs.head.moved", 1),
                 ("work_item.commented", 1),
+                ("work_item.commented", 2),
                 ("work_item.created", 1),
+                ("work_item.created", 2),
                 ("work_item.deleted", 1),
+                ("work_item.deleted", 2),
                 ("work_item.edited", 1),
+                ("work_item.edited", 2),
                 ("work_item.linked", 1),
+                ("work_item.linked", 2),
                 ("work_item.recorded", 1),
                 ("work_item.recorded", 2),
                 ("work_item.state_changed", 1),
@@ -2439,6 +2626,57 @@ mod tests {
                 json!({ "note": "thread_note:not7", "thread": "thread:thr3" })
             );
         }
+    }
+
+    /// v1 of the work-item events spoke oxplow's task list: its statuses,
+    /// its field names, its note refs. Each reads at v2 in the interface's
+    /// words, which every list's events use.
+    #[test]
+    fn a_v1_work_item_event_reads_in_the_interfaces_words() {
+        let r = crate::vocabulary::Vocabulary::core();
+        let up = |ty: &str, v1: Value| {
+            let (v, up) = r.upcast_to_latest(ty, 1, v1).unwrap();
+            assert_eq!(v, 2, "{ty}");
+            up
+        };
+        let item = "work_item:oxplow:tsk42";
+        for (status, state) in [
+            ("ready", "todo"),
+            ("in_progress", "in_progress"),
+            ("blocked", "blocked"),
+            ("done", "done"),
+            ("canceled", "canceled"),
+            ("archived", "canceled"),
+        ] {
+            assert_eq!(
+                up(
+                    "work_item.created",
+                    json!({ "work_item": item, "status": status })
+                ),
+                json!({ "work_item": item, "state": state })
+            );
+        }
+        assert_eq!(
+            up(
+                "work_item.edited",
+                json!({ "work_item": item, "fields": ["title", "description", "priority", "parent", "thread", "position"] })
+            ),
+            json!({ "work_item": item, "fields": ["title", "body", "native.priority", "parent", "list", "rank"] })
+        );
+        assert_eq!(
+            up(
+                "work_item.commented",
+                json!({ "work_item": item, "comment": "task_note:note3" })
+            ),
+            json!({ "work_item": item, "comment": "note3" })
+        );
+        let linked =
+            json!({ "work_item": item, "target": "work_item:oxplow:tsk7", "link_type": "blocks" });
+        assert_eq!(up("work_item.linked", linked.clone()), linked);
+        assert_eq!(
+            up("work_item.deleted", json!({ "work_item": item })),
+            json!({ "work_item": item })
+        );
     }
 
     /// v1 reads at v2 with no transcript and no usage; the v2 producer's

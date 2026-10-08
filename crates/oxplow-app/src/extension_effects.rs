@@ -2705,14 +2705,14 @@ mod tests {
             std::fs::write(
                 dir.join("extension.yaml"),
                 format!(
-                    "manifest: 2\nname: acme\nsharing: private\nintent:\n  purpose: p\n  examples:\n    - {{ name: basic, input: x, expect: y }}\neffects:\n  - {{ id: on-done, summary: s, on: [work_item.transitioned]{filter}, entry: e.star }}\n"
+                    "manifest: 2\nname: acme\nsharing: private\nintent:\n  purpose: p\n  examples:\n    - {{ name: basic, input: x, expect: y }}\neffects:\n  - {{ id: on-done, summary: s, on: [work_item.state_changed]{filter}, entry: e.star }}\n"
                 ),
             )
             .unwrap();
             std::fs::write(dir.join("e.star"), script).unwrap();
             std::fs::write(
                 dir.join("fixtures/basic.yaml"),
-                "input: { effect: on-done, event: { type: work_item.transitioned, payload: { work_item: \"work_item:oxplow:tsk1\", to: done } } }\nexpect: { commands: [oxplow.work_item.comment] }\n",
+                "input: { effect: on-done, event: { type: work_item.state_changed, payload: { work_item: \"work_item:oxplow:tsk1\", to: done } } }\nexpect: { commands: [oxplow.work_item.comment] }\n",
             )
             .unwrap();
         };
@@ -2765,7 +2765,7 @@ mod tests {
                 .filter(|l| l.starts_with("Effect"))
                 .collect::<Vec<_>>(),
             vec![
-                "Effect on-done: on work_item.transitioned → on work_item.transitioned where to = done",
+                "Effect on-done: on work_item.state_changed → on work_item.state_changed where to = done",
                 "Effect on-done on fixture basic: runs [oxplow.work_item.comment] → skips (not today)",
             ]
         );
@@ -3101,12 +3101,12 @@ mod tests {
                     id: "on-done".into(),
                     change: Change::Changed,
                     before: Some(EffectTrigger {
-                        on: vec!["work_item.transitioned".into()],
+                        on: vec!["work_item.state_changed".into()],
                         filter: BTreeMap::new(),
                         input: None,
                     }),
                     after: Some(EffectTrigger {
-                        on: vec!["work_item.transitioned".into()],
+                        on: vec!["work_item.state_changed".into()],
                         filter: [("to".to_string(), "done".to_string())].into(),
                         input: None,
                     }),
@@ -3151,7 +3151,7 @@ mod tests {
             vec![
                 "Collector gh: now reaches api.example.com (was none)",
                 "Provider fake: command `delete` added (destructive)",
-                "Effect on-done: on work_item.transitioned → on work_item.transitioned where to = done",
+                "Effect on-done: on work_item.state_changed → on work_item.state_changed where to = done",
                 "Effect on-done on fixture basic: runs [oxplow.work_item.comment] → skips (not today)",
                 "Effect ping: added — on vcs.head.moved",
                 "Collector gh on fixture two: 2 thing → fails (boom)",
