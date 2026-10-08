@@ -356,7 +356,10 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     - **One lens shape, `LensSpec`**: what a lens file holds, what an
       answer stores and what `oxplow.lens.keep` writes (`Lens::from_spec`,
       `Lens::spec`). `extensions::save_lens(root, ext, slug, &spec,
-      &LensOrigin)` refuses a spec with a `spec_problem`, writes the YAML
+      &LensOrigin)` refuses a spec with a `spec_problem` (no title, a
+      `grid` or `custom`, or a `form`: a form's submit runs its command
+      as the person, and an answer an agent chose never does — so no
+      answer, and no kept spec, is a form), writes the YAML
       pruned of nulls and empties, and — when the file doesn't then load —
       removes it and reports the loader's errors. Serialize a spec's JSON
       values with `plain_json` (serde_json's `arbitrary_precision` makes

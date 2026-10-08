@@ -39,6 +39,8 @@ lens id, plus `params`) or `spec` (a lens of your own: `title`, `query`,
 the query read-only (as `query_sql` does), stores the answer on the
 thread and shows it beside the conversation; the tool returns the
 answer's ref and its text rendering, which is what you tell the user.
+An answer is never a `form` (its submit would run a command as the
+user), a `grid` or a `custom` component.
 
 Nothing is written to the repo. The user presses **Keep This** to turn an
 answer into a private lens (in `my-lenses`), and shares it from there. Build
