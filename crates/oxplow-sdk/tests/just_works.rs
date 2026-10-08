@@ -151,7 +151,7 @@ async fn a_scaffolded_command_checks_tests_and_runs_through_the_bus() {
         )
         .await
         .unwrap();
-    let item = format!("work_item:oxplow:{}", task.result["id"].as_str().unwrap());
+    let item = task.result["ref"].as_str().unwrap().to_string();
     let ran = svc
         .commands
         .run(
@@ -208,7 +208,7 @@ async fn a_scaffolded_effect_checks_tests_and_once_approved_reacts() {
         )
         .await
         .unwrap();
-    let item = format!("work_item:oxplow:{}", task.result["id"].as_str().unwrap());
+    let item = task.result["ref"].as_str().unwrap().to_string();
     svc.commands
         .run(
             &human,

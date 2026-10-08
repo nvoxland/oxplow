@@ -210,7 +210,16 @@ impl Tasks {
             .run(&self.actor, name, Value::Object(input), false)
             .await
             .map_err(|e| e.to_string())?;
-        serde_json::to_string_pretty(&out.result).map_err(|e| e.to_string())
+        // The interface answers `{ ref, state? }`; this is oxplow's task
+        // tool, so it names the task's id too.
+        let mut result = out.result;
+        let task = result["ref"]
+            .as_str()
+            .and_then(oxplow_tasks::task_of_work_item_ref);
+        if let (Some(task), Value::Object(fields)) = (task, &mut result) {
+            fields.insert("id".into(), json!(task.to_string()));
+        }
+        serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
     }
 
     /// Oxplow's tasks, from its own table: whatever work list is active

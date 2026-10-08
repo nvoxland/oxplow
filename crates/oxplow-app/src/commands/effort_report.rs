@@ -264,7 +264,7 @@ mod tests {
         let audit = SqliteCommandAuditStore::new(fx.svc.db.clone());
         let before = audit.list_recent(50).await.unwrap().len();
         let (task, report) = complete(&fx, json!({ "summary": "shipped it" })).await;
-        assert_eq!(task["status"], "done", "{task}");
+        assert_eq!(task["state"], "done", "{task}");
         assert_eq!(report["effort"], json!(fx.effort.to_string()));
 
         let rows = audit.list_recent(50).await.unwrap();
