@@ -1831,9 +1831,6 @@ mod tests {
                 "oxplow.stream.archive",
                 "oxplow.stream.create_worktree",
                 // A run's capture, through the collection service (P8.A8).
-                "oxplow.tab.close",
-                "oxplow.tab.focus",
-                "oxplow.tab.open",
                 "oxplow.test.record_run",
                 "oxplow.vcs.checkout_branch",
                 "oxplow.vcs.commit",

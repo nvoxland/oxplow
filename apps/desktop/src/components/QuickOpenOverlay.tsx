@@ -14,12 +14,11 @@ import {
   type Stream,
   type WorkspaceIndexedFile,
 } from "../api.js";
-import type { MenuGroup } from "../commands.js";
 import {
   buildLauncherTree,
   buildQuickOpenResults,
   buildRecentEntries,
-  flattenCommands,
+  searchableCommands,
   nextSectionIndex,
   type LauncherNavRow,
   type LauncherPageEntry,
@@ -47,7 +46,6 @@ interface Props {
   pages: PageDirectoryEntry[];
   /** Menu commands flattened into the launcher so actions (Commit,
    *  New Task, …) are discoverable here too — this is the only palette. */
-  menuGroups: MenuGroup[];
   /** What the command bus offers a person here (`commandOffers`). */
   offers: CommandEntry[];
   onClose(): void;
@@ -121,7 +119,7 @@ function persistRecentCollapsed(collapsed: boolean): void {
   }
 }
 
-export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pages: staticPages, menuGroups, offers, onClose, onOpenFile, onOpenPage, onOpenSearchHit }: Props) {
+export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pages: staticPages, offers, onClose, onOpenFile, onOpenPage, onOpenSearchHit }: Props) {
   const [query, setQuery] = useState("");
   const [files, setFiles] = useState<WorkspaceIndexedFile[]>([]);
   const [siteHits, setSiteHits] = useState<SearchHit[]>([]);
@@ -314,8 +312,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
   // the command asks); a prompt entry fills the agent's input, never sent.
   const commands = useMemo(
     () => [
-      ...flattenCommands(menuGroups),
-      ...offers,
+      ...searchableCommands(offers),
       ...launcherActions.map((a) => {
         const t = a.target;
         return {
@@ -330,7 +327,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
         };
       }),
     ],
-    [menuGroups, offers, launcherActions],
+    [offers, launcherActions],
   );
 
   // Empty input = launcher mode (pages only, grouped by category in the

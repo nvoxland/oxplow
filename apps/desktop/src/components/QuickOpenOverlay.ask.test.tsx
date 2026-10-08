@@ -56,7 +56,6 @@ function renderOverlay(onClose = () => {}) {
       threadId="thr1"
       selectedFilePath={null}
       pages={[]}
-      menuGroups={[]}
       offers={[]}
       onClose={onClose}
       onOpenFile={() => {}}

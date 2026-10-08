@@ -517,9 +517,10 @@ declaring *what it is* and mounting the generic layer.
 
 ## Keyboard
 
-- **Shortcuts go through the menu.** Add new shortcuts to
-  `commands.ts` and `keybindings.ts` so they appear in the native
-  menu and help discoverability.
+- **Shortcuts are commands'.** A shortcut is a command's `ui.shortcut`
+  (`.context/commands.md` "Offering a command to a person"), shown on
+  its menu item when it has a `ui.menu` place; there's no separate key
+  table.
 - **The native menu is renderer-driven.** `App.tsx` pushes the menu
   snapshot to `set_native_menu` (built in
   `crates/oxplow-tauri-ipc/src/commands/menu.rs`); macOS shows the
@@ -529,7 +530,7 @@ declaring *what it is* and mounting the generic layer.
   dynamic entries (e.g. File ▸ Open Recent ▸ `<project>`, built by
   `buildNativeMenuSnapshots`) use free-form ids like
   `project.openRecent:<path>` that the `menu:command` handler matches by
-  prefix rather than going through the static `CommandId` map.
+  prefix rather than going through the menu's items.
 - **The macOS application submenu is added in Rust, not the snapshot.**
   `build_menu` prepends a `#[cfg(target_os = "macos")]` "Oxplow"
   submenu of `PredefinedMenuItem`s (About / Hide / Hide Others / Show
@@ -547,19 +548,17 @@ declaring *what it is* and mounting the generic layer.
   rather than silently running first-run setup. The `<Launcher>` mirrors
   the pair (`launcher-new-project` accented, `launcher-open-project`
   secondary). Don't reintroduce an "open initializes it for you" path.
-- **The menu bar is File and Edit only** (decided 2026-10-07). Every
-  other command is a **search command**. The command bus's offers come
-  first (`commandOffers`, `.context/commands.md` "Offering a command to a
-  person": Pull / Push Changes, New Task… (⌘⇧N), New Dashboard…, New
-  Stream…); what's left of the app's own groups (`inMenuBar: false` in
-  `commands.ts` — Git: `Commit Changes…`; Tasks, group id `plan`: `New
-  Lens with Your Agent…` / `New Thread…`) is listed by the launcher under
-  its label too (`commandMap` holds every group; `menuBarGroups` picks the
-  bar's for the native menu and the in-window `Menubar`). **Pages aren't
-  commands:** the View / Git / Tasks "Dashboard" items that only opened
-  a page are gone — the launcher lists every page as a page row. Pull /
-  Push run as background tasks (failures record an op-error and a "Show
-  details" toast); Commit opens the Files page and its commit slideover.
+- **The menu bar is File and Edit only** (decided 2026-10-07): the
+  offers with a `ui.menu` place (Save, Quick Open… in File; Find in
+  Edit), beside the shell's project commands and the native Edit roles
+  (`menuBar.ts`). Every other command is a **search command** — the
+  command bus's offers (`commandOffers`: Pull / Push Changes, New Task…
+  (⌘⇧N), New Dashboard…, New Stream…, New Thread…, Commit Changes…, New
+  Lens with Your Agent…). **Pages aren't commands:** the View / Git /
+  Tasks "Dashboard" items that only opened a page are gone — the
+  launcher lists every page as a page row. Pull / Push run as background
+  tasks (failures record an op-error and a "Show details" toast); Commit
+  opens the Files page and its commit slideover (its `commit` form).
 - **Common muscle memory:** Cmd/Ctrl+S save, Cmd/Ctrl+F find,
   Cmd/Ctrl+P quick open, Cmd/Ctrl+Shift+N new task. Don't
   collide with these.
@@ -616,13 +615,13 @@ declaring *what it is* and mounting the generic layer.
   A section that hit its row cap shows a muted "+N more" footer
   (`QuickOpenBuild.truncated`).
 - **The launcher is the main keyboard lever — keep it populated.** Every
-  enabled menu command in `commands.ts` flows into the launcher's typed
-  results automatically (it flattens the same `buildMenuGroups` registry
-  via `flattenCommands`), and every page in `computePagesDirectory` shows
-  in its empty-state start menu. When adding a user-visible action, prefer
-  wiring it as a CommandId over a bespoke button so it stays keyboard-
-  reachable; a new *page* needs no CommandId — adding it to
-  `computePagesDirectory` (with a `category`) is enough.
+  command the bus offers a person that can run now flows into the
+  launcher's typed results (`searchableCommands` over the offers), and
+  every page in `computePagesDirectory` shows in its empty-state start
+  menu. When adding a user-visible action, declare it as a command with
+  a `ui` over a bespoke button so it stays keyboard-reachable; a new
+  *page* needs no command — adding it to `computePagesDirectory` (with a
+  `category`) is enough.
 
 ## Test-driveability
 

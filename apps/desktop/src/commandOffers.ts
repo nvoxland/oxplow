@@ -17,6 +17,13 @@ export interface OfferContext {
 export interface OfferDeps {
   /** Open a page by tab id (`page:new-task`). */
   openPage(tabId: string): void;
+  /** Open one of the window's own forms (`new-thread`, `commit`): a
+   *  `ui.form` that isn't a tab id. */
+  openForm(name: string): void;
+  /** Whether it can run here now (the window has something for it to act
+   *  on); unsaid, it can. One that can't is listed greyed in a menu and
+   *  not offered by search. */
+  available?(spec: CommandSpec): boolean;
   /** Run it as the person (asking first where it asks); its outcome, or
    *  `null` when it failed or waits for their confirmation. */
   run(label: string, id: string, input: unknown): Promise<CommandOutcome | null>;
@@ -75,8 +82,14 @@ export function commandOffers(specs: CommandSpec[], ctx: OfferContext, deps: Off
       group,
       label: ui.label,
       searchKey: [group, ui.label, ...ui.keywords].join(" ").toLowerCase(),
+      shortcut: ui.shortcut ?? undefined,
+      whileTyping: ui.while_typing,
+      menu: ui.menu ?? null,
+      enabled: deps.available ? deps.available(spec) : true,
       run: () => {
-        if (ui.form) return deps.openPage(ui.form);
+        // A tab id (`page:new-task`) is a page; anything else one of the
+        // window's own forms.
+        if (ui.form) return ui.form.includes(":") ? deps.openPage(ui.form) : deps.openForm(ui.form);
         if (ui.background) return deps.runInBackground(ui.label, spec.id, bound.input);
         void deps.run(ui.label, spec.id, bound.input).then((out) => {
           if (out && ui.open_after) deps.openPage(withResult(ui.open_after, out.result));

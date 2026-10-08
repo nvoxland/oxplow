@@ -157,13 +157,63 @@ pub struct TabInput {
     pub tab: String,
 }
 
+/// `editor.write` `save`'s input: the file (its tab id, `file:src/a.rs`);
+/// none saves the one the thread shows.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SaveInput {
+    #[serde(rename = "ref", default)]
+    pub tab: Option<String>,
+}
+
+/// `agent_input.write` `draft`'s input: the text to put in the agent's
+/// input, unsent.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DraftInput {
+    pub text: String,
+}
+
+/// An operation that takes nothing.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NoInput {}
+
+fn schema<T: JsonSchema>() -> Value {
+    serde_json::to_value(schemars::schema_for!(T)).expect("schema serializes")
+}
+
 /// The window's operations, run through `host` when the daemon runs them.
 pub fn ops(host: &Arc<ClientHost>) -> Vec<Op> {
-    let schema = serde_json::to_value(schemars::schema_for!(TabInput)).expect("schema serializes");
-    ["open", "close", "focus"]
+    let mut ops: Vec<Op> = ["open", "close", "focus"]
         .into_iter()
-        .map(|op| ClientHost::op(host, "tabs.write", op, schema.clone()))
-        .collect()
+        .map(|op| ClientHost::op(host, "tabs.write", op, schema::<TabInput>()))
+        .collect();
+    ops.push(ClientHost::op(
+        host,
+        "editor.write",
+        "save",
+        schema::<SaveInput>(),
+    ));
+    ops.push(ClientHost::op(
+        host,
+        "window.show",
+        "find",
+        schema::<NoInput>(),
+    ));
+    ops.push(ClientHost::op(
+        host,
+        "window.show",
+        "quick_open",
+        schema::<NoInput>(),
+    ));
+    ops.push(ClientHost::op(
+        host,
+        "agent_input.write",
+        "draft",
+        schema::<DraftInput>(),
+    ));
+    ops
 }
 
 #[cfg(test)]

@@ -1902,8 +1902,9 @@ export type CommandUi = {
 	 */
 	input?: unknown | null,
 	/**
-	 *  The page that gathers its input (a tab id, `page:new-task`):
-	 *  choosing it opens that page rather than running it.
+	 *  What gathers its input — a page (a tab id, `page:new-task`) or one
+	 *  of the window's own forms (`new-thread`, `commit`): choosing it
+	 *  opens that rather than running it.
 	 */
 	form?: string | null,
 	/**
@@ -1916,6 +1917,18 @@ export type CommandUi = {
 	 *  failure is reported, rather than awaited where it was chosen.
 	 */
 	background?: boolean,
+	/**
+	 *  The key that runs it, as `Ctrl/Cmd+S` / `Ctrl/Cmd+Shift+N`
+	 *  (`Ctrl/Cmd` is Cmd on macOS, Ctrl elsewhere).
+	 */
+	shortcut?: string | null,
+	/**
+	 *  Its shortcut runs it while the person types in a field too (Save,
+	 *  Find); otherwise typing keeps it.
+	 */
+	while_typing?: boolean,
+	// Where the menu bar shows it.
+	menu?: MenuPlace | null,
 };
 
 /**
@@ -4123,6 +4136,16 @@ export type MenuItemSnapshot = {
 	 *  (e.g. File ▸ Open Recent ▸ …) rather than a leaf command.
 	 */
 	submenu?: MenuItemSnapshot[] | null,
+};
+
+/**
+ *  A command's place in the menu bar: which menu, and where in it
+ *  (lowest first).
+ */
+export type MenuPlace = {
+	// `file` or `edit`.
+	bar: string,
+	order: number,
 };
 
 // Whether `head` would merge into `base` cleanly.

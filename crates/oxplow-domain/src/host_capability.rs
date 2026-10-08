@@ -74,6 +74,12 @@ pub struct HostCapability {
 /// Every host capability core provides, by id.
 pub const HOST_CAPABILITIES: &[HostCapability] = &[
     HostCapability {
+        id: "agent_input.write",
+        class: EffectClass::View,
+        host: Host::Window,
+        summary: "Put text in a thread's agent input, unsent — a person's: oxplow never types for the agent.",
+    },
+    HostCapability {
         id: "bookmarks.write",
         class: EffectClass::Record,
         host: Host::Daemon,
@@ -108,6 +114,12 @@ pub const HOST_CAPABILITIES: &[HostCapability] = &[
         class: EffectClass::Record,
         host: Host::Daemon,
         summary: "Record an error the window ran into, for the person to see.",
+    },
+    HostCapability {
+        id: "editor.write",
+        class: EffectClass::View,
+        host: Host::Window,
+        summary: "Save a file's unsaved changes in a thread's editor.",
     },
     HostCapability {
         id: "effects.read",
@@ -237,6 +249,12 @@ pub const HOST_CAPABILITIES: &[HostCapability] = &[
         class: EffectClass::Write,
         host: Host::Daemon,
         summary: "Change the repository: stage, commit, discard, branch, merge, rebase, resolve.",
+    },
+    HostCapability {
+        id: "window.show",
+        class: EffectClass::View,
+        host: Host::Window,
+        summary: "Show the window's search box (Quick Open) or its find-in-file bar.",
     },
     HostCapability {
         id: "work_items.write",

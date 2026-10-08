@@ -1,7 +1,7 @@
-import type { MenuGroup } from "../commands.js";
 import { fuzzyMatches } from "../fuzzy-match.js";
 import type { SearchHit, WorkspaceIndexedFile } from "../api.js";
 import type { TabRef } from "../tabs/tabState.js";
+import type { MenuPlace } from "../tauri-bridge/generated/bindings.js";
 import { refFromTabId } from "../tabs/pageRefs.js";
 import type { PageCategory, PageDirectoryEntry } from "./RailHud/sections.js";
 
@@ -14,6 +14,13 @@ export interface CommandEntry {
   shortcut?: string;
   run: () => void;
   searchKey: string;
+  /** Its shortcut runs it while typing in a field too. */
+  whileTyping?: boolean;
+  /** Where the menu bar shows it. */
+  menu?: MenuPlace | null;
+  /** It can run now; one that can't is greyed in a menu, left out of
+   *  search. Unsaid, it can. */
+  enabled?: boolean;
 }
 
 export type QuickOpenResult =
@@ -25,28 +32,12 @@ export type QuickOpenResult =
    *  (never sent). Last in every search. */
   | { kind: "ask"; text: string };
 
-/// Flatten enabled, runnable menu commands into searchable entries.
-/// Disabled commands (and the native responder-chain placeholders with
-/// no `run`) are skipped so the launcher never advertises an action the
-/// user can't take right now. Every group counts, on the menu bar or not:
-/// every command is a search command. Pages aren't commands — they're the
-/// launcher's page rows.
-export function flattenCommands(menuGroups: MenuGroup[]): CommandEntry[] {
-  const out: CommandEntry[] = [];
-  for (const group of menuGroups) {
-    for (const item of group.items) {
-      if (!item.enabled || !item.run) continue;
-      out.push({
-        id: item.id,
-        group: group.label,
-        label: item.label,
-        shortcut: item.shortcut,
-        run: item.run,
-        searchKey: `${group.label} ${item.label}`.toLowerCase(),
-      });
-    }
-  }
-  return out;
+/// The commands search offers: those that can run now — one that can't
+/// (nothing for it to act on) is left out rather than advertised. Every
+/// command the bus offers a person is a search command, on the menu bar
+/// or not; pages aren't commands — they're the launcher's page rows.
+export function searchableCommands(entries: CommandEntry[]): CommandEntry[] {
+  return entries.filter((e) => e.enabled !== false);
 }
 
 /// Body-search hits merged into the quick-open list after the filename

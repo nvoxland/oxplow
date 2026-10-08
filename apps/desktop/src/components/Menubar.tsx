@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
-import type { MenuGroup } from "../commands.js";
+import type { MenuGroup } from "../menuBar.js";
 import { MenuList } from "./ContextMenu.js";
 
 interface Props {
