@@ -455,8 +455,25 @@ test("streams are inverted tiles and threads indented tabs, tied by a guide line
   expect(guide("navigator-strip-thread-thr1")).toBe("mid");
   expect(guide("navigator-strip-thread-thr2")).toBe("last");
 
+  // The tabs end at the strip's own edge, not cut off against the rail.
+  const strip = getByTestId("navigator-strip").style;
+  expect([strip.borderRightWidth, strip.borderRightStyle, strip.borderRightColor]).toEqual([
+    "1px",
+    "solid",
+    "var(--border-subtle)",
+  ]);
+
   // The panel draws the same, so its rows stay lined up with the strip's.
   openOverlay(getByTestId);
+  // There each tab runs on across its row, carrying the title: the
+  // stream's tile colour and a thread's tab flow into the label.
+  const streamTab = getByTestId("navigator-stream-row-str1").querySelector("[data-glyph]") as HTMLElement;
+  expect(streamTab.textContent).toContain("Main");
+  expect(streamTab.style.background).toBe("var(--surface-stream-tile)");
+  expect(streamTab.style.flexGrow).toBe("1");
+  const threadTab = getByTestId("navigator-thread-row-thr2").querySelector("[data-glyph]") as HTMLElement;
+  expect(threadTab.textContent).toContain("Research");
+  expect(threadTab.style.flexGrow).toBe("1");
   expect(guide("navigator-stream-row-str1")).toBe("stream");
   expect(guide("navigator-thread-row-thr2")).toBe("last");
   expect(

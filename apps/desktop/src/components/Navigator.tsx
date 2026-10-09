@@ -348,10 +348,14 @@ export function Navigator({
           width: STRIP_WIDTH,
           flexShrink: 0,
           height: "100%",
-          // Part of the lighter chrome frame — matches the HUD rail to its
-          // right so the whole left edge reads as one seamless surface (no
-          // divider between the strip and the rail).
+          // Part of the lighter chrome frame, like the HUD rail to its
+          // right; its own edge is where the tabs end, so they don't read
+          // as cut off against the rail.
           background: "var(--surface-chrome)",
+          borderRightWidth: 1,
+          borderRightStyle: "solid",
+          borderRightColor: "var(--border-subtle)",
+          boxSizing: "border-box",
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
@@ -369,7 +373,7 @@ export function Navigator({
           style={{ flex: 1, overflowY: "auto", paddingTop: 0 }}
         >
           {streamGroups.map((g) => (
-            <div key={g.stream.id} style={STREAM_PANEL_STYLE}>
+            <div key={g.stream.id} style={STRIP_PANEL_STYLE}>
               <StripRow
                 letter={titleInitials(g.stream.title)}
                 label={g.stream.title}
@@ -750,18 +754,16 @@ function OverlayRow({
         height: isStream ? ROW_HEIGHT : THREAD_ROW_HEIGHT,
         display: "flex",
         alignItems: "center",
-        gap: 8,
         cursor: interactive ? "pointer" : "default",
-        // The stream row is the panel header (muted-accent tint); thread
-        // rows are transparent. Selection is marked by the accent left
-        // line only — no background fill.
+        // The row's tab carries its title (below), so the stream's tile
+        // colour and a thread's tab run on across the row. Selection is
+        // the accent left line.
         background: isStream ? "var(--panel-header-bg)" : "transparent",
         borderLeft: selected ? "3px solid var(--accent)" : "3px solid transparent",
-        paddingRight: 6,
         transition: "background 120ms ease",
       }}
     >
-      <IconColumn guide={guide}>
+      <IconColumn guide={guide} wide>
         <IconCell
           letter={letter}
           isStream={isStream}
@@ -769,35 +771,37 @@ function OverlayRow({
           isWriter={isWriter}
           status={status}
           question={question}
+          label={
+            renaming ? (
+              <RenameInput
+                initial={label}
+                paddingLeft={0}
+                onCommit={(next) => onCommitRename?.(next)}
+                onCancel={() => onCancelRename?.()}
+              />
+            ) : (
+              <span
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  fontSize: "var(--text-sm)",
+                  fontWeight: isStream ? 700 : 400,
+                  color: isStream
+                    ? "var(--text-on-stream-tile)"
+                    : selected
+                      ? "var(--text-primary)"
+                      : "var(--text-secondary)",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {label}
+              </span>
+            )
+          }
         />
       </IconColumn>
-      {renaming ? (
-        <RenameInput
-          initial={label}
-          paddingLeft={0}
-          onCommit={(next) => onCommitRename?.(next)}
-          onCancel={() => onCancelRename?.()}
-        />
-      ) : (
-        <span
-          style={{
-            flex: 1,
-            fontSize: "var(--text-sm)",
-            fontWeight: isStream ? 700 : 400,
-            color: isStream
-              ? "var(--text-primary)"
-              : selected
-                ? "var(--text-primary)"
-                : "var(--text-secondary)",
-            paddingLeft: 0,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {label}
-        </span>
-      )}
       {cm.menu}
     </div>
   );
@@ -866,7 +870,16 @@ type Guide = "none" | "stream" | "mid" | "last";
  *  the guide line that ties a stream's threads to it — down the column's
  *  left from under the stream's tile, with a tick into each thread's tab,
  *  ending at the last one. */
-function IconColumn({ guide, children }: { guide: Guide; children: ReactNode }) {
+function IconColumn({
+  guide,
+  wide = false,
+  children,
+}: {
+  guide: Guide;
+  /** The panel's row: the column runs the row's width, its tab with it. */
+  wide?: boolean;
+  children: ReactNode;
+}) {
   const line = (style: CSSProperties) => (
     <span aria-hidden style={{ position: "absolute", background: "var(--text-muted)", ...style }} />
   );
@@ -878,7 +891,7 @@ function IconColumn({ guide, children }: { guide: Guide; children: ReactNode }) 
       style={{
         position: "relative",
         flexShrink: 0,
-        width: ICON_COLUMN,
+        ...(wide ? { flex: 1, minWidth: 0 } : { width: ICON_COLUMN }),
         height,
         display: "flex",
         alignItems: "center",
@@ -908,9 +921,12 @@ function IconCell({
   isWriter,
   status,
   question,
+  label,
 }: {
   letter: string;
   isStream: boolean;
+  /** The panel's title: the tab runs on across the row carrying it. */
+  label?: ReactNode;
   /** The last of its stream's threads: its tab closes the stack. */
   isLast: boolean;
   isWriter: boolean;
@@ -922,10 +938,13 @@ function IconCell({
   // butted up against each other — each fills its row, drawing its top
   // edge, and the last one also the bottom — a faint fill, the writer's in
   // the accent. Both are rounded on the left only and run to the column's
-  // right edge, like tabs.
+  // right edge, like tabs. In the panel a tab runs on across the row
+  // carrying the title, its glyph kept at the strip's width so the two
+  // line up.
+  const glyphWidth = isStream ? ICON_COLUMN - STREAM_LEFT : ICON_COLUMN - THREAD_LEFT;
   const shape: CSSProperties = isStream
     ? {
-        width: ICON_COLUMN - STREAM_LEFT,
+        width: glyphWidth,
         height: ICON_BOX,
         borderRadius: "6px 0 0 6px",
         background: "var(--surface-stream-tile)",
@@ -934,7 +953,7 @@ function IconCell({
         fontWeight: 700,
       }
     : {
-        width: ICON_COLUMN - THREAD_LEFT,
+        width: glyphWidth,
         height: THREAD_ROW_HEIGHT,
         borderRadius: "4px 0 0 4px",
         background: isWriter ? "var(--accent-soft-bg)" : "var(--surface-thread-tab)",
@@ -956,9 +975,18 @@ function IconCell({
         boxSizing: "border-box",
         lineHeight: 1,
         ...shape,
+        ...(label !== undefined ? { width: undefined, flex: 1, minWidth: 0, justifyContent: "flex-start" } : {}),
       }}
     >
-      {letter}
+      {label !== undefined ? (
+        <>
+          {/* The glyph keeps its strip width (less a thread tab's left edge). */}
+          <span style={{ width: glyphWidth - (isStream ? 0 : 1), flexShrink: 0, textAlign: "center" }}>{letter}</span>
+          {label}
+        </>
+      ) : (
+        letter
+      )}
       {/* Threads always show the agent's activity indicator. Mirrors
           the fallback the Agent tab uses (App.tsx — `agentStatuses[id]
           ?? "waiting"`) so a never-attached thread still reads as the
@@ -1093,8 +1121,9 @@ const ICON_BOX = 30;
 const THREAD_ROW_HEIGHT = 28;
 const THREAD_LETTER_FONT = 13;
 const STRIP_WIDTH = 40;
-// The icon column: the strip's width less the selection line's 3px.
-const ICON_COLUMN = STRIP_WIDTH - 3;
+// The icon column: the strip's width less the selection line's 3px and the
+// strip's 1px edge.
+const ICON_COLUMN = STRIP_WIDTH - 4;
 // Where a stream's tile starts (over the guide line's top), the guide
 // line's x, and where a thread's tab starts. Both run to the column's
 // right edge.
@@ -1120,3 +1149,5 @@ const STREAM_PANEL_STYLE: CSSProperties = {
   marginBottom: 6,
   overflow: "hidden",
 };
+// In the strip the strip's own edge is the panel's right side.
+const STRIP_PANEL_STYLE: CSSProperties = { ...STREAM_PANEL_STYLE, borderRight: "none" };
