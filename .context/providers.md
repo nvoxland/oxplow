@@ -427,7 +427,14 @@ each is bounded at 1 s (`HOOK_VERB_TIMEOUT`, inside the route's 5 s), and
 a late or failed answer reads as no call and `{}`. Approving one is
 approving what its launch answers: that command runs in the person's
 terminal with their rights, outside the provider's own grants, so its
-Programs row says so. The MCP adapter
+Programs row says so. The live proof is
+`crates/oxplow-control-plane/tests/observe_conformance.rs`
+`a_provider_launched_session_is_recorded_canonically`: the fake provider
+in harness mode (`relay`, approved and enabled in the project, the
+in-process fake not registered) launches the fake harness's scripted
+session, whose hooks the route maps and answers through the provider's
+`tool_use` / `render`, and the observe suite finds it recorded
+canonically. The MCP adapter
 (`oxplow-provider-mcp`) still maps work-item refs only.
 
 **Consent precedes execution** (`exec_consent`, `ProgramKind::Provider`,

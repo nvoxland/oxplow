@@ -4547,6 +4547,7 @@ dependencies = [
  "oxplow-domain",
  "oxplow-harness-fake",
  "oxplow-mcp",
+ "oxplow-provider-fake",
  "oxplow-runtime",
  "oxplow-tasks",
  "oxplow-workspace-hack",

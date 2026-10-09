@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use common::boot;
 
+use oxplow_app::exec_consent;
 use oxplow_app::observe_conformance::{suite, Expect};
 use oxplow_domain::agent::harness::{Endpoints, LaunchInput, LaunchSpec, SessionIds};
 use oxplow_domain::agent::text::AgentText;
@@ -43,9 +44,33 @@ fn fake_bin() -> std::path::PathBuf {
     bin
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn the_fake_harness_session_is_recorded_canonically() {
-    let (cp, svc, root, _dir) = boot().await;
+/// The fake provider's binary, built on demand into this test's target
+/// dir: run in harness mode, it answers the fake harness's verbs.
+fn provider_bin() -> std::path::PathBuf {
+    let exe = std::env::current_exe().unwrap();
+    let dir = exe.parent().unwrap().parent().unwrap();
+    let bin = dir.join("oxplow-provider-fake");
+    if !bin.exists() {
+        let ok = Proc::new(env!("CARGO"))
+            .args(["build", "-q", "-p", "oxplow-provider-fake"])
+            .env("CARGO_TARGET_DIR", dir.parent().unwrap())
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "building oxplow-provider-fake failed");
+    }
+    bin
+}
+
+/// A session of `harness` (a registered harness's key) on a fresh thread:
+/// launched, its process run to the end, and the suite over what core
+/// recorded.
+async fn a_session_of(
+    cp: &oxplow_control_plane::ControlPlane,
+    svc: &oxplow_app::Services,
+    root: &std::path::Path,
+    harness_id: &str,
+) {
     let now = Timestamp::from_unix_ms(1);
     let stream = Stream {
         id: StreamId::new(1),
@@ -82,21 +107,15 @@ async fn the_fake_harness_session_is_recorded_canonically() {
     };
     svc.thread_store.upsert(&thread).await.unwrap();
 
-    // The fake registered as any harness is, and a session of it.
-    svc.harnesses.register(Arc::new(FakeHarness));
     let session = svc
         .agent_session_store
-        .open(&NewAgentSession::terminal(
-            thread.id,
-            oxplow_harness_fake::ID,
-        ))
+        .open(&NewAgentSession::terminal(thread.id, harness_id))
         .await
         .unwrap();
-
-    let harness = svc.harnesses.get(oxplow_harness_fake::ID).unwrap();
+    let harness = svc.harnesses.get(harness_id).unwrap();
     // The fake's binary is found where cargo built it.
     let bin_dir = fake_bin().parent().unwrap().to_path_buf();
-    let token = common::bearer_for(&svc, session.id).await;
+    let token = common::bearer_for(svc, session.id).await;
     let identity = vec![
         ("OXPLOW_HOOK_TOKEN".to_string(), token.clone()),
         ("OXPLOW_HOOK_BASE_URL".to_string(), cp.hook_base_url()),
@@ -111,8 +130,8 @@ async fn the_fake_harness_session_is_recorded_canonically() {
                 thread: thread.id,
                 session: session.id,
             },
-            workspace: root.clone(),
-            project_dir: root.clone(),
+            workspace: root.to_path_buf(),
+            project_dir: root.to_path_buf(),
             endpoints: Endpoints {
                 hook_base_url: cp.hook_base_url(),
                 mcp_endpoint_url: cp.mcp_endpoint_url(),
@@ -154,9 +173,9 @@ async fn the_fake_harness_session_is_recorded_canonically() {
     );
 
     let findings = suite(
-        &svc,
+        svc,
         &Expect {
-            harness: oxplow_harness_fake::ID,
+            harness: harness_id,
             thread: thread.id,
             edited: EDITED,
             tokens: (TOKENS.0 as u64, TOKENS.1 as u64),
@@ -164,4 +183,85 @@ async fn the_fake_harness_session_is_recorded_canonically() {
     )
     .await;
     assert!(findings.is_empty(), "{findings:#?}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_fake_harness_session_is_recorded_canonically() {
+    let (cp, svc, root, _dir) = boot().await;
+    // The fake registered as any harness is.
+    svc.harnesses.register(Arc::new(FakeHarness));
+    a_session_of(&cp, &svc, &root, oxplow_harness_fake::ID).await;
+}
+
+/// The same session, its harness a provider's process: the fake provider
+/// in harness mode, approved and enabled in the project as a person would,
+/// registered under its instance id. Its launch, every tool hook's mapping
+/// and every answer's rendering go through that process — and core records
+/// it canonically.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_provider_launched_session_is_recorded_canonically() {
+    let (cp, svc, root, _dir) = boot().await;
+    let ext_dir = root.join("oxplow/extensions/relay");
+    std::fs::create_dir_all(ext_dir.join("bin")).unwrap();
+    std::fs::write(
+        ext_dir.join("extension.yaml"),
+        "manifest: 2\nname: relay\nsharing: private\nintent:\n  purpose: a harness over the protocol\n  examples: [{ name: a }]\nproviders:\n  - id: relay\n    capability: agent_harness\n    entry: bin/provider\n    declarations: provider.json\n",
+    )
+    .unwrap();
+    let script = ext_dir.join("bin/provider");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nOXPLOW_FAKE_CAPABILITY=agent_harness exec '{}' \"$@\"\n",
+            provider_bin().display()
+        ),
+    )
+    .unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    std::fs::write(
+        ext_dir.join("provider.json"),
+        serde_json::to_string_pretty(&oxplow_provider_fake::harness_declarations()).unwrap(),
+    )
+    .unwrap();
+
+    let extensions = oxplow_app::extensions::load_extensions(&root);
+    let ext = extensions
+        .iter()
+        .find(|e| e.name == "relay")
+        .cloned()
+        .expect("the harness extension loads");
+    assert_eq!(ext.errors, Vec::<String>::new());
+    let config = oxplow_app::config_service::read_config(&svc.config);
+    let program = exec_consent::list(&svc.approvals, &root, &config, &extensions)
+        .into_iter()
+        .find(|p| p.kind == exec_consent::ProgramKind::Provider)
+        .expect("the provider is a program");
+    exec_consent::approve_program(
+        &svc.approvals,
+        &root,
+        &config,
+        &extensions,
+        program.kind,
+        &program.name,
+        program.version.as_deref().unwrap(),
+    )
+    .unwrap();
+    svc.providers
+        .enable(
+            &ext,
+            &ext.providers[0],
+            serde_json::json!({ "team": "core" }),
+        )
+        .await
+        .unwrap();
+    assert!(
+        svc.harnesses.get(oxplow_harness_fake::ID).is_err(),
+        "only the provider's instance stands for the fake"
+    );
+
+    a_session_of(&cp, &svc, &root, "relay").await;
+    svc.providers.stop("relay/relay").await;
 }
