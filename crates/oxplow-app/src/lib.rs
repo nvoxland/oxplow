@@ -60,6 +60,7 @@ pub mod effort_lifecycle;
 pub mod effort_observation;
 pub mod effort_policy;
 pub mod effort_policy_conformance;
+pub mod effort_policy_script;
 pub mod effort_reactors;
 pub mod effort_service;
 pub mod entity_metrics;
@@ -1212,11 +1213,17 @@ impl Services {
             sql: sql.clone(),
             lifecycle: efforts.without_event_pump(),
         }));
-        // The effort policies: the built-ins the extensions declare, and
-        // the provider instances that register themselves.
+        // The effort policies: the built-ins and scripts the extensions
+        // declare, and the provider instances that register themselves.
         let effort_policies =
             Arc::new(oxplow_domain::effort_policy::EffortPolicyRegistry::default());
-        effort_policy::register_built_ins(&effort_policies, &declared, &sql);
+        effort_policy::register_built_ins(
+            &effort_policies,
+            &declared,
+            &sql,
+            &approvals,
+            &layout.project_dir,
+        );
         // The project's effort policy reacts to items starting and
         // finishing, through this bus (`.context/work-tracking.md`).
         event_pump.register_async(Arc::new(effort_policy::EffortPolicyConsumer {

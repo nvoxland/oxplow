@@ -113,6 +113,20 @@ policy's own run caused (a source starting `effect:effort_policy:`). A
 `capability.switched` of the effort policy closes every open effort
 (`switch`), as the system — core's rule, whichever policy is active after.
 
+**A script may be the policy** (`implementations:` with `capability:
+effort_policy` and a `.star` entry, its `needs:` the scopes it reads —
+[extensions.md](./extensions.md) "Implementations"). It's an effect's
+shape: `transform({event})` gets the `PolicyEvent` and answers `{
+commands: [{ name, input }] }` or `{ skip }` (events are refused).
+`effort_policy::register_built_ins` registers it as an
+`effort_policy_script::ScriptedPolicy`, which `effects::run_over` runs
+under the effects' sandbox, its `scope("sql.read", …)` limited to its
+`needs`. It runs only while a person has approved it as it is
+(`ProgramKind::EffortPolicy`, `exec_consent::script_gate`, asked before
+each event): unapproved, each event it's offered fails saying so and the
+pump dead-letters it — nothing falls back. Its reads aren't audited, as
+an external policy's aren't.
+
 **A provider process may be the policy** (`providers:` with `capability:
 effort_policy`, [providers.md](./providers.md) "What a provider may
 implement"). While it runs, `providers::effort_policy::EffortPolicyHost`

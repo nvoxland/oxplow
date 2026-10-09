@@ -160,7 +160,7 @@ saying so (`oxplow_ai::config::DROPPED_ROLES`; project.yaml's
     lives through `files_at`, a shipped one's embedded) and its default
     `baseUrl` (`ai_provider_program`). Settings → Data → Programs lists it
     ("AI provider …", what it sends to, **Read the script**). Every call
-    asks its `Gate` first (`ai_service::script_gate`, the approvals file
+    asks its `Gate` first (`exec_consent::script_gate`, the approvals file
     read each time, as an effect's is), so approving takes effect at once
     and an edit stops it: until then a call fails `AiError::Unapproved`
     naming Settings → Data → Programs, and nothing is sent — it never falls

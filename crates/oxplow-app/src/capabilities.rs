@@ -222,13 +222,15 @@ pub enum Source {
     Core,
     /// A built-in in core's standard library, by its entry.
     BuiltIn(&'static str),
-    /// A script in an extension (an AI provider written as one): its
-    /// entry, the extension's folder (`tree`, `bundled:<name>` for a
-    /// shipped one) and the script's text.
+    /// A script in an extension (an AI provider or an effort policy
+    /// written as one): its entry, the extension's folder (`tree`,
+    /// `bundled:<name>` for a shipped one), the script's text and the
+    /// scopes it calls (`needs`).
     Script {
         entry: String,
         tree: String,
         script: String,
+        needs: Vec<String>,
     },
     /// A provider instance's process.
     External,
@@ -803,18 +805,24 @@ pub fn declared_by(extensions: &[crate::extensions::Extension]) -> Vec<Implement
         .collect()
 }
 
-/// An AI provider written as a script, as the registry holds it: what it
-/// answers natively (`ops`) are its features.
+/// An implementation written as a script, as the registry holds it. An AI
+/// provider's features are what it answers natively (`ops`); an effort
+/// policy has none.
 fn scripted_implementation(
     e: &crate::extensions::Extension,
     d: &crate::extensions::implementations::ImplementationDecl,
     script: &str,
 ) -> Implementation {
-    let decides = d
-        .config
-        .get("ops")
-        .and_then(Value::as_array)
-        .is_some_and(|ops| ops.iter().any(|o| o == "decide"));
+    let features = match d.capability.as_str() {
+        "ai_provider" => serde_json::json!({
+            "decide_native": d
+                .config
+                .get("ops")
+                .and_then(Value::as_array)
+                .is_some_and(|ops| ops.iter().any(|o| o == "decide"))
+        }),
+        _ => serde_json::json!({}),
+    };
     Implementation {
         capability: d.capability.clone(),
         id: d.id.clone(),
@@ -824,8 +832,9 @@ fn scripted_implementation(
             entry: d.entry.clone(),
             tree: e.path.clone(),
             script: script.to_string(),
+            needs: d.needs.clone(),
         },
-        features: serde_json::json!({ "decide_native": decides }),
+        features,
         fields: serde_json::Value::Array(Vec::new()),
         id_pattern: None,
         config: d.config.clone(),
@@ -962,7 +971,13 @@ pub async fn refresh(svc: &crate::Services) -> Result<(), DomainError> {
     let declared = declared_by(&extensions);
     crate::work_items::register_built_ins(&svc.work_items, &declared, &svc.db);
     crate::harnesses::register_built_ins(&svc.harnesses, &declared);
-    crate::effort_policy::register_built_ins(&svc.effort_policies, &declared, &svc.sql);
+    crate::effort_policy::register_built_ins(
+        &svc.effort_policies,
+        &declared,
+        &svc.sql,
+        &svc.approvals,
+        &svc.layout.project_dir,
+    );
     crate::harnesses::register_acp_adapters(&svc.acp_adapters, &declared);
     crate::ai_service::register_built_ins(
         svc.ai.providers(),

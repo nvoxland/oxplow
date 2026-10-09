@@ -796,6 +796,47 @@ pub fn may_run_acp(
     approved_at(store, project_dir, cwd, &acp_program(agent))
 }
 
+/// Whether a script may run now, asked before each run: `Err` says why
+/// not, for the person reading it.
+pub type Gate = std::sync::Arc<dyn Fn() -> Result<(), String> + Send + Sync>;
+
+/// [`Gate`] for a script `program` (an AI provider's, an effort
+/// policy's): approved on this machine as it is now, checked on every
+/// call — the approvals file is read each time, as an effect's is — so
+/// approving takes effect at once and an edit stops it.
+pub fn script_gate(
+    approvals: std::sync::Arc<ApprovalStore>,
+    project_dir: std::path::PathBuf,
+    program: ProjectProgram,
+) -> Gate {
+    std::sync::Arc::new(move || {
+        if is_program_approved(&approvals, &project_dir, &program) {
+            Ok(())
+        } else {
+            Err(format!(
+                "{} `{}` is a script nobody on this machine approved as it is now; read and \
+                 approve it in Settings → Data → Programs",
+                kind_title(program.kind),
+                program.name
+            ))
+        }
+    })
+}
+
+/// How a person names a program of `kind`, at the start of a sentence.
+fn kind_title(kind: ProgramKind) -> &'static str {
+    match kind {
+        ProgramKind::Collector => "Collector",
+        ProgramKind::AcpAgent => "ACP agent",
+        ProgramKind::Advisories => "Extension advisories",
+        ProgramKind::Provider => "Provider",
+        ProgramKind::Effect => "Effect",
+        ProgramKind::Component => "Component",
+        ProgramKind::AiProvider => "AI provider",
+        ProgramKind::EffortPolicy => "Effort policy",
+    }
+}
+
 /// An effort policy written as a script, as a program to approve: its
 /// script (`entry`, in the extension at `tree`) over every file of the
 /// extension, and the scopes it calls (`needs`).

@@ -380,21 +380,40 @@ pub async fn dry_run(
     answers: &BTreeMap<String, Vec<serde_json::Value>>,
     registry: Option<crate::extensions::CommandSchemas<'_>>,
 ) -> Result<Reaction, String> {
-    let (script, needs) = (script.to_string(), decl.needs.clone());
-    let (layer, answers) = (layer.clone(), answers.clone());
-    let runtime = tokio::runtime::Handle::current();
-    let reaction = tokio::task::spawn_blocking(move || {
-        let trace = oxplow_domain::scope::ScopeTrace::default();
-        let read = Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(layer.run(q)));
-        let mut calls = crate::scope_calls::Calls::new(&needs, &trace, read).with_answers(&answers);
-        run_script(&script, event, &mut calls)
-    })
-    .await
-    .map_err(|e| format!("the script's worker failed: {e}"))??;
+    let reaction = run_over(layer, &decl.needs, script, event, Some(answers)).await?;
     if let (Some(registry), Reaction::Run { calls, .. }) = (registry, &reaction) {
         crate::extension_commands::check_calls(registry, calls)?;
     }
     Ok(reaction)
+}
+
+/// `script` (an effects-shaped `transform`) over `event`, its scope calls
+/// limited to `needs` and answered from `answers` (a fixture's, in call
+/// order) or for real (reads through `layer`): what it composes, nothing
+/// run. Off the async runtime, under the effects' budget. An effect's dry
+/// run and an effort policy written as a script both run through it.
+pub async fn run_over(
+    layer: &crate::sql_gateway::SqlGateway,
+    needs: &[String],
+    script: &str,
+    event: serde_json::Value,
+    answers: Option<&BTreeMap<String, Vec<serde_json::Value>>>,
+) -> Result<Reaction, String> {
+    let (script, needs) = (script.to_string(), needs.to_vec());
+    let (layer, answers) = (layer.clone(), answers.cloned());
+    let runtime = tokio::runtime::Handle::current();
+    tokio::task::spawn_blocking(move || {
+        let trace = oxplow_domain::scope::ScopeTrace::default();
+        let read = Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(layer.run(q)));
+        let calls = crate::scope_calls::Calls::new(&needs, &trace, read);
+        let mut calls = match &answers {
+            Some(answers) => calls.with_answers(answers),
+            None => calls,
+        };
+        run_script(&script, event, &mut calls)
+    })
+    .await
+    .map_err(|e| format!("the script's worker failed: {e}"))?
 }
 
 /// What a reaction that another delivery already recorded answers (the

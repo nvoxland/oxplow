@@ -373,24 +373,55 @@ fn text(cell: &SqlCell) -> Option<String> {
     }
 }
 
-/// Register the built-in policies the extensions declare (`implementations:`
-/// naming [`BUILT_IN`]) under their declared ids, replacing the ones
-/// declared before; a running provider instance stays registered.
+/// Register the policies the extensions declare (`implementations:`)
+/// under their declared ids, replacing the ones declared before: the
+/// built-in ([`BUILT_IN`]) and policies written as scripts
+/// (`effort_policy_script::ScriptedPolicy`, each gated on a person's
+/// approval as it is now). A running provider instance stays registered.
 pub fn register_built_ins(
     registry: &EffortPolicyRegistry,
     declared: &[crate::capabilities::Implementation],
     sql: &SqlGateway,
+    approvals: &Arc<crate::exec_consent::ApprovalStore>,
+    project_dir: &std::path::Path,
 ) {
+    use crate::capabilities::Source;
     let built: Vec<Arc<dyn EffortPolicy>> = declared
         .iter()
         .filter(|i| i.capability == CAPABILITY)
-        .filter(|i| i.source == crate::capabilities::Source::BuiltIn(BUILT_IN))
-        .map(|i| {
-            let policy: Arc<dyn EffortPolicy> = Arc::new(CommitOrSwitch {
-                id: i.id.clone(),
-                sql: sql.clone(),
-            });
-            policy
+        .filter_map(|i| -> Option<Arc<dyn EffortPolicy>> {
+            match &i.source {
+                Source::BuiltIn(BUILT_IN) => Some(Arc::new(CommitOrSwitch {
+                    id: i.id.clone(),
+                    sql: sql.clone(),
+                })),
+                Source::Script {
+                    entry,
+                    tree,
+                    script,
+                    needs,
+                } => {
+                    let program = crate::exec_consent::effort_policy_program(
+                        tree,
+                        i.extension.as_deref().unwrap_or_default(),
+                        &i.id,
+                        entry,
+                        needs,
+                    );
+                    Some(Arc::new(crate::effort_policy_script::ScriptedPolicy {
+                        id: i.id.clone(),
+                        script: script.as_str().into(),
+                        needs: needs.clone(),
+                        sql: sql.clone(),
+                        gate: crate::exec_consent::script_gate(
+                            approvals.clone(),
+                            project_dir.to_path_buf(),
+                            program,
+                        ),
+                    }))
+                }
+                _ => None,
+            }
         })
         .collect();
     registry.set_declared(built);

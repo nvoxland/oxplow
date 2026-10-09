@@ -674,6 +674,7 @@ pub fn register_built_ins(
                 entry,
                 tree,
                 script,
+                ..
             } => {
                 let program = crate::exec_consent::ai_provider_program(
                     tree,
@@ -682,7 +683,11 @@ pub fn register_built_ins(
                     entry,
                     i.config.get("baseUrl").and_then(serde_json::Value::as_str),
                 );
-                let gate = script_gate(approvals.clone(), project_dir.to_path_buf(), program);
+                let gate = crate::exec_consent::script_gate(
+                    approvals.clone(),
+                    project_dir.to_path_buf(),
+                    program,
+                );
                 match oxplow_ai_providers::scripted(&i.id, &i.title, entry, script, &i.config, gate)
                 {
                     Ok(p) => Some(p),
@@ -696,28 +701,6 @@ pub fn register_built_ins(
         })
         .collect();
     providers.set(built);
-}
-
-/// Whether a scripted provider's `program` may run now: approved on this
-/// machine as it is, checked on every call (the approvals file is read
-/// each time, as an effect's is), so approving takes effect at once and an
-/// edit stops it.
-fn script_gate(
-    approvals: Arc<crate::exec_consent::ApprovalStore>,
-    project_dir: PathBuf,
-    program: crate::exec_consent::ProjectProgram,
-) -> oxplow_ai_providers::Gate {
-    Arc::new(move || {
-        if crate::exec_consent::is_program_approved(&approvals, &project_dir, &program) {
-            Ok(())
-        } else {
-            Err(format!(
-                "AI provider `{}` is a script nobody on this machine approved as it is now; \
-                 read and approve it in Settings → Data → Programs",
-                program.name
-            ))
-        }
-    })
 }
 
 fn endpoint_of(provider: Option<&ProviderConfig>) -> String {
