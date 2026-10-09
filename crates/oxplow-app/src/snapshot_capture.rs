@@ -27,6 +27,7 @@ use tracing::{debug, info, warn};
 
 use std::time::UNIX_EPOCH;
 
+use oxplow_db::analytics_stores::TakeOutcome;
 use oxplow_db::{FileSnapshot, SnapshotStorage, SqliteSnapshotStore, TakeRecord};
 use oxplow_domain::snapshot::SnapshotTrigger;
 use oxplow_domain::vcs::{ObjectStore, Revision, Vcs};
@@ -36,7 +37,7 @@ use oxplow_domain::{EffortId, ThreadId};
 /// long its caller will wait (P2.2/P2.3; `.context/data-model.md`
 /// "snapshot_op"). A bare [`SnapshotTrigger`] converts into one with no
 /// anchors and no budget.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TakeRequest {
     pub trigger: SnapshotTrigger,
     pub thread_id: Option<ThreadId>,
@@ -46,6 +47,30 @@ pub struct TakeRequest {
     /// The caller's time budget; recorded on the op, reported when
     /// exceeded.
     pub budget: Option<Duration>,
+    /// The snapshot implementation taking it (its id), recorded on the op;
+    /// `None` when the caller names none.
+    pub provider: Option<String>,
+}
+
+/// Whether a take keeps the bytes of the files it records. Under
+/// `HashesOnly` a changed file is read and hashed (so every identity, diff
+/// and "unchanged" comparison still works) but no blob is written: its row
+/// is `storage = oxplow` with the hash as its address and nothing behind
+/// it — the state retention GC leaves an expired row in. Read at each take.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ContentPolicy {
+    /// Write each changed file's bytes to the blob store.
+    #[default]
+    Keep,
+    /// Record identities only.
+    HashesOnly,
+}
+
+impl ContentPolicy {
+    /// Whether a take under it keeps file contents.
+    pub fn keeps(self) -> bool {
+        self == ContentPolicy::Keep
+    }
 }
 
 impl From<SnapshotTrigger> for TakeRequest {
@@ -56,6 +81,7 @@ impl From<SnapshotTrigger> for TakeRequest {
             turn_id: None,
             effort_id: None,
             budget: None,
+            provider: None,
         }
     }
 }
@@ -196,6 +222,9 @@ struct Inner {
     /// IPC) can swap it at runtime via [`SnapshotCaptureService::set_workspace_filter`]
     /// without restarting the app.
     workspace_filter: RwLock<WorkspaceFilter>,
+    /// Whether takes keep file bytes; read at each take, set by the
+    /// registry when the active snapshot implementation changes.
+    content_policy: RwLock<ContentPolicy>,
     /// Paths that have changed since the last `request_snapshot()`.
     /// The watcher loop pushes into this map; `request_snapshot`
     /// drains it. Keyed by path so repeated edits between requests
@@ -283,6 +312,7 @@ impl SnapshotCaptureService {
                 stream_id,
                 max_file_bytes,
                 workspace_filter: RwLock::new(workspace_filter),
+                content_policy: RwLock::new(ContentPolicy::default()),
                 dirty: Mutex::new(HashMap::new()),
                 settle_duration: DEFAULT_SETTLE_DURATION,
                 predrain_delay: DEFAULT_PREDRAIN_DELAY,
@@ -320,6 +350,25 @@ impl SnapshotCaptureService {
         // Err only if the sender dropped (it lives in `inner`'s Arc, so
         // that won't happen while we hold a handle) — treat as ready.
         let _ = rx.wait_for(|&ready| ready).await;
+    }
+
+    /// Choose whether takes keep file bytes (see [`ContentPolicy`]); the next
+    /// take reads it.
+    pub fn set_content_policy(&self, policy: ContentPolicy) {
+        *self
+            .inner
+            .content_policy
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = policy;
+    }
+
+    /// Whether takes keep file bytes now.
+    pub fn content_policy(&self) -> ContentPolicy {
+        *self
+            .inner
+            .content_policy
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
     }
 
     /// Swap the workspace path filter at runtime. Called when the
@@ -620,7 +669,8 @@ impl SnapshotCaptureService {
         let _serialized = self.inner.take_lock.lock().await;
         let after_drain = self
             .capture_inner(SnapshotTrigger::GitRefs.into(), started)
-            .await?;
+            .await?
+            .map(|o| o.snapshot_id);
         let Some(current) = after_drain else {
             return Ok(None);
         };
@@ -914,6 +964,7 @@ impl SnapshotCaptureService {
         let project_dir = self.inner.project_dir.clone();
         let max_bytes = self.inner.max_file_bytes;
         let blobs = self.inner.blobs.clone();
+        let keep_bytes = self.content_policy().keeps();
         let vcs = self.inner.vcs.clone();
         let objects = vcs.object_store(&project_dir);
         let filter = self
@@ -1161,13 +1212,17 @@ impl SnapshotCaptureService {
                         // bytes in memory. The serial capture path
                         // would otherwise re-read the same bytes off
                         // disk a moment later.
-                        match blobs.write(&bytes) {
-                            Ok(_) => {
-                                blobs_written.fetch_add(1, Ordering::Relaxed);
-                            }
-                            Err(e) => {
-                                warn!(?path, error = %e, "snapshot sweep: blob write failed");
-                                return None;
+                        // Hashes-only keeps no bytes: the row carries the
+                        // identity and nothing is behind it.
+                        if keep_bytes {
+                            match blobs.write(&bytes) {
+                                Ok(_) => {
+                                    blobs_written.fetch_add(1, Ordering::Relaxed);
+                                }
+                                Err(e) => {
+                                    warn!(?path, error = %e, "snapshot sweep: blob write failed");
+                                    return None;
+                                }
                             }
                         }
                         Some((
@@ -1175,9 +1230,9 @@ impl SnapshotCaptureService {
                             CaptureStaging {
                                 size_bytes: size,
                                 mtime_ms,
+                                content_hash: (!keep_bytes).then(|| hash.clone()),
                                 blob_hash: Some(hash),
                                 storage: SnapshotStorage::Oxplow,
-                                content_hash: None,
                             },
                         ))
                     })
@@ -1260,6 +1315,18 @@ impl SnapshotCaptureService {
         &self,
         req: impl Into<TakeRequest>,
     ) -> Result<Option<i64>, Box<dyn std::error::Error + Send + Sync>> {
+        self.request_take(req)
+            .await
+            .map(|o| o.map(|o| o.snapshot_id))
+    }
+
+    /// [`Self::request_snapshot`], answering with the whole outcome: the
+    /// snapshot, its parent, whether nothing changed, the files recorded
+    /// and whether the take ran over its budget.
+    pub async fn request_take(
+        &self,
+        req: impl Into<TakeRequest>,
+    ) -> Result<Option<TakeOutcome>, Box<dyn std::error::Error + Send + Sync>> {
         let req = req.into();
         // The clock starts before the lock: waiting behind another take
         // counts against this one's budget.
@@ -1288,13 +1355,15 @@ impl SnapshotCaptureService {
         &self,
         req: TakeRequest,
         started: Instant,
-    ) -> Result<Option<i64>, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<Option<TakeOutcome>, Box<dyn std::error::Error + Send + Sync>> {
+        // One policy for the whole take, read once.
+        let policy = self.content_policy();
         let drained: Vec<(PathBuf, DirtyEntry)> = {
             let mut set = self.inner.dirty.lock().unwrap_or_else(|e| e.into_inner());
             set.drain().collect()
         };
         if drained.is_empty() {
-            return self.record(req, Vec::new(), started).await;
+            return self.record(req, Vec::new(), started, policy).await;
         }
         let capture_started = Instant::now();
         let drained_count = drained.len();
@@ -1328,6 +1397,7 @@ impl SnapshotCaptureService {
         let stream_id = self.inner.stream_id;
         let max_bytes = self.inner.max_file_bytes;
         let blobs = self.inner.blobs.clone();
+        let keep_bytes = policy.keeps();
         let objects = self.inner.vcs.object_store(&project_dir);
         let settle = self.inner.settle_duration;
         let classify_now = Instant::now();
@@ -1457,6 +1527,7 @@ impl SnapshotCaptureService {
                                             {
                                                 return None;
                                             }
+                                            h if !keep_bytes => Some(h),
                                             h => match blobs.write_hashed(&h, &bytes) {
                                                 Ok(h) => Some(h),
                                                 Err(e) => {
@@ -1471,6 +1542,7 @@ impl SnapshotCaptureService {
                                         }
                                     }
                                 };
+                                let content_hash = if keep_bytes { None } else { blob_hash.clone() };
                                 Some(Outcome::Row(FileSnapshot {
                                     id: 0,
                                     stream_id,
@@ -1485,7 +1557,7 @@ impl SnapshotCaptureService {
                                     },
                                     snapshot_id: None,
                                     mtime_ms,
-                                    content_hash: None,
+                                    content_hash,
                                 }))
                             }
                         }
@@ -1535,7 +1607,7 @@ impl SnapshotCaptureService {
                 trigger = ?req.trigger,
                 "snapshot request: nothing to capture (all deferred or dropped)",
             );
-            return self.record(req, Vec::new(), started).await;
+            return self.record(req, Vec::new(), started, policy).await;
         }
 
         debug!(
@@ -1546,7 +1618,7 @@ impl SnapshotCaptureService {
             capture_ms = capture_started.elapsed().as_millis() as u64,
             "snapshot request: rows assembled",
         );
-        self.record(req, rows, started).await
+        self.record(req, rows, started, policy).await
     }
 
     /// Record a take with `rows` (possibly none): stamp the branch HEAD is
@@ -1562,7 +1634,8 @@ impl SnapshotCaptureService {
         req: TakeRequest,
         rows: Vec<FileSnapshot>,
         started: Instant,
-    ) -> Result<Option<i64>, Box<dyn std::error::Error + Send + Sync>> {
+        policy: ContentPolicy,
+    ) -> Result<Option<TakeOutcome>, Box<dyn std::error::Error + Send + Sync>> {
         // A take with no rows records no new snapshot, so it needs no
         // branch or revision — skip the VCS probes (a status on a big repo
         // is most of an empty take's cost).
@@ -1583,6 +1656,8 @@ impl SnapshotCaptureService {
             elapsed_ms: started.elapsed().as_millis() as u64,
             budget_ms: req.budget.map(|b| b.as_millis() as u64),
             source: "system:snapshot_capture".into(),
+            provider: req.provider.clone(),
+            contents: policy.keeps(),
         };
         let paths: Vec<String> = take.rows.iter().map(|r| r.path.clone()).collect();
         let outcome = match self.inner.store.record_take(take).await {
@@ -1615,7 +1690,7 @@ impl SnapshotCaptureService {
             elapsed_ms = started.elapsed().as_millis() as u64,
             "snapshot take recorded",
         );
-        Ok(Some(outcome.snapshot_id))
+        Ok(Some(outcome))
     }
 }
 
@@ -2429,6 +2504,7 @@ mod tests {
                 turn_id: None,
                 effort_id: None,
                 budget: Some(Duration::from_secs(5)),
+                provider: None,
             })
             .await
             .unwrap();
@@ -3026,5 +3102,223 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert!(rows[0].storage.is_oversize());
         assert!(rows[0].blob_hash.is_none());
+    }
+
+    // --- ContentPolicy: hashes only -----------------------------------
+
+    /// The reader over a service's store and blobs (a primary checkout).
+    fn files_for(
+        svc: &SnapshotCaptureService,
+        store: &Arc<SqliteSnapshotStore>,
+        project: &std::path::Path,
+    ) -> crate::snapshot_files::SnapshotFiles {
+        let streams = Arc::new(oxplow_db::SqliteStreamStore::new(Database::in_memory()));
+        crate::snapshot_files::SnapshotFiles {
+            snapshots: store.clone(),
+            streams,
+            content: svc.content(),
+            project_dir: project.to_path_buf(),
+        }
+    }
+
+    fn take_by(provider: &str) -> TakeRequest {
+        TakeRequest {
+            provider: Some(provider.into()),
+            ..SnapshotTrigger::Manual.into()
+        }
+    }
+
+    /// A hashes-only take (the capture path and the startup sweep alike)
+    /// records each changed file's identity and writes no blob.
+    #[tokio::test]
+    async fn a_hashes_only_take_writes_identities_and_no_blobs() {
+        let project = tempdir().unwrap();
+        std::fs::write(project.path().join("swept.txt"), "swept body").unwrap();
+        let (svc, store) = svc_for(project.path()).await;
+        svc.set_content_policy(ContentPolicy::HashesOnly);
+        svc.enqueue_startup_diff().await.unwrap();
+        let first = svc
+            .request_snapshot(take_by("hashes"))
+            .await
+            .unwrap()
+            .unwrap();
+        std::fs::write(project.path().join("marked.txt"), "marked body").unwrap();
+        svc.mark_dirty(project.path().join("marked.txt"), WatchEventKind::Other);
+        let second = svc
+            .request_snapshot(take_by("hashes"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_ne!(first, second);
+
+        for (path, body) in [("swept.txt", "swept body"), ("marked.txt", "marked body")] {
+            let rows = store.list_for_path(path).await.unwrap();
+            assert_eq!(rows.len(), 1, "{path}");
+            let hash = BlobStore::hash(body.as_bytes());
+            assert_eq!(rows[0].storage, SnapshotStorage::Oxplow);
+            assert_eq!(rows[0].blob_hash.as_deref(), Some(hash.as_str()));
+            // Its identity is the hash, with no bytes behind it.
+            let tree = store.tree_at(second).await.unwrap();
+            assert_eq!(tree[path].content_hash.as_deref(), Some(hash.as_str()));
+            assert!(!svc.inner.blobs.has(&hash), "{path} wrote a blob");
+        }
+    }
+
+    /// Two hashes-only snapshots diff to exactly what changed between
+    /// them, and an unchanged tree returns its parent, under either policy.
+    #[tokio::test]
+    async fn hashes_only_snapshots_diff_and_dedupe_like_kept_ones() {
+        use oxplow_domain::ChangeStatus;
+        for policy in [ContentPolicy::Keep, ContentPolicy::HashesOnly] {
+            let project = tempdir().unwrap();
+            let (svc, store) = svc_for(project.path()).await;
+            svc.set_content_policy(policy);
+            let write = |name: &str, body: &str| {
+                let full = project.path().join(name);
+                std::fs::write(&full, body).unwrap();
+                svc.mark_dirty(full, WatchEventKind::Other);
+            };
+            write("keep.txt", "same");
+            write("edit.txt", "v1");
+            write("gone.txt", "bye");
+            let a = svc.request_snapshot(take_by("p")).await.unwrap().unwrap();
+            write("edit.txt", "v2");
+            write("new.txt", "hello");
+            std::fs::remove_file(project.path().join("gone.txt")).unwrap();
+            svc.mark_dirty(project.path().join("gone.txt"), WatchEventKind::Other);
+            let b = svc.request_snapshot(take_by("p")).await.unwrap().unwrap();
+            let mut changes: Vec<_> = store
+                .diff_snapshots(Some(a), b)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|c| (c.path, c.status))
+                .collect();
+            changes.sort_by(|x, y| x.0.cmp(&y.0));
+            assert_eq!(
+                changes,
+                vec![
+                    ("edit.txt".to_string(), ChangeStatus::Modified),
+                    ("gone.txt".to_string(), ChangeStatus::Deleted),
+                    ("new.txt".to_string(), ChangeStatus::Added),
+                ],
+                "{policy:?}"
+            );
+            // Nothing changed: the parent, however often it is asked.
+            assert_eq!(svc.request_snapshot(take_by("p")).await.unwrap(), Some(b));
+            // Rewriting a file with the same bytes is no change either.
+            write("keep.txt", "same");
+            assert_eq!(svc.request_snapshot(take_by("p")).await.unwrap(), Some(b));
+        }
+    }
+
+    /// The op says who took it and whether it kept contents; a read at a
+    /// hashes-only snapshot is `NoContents`, not `Expired`, while a kept
+    /// file whose blob was pruned stays `Expired`.
+    #[tokio::test]
+    async fn the_op_records_provider_and_contents_and_a_read_tells_never_kept_from_pruned() {
+        use crate::snapshot_files::SnapshotFileError;
+        let project = tempdir().unwrap();
+        let (svc, store) = svc_for(project.path()).await;
+        let files = files_for(&svc, &store, project.path());
+        let write = |name: &str, body: &str| {
+            let full = project.path().join(name);
+            std::fs::write(&full, body).unwrap();
+            svc.mark_dirty(full, WatchEventKind::Other);
+        };
+
+        write("kept.txt", "kept body");
+        let kept = svc
+            .request_snapshot(take_by("oxplow"))
+            .await
+            .unwrap()
+            .unwrap();
+        svc.set_content_policy(ContentPolicy::HashesOnly);
+        write("hashed.txt", "hashed body");
+        let hashed = svc
+            .request_snapshot(take_by("hashes"))
+            .await
+            .unwrap()
+            .unwrap();
+
+        let kept_op = store.op_for_snapshot(kept).await.unwrap().unwrap();
+        assert_eq!(kept_op.provider.as_deref(), Some("oxplow"));
+        assert!(kept_op.contents);
+        let hashed_op = store.op_for_snapshot(hashed).await.unwrap().unwrap();
+        assert_eq!(hashed_op.provider.as_deref(), Some("hashes"));
+        assert!(!hashed_op.contents);
+
+        // What was kept reads, even at a later hashes-only snapshot.
+        assert_eq!(
+            files
+                .read_file_at_snapshot(hashed, "kept.txt")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(&b"kept body"[..])
+        );
+        // What was never kept says so, naming who took it.
+        match files.read_file_at_snapshot(hashed, "hashed.txt").await {
+            Err(SnapshotFileError::NoContents { snapshot, provider }) => {
+                assert_eq!((snapshot, provider.as_deref()), (hashed, Some("hashes")));
+            }
+            other => panic!("expected NoContents, got {other:?}"),
+        }
+        // The same by file row.
+        let row = store.list_for_path("hashed.txt").await.unwrap().remove(0);
+        assert!(matches!(
+            files.read_file_snapshot(row.id).await,
+            Err(SnapshotFileError::NoContents { .. })
+        ));
+        // A kept file whose blob retention pruned is expired, not never kept.
+        svc.inner.blobs.gc(&Default::default()).unwrap();
+        assert!(matches!(
+            files.read_file_at_snapshot(kept, "kept.txt").await,
+            Err(SnapshotFileError::Expired)
+        ));
+    }
+
+    /// The registry hands its policy to the services it has and the ones
+    /// it registers later.
+    #[tokio::test]
+    async fn the_registry_sets_the_policy_on_every_service() {
+        let project = tempdir().unwrap();
+        let db = Database::in_memory();
+        let reg = crate::snapshot_capture_registry::SnapshotCaptureRegistry::new(
+            crate::snapshot_capture_registry::SnapshotCaptureRegistryConfig {
+                snapshot_store: Arc::new(SqliteSnapshotStore::new(db)),
+                blobs: BlobStore::new(project.path().join(".oxplow/snapshots")),
+                vcs: std::sync::Arc::new(crate::vcs::GitProvider),
+                max_file_bytes: 1_000_000,
+                workspace_filter: oxplow_fs_watch::WorkspaceFilter::default(),
+                open_turn_probe: None,
+            },
+        );
+        let stream = |id: i64| oxplow_domain::Stream {
+            id: StreamId::new(id),
+            kind: oxplow_domain::StreamKind::Primary,
+            title: "t".into(),
+            branch: "main".into(),
+            branch_ref: "refs/heads/main".into(),
+            branch_source: "main".into(),
+            worktree_path: project.path().to_string_lossy().into(),
+            working_pane: String::new(),
+            talking_pane: String::new(),
+            working_session_id: String::new(),
+            talking_session_id: String::new(),
+            host: oxplow_domain::HostId::LOCAL,
+            custom_prompt: None,
+            created_at: Timestamp::from_unix_ms(0),
+            updated_at: Timestamp::from_unix_ms(0),
+            archived_at: None,
+        };
+        let early = reg.register(&stream(1)).unwrap();
+        assert_eq!(early.content_policy(), ContentPolicy::Keep);
+        reg.set_content_policy(ContentPolicy::HashesOnly);
+        let late = reg.register(&stream(2)).unwrap();
+        assert_eq!(early.content_policy(), ContentPolicy::HashesOnly);
+        assert_eq!(late.content_policy(), ContentPolicy::HashesOnly);
+        reg.set_content_policy(ContentPolicy::Keep);
+        assert_eq!(late.content_policy(), ContentPolicy::Keep);
     }
 }

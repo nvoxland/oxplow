@@ -1183,13 +1183,14 @@ fn insert_op_tx(
     elapsed_ms: u64,
     budget_ms: Option<u64>,
     file_count: u32,
+    kept: (Option<&str>, bool),
 ) -> rusqlite::Result<i64> {
     let over = budget_ms.is_some_and(|b| elapsed_ms > b);
     conn.execute(
         "INSERT INTO snapshot_op
            (stream_id, snapshot_id, parent_snapshot_id, trigger, thread_id, turn_id, effort_id,
-            at, elapsed_ms, budget_ms, over_budget, file_count)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            at, elapsed_ms, budget_ms, over_budget, file_count, provider, contents)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         params![
             stream_id.value(),
             snapshot_id,
@@ -1203,6 +1204,8 @@ fn insert_op_tx(
             budget_ms.map(|b| b as i64),
             over as i64,
             file_count as i64,
+            kept.0,
+            kept.1 as i64,
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -1284,6 +1287,7 @@ fn record_take_tx(
         take.elapsed_ms,
         take.budget_ms,
         file_count,
+        (take.provider.as_deref(), take.contents),
     )
     .map_err(map_sql_err)?;
     if let Some(turn) = take.turn_id {
@@ -1364,6 +1368,7 @@ fn record_head_moved_tx(
         0,
         None,
         0,
+        (None, true),
     )
     .map_err(map_sql_err)?;
     let stream = stream_ref(stream_id);
@@ -1423,6 +1428,8 @@ fn row_to_op(row: &rusqlite::Row<'_>) -> rusqlite::Result<SnapshotOp> {
         budget_ms: row.get(10)?,
         over_budget: row.get::<_, i64>(11)? != 0,
         file_count: row.get(12)?,
+        provider: row.get(13)?,
+        contents: row.get::<_, i64>(14)? != 0,
     })
 }
 
@@ -1446,6 +1453,12 @@ pub struct TakeRecord {
     pub budget_ms: Option<u64>,
     /// The envelope `source` of `snapshot.taken` (`system:snapshot_capture`).
     pub source: String,
+    /// The snapshot implementation that took it (its id); `None` when the
+    /// caller names none.
+    pub provider: Option<String>,
+    /// Whether the take kept file contents (blobs) for its rows; `false`
+    /// for a hashes-only take, whose reads answer "no contents".
+    pub contents: bool,
 }
 
 /// What a take recorded.
@@ -1478,6 +1491,10 @@ pub struct SnapshotOp {
     pub budget_ms: Option<i64>,
     pub over_budget: bool,
     pub file_count: i64,
+    /// What took it; `None` for ops recorded before V45.
+    pub provider: Option<String>,
+    /// Whether the take kept file contents (`false`: hashes only).
+    pub contents: bool,
 }
 
 #[derive(Clone)]
@@ -1555,7 +1572,8 @@ impl SqliteSnapshotStore {
             .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT seq, stream_id, snapshot_id, parent_snapshot_id, trigger, thread_id,
-                            turn_id, effort_id, at, elapsed_ms, budget_ms, over_budget, file_count
+                            turn_id, effort_id, at, elapsed_ms, budget_ms, over_budget, file_count,
+                            provider, contents
                        FROM snapshot_op WHERE stream_id = ?1
                       ORDER BY seq DESC LIMIT ?2",
                 )?;
@@ -1575,10 +1593,45 @@ impl SqliteSnapshotStore {
             .call(move |conn| {
                 conn.query_row(
                     "SELECT seq, stream_id, snapshot_id, parent_snapshot_id, trigger, thread_id,
-                            turn_id, effort_id, at, elapsed_ms, budget_ms, over_budget, file_count
+                            turn_id, effort_id, at, elapsed_ms, budget_ms, over_budget, file_count,
+                            provider, contents
                        FROM snapshot_op WHERE snapshot_id = ?1 ORDER BY seq ASC LIMIT 1",
                     params![snapshot_id],
                     row_to_op,
+                )
+                .optional()
+            })
+            .await
+    }
+
+    /// When the row that `path` reads as at `snapshot_id` was captured by a
+    /// take that kept no file contents ("Track changes only"): that take's
+    /// snapshot and the provider that took it (`None` for an op that names
+    /// none). `None` when the row's take kept contents (or there is no row),
+    /// so a missing blob there means the bytes expired.
+    pub async fn contentless_take_for_path(
+        &self,
+        snapshot_id: i64,
+        path: &str,
+    ) -> Result<Option<(i64, Option<String>)>, DomainError> {
+        let path = path.to_string();
+        self.db
+            .call(move |conn| {
+                conn.query_row(
+                    "SELECT f.snapshot_id, o.provider
+                       FROM file_snapshot f
+                       JOIN snapshot s ON s.id = ?3
+                       JOIN snapshot_op o ON o.seq = (
+                              SELECT min(seq) FROM snapshot_op WHERE snapshot_id = f.snapshot_id)
+                      WHERE f.stream_id = s.stream_id AND f.path = ?1
+                        AND f.snapshot_id IS NOT NULL AND f.snapshot_id <= ?2
+                        AND o.contents = 0
+                        AND f.id = (SELECT id FROM file_snapshot
+                                     WHERE stream_id = s.stream_id AND path = ?1
+                                       AND snapshot_id IS NOT NULL AND snapshot_id <= ?2
+                                     ORDER BY snapshot_id DESC, id DESC LIMIT 1)",
+                    params![path, snapshot_id, snapshot_id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
                 )
                 .optional()
             })
@@ -2923,6 +2976,8 @@ mod tests {
             elapsed_ms: 5,
             budget_ms: None,
             source: "test".into(),
+            provider: None,
+            contents: true,
         }
     }
 

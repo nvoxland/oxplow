@@ -19,7 +19,7 @@ use oxplow_domain::{Stream, StreamId};
 use oxplow_fs_watch::WorkspaceFilter;
 
 use crate::blob_store::BlobStore;
-use crate::snapshot_capture::SnapshotCaptureService;
+use crate::snapshot_capture::{ContentPolicy, SnapshotCaptureService};
 
 /// Build parameters shared across every per-stream service. The
 /// registry holds these so `register()` can construct fresh services
@@ -52,6 +52,9 @@ pub struct SnapshotCaptureRegistry {
     /// can update the filter handed to *future* `register()` calls when
     /// the project's `generated` config changes at runtime.
     workspace_filter: Arc<RwLock<WorkspaceFilter>>,
+    /// Whether takes keep file bytes: every live service has it, and a
+    /// service registered later starts with it.
+    content_policy: Arc<RwLock<ContentPolicy>>,
     config: SnapshotCaptureRegistryConfig,
 }
 
@@ -61,6 +64,7 @@ impl SnapshotCaptureRegistry {
             services: Arc::new(RwLock::new(HashMap::new())),
             primary_id: Arc::new(RwLock::new(None)),
             workspace_filter: Arc::new(RwLock::new(config.workspace_filter.clone())),
+            content_policy: Arc::new(RwLock::new(ContentPolicy::default())),
             config,
         }
     }
@@ -103,6 +107,7 @@ impl SnapshotCaptureRegistry {
             svc = svc.with_open_turn_probe(probe.clone());
         }
         let svc = Arc::new(svc);
+        svc.set_content_policy(self.content_policy());
         let mut services = self.services.write().unwrap_or_else(|e| e.into_inner());
         // Double-check after acquiring the write lock — a concurrent
         // register for the same id may have raced us.
@@ -141,6 +146,26 @@ impl SnapshotCaptureRegistry {
         for svc in self.list() {
             svc.set_workspace_filter(filter.clone());
         }
+    }
+
+    /// Set whether takes keep file bytes on every live service and on the
+    /// ones registered later (the active snapshot implementation's choice).
+    pub fn set_content_policy(&self, policy: ContentPolicy) {
+        *self
+            .content_policy
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = policy;
+        for svc in self.list() {
+            svc.set_content_policy(policy);
+        }
+    }
+
+    /// Whether takes keep file bytes now.
+    pub fn content_policy(&self) -> ContentPolicy {
+        *self
+            .content_policy
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
     }
 
     /// The filter every capture applies (and a newly registered one gets).

@@ -29,6 +29,18 @@ pub enum SnapshotFileError {
          but file bytes are only kept for the retention window"
     )]
     Expired,
+    /// The take that recorded it kept no file contents ("Track changes
+    /// only"): what changed is known, never what the file said. Apart from
+    /// `Expired`, which kept the bytes and pruned them.
+    #[error(
+        "snapshot {snapshot} was taken by `{}`, which keeps no file contents; choose Keep every \
+         version in Settings → Capabilities to keep them",
+        provider.as_deref().unwrap_or("a snapshot implementation")
+    )]
+    NoContents {
+        snapshot: i64,
+        provider: Option<String>,
+    },
     /// The stream it was captured in is archived or gone: restoring it
     /// would write into some other checkout.
     #[error(
@@ -85,9 +97,39 @@ impl SnapshotFiles {
         else {
             return Ok(None);
         };
-        self.read_bytes(content.storage, content.hash)
-            .await
-            .map(Some)
+        match self.read_bytes(content.storage, content.hash).await {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(SnapshotFileError::Expired) => {
+                // One lookup, only for a row whose bytes aren't there.
+                match self
+                    .snapshots
+                    .contentless_take_for_path(snapshot_id, path)
+                    .await
+                    .map_err(|e| SnapshotFileError::Other(e.to_string()))?
+                {
+                    Some((snapshot, provider)) => {
+                        Err(SnapshotFileError::NoContents { snapshot, provider })
+                    }
+                    None => Err(SnapshotFileError::Expired),
+                }
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Why a row's bytes are missing: `NoContents` when the take that
+    /// recorded it kept none, else `Expired`.
+    async fn expired_or_never_kept(&self, row: &FileSnapshot) -> SnapshotFileError {
+        let Some(snapshot) = row.snapshot_id else {
+            return SnapshotFileError::Expired;
+        };
+        match self.snapshots.op_for_snapshot(snapshot).await {
+            Ok(Some(op)) if !op.contents => SnapshotFileError::NoContents {
+                snapshot,
+                provider: op.provider,
+            },
+            _ => SnapshotFileError::Expired,
+        }
     }
 
     /// Write a `file_snapshot` row's bytes back to its path in its stream's
@@ -138,7 +180,10 @@ impl SnapshotFiles {
 
     async fn read_row(&self, row: &FileSnapshot) -> Result<Vec<u8>, SnapshotFileError> {
         let hash = row.blob_hash.clone().ok_or(SnapshotFileError::NoContent)?;
-        self.read_bytes(row.storage, hash).await
+        match self.read_bytes(row.storage, hash).await {
+            Err(SnapshotFileError::Expired) => Err(self.expired_or_never_kept(row).await),
+            other => other,
+        }
     }
 
     /// Blob-store or VCS-object bytes, off the async runtime (it's file I/O).
@@ -217,6 +262,7 @@ mod tests {
                 turn_id: None,
                 effort_id: None,
                 budget: None,
+                provider: None,
             })
             .await
             .unwrap()

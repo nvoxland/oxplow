@@ -233,6 +233,7 @@ pub fn archive_op(deps: StreamDeps) -> Op {
                                 turn_id: None,
                                 effort_id: Some(effort.id),
                                 budget: None,
+                                provider: None,
                             })
                             .await
                             .map_err(|e| CommandError::Failed {

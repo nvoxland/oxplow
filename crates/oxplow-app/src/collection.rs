@@ -1926,6 +1926,7 @@ impl CollectionService {
                 turn_id: turn,
                 effort_id: effort,
                 budget: None,
+                provider: None,
             })
             .await;
         let id = match taken {

@@ -5477,6 +5477,10 @@ export type SnapshotOp = {
 	budget_ms: number | null,
 	over_budget: boolean,
 	file_count: number,
+	// What took it; `None` for ops recorded before V45.
+	provider: string | null,
+	// Whether the take kept file contents (`false`: hashes only).
+	contents: boolean,
 };
 
 /**

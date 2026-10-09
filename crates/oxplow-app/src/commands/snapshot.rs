@@ -45,6 +45,7 @@ pub fn restore_file_op(files: SnapshotFiles, events: crate::events::EventBus) ->
                         SnapshotFileError::NotFound
                         | SnapshotFileError::NoContent
                         | SnapshotFileError::Expired
+                        | SnapshotFileError::NoContents { .. }
                         | SnapshotFileError::StreamGone(_) => CommandError::Invalid {
                             field: Some("/file_snapshot".into()),
                             message: e.to_string(),

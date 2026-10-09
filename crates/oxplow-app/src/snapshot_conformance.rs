@@ -69,6 +69,7 @@ mod tests {
             turn_id: None,
             effort_id: None,
             budget: None,
+            provider: None,
         }
     }
 
@@ -173,6 +174,7 @@ mod tests {
                 turn_id: Some(turn),
                 effort_id: Some(f.effort),
                 budget: None,
+                provider: None,
             },
         )
         .await;
@@ -193,6 +195,7 @@ mod tests {
             turn_id: None,
             effort_id: None,
             budget: Some(Duration::from_millis(ms)),
+            provider: None,
         };
         let (fast, stream) = provider(&f, Duration::ZERO);
         write(&f, &fast, "a.txt", "quick");

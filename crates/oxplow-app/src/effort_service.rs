@@ -218,6 +218,7 @@ impl EffortService {
                 turn_id: None,
                 effort_id: Some(effort_id),
                 budget: None,
+                provider: None,
             })
             .await
             .unwrap_or_else(|e| {
@@ -255,6 +256,7 @@ impl EffortService {
                         turn_id: None,
                         effort_id: Some(effort_id),
                         budget: None,
+                        provider: None,
                     })
                     .await
                     .unwrap_or_else(|e| {
@@ -1049,6 +1051,7 @@ mod tests {
                 turn_id: None,
                 effort_id: None,
                 budget: None,
+                provider: None,
             })
             .await
             .unwrap()

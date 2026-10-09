@@ -846,7 +846,10 @@ seeders for tests.
   the take; `parent_snapshot_id` where it was before (the stream's
   current snapshot = its latest op's `snapshot_id`). Readable as
   `v_snapshot_op`; listed newest first by `list_ops` (RPC + MCP
-  `list_snapshot_ops { stream_id, limit? }`, P2.11).
+  `list_snapshot_ops { stream_id, limit? }`, P2.11). V45 adds
+  `provider TEXT` (the snapshot implementation that took it; NULL for
+  older ops) and `contents INTEGER NOT NULL DEFAULT 1` (0 when the take
+  kept no file bytes), exposed on `v_snapshot_op`.
 - **A snapshot row carries its creating op** (P2.11): the stream listing
   (`list_snapshots_for_stream`) joins each snapshot's FIRST op for its
   `parent_snapshot_id`, `trigger` and `over_budget`. The diff view's
@@ -958,6 +961,29 @@ worktree's current tree stays viewable/rollbackable forever. Older
 content reads degrade to "expired": `read_file_snapshot` → `None`
 (`SnapshotFileError::Expired` in `oxplow_app::snapshot_files`), restores
 refuse with an explicit message, never a half-restore.
+
+**Content policy (hashes only).** `SnapshotCaptureService` has a
+`ContentPolicy { Keep, HashesOnly }` (default `Keep`), read at each take
+and set on every stream's service by `SnapshotCaptureRegistry::
+set_content_policy` (a service registered later starts with it). Under
+`HashesOnly` a changed file is read and hashed (xxh3) but no blob is
+written, on the sweep and the capture path alike: its row is
+`storage = oxplow`, `blob_hash = content_hash = hash`, an identity with
+no bytes behind it — the state retention GC leaves an expired row in, so
+no new storage class (and no rebuild of `file_snapshot`, whose `storage`
+CHECK can't be widened). Git-clean, oversize and deleted rows are
+unchanged. Diffs, change entries, tree hashes and "unchanged take returns
+the parent" all work on identities, so they hold under either policy. A
+take records `provider` and `contents` on its op (`TakeRequest.provider`,
+`TakeRecord.contents = policy == Keep`). **`NoContents` vs `Expired`:** a
+read whose blob is missing asks the op of the take that recorded the row
+(`SqliteSnapshotStore::contentless_take_for_path` / `op_for_snapshot`):
+`contents = 0` is `SnapshotFileError::NoContents { snapshot, provider }`
+("never kept", naming who took it), anything else stays `Expired` ("kept,
+then pruned"). The lookup runs only for a row whose bytes are missing, so
+a normal read costs nothing extra. A switch deletes nothing: the record
+holds both kinds of op, and a path unchanged since a kept take still reads
+at a later hashes-only snapshot.
 Only `oxplow`-class rows hold blob-store hashes; `git` rows reference
 the git odb, which this GC never touches. The blob store is shared
 across all streams, so GC runs at the project level and dedupes

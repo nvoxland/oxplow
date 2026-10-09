@@ -80,6 +80,7 @@ impl TurnSnapshots for CaptureTurnSnapshots {
             turn_id: Some(turn.value()),
             effort_id: effort,
             budget: Some(budget),
+            provider: None,
         };
         // Spawned so it keeps running if we stop waiting at the budget.
         let take = tokio::spawn(async move {

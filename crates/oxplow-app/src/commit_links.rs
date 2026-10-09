@@ -114,7 +114,11 @@ async fn holds_effort(
             // kept): what it was can't be known, so it can't be shown to
             // hold the commit — and mustn't stop the commit linking to the
             // efforts that do (tsk1078).
-            Err(SnapshotFileError::Expired | SnapshotFileError::NoContent) => return Ok(false),
+            Err(
+                SnapshotFileError::Expired
+                | SnapshotFileError::NoContents { .. }
+                | SnapshotFileError::NoContent,
+            ) => return Ok(false),
             Err(e) => {
                 return Err(DomainError::Invalid(format!("snapshot {end}:{path}: {e}")));
             }
@@ -189,6 +193,7 @@ mod tests {
                 turn_id: None,
                 effort_id: None,
                 budget: None,
+                provider: None,
             })
             .await
             .unwrap()

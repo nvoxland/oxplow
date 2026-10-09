@@ -591,6 +591,7 @@ mod tests {
                     turn_id: None,
                     effort_id: None,
                     budget: None,
+                    provider: None,
                 })
                 .await
                 .unwrap()

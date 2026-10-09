@@ -580,6 +580,7 @@ mod tests {
                 turn_id: None,
                 effort_id: None,
                 budget: None,
+                provider: None,
             })
             .await
             .unwrap()
@@ -658,6 +659,7 @@ mod tests {
                 turn_id: None,
                 effort_id: None,
                 budget: None,
+                provider: None,
             })
         };
         let start = take("src/lib.rs").await.unwrap().unwrap();
