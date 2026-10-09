@@ -164,8 +164,9 @@ pub trait SnapshotProvider: Send + Sync {
     fn id(&self) -> &str;
     /// Whether what it marks keeps file contents (the `contents` feature).
     fn contents(&self) -> bool;
-    /// Take the stream's worktree as it is now.
-    async fn mark(&self, request: &MarkRequest) -> Result<Marked, SnapshotError>;
+    /// Take the stream's worktree as it is now; `None` when there is
+    /// nothing to record (no snapshot yet and nothing in the tree).
+    async fn mark(&self, request: &MarkRequest) -> Result<Option<Marked>, SnapshotError>;
     /// What changed between `from` (`None`: the empty tree) and `to`.
     async fn changed(
         &self,
@@ -284,7 +285,7 @@ mod tests {
         fn contents(&self) -> bool {
             true
         }
-        async fn mark(&self, _: &MarkRequest) -> Result<Marked, SnapshotError> {
+        async fn mark(&self, _: &MarkRequest) -> Result<Option<Marked>, SnapshotError> {
             Err(SnapshotError::Storage("a fake".into()))
         }
         async fn changed(
