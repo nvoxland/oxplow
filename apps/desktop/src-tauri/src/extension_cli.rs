@@ -352,14 +352,14 @@ mod tests {
         std::fs::create_dir_all(&folder).unwrap();
         std::fs::write(
             folder.join("extension.yaml"),
-            "manifest: 2\nname: team\nsharing: shared\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\nui:\n  replacements: []\n",
+            "manifest: 2\nname: team\nsharing: shared\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: x\n  examples: [{ name: a }]\nui:\n  replacements: []\n",
         )
         .unwrap();
         let (code, out, _) = cli(&["check", folder.to_str().unwrap()]);
         assert_eq!(code, 1);
         assert!(
             out.contains(
-                "error: oxplow/extensions/team/extension.yaml:9: `ui.replacements` is experimental"
+                "error: oxplow/extensions/team/extension.yaml:10: `ui.replacements` is experimental"
             ),
             "{out}"
         );

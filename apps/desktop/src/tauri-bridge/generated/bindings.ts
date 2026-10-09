@@ -2181,6 +2181,21 @@ export type ContextUsage = {
 	costCurrency: string | null,
 };
 
+/**
+ *  A contribution's identity: `<extension>/<kind>/<local>`. Stable across
+ *  loads; what ordering, imports and the views key on. The public forms a
+ *  kind already had (`lens:<ext>/<slug>`, a command id, a metric key) are
+ *  its [`Descriptor::aliases`].
+ */
+export type ContributionId = {
+	extension: string,
+	kind: ContributionKind,
+	local: string,
+};
+
+// Every kind of contribution a manifest can declare.
+export type ContributionKind = "model" | "measure" | "metric" | "dimension" | "collector" | "event_type" | "ref_kind" | "command" | "effect" | "advisory" | "skill" | "implementation" | "provider" | "lens" | "page" | "panel" | "slot" | "decorator" | "replacement" | "custom_component";
+
 // One credential a provider declares.
 export type CredentialDecl = {
 	/**
@@ -2287,6 +2302,13 @@ export type DeadLetter = {
 	state: string,
 };
 
+// Where in the manifest it was declared.
+export type DeclaredAt = {
+	file: string,
+	// 1-based; `None` when the kind doesn't track lines.
+	line: number | null,
+};
+
 // Where a decoration shows.
 export type DecoratorPlacement = 
 // A chip in the header of a page whose ref the model lists.
@@ -2303,6 +2325,35 @@ export type Deprecated = {
 	version: number,
 	file: string,
 	until: string,
+};
+
+// Everything a contribution is, as core knows it.
+export type Descriptor = {
+	id: ContributionId,
+	owner: Owner,
+	stability: Stability,
+	/**
+	 *  The contract's own version (a model's, an event type's), when it
+	 *  has one.
+	 */
+	contract_version: number | null,
+	trigger: RunsOn,
+	/**
+	 *  What it requires: capabilities, features or scopes
+	 *  (`capability::check_need`'s forms). Never what it was granted.
+	 */
+	needs: string[],
+	// Contributions it runs after (by alias, as the manifest names them).
+	after: string[],
+	/**
+	 *  The name it takes in a space extensions share (a metric key, an
+	 *  event type, a skill name, `<capability>/<id>`); two contributions
+	 *  of a kind that doesn't share names can't hold the same one.
+	 */
+	global: string | null,
+	// Its other public forms (`lens:<ext>/<slug>`, a command id).
+	aliases: string[],
+	source: DeclaredAt,
 };
 
 /**
@@ -2977,6 +3028,13 @@ export type Extension_Deserialize = {
 	 *  core commands (P6b; valid ones — invalid ones are in `errors`).
 	 */
 	commands: ExtensionCommand[],
+	// Its `version:` (semver), when it declares one; required to share.
+	version: string | null,
+	/**
+	 *  Its contributions as descriptors (`extensions::descriptors`): the
+	 *  kinds that have moved onto them so far.
+	 */
+	contributions: Descriptor[],
 };
 
 // A loaded extension and anything wrong with it.
@@ -3099,6 +3157,13 @@ export type Extension_Serialize = {
 	 *  core commands (P6b; valid ones — invalid ones are in `errors`).
 	 */
 	commands: ExtensionCommand[],
+	// Its `version:` (semver), when it declares one; required to share.
+	version: string | null,
+	/**
+	 *  Its contributions as descriptors (`extensions::descriptors`): the
+	 *  kinds that have moved onto them so far.
+	 */
+	contributions: Descriptor[],
 };
 
 /**
@@ -4500,6 +4565,15 @@ export type OpRef = {
 	op: string,
 };
 
+// Who contributed it.
+export type Owner = {
+	extension: string,
+	// `project` or `bundled`.
+	origin: string,
+	// The extension's `version:`, when it declares one.
+	version: string | null,
+};
+
 export type OxplowConfig = {
 	/**
 	 *  The agent harnesses enabled for this project, by registry key, in
@@ -5342,6 +5416,25 @@ export type RowSample = {
 // The kind of run a report collector reads after.
 export type RunKind = "test" | "analysis";
 
+// How a contribution comes to run.
+export type RunsOn = 
+// Logged events of these types.
+{ on: "events"; types: string[] } | 
+// A schedule (`every`, a cron).
+{ on: "schedule"; every: string } | 
+// A run's reports (a report collector).
+{ on: "run" } | 
+// Called by name: a command, an implementation's verbs.
+{ on: "call" } | 
+// Read by a query: a model, a measure, a metric, a dimension.
+{ on: "query" } | 
+// Shown where it's mounted: a lens, a page, a slot.
+{ on: "mount" } | 
+// Read by an agent: a skill, an advisory.
+{ on: "agent" } | 
+// Nothing invokes it: a vocabulary entry (an event type, a ref kind).
+{ on: "declared" };
+
 // Whose an instance is (P9.B2).
 export type Scope = 
 /**
@@ -5598,6 +5691,9 @@ export type SqlQueryResult = {
 	 */
 	freshness: ModelFreshness[],
 };
+
+// Whether a contract is permanent API.
+export type Stability = "stable" | "experimental";
 
 // One changed path in a workspace.
 export type StatusEntry = {

@@ -162,6 +162,11 @@ pub struct ManifestV2 {
     /// Required when shared.
     #[serde(default)]
     pub engine: Option<String>,
+    /// Its own version, `MAJOR.MINOR.PATCH` (semver; a `-pre` suffix is
+    /// fine). Recorded on every contribution it makes. Required when
+    /// shared.
+    #[serde(default)]
+    pub version: Option<String>,
     /// Why it exists: its purpose, the ref that created it, and examples.
     /// Required.
     #[schemars(required)]
@@ -584,7 +589,33 @@ pub fn check(m: &ManifestV2, file: &str, text: &str, bundled: bool) -> (Vec<Stri
             errors.push(at(file, key_line(text, "engine"), e));
         }
     }
+    match &m.version {
+        // A bundled extension ships with oxplow: its version is oxplow's.
+        None if m.sharing == Sharing::Shared && !bundled => errors.push(at(
+            file,
+            Some(1),
+            "a shared extension must declare its `version: MAJOR.MINOR.PATCH`",
+        )),
+        Some(v) if !valid_version(v) => errors.push(at(
+            file,
+            key_line(text, "version"),
+            format!("`version: {v}` must be MAJOR.MINOR.PATCH (a `-pre` suffix is fine)"),
+        )),
+        _ => {}
+    }
     (errors, warnings)
+}
+
+/// `MAJOR.MINOR.PATCH`, numbers each, with an optional `-pre` suffix.
+pub fn valid_version(v: &str) -> bool {
+    let core = v
+        .split_once('-')
+        .map_or(v, |(core, pre)| if pre.is_empty() { "" } else { core });
+    let parts: Vec<&str> = core.split('.').collect();
+    parts.len() == 3
+        && parts
+            .iter()
+            .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
 }
 
 #[cfg(test)]
@@ -639,7 +670,7 @@ mod tests {
                 .any(|e| e.contains("`ui.replacements` is experimental")),
             "{errors:?}"
         );
-        let text = "manifest: 2\nname: acme\nsharing: shared\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\n";
+        let text = "manifest: 2\nname: acme\nsharing: shared\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: x\n  examples: [{ name: a }]\n";
         let (errors, warnings) = check(&parse(text), "e/extension.yaml", text, true);
         assert!(
             errors.is_empty() && warnings.is_empty(),
@@ -653,7 +684,7 @@ mod tests {
                 .any(|e| e.contains("bundled extension must declare `sharing: shared`")),
             "{errors:?}"
         );
-        let text = "manifest: 2\nname: acme\nsharing: shared\nengine: \">=99.0\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\n";
+        let text = "manifest: 2\nname: acme\nsharing: shared\nengine: \">=99.0\"\nversion: 0.1.0\nintent:\n  purpose: x\n  examples: [{ name: a }]\n";
         let (errors, _) = check(&parse(text), "e/extension.yaml", text, false);
         assert!(
             errors.iter().any(|e| e.contains("needs oxplow >=99.0")),
@@ -667,7 +698,7 @@ mod tests {
     /// to it. Every kind is in exactly one of the two tables.
     #[test]
     fn event_types_is_stable_and_the_tables_partition_the_kinds() {
-        let text = "manifest: 2\nname: acme\nsharing: shared\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\nevent_types:\n  types: []\n";
+        let text = "manifest: 2\nname: acme\nsharing: shared\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: x\n  examples: [{ name: a }]\nevent_types:\n  types: []\n";
         let (errors, _) = check(&parse(text), "e/extension.yaml", text, false);
         assert!(errors.is_empty(), "{errors:?}");
         assert!(STABLE_KINDS.contains(&"event_types"));
@@ -690,7 +721,7 @@ mod tests {
     /// extension may declare effects; the tables still partition the kinds.
     #[test]
     fn effects_is_stable_and_the_tables_partition_the_kinds() {
-        let text = "manifest: 2\nname: acme\nsharing: shared\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\neffects: []\n";
+        let text = "manifest: 2\nname: acme\nsharing: shared\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: x\n  examples: [{ name: a }]\neffects: []\n";
         let (errors, _) = check(&parse(text), "e/extension.yaml", text, false);
         assert!(errors.is_empty(), "{errors:?}");
         assert!(STABLE_KINDS.contains(&"effects"));
@@ -707,7 +738,7 @@ mod tests {
     /// the tables still partition the kinds.
     #[test]
     fn custom_components_is_stable_and_the_tables_partition_the_kinds() {
-        let text = "manifest: 2\nname: acme\nsharing: shared\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\ncustom_components: []\n";
+        let text = "manifest: 2\nname: acme\nsharing: shared\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: x\n  examples: [{ name: a }]\ncustom_components: []\n";
         let (errors, _) = check(&parse(text), "e/extension.yaml", text, false);
         assert!(errors.is_empty(), "{errors:?}");
         assert!(STABLE_KINDS.contains(&"custom_components"));
@@ -723,7 +754,7 @@ mod tests {
     /// decorators; the tables still partition the kinds.
     #[test]
     fn decorators_is_stable_and_the_tables_partition_the_kinds() {
-        let text = "manifest: 2\nname: acme\nsharing: shared\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\nui:\n  decorators: []\n";
+        let text = "manifest: 2\nname: acme\nsharing: shared\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: x\n  examples: [{ name: a }]\nui:\n  decorators: []\n";
         let (errors, _) = check(&parse(text), "e/extension.yaml", text, false);
         assert!(errors.is_empty(), "{errors:?}");
         assert!(STABLE_KINDS.contains(&"ui.decorators"));

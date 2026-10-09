@@ -158,7 +158,7 @@ mod tests {
             d.path(),
             "oxplow/extensions/flags/extension.yaml",
             &format!(
-                "manifest: 2\nname: flags\nsharing: {sharing}\nengine: \">=0.1\"\nintent:\n  purpose: p\n  examples: [{{ name: a }}]\nmodels:\n  - name: flags\n    version: 1\n    description: d\n    columns:\n      - {{ name: ref, type: TEXT, doc: r }}\n      - {{ name: label, type: TEXT, doc: l }}\n      - {{ name: color, type: TEXT, doc: c }}\nui:\n  decorators:\n{decorators}"
+                "manifest: 2\nname: flags\nsharing: {sharing}\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: p\n  examples: [{{ name: a }}]\nmodels:\n  - name: flags\n    version: 1\n    description: d\n    columns:\n      - {{ name: ref, type: TEXT, doc: r }}\n      - {{ name: label, type: TEXT, doc: l }}\n      - {{ name: color, type: TEXT, doc: c }}\nui:\n  decorators:\n{decorators}"
             ),
         );
         write(

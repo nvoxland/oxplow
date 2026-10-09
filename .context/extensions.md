@@ -19,7 +19,39 @@ them"):
 | access | `view` / `read` / `record` / `write`: what a command or a scope may do |
 | effect | an extension's reaction to events ("Effects" below) |
 
-"Plugin" is only a Claude Code or opencode plugin.
+"Plugin" is only a Claude Code or opencode plugin. Two more terms keep
+authority honest: a **need** is what a contribution says it requires (a
+capability, a feature, a scope); a **grant** is what a person approved
+(a program's hash and its declared access). A need is never a grant.
+
+## Contributions (descriptors)
+
+Every contribution has one `oxplow_domain::contribution::Descriptor`,
+built at load from the kind's typed declaration
+(`extensions::descriptors::describe`, `Extension.contributions`): a
+stable id `<extension>/<kind>/<local>` (`ContributionId`; one grammar for
+`local`, dots only for the kinds whose ids are dotted), its owner
+(extension, origin and the extension's `version:`), the kind's stability,
+how it runs (`RunsOn`), its needs and `after`, the **global name** it
+takes in a space extensions share (a metric key, a fact collector's id)
+and the public forms it already had (`aliases`). The kinds' table
+(`contribution::KINDS`: manifest key, title, stability, whether two
+extensions may share a name) is the one place those facts live.
+
+At load, `check_ids` turns an id that breaks the grammar into a load
+error, and the folder name must be a valid extension name
+(`valid_extension_name`; bundled names are core's). Across the catalog,
+`check_catalog` (end of `load_extensions_in`, after disables) adds every
+enabled extension's descriptors to a `Registry` in catalog order: a global
+name a kind doesn't share that another already holds is refused — a load
+error of the later extension naming both — and the contribution is taken
+out of that extension, so nothing downstream sees two (this is what keeps
+the first extension's metric when two declare one key). `version:` is
+required for `sharing: shared` (`manifest_v2::valid_version`); a bundled
+extension's version is oxplow's own. The kinds with adapters so far:
+collectors, effects, measures, metrics, dimensions; the rest keep their
+own checks until they move (the inventory and plan are the foundation
+roadmap's "Normalize contribution descriptors").
 
 > **Status: built (epic tsk275; host finished in tsk278).**
 > - **Current:**

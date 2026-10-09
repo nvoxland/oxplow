@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod custom_components;
 pub mod decorators;
+pub mod descriptors;
 pub mod implementations;
 pub mod manifest_v2;
 pub mod replacements;
@@ -1084,6 +1085,11 @@ pub struct Extension {
     /// Commands it registers on the bus, each a Starlark script composing
     /// core commands (P6b; valid ones — invalid ones are in `errors`).
     pub commands: Vec<crate::extension_commands::ExtensionCommand>,
+    /// Its `version:` (semver), when it declares one; required to share.
+    pub version: Option<String>,
+    /// Its contributions as descriptors (`extensions::descriptors`): the
+    /// kinds that have moved onto them so far.
+    pub contributions: Vec<oxplow_domain::contribution::Descriptor>,
 }
 
 /// What an extension adds to the core UI (`ui:` in its manifest).
@@ -1218,6 +1224,7 @@ pub fn load_extensions_in(root: &Path, project: &Path) -> Vec<Extension> {
         .map(|e| apply_disabled(e, &disabled))
         .collect();
     crate::extension_commands::refuse_shared_namespaces(&mut out);
+    descriptors::check_catalog(&mut out);
     out
 }
 
@@ -1683,6 +1690,8 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         panels: Vec::new(),
         pages: Vec::new(),
         commands: Vec::new(),
+        version: None,
+        contributions: Vec::new(),
     }
 }
 
@@ -1733,6 +1742,18 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         }
     };
     ext.manifest_version = m.manifest;
+    // A bundled extension ships with oxplow: its version is oxplow's.
+    ext.version = if origin == "bundled" {
+        Some(env!("CARGO_PKG_VERSION").to_string())
+    } else {
+        m.version.clone()
+    };
+    if origin != "bundled" && !oxplow_domain::contribution::valid_extension_name(name) {
+        ext.errors.push(format!(
+            "{file}: the name `{name}` must be lowercase letters, digits and single dashes, \
+             starting with a letter (rename the folder)"
+        ));
+    }
     if let Some(ns) = &m.namespace {
         match crate::extension_commands::check_namespace(ns, origin == "bundled") {
             Ok(()) => ext.namespace = ns.clone(),
@@ -2310,6 +2331,8 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             at(&file, line.or(key_line(&manifest, "panels")), e)
         }));
     }
+    ext.contributions = descriptors::describe(&ext);
+    descriptors::check_ids(&mut ext);
     ext
 }
 
@@ -2664,6 +2687,7 @@ fn apply_disabled(mut ext: Extension, disabled: &[String]) -> Extension {
         ext.panels.clear();
         ext.pages.clear();
         ext.commands.clear();
+        ext.contributions.clear();
     }
     ext
 }
@@ -4006,7 +4030,10 @@ pub fn scaffold_manifest(m: &ManifestScaffold<'_>) -> String {
         sharing = if m.shared {
             let version = manifest_v2::current_engine();
             let major_minor: Vec<&str> = version.split('.').take(2).collect();
-            format!("sharing: shared\nengine: \">={}\"\n", major_minor.join("."))
+            format!(
+                "sharing: shared\nengine: \">={}\"\nversion: 0.1.0\n",
+                major_minor.join(".")
+            )
         } else {
             "sharing: private\n".to_string()
         },
@@ -5416,7 +5443,7 @@ empty: No items.
     #[test]
     fn a_shared_manifest_may_not_use_an_experimental_kind() {
         let dir = tempfile::tempdir().unwrap();
-        let manifest = "manifest: 2\nname: review\nsharing: shared\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\nui:\n  replacements: []\n";
+        let manifest = "manifest: 2\nname: review\nsharing: shared\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: x\n  examples: [{ name: a }]\nui:\n  replacements: []\n";
         write(
             dir.path(),
             "oxplow/extensions/review/extension.yaml",
@@ -5429,7 +5456,7 @@ empty: No items.
             .find(|m| m.contains("`ui.replacements` is experimental"))
             .unwrap_or_else(|| panic!("{:?}", e.errors));
         assert!(
-            err.starts_with("oxplow/extensions/review/extension.yaml:9:"),
+            err.starts_with("oxplow/extensions/review/extension.yaml:10:"),
             "{err}"
         );
         assert_eq!(e.sharing, Sharing::Shared);

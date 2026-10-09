@@ -3,6 +3,7 @@ name: prompt-efforts
 description: An effort policy that gives every prompt that changes files its own effort.
 sharing: shared
 engine: ">=0.7"
+version: 0.1.0
 intent:
   purpose: >-
     One effort per prompt: each prompt whose turn changed the worktree gets an

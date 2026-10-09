@@ -96,11 +96,7 @@ pub struct DeclaredEventType {
     pub upcast: Option<Upcast>,
 }
 
-/// The namespace an extension's types live under: its name, `-` read as
-/// `_` (a type name is snake_case).
-pub fn extension_namespace(extension: &str) -> String {
-    extension.replace('-', "_")
-}
+pub use crate::contribution::extension_namespace;
 
 struct Registered {
     validator: jsonschema::Validator,

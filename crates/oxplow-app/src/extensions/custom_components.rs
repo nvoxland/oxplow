@@ -621,7 +621,7 @@ mod tests {
             root,
             "oxplow/extensions/x/extension.yaml",
             &format!(
-                "manifest: 2\nname: x\nsharing: {sharing}\nengine: \">=0.1\"\nintent:\n  purpose: p\n  examples: [{{ name: a }}]\ncustom_components:\n{components}"
+                "manifest: 2\nname: x\nsharing: {sharing}\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: p\n  examples: [{{ name: a }}]\ncustom_components:\n{components}"
             ),
         );
         write(

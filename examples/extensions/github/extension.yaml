@@ -3,6 +3,7 @@ name: github
 description: Pull requests from this repo's GitHub, joined to work items and streams.
 sharing: shared
 engine: ">=0.7"
+version: 0.1.0
 intent:
   purpose: >-
     Bring the repo's pull requests into the semantic layer as v_github_pr,

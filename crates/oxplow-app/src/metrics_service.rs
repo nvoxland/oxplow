@@ -6004,7 +6004,6 @@ def transform(input):
     /// extension and then fails its scope test, so neither activates and
     /// nothing is reported.
     #[tokio::test]
-    #[ignore = "red until contribution descriptors land"]
     async fn two_extensions_declaring_one_metric_key_report_it_and_keep_the_first() {
         let (svc, dir) = fixture().await;
         for (name, measure) in [("alpha", "alpha.todo"), ("beta", "beta.todo")] {

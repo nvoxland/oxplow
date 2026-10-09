@@ -1285,7 +1285,7 @@ mod tests {
         std::fs::create_dir_all(&team).unwrap();
         std::fs::write(
             team.join("extension.yaml"),
-            "manifest: 2\nname: team\nsharing: shared\nengine: \">=0.1\"\nintent:\n  purpose: p\n  examples: [{ name: a }]\n",
+            "manifest: 2\nname: team\nsharing: shared\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: p\n  examples: [{ name: a }]\n",
         )
         .unwrap();
         let err = fx

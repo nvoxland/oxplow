@@ -66,7 +66,14 @@ intent:
   with a fixture under `fixtures/<example>.yaml` saying what to expect.
 - `sharing: shared` is for an extension committed for a team or
   installed from git. A shared extension needs `engine: ">=0.7"` (the
-  oxplow it targets) and may use stable kinds only.
+  oxplow it targets) and its own `version: 1.2.0` (`MAJOR.MINOR.PATCH`),
+  and may use stable kinds only. A private one may declare a version too.
+- The folder name is lowercase letters, digits and single dashes,
+  starting with a letter.
+- A metric, measure, dimension or fact collector's key is shared by every
+  extension in the project: when two declare the same one, the first
+  (alphabetically) keeps it and the other gets a load error naming
+  both.
 
 ### What it can declare
 

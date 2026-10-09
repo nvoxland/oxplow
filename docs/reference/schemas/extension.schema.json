@@ -43,6 +43,14 @@
       ],
       "default": null
     },
+    "version": {
+      "description": "Its own version, `MAJOR.MINOR.PATCH` (semver; a `-pre` suffix is\nfine). Recorded on every contribution it makes. Required when\nshared.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
     "intent": {
       "description": "Why it exists: its purpose, the ref that created it, and examples.\nRequired.",
       "type": "object",

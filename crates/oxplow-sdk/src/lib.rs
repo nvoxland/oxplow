@@ -1330,7 +1330,7 @@ mod tests {
         write(
             dir.path(),
             "oxplow/extensions/team/extension.yaml",
-            "manifest: 2\nname: team\nsharing: shared\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\nui:\n  replacements: []\n",
+            "manifest: 2\nname: team\nsharing: shared\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: x\n  examples: [{ name: a }]\nui:\n  replacements: []\n",
         );
         let report = check(
             dir.path(),
@@ -1346,7 +1346,7 @@ mod tests {
         let text = render_findings(&report, Format::Text);
         assert!(
             text.contains(
-                "error: oxplow/extensions/team/extension.yaml:9: `ui.replacements` is experimental"
+                "error: oxplow/extensions/team/extension.yaml:10: `ui.replacements` is experimental"
             ),
             "{text}"
         );
