@@ -24,6 +24,11 @@
 //! so it outlives the process as a real service's does; without, it lives
 //! in memory.
 //!
+//! With `OXPLOW_FAKE_CAPABILITY=effort_policy` it is an **effort policy**
+//! instead (`policy`): it declares [`policy_declarations`], keeps no items,
+//! and answers `react { event }` with the commands to run; the `react`s it
+//! answered are counted in its state (`reacts`).
+//!
 //! Two notifications act at once: `fake/changed { collectors? }` makes
 //! it send the host `host/changed` (what a webhook would), and
 //! `fake/exit` makes it exit on its own (status 3).
@@ -43,6 +48,8 @@
 //! - `shutdown-file:<path>` — a `shutdown` writes `<path>` before it
 //!   answers; `ignore-shutdown` — a `shutdown` is answered and it keeps
 //!   running;
+//! - `bogus-react` — as an effort policy, `react` composes a command that
+//!   doesn't exist;
 //! - `checkpoint-at-end` — a read sends one `$/state`, after its last
 //!   record;
 //! - `bad-declarations` — `initialize` declares an extra command the
@@ -97,7 +104,34 @@ use serde_json::{json, Value};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{oneshot, Mutex};
 
+mod policy;
+
+pub use policy::declarations as policy_declarations;
+
 pub const PROVIDER: &str = "fake";
+
+/// The capability it implements (`OXPLOW_FAKE_CAPABILITY`): a work list,
+/// the default, or an effort policy ([`policy_declarations`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Capability {
+    #[default]
+    WorkItems,
+    EffortPolicy,
+}
+
+impl Capability {
+    /// The capability `name` names (`work_items` — also when unset — or
+    /// `effort_policy`).
+    pub fn named(name: Option<&str>) -> Result<Self, String> {
+        match name.unwrap_or("work_items") {
+            "work_items" => Ok(Capability::WorkItems),
+            "effort_policy" => Ok(Capability::EffortPolicy),
+            other => Err(format!(
+                "the fake implements work_items or effort_policy, not `{other}`"
+            )),
+        }
+    }
+}
 
 /// The script hooks.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -147,6 +181,9 @@ pub struct Hooks {
     /// `checkpoint-at-end`: a read sends one `$/state`, after its last
     /// record, rather than one per record.
     pub checkpoint_at_end: bool,
+    /// `bogus-react`: an effort policy's `react` composes a command that
+    /// doesn't exist.
+    pub bogus_react: bool,
 }
 
 impl Hooks {
@@ -197,6 +234,7 @@ impl Hooks {
                 None if part == "host-read" => self.host_read = true,
                 None if part == "ignore-shutdown" => self.ignore_shutdown = true,
                 None if part == "checkpoint-at-end" => self.checkpoint_at_end = true,
+                None if part == "bogus-react" => self.bogus_react = true,
                 _ => {}
             }
         }
@@ -219,7 +257,7 @@ fn canonical_of(native: &str) -> Option<CanonicalState> {
         .find(|s| native_of(*s).eq_ignore_ascii_case(native))
 }
 
-fn command(name: &str, summary: &str, input_schema: Value) -> CommandDecl {
+pub(crate) fn command(name: &str, summary: &str, input_schema: Value) -> CommandDecl {
     CommandDecl {
         name: name.into(),
         summary: summary.into(),
@@ -355,6 +393,10 @@ struct Item {
 struct World {
     /// The instance it is: its refs' provider segment.
     id: String,
+    capability: Capability,
+    /// How many `react`s it answered (an effort policy's), kept with its
+    /// state so a test can tell whether it was asked.
+    reacts: u64,
     hooks: Hooks,
     items: BTreeMap<u64, Item>,
     next: u64,
@@ -376,6 +418,8 @@ struct Saved {
     next: u64,
     rev: u64,
     answered: HashMap<String, (String, Value, Value)>,
+    #[serde(default)]
+    reacts: u64,
 }
 
 impl World {
@@ -389,6 +433,7 @@ impl World {
             next: self.next,
             rev: self.rev,
             answered: self.answered.clone(),
+            reacts: self.reacts,
         };
         let kept = path
             .parent()
@@ -413,6 +458,7 @@ impl World {
         self.next = saved.next;
         self.rev = saved.rev;
         self.answered = saved.answered;
+        self.reacts = saved.reacts;
     }
 }
 
@@ -428,14 +474,15 @@ pub enum Served {
     Crashed,
 }
 
-/// Serve the protocol on `reader` / `writer` as instance `id` until the
-/// stream ends, a `shutdown`, or a `crash` hook.
+/// Serve the protocol on `reader` / `writer` as instance `id` of
+/// `capability` until the stream ends, a `shutdown`, or a `crash` hook.
 pub async fn serve<R, W>(
     reader: R,
     writer: W,
     hooks: &str,
     id: &str,
     state: Option<std::path::PathBuf>,
+    capability: Capability,
 ) -> Served
 where
     R: AsyncRead + Unpin + Send + 'static,
@@ -444,6 +491,7 @@ where
     let (peer, mut incoming) = Peer::spawn(reader, writer);
     let mut world = World {
         id: id.to_string(),
+        capability,
         hooks: Hooks::parse(hooks),
         next: 1,
         state,
@@ -599,8 +647,13 @@ async fn handle(
                     p.protocol_version
                 )));
             }
-            let hooks = world.lock().await.hooks.clone();
-            let declared = if hooks.bad_declarations {
+            let (hooks, capability) = {
+                let w = world.lock().await;
+                (w.hooks.clone(), w.capability)
+            };
+            let declared = if capability == Capability::EffortPolicy {
+                policy_declarations()
+            } else if hooks.bad_declarations {
                 bad_declarations()
             } else if hooks.plain_writes {
                 plain_declarations()
@@ -652,6 +705,10 @@ async fn handle(
         method::DISCOVER => {
             let p: DiscoverParams = parse(params)?;
             require_handle(&p.handle)?;
+            // A policy reads nothing.
+            if world.lock().await.capability == Capability::EffortPolicy {
+                return Ok(json!({ "entities": [] }));
+            }
             Ok(serde_json::to_value(DiscoverResult {
                 entities: vec![EntityDecl {
                     name: "work_item".into(),
@@ -705,7 +762,26 @@ async fn handle(
             } else {
                 None
             };
-            let mut answer = invoke(world, &p.command, p.input.clone()).await?;
+            let policy = world.lock().await.capability == Capability::EffortPolicy;
+            let mut answer = match (policy, p.command.as_str()) {
+                (true, "react") if hooks.bogus_react => {
+                    world.lock().await.reacts += 1;
+                    json!({ "result": { "commands": [{ "name": "oxplow.nope.never", "input": {} }] },
+                            "events": [] })
+                }
+                (true, "react") => {
+                    let result = policy::react(peer, sent_key.clone(), &p.input).await?;
+                    world.lock().await.reacts += 1;
+                    json!({ "result": result, "events": [] })
+                }
+                (true, other) => {
+                    return Err(ProtocolError::InvalidInput {
+                        field: "/command".into(),
+                        message: format!("an effort policy answers `react`, not `{other}`"),
+                    })
+                }
+                (false, _) => invoke(world, &p.command, p.input.clone()).await?,
+            };
             if let Some(read) = read {
                 answer["result"]["read"] = read;
             }

@@ -155,6 +155,22 @@ Two notifications drive it from a test: `fake/changed { collectors? }`
 `tests/stdio.rs` pins all of it through a `Peer`, validating the streamed
 notifications against the goldens.
 
+**As an effort policy** (`OXPLOW_FAKE_CAPABILITY=effort_policy`; unset or
+`work_items` is the work list, anything else exits 2) it declares
+`policy_declarations()` — the `effort_policy` capability, its one verb
+`react` (`confirm: never`, `access: record`), no event types or
+collectors, the same `team` config — and keeps no items (`discover` is
+empty, any other verb `InvalidInput`). `react { event }` answers as an
+effect's script does: an item moved to `in_progress` with a thread in
+its anchors opens an effort on that thread linked to the item
+(`oxplow.effort.open`); one moved to `done` or `canceled` reads its open
+efforts through `host/call` (`sql.read` over `v_effort`, named with the
+invoke's key) and closes each (`oxplow.effort.close`, `switch`);
+anything else is `{ skip }`. It counts the `react`s it answered in its
+state (`reacts`), so a test can see a policy that wasn't chosen was asked
+nothing. The `bogus-react` hook makes `react` compose a command that
+doesn't exist.
+
 ## Which trackers are backends (decided 2026-10-05)
 
 A work-items provider is a **backend for the project's own work**: when
@@ -1043,6 +1059,15 @@ audit row (and undo dispatches again), its verbs aren't on the bus but
 its extension's `tracker.item.estimate` is, run on the instance its `ref`
 names; a verb's input is checked against its declared schema
 and a parent or link target of another provider is refused.
+The fake as an effort policy (`write_policy_extension`, a `steward`
+extension that `needs: [sql.read]`) is chosen as
+`activeProviders.effort_policy`: it is listed under the capability in
+`v_capability_provider` while it runs; a task its thread's agent starts
+opens an effort linked to it, logged with source
+`effect:effort_policy:fake`, and finishing the task closes it; with
+`oxplow` or `none` chosen it answers no `react`; a `bogus-react` call
+runs nothing and the item's move stands; and once stopped the choice
+resolves to `none` and starting a task opens nothing.
 
 **Its commands appear in core menus** by their own `ui`: one about a
 ref's kind (`ui.about: work_item`) is on that ref's page menu and its
