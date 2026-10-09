@@ -108,9 +108,9 @@ export function CapabilitiesSection() {
                     onChange={() => void choose("project", p.capability, c.id)}
                   />
                   {c.title}
-                  {choiceHint(p.capability, c.features) ? (
+                  {choiceHint(p.capability, c.features, c.source) ? (
                     <span style={mutedStyle} data-testid={`capabilities-${p.capability}-${c.id}-hint`}>
-                      — {choiceHint(p.capability, c.features)}
+                      — {choiceHint(p.capability, c.features, c.source)}
                     </span>
                   ) : null}
                   {c.features.length > 0 ? <span style={mutedStyle}>· {c.features.join(", ")}</span> : null}

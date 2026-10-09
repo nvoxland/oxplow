@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import type { SearchHit, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
-import { freshnessFromResult, pagesFromResult, searchHitsOf } from "./knowledge.js";
+import { freshnessFromResult, knowledgeIsNone, NO_KNOWLEDGE_STORE, pagesFromResult, searchHitsOf } from "./knowledge.js";
 
 const result = (columns: string[], rows: SqlQueryResult["rows"]): SqlQueryResult =>
   ({ columns, rows, truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} }) as unknown as SqlQueryResult;
@@ -46,4 +46,14 @@ test("title and body search is the site search's wiki hits", () => {
     { kind: "task", ref_id: "tsk1", stream_id: null, title: "x", snippet: "", score: 1 },
   ] as SearchHit[];
   expect(searchHitsOf(hits)).toEqual([{ slug: "auth", title: "Auth", snippet: "…login…" }]);
+});
+
+// Knowledge is none when its active row is `none`; nothing listed yet is not none.
+test("knowledge is none only when the active row says so", () => {
+  const row = (provider: string, active: boolean) =>
+    ({ capability: "knowledge", provider, extension: null, features: {}, fields: [], idPattern: null, active }) as never;
+  expect(knowledgeIsNone([row("oxplow", false), row("none", true)])).toBe(true);
+  expect(knowledgeIsNone([row("oxplow", true), row("none", false)])).toBe(false);
+  expect(knowledgeIsNone([])).toBe(false);
+  expect(NO_KNOWLEDGE_STORE).toBe("No knowledge store — choose one in Settings → Capabilities");
 });
