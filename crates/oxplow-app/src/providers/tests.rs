@@ -6423,6 +6423,33 @@ async fn a_harness_providers_verbs_are_its_process() {
     assert!(env.iter().any(|(_, v)| v == "secret-bearer"));
 }
 
+/// A harness provider keeps the floor the built-ins keep: the harness
+/// conformance suite over its process, its program found where the launch
+/// looks.
+#[tokio::test]
+async fn a_harness_provider_passes_the_harness_suite() {
+    let (fx, _ext) = running_harness("").await;
+    let bin_dir = tempfile::tempdir().unwrap();
+    std::fs::write(bin_dir.path().join(oxplow_harness_fake::BIN), "").unwrap();
+    let run = crate::harness_conformance::suite(
+        &fx.svc,
+        "fake",
+        &json!({}),
+        &[bin_dir.path().to_path_buf()],
+    )
+    .await;
+    assert!(run.findings.is_empty(), "{:#?}", run.findings);
+    // Its program missing, the launch fails — and the suite says so.
+    let run = crate::harness_conformance::suite(&fx.svc, "fake", &json!({}), &[]).await;
+    assert!(
+        run.findings
+            .iter()
+            .any(|f| f.message.contains("launch failed")),
+        "{:#?}",
+        run.findings
+    );
+}
+
 /// The hook route waits on a harness's mapping and answer: a provider
 /// too slow to answer reads as no call and the empty answer, within the
 /// hook verbs' bound — the route's fail-open stance.

@@ -5012,6 +5012,7 @@ dependencies = [
  "oxplow-config",
  "oxplow-db",
  "oxplow-domain",
+ "oxplow-harness-fake",
  "oxplow-provider-fake",
  "oxplow-provider-protocol",
  "oxplow-workspace-hack",

@@ -31,6 +31,7 @@ oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
 
 [dev-dependencies]
 oxplow-provider-fake = { workspace = true }
+oxplow-harness-fake = { workspace = true }
 # Scaffolds are checked against the extension and lens schemas.
 jsonschema = { version = "0.58", default-features = false }
 

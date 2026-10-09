@@ -10,7 +10,8 @@
 use std::path::{Path, PathBuf};
 
 use oxplow_app::extension_catalog::ExtensionCatalog;
-use oxplow_sdk::{check, extension_test::test_extension, render_findings, scaffold, Format, Kind};
+use oxplow_sdk::extension_test::{test_extension, test_extension_in};
+use oxplow_sdk::{check, render_findings, scaffold, Format, Kind};
 
 async fn project() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
@@ -462,6 +463,81 @@ async fn a_scaffolded_policy_checks_tests_and_passes_the_suite() {
         ("effort_policy", "tidy_up")
     );
     assert_eq!(decl.needs, ["sql.read"]);
+}
+
+/// `extension test` runs the agent-harness suite over a harness provider —
+/// here the fake in harness mode — its launch looking for programs on the
+/// kit environment's PATH (where a stand-in for the fake harness's binary
+/// sits); `ran` shows it.
+#[tokio::test(flavor = "multi_thread")]
+async fn extension_test_runs_the_harness_suite_over_a_harness_provider() {
+    let dir = project().await;
+    let ext = dir.path().join("oxplow/extensions/relay");
+    std::fs::create_dir_all(ext.join("bin")).unwrap();
+    std::fs::create_dir_all(ext.join("fixtures")).unwrap();
+    std::fs::write(
+        ext.join("extension.yaml"),
+        "manifest: 2\nname: relay\nsharing: private\nintent:\n  purpose: A harness over the protocol.\n  examples:\n    - { name: basic, input: { command: render, input: { answer: { kind: ack } } }, expect: its acknowledgement }\nproviders:\n  - id: relay\n    capability: agent_harness\n    entry: bin/provider\n    declarations: provider.json\n",
+    )
+    .unwrap();
+    std::fs::write(
+        ext.join("fixtures/basic.yaml"),
+        "input: { command: render, input: { answer: { kind: ack } } }\nexpect: { body: $any }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        ext.join("fixtures/provider-relay.yaml"),
+        "config: { team: core }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        ext.join("provider.json"),
+        serde_json::to_string_pretty(&oxplow_provider_fake::harness_declarations()).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        ext.join("bin/provider"),
+        format!(
+            "#!/bin/sh\nOXPLOW_FAKE_CAPABILITY=agent_harness exec '{}' \"$@\"\n",
+            fake_bin().display()
+        ),
+    )
+    .unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(
+            ext.join("bin/provider"),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+    }
+    let bins = tempfile::tempdir().unwrap();
+    std::fs::write(bins.path().join(oxplow_harness_fake::BIN), "").unwrap();
+    let path = format!(
+        "{}:{}",
+        bins.path().display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let env: oxplow_app::providers::host::HostEnv = std::sync::Arc::new(move |name| {
+        if name == "PATH" {
+            Some(path.clone())
+        } else {
+            std::env::var(name).ok()
+        }
+    });
+    let blessed = test_extension_in(dir.path(), "relay", true, env.clone())
+        .await
+        .unwrap();
+    assert_eq!(blessed.errors, Vec::<String>::new());
+    let report = test_extension_in(dir.path(), "relay", false, env)
+        .await
+        .unwrap();
+    assert_eq!(report.errors, Vec::<String>::new());
+    assert!(
+        report.ran.iter().any(|r| r == "agent_harness suite"),
+        "{:?}",
+        report.ran
+    );
 }
 
 /// The fields `scripts/record-just-works.sh` strips from a recorded

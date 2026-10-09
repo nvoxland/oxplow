@@ -78,6 +78,7 @@ pub mod extension_ref_kinds;
 pub mod extensions;
 pub mod file_ref_version;
 pub mod followup;
+pub mod harness_conformance;
 pub mod harnesses;
 pub mod hook_ingest;
 pub mod indexer;

@@ -1383,6 +1383,17 @@ fn transcript(
 /// in-memory oxplow over a copy of the extension, the provider approved
 /// there (the person running the kit consents) and enabled with the
 /// fixture config.
+/// Where a harness's launch looks for programs under the kit: `env`'s
+/// PATH, then the well-known install dirs under its HOME — what
+/// `agent_path::search_path` is for the app's own environment.
+fn kit_search_path(env: &host::HostEnv) -> Vec<std::path::PathBuf> {
+    let extra = env("HOME")
+        .filter(|h| !h.is_empty())
+        .map(|h| oxplow_app::agent_path::well_known_bin_dirs(Path::new(&h)))
+        .unwrap_or_default();
+    oxplow_app::agent_path::search_path_in(env("PATH").as_deref().map(std::ffi::OsStr::new), &extra)
+}
+
 /// A throwaway oxplow over a copy of `ext` alone, in `env`: the folder
 /// (kept alive by the guard), the services, and the extension as they
 /// loaded it.
@@ -1561,6 +1572,17 @@ async fn suite(
                     .await
                     .map_err(|e| e.to_string())?;
                 oxplow_app::effort_policy_conformance::suite(&svc, &spec.id).await
+            }
+            providers::agent_harness::HarnessHost::CAPABILITY => {
+                // Its launch looks for programs where the kit's
+                // environment would: its PATH, then the install dirs.
+                oxplow_app::harness_conformance::suite(
+                    &svc,
+                    &spec.id,
+                    &json!({}),
+                    &kit_search_path(env),
+                )
+                .await
             }
             other => return Err(format!("no conformance suite for `{other}`")),
         };

@@ -434,7 +434,22 @@ in harness mode (`relay`, approved and enabled in the project, the
 in-process fake not registered) launches the fake harness's scripted
 session, whose hooks the route maps and answers through the provider's
 `tool_use` / `render`, and the observe suite finds it recorded
-canonically. The MCP adapter
+canonically.
+
+**The harness conformance suite** (`harness_conformance::suite(svc,
+harness, config, search_path)`) checks any registered harness through its
+own operations, built-ins and providers alike: its answers render as
+objects, a refusal and added context read unlike an acknowledgement, an
+empty hook body maps to no tool, its instruction files are paths inside
+the worktree, and a launch in a scratch worktree (placeholder endpoints, a
+marked bearer) keeps the bearer off the command line or an ACP agent's
+program and args, and in a terminal launch's env. In-tree it runs over the
+four built-ins (`acp` with `{ program: /bin/true }`) and the fake provider;
+it found Codex passing its telemetry bearer in `--config`. The kit's arm
+runs it with config `{}` and the kit environment's search path (its PATH,
+then the install dirs under its HOME — `kit_search_path`), so a harness
+provider's program must be findable where a person's would be; `ran`
+shows `agent_harness suite`. The MCP adapter
 (`oxplow-provider-mcp`) still maps work-item refs only.
 
 **Consent precedes execution** (`exec_consent`, `ProgramKind::Provider`,

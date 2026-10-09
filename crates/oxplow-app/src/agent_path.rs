@@ -81,7 +81,7 @@ pub fn resolve_program_in(
 }
 
 /// The PATH's dirs, then `extra`, in order.
-fn search_path_in(path_var: Option<&OsStr>, extra: &[PathBuf]) -> Vec<PathBuf> {
+pub fn search_path_in(path_var: Option<&OsStr>, extra: &[PathBuf]) -> Vec<PathBuf> {
     path_var
         .into_iter()
         .flat_map(std::env::split_paths)
