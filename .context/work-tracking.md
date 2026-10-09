@@ -220,13 +220,13 @@ own — heavier ones included (beads as a work list).
   other, and a choice is a project default with a personal override.
   Core declares the capabilities (`oxplow_domain::capability`:
   `CapabilitySpec` — choosable, optional, default, the features an
-  implementation may declare): the work list and the effort policy may
-  be none, snapshots may not, and `vcs` / `knowledge` aren't chosen. A
+  implementation may declare): the work list, the effort policy and
+  knowledge may be none, snapshots may not, and `vcs` isn't chosen. A
   person's override is `activeProviders` in `.oxplow/personal.yaml`
   (`oxplow.config.set { layer: personal }`).
 - **One active, or many at once.** Most capabilities have one active
   implementation, chosen (the work list, the effort policy, snapshots) or
-  fixed (`vcs`, `knowledge`). A **many-capability** (`CapabilitySpec.many`:
+  fixed (`vcs`). A **many-capability** (`CapabilitySpec.many`:
   `agent_harness`, `acp_adapter`, `ai_provider`) is served by every
   implementation declared — the way collectors are — never chosen,
   never none and never switched: each declared row is active
@@ -276,13 +276,14 @@ own — heavier ones included (beads as a work list).
   closes every open effort (`switch`), whichever policy is active after;
   nothing is deleted.
 
-The three in progress:
+The four in progress:
 
 | Capability | May be none | Default | Notes |
 |---|---|---|---|
 | Work list | yes | oxplow's tasks | Task screens stay core components, written against the interface; moving them into the extension is later work |
 | Effort policy | yes | the three rules above (`CommitOrSwitch`) | An `EffortPolicy`: it composes commands for an event, the dispatcher runs them as `effect:effort_policy:<id>`. A provider process may implement it (`react`) |
 | Snapshots | no | keeps everything (core's `oxplow`) | `SnapshotProvider` (`oxplow_domain::snapshot`): mark now, what changed between two points, read a path at a point (bytes only with `contents`). `Services.snapshots` (a `SnapshotRegistry`) answers the active one; every core take (an effort's brackets, a turn's end, a measured run, an archive) is its mark. Both built-ins are `snapshots::CoreSnapshots`, one capture pipeline under a content policy: `oxplow` keeps every version, `hashes` (bundled, "Track changes only") records identities and keeps no bytes. The captures follow the active one's policy (`SnapshotSwitch` on `capability.switched`, and every reload); a switch changes what's kept from then on, nothing taken before. A provider process implements it too (`providers::snapshots::SnapshotsHost`, `.context/providers.md` "A snapshots provider"): it marks, core records what it reports in the same ledger, and the capture pipeline idles while it's active |
+| Knowledge | yes | oxplow's wiki (bundled, `oxplow:wiki`) | `KnowledgeProvider` (`oxplow_domain::knowledge`): write, delete and link pages, and how current each page's pinned refs are. `Services.knowledge` (a `KnowledgeRegistry`) answers the active one. None is a sink, as the work list's is (`knowledge::NoneKnowledge`, core's, always registered): a write lands nowhere and succeeds, so nothing that writes pages is refused. An extension's provider may keep pages elsewhere (an Obsidian vault, a Confluence or MediaWiki server; `.context/knowledge.md` "The capability") |
 
 ## Status
 

@@ -47,7 +47,7 @@ pub struct CapabilitySpec {
     /// How a person names it.
     pub title: &'static str,
     /// Whether a project chooses its implementation. One that can't has
-    /// a single implementation, always active (`vcs`, `knowledge`).
+    /// a single implementation, always active (`vcs`).
     pub choosable: bool,
     /// Whether it may be [`NONE`]: nothing implements it, and what
     /// needs it says so.
@@ -234,6 +234,38 @@ pub const SNAPSHOTS: ProviderContract = ProviderContract {
     data: None,
 };
 
+/// A knowledge store's (`.context/knowledge.md` "The capability"): the
+/// page commands dispatch to its verbs, each answering the page's
+/// `knowledge.page.recorded@1` (the body it kept and the refs it states),
+/// and its collector streams its pages (edited outside oxplow) as the same
+/// records. Its pages are `wiki:<slug>`: bare refs, the active store's.
+pub const KNOWLEDGE: ProviderContract = ProviderContract {
+    verbs: &[
+        Verb {
+            name: "write_page",
+            needs: Need::Always,
+        },
+        Verb {
+            name: "delete_page",
+            needs: Need::Always,
+        },
+        Verb {
+            name: "link",
+            needs: Need::Always,
+        },
+    ],
+    dispatch: None,
+    events: &[("knowledge.page.recorded", 1)],
+    records: Some(Record {
+        entity: "knowledge_page",
+        event: ("knowledge.page.recorded", 1),
+        key: "page",
+    }),
+    ref_kind: Some("wiki"),
+    items: false,
+    data: None,
+};
+
 /// An agent harness's (`.context/agent-model.md`): core launches its
 /// sessions through it, has it map its tool hooks and render its answers,
 /// and — as its features say — read its transcript and telemetry and
@@ -364,12 +396,12 @@ pub const CAPABILITIES: &[CapabilitySpec] = &[
     CapabilitySpec {
         id: "knowledge",
         title: "Knowledge",
-        choosable: false,
-        optional: false,
+        choosable: true,
+        optional: true,
         many: false,
         default: "oxplow",
         features: &[],
-        provider: None,
+        provider: Some(&KNOWLEDGE),
     },
     CapabilitySpec {
         id: "agent_harness",
@@ -571,8 +603,9 @@ mod tests {
         }
         assert_eq!(
             choosable().map(|c| c.id).collect::<Vec<_>>(),
-            ["work_items", "effort_policy", "snapshots"]
+            ["work_items", "effort_policy", "snapshots", "knowledge"]
         );
+        assert_eq!(spec("knowledge").map(|c| c.optional), Some(true));
         for c in CAPABILITIES.iter().filter(|c| c.many) {
             assert!(
                 !c.choosable && !c.optional,
@@ -607,7 +640,13 @@ mod tests {
                 .filter(|c| c.provider.is_some())
                 .map(|c| c.id)
                 .collect::<Vec<_>>(),
-            ["work_items", "effort_policy", "snapshots", "agent_harness"]
+            [
+                "work_items",
+                "effort_policy",
+                "snapshots",
+                "knowledge",
+                "agent_harness"
+            ]
         );
         assert!(contract("vcs").is_none() && contract("nope").is_none());
     }
@@ -628,6 +667,16 @@ mod tests {
         assert!(work.verb("reorder").is_some() && work.verb("estimate").is_none());
         let policy = contract("effort_policy").unwrap();
         assert_eq!(policy.required(&serde_json::json!({})), ["react"]);
+        let knowledge = contract("knowledge").unwrap();
+        assert_eq!(
+            knowledge.required(&serde_json::json!({})),
+            ["write_page", "delete_page", "link"]
+        );
+        assert_eq!(knowledge.ref_kind, Some("wiki"));
+        assert_eq!(
+            knowledge.records.map(|r| (r.entity, r.event, r.key)),
+            Some(("knowledge_page", ("knowledge.page.recorded", 1), "page"))
+        );
         let snapshots = contract("snapshots").unwrap();
         assert_eq!(
             snapshots.required(&serde_json::json!({})),

@@ -2527,7 +2527,7 @@ implementations:
   systemPrompt?: meta|prompt }`.
 - `entry` names a built-in in core's standard library
   (`capabilities::BUILT_INS`: `oxplow:tasks`, `oxplow:commit-or-switch`,
-  `oxplow:snapshots`, `oxplow:snapshot-hashes`), the way a collector names
+  `oxplow:snapshots`, `oxplow:snapshot-hashes`, `oxplow:wiki`), the way a collector names
   `oxplow:junit`. A
   built-in's features are core's table's — it's core's code — never the
   manifest's. A built-in whose items' refs carry a provider id
@@ -2570,9 +2570,9 @@ implementations:
 - A required capability's default is core's own: `CapabilityRegistry::new`
   registers it (snapshots' `oxplow`, `oxplow:snapshots`), so it's there
   whatever is disabled, and a manifest declaring that id is an error.
-- `oxplow-bundled` declares the optional defaults (the work list and the
-  effort policy). Disabled, nothing declares them and both resolve to
-  none (`capabilities::CapabilityRegistry::resolve`,
+- `oxplow-bundled` declares the optional defaults (the work list, the
+  effort policy and knowledge's wiki, `oxplow:wiki`). Disabled, nothing
+  declares them and all three resolve to none (`capabilities::CapabilityRegistry::resolve`,
   `.context/work-tracking.md`). It also offers snapshots' `hashes`
   (`oxplow:snapshot-hashes`, "Track changes only": no `contents`); a
   chosen `hashes` with bundled disabled falls back to core's `oxplow`.

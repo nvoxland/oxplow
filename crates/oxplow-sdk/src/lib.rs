@@ -568,6 +568,14 @@ fn provider_starter(capability: &str) -> ProviderStarter {
             needs: None,
             data: serde_json::Value::Null,
         },
+        "knowledge" => ProviderStarter {
+            input: "{ command: write_page, input: { slug: example, body: '# Example', verified_refs: [], removed_refs: [] } }"
+                .to_string(),
+            expect: "the page's ref",
+            fixture: "{ page: 'wiki:example' }".to_string(),
+            needs: None,
+            data: serde_json::Value::Null,
+        },
         _ => {
             let verb = oxplow_domain::capability::contract(capability)
                 .and_then(|c| c.verbs.first())
@@ -663,6 +671,27 @@ fn verb_input(capability: &str, verb: &str) -> (String, serde_json::Value) {
             json!({ "type": "object", "required": ["handle", "path"],
                     "additionalProperties": false,
                     "properties": { "handle": str_prop, "path": str_prop } }),
+        ),
+        ("knowledge", "write_page") => (
+            "Write a page, creating it or replacing its body: { page } (`wiki:<slug>`), and answer its \
+             `knowledge.page.recorded` event with its `refs` (`file:…` / `wiki:…`)."
+                .into(),
+            json!({ "type": "object", "required": ["slug", "body", "verified_refs", "removed_refs"],
+                    "additionalProperties": false,
+                    "properties": { "slug": str_prop, "title": str_prop, "body": str_prop,
+                                    "verified_refs": { "type": "array", "items": str_prop },
+                                    "removed_refs": { "type": "array", "items": str_prop } } }),
+        ),
+        ("knowledge", "delete_page") => (
+            "Delete a page: {}, answering its record with `deleted: true`.".into(),
+            json!({ "type": "object", "required": ["slug"], "additionalProperties": false,
+                    "properties": { "slug": str_prop } }),
+        ),
+        ("knowledge", "link") => (
+            "Link a page to a target (a wikilink's interior, such as `other-page` or `src/lib.rs`): {}.".into(),
+            json!({ "type": "object", "required": ["page", "target"],
+                    "additionalProperties": false,
+                    "properties": { "page": str_prop, "target": str_prop } }),
         ),
         ("effort_policy", "react") => (
             "Compose the commands an event calls for: { commands } to run, or { skip }.".into(),
@@ -1024,6 +1053,7 @@ mod tests {
             Kind::provider("effort_policy").unwrap(),
             Kind::provider("agent_harness").unwrap(),
             Kind::provider("snapshots").unwrap(),
+            Kind::provider("knowledge").unwrap(),
             Kind::Collector,
             Kind::Command,
             Kind::Effect,

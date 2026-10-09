@@ -1173,11 +1173,11 @@
     - { unique: id }
     - { relationships: { column: ref, to: work_item, field: ref } }
 - name: knowledge_page
-  version: 1
+  version: 2
   description: "Knowledge pages (the wiki): one row per page with what it links to and how many of its file refs have drifted since they were pinned. A page's full text is `v_knowledge_body`; search them with the `search` tool."
   columns:
     - { name: "ref", type: "TEXT", doc: "`wiki:<slug>`." }
-    - { name: "provider", type: "TEXT", doc: "The knowledge provider (`oxplow`)." }
+    - { name: "provider", type: "TEXT", doc: "The knowledge store that keeps it: the project's active one (`oxplow`, the wiki; a provider's instance). The pages are the active store's. (v2)" }
     - { name: "slug", type: "TEXT", doc: "Page slug (link with [[slug]])." }
     - { name: "title", type: "TEXT", doc: "The page's first `# ` heading, else its slug." }
     - { name: "excerpt", type: "TEXT", doc: "Start of the body." }

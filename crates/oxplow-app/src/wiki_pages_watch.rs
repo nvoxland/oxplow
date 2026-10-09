@@ -26,17 +26,28 @@ pub struct WikiPagesWatcher {
 impl WikiPagesWatcher {
     /// Boot — runs the initial scan synchronously, then attaches the
     /// debounced fs watcher. Errors during scan are logged but don't
-    /// prevent the watcher from starting.
+    /// prevent the watcher from starting. While the wiki isn't the
+    /// project's knowledge store (`wiki`) its files aren't the record's:
+    /// the record left from before is emptied instead, and changes are
+    /// ignored until it is again (`knowledge::KnowledgeSwitch` restates it).
     pub async fn spawn(
         project_dir: PathBuf,
         db: Database,
         vocabulary: VocabularyHandle,
         store: Arc<SqliteWikiPageStore>,
+        wiki: Arc<crate::knowledge::WikiFollow>,
     ) -> Option<Self> {
         let dir = wiki_pages::wiki_pages_dir(&project_dir);
         std::fs::create_dir_all(&dir).ok();
 
-        match wiki_pages::scan_and_sync_all(&db, &vocabulary, &project_dir, &store).await {
+        let scanned = if wiki.live() {
+            wiki_pages::scan_and_sync_all(&db, &vocabulary, &project_dir, &store).await
+        } else {
+            crate::knowledge::clear_record(&db)
+                .await
+                .map(|()| wiki_pages::ScanReport::default())
+        };
+        match scanned {
             Ok(report) if report.failures.is_empty() => {
                 info!(dir = %dir.display(), synced = report.synced, "wiki pages initial scan complete");
             }
@@ -66,7 +77,9 @@ impl WikiPagesWatcher {
             loop {
                 match rx.recv().await {
                     Ok(evt) => {
-                        if evt.path.extension().and_then(|s| s.to_str()) != Some("md") {
+                        if !wiki.live()
+                            || evt.path.extension().and_then(|s| s.to_str()) != Some("md")
+                        {
                             continue;
                         }
                         let Some(slug) = evt.path.file_stem().and_then(|s| s.to_str()) else {
@@ -112,9 +125,12 @@ mod tests {
         let store = Arc::new(oxplow_db::SqliteWikiPageStore::new(db.clone()));
         let vocabulary = VocabularyHandle::core();
 
-        let _watcher = WikiPagesWatcher::spawn(project.clone(), db, vocabulary, store.clone())
-            .await
-            .expect("watcher to spawn");
+        let wiki = Arc::new(crate::knowledge::WikiFollow::default());
+        wiki.set_serves_for_test("oxplow");
+        let _watcher =
+            WikiPagesWatcher::spawn(project.clone(), db, vocabulary, store.clone(), wiki)
+                .await
+                .expect("watcher to spawn");
 
         // Give the OS-level watcher a moment to attach before we
         // poke the directory.

@@ -35,6 +35,7 @@ implementations:
   - { capability: work_items, id: oxplow, entry: "oxplow:tasks", skills: [work-next] }
   - { capability: effort_policy, id: oxplow, entry: "oxplow:commit-or-switch" }
   - { capability: snapshots, id: hashes, entry: "oxplow:snapshot-hashes" }
+  - { capability: knowledge, id: oxplow, entry: "oxplow:wiki" }
 # What the coding agent reads about the work list: its commands (with no
 # list they're a sink), and oxplow's tasks' ready queue while they are it.
 skills:

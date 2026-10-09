@@ -1146,17 +1146,27 @@ pub fn check_subject(
     }
 }
 
-/// Whether `r` is one of instance `id`'s own refs under `contract`
-/// (`<kind>:<id>:<native id>`).
+/// Whether `r` is one of instance `id`'s own refs under `contract`: a
+/// provider-scoped kind's carries the instance (`<kind>:<id>:<native
+/// id>`); a bare kind's (`wiki:<slug>`) is the active implementation's,
+/// so any well-formed one is.
 pub(super) fn owns(
     contract: &oxplow_domain::capability::ProviderContract,
     id: &str,
     r: &str,
 ) -> bool {
-    contract
-        .ref_kind
-        .and_then(|kind| instance_in(kind, r))
-        .is_some_and(|instance| instance == id)
+    static KINDS: std::sync::LazyLock<oxplow_domain::refs::kind::KindRegistry> =
+        std::sync::LazyLock::new(oxplow_domain::refs::kind::core_kinds);
+    let Some(kind) = contract.ref_kind else {
+        return false;
+    };
+    if KINDS.get(kind).is_some_and(|k| k.provider_scoped) {
+        instance_in(kind, r).is_some_and(|instance| instance == id)
+    } else {
+        r.strip_prefix(kind)
+            .and_then(|rest| rest.strip_prefix(':'))
+            .is_some_and(|rest| !rest.is_empty())
+    }
 }
 
 /// The instance segment of a ref of `kind` (`work_item:<instance>:ENG-12`).

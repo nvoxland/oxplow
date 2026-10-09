@@ -189,6 +189,26 @@ in memory only; the `mark`s it answered are counted in its state
 (`marks`, also what the next handle is numbered from), so a test can see a
 provider that wasn't chosen was asked nothing.
 
+**As a knowledge provider** (`OXPLOW_FAKE_CAPABILITY=knowledge`) it
+declares `knowledge_declarations()` — the `knowledge` capability (no
+features), the verbs `write_page { slug, title?, body, verified_refs,
+removed_refs }` → `{ page: "wiki:<slug>" }`, `delete_page { slug }` and
+`link { page, target }` → `{}` (each `confirm: never`, `access: record`,
+inputs `additionalProperties: false`), the event type
+`knowledge.page.recorded@1`, a `knowledge_pages` collector over entity
+`knowledge_page` (`discover` lists it), and the same `team` config; the
+event's schema is core's. Pages live in its state
+like items do. Every verb answers the page's record as that event:
+`{ page: { ref: "wiki:<slug>", title, body, refs, updated_at, deleted? } }`.
+`refs` is the body's `[[…]]` interiors in oxplow's grammar (one with a `/`
+or a `.` is `file:<path>`, a bare one `wiki:<slug>`); the title defaults to
+the slug; `verified_refs` and `removed_refs` are accepted and ignored (it
+keeps no pins). `link` appends `[[target]]` under a `## Related` heading;
+`delete_page` answers the record with `deleted: true`, and a page that is
+absent or already deleted is `InvalidInput`. `read` of `knowledge_pages`
+streams the pages changed after the cursor in revision order, each
+followed by a `$/state` checkpoint, as the work list's does.
+
 ## Which trackers are backends (decided 2026-10-05)
 
 A work-items provider is a **backend for the project's own work**: when
@@ -402,15 +422,15 @@ a verb runs as (so an inverse naming a verb undoes through it), the event
 types it may emit, what its collectors stream, the refs an instance owns,
 and whether it keeps items.
 
-| | `work_items` | `effort_policy` | `agent_harness` | `snapshots` |
-|---|---|---|---|---|
-| verbs | `create`, `update`, `transition`; `link` ← links, `comment` ← comments, `delete` ← delete, `reorder` ← ordering, `move` ← lists | `react` | `launch`, `tool_use`, `render`; `turns` ← transcript, `token_readings` ← telemetry, `refresh_text` ← runtime_text, `prompt` and `subagent` ← subagents | `mark`, `changed`; `read_at` ← contents |
-| verbs run as | `oxplow.work_item.<verb>` | the dispatcher's call (nothing undoes it) | core's call: a session's launch, the hook route, the OTLP route, a transcript read, a text refresh | core's call: every take core makes (an effort's brackets, a turn's end, a measured run, an archive) |
-| declares as `data` | nothing | nothing | `instruction_files`, `env_markers`, `settings` | nothing |
-| may emit | `work_item.recorded@2` | nothing | nothing | nothing |
-| collectors stream | `work_item` rows, logged as `work_item.recorded@2` `{ item: row }` | nothing | nothing | nothing |
-| owns refs | `work_item:<instance>:…` | none | none | none |
-| keeps items (`fields`, `idPattern`) | yes | no | no | no |
+| | `work_items` | `effort_policy` | `agent_harness` | `snapshots` | `knowledge` |
+|---|---|---|---|---|---|
+| verbs | `create`, `update`, `transition`; `link` ← links, `comment` ← comments, `delete` ← delete, `reorder` ← ordering, `move` ← lists | `react` | `launch`, `tool_use`, `render`; `turns` ← transcript, `token_readings` ← telemetry, `refresh_text` ← runtime_text, `prompt` and `subagent` ← subagents | `mark`, `changed`; `read_at` ← contents | `write_page`, `delete_page`, `link` |
+| verbs run as | `oxplow.work_item.<verb>` | the dispatcher's call (nothing undoes it) | core's call: a session's launch, the hook route, the OTLP route, a transcript read, a text refresh | core's call: every take core makes (an effort's brackets, a turn's end, a measured run, an archive) | `oxplow.knowledge.<verb>`, after core checks the page against its record |
+| declares as `data` | nothing | nothing | `instruction_files`, `env_markers`, `settings` | nothing | nothing |
+| may emit | `work_item.recorded@2` | nothing | nothing | nothing | `knowledge.page.recorded@1` |
+| collectors stream | `work_item` rows, logged as `work_item.recorded@2` `{ item: row }` | nothing | nothing | nothing | `knowledge_page` rows, logged as `knowledge.page.recorded@1` `{ page: row }` |
+| owns refs | `work_item:<instance>:…` | none | none | none | `wiki:<slug>` (bare: the active store's) |
+| keeps items (`fields`, `idPattern`) | yes | no | no | no | no |
 
 Each such capability has a **host** (`registry::CapabilityHost`): what
 turns a started instance into the capability's implementation and takes
@@ -421,9 +441,33 @@ registers an external policy in `Services.effort_policies`; the agent
 harness's (`agent_harness::HarnessHost`) registers an `ExternalHarness` in
 `Services.harnesses` under the instance id, beside the built-ins (a
 catalog reload keeps it); the snapshots' (`snapshots::SnapshotsHost`)
-registers an `ExternalSnapshots` in `Services.snapshots`. A record
-row carries its own `ref`; the host logs it as the contract's event with
-the row under the contract's key and that ref the subject.
+registers an `ExternalSnapshots` in `Services.snapshots`; the
+knowledge's (`knowledge::KnowledgeHost`) registers an `ExternalKnowledge`
+in `Services.knowledge`. A record row carries its own `ref`; the host
+logs it as the contract's event with the row under the contract's key,
+that ref the subject and the instance the source (`provider:<id>`: whose
+record it is). A ref kind the kind registry doesn't scope by provider
+(`wiki`) is the active implementation's, so any well-formed one is an
+instance's own (`registry::owns`).
+
+**A knowledge provider** keeps pages (an Obsidian vault, a Confluence or
+MediaWiki space); core keeps the record (`.context/knowledge.md` "The
+capability"). The page commands check a write against core's record
+first — the slug, every link it adds, the refs it verifies or removes —
+then invoke the verb: `write_page { slug, title?, body, verified_refs,
+removed_refs }` (the body in oxplow's markdown, `title` also given), `link
+{ page, target }` (`target` a wikilink's inside), `delete_page { slug }`.
+Each answers the page's `knowledge.page.recorded@1 { page: { ref, title,
+body, refs, updated_at, deleted? } }`: `body` what it keeps (in its own
+grammar if it likes), `refs` what the page links **in oxplow's grammar**
+(`file:src/lib.rs`, `wiki:other`, `work_item:…`) — core links and pins
+from those, never parsing a foreign body. A write answering no record of
+the page fails. Core records the row, the edges and the pins from it and
+logs `knowledge.page.written` after the store's own record. Its collector
+streams its pages edited outside oxplow as the same records;
+`knowledge::KnowledgeRecords` restates them while it is the active store
+(a body the record already holds restates nothing; `deleted` takes the
+page out).
 
 **A snapshots provider** marks the worktree; core keeps the record
 (`snapshot`, `file_snapshot`, `snapshot_op`, `snapshot.taken`), so
@@ -1289,7 +1333,12 @@ and the throwaway host the conformance suite runs in
   instance made the project's snapshots, the captures following it —
   `snapshot_conformance::suite` on the primary stream (round-trip, an
   unchanged mark keeps its snapshot, diffs with deletions, turn-end
-  anchoring, the budget recorded), which both built-ins pass too.
+  anchoring, the budget recorded), which both built-ins pass too; or —
+  the instance made the project's knowledge store, the switch delivered —
+  `knowledge_conformance::suite` through the page commands (a write lands
+  the page, its body and its event; pins go stale and re-pin; a dangling
+  link is refused; a link lands; a delete takes the page), which the wiki
+  passes too.
 
 The red test (`extension_cli.rs`,
 `extension_test_blesses_a_provider_then_a_changed_transcript_fails`)

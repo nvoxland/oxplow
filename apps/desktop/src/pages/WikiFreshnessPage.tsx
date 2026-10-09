@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Page } from "../tabs/Page.js";
 import { writeWikiPage } from "../api.js";
-import { readWikiFreshness, readWikiPage } from "../knowledge.js";
+import { NO_KNOWLEDGE_STORE, readWikiFreshness, readWikiPage } from "../knowledge.js";
+import { useKnowledgeIsNone } from "../useKnowledgeStore.js";
 import type { WikiRefFreshness } from "../knowledge.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
 import type { Reads } from "../tauri-bridge/generated/bindings.js";
@@ -30,6 +31,7 @@ export interface WikiFreshnessPageProps {
 export function WikiFreshnessPage({ slug, onOpenPage }: WikiFreshnessPageProps) {
   usePageTitle(`Freshness — ${slug}`);
   const nav = useOptionalPageNavigation();
+  const noStore = useKnowledgeIsNone();
   const [rows, setRows] = useState<WikiRefFreshness[] | null>(null);
   const [reads, setReads] = useState<Reads>(NO_READS);
   const [error, setError] = useState<string | null>(null);
@@ -100,7 +102,9 @@ export function WikiFreshnessPage({ slug, onOpenPage }: WikiFreshnessPageProps) 
             {rows == null
               ? "Loading…"
               : rows.length === 0
-                ? "No file references"
+                ? noStore
+                  ? NO_KNOWLEDGE_STORE
+                  : "No file references"
                 : `${staleCount} of ${rows.length} stale`}
           </span>
           {rows && rows.length > 0 ? (

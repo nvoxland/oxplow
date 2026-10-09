@@ -3510,7 +3510,7 @@ async fn a_late_read_on_a_stopped_instance_doesnt_touch_its_successor() {
     // The folder isn't what was approved any more.
     write_extension(&fx.svc.layout.project_dir, "progress");
 
-    let late = was_running.read(&Actor::Human, "work_items").await;
+    let late = was_running.read("work_items").await;
     assert!(late.is_err(), "a stopped instance doesn't read: {late:?}");
     let still = fx.svc.providers.get(INSTANCE).await.expect("still running");
     assert!(std::sync::Arc::ptr_eq(&still, &successor));
@@ -6717,4 +6717,166 @@ async fn a_snapshots_provider_without_contents_records_identities_only() {
         !fx.svc.blobs.has(row.blob_hash.as_deref().unwrap()),
         "no bytes kept"
     );
+}
+
+/// A project extension `shelf` whose provider `shelf` is the fake as a
+/// knowledge store, its pages kept in `state` (seeded by the caller, as a
+/// store holding pages written outside oxplow).
+fn write_knowledge_extension(project: &Path, state: &Path) {
+    let dir = project.join("oxplow/extensions/shelf");
+    std::fs::create_dir_all(dir.join("bin")).unwrap();
+    std::fs::write(
+        dir.join("extension.yaml"),
+        "manifest: 2\nname: shelf\nsharing: private\nintent:\n  purpose: the fake knowledge store\n  examples: [{ name: a }]\nproviders:\n  - id: shelf\n    capability: knowledge\n    entry: bin/provider\n    declarations: provider.json\n",
+    )
+    .unwrap();
+    let script = dir.join("bin/provider");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nOXPLOW_FAKE_CAPABILITY=knowledge OXPLOW_FAKE_STATE='{}' exec '{}' \"$@\"\n",
+            state.display(),
+            fake_bin().display()
+        ),
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(
+        dir.join("provider.json"),
+        serde_json::to_string_pretty(&oxplow_provider_fake::knowledge_declarations()).unwrap(),
+    )
+    .unwrap();
+}
+
+/// A provider process as the project's knowledge store: a page written
+/// through `oxplow.knowledge.write_page` lands in its service and in core's
+/// record (pinned, its links from the refs it states), a page written
+/// outside oxplow comes in on a sync, a delete takes a page out of both,
+/// and the wiki's files are never touched.
+#[tokio::test]
+async fn a_knowledge_provider_keeps_pages_and_core_records_them() {
+    let fx = services_with_effort().await;
+    let project = fx.svc.layout.project_dir.clone();
+    let state = project.join(".oxplow/fake-knowledge.json");
+    std::fs::create_dir_all(state.parent().unwrap()).unwrap();
+    std::fs::write(
+        &state,
+        serde_json::to_string(&json!({
+            "items": {}, "next": 1, "rev": 1, "answered": {},
+            "pages": { "outside": { "rev": 1, "record": {
+                "ref": "wiki:outside", "title": "Outside", "body": "# Outside\n\nWritten in the vault.\n",
+                "refs": [], "updated_at": "2026-10-09T00:00:01Z"
+            } } }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    write_knowledge_extension(&project, &state);
+    let ext = crate::extensions::load_extensions(&project)
+        .into_iter()
+        .find(|e| e.name == "shelf")
+        .expect("the knowledge extension loads");
+    assert_eq!(ext.errors, Vec::<String>::new());
+    approve(&fx, &ext);
+    fx.svc
+        .providers
+        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
+        .await
+        .unwrap();
+    fx.svc
+        .config
+        .write()
+        .unwrap()
+        .active_providers
+        .insert(crate::knowledge::CAPABILITY.into(), "shelf".into());
+    let config = crate::config_service::read_config(&fx.svc.config);
+    fx.svc
+        .capabilities
+        .publish(&config, &fx.svc.db)
+        .await
+        .unwrap();
+    fx.svc
+        .event_pump
+        .settle(
+            &[crate::knowledge::KnowledgeSwitch::NAME],
+            std::time::Duration::from_secs(10),
+        )
+        .await;
+    assert!(!fx.svc.wiki.live());
+
+    // A page written outside oxplow comes in on a sync.
+    fx.svc
+        .commands
+        .run(
+            &Actor::Human,
+            sync::SYNC,
+            json!({ "instance": "shelf/shelf" }),
+            false,
+        )
+        .await
+        .unwrap();
+    fx.svc
+        .event_pump
+        .settle(
+            &[super::knowledge::KnowledgeRecords::NAME],
+            std::time::Duration::from_secs(10),
+        )
+        .await;
+    let page = fx.svc.wiki_page_store.get("outside").await.unwrap();
+    assert_eq!(page.map(|p| p.title), Some("Outside".into()));
+
+    // A write through the command lands in the store and the record.
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    std::fs::write(project.join("src/lib.rs"), "fn a() {}\n").unwrap();
+    let out = fx
+        .svc
+        .commands
+        .run(
+            &Actor::Human,
+            crate::knowledge::WRITE_PAGE,
+            json!({ "slug": "design", "body": "# Design\n\nSee [[src/lib.rs]].\n",
+                    "verified_refs": ["src/lib.rs"] }),
+            true,
+        )
+        .await
+        .unwrap();
+    assert_eq!(out.result["page"], "wiki:design");
+    assert!(!project.join(".oxplow/wiki/design.md").exists());
+    let body: Option<String> = fx
+        .svc
+        .wiki_page_store
+        .body("design")
+        .await
+        .unwrap()
+        .map(|(_, body)| body);
+    assert_eq!(body.as_deref(), Some("# Design\n\nSee [[src/lib.rs]].\n"));
+    let fresh = crate::knowledge::freshness(&fx.svc.db, "wiki:design")
+        .await
+        .unwrap();
+    assert_eq!(
+        fresh.iter().map(|f| f.target.as_str()).collect::<Vec<_>>(),
+        ["file:src/lib.rs"]
+    );
+    let saved = std::fs::read_to_string(&state).unwrap();
+    assert!(saved.contains("wiki:design"), "the store kept it: {saved}");
+
+    // A delete takes it out of both.
+    fx.svc
+        .commands
+        .run(
+            &Actor::Human,
+            crate::knowledge::DELETE_PAGE,
+            json!({ "slug": "design" }),
+            true,
+        )
+        .await
+        .unwrap();
+    assert!(fx
+        .svc
+        .wiki_page_store
+        .get("design")
+        .await
+        .unwrap()
+        .is_none());
 }

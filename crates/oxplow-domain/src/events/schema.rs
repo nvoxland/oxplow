@@ -216,6 +216,8 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<KnowledgePageDeleted>()
             .expect("core type registers");
+        r.register::<KnowledgePageRecorded>()
+            .expect("core type registers");
         r.register::<KnowledgeNoteWritten>()
             .expect("core type registers");
         r.register::<KnowledgeNoteDeleted>()
@@ -2263,6 +2265,42 @@ impl EventType for KnowledgePageWritten {
     type Payload = KnowledgePageWrittenV1;
 }
 
+/// A knowledge page as a store records it: what a provider's write verb
+/// answers and its collector streams. The body is what it keeps; the refs
+/// are what the page links, in oxplow's grammar (`file:src/lib.rs`,
+/// `wiki:other`), which core pins and links from — never parsed out of a
+/// body in the store's own grammar.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct KnowledgePageRecord {
+    /// `wiki:<slug>`.
+    #[serde(rename = "ref")]
+    pub page_ref: String,
+    pub title: String,
+    pub body: String,
+    pub refs: Vec<String>,
+    /// RFC 3339: when the store last changed it.
+    pub updated_at: String,
+    /// It was deleted in the store.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub deleted: bool,
+}
+
+/// `knowledge.page.recorded@1`: a knowledge store's page, as it recorded
+/// it (`.context/knowledge.md` "The capability").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct KnowledgePageRecordedV1 {
+    pub page: KnowledgePageRecord,
+}
+
+pub struct KnowledgePageRecorded;
+impl EventType for KnowledgePageRecorded {
+    const TYPE: &'static str = "knowledge.page.recorded";
+    const V: u32 = 1;
+    type Payload = KnowledgePageRecordedV1;
+}
+
 /// `lens.shown@1`: an agent showed the person an answer in a thread —
 /// an existing lens or its own lens spec (`oxplow.lens.show`, P6.C1).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -2557,6 +2595,7 @@ mod tests {
                 ("knowledge.note.deleted", 2),
                 ("knowledge.note.written", 2),
                 ("knowledge.page.deleted", 1),
+                ("knowledge.page.recorded", 1),
                 ("knowledge.page.written", 1),
                 ("lens.kept", 1),
                 ("lens.kept", 2),

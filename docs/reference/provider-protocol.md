@@ -10,6 +10,7 @@ oxplow extension new provider my-tracker   # declarations, a stub program, a tes
 oxplow extension new provider my-policy --capability effort_policy
 oxplow extension new provider my-agent --capability agent_harness
 oxplow extension new provider my-shutter --capability snapshots
+oxplow extension new provider my-shelf --capability knowledge
 oxplow extension test my-tracker           # handshake, examples, conformance suite
 ```
 
@@ -40,6 +41,17 @@ refuse unknown keys (`read_at` only with `contents`):
   of `null` is the empty tree.
 - `read_at { handle, path }` → `{ bytes }`, base64: a file's bytes at a
   marked state. An unknown handle or path is `InvalidInput`.
+
+A knowledge provider keeps the project's pages in its own store and
+declares the `knowledge` capability. It answers `write_page { slug, title?,
+body, verified_refs, removed_refs }` → `{ page }`, `delete_page { slug }`
+and `link { page, target }` → `{}`, and emits `knowledge.page.recorded@1`
+with `{ page: { ref: "wiki:<slug>", title, body, refs, updated_at,
+deleted? } }` for every page it writes or deletes (each verb answers it,
+and a `knowledge_pages` collector over the entity `knowledge_page`
+streams them all). `refs` states the page's outbound references in
+oxplow's grammar (`file:<path>`, `wiki:<slug>`); oxplow never parses a
+foreign body.
 
 ## Declaring one
 

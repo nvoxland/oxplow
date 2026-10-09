@@ -38,6 +38,14 @@ same way as on the writer thread. Don't punt the user's
 exploration answer just because you can't edit code; the wiki is
 where exploration goes regardless of writer status.
 
+## When the project keeps no knowledge store
+
+A project can choose no store for knowledge (Settings → Capabilities).
+`oxplow.knowledge.write_page` then still succeeds, but the page lands
+nowhere: its answer says `tracked: false`, and the wiki reads empty. Don't
+retry or work around it; say once that the page wasn't kept and that
+choosing a knowledge store in Settings → Capabilities keeps pages.
+
 ## Find before you create
 
 Before writing, search for an existing topic note. Don't fragment.

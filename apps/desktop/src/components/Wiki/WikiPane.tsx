@@ -11,6 +11,7 @@ import {
   searchWikiPages,
   type WikiPageSearchHit,
   type WikiPageSummary,
+  NO_KNOWLEDGE_STORE,
 } from "../../knowledge.js";
 import { NO_READS, useRerunOnChange } from "../../lens/lensRerun.js";
 import { personCommands } from "../../personCommands.js";
@@ -24,6 +25,7 @@ import { useRouteDispatch } from "../../tabs/RouteLink.js";
 import { wikiPageRef } from "../../tabs/pageRefs.js";
 import { wikiRowTooltip } from "./wikiRowLabel.js";
 import { EmptyState } from "../Prompts/EmptyState.js";
+import { useKnowledgeIsNone } from "../../useKnowledgeStore.js";
 
 const SECTION_INITIAL_LIMIT = 8;
 
@@ -34,6 +36,7 @@ interface Props {
 }
 
 export function WikiPane({ stream, selectedSlug, onOpenWikiPage }: Props) {
+  const noStore = useKnowledgeIsNone();
   const [notes, setNotes] = useState<WikiPageSummary[]>([]);
   const [recentUsage, setRecentUsage] = useState<UsageRollup[]>([]);
   const [query, setQuery] = useState("");
@@ -231,7 +234,9 @@ export function WikiPane({ stream, selectedSlug, onOpenWikiPage }: Props) {
         gap: 6,
       }}>
         <span style={{ fontSize: "var(--text-xs)", opacity: 0.7 }}>Wiki pages ({notes.length})</span>
-        <button type="button" onClick={beginNew} title="New wiki page" disabled={newSlugDraft !== null}>+ New</button>
+        {noStore ? null : (
+          <button type="button" onClick={beginNew} title="New wiki page" disabled={newSlugDraft !== null}>+ New</button>
+        )}
       </div>
 
       <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--border-subtle)" }}>
@@ -304,6 +309,10 @@ export function WikiPane({ stream, selectedSlug, onOpenWikiPage }: Props) {
               openMenuForWikiPage(rect, summary ?? { slug: hit.slug, title: hit.title } as WikiPageSummary);
             }}
           />
+        ) : notes.length === 0 && noStore ? (
+          <div style={{ padding: 12 }}>
+            <EmptyState testId="wiki-no-store" title={NO_KNOWLEDGE_STORE} />
+          </div>
         ) : notes.length === 0 ? (
           <div style={{ padding: 12 }}>
             <EmptyState

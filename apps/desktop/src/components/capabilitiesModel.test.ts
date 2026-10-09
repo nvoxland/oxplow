@@ -69,3 +69,10 @@ test("a snapshot choice says what it keeps", () => {
   expect(choiceHint("snapshots", [])).toBe("what changed, never what it said; no blob store growth");
   expect(choiceHint("work_items", [])).toBeNull();
 });
+
+// oxplow's wiki says where its pages live; a provider's store says nothing more.
+test("the wiki choice says where its pages live", () => {
+  expect(choiceHint("knowledge", [], "builtin")).toBe("pages as Markdown under .oxplow/wiki, pinned to snapshots");
+  expect(choiceHint("knowledge", [], "external")).toBeNull();
+  expect(choiceHint("knowledge", [], "none")).toBeNull();
+});

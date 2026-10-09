@@ -546,8 +546,12 @@ pub struct Services {
     pub effect_services: commands::effect::ServicesSlot,
     /// The daemon's line to its window: the window's capabilities' calls.
     pub client_host: Arc<client_host::ClientHost>,
-    /// The knowledge provider: oxplow's wiki (`.context/knowledge.md`).
-    pub knowledge: Arc<dyn oxplow_domain::knowledge::KnowledgeProvider>,
+    /// The knowledge implementations and the active one: oxplow's wiki
+    /// (bundled), a provider's, or none (`.context/knowledge.md`).
+    pub knowledge: Arc<oxplow_domain::knowledge::KnowledgeRegistry>,
+    /// Whether oxplow's wiki is the active store (its watch and repair
+    /// run only then).
+    pub wiki: Arc<knowledge::WikiFollow>,
     pub wiki_page_store: Arc<SqliteWikiPageStore>,
     pub page_visit_store: Arc<SqlitePageVisitStore>,
     pub usage_store: Arc<SqliteUsageStore>,
@@ -1336,6 +1340,34 @@ impl Services {
         })) {
             commands.add_op(command).expect("core ops register");
         }
+        // Where pages are kept: the wiki under each id an extension
+        // declares it, none (a sink) always, a provider's instance once it
+        // runs; the active one is the project's choice.
+        let knowledge = {
+            let (config, capabilities) = (config_arc.clone(), capabilities.clone());
+            Arc::new(oxplow_domain::knowledge::KnowledgeRegistry::new(Arc::new(
+                move || {
+                    capabilities
+                        .active(&config_service::read_config(&config), knowledge::CAPABILITY)
+                },
+            )))
+        };
+        let wiki = Arc::new(knowledge::WikiFollow::default());
+        knowledge::register_built_ins(&knowledge, &declared, &layout.project_dir, &wiki);
+        event_pump.register_async(Arc::new(knowledge::KnowledgeSwitch {
+            stores: knowledge.clone(),
+            wiki: wiki.clone(),
+            db: db.clone(),
+            vocabulary: event_log_store.vocabulary().clone(),
+            project_dir: layout.project_dir.clone(),
+            pages: wiki_page_store.clone(),
+        }));
+        event_pump.register_async(Arc::new(providers::knowledge::KnowledgeRecords {
+            stores: knowledge.clone(),
+            db: db.clone(),
+            vocabulary: event_log_store.vocabulary().clone(),
+            project_dir: layout.project_dir.clone(),
+        }));
         let providers = providers::ProviderRegistry::new(
             providers::HostDeps {
                 project_dir: layout.project_dir.clone(),
@@ -1363,6 +1395,7 @@ impl Services {
                     effort_policies.clone(),
                 )),
                 Arc::new(providers::agent_harness::HarnessHost(harnesses.clone())),
+                Arc::new(providers::knowledge::KnowledgeHost(knowledge.clone())),
                 Arc::new(providers::snapshots::SnapshotsHost {
                     registry: snapshots.clone(),
                     ledger: providers::snapshots::Ledger {
@@ -1444,22 +1477,13 @@ impl Services {
         }
         let thread_answer_store = oxplow_db::SqliteThreadAnswerStore::new(db.clone());
         let panel_layout_store = oxplow_db::SqlitePanelLayoutStore::new(db.clone());
-        let knowledge: Arc<dyn oxplow_domain::knowledge::KnowledgeProvider> =
-            Arc::new(knowledge::OxplowKnowledge::new(&commands, db.clone()));
-        capabilities.add_core(capabilities::Implementation {
-            capability: "knowledge".into(),
-            id: knowledge.provider().into(),
-            title: knowledge.provider().into(),
-            extension: None,
-            source: capabilities::Source::Core,
-            features: serde_json::json!({}),
-            fields: serde_json::Value::Array(Vec::new()),
-            id_pattern: None,
-            config: serde_json::json!({}),
-        });
         for command in knowledge::ops(knowledge::KnowledgeTarget {
             project_dir: layout.project_dir.clone(),
             vcs: vcs.clone(),
+            db: db.clone(),
+            vocabulary: event_log_store.vocabulary().clone(),
+            stores: knowledge.clone(),
+            wiki: wiki.clone(),
         }) {
             commands.add_op(command).expect("knowledge ops register");
         }
@@ -1621,6 +1645,7 @@ impl Services {
             snapshots,
             providers,
             knowledge,
+            wiki,
             wiki_page_store,
             page_visit_store,
             usage_store,
@@ -1960,6 +1985,11 @@ mod tests {
                 "oxplow.git.ignore",
                 "oxplow.git.rebase",
                 "oxplow.git.revert",
+                // The active knowledge store keeps the page (the wiki's file,
+                // a provider's service); core records what it kept.
+                "oxplow.knowledge.delete_page",
+                "oxplow.knowledge.link",
+                "oxplow.knowledge.write_page",
                 // Lens files on disk (P6 review, tsk597): a Tx handler may
                 // run twice, and a retried file write strands the first.
                 "oxplow.lens.keep",

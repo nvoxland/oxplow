@@ -16,6 +16,7 @@
 pub mod agent_harness;
 pub mod effort_policy;
 pub mod host;
+pub mod knowledge;
 pub mod oauth;
 pub mod registry;
 pub mod snapshots;

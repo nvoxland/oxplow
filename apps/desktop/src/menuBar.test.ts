@@ -64,6 +64,25 @@ test("a menu's items sit in their groups, a separator between groups, ordered wi
   expect(bar[0].items.filter((i) => i.separator).every((i) => i.id.startsWith("native.separator."))).toBe(true);
 });
 
+// The shell draws `native.separator` or `native.separator.<digits>` as a
+// separator and skips any other `native.*` id (`is_separator_role`), so a
+// group's separator is numbered — unique within its menu, Edit's native
+// ones included.
+test("a group separator is one the shell draws: numbered, unique in its menu", () => {
+  const bar = buildMenuBar([
+    offer("oxplow.project.create", { bar: "file", group: "1_project", order: 10 }),
+    offer("oxplow.editor.save", { bar: "file", group: "2_save", order: 10 }),
+    offer("oxplow.window.quick_open", { bar: "file", group: "3_go", order: 10 }),
+    offer("oxplow.window.find", { bar: "edit", group: "1_find", order: 10 }),
+    offer("oxplow.window.replace", { bar: "edit", group: "2_replace", order: 10 }),
+  ]);
+  for (const group of bar) {
+    const ids = group.items.filter((i) => i.separator).map((i) => i.id);
+    expect(ids.every((id) => /^native\.separator\.\d+$/.test(id))).toBe(true);
+    expect(new Set(ids).size).toBe(ids.length);
+  }
+});
+
 // tsk963: the native menu is sent as the generated `MenuGroupSnapshot` the
 // shell deserializes — every item names its shortcut and check state (null
 // when it has none), and carries nothing the shell doesn't read.
