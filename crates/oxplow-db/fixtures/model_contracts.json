@@ -4200,6 +4200,91 @@
         }
       ],
       "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "seq",
+          "type": "INTEGER",
+          "doc": "Operation order within the project."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "Stream (worktree) the take ran on."
+        },
+        {
+          "name": "snapshot_id",
+          "type": "INTEGER",
+          "doc": "Snapshot the worktree is at after the take (v_snapshot.id)."
+        },
+        {
+          "name": "parent_snapshot_id",
+          "type": "INTEGER",
+          "doc": "Snapshot the worktree was at just before this take; parent → snapshot is what THIS take recorded (for a turn's changes use v_agent_turn.start_snapshot_id → snapshot_id)."
+        },
+        {
+          "name": "trigger",
+          "type": "TEXT",
+          "doc": "Why: turn_end, quiet, effort_start, effort_end, startup, manual, git_refs, head_moved, run_measured (a run's reports were recorded: the code it measured), legacy."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread the take belongs to, if any."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "Agent turn the take belongs to, if any (v_agent_turn.id)."
+        },
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "Effort the take belongs to, if any (v_effort.id)."
+        },
+        {
+          "name": "at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "elapsed_ms",
+          "type": "INTEGER",
+          "doc": "How long the take took."
+        },
+        {
+          "name": "budget_ms",
+          "type": "INTEGER",
+          "doc": "The caller's time budget, if it had one."
+        },
+        {
+          "name": "over_budget",
+          "type": "INTEGER",
+          "doc": "1 when elapsed_ms exceeded budget_ms."
+        },
+        {
+          "name": "file_count",
+          "type": "INTEGER",
+          "doc": "File rows recorded (0 when nothing changed)."
+        },
+        {
+          "name": "provider",
+          "type": "TEXT",
+          "doc": "The snapshot implementation that took it (`oxplow`, `hashes`, …); NULL for takes recorded before it was kept. (v2)"
+        },
+        {
+          "name": "contents",
+          "type": "INTEGER",
+          "doc": "1 when the take kept file contents; 0 when it recorded identities only ('Track changes only'): a read of that snapshot answers 'no contents', not 'expired'. (v2)"
+        },
+        {
+          "name": "handle",
+          "type": "TEXT",
+          "doc": "A snapshot provider's own name for the state the take marked, which core hands back to it as the next mark's parent; NULL for takes by oxplow's own capture. (v3)"
+        }
+      ],
+      "key": []
     }
   },
   "stream": {

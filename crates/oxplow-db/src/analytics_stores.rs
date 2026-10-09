@@ -1183,14 +1183,14 @@ fn insert_op_tx(
     elapsed_ms: u64,
     budget_ms: Option<u64>,
     file_count: u32,
-    kept: (Option<&str>, bool),
+    kept: (Option<&str>, bool, Option<&str>),
 ) -> rusqlite::Result<i64> {
     let over = budget_ms.is_some_and(|b| elapsed_ms > b);
     conn.execute(
         "INSERT INTO snapshot_op
            (stream_id, snapshot_id, parent_snapshot_id, trigger, thread_id, turn_id, effort_id,
-            at, elapsed_ms, budget_ms, over_budget, file_count, provider, contents)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            at, elapsed_ms, budget_ms, over_budget, file_count, provider, contents, handle)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         params![
             stream_id.value(),
             snapshot_id,
@@ -1206,6 +1206,7 @@ fn insert_op_tx(
             file_count as i64,
             kept.0,
             kept.1 as i64,
+            kept.2,
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -1287,7 +1288,11 @@ fn record_take_tx(
         take.elapsed_ms,
         take.budget_ms,
         file_count,
-        (take.provider.as_deref(), take.contents),
+        (
+            take.provider.as_deref(),
+            take.contents,
+            take.handle.as_deref(),
+        ),
     )
     .map_err(map_sql_err)?;
     if let Some(turn) = take.turn_id {
@@ -1368,7 +1373,7 @@ fn record_head_moved_tx(
         0,
         None,
         0,
-        (None, true),
+        (None, true, None),
     )
     .map_err(map_sql_err)?;
     let stream = stream_ref(stream_id);
@@ -1430,6 +1435,7 @@ fn row_to_op(row: &rusqlite::Row<'_>) -> rusqlite::Result<SnapshotOp> {
         file_count: row.get(12)?,
         provider: row.get(13)?,
         contents: row.get::<_, i64>(14)? != 0,
+        handle: row.get(15)?,
     })
 }
 
@@ -1459,6 +1465,9 @@ pub struct TakeRecord {
     /// Whether the take kept file contents (blobs) for its rows; `false`
     /// for a hashes-only take, whose reads answer "no contents".
     pub contents: bool,
+    /// A snapshot provider's own name for the state it marked (V46);
+    /// `None` for core's capture pipeline.
+    pub handle: Option<String>,
 }
 
 /// What a take recorded.
@@ -1495,6 +1504,9 @@ pub struct SnapshotOp {
     pub provider: Option<String>,
     /// Whether the take kept file contents (`false`: hashes only).
     pub contents: bool,
+    /// The provider's name for the state it marked (V46); `None` for a take
+    /// by core's capture pipeline.
+    pub handle: Option<String>,
 }
 
 #[derive(Clone)]
@@ -1573,7 +1585,7 @@ impl SqliteSnapshotStore {
                 let mut stmt = conn.prepare(
                     "SELECT seq, stream_id, snapshot_id, parent_snapshot_id, trigger, thread_id,
                             turn_id, effort_id, at, elapsed_ms, budget_ms, over_budget, file_count,
-                            provider, contents
+                            provider, contents, handle
                        FROM snapshot_op WHERE stream_id = ?1
                       ORDER BY seq DESC LIMIT ?2",
                 )?;
@@ -1594,7 +1606,7 @@ impl SqliteSnapshotStore {
                 conn.query_row(
                     "SELECT seq, stream_id, snapshot_id, parent_snapshot_id, trigger, thread_id,
                             turn_id, effort_id, at, elapsed_ms, budget_ms, over_budget, file_count,
-                            provider, contents
+                            provider, contents, handle
                        FROM snapshot_op WHERE snapshot_id = ?1 ORDER BY seq ASC LIMIT 1",
                     params![snapshot_id],
                     row_to_op,
@@ -2978,6 +2990,7 @@ mod tests {
             source: "test".into(),
             provider: None,
             contents: true,
+            handle: None,
         }
     }
 
@@ -2994,6 +3007,41 @@ mod tests {
             .unwrap()
             .map(|p| serde_json::from_str(&p.unwrap()).unwrap())
             .collect()
+    }
+
+    /// A provider's take records the name it gave the marked state on the
+    /// op, an unchanged take too: the stream's newest op names where the
+    /// worktree is, in the provider's terms.
+    #[tokio::test]
+    async fn a_take_records_the_providers_handle_on_its_op() {
+        let db = Database::in_memory();
+        seed_stream(&db, 1);
+        let store = SqliteSnapshotStore::new(db.clone());
+        let mut first = take(1, vec![("a.txt", "a1")], SnapshotTrigger::Startup);
+        first.handle = Some("m1".into());
+        let one = store.record_take(first).await.unwrap().unwrap();
+        assert_eq!(
+            store
+                .op_for_snapshot(one.snapshot_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .handle
+                .as_deref(),
+            Some("m1")
+        );
+        let mut again = take(1, vec![], SnapshotTrigger::TurnEnd);
+        again.handle = Some("m2".into());
+        let two = store.record_take(again).await.unwrap().unwrap();
+        assert!(two.unchanged);
+        let ops = store.list_ops(StreamId::new(1), 1).await.unwrap();
+        assert_eq!(ops[0].handle.as_deref(), Some("m2"));
+        // A take that names none (core's own capture) records none.
+        let mut core = take(1, vec![("a.txt", "a2")], SnapshotTrigger::Quiet);
+        core.handle = None;
+        store.record_take(core).await.unwrap().unwrap();
+        let ops = store.list_ops(StreamId::new(1), 1).await.unwrap();
+        assert_eq!(ops[0].handle, None);
     }
 
     #[tokio::test]

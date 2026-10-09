@@ -849,7 +849,11 @@ seeders for tests.
   `list_snapshot_ops { stream_id, limit? }`, P2.11). V45 adds
   `provider TEXT` (the snapshot implementation that took it; NULL for
   older ops) and `contents INTEGER NOT NULL DEFAULT 1` (0 when the take
-  kept no file bytes), exposed on `v_snapshot_op`.
+  kept no file bytes), exposed on `v_snapshot_op`. V46 adds `handle
+  TEXT`: a snapshot provider process's own name for the state it marked
+  (NULL for core's capture). The stream's newest op's handle is the
+  parent core hands the provider's next mark (`.context/providers.md` "A
+  snapshots provider").
 - **A snapshot row carries its creating op** (P2.11): the stream listing
   (`list_snapshots_for_stream`) joins each snapshot's FIRST op for its
   `parent_snapshot_id`, `trigger` and `over_budget`. The diff view's
