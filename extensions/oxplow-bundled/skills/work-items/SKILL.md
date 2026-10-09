@@ -18,7 +18,7 @@ File one when it helps the person follow the work:
 - a follow-up you noticed but can't do now.
 
 ```json
-{ "name": "oxplow.work_item.create",
+{ "id": "oxplow.work_item.create",
   "input": { "title": "Fix login redirect loop", "body": "…", "state": "todo" } }
 ```
 
