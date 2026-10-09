@@ -6503,3 +6503,218 @@ fn launch_input(
         search_path,
     }
 }
+
+/// A project extension `shutter` whose provider `shutter` is the fake as a
+/// snapshots provider, keeping contents when `contents`.
+fn write_snapshots_extension(project: &Path, contents: bool) {
+    let dir = project.join("oxplow/extensions/shutter");
+    std::fs::create_dir_all(dir.join("bin")).unwrap();
+    std::fs::write(
+        dir.join("extension.yaml"),
+        "manifest: 2\nname: shutter\nsharing: private\nintent:\n  purpose: the fake snapshots provider\n  examples: [{ name: a }]\nproviders:\n  - id: shutter\n    capability: snapshots\n    entry: bin/provider\n    declarations: provider.json\n",
+    )
+    .unwrap();
+    let script = dir.join("bin/provider");
+    let features = if contents { "contents" } else { "" };
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nOXPLOW_FAKE_CAPABILITY=snapshots OXPLOW_FAKE_FEATURES='{features}' exec '{}' \"$@\"\n",
+            fake_bin().display()
+        ),
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(
+        dir.join("provider.json"),
+        serde_json::to_string_pretty(&oxplow_provider_fake::snapshots_declarations(contents))
+            .unwrap(),
+    )
+    .unwrap();
+}
+
+/// The fixture with the snapshots extension approved, its instance
+/// running and chosen as the project's snapshots, and the primary
+/// stream's capture service in place (its worktree is what the provider
+/// marks).
+async fn running_snapshots(
+    contents: bool,
+) -> (
+    EffortFixture,
+    oxplow_domain::StreamId,
+    std::sync::Arc<crate::snapshot_capture::SnapshotCaptureService>,
+) {
+    let fx = services_with_effort().await;
+    let project = fx.svc.layout.project_dir.clone();
+    write_snapshots_extension(&project, contents);
+    let ext = crate::extensions::load_extensions(&project)
+        .into_iter()
+        .find(|e| e.name == "shutter")
+        .expect("the snapshots extension loads");
+    assert_eq!(ext.errors, Vec::<String>::new());
+    approve(&fx, &ext);
+    let stream = oxplow_domain::StreamId::new(1);
+    let capture = std::sync::Arc::new(
+        crate::snapshot_capture::SnapshotCaptureService::new(
+            fx.svc.snapshot_store.clone(),
+            fx.svc.blobs.clone(),
+            project.clone(),
+            std::sync::Arc::new(crate::vcs::GitProvider),
+            stream,
+            1_000_000,
+            oxplow_fs_watch::WorkspaceFilter::default(),
+        )
+        .with_settle_duration(std::time::Duration::ZERO)
+        .with_predrain_delay(std::time::Duration::ZERO),
+    );
+    fx.svc
+        .snapshot_captures
+        .insert_for_test(stream, capture.clone());
+    fx.svc
+        .providers
+        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
+        .await
+        .unwrap();
+    choose_snapshots(&fx, "shutter").await;
+    (fx, stream, capture)
+}
+
+/// `id` as the project's snapshots, its switch applied.
+async fn choose_snapshots(fx: &EffortFixture, id: &str) {
+    fx.svc
+        .config
+        .write()
+        .unwrap()
+        .active_providers
+        .insert(crate::snapshots::CAPABILITY.into(), id.into());
+    let config = crate::config_service::read_config(&fx.svc.config);
+    fx.svc
+        .capabilities
+        .publish(&config, &fx.svc.db)
+        .await
+        .unwrap();
+    fx.svc
+        .event_pump
+        .settle(&["snapshots.switch"], std::time::Duration::from_secs(10))
+        .await;
+}
+
+async fn mark_turn(
+    fx: &EffortFixture,
+    stream: oxplow_domain::StreamId,
+) -> oxplow_domain::snapshot::Marked {
+    let mut request = oxplow_domain::snapshot::MarkRequest::new(
+        stream,
+        oxplow_domain::snapshot::SnapshotTrigger::TurnEnd,
+    );
+    request.budget = Some(std::time::Duration::from_secs(30));
+    fx.svc
+        .snapshots
+        .active()
+        .expect("an active implementation")
+        .mark(&request)
+        .await
+        .unwrap()
+        .expect("a snapshot")
+}
+
+/// A provider process as the project's snapshots: it marks the worktree,
+/// core records what it reports (its handle and budget on the op) and
+/// keeps the bytes it ships, an unchanged mark returns the snapshot it
+/// already has, and an edit is a change. Core's own capture idles
+/// meanwhile, and resumes when core's implementation is chosen again.
+#[tokio::test]
+async fn a_snapshots_provider_marks_and_core_records_and_reads_it() {
+    let (fx, stream, capture) = running_snapshots(true).await;
+    assert!(capture.is_idle(), "core's capture idles");
+    let project = fx.svc.layout.project_dir.clone();
+    std::fs::write(project.join("a.txt"), "alpha").unwrap();
+
+    let first = mark_turn(&fx, stream).await;
+    let op = fx
+        .svc
+        .snapshot_store
+        .list_ops(stream, 1)
+        .await
+        .unwrap()
+        .remove(0);
+    assert_eq!(op.snapshot_id, first.snapshot);
+    assert_eq!(
+        (op.provider.as_deref(), op.contents, op.budget_ms),
+        (Some("shutter"), true, Some(30_000))
+    );
+    assert!(op.handle.is_some(), "{op:?}");
+    let active = fx.svc.snapshots.active().unwrap();
+    assert_eq!(
+        active.read_at(first.snapshot, "a.txt").await.unwrap(),
+        b"alpha"
+    );
+
+    let again = mark_turn(&fx, stream).await;
+    assert!(again.unchanged);
+    assert_eq!(again.snapshot, first.snapshot);
+
+    std::fs::write(project.join("a.txt"), "beta").unwrap();
+    let edited = mark_turn(&fx, stream).await;
+    assert_ne!(edited.snapshot, first.snapshot);
+    let changed = active
+        .changed(stream, Some(first.snapshot), edited.snapshot)
+        .await
+        .unwrap();
+    assert_eq!(
+        changed.iter().map(|c| c.path.as_str()).collect::<Vec<_>>(),
+        ["a.txt"]
+    );
+    assert_eq!(
+        active.read_at(edited.snapshot, "a.txt").await.unwrap(),
+        b"beta"
+    );
+
+    // Core's capture takes nothing of its own while the provider marks.
+    capture.mark_dirty(
+        project.join("a.txt"),
+        oxplow_fs_watch::WatchEventKind::Other,
+    );
+    assert_eq!(
+        capture
+            .request_snapshot(oxplow_domain::snapshot::SnapshotTrigger::Quiet)
+            .await
+            .unwrap(),
+        None
+    );
+
+    choose_snapshots(&fx, "oxplow").await;
+    assert!(!capture.is_idle(), "core's capture resumes");
+}
+
+/// Without `contents` a provider's snapshots record what changed and no
+/// bytes: a read says the snapshot was taken without contents, by it.
+#[tokio::test]
+async fn a_snapshots_provider_without_contents_records_identities_only() {
+    let (fx, stream, _capture) = running_snapshots(false).await;
+    std::fs::write(fx.svc.layout.project_dir.join("a.txt"), "alpha").unwrap();
+    let marked = mark_turn(&fx, stream).await;
+    let active = fx.svc.snapshots.active().unwrap();
+    assert!(!active.contents());
+    match active.read_at(marked.snapshot, "a.txt").await {
+        Err(oxplow_domain::snapshot::SnapshotError::NoContents { provider, .. }) => {
+            assert_eq!(provider.as_deref(), Some("shutter"))
+        }
+        other => panic!("{other:?}"),
+    }
+    let rows = fx
+        .svc
+        .snapshot_store
+        .list_files_for_snapshot(marked.snapshot)
+        .await
+        .unwrap();
+    let row = rows
+        .iter()
+        .find(|r| r.path == "a.txt")
+        .expect("a.txt recorded");
+    assert!(
+        !fx.svc.blobs.has(row.blob_hash.as_deref().unwrap()),
+        "no bytes kept"
+    );
+}
