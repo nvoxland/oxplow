@@ -939,10 +939,20 @@ empty list of findings passes.
   `hook_goldens.rs::every_built_in_harness_renders_the_golden_deny`: each
   registered harness's `render(Deny)` is byte-equal to
   `pre_tool_write_guard_path.json`.
-- **Not yet: the real harnesses replayed.** The suite is shaped to run over
-  a real harness's hooks recorded with `OXPLOW_HOOK_DEBUG` and replayed
-  through `HookIngestService::ingest`; no recordings are checked in yet, so
-  Claude Code, Codex and opencode never run in CI.
+- **The real harnesses, replayed.** One session each of Claude Code,
+  Codex and opencode, recorded with `OXPLOW_HOOK_DEBUG`, is checked in
+  under `crates/oxplow-harnesses/fixtures/<harness>/hooks.jsonl` (`{event,
+  payload}` per line; paths scrubbed to `<ROOT>`, `<HOME>`, `<TMP>`;
+  `claude/subagent.jsonl` is a background-subagent session). The control
+  plane's `tests/replayed_harnesses.rs` posts each, in order, to a live
+  hook route as a session of its harness — its own mapping and answers
+  run — and the suite checks the record (tokens aren't replayed). When an
+  agent's hook shapes change (Codex 0.158 renamed its shell `Bash`, moved
+  its patch to `command`, answers `Exit code: N` text), record a new
+  session the same way and replace its fixture: the replay is what
+  notices. Filter the recording by the session's `session_id`: an oxplow
+  started with `OXPLOW_HOOK_DEBUG` also records every hook its agent
+  terminals' own test runs post.
 
 ## Agent policy (shared by every transport, tsk333)
 
