@@ -446,7 +446,7 @@ test("streams are inverted tiles and threads indented tabs, tied by a guide line
   // Flat where another tab sits next to it; the last rounds the bottom.
   expect(writer.style.borderRadius).toBe("0px");
   expect(queued.style.borderRadius).toBe("0px 0px 6px");
-  expect(writer.style.borderWidth).toBe("1px 1px 0px 0px");
+  expect(writer.style.borderWidth).toBe("1px");
   expect(queued.style.borderWidth).toBe("1px 1px 1px 0px");
   expect(writer.style.borderColor).toBe("var(--accent)");
   expect(queued.style.borderColor).toBe("var(--border-strong)");
@@ -472,6 +472,10 @@ test("streams are inverted tiles and threads indented tabs, tied by a guide line
   const threadTab = getByTestId("navigator-thread-row-thr2").querySelector("[data-glyph]") as HTMLElement;
   expect(threadTab.textContent).toContain("Research");
   expect(threadTab.style.flexGrow).toBe("1");
+  // The abbreviation is set off from the title by a divider.
+  const divider = threadTab.querySelector('[data-testid="navigator-glyph-divider"]') as HTMLElement;
+  expect(divider.textContent).toBe("Re");
+  expect(divider.style.borderRightWidth).toBe("1px");
   expect(guide("navigator-stream-row-str1")).toBe("stream");
   expect(guide("navigator-thread-row-thr2")).toBe("last");
   expect(

@@ -967,7 +967,9 @@ function IconCell({
         borderRadius: isLast ? "0 0 6px 0" : 0,
         background: isWriter ? "var(--accent-soft-bg)" : "transparent",
         color: "var(--text-primary)",
-        borderWidth: isLast ? "1px 1px 1px 0" : "1px 1px 0 0",
+        // The writer's accent outline is whole; the rest draw their top
+        // edge, and the last also its bottom.
+        borderWidth: isWriter ? 1 : isLast ? "1px 1px 1px 0" : "1px 1px 0 0",
         borderStyle: "solid",
         borderColor: isWriter ? "var(--accent)" : "var(--border-strong)",
         fontSize: THREAD_LETTER_FONT,
@@ -990,8 +992,24 @@ function IconCell({
       {label !== undefined ? (
         <>
           {/* The glyph keeps its strip width (less a thread tab's right edge). */}
-          <span style={{ width: glyphWidth - (isStream ? 0 : 1), flexShrink: 0, textAlign: "center" }}>{letter}</span>
-          {label}
+          {/* A divider after it runs through every row, and the title keeps its distance. */}
+          <span
+            data-testid="navigator-glyph-divider"
+            style={{
+              width: glyphWidth - (isStream ? 0 : 1),
+              flexShrink: 0,
+              alignSelf: "stretch",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              borderRightWidth: 1,
+              borderRightStyle: "solid",
+              borderRightColor: "var(--border-strong)",
+            }}
+          >
+            {letter}
+          </span>
+          <span style={{ flex: 1, minWidth: 0, display: "flex", paddingLeft: 10 }}>{label}</span>
         </>
       ) : (
         letter
