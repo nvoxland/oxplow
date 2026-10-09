@@ -81,6 +81,7 @@ mod test_launch {
     /// Run a harness's call to its end, for a test.
     pub fn block<F: std::future::Future>(f: F) -> F::Output {
         tokio::runtime::Builder::new_current_thread()
+            .enable_all()
             .build()
             .unwrap()
             .block_on(f)

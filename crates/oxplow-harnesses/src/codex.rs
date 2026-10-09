@@ -1,10 +1,15 @@
 //! The `codex` harness: Codex in a terminal. Its hooks are commands
 //! (`oxplow hook <event>`) and its MCP server, hooks and OTEL exporter ride
-//! `--config` overrides. Its skills are the one thing on disk: Codex finds
+//! `--config` overrides. Embedded mode is explicit when its CLI supports
+//! `--no-daemon`, keeping those overrides and identity in this process.
+//! Its skills are the one thing on disk: Codex finds
 //! them only beside the directory it runs in, so they're in the worktree's
 //! `.agents/skills/`.
 
+use std::collections::HashMap;
 use std::path::Path;
+use std::sync::OnceLock;
+use std::time::{Duration, SystemTime};
 
 use oxplow_domain::agent::harness::{
     AgentHarness, HarnessError, Interact, Launch, LaunchInput, LaunchSpec, RuntimeRoots, Transcript,
@@ -46,6 +51,7 @@ impl AgentHarness for Codex {
         // Claude's; the session's bearer rides its env.
         overrides.extend(otel_overrides(&ep.otlp_base_url));
         let program = input.resolve_program("codex");
+        let embedded = supports_embedded_mode(program.as_deref()).await;
         Ok(Launch {
             spec: LaunchSpec::Pty {
                 command: command(
@@ -53,6 +59,7 @@ impl AgentHarness for Codex {
                     input.resume.as_deref().filter(|r| !r.is_empty()),
                     program.as_deref(),
                     &overrides,
+                    embedded,
                 ),
                 env: input
                     .identity_env
@@ -181,17 +188,79 @@ fn per_tool(event: &str) -> bool {
     matches!(event, "PreToolUse" | "PermissionRequest" | "PostToolUse")
 }
 
-/// `codex --cd <cwd>` with its overrides, or `codex resume` for `resume`.
-fn command(cwd: &str, resume: Option<&str>, program: Option<&str>, overrides: &[String]) -> String {
+struct EmbeddedModeSupport {
+    modified: Option<SystemTime>,
+    len: u64,
+    supported: bool,
+}
+
+/// Probe each resolved executable once, and again after an upgrade. Older
+/// CLIs (or a failed probe) keep the existing override-based launch. A
+/// slow wrapper must not prevent launch; dropping the timed-out probe
+/// kills its child. No login or user configuration is changed.
+async fn supports_embedded_mode(program: Option<&str>) -> bool {
+    static CACHE: OnceLock<tokio::sync::Mutex<HashMap<String, EmbeddedModeSupport>>> =
+        OnceLock::new();
+    let Some(program) = program else {
+        return false;
+    };
+    let Ok(metadata) = std::fs::metadata(program) else {
+        return false;
+    };
+    let modified = metadata.modified().ok();
+    let mut cache = CACHE.get_or_init(Default::default).lock().await;
+    if let Some(entry) = cache.get(program) {
+        if entry.modified == modified && entry.len == metadata.len() {
+            return entry.supported;
+        }
+    }
+    let Ok(Ok(output)) = tokio::time::timeout(
+        Duration::from_secs(2),
+        tokio::process::Command::new(program)
+            .arg("--help")
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    let supported = String::from_utf8_lossy(&output.stdout)
+        .split_ascii_whitespace()
+        .any(|word| word == "--no-daemon");
+    cache.insert(
+        program.to_owned(),
+        EmbeddedModeSupport {
+            modified,
+            len: metadata.len(),
+            supported,
+        },
+    );
+    supported
+}
+
+/// `codex --cd <cwd>` with its overrides and explicit embedded mode when
+/// supported, or `codex resume` for `resume`.
+fn command(
+    cwd: &str,
+    resume: Option<&str>,
+    program: Option<&str>,
+    overrides: &[String],
+    embedded: bool,
+) -> String {
     let (prog, guard) = program_and_guard(program, "codex");
+    let mode = if embedded { " --no-daemon" } else { "" };
     let config_args: String = overrides
         .iter()
         .map(|c| format!(" --config {}", shell_escape(c)))
         .collect();
     let base = match resume {
-        None => format!("{prog} --cd {}{config_args}", shell_escape(cwd)),
+        None => format!("{prog}{mode} --cd {}{config_args}", shell_escape(cwd)),
         Some(id) => format!(
-            "{prog} resume --cd {}{config_args} {}",
+            "{prog}{mode} resume --cd {}{config_args} {}",
             shell_escape(cwd),
             shell_escape(id)
         ),
@@ -469,10 +538,79 @@ mod tests {
 
     #[test]
     fn a_fresh_session_runs_codex_in_its_worktree() {
-        let cmd = command("/repo", None, None, &[]);
+        let cmd = command("/repo", None, None, &[], true);
         assert!(cmd.starts_with("sh -lc "));
         assert!(cmd.contains("exec codex") && cmd.contains("--cd") && cmd.contains("/repo"));
         assert!(!cmd.contains(" resume "));
+        assert!(cmd.contains("codex --no-daemon --cd"));
+    }
+
+    /// Execute the generated shell command: mode selection must preserve
+    /// resume, quoted paths, overrides and the child's session identity.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn embedded_mode_is_detected_and_preserves_launch_arguments() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = TempDir::new().unwrap();
+        let program = tmp.path().join("codex with spaces");
+        let probes = tmp.path().join("probes");
+        let help = format!(
+            "#!/bin/sh\nif [ \"$1\" = --help ]; then\n echo probe >> {}\n echo 'Options: --no-daemon'\n exit 0\nfi\nprintf '%s\\n' \"$@\" \"$OXPLOW_SESSION\"\n",
+            shell_escape(probes.to_str().unwrap())
+        );
+        fs::write(&program, &help).unwrap();
+        fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).unwrap();
+        let path = program.to_str().unwrap();
+        for resume in [None, Some("session 'quoted'")] {
+            let embedded = supports_embedded_mode(Some(path)).await;
+            assert!(embedded);
+            let cmd = command(
+                tmp.path().to_str().unwrap(),
+                resume,
+                Some(path),
+                &["mcp_servers.oxplow.url=\"http://127.0.0.1:9/mcp\"".into()],
+                embedded,
+            );
+            let output = tokio::process::Command::new("sh")
+                .args(["-c", &cmd])
+                .env("OXPLOW_SESSION", "ses3")
+                .output()
+                .await
+                .unwrap();
+            assert!(output.status.success());
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            let args: Vec<_> = stdout.lines().collect();
+            let mut expected = vec!["--no-daemon"];
+            if resume.is_some() {
+                expected.push("resume");
+            }
+            expected.extend([
+                "--cd",
+                tmp.path().to_str().unwrap(),
+                "--config",
+                "mcp_servers.oxplow.url=\"http://127.0.0.1:9/mcp\"",
+            ]);
+            expected.extend(resume);
+            expected.push("ses3");
+            assert_eq!(args, expected);
+        }
+        assert_eq!(fs::read_to_string(&probes).unwrap().lines().count(), 1);
+
+        // Replacing the executable invalidates the cached capability;
+        // an older CLI must still launch without an unknown flag.
+        fs::write(
+            &program,
+            help.replace("Options: --no-daemon", "Options: --cd"),
+        )
+        .unwrap();
+        assert!(!supports_embedded_mode(Some(path)).await);
+        assert_eq!(fs::read_to_string(&probes).unwrap().lines().count(), 2);
+        assert!(!command("/repo", Some("saved"), Some(path), &[], false).contains("--no-daemon"));
+
+        fs::write(&program, "#!/bin/sh\nexit 1\n").unwrap();
+        assert!(!supports_embedded_mode(Some(path)).await);
+        assert!(!supports_embedded_mode(None).await);
     }
 
     /// Codex finds skills only beside the directory it runs in: they land
