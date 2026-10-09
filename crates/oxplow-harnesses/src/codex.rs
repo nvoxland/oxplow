@@ -42,9 +42,9 @@ impl AgentHarness for Codex {
         let ep = &input.endpoints;
         write_worktree_skills(&input.workspace, &input.text.skills).map_err(runtime)?;
         let mut overrides = config_overrides(&input.oxplow_executable, &ep.mcp_endpoint_url);
-        // Codex has no OTEL env vars: its exporter rides `--config otel.*`,
-        // to the same receiver as Claude's, with the session's bearer.
-        overrides.extend(otel_overrides(&ep.otlp_base_url, &ep.hook_token));
+        // Its exporter rides `--config otel.*`, to the same receiver as
+        // Claude's; the session's bearer rides its env.
+        overrides.extend(otel_overrides(&ep.otlp_base_url));
         let program = input.resolve_program("codex");
         Ok(Launch {
             spec: LaunchSpec::Pty {
@@ -54,7 +54,12 @@ impl AgentHarness for Codex {
                     program.as_deref(),
                     &overrides,
                 ),
-                env: input.identity_env.to_vec(),
+                env: input
+                    .identity_env
+                    .iter()
+                    .cloned()
+                    .chain([otel_env(&ep.hook_token)])
+                    .collect(),
             },
             resume_dropped: false,
         })
@@ -218,11 +223,9 @@ fn config_overrides(oxplow_executable: &Path, mcp_endpoint_url: &str) -> Vec<Str
 }
 
 /// Codex's OTEL config pointing its OTLP metrics exporter at oxplow's
-/// receiver: protobuf ("binary"), the FULL signal URL (Codex uses it as
-/// is), and the session's bearer. Codex reads its exporter's headers only
-/// from config, so this bearer is on its command line — the one place a
-/// harness's is (`.context/agent-model.md` "Caller identity").
-fn otel_overrides(otlp_base_url: &str, hook_token: &str) -> Vec<String> {
+/// receiver: protobuf ("binary") and the FULL signal URL (Codex uses it as
+/// is). Its bearer isn't here: see [`otel_env`].
+fn otel_overrides(otlp_base_url: &str) -> Vec<String> {
     let endpoint = format!("{otlp_base_url}/v1/metrics");
     vec![
         format!(
@@ -230,11 +233,18 @@ fn otel_overrides(otlp_base_url: &str, hook_token: &str) -> Vec<String> {
             toml_string(&endpoint)
         ),
         "otel.exporter.otlp-http.protocol=\"binary\"".to_string(),
-        format!(
-            "otel.exporter.otlp-http.headers.authorization={}",
-            toml_string(&format!("Bearer {hook_token}"))
-        ),
     ]
+}
+
+/// The session's bearer for its OTLP exporter, in the env: the standard
+/// `OTEL_EXPORTER_OTLP_HEADERS`, which its OpenTelemetry exporter adds to
+/// the headers its config gives (none) — never on its command line, whose
+/// text any process can list.
+fn otel_env(hook_token: &str) -> (String, String) {
+    (
+        "OTEL_EXPORTER_OTLP_HEADERS".into(),
+        format!("Authorization=Bearer {hook_token}"),
+    )
 }
 
 /// A Codex tool hook's body mapped onto oxplow's vocabulary. Codex posts
@@ -381,25 +391,29 @@ mod tests {
         ] {
             assert!(command.contains(want), "{want}: {command}");
         }
-        // No identity rides the command; the bearer only in the one
-        // override Codex reads from config alone (its OTLP exporter's).
+        // No identity rides the command, and no bearer: its OTLP
+        // exporter's header is the standard env variable its exporter
+        // reads, as Claude's is.
         assert!(!command.contains("OXPLOW_SESSION=") && !command.contains("OXPLOW_HOOK_TOKEN="));
         assert!(!command.contains("thread=") && !command.contains("x-oxplow"));
-        assert_eq!(command.matches("secret-bearer").count(), 1, "{command}");
+        assert!(!command.contains("secret-bearer"), "{command}");
+        assert_eq!(
+            env["OTEL_EXPORTER_OTLP_HEADERS"],
+            "Authorization=Bearer secret-bearer"
+        );
         assert!(!command.contains("--dangerously-bypass-hook-trust"));
     }
 
     #[test]
     fn the_otel_overrides_configure_the_http_exporter() {
-        let ov = otel_overrides("http://127.0.0.1:9", "tok123");
+        let ov = otel_overrides("http://127.0.0.1:9");
         assert!(ov.contains(
             &"otel.exporter.otlp-http.endpoint=\"http://127.0.0.1:9/v1/metrics\"".to_string()
         ));
         assert!(ov.contains(&"otel.exporter.otlp-http.protocol=\"binary\"".to_string()));
-        assert!(ov.contains(
-            &"otel.exporter.otlp-http.headers.authorization=\"Bearer tok123\"".to_string()
-        ));
-        assert!(!ov.iter().any(|o| o.contains("x-oxplow")));
+        assert!(!ov
+            .iter()
+            .any(|o| o.contains("headers") || o.contains("x-oxplow")));
     }
 
     #[test]
