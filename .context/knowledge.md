@@ -171,6 +171,21 @@ snapshots: the record, links and **freshness are core's**
 definition of staleness), the same for every store. `WikiKnowledge` is
 the wiki: it keeps `.oxplow/wiki/<slug>.md`.
 
+**The record is the active store's pages.** Page refs are bare
+(`wiki:<slug>`, `.context/refs.md`), so one record can't hold two
+stores' pages: `wiki_page`, its `page_ref` slices and the touches are
+whichever store is active. `v_knowledge_page.provider` is that store
+(the active `capability_provider` row). On `capability.switched` for
+knowledge, `knowledge::KnowledgeSwitch` empties the record
+(`clear_record`; nothing in any store is touched, and the switch is the
+event) and, when the wiki is now the store, restates it from its files
+(`wiki_pages::scan_and_sync_all`); pins restart unverified, as after a
+hand edit. `knowledge::WikiFollow` (`Services.wiki`) says whether the
+wiki is the active store — by the ids `register_built_ins` registered it
+under, never by an id's name: the wiki's file watcher syncs only then
+(at boot it empties a record left from another store instead of
+scanning), and `oxplow.knowledge.resync` is refused otherwise.
+
 `knowledge_conformance::suite(svc, actor)` is what a store must do,
 checked through the commands and core's record: a write lands the page,
 its recorded body and its event; a pinned ref is fresh, goes stale when

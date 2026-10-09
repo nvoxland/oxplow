@@ -6504,6 +6504,56 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`wiki:<slug>`."
+        },
+        {
+          "name": "provider",
+          "type": "TEXT",
+          "doc": "The knowledge store that keeps it: the project's active one (`oxplow`, the wiki; a provider's instance). The pages are the active store's. (v2)"
+        },
+        {
+          "name": "slug",
+          "type": "TEXT",
+          "doc": "Page slug (link with [[slug]])."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The page's first `# ` heading, else its slug."
+        },
+        {
+          "name": "excerpt",
+          "type": "TEXT",
+          "doc": "Start of the body."
+        },
+        {
+          "name": "body_size",
+          "type": "INTEGER",
+          "doc": "Size of the full body, bytes."
+        },
+        {
+          "name": "outbound_refs",
+          "type": "TEXT",
+          "doc": "JSON array of every ref the page links to (`file:src/lib.rs`, `wiki:other`, `work_item:oxplow:tsk42`)."
+        },
+        {
+          "name": "stale_ref_count",
+          "type": "INT",
+          "doc": "Its `stale` rows in v_knowledge_ref: file refs whose file has a newer primary-stream snapshot than the one the ref was pinned to (or that were never pinned but have been snapshotted): what may no longer hold."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        }
+      ],
+      "key": []
     }
   },
   "knowledge_ref": {

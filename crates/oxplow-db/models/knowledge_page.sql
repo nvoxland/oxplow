@@ -4,7 +4,9 @@ WITH refs AS (
     WHERE pr.source_kind = 'wiki'
 )
 SELECT CAST('wiki:' || w.slug AS TEXT) AS ref,
-       CAST('oxplow' AS TEXT) AS provider,
+       -- The record is the active store's pages.
+       (SELECT a.provider FROM source('capability_provider') a
+         WHERE a.capability = 'knowledge' AND a.active = 1) AS provider,
        w.slug,
        w.title,
        w.body_excerpt AS excerpt,

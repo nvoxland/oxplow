@@ -549,6 +549,9 @@ pub struct Services {
     /// The knowledge implementations and the active one: oxplow's wiki
     /// (bundled), a provider's, or none (`.context/knowledge.md`).
     pub knowledge: Arc<oxplow_domain::knowledge::KnowledgeRegistry>,
+    /// Whether oxplow's wiki is the active store (its watch and repair
+    /// run only then).
+    pub wiki: Arc<knowledge::WikiFollow>,
     pub wiki_page_store: Arc<SqliteWikiPageStore>,
     pub page_visit_store: Arc<SqlitePageVisitStore>,
     pub usage_store: Arc<SqliteUsageStore>,
@@ -1457,13 +1460,23 @@ impl Services {
                 },
             )))
         };
-        knowledge::register_built_ins(&knowledge, &declared, &layout.project_dir);
+        let wiki = Arc::new(knowledge::WikiFollow::default());
+        knowledge::register_built_ins(&knowledge, &declared, &layout.project_dir, &wiki);
+        event_pump.register_async(Arc::new(knowledge::KnowledgeSwitch {
+            stores: knowledge.clone(),
+            wiki: wiki.clone(),
+            db: db.clone(),
+            vocabulary: event_log_store.vocabulary().clone(),
+            project_dir: layout.project_dir.clone(),
+            pages: wiki_page_store.clone(),
+        }));
         for command in knowledge::ops(knowledge::KnowledgeTarget {
             project_dir: layout.project_dir.clone(),
             vcs: vcs.clone(),
             db: db.clone(),
             vocabulary: event_log_store.vocabulary().clone(),
             stores: knowledge.clone(),
+            wiki: wiki.clone(),
         }) {
             commands.add_op(command).expect("knowledge ops register");
         }
@@ -1625,6 +1638,7 @@ impl Services {
             snapshots,
             providers,
             knowledge,
+            wiki,
             wiki_page_store,
             page_visit_store,
             usage_store,

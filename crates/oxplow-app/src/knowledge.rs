@@ -453,12 +453,111 @@ impl KnowledgeProvider for NoneKnowledge {
     }
 }
 
+/// Whether oxplow's wiki is the project's knowledge store now: its file
+/// watch and its repair (`oxplow.knowledge.resync`) run only then, since
+/// the record is the active store's pages. Decided by which ids the wiki
+/// was registered under, never by an id's name.
+#[derive(Debug, Default)]
+pub struct WikiFollow {
+    serves: std::sync::RwLock<std::collections::BTreeSet<String>>,
+    live: std::sync::atomic::AtomicBool,
+}
+
+impl WikiFollow {
+    fn set_serves(&self, ids: impl IntoIterator<Item = String>) {
+        *self.serves.write().unwrap_or_else(|e| e.into_inner()) = ids.into_iter().collect();
+    }
+
+    /// Follow the active store `id`; whether the wiki is it.
+    pub fn follow(&self, id: &str) -> bool {
+        let live = self
+            .serves
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(id);
+        self.live.store(live, std::sync::atomic::Ordering::SeqCst);
+        live
+    }
+
+    pub fn live(&self) -> bool {
+        self.live.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// A test's wiki, active under `id`.
+    #[cfg(test)]
+    pub(crate) fn set_serves_for_test(&self, id: &str) {
+        self.set_serves([id.to_string()]);
+        self.follow(id);
+    }
+}
+
+/// Empty the record — every page row, its edges and touches — when the
+/// store it held pages of is no longer the active one. Nothing in any
+/// store is touched.
+pub async fn clear_record(db: &oxplow_db::Database) -> Result<(), DomainError> {
+    db.transaction(|tx| {
+        tx.execute_batch(
+            "DELETE FROM page_ref WHERE source_kind = 'wiki';
+             DELETE FROM wiki_page_thread_update;
+             DELETE FROM wiki_page;",
+        )
+        .map_err(sql)
+    })
+    .await
+}
+
+/// On `capability.switched` for knowledge: the record becomes the newly
+/// active store's pages — emptied, then, for the wiki, restated from its
+/// files.
+pub struct KnowledgeSwitch {
+    pub stores: Arc<oxplow_domain::knowledge::KnowledgeRegistry>,
+    pub wiki: Arc<WikiFollow>,
+    pub db: oxplow_db::Database,
+    pub vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
+    pub project_dir: PathBuf,
+    pub pages: Arc<oxplow_db::SqliteWikiPageStore>,
+}
+
+impl KnowledgeSwitch {
+    pub const NAME: &'static str = "knowledge.switch";
+}
+
+#[async_trait::async_trait]
+impl crate::event_pump::AsyncEventConsumer for KnowledgeSwitch {
+    fn name(&self) -> &'static str {
+        Self::NAME
+    }
+
+    fn handles(&self, event_type: &str) -> bool {
+        event_type
+            == <oxplow_domain::events::schema::CapabilitySwitched as oxplow_domain::EventType>::TYPE
+    }
+
+    async fn handle(&self, event: &oxplow_domain::StoredEvent) -> Result<(), DomainError> {
+        if event.envelope.payload["capability"] != CAPABILITY {
+            return Ok(());
+        }
+        clear_record(&self.db).await?;
+        if self.wiki.follow(&self.stores.active_id()) {
+            crate::wiki_pages::scan_and_sync_all(
+                &self.db,
+                &self.vocabulary,
+                &self.project_dir,
+                &self.pages,
+            )
+            .await?;
+        }
+        Ok(())
+    }
+}
+
 /// Register the knowledge stores: core's none (the sink, always there) and
-/// the wiki under each id `declared` gives it.
+/// the wiki under each id `declared` gives it, which `wiki` follows.
 pub fn register_built_ins(
     registry: &oxplow_domain::knowledge::KnowledgeRegistry,
     declared: &[crate::capabilities::Implementation],
     project_dir: &Path,
+    wiki: &WikiFollow,
 ) {
     let mut all: Vec<Arc<dyn KnowledgeProvider>> = vec![Arc::new(NoneKnowledge)];
     all.extend(
@@ -473,7 +572,9 @@ pub fn register_built_ins(
                 })
             }),
     );
+    wiki.set_serves(all.iter().filter(|s| !s.sink()).map(|s| s.id().to_string()));
     registry.set_declared(all);
+    wiki.follow(&registry.active_id());
 }
 
 /// How current each of `page`'s pinned file refs is (`v_knowledge_ref`:
@@ -559,6 +660,7 @@ pub struct KnowledgeTarget {
     pub db: oxplow_db::Database,
     pub vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
     pub stores: Arc<oxplow_domain::knowledge::KnowledgeRegistry>,
+    pub wiki: Arc<WikiFollow>,
 }
 
 fn slug_of(raw: &str) -> Result<&str, CommandError> {
@@ -972,6 +1074,12 @@ pub fn ops(target: KnowledgeTarget) -> Vec<Op> {
     let resync = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
         let input: SlugInput = parse(input)?;
         let slug = slug_of(&input.slug)?;
+        if !t.wiki.live() {
+            return Err(invalid(
+                "/slug",
+                "oxplow's wiki isn't the project's knowledge store: there is no file to restate from",
+            ));
+        }
         let (result, events) = match std::fs::read_to_string(page_path(&t.project_dir, slug)) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 let env = delete_page_tx(ctx.conn, &ctx.events, ctx.actor.anchors(), slug)
@@ -1615,6 +1723,72 @@ mod tests {
 
     /// Delete is confirmed and takes the row, the file and the edges;
     /// link adds under Related and refuses a dangling target.
+    /// `id` as the project's knowledge store, its switch applied.
+    async fn choose(fx: &crate::test_fixtures::EffortFixture, id: &str) {
+        fx.svc
+            .config
+            .write()
+            .unwrap()
+            .active_providers
+            .insert(CAPABILITY.into(), id.into());
+        let config = crate::config_service::read_config(&fx.svc.config);
+        fx.svc
+            .capabilities
+            .publish(&config, &fx.svc.db)
+            .await
+            .unwrap();
+        fx.svc
+            .event_pump
+            .settle(&[KnowledgeSwitch::NAME], std::time::Duration::from_secs(10))
+            .await;
+    }
+
+    async fn recorded(fx: &crate::test_fixtures::EffortFixture) -> Vec<String> {
+        fx.svc
+            .wiki_page_store
+            .list()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|p| p.slug)
+            .collect()
+    }
+
+    /// The record is the active store's pages: choosing another store
+    /// empties it (nothing in the wiki's files is touched) and the wiki's
+    /// watch and repair stand down; choosing the wiki again restates it
+    /// from its files.
+    #[tokio::test]
+    async fn the_record_follows_the_active_store() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        run(
+            &fx,
+            WRITE_PAGE,
+            json!({ "slug": "kept", "body": "# Kept\n" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(recorded(&fx).await, ["kept"]);
+        assert!(fx.svc.wiki.live());
+
+        choose(&fx, "none").await;
+        assert!(recorded(&fx).await.is_empty());
+        assert!(dir(&fx).join(".oxplow/wiki/kept.md").exists());
+        assert!(!fx.svc.wiki.live());
+        let err = run(&fx, RESYNC, json!({ "slug": "kept" }))
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("isn't the project's knowledge store"),
+            "{err}"
+        );
+
+        choose(&fx, "oxplow").await;
+        assert!(fx.svc.wiki.live());
+        assert_eq!(recorded(&fx).await, ["kept"]);
+    }
+
     /// A store that records what it's asked, and keeps the body it's given.
     struct Recording(std::sync::Mutex<Vec<String>>);
 
