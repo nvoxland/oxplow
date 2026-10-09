@@ -227,8 +227,8 @@ verb of the same name. `token_readings` takes one export's records at
 once: the OTLP route asks each registered harness once per export.
 A built-in's declaration names the optional verbs it has as features —
 `transcript` (`turns`), `telemetry` (`token_readings`), `runtime_text`
-(`refresh_text`); Claude has all three, Codex the last two, opencode
-`runtime_text`.
+(`refresh_text`) and `subagents` (`prompt`, `subagent`); Claude has all
+four, Codex all but `transcript`, opencode `runtime_text`.
 
 **Resuming.** `shared::resume_or_fresh` builds the resume: a session the
 harness found on disk (Claude's transcript, `resume_state`) is `exec`'d
