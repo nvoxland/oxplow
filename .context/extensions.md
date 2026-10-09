@@ -941,6 +941,22 @@ boot. It never opens the project's database. It runs `check` there
   from `answers` (per scope, in call order) or for real, the
   composed calls checked against the registry; nothing runs. An
   extension command's is `input: { command: <id>, input, answers? }`;
+  `{ skip: $any }` matches any skip (`reaction_problem`, shared with the
+  policy's);
+- `input: { implementation: <id>, event: { type, payload, subject?,
+  anchors? }, answers? }`, the same `expect` but `reacts` — an
+  **effort policy script** (`implementations:` with `capability:
+  effort_policy`): the event as a `PolicyEvent` (`id`/`source`
+  `fixture`, `v` 1, `seq` 0), `effects::run_over` with the answers, the
+  calls checked against the registry; appending events is an error (a
+  policy emits nothing). Naming no policy script of the extension is an
+  error naming the id. For each such script `test` also runs the
+  effort-policy suite (`policy_suite`): a throwaway host over a copy of
+  the extension (`suite_host`, shared with a provider's suite), the
+  program approved there (`effort_policy_program`), `capabilities::refresh`,
+  the script chosen as `activeProviders.effort_policy`, then
+  `effort_policy_conformance::suite`; a finding is an error at the
+  manifest, `ran` shows `effort_policy suite`;
 - `input: { event_type, v?, payload }`, `expect: { valid: true | false,
   upcast?: <payload> }` — the payload against the extension's declared
   schema (the newest version without `v`), and its upcast;

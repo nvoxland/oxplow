@@ -390,6 +390,11 @@ names the file and line and says what to change.
    - a command: `input: { command: <id>, input: {...}, answers? }`,
      `expect: { commands: [names] }` or `{ refuses: <part of the reason>
      }` — a dry run; nothing changes;
+   - an effort policy script (`implementations:`): `input: {
+     implementation: <id>, event: { type, payload, anchors? }, answers?
+     }`, `expect: { commands: [names] }` or `{ skip: <part of the
+     reason> | $any }` — a dry run; the test also runs the effort-policy
+     conformance suite over the script;
    - a provider: `input: { command, input }` (below).
    Give a command's own `examples:` `answers:` too, so they don't depend
    on the project's data.

@@ -44,6 +44,9 @@ use crate::conformance::{first_mismatch, normalize, ReferenceClient};
 use crate::throwaway::Host;
 use crate::SdkError;
 
+/// The capability a policy script implements.
+const EFFORT_POLICY: &str = providers::effort_policy::EffortPolicyHost::CAPABILITY;
+
 /// What `extension test` found.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -108,6 +111,13 @@ pub async fn test_extension_in(
             report.ran.push(format!("provider {}", spec.id));
             test_provider(root, &ext, spec, bless, &env, &mut report).await;
         }
+        for decl in ext
+            .implementations
+            .iter()
+            .filter(|d| d.capability == EFFORT_POLICY && d.script.is_some())
+        {
+            policy_suite(root, &ext, decl, &env, &mut report).await;
+        }
         questions(&host, &ext, &mut report).await;
         incremental_models(&host, &ext, &mut report).await;
     }
@@ -170,6 +180,8 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
             lens_example(host, ext, &ex, slug, report).await;
         } else if let Some(id) = ex.input.get("effect").and_then(Value::as_str) {
             effect_example(host, ext, &ex, id, report).await;
+        } else if let Some(id) = ex.input.get("implementation").and_then(Value::as_str) {
+            policy_example(host, ext, &ex, id, report).await;
         } else if let Some(t) = ex.input.get("event_type").and_then(Value::as_str) {
             event_type_example(ext, &ex, t, report);
         } else if let Some(link) = ex.input.get("wikilink").and_then(Value::as_str) {
@@ -188,10 +200,11 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
         } else if ex.input.get("command").is_none() || ext.providers.is_empty() {
             report.errors.push(format!(
                 "{shown}:1: example `{}`'s `input` names no lens, collector, command, effect, \
-                 event type, wikilink or provider command — fix: `{{ lens: <slug>, params? }}`, \
-                 `{{ collector: <id>, rows? }}`, `{{ command: <name>, input }}`, `{{ effect: <id>, \
-                 event: {{ type, payload }} }}`, `{{ event_type, v?, payload }}`, `{{ wikilink }}`, \
-                 or (with a provider) `{{ command, input }}`",
+                 effort policy, event type, wikilink or provider command — fix: `{{ lens: <slug>, \
+                 params? }}`, `{{ collector: <id>, rows? }}`, `{{ command: <name>, input }}`, \
+                 `{{ effect: <id>, event: {{ type, payload }} }}`, `{{ implementation: <id>, \
+                 event: {{ type, payload, anchors? }} }}`, `{{ event_type, v?, payload }}`, \
+                 `{{ wikilink }}`, or (with a provider) `{{ command, input }}`",
                 example.name
             ));
         }
@@ -339,7 +352,7 @@ async fn effect_example(
     id: &str,
     report: &mut TestReport,
 ) {
-    use oxplow_app::effects::{dry_run, reacts_to, Reaction};
+    use oxplow_app::effects::{dry_run, reacts_to};
     let (shown, example) = (ex.shown, ex.name);
     let Some(decl) = ext.effects.iter().find(|e| e.id == id) else {
         report.errors.push(format!(
@@ -399,24 +412,97 @@ async fn effect_example(
         Some(host.svc.commands.as_ref()),
     )
     .await;
-    let problem = match (decided, ex.expect.get("skip").and_then(Value::as_str)) {
+    if let Some(p) = reaction_problem(&ex.expect, decided) {
+        report.errors.push(format!(
+            "{shown}:1: effect `{id}` {p} — fix: its script, or the example's `expect` \
+             (`{{ commands: [names] }}`, `{{ skip: <part of the reason> }}` or `{{ reacts: false }}`)"
+        ));
+    }
+}
+
+/// What's wrong with a script's reaction against an example's `expect` —
+/// `{ commands: [names] }`, or `{ skip: <part of the reason> | $any }` —
+/// or `None` when it matches.
+fn reaction_problem(
+    expect: &Value,
+    decided: Result<oxplow_app::effects::Reaction, String>,
+) -> Option<String> {
+    use oxplow_app::effects::Reaction;
+    match (decided, expect.get("skip").and_then(Value::as_str)) {
         (Err(e), _) => Some(format!("failed: {e}")),
-        (Ok(Reaction::Skip(why)), Some(want)) if why.contains(want) => None,
+        (Ok(Reaction::Skip(why)), Some(want)) if want == "$any" || why.contains(want) => None,
         (Ok(Reaction::Skip(why)), _) => Some(format!("skipped ({why})")),
         (Ok(r @ Reaction::Run { .. }), Some(want)) => Some(format!(
             "composed [{}] but the example expects it to skip ({want})",
             r.command_names().join(", ")
         )),
         (Ok(r @ Reaction::Run { .. }), None) => first_mismatch(
-            &ex.expect,
+            expect,
             &json!({ "commands": r.command_names() }),
         )
         .map(|(path, want, got)| format!("composed {got} at `{path}`, the example expects {want}")),
-    };
-    if let Some(p) = problem {
+    }
+}
+
+/// Dry-run the extension's effort policy script `id` on the fixture's
+/// event (`input: { implementation, event: { type, payload, subject?,
+/// anchors? }, answers? }`, the answers standing in for its scope calls'):
+/// what it composes, checked against the throwaway's registry, against
+/// `expect` as an effect's is. A policy emits nothing. Nothing runs.
+async fn policy_example(
+    host: &Host,
+    ext: &Extension,
+    ex: &Example<'_>,
+    id: &str,
+    report: &mut TestReport,
+) {
+    use oxplow_app::effects::{run_over, Reaction};
+    let (shown, example) = (ex.shown, ex.name);
+    let Some((decl, script)) = ext
+        .implementations
+        .iter()
+        .filter(|d| d.id == id && d.capability == EFFORT_POLICY)
+        .find_map(|d| d.script.as_deref().map(|s| (d, s)))
+    else {
         report.errors.push(format!(
-            "{shown}:1: effect `{id}` {p} — fix: its script, or the example's `expect` \
-             (`{{ commands: [names] }}`, `{{ skip: <part of the reason> }}` or `{{ reacts: false }}`)"
+            "{shown}:1: example `{example}` names effort policy `{id}`, which `{}` doesn't \
+             declare as a script — fix: an `implementations:` entry with `capability: \
+             effort_policy`, `id: {id}` and a `.star` entry",
+            ext.name
+        ));
+        return;
+    };
+    report.ran.push(format!("example {example}"));
+    let given = ex.input.get("event").cloned().unwrap_or_default();
+    let event = json!({
+        "id": "fixture",
+        "type": given.get("type").cloned().unwrap_or_else(|| json!("")),
+        "v": given.get("v").cloned().unwrap_or_else(|| json!(1)),
+        "seq": 0,
+        "source": "fixture",
+        "subject": given.get("subject").cloned().unwrap_or_else(|| json!([])),
+        "payload": given.get("payload").cloned().unwrap_or_else(|| json!({})),
+        "anchors": given.get("anchors").cloned().unwrap_or_else(|| json!({})),
+    });
+    let Some(answers) = answers(ex, &format!("effort policy `{id}`"), report) else {
+        return;
+    };
+    let decided = run_over(&host.svc.sql, &decl.needs, script, event, Some(&answers))
+        .await
+        .and_then(|reaction| match &reaction {
+            Reaction::Run { events, .. } if !events.is_empty() => {
+                Err("it appends events, and a policy emits nothing".to_string())
+            }
+            Reaction::Run { calls, .. } => {
+                oxplow_app::extension_commands::check_calls(host.svc.commands.as_ref(), calls)
+                    .map(|()| reaction)
+            }
+            Reaction::Skip(_) => Ok(reaction),
+        });
+    if let Some(p) = reaction_problem(&ex.expect, decided) {
+        report.errors.push(format!(
+            "{shown}:1: effort policy `{id}` {p} — fix: its script, or the example's `expect` \
+             (`{{ commands: [names] }}` or `{{ skip: <part of the reason> | $any }}`)"
         ));
     }
 }
@@ -1297,6 +1383,104 @@ fn transcript(
 /// in-memory oxplow over a copy of the extension, the provider approved
 /// there (the person running the kit consents) and enabled with the
 /// fixture config.
+/// A throwaway oxplow over a copy of `ext` alone, in `env`: the folder
+/// (kept alive by the guard), the services, and the extension as they
+/// loaded it.
+async fn suite_host(
+    root: &Path,
+    ext: &Extension,
+    env: &host::HostEnv,
+) -> Result<(tempfile::TempDir, oxplow_app::Services, Extension), String> {
+    let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let target = tmp.path().join(EXTENSIONS_DIR).join(&ext.name);
+    crate::throwaway::copy_dir(&root.join(&ext.path), &target).map_err(|e| e.to_string())?;
+    oxplow_app::vcs::GitProvider
+        .init_repository(tmp.path())
+        .await
+        .map_err(|e| e.to_string())?;
+    let svc = oxplow_app::Services::in_memory_on_machine(
+        tmp.path(),
+        tmp.path().join(".oxplow/global-config"),
+        Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
+        env.clone(),
+    )
+    .map_err(|e| e.to_string())?;
+    let hosted = svc
+        .extension_catalog
+        .get(tmp.path())
+        .iter()
+        .find(|e| e.name == ext.name)
+        .cloned()
+        .ok_or("the copied extension didn't load")?;
+    Ok((tmp, svc, hosted))
+}
+
+/// The effort-policy suite over the extension's policy script `decl`, in a
+/// throwaway host: the script approved there and chosen as the project's
+/// policy. A finding is an error at the manifest.
+async fn policy_suite(
+    root: &Path,
+    ext: &Extension,
+    decl: &oxplow_app::extensions::implementations::ImplementationDecl,
+    env: &host::HostEnv,
+    report: &mut TestReport,
+) {
+    let manifest = format!("{}/extension.yaml", ext.path.trim_end_matches('/'));
+    report.ran.push(format!("{EFFORT_POLICY} suite"));
+    let run = async {
+        let (tmp, svc, hosted) = suite_host(root, ext, env).await?;
+        let program = oxplow_app::exec_consent::effort_policy_program(
+            &hosted.path,
+            &hosted.name,
+            &decl.id,
+            &decl.entry,
+            &decl.needs,
+        );
+        let version = program
+            .hash(tmp.path())
+            .map_err(|e| format!("hashing it: {e}"))?;
+        oxplow_app::exec_consent::approve_program(
+            &svc.approvals,
+            tmp.path(),
+            &oxplow_app::config_service::read_config(&svc.config),
+            std::slice::from_ref(&hosted),
+            oxplow_app::exec_consent::ProgramKind::EffortPolicy,
+            &program.name,
+            &version,
+        )?;
+        oxplow_app::capabilities::refresh(&svc)
+            .await
+            .map_err(|e| e.to_string())?;
+        svc.config
+            .write()
+            .map_err(|e| e.to_string())?
+            .active_providers
+            .insert(EFFORT_POLICY.into(), decl.id.clone());
+        let config = oxplow_app::config_service::read_config(&svc.config);
+        svc.capabilities
+            .publish(&config, &svc.db)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok::<_, String>(oxplow_app::effort_policy_conformance::suite(&svc, &decl.id).await)
+    };
+    match run.await {
+        Ok(run) => {
+            report.left.extend(run.left);
+            for f in run.findings {
+                report.errors.push(format!(
+                    "{manifest}:1: {EFFORT_POLICY} conformance `{}`: {} — fix: the policy \
+                     script's `{}` handling",
+                    f.check, f.message, f.check
+                ));
+            }
+        }
+        Err(e) => report.errors.push(format!(
+            "{manifest}:1: effort policy `{}` couldn't run under a host: {e} — fix: see the message",
+            decl.id
+        )),
+    }
+}
+
 async fn suite(
     root: &Path,
     ext: &Extension,
@@ -1308,27 +1492,7 @@ async fn suite(
     let manifest = format!("{}/extension.yaml", ext.path.trim_end_matches('/'));
     report.ran.push(format!("{} suite", spec.capability));
     let run = async {
-        let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
-        let target = tmp.path().join(EXTENSIONS_DIR).join(&ext.name);
-        crate::throwaway::copy_dir(&root.join(&ext.path), &target).map_err(|e| e.to_string())?;
-        oxplow_app::vcs::GitProvider
-            .init_repository(tmp.path())
-            .await
-            .map_err(|e| e.to_string())?;
-        let svc = oxplow_app::Services::in_memory_on_machine(
-            tmp.path(),
-            tmp.path().join(".oxplow/global-config"),
-            Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
-            env.clone(),
-        )
-        .map_err(|e| e.to_string())?;
-        let hosted = svc
-            .extension_catalog
-            .get(tmp.path())
-            .iter()
-            .find(|e| e.name == ext.name)
-            .cloned()
-            .ok_or("the copied extension didn't load")?;
+        let (tmp, svc, hosted) = suite_host(root, ext, env).await?;
         let program = oxplow_app::exec_consent::provider_program(&hosted, spec);
         let version = program
             .hash(tmp.path())
@@ -1762,6 +1926,137 @@ after:
             errors.contains(
                 "oxplow/extensions/notes/fixtures/basic.yaml:1: effect `on-done` composed"
             ),
+            "{errors}"
+        );
+    }
+
+    /// A policy that opens an item's effort when it starts on a thread,
+    /// and closes its open efforts (read through `scope`) when it ends.
+    const TIDY: &str = r#"
+def transform(x):
+    e = x["event"]
+    if e["type"] != "work_item.state_changed":
+        return {"skip": "not an item's move"}
+    item = e["payload"]["work_item"]
+    to = e["payload"]["to"]
+    thread = e["anchors"].get("thread_id")
+    if to == "in_progress" and thread != None:
+        return {"commands": [{"name": "oxplow.effort.open",
+                              "input": {"thread": "thread:" + thread, "work_item": item}}]}
+    if to == "done" or to == "canceled":
+        rows = scope("sql.read", {"sql": "SELECT id FROM v_effort WHERE work_item = :w AND ended_at IS NULL",
+                                  "params": {"w": item}})
+        return {"commands": [{"name": "oxplow.effort.close",
+                              "input": {"effort": "effort:eff" + str(r["id"]), "reason": "switch"}}
+                             for r in rows]}
+    return {"skip": "a move that changes no effort"}
+"#;
+
+    /// The acme extension: `script` as the effort policy `tidy`, with an
+    /// example per reaction — a checkpoint (`basic`, expecting
+    /// `basic_expect`), a start on a thread, a finish whose read is
+    /// answered.
+    fn policy(root: &Path, script: &str, basic_expect: &str) {
+        write(
+            root,
+            "oxplow/extensions/acme/extension.yaml",
+            "manifest: 2
+name: acme
+sharing: private
+intent:
+  purpose: Open and close efforts as items start and finish.
+  examples:
+    - { name: basic, expect: nothing to do }
+    - { name: start, expect: its effort opens }
+    - { name: finish, expect: its effort closes }
+implementations:
+  - { capability: effort_policy, id: tidy, title: Tidy, entry: policies/tidy.star, needs: [sql.read] }
+",
+        );
+        write(root, "oxplow/extensions/acme/policies/tidy.star", script);
+        write(
+            root,
+            "oxplow/extensions/acme/fixtures/basic.yaml",
+            &format!(
+                "input: {{ implementation: tidy, event: {{ type: thread.checkpoint, payload: {{}} }} }}\nexpect: {basic_expect}\n"
+            ),
+        );
+        write(
+            root,
+            "oxplow/extensions/acme/fixtures/start.yaml",
+            "input: { implementation: tidy, event: { type: work_item.state_changed, payload: { work_item: \"work_item:oxplow:tsk1\", to: in_progress }, anchors: { thread_id: thr1 } } }\nexpect: { commands: [oxplow.effort.open] }\n",
+        );
+        write(
+            root,
+            "oxplow/extensions/acme/fixtures/finish.yaml",
+            "input: { implementation: tidy, event: { type: work_item.state_changed, payload: { work_item: \"work_item:oxplow:tsk1\", to: done } }, answers: { sql.read: [[{ id: 3 }]] } }\nexpect: { commands: [oxplow.effort.close] }\n",
+        );
+    }
+
+    /// A scripted effort policy's examples dry-run its script (a read
+    /// answered by the fixture), and the effort-policy suite runs over it
+    /// in a throwaway host.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_policy_script_runs_its_examples_and_the_suite() {
+        let dir = tempfile::tempdir().unwrap();
+        policy(dir.path(), TIDY, "{ skip: $any }");
+        let report = test_extension(dir.path(), "acme", false).await.unwrap();
+        assert!(report.ok, "{:?}", report.errors);
+        for ran in [
+            "example basic",
+            "example start",
+            "example finish",
+            "effort_policy suite",
+        ] {
+            assert!(
+                report.ran.iter().any(|r| r == ran),
+                "{ran}: {:?}",
+                report.ran
+            );
+        }
+    }
+
+    /// A policy example that doesn't match what the script answers is a
+    /// finding at its fixture; one naming no policy of the extension names
+    /// what it named.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_policy_example_that_doesnt_match_names_its_fixture() {
+        let dir = tempfile::tempdir().unwrap();
+        policy(dir.path(), TIDY, "{ commands: [oxplow.effort.open] }");
+        let finish = dir
+            .path()
+            .join("oxplow/extensions/acme/fixtures/finish.yaml");
+        let text = std::fs::read_to_string(&finish).unwrap();
+        std::fs::write(
+            &finish,
+            text.replace("implementation: tidy", "implementation: nope"),
+        )
+        .unwrap();
+        let report = test_extension(dir.path(), "acme", false).await.unwrap();
+        let errors = report.errors.join("\n");
+        assert!(
+            errors.contains("acme/fixtures/basic.yaml:1: effort policy `tidy` skipped"),
+            "{errors}"
+        );
+        assert!(
+            errors.contains(
+                "acme/fixtures/finish.yaml:1: example `finish` names effort policy `nope`"
+            ),
+            "{errors}"
+        );
+    }
+
+    /// A policy that opens efforts and never closes one fails the suite,
+    /// at the manifest.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_policy_script_that_never_closes_fails_the_suite() {
+        let dir = tempfile::tempdir().unwrap();
+        let opens_only = TIDY.replace(r#"if to == "done" or to == "canceled":"#, "if False:");
+        policy(dir.path(), &opens_only, "{ skip: $any }");
+        let report = test_extension(dir.path(), "acme", false).await.unwrap();
+        let errors = report.errors.join("\n");
+        assert!(
+            errors.contains("acme/extension.yaml:1: effort_policy conformance `a_finished_item_closes_its_effort`"),
             "{errors}"
         );
     }
