@@ -622,3 +622,36 @@ events at boot (a quarter of a million piled-up findings): the events
 socket lagged, the UI re-read for a minute and terminal input timed out. Typing in the ACP prompt box re-renders only the box:
 its draft is its own state, and the transcript and each message are
 memoized (`AcpAgentView.tsx`).
+
+## What running scripts in workers costs (measured 2026-10-09)
+
+Every Starlark and jaq run is its own `oxplow-script-worker` process
+([collection.md](./collection.md) "Containing scripts"). Measured with
+`crates/oxplow-script/tests/worker_cost.rs` (ignored by default; `bun run
+test:fast -p oxplow-script --run-ignored only --no-capture worker_cost`),
+debug build, Apple silicon:
+
+| What | Cost |
+|---|---|
+| A cold trivial run (spawn, run, exit), median of 20 | 34 ms wall, 2 ms worker CPU |
+| The whole-workspace lcov parse (6 MB, 100k lines), bundled parser | 2.3 s |
+| Shipping a 120-file / 663 KB tree to a fact collector | ~8 ms |
+| Each built-in fact metric over that tree | 2–11 MB peak; 17 ms–1.3 s CPU |
+| `oxplow.duplicate_lines` over that (duplicate-dense) tree | 527 MB peak, 11 s CPU |
+| `oxplow.duplicate_lines` over this repo's 1159 source files (14 MB) | 67 MB peak, 17 s CPU, 23,050 facts |
+
+**Decided: spawn per run, no warm workers.** The rule set beforehand
+(script-containment plan): reuse workers only if a cold start plus tree
+shipping costs over 100 ms, or over 10% of a realistic collector's run.
+It's ~42 ms, and a fact collector over a real tree runs for hundreds of
+milliseconds to seconds. A command script pays the ~34 ms start inside
+its bus transaction; if that lock time ever shows, a warm worker for
+command scripts is the lever (a worker is still killed on any overrun).
+
+**The 512 MB default cap holds for real trees**, with one known way to
+reach it: `duplicate_blocks` reports every *pair* of copies, so a block
+with k copies yields k(k−1)/2 pairs and facts for both sides of each.
+The generated corpus (shared blocks spliced into a fifth of its files)
+needs 527 MB; this repo needs 67. A heavily copy-pasted repo can hit the
+cap, and `duplicate_lines` then fails with "ran out of memory" rather
+than taking the app's memory with it.
