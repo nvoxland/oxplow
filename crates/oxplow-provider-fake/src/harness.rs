@@ -37,7 +37,6 @@ pub fn declarations() -> InitializeResult {
             capability: "agent_harness".into(),
             features: json!({ "terminal": true, "telemetry": true, "subagents": true }),
             data: json!({
-                "instruction_files": ["AGENTS.md"],
                 "env_markers": [MARKER],
                 "settings": [{
                     "key": "model",

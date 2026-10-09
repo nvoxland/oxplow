@@ -3,7 +3,7 @@
 //! (`.context/agent-model.md`, `.context/providers.md` "What a provider may
 //! implement"). What a built-in answers in code it declared — its
 //! features (a `structured_transcript` is a chat) and its capability's
-//! `data` (instruction files, environment markers, settings); each
+//! `data` (environment markers, settings); each
 //! operation is one invoke of the verb of its name:
 //!
 //! - `launch` — the launch's input as it is → a `Launch`
@@ -243,10 +243,6 @@ impl AgentHarness for ExternalHarness {
             Ok(body) if !body.is_null() => body,
             _ => json!({}),
         }
-    }
-
-    fn instruction_files(&self) -> Vec<String> {
-        self.data.instruction_files.clone()
     }
 
     fn env_markers(&self) -> Vec<String> {

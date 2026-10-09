@@ -112,8 +112,6 @@ pub async fn acp_open_session(
         .get(session.harness.as_str())
         .map_err(|e| IpcError::invalid(e.to_string()))?;
     let system_prompt = oxplow_app::agent_prompt::assemble_acp_system_prompt(
-        &project_dir,
-        &harness.instruction_files(),
         &config,
         &stream,
         Some(&thread),

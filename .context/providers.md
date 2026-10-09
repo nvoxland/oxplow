@@ -405,7 +405,7 @@ pattern; and declarations that don't parse, speak another protocol
 version, lack the named capability, declare a feature that isn't the
 capability's (each `true` or `false`), declare a capability `data` that
 isn't its contract's shape (`ProviderContract::data`, a JSON Schema: an
-agent harness's instruction files, environment markers and settings) or
+agent harness's environment markers and settings) or
 any `data` when the contract asks for none, lack a verb its contract requires
 for the features it declares, declare a verb that isn't `confirm: never`
 and `access: record` (core's call of it — `work_item.<verb>`, the effort
@@ -426,7 +426,7 @@ and whether it keeps items.
 |---|---|---|---|---|---|
 | verbs | `create`, `update`, `transition`; `link` ← links, `comment` ← comments, `delete` ← delete, `reorder` ← ordering, `move` ← lists | `react` | `launch`, `tool_use`, `render`; `turns` ← transcript, `token_readings` ← telemetry, `refresh_text` ← runtime_text, `prompt` and `subagent` ← subagents | `mark`, `changed`; `read_at` ← contents | `write_page`, `delete_page`, `link` |
 | verbs run as | `oxplow.work_item.<verb>` | the dispatcher's call (nothing undoes it) | core's call: a session's launch, the hook route, the OTLP route, a transcript read, a text refresh | core's call: every take core makes (an effort's brackets, a turn's end, a measured run, an archive) | `oxplow.knowledge.<verb>`, after core checks the page against its record |
-| declares as `data` | nothing | nothing | `instruction_files`, `env_markers`, `settings` | nothing | nothing |
+| declares as `data` | nothing | nothing | `env_markers`, `settings` | nothing | nothing |
 | may emit | `work_item.recorded@2` | nothing | nothing | nothing | `knowledge.page.recorded@1` |
 | collectors stream | `work_item` rows, logged as `work_item.recorded@2` `{ item: row }` | nothing | nothing | nothing | `knowledge_page` rows, logged as `knowledge.page.recorded@1` `{ page: row }` |
 | owns refs | `work_item:<instance>:…` | none | none | none | `wiki:<slug>` (bare: the active store's) |
@@ -501,8 +501,8 @@ instance's call timeout).
 **A harness provider** answers what a built-in harness answers in code
 (`.context/agent-model.md` "What a harness implements"). Its title is its
 `provider.name`; it's a chat (a structured transcript) when it declares
-`structured_transcript`; its instruction files, environment markers and
-settings are its capability's `data`. Each operation is one invoke:
+`structured_transcript`; its environment markers and settings are its
+capability's `data`. Each operation is one invoke:
 `launch` takes the launch's input as it is (`LaunchInput`: the session,
 its worktree and project, the endpoints and the session's bearer, the
 identity env, the system prompt, the resume id, the agent text, its
@@ -534,8 +534,7 @@ canonically.
 harness, config, search_path)`) checks any registered harness through its
 own operations, built-ins and providers alike: its answers render as
 objects, a refusal and added context read unlike an acknowledgement, an
-empty hook body maps to no tool, its instruction files are paths inside
-the worktree, and a launch in a scratch worktree (placeholder endpoints, a
+empty hook body maps to no tool, and a launch in a scratch worktree (placeholder endpoints, a
 marked bearer) keeps the bearer off the command line or an ACP agent's
 program and args, and in a terminal launch's env. In-tree it runs over the
 four built-ins (`acp` with `{ program: /bin/true }`) and the fake provider;

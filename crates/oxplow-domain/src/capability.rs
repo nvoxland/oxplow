@@ -270,7 +270,7 @@ pub const KNOWLEDGE: ProviderContract = ProviderContract {
 /// sessions through it, has it map its tool hooks and render its answers,
 /// and — as its features say — read its transcript and telemetry and
 /// rewrite its runtimes' text. What a built-in answers from code
-/// (instruction files, environment markers, settings) it declares as its
+/// (environment markers, settings) it declares as its
 /// `data` ([`HARNESS_DATA`]); a structured transcript is its feature.
 pub const AGENT_HARNESS: ProviderContract = ProviderContract {
     verbs: &[
@@ -320,7 +320,6 @@ pub const HARNESS_DATA: &str = r#"{
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "instruction_files": { "type": "array", "items": { "type": "string", "minLength": 1 } },
     "env_markers": { "type": "array", "items": { "type": "string", "minLength": 1 } },
     "settings": {
       "type": "array",
@@ -560,7 +559,6 @@ mod tests {
         use crate::agent::harness::{HarnessData, HarnessSetting};
         let schema = AGENT_HARNESS.data.unwrap();
         let data = HarnessData {
-            instruction_files: vec!["AGENTS.md".into()],
             env_markers: vec!["ACME_SESSION".into()],
             settings: vec![HarnessSetting {
                 key: "model".into(),

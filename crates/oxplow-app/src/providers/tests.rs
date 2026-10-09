@@ -1783,7 +1783,6 @@ fn a_provider_may_implement_an_agent_harness_by_its_contract() {
     let mut spec = policy_spec();
     spec.capability = "agent_harness".into();
     let data = json!({
-        "instruction_files": ["AGENTS.md"],
         "env_markers": ["ACME_SESSION"],
         "settings": [{ "key": "model", "title": "Model" }]
     });
@@ -6351,7 +6350,6 @@ async fn a_harness_provider_is_a_registered_harness() {
         h.interact().transcript,
         oxplow_domain::agent::harness::Transcript::Terminal
     );
-    assert_eq!(h.instruction_files(), ["AGENTS.md"]);
     assert_eq!(h.env_markers(), ["OXPLOW_FAKE_HARNESS_SESSION".to_string()]);
     assert_eq!(h.settings()[0].key, "model");
     assert!(crate::agent_path::not_inherited(&fx.svc.harnesses)

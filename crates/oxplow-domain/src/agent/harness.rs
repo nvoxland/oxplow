@@ -162,12 +162,12 @@ pub struct HarnessSetting {
 
 /// What a harness provider declares of itself beyond its features (its
 /// `agent_harness` capability's `data`): what a built-in answers from
-/// [`AgentHarness::instruction_files`], [`AgentHarness::env_markers`] and
-/// [`AgentHarness::settings`].
+/// [`AgentHarness::env_markers`] and [`AgentHarness::settings`]. A
+/// project's own instruction files are the harness's to read, never
+/// oxplow's.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct HarnessData {
-    pub instruction_files: Vec<String>,
     pub env_markers: Vec<String>,
     pub settings: Vec<HarnessSetting>,
 }
@@ -189,7 +189,7 @@ pub enum HarnessError {
 /// What every harness answers: who it is, how its sessions start and are
 /// shown, how its tool calls read in oxplow's vocabulary, and how its hooks
 /// expect an answer. The rest is what a harness offers beyond that — its
-/// own instruction files, environment markers, settings, a transcript or
+/// own environment markers, settings, a transcript or
 /// telemetry core can read — each with a default of "none", so a harness
 /// implements only what it has.
 #[async_trait]
@@ -207,11 +207,6 @@ pub trait AgentHarness: Send + Sync {
     /// `answer` in the shape its hooks expect back.
     async fn render(&self, answer: &HookAnswer) -> serde_json::Value;
 
-    /// The project files whose text oxplow adds to its system prompt: the
-    /// instruction files a session of it wouldn't read by itself.
-    fn instruction_files(&self) -> Vec<String> {
-        Vec::new()
-    }
     /// Its process's markers an agent or terminal must not inherit from
     /// oxplow's own environment (when oxplow itself runs in one).
     fn env_markers(&self) -> Vec<String> {
@@ -329,16 +324,21 @@ mod tests {
         assert_eq!(resolve_program_in(&full, &[]), Some(b.path().join("agent")));
     }
 
-    /// A provider's declared data is these three lists, nothing else.
+    /// A provider's declared data is these two lists, nothing else: a
+    /// project's instruction files aren't one of them.
     #[test]
     fn harness_data_refuses_an_unknown_key() {
         let data: HarnessData = serde_json::from_value(serde_json::json!({
-            "instruction_files": ["AGENTS.md"],
+            "env_markers": ["ACME_SESSION"],
             "settings": [{"key": "model", "title": "Model"}]
         }))
         .unwrap();
-        assert_eq!(data.instruction_files, ["AGENTS.md"]);
+        assert_eq!(data.env_markers, ["ACME_SESSION"]);
         assert_eq!(data.settings[0].hint, "");
         assert!(serde_json::from_value::<HarnessData>(serde_json::json!({"interact": 1})).is_err());
+        assert!(serde_json::from_value::<HarnessData>(
+            serde_json::json!({"instruction_files": ["AGENTS.md"]})
+        )
+        .is_err());
     }
 }

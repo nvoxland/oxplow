@@ -88,10 +88,6 @@ impl AgentHarness for Opencode {
         })
     }
 
-    fn instruction_files(&self) -> Vec<String> {
-        vec!["CLAUDE.md".into()]
-    }
-
     fn settings(&self) -> Vec<HarnessSetting> {
         vec![HarnessSetting {
             key: "model".into(),

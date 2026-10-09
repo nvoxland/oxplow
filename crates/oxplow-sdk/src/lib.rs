@@ -550,11 +550,10 @@ fn provider_starter(capability: &str) -> ProviderStarter {
             expect: "its hooks' acknowledgement",
             fixture: "{ body: $any }".to_string(),
             needs: None,
-            // The files its agent reads as instructions; the environment
-            // variables that mark a shell as one of its sessions; the
-            // settings a person gives its launch (`agentConfig.<id>`).
+            // The environment variables that mark a shell as one of its
+            // sessions; the settings a person gives its launch
+            // (`agentConfig.<id>`).
             data: serde_json::json!({
-                "instruction_files": ["AGENTS.md"],
                 "env_markers": [],
                 "settings": [],
             }),
@@ -1218,7 +1217,7 @@ mod tests {
         assert_eq!(verbs, ["launch", "tool_use", "render"]);
         assert_eq!(
             d["capabilities"][0]["data"],
-            serde_json::json!({ "instruction_files": ["AGENTS.md"], "env_markers": [], "settings": [] })
+            serde_json::json!({ "env_markers": [], "settings": [] })
         );
         let fixture =
             std::fs::read_to_string(dir.path().join(format!("{}/fixtures/basic.yaml", made.dir)))

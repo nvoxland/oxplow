@@ -1,17 +1,16 @@
 //! Agent system-prompt assembly.
 //!
 //! Combines (in order):
-//! 1. The project's instruction files the session's harness names
-//!    (`AgentHarness::instruction_files`: `CLAUDE.md`).
-//! 2. An Oxplow session-context note describing the active stream/thread.
-//! 3. The thread's `custom_prompt` if set.
-//! 4. The stream's `custom_prompt` if set.
-//! 5. The user's `agentPromptAppend` from `.oxplow/project.yaml`.
+//! 1. An Oxplow session-context note describing the active stream/thread.
+//! 2. The thread's `custom_prompt` if set.
+//! 3. The stream's `custom_prompt` if set.
+//! 4. The user's `agentPromptAppend` from `.oxplow/project.yaml`.
+//!
+//! A project's own instruction files (`AGENTS.md`, `CLAUDE.md`) are the
+//! harness's to read: oxplow never reads or forwards them.
 //!
 //! The combined string is passed through the selected agent's
 //! system-prompt mechanism.
-
-use std::path::Path;
 
 use oxplow_config::OxplowConfig;
 use oxplow_domain::{Stream, Thread};
@@ -44,17 +43,6 @@ impl RoleMode {
             RoleMode::ReadOnly => "read-only",
         }
     }
-}
-
-/// The text of each of `files` under `project_dir` that exists, in order,
-/// a blank line apart. Empty when none does.
-pub fn load_instruction_files(project_dir: &Path, files: &[String]) -> String {
-    files
-        .iter()
-        .filter_map(|f| std::fs::read_to_string(project_dir.join(f)).ok())
-        .filter(|t| !t.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n\n")
 }
 
 /// Build the visible Oxplow session-context note. Includes worktree
@@ -130,13 +118,11 @@ pub fn role_change_banner(initial: RoleMode, current: RoleMode) -> String {
 /// the agent's built-in system prompt is. Sections are separated by
 /// blank lines so Claude renders each as its own block.
 pub fn assemble_system_prompt(
-    project_dir: &Path,
-    instruction_files: &[String],
     config: &OxplowConfig,
     stream: &Stream,
     thread: Option<&Thread>,
 ) -> String {
-    assemble(project_dir, instruction_files, config, stream, thread, None)
+    assemble(config, stream, thread, None)
 }
 
 /// The system prompt for an ACP agent: the same, minus the
@@ -145,28 +131,17 @@ pub fn assemble_system_prompt(
 /// here too would send it twice. It has no skill files to discover, so it
 /// gets `skills`' index instead (`capabilities::agent_text`).
 pub fn assemble_acp_system_prompt(
-    project_dir: &Path,
-    instruction_files: &[String],
     config: &OxplowConfig,
     stream: &Stream,
     thread: Option<&Thread>,
     skills: &oxplow_domain::agent::text::AgentText,
 ) -> String {
-    assemble(
-        project_dir,
-        instruction_files,
-        config,
-        stream,
-        thread,
-        Some(skills),
-    )
+    assemble(config, stream, thread, Some(skills))
 }
 
 /// `skills` is an ACP agent's index; a terminal agent (`None`) gets the
 /// session context instead and discovers its skill files.
 fn assemble(
-    project_dir: &Path,
-    instruction_files: &[String],
     config: &OxplowConfig,
     stream: &Stream,
     thread: Option<&Thread>,
@@ -174,11 +149,6 @@ fn assemble(
 ) -> String {
     let session_context = skills.is_none();
     let mut out = String::new();
-    let instructions = load_instruction_files(project_dir, instruction_files);
-    if !instructions.is_empty() {
-        out.push_str(&instructions);
-        out.push_str("\n\n");
-    }
     if session_context {
         out.push_str(&build_session_context_block(stream, thread));
         out.push_str("\n\n");
@@ -322,16 +292,7 @@ mod tests {
 
     #[test]
     fn assembled_prompt_concatenates_sections() {
-        let dir = tempdir().unwrap();
-        std::fs::write(dir.path().join("CLAUDE.md"), "## Repo rules\nRule 1.").unwrap();
-        let prompt = assemble_system_prompt(
-            dir.path(),
-            &["CLAUDE.md".to_string()],
-            &config(),
-            &stream(),
-            Some(&thread()),
-        );
-        assert!(prompt.contains("Repo rules"));
+        let prompt = assemble_system_prompt(&config(), &stream(), Some(&thread()));
         assert!(prompt.contains("<session-context>"));
         assert!(prompt.contains("Use TDD"));
         assert!(prompt.contains("be precise"));
@@ -339,45 +300,31 @@ mod tests {
 
     #[test]
     fn testing_agent_hint_appended_when_set() {
-        let dir = tempdir().unwrap();
         let mut cfg = config();
         cfg.testing.agent_hint = Some("Run tests with bun run test:collect".into());
-        let prompt = assemble_system_prompt(
-            dir.path(),
-            &["CLAUDE.md".to_string()],
-            &cfg,
-            &stream(),
-            Some(&thread()),
-        );
+        let prompt = assemble_system_prompt(&cfg, &stream(), Some(&thread()));
         assert!(prompt.contains("# Testing\n"));
         assert!(prompt.contains("bun run test:collect"));
     }
 
     #[test]
     fn collection_agent_hint_absent_when_unset() {
-        let dir = tempdir().unwrap();
-        let prompt = assemble_system_prompt(
-            dir.path(),
-            &["CLAUDE.md".to_string()],
-            &config(),
-            &stream(),
-            Some(&thread()),
-        );
+        let prompt = assemble_system_prompt(&config(), &stream(), Some(&thread()));
         assert!(!prompt.contains("# Collection"));
     }
 
+    /// A project's instruction files are its harness's to read: the
+    /// prompt oxplow adds carries none of them, whatever the project has.
     #[test]
-    fn missing_claude_md_is_silent() {
+    fn the_prompt_carries_no_project_instruction_files() {
         let dir = tempdir().unwrap();
-        let prompt = assemble_system_prompt(
-            dir.path(),
-            &["CLAUDE.md".to_string()],
-            &config(),
-            &stream(),
-            Some(&thread()),
-        );
-        // No "Repo rules" section but session-context still present.
-        assert!(prompt.contains("<session-context>"));
+        for file in ["AGENTS.md", "CLAUDE.md"] {
+            std::fs::write(dir.path().join(file), "## Repo rules\nRule 1.").unwrap();
+        }
+        let mut s = stream();
+        s.worktree_path = dir.path().to_string_lossy().into_owned();
+        let prompt = assemble_system_prompt(&config(), &s, Some(&thread()));
+        assert!(!prompt.contains("Repo rules"), "{prompt}");
     }
 
     #[test]
@@ -437,17 +384,8 @@ mod tests {
 
     #[test]
     fn the_acp_system_prompt_leaves_session_context_to_the_first_prompt() {
-        let dir = tempdir().unwrap();
-        let full = assemble_system_prompt(
-            dir.path(),
-            &["CLAUDE.md".to_string()],
-            &config(),
-            &stream(),
-            Some(&thread()),
-        );
+        let full = assemble_system_prompt(&config(), &stream(), Some(&thread()));
         let acp = assemble_acp_system_prompt(
-            dir.path(),
-            &["CLAUDE.md".to_string()],
             &config(),
             &stream(),
             Some(&thread()),
@@ -463,17 +401,8 @@ mod tests {
     /// (tsk376).
     #[test]
     fn the_acp_system_prompt_indexes_the_skills() {
-        let dir = tempdir().unwrap();
-        let full = assemble_system_prompt(
-            dir.path(),
-            &["CLAUDE.md".to_string()],
-            &config(),
-            &stream(),
-            Some(&thread()),
-        );
+        let full = assemble_system_prompt(&config(), &stream(), Some(&thread()));
         let acp = assemble_acp_system_prompt(
-            dir.path(),
-            &["CLAUDE.md".to_string()],
             &config(),
             &stream(),
             Some(&thread()),

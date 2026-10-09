@@ -185,7 +185,7 @@ harness answers: `id`, `title`, `interact` (what the UI shows: its own
 terminal or oxplow's structured transcript), `launch`, `tool_use` (its
 tool calls in oxplow's vocabulary, "Tool vocabulary") and `render` (a hook
 answer in its shape). Everything else is what a harness has beyond that,
-each defaulting to none: `instruction_files`, `env_markers`, `settings`,
+each defaulting to none: `env_markers`, `settings`,
 `refresh_text` (a runtime on disk to rewrite), `turns` (a transcript core
 reads), `token_readings` (telemetry core reads). So a harness implements
 only what it uses; adding a harness-specific feature is a defaulted method,
@@ -222,7 +222,7 @@ input, `LaunchInput`, and every answer are serde shapes
 attributes an object) — because a harness may be a provider's process
 (`.context/providers.md`, the `agent_harness` contract): what a built-in
 answers in code, a provider declares (its features and its capability's
-`data`: `instruction_files`, `env_markers`, `settings`) or answers by a
+`data`: `env_markers`, `settings`) or answers by a
 verb of the same name. `token_readings` takes one export's records at
 once: the OTLP route asks each registered harness once per export.
 A built-in's declaration names the optional verbs it has as features —
@@ -237,12 +237,12 @@ couldn't check (opencode, or Claude with no projects dir) falls back to a
 fresh session only when it fails to start, and says so. A session found
 missing launches fresh and is dropped (`resume_dropped`).
 
-The harness also names its **instruction files** (`instruction_files()`): the
-project files a session of it wouldn't read by itself, which
-`agent_prompt` reads into the system prompt — none for Claude (Claude Code
-loads `CLAUDE.md` itself, so it would be in context twice), `CLAUDE.md` for
-Codex, opencode and ACP agents. And its **environment markers**
-(`env_markers()`), below. The
+**A project's instruction files are the harness's own business.** oxplow
+never reads or forwards `AGENTS.md`, `CLAUDE.md` or any other: each agent
+reads its project's files the way it does outside oxplow. What oxplow
+tells an agent (how to use oxplow) it injects itself — the session
+context, its skills — never through the project's files. The harness
+also names its **environment markers** (`env_markers()`), below. The
 harness config is a JSON value: the harness's `agentConfig.<key>` entry for the
 PTY harnesses (`{"model": …}` for opencode), `{program, args, env,
 systemPromptViaMeta}` from the ACP agent's entry. Where a session's `billing_pool` (plan / API credits / purchased) gets

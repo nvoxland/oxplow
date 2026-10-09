@@ -15,7 +15,7 @@
 //!   `subagents` says a hand-back by other means, never by default);
 //! - the instruction files it names are paths inside the worktree.
 
-use std::path::{Component, Path, PathBuf};
+use std::path::PathBuf;
 
 use oxplow_domain::agent::harness::{AgentHarness, Endpoints, LaunchInput, LaunchSpec, SessionIds};
 use oxplow_domain::agent::observe::{HookAnswer, Prompt};
@@ -114,19 +114,6 @@ async fn run(
             "a_plain_prompt_is_a_persons",
             format!("a body with `prompt: hi` read as {other:?}, not a person's \"hi\""),
         ),
-    }
-
-    for file in h.instruction_files() {
-        let path = Path::new(&file);
-        if file.is_empty()
-            || !path.is_relative()
-            || path.components().any(|c| matches!(c, Component::ParentDir))
-        {
-            fail(
-                "instruction_files_are_inside_the_worktree",
-                format!("instruction file `{file}` isn't a path inside the worktree"),
-            );
-        }
     }
 
     match scratch_launch(h, config, search_path).await {
@@ -254,9 +241,6 @@ mod tests {
                     transcript: Transcript::Terminal,
                 }
             }
-            fn instruction_files(&self) -> Vec<String> {
-                vec!["../outside.md".into()]
-            }
             async fn launch(&self, input: &LaunchInput) -> Result<Launch, HarnessError> {
                 Ok(Launch {
                     spec: LaunchSpec::Pty {
@@ -291,7 +275,6 @@ mod tests {
                 "a_refusal_and_context_read_unlike_an_acknowledgement",
                 "a_body_naming_no_tool_maps_to_none",
                 "a_plain_prompt_is_a_persons",
-                "instruction_files_are_inside_the_worktree",
                 "a_launch_keeps_the_bearer_in_its_env",
             ],
             "{:#?}",

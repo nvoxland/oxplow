@@ -72,10 +72,6 @@ impl AgentHarness for Codex {
         })
     }
 
-    fn instruction_files(&self) -> Vec<String> {
-        vec!["CLAUDE.md".into()]
-    }
-
     async fn refresh_text(
         &self,
         roots: &RuntimeRoots,

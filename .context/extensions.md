@@ -851,8 +851,7 @@ and one calling MCP read identical `file:line: what — fix` lines.
   `render` of `{ kind: ack }` expecting `{ body: $any }` for an agent
   harness, whose `launch` / `tool_use` / `render` inputs are the wire's
   (`{ session, endpoints, … }`, `{ body }`, `{ answer }`) and whose
-  capability `data` starts as `{ instruction_files: [AGENTS.md],
-  env_markers: [], settings: [] }` (`ProviderStarter.data`; null for a
+  capability `data` starts as `{ env_markers: [], settings: [] }` (`ProviderStarter.data`; null for a
   contract that asks none). A capability with no starter gets its first verb with `{}` and `$any`.
   Then a stub `bin/provider` that exits 1 and `fixtures/provider-<id>.yaml`
   (`config: {}`).

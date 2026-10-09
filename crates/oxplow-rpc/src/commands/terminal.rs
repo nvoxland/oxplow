@@ -176,13 +176,7 @@ pub async fn open_terminal_session(
         .get(session.harness.as_str())
         .map_err(|e| IpcError::invalid(e.to_string()))?;
     let config = read_config(&ctx.config);
-    let prompt = assemble_system_prompt(
-        &ctx.layout.project_dir,
-        &harness.instruction_files(),
-        &config,
-        &stream,
-        Some(&thread),
-    );
+    let prompt = assemble_system_prompt(&config, &stream, Some(&thread));
     let harness_config = config
         .agent_config
         .get(&session.harness)

@@ -58,10 +58,6 @@ impl AgentHarness for Acp {
         })
     }
 
-    fn instruction_files(&self) -> Vec<String> {
-        vec!["CLAUDE.md".into()]
-    }
-
     /// The canonical names its tool calls are recorded under
     /// (`acp::mapping::canonical_name`).
     /// An ACP agent's calls arrive already mapped, by the protocol's tool
