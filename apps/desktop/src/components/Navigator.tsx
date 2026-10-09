@@ -1157,7 +1157,7 @@ const OVERLAY_WIDTH = 240;
 // and the slide-over overlay.
 const STREAM_PANEL_STYLE: CSSProperties = {
   background: "var(--surface-card)",
-  border: "1px solid var(--border-subtle)",
+  border: "1px solid var(--border-strong)",
   marginBottom: 6,
   overflow: "hidden",
 };
