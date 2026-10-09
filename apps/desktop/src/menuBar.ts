@@ -48,21 +48,25 @@ export function buildMenuBar(offers: CommandEntry[]): MenuGroup[] {
     offers
       .filter((o) => o.menu?.bar === bar)
       .map((o) => ({ group: o.menu!.group ?? "", order: o.menu!.order, item: entry(o) }));
-  // In their groups (by name), ordered within each, a separator between.
-  const sorted = (items: Placed[]): MenuItem[] => {
+  // `lead` then `items` in their groups (by name), ordered within each, a
+  // separator between. The shell draws only `native.separator.<digits>`
+  // as one, so each is numbered on from the separators already in `lead`.
+  const menu = (lead: MenuItem[], items: Placed[]): MenuItem[] => {
     items.sort((a, b) => a.group.localeCompare(b.group) || a.order - b.order);
-    const out: MenuItem[] = [];
+    const out = [...lead];
+    let separators = lead.filter((i) => i.separator).length;
     items.forEach((p, i) => {
       if (i > 0 && p.group !== items[i - 1].group) {
-        out.push({ id: `native.separator.before.${p.item.id}`, label: "", separator: true, enabled: true });
+        separators += 1;
+        out.push({ id: `native.separator.${separators}`, label: "", separator: true, enabled: true });
       }
       out.push(p.item);
     });
     return out;
   };
   return [
-    { id: "file", label: "File", items: sorted(placed("file")) },
-    { id: "edit", label: "Edit", items: [...NATIVE_EDIT, ...sorted(placed("edit"))] },
+    { id: "file", label: "File", items: menu([], placed("file")) },
+    { id: "edit", label: "Edit", items: menu(NATIVE_EDIT, placed("edit")) },
   ];
 }
 
