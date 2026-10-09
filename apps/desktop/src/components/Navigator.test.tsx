@@ -424,13 +424,13 @@ test("streams are inverted tiles and threads indented tabs, tied by a guide line
   const glyph = (rowId: string) =>
     getByTestId(rowId).querySelector("[data-glyph]") as HTMLElement;
 
-  // Tabs: rounded on the left only, flush with the strip's right edge.
+  // Tabs coming out of the window's left edge: rounded on the right only.
   const stream = glyph("navigator-strip-stream-str1");
   expect(stream.dataset.glyph).toBe("stream");
   // The tab strip's header tint; rounded only at the stack's top.
   expect(stream.style.backgroundImage).toContain("var(--panel-header-bg)");
   expect(stream.style.color).toBe("var(--text-primary)");
-  expect(stream.style.borderRadius).toBe("6px 0px 0px");
+  expect(stream.style.borderRadius).toBe("0px 6px 0px 0px");
 
   // A stream's threads are tabs butted up against each other: each fills
   // its row, and only the last closes the stack along its bottom.
@@ -445,9 +445,9 @@ test("streams are inverted tiles and threads indented tabs, tied by a guide line
   }
   // Flat where another tab sits next to it; the last rounds the bottom.
   expect(writer.style.borderRadius).toBe("0px");
-  expect(queued.style.borderRadius).toBe("0px 0px 0px 6px");
-  expect(writer.style.borderWidth).toBe("1px 0px 0px 1px");
-  expect(queued.style.borderWidth).toBe("1px 0px 1px 1px");
+  expect(queued.style.borderRadius).toBe("0px 0px 6px");
+  expect(writer.style.borderWidth).toBe("1px 1px 0px 0px");
+  expect(queued.style.borderWidth).toBe("1px 1px 1px 0px");
   expect(writer.style.borderColor).toBe("var(--accent)");
   expect(queued.style.borderColor).toBe("var(--border-strong)");
 

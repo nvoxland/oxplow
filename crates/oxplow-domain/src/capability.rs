@@ -47,7 +47,7 @@ pub struct CapabilitySpec {
     /// How a person names it.
     pub title: &'static str,
     /// Whether a project chooses its implementation. One that can't has
-    /// a single implementation, always active (`vcs`, `knowledge`).
+    /// a single implementation, always active (`vcs`).
     pub choosable: bool,
     /// Whether it may be [`NONE`]: nothing implements it, and what
     /// needs it says so.
@@ -364,8 +364,8 @@ pub const CAPABILITIES: &[CapabilitySpec] = &[
     CapabilitySpec {
         id: "knowledge",
         title: "Knowledge",
-        choosable: false,
-        optional: false,
+        choosable: true,
+        optional: true,
         many: false,
         default: "oxplow",
         features: &[],
@@ -571,8 +571,9 @@ mod tests {
         }
         assert_eq!(
             choosable().map(|c| c.id).collect::<Vec<_>>(),
-            ["work_items", "effort_policy", "snapshots"]
+            ["work_items", "effort_policy", "snapshots", "knowledge"]
         );
+        assert_eq!(spec("knowledge").map(|c| c.optional), Some(true));
         for c in CAPABILITIES.iter().filter(|c| c.many) {
             assert!(
                 !c.choosable && !c.optional,

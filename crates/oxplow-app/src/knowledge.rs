@@ -37,6 +37,12 @@ use crate::wiki_pages::{
     extract_title, parse_refs, path_under_any_dir, strip_body_version_literals, wiki_pages_dir,
 };
 
+/// The capability.
+pub const CAPABILITY: &str = "knowledge";
+/// The wiki's built-in entry (`capabilities::BUILT_INS`), which
+/// `oxplow-bundled` declares.
+pub const BUILT_IN: &str = "oxplow:wiki";
+
 pub const WRITE_PAGE: &str = "oxplow.knowledge.write_page";
 pub const DELETE_PAGE: &str = "oxplow.knowledge.delete_page";
 pub const LINK: &str = "oxplow.knowledge.link";
@@ -335,13 +341,20 @@ fn with_title(body: &str, title: &str) -> String {
 /// audited); freshness reads the pins. Holds the bus weakly — the bus
 /// outlives nothing it owns.
 pub struct OxplowKnowledge {
+    /// The id its declaration gives (`oxplow`).
+    id: String,
     bus: std::sync::Weak<crate::commands::CommandBus>,
     db: oxplow_db::Database,
 }
 
 impl OxplowKnowledge {
-    pub fn new(bus: &Arc<crate::commands::CommandBus>, db: oxplow_db::Database) -> Self {
+    pub fn new(
+        id: impl Into<String>,
+        bus: &Arc<crate::commands::CommandBus>,
+        db: oxplow_db::Database,
+    ) -> Self {
         Self {
+            id: id.into(),
             bus: Arc::downgrade(bus),
             db,
         }
@@ -376,8 +389,8 @@ fn slug_of_ref(page: &str) -> Result<&str, KnowledgeError> {
 
 #[async_trait::async_trait]
 impl KnowledgeProvider for OxplowKnowledge {
-    fn provider(&self) -> &str {
-        "oxplow"
+    fn id(&self) -> &str {
+        &self.id
     }
 
     async fn write_page(
@@ -455,6 +468,69 @@ impl KnowledgeProvider for OxplowKnowledge {
             .await
             .map_err(|e| KnowledgeError::Failed(e.to_string()))
     }
+}
+
+/// None as a knowledge store: a sink, as the work list's none is. A write
+/// lands nowhere and succeeds, a delete and a link too, and nothing is
+/// pinned, so nothing that writes pages is refused while no store is
+/// active; the record reads empty.
+pub struct NoneKnowledge;
+
+#[async_trait::async_trait]
+impl KnowledgeProvider for NoneKnowledge {
+    fn id(&self) -> &str {
+        oxplow_domain::capability::NONE
+    }
+
+    async fn write_page(
+        &self,
+        _actor: &oxplow_domain::Actor,
+        draft: PageDraft,
+    ) -> Result<String, KnowledgeError> {
+        Ok(page_ref(&draft.slug))
+    }
+
+    async fn delete_page(
+        &self,
+        _actor: &oxplow_domain::Actor,
+        _page: &str,
+    ) -> Result<(), KnowledgeError> {
+        Ok(())
+    }
+
+    async fn link(
+        &self,
+        _actor: &oxplow_domain::Actor,
+        _page: &str,
+        _target: &str,
+    ) -> Result<(), KnowledgeError> {
+        Ok(())
+    }
+
+    async fn freshness(&self, _page: &str) -> Result<Vec<RefFreshness>, KnowledgeError> {
+        Ok(Vec::new())
+    }
+}
+
+/// Register the knowledge implementations: core's none (the sink, always
+/// there) and the wiki under each id `declared` gives it.
+pub fn register_built_ins(
+    registry: &oxplow_domain::knowledge::KnowledgeRegistry,
+    declared: &[crate::capabilities::Implementation],
+    bus: &Arc<crate::commands::CommandBus>,
+    db: &oxplow_db::Database,
+) {
+    let mut all: Vec<Arc<dyn KnowledgeProvider>> = vec![Arc::new(NoneKnowledge)];
+    all.extend(
+        declared
+            .iter()
+            .filter(|i| i.capability == CAPABILITY)
+            .filter(|i| matches!(i.source, crate::capabilities::Source::BuiltIn(BUILT_IN)))
+            .map(|i| -> Arc<dyn KnowledgeProvider> {
+                Arc::new(OxplowKnowledge::new(i.id.clone(), bus, db.clone()))
+            }),
+    );
+    registry.set_declared(all);
 }
 
 /// Marks a page touched by the thread whose command wrote it (the rail's
@@ -1315,7 +1391,14 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(stale_ref_count(&fx, "wiki:lib").await, 0);
-        let fresh = fx.svc.knowledge.freshness("wiki:lib").await.unwrap();
+        let fresh = fx
+            .svc
+            .knowledge
+            .active()
+            .unwrap()
+            .freshness("wiki:lib")
+            .await
+            .unwrap();
         assert_eq!(fresh.len(), 1);
         assert!(!fresh[0].stale, "{fresh:?}");
         assert_ne!(fresh[0].latest_snapshot, Some(9999));
@@ -1413,6 +1496,61 @@ mod tests {
 
     /// Delete is confirmed and takes the row, the file and the edges;
     /// link adds under Related and refuses a dangling target.
+    /// Knowledge is a choice: oxplow's wiki (bundled) or none, which is a
+    /// sink — a write through it lands nowhere and succeeds.
+    #[tokio::test]
+    async fn none_is_a_choice_and_a_sink() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let rows = fx
+            .svc
+            .sql
+            .query_sql(
+                "SELECT provider, active, choosable, optional FROM v_capability_provider
+                  WHERE capability = 'knowledge' ORDER BY provider",
+                Vec::new(),
+                None,
+            )
+            .await
+            .unwrap()
+            .rows;
+        use oxplow_db::SqlCell::{Int, Text};
+        assert_eq!(
+            rows,
+            vec![
+                vec![Text("none".into()), Int(0), Int(1), Int(1)],
+                vec![Text("oxplow".into()), Int(1), Int(1), Int(1)],
+            ]
+        );
+        fx.svc
+            .config
+            .write()
+            .unwrap()
+            .active_providers
+            .insert(CAPABILITY.into(), "none".into());
+        let none = fx.svc.knowledge.active().expect("none is registered");
+        assert_eq!(none.id(), "none");
+        let page = none
+            .write_page(
+                &oxplow_domain::Actor::Human,
+                PageDraft {
+                    slug: "kept-nowhere".into(),
+                    body: "# Kept nowhere\n".into(),
+                    ..PageDraft::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(page, "wiki:kept-nowhere");
+        assert!(none.freshness(&page).await.unwrap().is_empty());
+        assert!(fx
+            .svc
+            .wiki_page_store
+            .get("kept-nowhere")
+            .await
+            .unwrap()
+            .is_none());
+    }
+
     #[tokio::test]
     async fn delete_and_link() {
         let fx = crate::test_fixtures::services_with_effort().await;

@@ -5,7 +5,7 @@
 //! implementations come from three places, all held by one
 //! [`CapabilityRegistry`]:
 //!
-//! - **core**: the fixed ones (the VCS, knowledge) and, for every optional
+//! - **core**: the fixed ones (the VCS) and, for every optional
 //!   capability, [`NONE`] — nothing implements it;
 //! - **extensions**: `implementations:` naming a built-in in core's
 //!   standard library ([`BUILT_INS`], `entry: oxplow:tasks`), the way a
@@ -98,6 +98,17 @@ pub const BUILT_INS: &[BuiltIn] = &[
         capability: "snapshots",
         provider: None,
         title: "Track changes only",
+        features: &[],
+        id_pattern: None,
+        fields: &[],
+        config_schema: None,
+    },
+    // Knowledge: pages as Markdown under `.oxplow/wiki`, pinned to snapshots.
+    BuiltIn {
+        entry: "oxplow:wiki",
+        capability: "knowledge",
+        provider: None,
+        title: "oxplow's wiki",
         features: &[],
         id_pattern: None,
         fields: &[],
@@ -251,7 +262,7 @@ pub fn built_in(entry: &str) -> Option<&'static BuiltIn> {
 /// How an implementation is loaded — never how it's called.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Source {
-    /// Core's own (the VCS, knowledge).
+    /// Core's own (the VCS).
     Core,
     /// A built-in in core's standard library, by its entry.
     BuiltIn(&'static str),
@@ -456,7 +467,7 @@ pub struct CapabilityRegistry {
 }
 
 impl CapabilityRegistry {
-    /// A registry with core's fixed implementations (`vcs`, `knowledge`)
+    /// A registry with core's fixed implementations (`vcs`)
     /// and [`NONE`] for each optional capability.
     pub fn new(fixed: Vec<Implementation>, vocabulary: VocabularyHandle) -> Self {
         let mut core = fixed;
@@ -493,14 +504,6 @@ impl CapabilityRegistry {
             external: RwLock::default(),
             vocabulary,
         }
-    }
-
-    /// Add one of core's own (built after the registry: knowledge).
-    pub fn add_core(&self, implementation: Implementation) {
-        self.core
-            .write()
-            .unwrap_or_else(|e| e.into_inner())
-            .push(implementation);
     }
 
     /// Replace what extensions declare (on boot, and when the catalog
@@ -1012,6 +1015,7 @@ pub async fn refresh(svc: &crate::Services) -> Result<(), DomainError> {
         &svc.layout.project_dir,
     );
     crate::harnesses::register_acp_adapters(&svc.acp_adapters, &declared);
+    crate::knowledge::register_built_ins(&svc.knowledge, &declared, &svc.commands, &svc.db);
     crate::snapshots::register_built_ins(
         &svc.snapshots,
         &declared,
@@ -1057,6 +1061,7 @@ mod tests {
             r.set_declared(vec![
                 builtin("work_items", "oxplow", "oxplow:tasks"),
                 builtin("effort_policy", "oxplow", "oxplow:commit-or-switch"),
+                builtin("knowledge", "oxplow", "oxplow:wiki"),
             ]);
         }
         r
@@ -1120,6 +1125,13 @@ mod tests {
         let none = config(&[], &[]);
         assert_eq!(disabled.active(&none, "work_items"), NONE);
         assert_eq!(disabled.active(&none, "effort_policy"), NONE);
+        // The wiki is bundled's: disabled, knowledge is none.
+        assert_eq!(disabled.active(&none, "knowledge"), NONE);
+        assert_eq!(r.active(&none, "knowledge"), "oxplow");
+        assert_eq!(
+            r.active(&config(&[("knowledge", "none")], &[]), "knowledge"),
+            NONE
+        );
         let snapshots = disabled.resolve(&none, "snapshots");
         assert_eq!(
             (snapshots.id.as_str(), snapshots.chosen_by),
