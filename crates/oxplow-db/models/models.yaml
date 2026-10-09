@@ -997,6 +997,28 @@
     - { name: "event_seq", type: "INTEGER", doc: "The latest triggering event it will run for (v_event.seq)." }
     - { name: "since", type: "TEXT", doc: "When its run was first deferred (RFC 3339)." }
     - { name: "touched", type: "TEXT", doc: "When a triggering event last arrived for it (RFC 3339): what `settle` counts from." }
+- name: contribution
+  version: 1
+  key: [id]
+  description: "Every enabled extension's contributions, one row each, as their descriptors say: a stable id (`<extension>/<kind>/<local>`), who contributed it and at what version, how stable its contract is, how it runs, what it needs, and the shared name it holds. What `list_extensions` counts and the reference documents. Kinds move onto descriptors one by one; a kind not yet listed here keeps its own listing."
+  columns:
+    - { name: "id", type: "TEXT", doc: "`<extension>/<kind>/<local>`." }
+    - { name: "extension", type: "TEXT", doc: "The extension that declares it." }
+    - { name: "kind", type: "TEXT", doc: "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `lens`, …" }
+    - { name: "local", type: "TEXT", doc: "Its id within the extension (a command's `<area>.<verb>`, a metric's key)." }
+    - { name: "origin", type: "TEXT", doc: "`project` or `bundled`." }
+    - { name: "version", type: "TEXT", doc: "The extension's `version:` (a bundled one's is oxplow's); NULL when it declares none." }
+    - { name: "stability", type: "TEXT", doc: "`stable` or `experimental`." }
+    - { name: "contract_version", type: "INTEGER", doc: "The contract's own version (a model's, an event type's), when it has one." }
+    - { name: "runs_on", type: "TEXT", doc: "How it comes to run, as JSON: `{on: events, types}`, `{on: schedule, every}`, `{on: run}`, `{on: call}`, `{on: query}`, `{on: mount}`, `{on: agent}`, `{on: declared}`." }
+    - { name: "needs", type: "TEXT", doc: "What it requires (capabilities, features, scopes), as a JSON array. Never what a person granted." }
+    - { name: "after", type: "TEXT", doc: "What it runs after, as the manifest names them (JSON array)." }
+    - { name: "global_name", type: "TEXT", doc: "The name it holds in a space every extension shares (a metric key, a skill name, `<capability>/<id>`); NULL when none." }
+    - { name: "aliases", type: "TEXT", doc: "Its other public forms (a command id, `lens:<ext>/<slug>`), as a JSON array." }
+    - { name: "file", type: "TEXT", doc: "The manifest it's declared in." }
+    - { name: "line", type: "INTEGER", doc: "Its line there, when the kind tracks lines." }
+  tests:
+    - { not_null: id }
 - name: capability_provider
   version: 7
   description: "Each capability's implementations — core's, the built-ins extensions declare (`oxplow-bundled`'s defaults, `oxplow-foundation`'s agent harnesses, ACP agents and AI providers), running provider instances', and `none` for an optional capability — with the features each declares, which is active and why. A capability many implementations serve at once (`agent_harness`, `acp_adapter`, `ai_provider`) has every declared row active. A choice that isn't available (its extension disabled, its instance stopped) is listed with `available = 0`; the active row is then the fallback. Settings lists the choices from here, and the UI shows an implementation's enhancements only when its features allow them."

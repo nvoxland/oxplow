@@ -18,6 +18,7 @@ pub mod collector_store;
 pub mod command_audit_store;
 pub mod comment_store;
 pub mod contribution_health_store;
+pub mod contribution_store;
 pub mod dashboard_store;
 mod database;
 pub mod diagnostic_store;

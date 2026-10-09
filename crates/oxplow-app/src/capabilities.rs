@@ -1001,7 +1001,8 @@ pub fn offered_text(
 }
 
 /// Restate the registry's declared implementations from the project's
-/// extensions and publish the rows.
+/// extensions and publish the rows, and the extensions' contributions
+/// (`v_contribution`).
 pub async fn refresh(svc: &crate::Services) -> Result<(), DomainError> {
     let extensions = svc.extension_catalog.get(&svc.layout.project_dir);
     let declared = declared_by(&extensions);
@@ -1034,6 +1035,13 @@ pub async fn refresh(svc: &crate::Services) -> Result<(), DomainError> {
         &svc.layout.project_dir,
     );
     svc.capabilities.set_declared(declared);
+    // Every enabled extension's contributions, as `v_contribution`.
+    let contributions = extensions
+        .iter()
+        .filter(|e| e.enabled)
+        .flat_map(|e| e.contributions.iter().cloned())
+        .collect();
+    oxplow_db::contribution_store::reset(&svc.db, contributions).await?;
     let config = crate::config_service::read_config(&svc.config);
     let published = svc.capabilities.publish(&config, &svc.db).await;
     // A reload can drop the chosen snapshot implementation (its extension
@@ -1671,5 +1679,66 @@ mod tests {
         refresh(svc).await.unwrap();
         svc.vocabulary_service.sync().await.unwrap();
         assert!(found().is_empty(), "{:?}", found());
+    }
+}
+
+#[cfg(test)]
+mod contribution_tests {
+    /// A refresh publishes every enabled extension's contributions as
+    /// `v_contribution`, a disabled one's taken out.
+    #[tokio::test]
+    async fn a_refresh_publishes_the_contributions() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let dir = fx.svc.layout.project_dir.join("oxplow/extensions/acme");
+        std::fs::create_dir_all(dir.join("skills")).unwrap();
+        std::fs::write(
+            dir.join("extension.yaml"),
+            "manifest: 2\nname: acme\nversion: 1.2.0\nintent:\n  purpose: p\n  examples: [{ name: a }]\nskills:\n  - { name: deploy, file: skills/deploy.md }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("skills/deploy.md"),
+            "---\nname: deploy\ndescription: d\n---\nShip it.\n",
+        )
+        .unwrap();
+        fx.svc.extension_catalog.changed();
+        super::refresh(&fx.svc).await.unwrap();
+        let rows = fx
+            .svc
+            .sql
+            .query_sql(
+                "SELECT id, kind, version, global_name FROM v_contribution WHERE extension = 'acme'",
+                Vec::new(),
+                None,
+            )
+            .await
+            .unwrap()
+            .rows;
+        use oxplow_db::SqlCell::Text;
+        assert_eq!(
+            rows,
+            vec![vec![
+                Text("acme/skill/deploy".into()),
+                Text("skill".into()),
+                Text("1.2.0".into()),
+                Text("deploy".into()),
+            ]]
+        );
+        // Bundled extensions' contributions are listed too, at oxplow's version.
+        let bundled = fx
+            .svc
+            .sql
+            .query_sql(
+                "SELECT count(*) FROM v_contribution WHERE origin = 'bundled' AND version = ?1",
+                vec![oxplow_db::SqlCell::Text(env!("CARGO_PKG_VERSION").into())],
+                None,
+            )
+            .await
+            .unwrap()
+            .rows;
+        assert!(
+            matches!(bundled[0][0], oxplow_db::SqlCell::Int(n) if n > 0),
+            "{bundled:?}"
+        );
     }
 }

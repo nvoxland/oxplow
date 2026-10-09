@@ -198,6 +198,59 @@ fn remove(ext: &mut Extension, c: &Collision) {
 mod tests {
     use super::*;
 
+    /// The reference's "What it can declare" table, from the kinds' table:
+    /// the two can't drift. `OXPLOW_BLESS=1` rewrites it.
+    #[test]
+    fn the_reference_lists_every_kind() {
+        use oxplow_domain::contribution::{Stability, KINDS};
+        let more = |k: ContributionKind| match k {
+            ContributionKind::Lens => "[Lenses](../guide/lenses.md)",
+            ContributionKind::Measure | ContributionKind::Metric | ContributionKind::Dimension => {
+                "[Metrics](../guide/metrics.md)"
+            }
+            ContributionKind::Collector
+            | ContributionKind::Command
+            | ContributionKind::Effect
+            | ContributionKind::Implementation => "below",
+            ContributionKind::Provider => "[Provider protocol](provider-protocol.md)",
+            _ => "",
+        };
+        let mut table =
+            String::from("| Key | What it adds | Stability | More |\n|---|---|---|---|\n");
+        for k in KINDS {
+            let key = match k.kind {
+                ContributionKind::Lens => "`lenses/*.yaml` (files, not a key)".to_string(),
+                _ => format!("`{}`", k.key),
+            };
+            let stability = match k.stability {
+                Stability::Stable => "stable",
+                Stability::Experimental => "experimental",
+            };
+            table.push_str(&format!(
+                "| {key} | {} | {stability} | {} |\n",
+                k.summary,
+                more(k.kind)
+            ));
+        }
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../docs/reference/extensions.md");
+        let doc = std::fs::read_to_string(&path).unwrap();
+        let begin = doc.find("<!-- kinds:begin").expect("the begin marker");
+        let begin = begin + doc[begin..].find("-->").unwrap() + 3;
+        let end = doc.find("<!-- kinds:end -->").expect("the end marker");
+        let generated = format!("\n{table}");
+        if std::env::var_os("OXPLOW_BLESS").is_some() {
+            let blessed = format!("{}{generated}{}", &doc[..begin], &doc[end..]);
+            std::fs::write(&path, blessed).unwrap();
+            return;
+        }
+        assert_eq!(
+            &doc[begin..end],
+            generated,
+            "docs/reference/extensions.md's kinds table is stale; bless it with OXPLOW_BLESS=1"
+        );
+    }
+
     fn write(root: &std::path::Path, ext: &str, body: &str) {
         let dir = root.join("oxplow/extensions").join(ext);
         std::fs::create_dir_all(dir.join("skills")).unwrap();

@@ -77,23 +77,30 @@ intent:
 
 ### What it can declare
 
-| Key | What it adds | More |
-|---|---|---|
-| `lenses/*.yaml` (files, not a key) | a page or panel over a SQL query | [Lenses](../guide/lenses.md) |
-| `models` | SQL views over oxplow's models, published as `v_<ext>_<name>` | |
-| `measures`, `metrics`, `dimensions` | metric definitions, in `.oxplow/project.yaml`'s vocabulary | [Metrics](../guide/metrics.md) |
-| `collectors` | outside data brought in as entities, or facts for metrics | below |
-| `commands` | commands on oxplow's command bus | below |
-| `effects` | scripts that react to logged events | below |
-| `providers` | an external program implementing a capability, such as the work list | [Provider protocol](provider-protocol.md) |
-| `event_types` | its own namespace's event types | |
-| `ref_kinds` | kinds of thing a ref can name | |
-| `pages`, `panels` | where its lenses show | |
-| `ui` | lenses mounted into core pages (`slots`), labels on core refs (`decorators`) | |
-| `advisories` | guidance queries for the coding agent | |
-| `skills` | skills and slash commands for the coding agent | |
-| `implementations` | implementations of a capability it offers: a built-in, or an AI provider or effort policy written as a script | below |
-| `custom_components` | sandboxed HTML components for `viz: custom` lenses | |
+<!-- kinds:begin (generated from oxplow_domain::contribution::KINDS; bless with OXPLOW_BLESS=1) -->
+| Key | What it adds | Stability | More |
+|---|---|---|---|
+| `models` | SQL views over oxplow's models, published as `v_<ext>_<name>` | stable |  |
+| `measures` | what a metric's facts measure | stable | [Metrics](../guide/metrics.md) |
+| `metrics` | a number tracked over a measure | stable | [Metrics](../guide/metrics.md) |
+| `dimensions` | a way to slice metrics | stable | [Metrics](../guide/metrics.md) |
+| `collectors` | outside data brought in as entities, or facts for metrics | stable | below |
+| `event_types` | its own namespace's event types | stable |  |
+| `ref_kinds` | kinds of thing a ref can name | stable |  |
+| `commands` | commands on oxplow's command bus | stable | below |
+| `effects` | scripts that react to logged events | stable | below |
+| `advisories` | guidance queries for the coding agent | stable |  |
+| `skills` | skills and slash commands for the coding agent | stable |  |
+| `implementations` | an implementation of a capability: a built-in, or an AI provider or effort policy written as a script | stable | below |
+| `providers` | an external program implementing a capability, such as the work list | stable | [Provider protocol](provider-protocol.md) |
+| `lenses/*.yaml` (files, not a key) | a page or panel over a SQL query | stable | [Lenses](../guide/lenses.md) |
+| `pages` | where its lenses show as pages | stable |  |
+| `panels` | where its lenses show as panels | stable |  |
+| `ui.slots` | a lens mounted into a core page | stable |  |
+| `ui.decorators` | labels on core refs | stable |  |
+| `ui.replacements` | a lens in place of a core component (private extensions only) | experimental |  |
+| `custom_components` | sandboxed HTML components for `viz: custom` lenses | stable |  |
+<!-- kinds:end -->
 
 `ui.replacements` (a lens in place of a core component) is
 experimental: a private extension only.

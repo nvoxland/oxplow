@@ -61,7 +61,15 @@ event types and the SDK). Two rules stay their own on purpose:
 `refuse_shared_namespaces` refuses *both* extensions whose commands map to
 one namespace (a namespace is one extension's), and
 `capability::instance_id_problem` keeps provider ids to snake_case (the id
-is also a command namespace); the rest keep their own checks until they move (the inventory and plan are the foundation
+is also a command namespace); the rest keep their own checks until they move **Discovery:**
+`capabilities::refresh` (boot and every catalog change) restates the
+`contribution` table (V47, `oxplow_db::contribution_store`) from every
+enabled extension's descriptors, read as `v_contribution`; the
+reference's "What it can declare" table is generated from
+`contribution::KINDS` (each kind's `summary`) between markers in
+`docs/reference/extensions.md`, and
+`descriptors::tests::the_reference_lists_every_kind` fails when they
+drift (`OXPLOW_BLESS=1` rewrites it). (the inventory and plan are the foundation
 roadmap's "Normalize contribution descriptors").
 
 > **Status: built (epic tsk275; host finished in tsk278).**
