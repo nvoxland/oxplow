@@ -962,6 +962,7 @@ pub async fn refresh(svc: &crate::Services) -> Result<(), DomainError> {
     let declared = declared_by(&extensions);
     crate::work_items::register_built_ins(&svc.work_items, &declared, &svc.db);
     crate::harnesses::register_built_ins(&svc.harnesses, &declared);
+    crate::effort_policy::register_built_ins(&svc.effort_policies, &declared, &svc.sql);
     crate::harnesses::register_acp_adapters(&svc.acp_adapters, &declared);
     crate::ai_service::register_built_ins(
         svc.ai.providers(),

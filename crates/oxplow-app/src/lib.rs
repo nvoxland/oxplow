@@ -527,6 +527,9 @@ pub struct Services {
     pub acp_adapters: oxplow_domain::agent::registry::AcpAdapterRegistry,
     /// Every capability's implementations and which is active.
     pub capabilities: Arc<capabilities::CapabilityRegistry>,
+    /// The effort policies, by id: the declared built-ins and the running
+    /// provider instances (`.context/work-tracking.md`).
+    pub effort_policies: Arc<oxplow_domain::effort_policy::EffortPolicyRegistry>,
     /// The enabled external provider instances (`.context/providers.md`).
     pub providers: Arc<providers::ProviderRegistry>,
     /// Enabled extensions' `commands:` on the bus (P6b).
@@ -1208,6 +1211,11 @@ impl Services {
             sql: sql.clone(),
             lifecycle: efforts.without_event_pump(),
         }));
+        // The effort policies: the built-ins the extensions declare, and
+        // the provider instances that register themselves.
+        let effort_policies =
+            Arc::new(oxplow_domain::effort_policy::EffortPolicyRegistry::default());
+        effort_policy::register_built_ins(&effort_policies, &declared, &sql);
         // The project's effort policy reacts to items starting and
         // finishing, through this bus (`.context/work-tracking.md`).
         event_pump.register_async(Arc::new(effort_policy::EffortPolicyConsumer {
@@ -1215,6 +1223,7 @@ impl Services {
             sql: sql.clone(),
             config: config_arc.clone(),
             capabilities: capabilities.clone(),
+            policies: effort_policies.clone(),
         }));
         for command in commands::vcs::ops(commands::vcs::VcsTarget {
             vcs: vcs.clone(),
@@ -1557,6 +1566,7 @@ impl Services {
             session_auth,
             acp_adapters,
             capabilities,
+            effort_policies,
             providers,
             knowledge,
             wiki_page_store,

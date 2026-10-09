@@ -87,17 +87,38 @@ oxplow moves a `todo` item to in progress when work is linked to it, and
 effort afterwards. A policy may be **none**: no efforts, and the record is
 per turn.
 
-Built so far: rule 1, in `crate::effort_policy` — a pump consumer on
-`work_item.state_changed` (core's, logged for every provider), `effort.linked`
-and `effort.opened`. It runs the `effort.*` and `oxplow.work_item.transition`
-commands as the effect `oxplow:effort-policy` and ignores events its own
-runs caused. The thread is the event's (the agent that moved the item),
-else the item's (`v_work_item.thread_id`); a person moving a backlog item
-opens nothing. A descendant of the linked item refines the link; an
-ancestor leaves it. The project picks the policy as
-`activeProviders.effort_policy`: `oxplow` (the default, unset) or `none`;
-both are rows in `v_capability_provider`. A task's status no longer opens
-or closes an effort anywhere else.
+**The effort policy is an interface** (`oxplow_domain::effort_policy`):
+`EffortPolicy { id, react(PolicyEvent) → Vec<CommandCall> }`. A policy
+only composes; core runs. `PolicyEvent` is an effect's event shape (`id`,
+`type`, `v`, `seq`, `source`, `subject`, `payload`) plus its `anchors`
+(the mover's thread, a checkpoint's turn, a landing's effort), and it is
+offered each of `EVENTS`: `work_item.state_changed` (core's, logged for
+every provider), `effort.linked`, `effort.opened`, `thread.checkpoint`,
+`effort.landed`. `EffortPolicyRegistry` (`Services.effort_policies`) holds
+the policies by id: the declared built-ins, which a catalog reload
+restates (`set_declared`, `effort_policy::register_built_ins` from
+`capabilities::refresh`), and running provider instances, which register
+themselves and a reload never touches.
+
+`crate::effort_policy::EffortPolicyConsumer` (`effort.policy`) is the
+**dispatcher**: it resolves the active id
+(`activeProviders.effort_policy`: `oxplow` — the default, unset — `none`,
+or a provider instance; all rows in `v_capability_provider`), and for any
+but `none` offers the event to that policy only, checks what it composed
+(`extension_commands::check_calls`: a call that isn't a command, or whose
+input doesn't fit, runs nothing) and runs the calls in order as the effect
+`effort_policy:<id>` (source `effect:effort_policy:<id>`), stopping at the
+first that fails — the pump dead-letters it. It never offers an event a
+policy's own run caused (a source starting `effect:effort_policy:`). A
+`capability.switched` of the effort policy closes every open effort
+(`switch`), as the system — core's rule, whichever policy is active after.
+
+`CommitOrSwitch` (`oxplow:commit-or-switch`) is the built-in, the rules
+above composed as calls (it reads first, then composes). Rule 1: the
+thread is the event's (the agent that moved the item), else the item's
+(`v_work_item.thread_id`); a person moving a backlog item opens nothing. A
+descendant of the linked item refines the link; an ancestor leaves it. A
+task's status no longer opens or closes an effort anywhere else.
 
 Rule 2 reads **`thread.checkpoint@1 { thread, turn, reason, snapshot,
 changed, writing_tools }`**, logged by the `thread.checkpoint` consumer
@@ -222,7 +243,7 @@ The three in progress:
 | Capability | May be none | Default | Notes |
 |---|---|---|---|
 | Work list | yes | oxplow's tasks | Task screens stay core components, written against the interface; moving them into the extension is later work |
-| Effort policy | yes | the three rules above | An extension policy is an effect reacting to core's events |
+| Effort policy | yes | the three rules above (`CommitOrSwitch`) | An `EffortPolicy`: it composes commands for an event, the dispatcher runs them as `effect:effort_policy:<id>`. A provider process may implement it (`react`) |
 | Snapshots | no | keeps everything | Interface: mark now, what changed between two points, read a path at a point (optional, declared as `contents`); a hashes-only implementation ships too |
 
 ## Status
