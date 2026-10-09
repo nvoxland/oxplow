@@ -6,6 +6,8 @@
 -- delta capture its snapshot's rows, a full one the tree reconstructed as
 -- of its snapshot, an asserted one the paths it emitted. A deleted file's
 -- tombstone drops it; a removed function goes with its file's rescan.
+-- "The facts from" a capture are the ones it holds for the path: its own
+-- rows, or through its hold (`fact_path_hold`, V43) at the lines it saw.
 WITH rel AS (
   SELECT DISTINCT c2.producer AS producer
     FROM source('fact') f2
@@ -74,18 +76,45 @@ ranked AS (
            ORDER BY captured_at DESC, capture_id DESC
          ) AS rn
     FROM restated
+),
+winners AS (
+  SELECT s.capture_id, fp.id AS path_id, fp.path AS path
+    FROM ranked s JOIN source('fact_path') fp ON fp.path = s.path
+   WHERE s.rn = 1 AND s.storage <> 'deleted'
 )
-SELECT f.id, f.capture_id, m.key AS measure_key, f.value, f.numerator,
-       f.denominator, subj.kind AS subject_kind, subj.ref AS subject_ref, fp.path, f.line,
+SELECT f.id, c.id AS capture_id, m.key AS measure_key, f.value, f.numerator,
+       f.denominator, subj.kind AS subject_kind, subj.ref AS subject_ref, w.path, f.line,
        f.severity, f.rule, f.detail, d.json AS dims_json,
        c.stream_id, c.thread_id, c.effort_id, c.captured_at, c.branch
-  FROM source('fact') f
+  FROM winners w
+  CROSS JOIN source('fact') f ON f.capture_id = w.capture_id AND f.path_id = w.path_id
+  CROSS JOIN source('metric_capture') c ON c.id = f.capture_id
   JOIN source('measure') m ON m.id = f.measure_id
-  JOIN source('metric_capture') c ON c.id = f.capture_id
-  JOIN source('fact_path') fp ON fp.id = f.path_id
-  JOIN ranked s ON s.capture_id = f.capture_id AND s.path = fp.path
   LEFT JOIN source('fact_subject') subj ON subj.id = f.subject_id
   LEFT JOIN source('fact_dims') d ON d.id = f.dims_id
  WHERE m.capture_scope = 'per-path'
-   AND s.rn = 1
-   AND s.storage <> 'deleted'
+   AND NOT EXISTS (SELECT 1 FROM source('fact_path_hold') y
+                    WHERE y.capture_id = c.id AND y.measure_id = f.measure_id
+                      AND y.path_id = f.path_id)
+UNION ALL
+SELECT f.id, c.id AS capture_id, m.key AS measure_key, f.value, f.numerator,
+       f.denominator, subj.kind AS subject_kind, subj.ref AS subject_ref, w.path,
+       -- CAST keeps the column INTEGER across the UNION.
+       CAST(coalesce((SELECT fl.line FROM source('fact_line') fl
+                       WHERE fl.fact_id = f.id AND fl.capture_id <= ph.capture_id
+                       ORDER BY fl.capture_id DESC LIMIT 1), f.line) AS INTEGER) AS line,
+       f.severity, f.rule, f.detail, d.json AS dims_json,
+       c.stream_id, c.thread_id, c.effort_id, c.captured_at, c.branch
+  FROM winners w
+  CROSS JOIN source('fact_path_hold') ph ON ph.capture_id = w.capture_id AND ph.path_id = w.path_id
+  CROSS JOIN source('metric_capture') c ON c.id = ph.capture_id
+  CROSS JOIN source('fact') f INDEXED BY idx_fact_measure_path ON f.measure_id = ph.measure_id AND f.path_id = ph.path_id
+                      AND f.capture_id >= ph.from_capture_id AND f.capture_id <= ph.capture_id
+                      AND (f.last_capture_id IS NULL OR f.last_capture_id >= ph.capture_id)
+  CROSS JOIN source('metric_capture') fc ON fc.id = f.capture_id
+                                  AND fc.stream_id = c.stream_id AND fc.producer = c.producer
+                                  AND fc.status = 'done'
+  JOIN source('measure') m ON m.id = f.measure_id
+  LEFT JOIN source('fact_subject') subj ON subj.id = f.subject_id
+  LEFT JOIN source('fact_dims') d ON d.id = f.dims_id
+ WHERE m.capture_scope = 'per-path'

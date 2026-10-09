@@ -163,10 +163,16 @@ impl CaptureListener {
                            JOIN measure m ON m.id = ch.measure_id
                           WHERE c.id > ?2
                          UNION
+                         SELECT c.stream_id, m.key FROM fact_path_hold ph
+                           JOIN metric_capture c ON c.id = ph.capture_id
+                           JOIN measure m ON m.id = ph.measure_id
+                          WHERE c.id > ?2
+                         UNION
                          SELECT c.stream_id, NULL FROM metric_capture c
                           WHERE c.id > ?2
                             AND NOT EXISTS (SELECT 1 FROM fact f WHERE f.capture_id = c.id)
-                            AND NOT EXISTS (SELECT 1 FROM fact_chain ch WHERE ch.capture_id = c.id)",
+                            AND NOT EXISTS (SELECT 1 FROM fact_chain ch WHERE ch.capture_id = c.id)
+                            AND NOT EXISTS (SELECT 1 FROM fact_path_hold ph WHERE ph.capture_id = c.id)",
                     )
                     .map_err(oxplow_db::map_sql_err)?;
                 let rows = st

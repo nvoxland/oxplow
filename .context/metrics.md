@@ -453,14 +453,37 @@ welded to collection.
   query that joins `fact` to `metric_capture` on `f.capture_id` sees only
   what a chain capture stored, so a new reader of complete-scope facts
   goes through `held_facts_sql` or `v_fact`; the chain join is pinned with
-  CROSS JOINs and spelled-out bounds (see performance.md). Failed captures
-  and per-path/per-subject measures store as before, held by their own
-  capture only. Pruning moves a fact a doomed capture stored up to the
-  first kept capture that holds it (`rehome`), and prune's keep rules
-  protect a fact's **last holder** (`LAST_HOLDER`), not the capture that
-  stored it. `prune_dominated_tree_captures` never takes a chain holder.
-  The live database's history was rewritten into chains once, by hand
-  (the same diff, replayed in capture order), when V39 landed.
+  CROSS JOINs, spelled-out bounds and named indexes (see performance.md).
+  Failed and asserted captures and per-subject measures store as before,
+  held by their own capture only. Pruning moves a fact a doomed capture
+  stored up to the first kept capture that holds it (`rehome`, only a
+  holder whose `from_capture_id` is at or before the fact), and prune's
+  keep rules protect a fact's **last holder** (`LAST_HOLDER`), not the
+  capture that stored it. `prune_dominated_tree_captures` never takes a
+  chain holder, and rehomes before it deletes. The live database's history
+  was rewritten into chains once, by hand (the same diff, replayed in
+  capture order), when V39 landed.
+  **Per-path code gauges hold each rescanned file the same way (V43).** A
+  finished delta or full scan of a per-path measure writes, per file it
+  emitted facts for, a `fact_path_hold (capture, measure, path,
+  from_capture_id, depth)` row: it holds that file's facts stored since
+  `from_capture_id` and not closed before it, and its own rows for the
+  file are only what's new. The diff against the file's last hold matches
+  on everything **but the line**, because an edit shifts the functions
+  below it (on this project a rescan's facts were 60% identical, 99%
+  identical but for the line): a fact that only moved stays one fact, and
+  `fact_line (fact, capture, line)` says where it is from that capture on —
+  a holder reads the newest one at or before it, else the fact's own line,
+  so every capture's drill-down keeps exact lines. A dropped fact is closed
+  just before the scan (nothing between the last hold and it holds the
+  file). A file restated with no facts gets no hold, so the scan holds
+  nothing for it — what the tree fold expects. The tree fold
+  (`latest_tree_facts`, `v_tree_fact`, so `v_file_metric` and
+  `v_function`) reads what each path's winning capture **holds** for it;
+  `held_facts_sql` and `v_fact` read path holds as a third branch. A
+  rehomed fact takes the line it has at its new home and its earlier
+  `fact_line` rows go. The live history was rewritten into holds once, by
+  hand, when V43 landed.
 - **`metric_cube`** + **`metric_live_fact`** + **`metric_cube_state`**
   (`V62__metric_cube.sql`, tsk96; live state + watermark re-keyed per **branch**
   by `V63__branch_aware_cube.sql`, tsk97) — the **aggregate cube**: the

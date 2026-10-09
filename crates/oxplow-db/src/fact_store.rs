@@ -588,17 +588,9 @@ pub fn record_facts_tx(
         check_dims_tx(conn, f.dims_json.as_deref())?;
     }
     let capture_id = insert_capture(conn, capture).map_err(map_sql_err)?;
-    // A complete-scope measure stores only what changed since the
-    // producer's previous scan (V39, `fact_chain`).
-    crate::fact_chain::write(
-        conn,
-        capture_id,
-        capture.stream_id,
-        &capture.producer,
-        capture.status == "done",
-        facts,
-    )
-    .map_err(map_sql_err)?;
+    // A complete-scope measure, and each file a code gauge rescans, stores
+    // only what changed (V39 chains, V43 path holds: `fact_chain`).
+    crate::fact_chain::write(conn, capture_id, capture, facts).map_err(map_sql_err)?;
     if let Some(log) = log {
         let env = (log.build)(capture_id);
         crate::event_log_store::append_unique_tx(conn, &log.vocabulary.current(), &env)?;
@@ -2715,6 +2707,9 @@ impl SqliteFactStore {
     /// - **symbol**-grained facts and **many-facts-per-path** (TODO markers) are
     ///   superseded *wholesale per file*, so a removed function/marker disappears.
     ///
+    /// "The facts from" a capture are the ones it **holds** for the path: its
+    /// own rows, or through its `fact_path_hold` at the lines it saw (V43).
+    ///
     /// Partitioning by `producer` matters: the 10 idiom gauges all share
     /// `oxplow.ast_hit` (sliced by `rule`), so without it a later gauge's capture
     /// would supersede an earlier gauge's facts for the same path.
@@ -2823,15 +2818,28 @@ impl SqliteFactStore {
                               ) AS rn
                          FROM restated
                         WHERE (?2 IS NULL OR stream_id = ?2)
+                     ),
+                     -- Each (stream, producer, path)'s latest restatement…
+                     winners AS (
+                       SELECT s.capture_id, fp.id AS path_id
+                         FROM ranked s JOIN fact_path fp ON fp.path = s.path
+                        WHERE s.rn = 1 AND s.storage <> 'deleted'
                      )
-                     SELECT {FACT_ROW_COLS} FROM fact f
-                       JOIN metric_capture c ON c.id = f.capture_id
-                       JOIN fact_path fp ON fp.id = f.path_id
-                       JOIN ranked s ON s.capture_id = f.capture_id AND s.path = fp.path
-                      WHERE f.measure_id = ?1
-                        AND s.rn = 1
-                        AND s.storage <> 'deleted'
-                      ORDER BY c.captured_at ASC, f.id ASC"
+                     -- …and the facts it holds for that path: its own rows, or
+                     -- through its hold (V43), at the lines it saw.
+                     SELECT {FACT_ROW_COLS} FROM winners w
+                       CROSS JOIN fact f ON f.capture_id = w.capture_id AND f.path_id = w.path_id
+                       CROSS JOIN metric_capture c ON c.id = f.capture_id
+                      WHERE f.measure_id = ?1 AND {not_held}
+                     UNION ALL
+                     SELECT {path_cols} FROM winners w
+                       CROSS JOIN {path_held}
+                      WHERE ph.capture_id = w.capture_id AND ph.path_id = w.path_id
+                        AND ph.measure_id = ?1
+                      ORDER BY 14, 1",
+                    not_held = crate::fact_chain::NOT_PATH_HELD,
+                    path_cols = crate::fact_chain::path_held_cols(),
+                    path_held = crate::fact_chain::PATH_HELD,
                 );
                 let mut stmt = conn.prepare(&sql)?;
                 let rows =
@@ -2943,11 +2951,10 @@ impl SqliteFactStore {
         let n = self
             .db
             .transaction(move |tx| {
-                let n = tx
-                    .execute(
-                        "DELETE FROM metric_capture
-                      WHERE id IN (
-                        SELECT c.id
+                let doomed: Vec<i64> = {
+                    let mut stmt = tx
+                        .prepare(
+                            "SELECT c.id
                           FROM metric_capture c
                           JOIN (
                             SELECT stream_id, producer, captured_at, id
@@ -2988,9 +2995,23 @@ impl SqliteFactStore {
                            -- Nor one holding a chain's facts (V39).
                            AND NOT EXISTS (
                              SELECT 1 FROM fact_chain ch WHERE ch.capture_id = c.id
-                           )
-                      )",
-                        params![stream_id],
+                           )",
+                        )
+                        .map_err(map_sql_err)?;
+                    let rows = stmt
+                        .query_map(params![stream_id], |r| r.get::<_, i64>(0))
+                        .map_err(map_sql_err)?
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                        .map_err(map_sql_err)?;
+                    rows
+                };
+                // The baseline holds facts the dominated scans stored (V43):
+                // they move up to it before those scans go.
+                crate::fact_chain::rehome(tx, &doomed).map_err(map_sql_err)?;
+                let n = tx
+                    .execute(
+                        "DELETE FROM metric_capture WHERE id IN (SELECT value FROM json_each(?1))",
+                        params![serde_json::to_string(&doomed).expect("ids serialize")],
                     )
                     .map_err(map_sql_err)?;
                 // Same transaction as the delete: the cube must never be observable
@@ -3164,7 +3185,7 @@ impl SqliteFactStore {
                 let latest = |partition: &str, from: &str, filter: &str| {
                     format!(
                         "SELECT {held} FROM (
-                           SELECT f.capture_id, f.measure_id, f.last_capture_id,
+                           SELECT f.capture_id, f.measure_id, f.path_id, f.last_capture_id,
                                   c.stream_id, c.producer, ROW_NUMBER() OVER (
                              PARTITION BY f.measure_id, c.stream_id, c.producer{partition}
                              ORDER BY c.captured_at DESC, c.id DESC, f.id DESC) rn
@@ -3632,6 +3653,17 @@ mod tests {
         string_to_ts(ts).unwrap()
     }
 
+    /// A `per-path` measure — the scope the tree fold reads.
+    async fn tree_measure(store: &SqliteFactStore, key: &str) -> i64 {
+        store
+            .upsert_measure(NewMeasure {
+                capture_scope: "per-path".into(),
+                ..NewMeasure::new(key, key)
+            })
+            .await
+            .unwrap()
+    }
+
     // --- change-only complete captures (V39) -----------------------------
 
     /// One scanned block: subject `id`, at `id.rs:1`, valued `value`.
@@ -4049,7 +4081,7 @@ mod tests {
         // edited to 0 — the gauge emits NO fact for it (the `if c > 0:` guard), but
         // a.rs IS in the new snapshot, so the new capture supersedes it → 2.
         let store = fixture().await;
-        let m = measure(&store, "acme.hits").await;
+        let m = tree_measure(&store, "acme.hits").await;
 
         snapshot_with(&store, 1, &[("a.rs", "oxplow"), ("b.rs", "oxplow")]).await;
         gauge_capture(
@@ -4080,7 +4112,7 @@ mod tests {
     #[tokio::test]
     async fn per_path_fold_drops_a_deleted_file() {
         let store = fixture().await;
-        let m = measure(&store, "acme.hits").await;
+        let m = tree_measure(&store, "acme.hits").await;
 
         snapshot_with(&store, 1, &[("a.rs", "oxplow"), ("b.rs", "oxplow")]).await;
         gauge_capture(
@@ -4108,7 +4140,7 @@ mod tests {
         // The incrementality guarantee: a file never rescanned since the baseline
         // keeps contributing. This is what makes delta captures correct.
         let store = fixture().await;
-        let m = measure(&store, "acme.hits").await;
+        let m = tree_measure(&store, "acme.hits").await;
 
         snapshot_with(&store, 1, &[("a.rs", "oxplow"), ("b.rs", "oxplow")]).await;
         gauge_capture(
@@ -4167,6 +4199,370 @@ mod tests {
         store.record_facts(capture, rows).await.unwrap()
     }
 
+    // --- per-path holds (V43) --------------------------------------------
+
+    async fn per_path_measure(store: &SqliteFactStore) -> i64 {
+        store
+            .upsert_measure(NewMeasure {
+                capture_scope: "per-path".into(),
+                ..NewMeasure::new("acme.complexity", "acme.complexity")
+            })
+            .await
+            .unwrap()
+    }
+
+    /// A code gauge's `scan_kind` capture by `fns` over `snap_id`: one fact
+    /// per `(path, function, value, line)`.
+    async fn fn_scan(
+        store: &SqliteFactStore,
+        scan_kind: &str,
+        snap_id: i64,
+        when: &str,
+        m: i64,
+        fns: &[(&str, &str, f64, i64)],
+    ) -> i64 {
+        let mut capture = NewMetricCapture::done(1, "fns", "metric:fns");
+        capture.snapshot_id = Some(snap_id);
+        capture.captured_at = Some(at(when));
+        capture.scan_kind = scan_kind.into();
+        let rows: Vec<NewFact> = fns
+            .iter()
+            .map(|(path, name, value, line)| NewFact {
+                subject_kind: Some("symbol".into()),
+                subject_ref: Some(format!("symbol:{path}::{name}")),
+                path: Some((*path).to_string()),
+                line: Some(*line),
+                ..NewFact::new(m, *value)
+            })
+            .collect();
+        store.record_facts(capture, rows).await.unwrap()
+    }
+
+    /// What a read gives `capture`: `(subject, value, line)`, sorted.
+    fn fn_shape(rows: &[FactRow], capture: i64) -> Vec<(String, f64, Option<i64>)> {
+        let mut out: Vec<(String, f64, Option<i64>)> = rows
+            .iter()
+            .filter(|r| r.capture_id == capture)
+            .map(|r| (r.subject_ref.clone().unwrap_or_default(), r.value, r.line))
+            .collect();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    }
+
+    /// `(subject, value, line)` of `facts`, sorted.
+    fn tree_shape(facts: &[FactRow]) -> Vec<(String, f64, Option<i64>)> {
+        let mut out: Vec<(String, f64, Option<i64>)> = facts
+            .iter()
+            .map(|r| (r.subject_ref.clone().unwrap_or_default(), r.value, r.line))
+            .collect();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    }
+
+    /// `v_tree_fact` and `v_fact` give the same lines the engine does.
+    async fn models_hold_the_same_lines(store: &SqliteFactStore, m: i64) {
+        let engine = tree_shape(&store.latest_tree_facts(m, Some(1)).await.unwrap());
+        let model: Vec<(String, f64, Option<i64>)> = store
+            .db
+            .call(|conn| {
+                let mut st = conn.prepare(
+                    "SELECT subject_ref, value, line FROM v_tree_fact
+                      WHERE measure_key = 'acme.complexity' AND stream_id = 1 ORDER BY subject_ref",
+                )?;
+                let rows = st
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok(rows)
+            })
+            .await
+            .unwrap();
+        assert_eq!(model, engine, "v_tree_fact");
+        let all = store.facts_for_measure(m).await.unwrap();
+        let mut engine: Vec<(i64, String, f64, Option<i64>)> = all
+            .iter()
+            .map(|r| {
+                (
+                    r.capture_id,
+                    r.subject_ref.clone().unwrap_or_default(),
+                    r.value,
+                    r.line,
+                )
+            })
+            .collect();
+        engine.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
+        let model: Vec<(i64, String, f64, Option<i64>)> = store
+            .db
+            .call(|conn| {
+                let mut st = conn.prepare(
+                    "SELECT capture_id, subject_ref, value, line FROM v_fact
+                      WHERE measure_key = 'acme.complexity' ORDER BY capture_id, subject_ref",
+                )?;
+                let rows = st
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok(rows)
+            })
+            .await
+            .unwrap();
+        assert_eq!(model, engine, "v_fact");
+    }
+
+    async fn line_moves(store: &SqliteFactStore) -> i64 {
+        store
+            .db
+            .read(|c| {
+                c.query_row("SELECT count(*) FROM fact_line", [], |r| r.get(0))
+                    .map_err(map_sql_err)
+            })
+            .await
+            .unwrap()
+    }
+
+    fn sym(name: &str, value: f64, line: i64) -> (String, f64, Option<i64>) {
+        (format!("symbol:a.rs::{name}"), value, Some(line))
+    }
+
+    /// A rescanned file stores only the functions that changed; one that
+    /// only moved is recorded as a line move. Every capture still reads
+    /// exactly what it scanned, lines included, and so do the fold and the
+    /// models.
+    #[tokio::test]
+    async fn a_rescanned_file_stores_what_changed_and_holds_the_rest() {
+        let store = fixture().await;
+        let m = per_path_measure(&store).await;
+        snapshot_with(&store, 1, &[("a.rs", "oxplow"), ("b.rs", "oxplow")]).await;
+        let c1 = fn_scan(
+            &store,
+            "delta",
+            1,
+            "2026-06-30T10:00:00Z",
+            m,
+            &[
+                ("a.rs", "f", 1.0, 1),
+                ("a.rs", "g", 2.0, 10),
+                ("a.rs", "h", 3.0, 20),
+                ("b.rs", "k", 1.0, 1),
+            ],
+        )
+        .await;
+        // `f` got more complex and two lines longer: `g` and `h` moved.
+        snapshot_with(&store, 2, &[("a.rs", "oxplow")]).await;
+        let c2 = fn_scan(
+            &store,
+            "delta",
+            2,
+            "2026-06-30T11:00:00Z",
+            m,
+            &[
+                ("a.rs", "f", 5.0, 1),
+                ("a.rs", "g", 2.0, 12),
+                ("a.rs", "h", 3.0, 22),
+            ],
+        )
+        .await;
+        assert_eq!(stored(&store, c2).await, 1, "only `f` changed");
+        assert_eq!(line_moves(&store).await, 2, "`g` and `h` moved");
+        let read = |c: i64| {
+            let store = &store;
+            async move { fn_shape(&store.facts_for_captures(m, vec![c]).await.unwrap(), c) }
+        };
+        assert_eq!(read(c1).await.len(), 4);
+        assert_eq!(
+            read(c1).await[1],
+            sym("g", 2.0, 10),
+            "c1 keeps its own lines"
+        );
+        let at_c2 = vec![sym("f", 5.0, 1), sym("g", 2.0, 12), sym("h", 3.0, 22)];
+        assert_eq!(read(c2).await, at_c2);
+        let tree = tree_shape(&store.latest_tree_facts(m, Some(1)).await.unwrap());
+        assert_eq!(tree.len(), 4);
+        assert_eq!(tree[1], sym("g", 2.0, 12));
+        models_hold_the_same_lines(&store, m).await;
+        model_agrees(&store, m).await;
+
+        // The file is rescanned empty, then as it was: the empty scan holds
+        // nothing, and the next stores nothing new.
+        snapshot_with(&store, 3, &[("a.rs", "oxplow")]).await;
+        let c3 = fn_scan(&store, "delta", 3, "2026-06-30T12:00:00Z", m, &[]).await;
+        assert!(read(c3).await.is_empty());
+        assert_eq!(
+            tree_shape(&store.latest_tree_facts(m, Some(1)).await.unwrap()).len(),
+            1
+        );
+        snapshot_with(&store, 4, &[("a.rs", "oxplow")]).await;
+        let c4 = fn_scan(
+            &store,
+            "delta",
+            4,
+            "2026-06-30T13:00:00Z",
+            m,
+            &[
+                ("a.rs", "f", 5.0, 1),
+                ("a.rs", "g", 2.0, 12),
+                ("a.rs", "h", 3.0, 22),
+            ],
+        )
+        .await;
+        assert_eq!(stored(&store, c4).await, 0);
+        assert_eq!(read(c4).await, at_c2);
+        assert_eq!(read(c2).await, at_c2);
+        models_hold_the_same_lines(&store, m).await;
+    }
+
+    /// A file that mostly changed, or whose holds ran 32 scans, is stored
+    /// whole: a read never looks far back.
+    #[tokio::test]
+    async fn a_mostly_changed_or_long_held_file_is_stored_whole() {
+        let store = fixture().await;
+        let m = per_path_measure(&store).await;
+        let fns = |v: f64| -> Vec<(&'static str, &'static str, f64, i64)> {
+            vec![("a.rs", "f", v, 1), ("a.rs", "g", v, 10)]
+        };
+        snapshot_with(&store, 1, &[("a.rs", "oxplow")]).await;
+        fn_scan(&store, "delta", 1, "2026-06-30T10:00:00Z", m, &fns(1.0)).await;
+        let changed = fn_scan(&store, "delta", 1, "2026-06-30T10:01:00Z", m, &fns(2.0)).await;
+        assert_eq!(stored(&store, changed).await, 2);
+        let mut last = changed;
+        for i in 0..crate::fact_chain::MAX_CHAIN_DEPTH as u32 {
+            last = fn_scan(
+                &store,
+                "delta",
+                1,
+                &format!("2026-07-01T{:02}:{:02}:00Z", i / 60, i % 60),
+                m,
+                &fns(2.0),
+            )
+            .await;
+        }
+        assert_eq!(
+            stored(&store, last).await,
+            2,
+            "the hold's cap restates it whole"
+        );
+        assert_eq!(
+            store.facts_for_captures(m, vec![last]).await.unwrap().len(),
+            2
+        );
+    }
+
+    /// Pruning the scans a baseline stands on moves the facts it holds up
+    /// to it, at the lines it saw: it reads the same afterwards.
+    #[tokio::test]
+    async fn pruning_dominated_scans_moves_the_facts_the_baseline_holds() {
+        let store = fixture().await;
+        let m = per_path_measure(&store).await;
+        snapshot_with(&store, 1, &[("a.rs", "oxplow"), ("b.rs", "oxplow")]).await;
+        fn_scan(
+            &store,
+            "delta",
+            1,
+            "2026-06-30T10:00:00Z",
+            m,
+            &[
+                ("a.rs", "f", 1.0, 1),
+                ("a.rs", "g", 2.0, 10),
+                ("a.rs", "h", 3.0, 20),
+                ("b.rs", "k", 1.0, 1),
+            ],
+        )
+        .await;
+        let full = fn_scan(
+            &store,
+            "full",
+            1,
+            "2026-06-30T11:00:00Z",
+            m,
+            &[
+                ("a.rs", "f", 1.0, 3),
+                ("a.rs", "g", 2.0, 12),
+                ("a.rs", "h", 3.0, 22),
+                ("b.rs", "k", 1.0, 1),
+            ],
+        )
+        .await;
+        assert_eq!(stored(&store, full).await, 0);
+        let before = fn_shape(
+            &store.facts_for_captures(m, vec![full]).await.unwrap(),
+            full,
+        );
+        let tree_before = tree_shape(&store.latest_tree_facts(m, Some(1)).await.unwrap());
+        assert_eq!(store.prune_dominated_tree_captures(1).await.unwrap(), 1);
+        assert_eq!(stored(&store, full).await, 4, "moved up to the baseline");
+        assert_eq!(
+            line_moves(&store).await,
+            0,
+            "their lines are the baseline's now"
+        );
+        assert_eq!(
+            fn_shape(
+                &store.facts_for_captures(m, vec![full]).await.unwrap(),
+                full
+            ),
+            before
+        );
+        assert_eq!(
+            tree_shape(&store.latest_tree_facts(m, Some(1)).await.unwrap()),
+            tree_before
+        );
+        models_hold_the_same_lines(&store, m).await;
+    }
+
+    /// Retention keeps a held fact's last holder, and moves the facts an
+    /// aged-out scan stored up to the scan that still holds them.
+    #[tokio::test]
+    async fn pruning_aged_scans_moves_the_facts_a_kept_scan_holds() {
+        let store = fixture().await;
+        let m = per_path_measure(&store).await;
+        snapshot_with(&store, 1, &[("a.rs", "oxplow")]).await;
+        let old = fn_scan(
+            &store,
+            "delta",
+            1,
+            "2026-06-30T10:00:00Z",
+            m,
+            &[
+                ("a.rs", "f", 1.0, 1),
+                ("a.rs", "g", 2.0, 10),
+                ("a.rs", "h", 3.0, 20),
+            ],
+        )
+        .await;
+        let kept = fn_scan(
+            &store,
+            "delta",
+            1,
+            "2026-07-02T10:00:00Z",
+            m,
+            &[
+                ("a.rs", "f", 5.0, 1),
+                ("a.rs", "g", 2.0, 12),
+                ("a.rs", "h", 3.0, 22),
+            ],
+        )
+        .await;
+        let before = fn_shape(
+            &store.facts_for_captures(m, vec![kept]).await.unwrap(),
+            kept,
+        );
+        assert_eq!(
+            store
+                .prune_aged_captures(at("2026-07-01T00:00:00Z"))
+                .await
+                .unwrap(),
+            1
+        );
+        assert!(store.get_capture(old).await.unwrap().is_none());
+        assert_eq!(
+            fn_shape(
+                &store.facts_for_captures(m, vec![kept]).await.unwrap(),
+                kept
+            ),
+            before
+        );
+        assert_eq!(stored(&store, kept).await, 3);
+        assert_eq!(line_moves(&store).await, 0);
+    }
+
     #[tokio::test]
     async fn full_scan_capture_supersedes_the_whole_reconstructed_tree() {
         // The tsk71 baseline: a full scan anchored to a DELTA snapshot must
@@ -4175,7 +4571,7 @@ mod tests {
         // it is NOT in snapshot 2's rows, but it IS in the reconstructed tree,
         // so the full capture supersedes it.
         let store = fixture().await;
-        let m = measure(&store, "acme.hits").await;
+        let m = tree_measure(&store, "acme.hits").await;
 
         snapshot_with(&store, 1, &[("a.rs", "oxplow"), ("b.rs", "oxplow")]).await;
         gauge_capture(
@@ -4217,7 +4613,7 @@ mod tests {
         // (<= the anchor snapshot) is a tombstone is out of the tree, so the
         // full capture supersedes-to-nothing rather than resurrecting it.
         let store = fixture().await;
-        let m = measure(&store, "acme.hits").await;
+        let m = tree_measure(&store, "acme.hits").await;
 
         snapshot_with(&store, 1, &[("a.rs", "oxplow"), ("b.rs", "oxplow")]).await;
         gauge_capture(
@@ -4256,7 +4652,7 @@ mod tests {
         // If the snapshot were treated as a delta scanned set, this assertion
         // over snapshot 1 (which lists b.rs) would wipe b.rs's gauge fact.
         let store = fixture().await;
-        let m = measure(&store, "acme.hits").await;
+        let m = tree_measure(&store, "acme.hits").await;
 
         snapshot_with(&store, 1, &[("a.rs", "oxplow"), ("b.rs", "oxplow")]).await;
         gauge_capture(
@@ -4292,7 +4688,7 @@ mod tests {
         // capture can only be an assertion. The insert coerces so no caller
         // can accidentally record an unanchorable scan.
         let store = fixture().await;
-        let m = measure(&store, "acme.hits").await;
+        let m = tree_measure(&store, "acme.hits").await;
         let capture = NewMetricCapture::done(1, "g", "agent"); // scan_kind: delta, no snapshot
         let rows = vec![NewFact {
             path: Some("a.rs".into()),
@@ -5046,7 +5442,7 @@ mod tests {
         // fold didn't partition by producer, gauge `g2`'s capture on the same
         // snapshot would supersede gauge `g1`'s facts for the same path.
         let store = fixture().await;
-        let m = measure(&store, "oxplow.ast_hit").await;
+        let m = tree_measure(&store, "oxplow.ast_hit").await;
 
         snapshot_with(&store, 1, &[("a.rs", "oxplow")]).await;
         gauge_capture(
@@ -5889,7 +6285,7 @@ mod tests {
         // code gauges emit one fact per SYMBOL. Rescanning the file must replace the
         // whole set — so a removed marker/function disappears rather than lingering.
         let store = fixture().await;
-        let m = measure(&store, "oxplow.todo").await;
+        let m = tree_measure(&store, "oxplow.todo").await;
 
         snapshot_with(&store, 1, &[("a.rs", "oxplow")]).await;
         gauge_capture(
@@ -5933,7 +6329,7 @@ mod tests {
         // supersede nothing. Under the old semi-additive reading this was "the repo
         // is zero" — the bug in miniature.
         let store = fixture().await;
-        let m = measure(&store, "acme.hits").await;
+        let m = tree_measure(&store, "acme.hits").await;
 
         snapshot_with(&store, 1, &[("a.rs", "oxplow")]).await;
         gauge_capture(
@@ -6030,7 +6426,7 @@ mod tests {
         // which is far worse than the bug we're fixing. Non-`done` captures must be
         // invisible to the fold.
         let store = fixture().await;
-        let m = measure(&store, "acme.hits").await;
+        let m = tree_measure(&store, "acme.hits").await;
 
         snapshot_with(&store, 1, &[("a.rs", "oxplow"), ("b.rs", "oxplow")]).await;
         gauge_capture(

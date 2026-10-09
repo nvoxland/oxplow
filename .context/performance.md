@@ -567,6 +567,35 @@ minutes; and with `f.capture_id BETWEEN ch.from_capture_id AND
 ch.capture_id` it used only the lower bound, scanning every later fact of
 the measure. Spell the bounds out as `>=` / `<=`.
 
+## Per-path holds (V43, 2026-10-08)
+
+A code gauge's scan holds each rescanned file's unchanged facts, a moved
+function a line move (`fact_path_hold`, `fact_line`, see
+[metrics.md](./metrics.md)). The live history rewritten into holds,
+measured against `main` on identical copies of the live database:
+
+| | main | holds |
+|---|---|---|
+| fact rows | 3.47 M | 1.17 M |
+| per-path fact rows | 2.64 M | 0.34 M (+1.21 M `fact_line`, +50 k holds) |
+| fact tables + their indexes | 301 MB | 132 MB |
+| whole database, vacuumed | 1.09 GB | 0.78 GB |
+| fact-served reads (72 specs) | 24.0 s | 24.7 s |
+| full cube build from empty | 79.7 s | 79.5 s |
+
+`v_fact`'s per-path rows (lines included), `v_tree_fact` and `v_function`
+read identically before and after the rewrite, and all 72 series are
+identical.
+
+**Name the index on a held read.** Inside the whole read (three UNION ALL
+branches and an ORDER BY) the planner read a hold's facts through
+`idx_fact_measure_capture` — every fact of the measure in the hold's
+capture range — instead of `idx_fact_measure_path`, which seeks the one
+file: the per-path history read went 2 s → 21 s and the fact-served specs
+24 s → 174 s, while the same join counted alone chose right. The chain
+and hold joins name their index (`INDEXED BY`), in `fact_chain.rs` and
+both models.
+
 ## Related
 
 - [metrics.md](./metrics.md) — the metric substrate itself: the cube, its two
