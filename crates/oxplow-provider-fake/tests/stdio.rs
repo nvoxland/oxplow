@@ -866,3 +866,206 @@ async fn a_snapshots_provider_without_contents_has_no_read_at() {
         "{refused:?}"
     );
 }
+
+/// Its knowledge mode (`OXPLOW_FAKE_CAPABILITY=knowledge`): pages that
+/// answer their `knowledge.page.recorded` event, and a collector of them.
+fn spawn_knowledge(state: Option<&std::path::Path>) -> (Child, Peer, Receiver<Incoming>) {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_oxplow-provider-fake"));
+    cmd.env("OXPLOW_FAKE_CAPABILITY", "knowledge")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .kill_on_drop(true);
+    if let Some(state) = state {
+        cmd.env("OXPLOW_FAKE_STATE", state);
+    }
+    let mut child = cmd.spawn().expect("spawn the fake");
+    let stdout = child.stdout.take().expect("piped stdout");
+    let stdin = child.stdin.take().expect("piped stdin");
+    let (peer, incoming) = Peer::spawn(stdout, stdin);
+    (child, peer, incoming)
+}
+
+fn page_write(slug: &str, body: &str) -> Value {
+    json!({ "slug": slug, "body": body, "verified_refs": [], "removed_refs": [] })
+}
+
+#[tokio::test]
+async fn as_a_knowledge_provider_it_declares_its_verbs_event_and_collector() {
+    let (_child, peer, _incoming) = spawn_knowledge(None);
+    let declared = initialize(&peer).await;
+    assert_eq!(declared, oxplow_provider_fake::knowledge_declarations());
+    let capability = &declared.capabilities[0];
+    assert_eq!(capability.capability, "knowledge");
+    assert_eq!(capability.features, json!({}));
+    assert_eq!(
+        declared
+            .commands
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["write_page", "delete_page", "link"]
+    );
+    for c in &declared.commands {
+        assert_eq!((c.confirm.as_str(), c.access.as_str()), ("never", "record"));
+        assert_eq!(
+            c.input_schema["additionalProperties"],
+            json!(false),
+            "{}",
+            c.name
+        );
+    }
+    assert_eq!(
+        (
+            declared.event_types[0].event_type.as_str(),
+            declared.event_types[0].v
+        ),
+        ("knowledge.page.recorded", 1)
+    );
+    assert_eq!(
+        (
+            declared.collectors[0].name.as_str(),
+            declared.collectors[0].entity.as_str()
+        ),
+        ("knowledge_pages", "knowledge_page")
+    );
+}
+
+#[tokio::test]
+async fn as_a_knowledge_provider_a_write_answers_the_page_and_its_record() {
+    let (_child, peer, _incoming) = spawn_knowledge(None);
+    initialize(&peer).await;
+    let handle = check(&peer).await;
+    let wrote = invoke(
+        &peer,
+        &handle,
+        "write_page",
+        page_write(
+            "design",
+            "See [[src/lib.rs]] and [[other-page]], [[src/lib.rs]] again.",
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(wrote.result, json!({ "page": "wiki:design" }));
+    assert_eq!(wrote.events.len(), 1);
+    let event = &wrote.events[0];
+    assert_eq!(event.event_type, "knowledge.page.recorded");
+    assert_eq!(event.v, 1);
+    assert_eq!(event.subject, vec!["wiki:design".to_string()]);
+    let page = &event.payload["page"];
+    assert_eq!(page["ref"], "wiki:design");
+    assert_eq!(page["title"], "design");
+    assert_eq!(page["refs"], json!(["file:src/lib.rs", "wiki:other-page"]));
+    assert!(page.get("deleted").is_none());
+    assert!(page["updated_at"].as_str().unwrap().ends_with('Z'));
+
+    // A link goes under Related; the record states the new ref.
+    let linked = invoke(
+        &peer,
+        &handle,
+        "link",
+        json!({ "page": "wiki:design", "target": "wiki:third" }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(linked.result, json!({}));
+    let page = &linked.events[0].payload["page"];
+    assert!(
+        page["body"]
+            .as_str()
+            .unwrap()
+            .contains("## Related\n\n[[third]]"),
+        "{page}"
+    );
+    assert_eq!(
+        page["refs"],
+        json!(["file:src/lib.rs", "wiki:other-page", "wiki:third"])
+    );
+
+    let deleted = invoke(&peer, &handle, "delete_page", json!({ "slug": "design" }))
+        .await
+        .unwrap();
+    assert_eq!(deleted.result, json!({}));
+    assert_eq!(deleted.events[0].payload["page"]["deleted"], json!(true));
+
+    for (verb, input) in [
+        ("delete_page", json!({ "slug": "design" })),
+        ("delete_page", json!({ "slug": "nope" })),
+        ("link", json!({ "page": "wiki:nope", "target": "x" })),
+    ] {
+        let refused = invoke(&peer, &handle, verb, input).await;
+        assert!(
+            matches!(refused, Err(ProtocolError::InvalidInput { .. })),
+            "{verb}: {refused:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn as_a_knowledge_provider_it_streams_changed_pages_and_keeps_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("state.json");
+    {
+        let (_child, peer, _incoming) = spawn_knowledge(Some(&state));
+        initialize(&peer).await;
+        let handle = check(&peer).await;
+        invoke(&peer, &handle, "write_page", page_write("a", "one"))
+            .await
+            .unwrap();
+        invoke(&peer, &handle, "write_page", page_write("b", "two"))
+            .await
+            .unwrap();
+    }
+    // A new process reads back what the old one kept.
+    let (_child, peer, mut incoming) = spawn_knowledge(Some(&state));
+    initialize(&peer).await;
+    let handle = check(&peer).await;
+    invoke(&peer, &handle, "write_page", page_write("a", "uno"))
+        .await
+        .unwrap();
+    let read = |state: Value| {
+        let peer = peer.clone();
+        let handle = handle.clone();
+        async move {
+            peer.call::<_, Value>(
+                method::READ,
+                &ReadParams {
+                    handle,
+                    collector: "knowledge_pages".into(),
+                    state: Some(state),
+                },
+            )
+            .await
+        }
+    };
+    let reader = tokio::spawn(async move {
+        let mut rows = Vec::new();
+        let mut checkpoints = Vec::new();
+        while let Some(Incoming::Notification { method, params }) = incoming.recv().await {
+            match method.as_str() {
+                notify::RECORD => rows.push(params),
+                notify::STATE => checkpoints.push(params),
+                _ => {}
+            }
+            if rows.len() == 2 && checkpoints.len() == 2 {
+                break;
+            }
+        }
+        (rows, checkpoints)
+    });
+    // Everything, then — after its cursor — only what changed since.
+    read(json!({})).await.expect("read");
+    let (rows, checkpoints) = reader.await.unwrap();
+    assert!(rows.iter().all(|r| r["entity"] == "knowledge_page"));
+    let slugs: Vec<_> = rows
+        .iter()
+        .map(|r| r["row"]["ref"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        slugs,
+        vec!["wiki:b", "wiki:a"],
+        "in revision order, a's rewrite last"
+    );
+    assert_eq!(rows[1]["row"]["body"], "uno");
+    assert_eq!(checkpoints[1]["state"]["cursor"], json!(3));
+}
