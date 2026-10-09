@@ -92,6 +92,17 @@ pub const BUILT_INS: &[BuiltIn] = &[
         fields: &[],
         config_schema: None,
     },
+    // The same capture, recording what changed and keeping no bytes.
+    BuiltIn {
+        entry: "oxplow:snapshot-hashes",
+        capability: "snapshots",
+        provider: None,
+        title: "Track changes only",
+        features: &[],
+        id_pattern: None,
+        fields: &[],
+        config_schema: None,
+    },
     // Agent harnesses: what runs in an agent session.
     harness(
         "oxplow:claude-code",
@@ -1001,6 +1012,12 @@ pub async fn refresh(svc: &crate::Services) -> Result<(), DomainError> {
         &svc.layout.project_dir,
     );
     crate::harnesses::register_acp_adapters(&svc.acp_adapters, &declared);
+    crate::snapshots::register_built_ins(
+        &svc.snapshots,
+        &declared,
+        &svc.snapshot_captures,
+        &svc.snapshot_files(),
+    );
     crate::ai_service::register_built_ins(
         svc.ai.providers(),
         &declared,
@@ -1009,7 +1026,11 @@ pub async fn refresh(svc: &crate::Services) -> Result<(), DomainError> {
     );
     svc.capabilities.set_declared(declared);
     let config = crate::config_service::read_config(&svc.config);
-    svc.capabilities.publish(&config, &svc.db).await
+    let published = svc.capabilities.publish(&config, &svc.db).await;
+    // A reload can drop the chosen snapshot implementation (its extension
+    // disabled): the captures follow whatever is active now.
+    crate::snapshots::apply_active_policy(&svc.snapshots, &svc.snapshot_captures);
+    published
 }
 
 #[cfg(test)]

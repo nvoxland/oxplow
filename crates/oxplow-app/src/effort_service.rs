@@ -35,6 +35,9 @@ pub struct EffortService {
     /// Per-stream snapshot capture registry. Optional so bare tests skip
     /// the snapshot pins.
     snapshot_captures: Option<crate::snapshot_capture_registry::SnapshotCaptureRegistry>,
+    /// The snapshot implementations: a lifecycle take is the active one's
+    /// mark.
+    snapshots: Option<Arc<oxplow_domain::snapshot::SnapshotRegistry>>,
     /// Durable fact layer: when set, closing an effort projects derived
     /// process metrics (`effort.cycle_time_ms`, `work_item.efforts`, …) as
     /// facts under a capture that stamps the producing `effort_id`.
@@ -55,6 +58,7 @@ impl EffortService {
             effort_store,
             thread_store,
             snapshot_captures: None,
+            snapshots: None,
             fact_store: None,
             events: None,
             agent_turn_store: None,
@@ -94,6 +98,41 @@ impl EffortService {
     ) -> Self {
         self.snapshot_captures = Some(reg);
         self
+    }
+
+    /// Attach the snapshot implementations: lifecycle takes are the active
+    /// one's marks.
+    pub fn with_snapshots(
+        mut self,
+        snapshots: Arc<oxplow_domain::snapshot::SnapshotRegistry>,
+    ) -> Self {
+        self.snapshots = Some(snapshots);
+        self
+    }
+
+    /// Mark `stream` through the active snapshot implementation for an
+    /// effort's bracket; the snapshot it's at, or `None` (none recorded,
+    /// none attached, or the take failed — logged).
+    async fn mark(
+        &self,
+        stream: oxplow_domain::StreamId,
+        trigger: oxplow_domain::snapshot::SnapshotTrigger,
+        thread: ThreadId,
+        effort: EffortId,
+    ) -> Option<i64> {
+        let active = self.snapshots.as_ref()?.active()?;
+        let req = oxplow_domain::snapshot::MarkRequest {
+            thread: Some(thread),
+            effort: Some(effort),
+            ..oxplow_domain::snapshot::MarkRequest::new(stream, trigger)
+        };
+        match active.mark(&req).await {
+            Ok(marked) => marked.map(|m| m.snapshot),
+            Err(error) => {
+                tracing::warn!(%error, %effort, ?trigger, "effort lifecycle: snapshot failed");
+                None
+            }
+        }
     }
 
     /// Wire the steering-signal sources: agent turns (user prompt
@@ -211,20 +250,14 @@ impl EffortService {
         // An effort's start baseline must reflect the full pre-edit tree:
         // wait for the startup sweep (a no-op once it's done).
         snapshot.await_initial_ready().await;
-        let captured = snapshot
-            .request_snapshot(crate::snapshot_capture::TakeRequest {
-                trigger: oxplow_domain::snapshot::SnapshotTrigger::EffortStart,
-                thread_id: Some(effort.thread_id),
-                turn_id: None,
-                effort_id: Some(effort_id),
-                budget: None,
-                provider: None,
-            })
-            .await
-            .unwrap_or_else(|e| {
-                tracing::warn!(error = %e, effort = %effort_id, "effort lifecycle: start snapshot failed");
-                None
-            });
+        let captured = self
+            .mark(
+                *snapshot.stream_id(),
+                oxplow_domain::snapshot::SnapshotTrigger::EffortStart,
+                effort.thread_id,
+                effort_id,
+            )
+            .await;
         if let Some(id) = captured {
             effort_store.set_start_snapshot(&effort_id, id).await?;
         }
@@ -249,20 +282,14 @@ impl EffortService {
         }
         if let Some(snapshot) = self.service_for_thread(&effort.thread_id).await {
             if effort.end_snapshot_id.is_none() {
-                let captured = snapshot
-                    .request_snapshot(crate::snapshot_capture::TakeRequest {
-                        trigger: oxplow_domain::snapshot::SnapshotTrigger::EffortEnd,
-                        thread_id: Some(effort.thread_id),
-                        turn_id: None,
-                        effort_id: Some(effort_id),
-                        budget: None,
-                        provider: None,
-                    })
-                    .await
-                    .unwrap_or_else(|e| {
-                        tracing::warn!(error = %e, effort = %effort_id, "effort lifecycle: end snapshot failed");
-                        None
-                    });
+                let captured = self
+                    .mark(
+                        *snapshot.stream_id(),
+                        oxplow_domain::snapshot::SnapshotTrigger::EffortEnd,
+                        effort.thread_id,
+                        effort_id,
+                    )
+                    .await;
                 // Keep "end_snapshot_id null ⇔ effort open": a close that
                 // captured nothing falls back to the start pin.
                 if let Some(id) = close_end_snapshot(captured, effort.start_snapshot_id) {
@@ -898,6 +925,7 @@ mod tests {
         let effort_store = Arc::new(SqliteEffortStore::new(db.clone()));
         let snapshot_store = Arc::new(oxplow_db::SqliteSnapshotStore::new(db.clone()));
         let blobs = crate::blob_store::BlobStore::new(project.path().join(".oxplow/snapshots"));
+        let (marks_store, marks_blobs) = (snapshot_store.clone(), blobs.clone());
         let s = Stream {
             id: StreamId::new(1),
             kind: StreamKind::Primary,
@@ -977,8 +1005,16 @@ mod tests {
         for spec in crate::producer_metrics::builtin_producer_specs() {
             fact_store.upsert_spec(spec).await.unwrap();
         }
+        let marks = crate::snapshots::registry_over(
+            &snapshot_captures,
+            marks_store,
+            &db,
+            marks_blobs,
+            project.path(),
+        );
         let svc = EffortService::new(effort_store.clone(), thread_store_for_svc)
             .with_snapshot_captures(snapshot_captures.clone())
+            .with_snapshots(marks)
             .with_metrics(fact_store, event_bus.clone())
             .with_steering_sources(
                 Arc::new(oxplow_db::SqliteAgentTurnStore::new(db.clone())),
@@ -1588,6 +1624,7 @@ mod tests {
         let effort_store = Arc::new(SqliteEffortStore::new(db.clone()));
         let snapshot_store = Arc::new(oxplow_db::SqliteSnapshotStore::new(db.clone()));
         let blobs = crate::blob_store::BlobStore::new(primary_dir.path().join(".oxplow/snapshots"));
+        let (marks_store, marks_blobs) = (snapshot_store.clone(), blobs.clone());
 
         let primary = Stream {
             id: StreamId::new(1),
@@ -1684,7 +1721,14 @@ mod tests {
                 effort_store.clone(),
                 Arc::new(SqliteThreadStore::new(db.clone())),
             )
-            .with_snapshot_captures(snapshot_captures.clone()),
+            .with_snapshot_captures(snapshot_captures.clone())
+            .with_snapshots(crate::snapshots::registry_over(
+                &snapshot_captures,
+                marks_store,
+                &db,
+                marks_blobs,
+                primary_dir.path(),
+            )),
             &db,
         );
 

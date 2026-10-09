@@ -442,6 +442,9 @@ pub struct CollectionService {
     /// Each stream's snapshot taker: a run's coverage is pinned to a take
     /// of the code it measured (tsk883).
     captures: crate::snapshot_capture_registry::SnapshotCaptureRegistry,
+    /// The snapshot implementations: a run's measured take is the active
+    /// one's mark.
+    marks: Option<Arc<oxplow_domain::snapshot::SnapshotRegistry>>,
     /// Each stream's checkout: a thread's reports, report parsers and
     /// commits are its own worktree's (tsk890).
     worktrees: Arc<crate::worktrees::WorktreeRouter>,
@@ -610,6 +613,7 @@ impl CollectionService {
             threads,
             snapshots,
             captures,
+            marks: None,
             worktrees,
             content,
             vcs,
@@ -622,6 +626,12 @@ impl CollectionService {
             computed: Default::default(),
             vocabulary: oxplow_domain::vocabulary::VocabularyHandle::core(),
         }
+    }
+
+    /// The snapshot implementations a run's measured take marks through.
+    pub fn with_marks(mut self, marks: Arc<oxplow_domain::snapshot::SnapshotRegistry>) -> Self {
+        self.marks = Some(marks);
+        self
     }
 
     /// The registry the `test.*` events are validated against.
@@ -1919,18 +1929,20 @@ impl CollectionService {
         let stream = oxplow_domain::StreamId::try_from_str(stream_id)?;
         let capture = self.captures.get(&stream)?;
         capture.await_initial_ready().await;
-        let taken = capture
-            .request_snapshot(crate::snapshot_capture::TakeRequest {
-                trigger: oxplow_domain::snapshot::SnapshotTrigger::RunMeasured,
-                thread_id: Some(*thread),
-                turn_id: turn,
-                effort_id: effort,
-                budget: None,
-                provider: None,
+        let active = self.marks.as_ref()?.active()?;
+        let taken = active
+            .mark(&oxplow_domain::snapshot::MarkRequest {
+                thread: Some(*thread),
+                turn,
+                effort,
+                ..oxplow_domain::snapshot::MarkRequest::new(
+                    stream,
+                    oxplow_domain::snapshot::SnapshotTrigger::RunMeasured,
+                )
             })
             .await;
         let id = match taken {
-            Ok(id) => id?,
+            Ok(marked) => marked?.snapshot,
             Err(e) => {
                 tracing::warn!(error = %e, "coverage: the measured snapshot failed");
                 return None;
@@ -4331,6 +4343,7 @@ mod tests {
             // The stream's snapshot taker, as boot registers one.
             let blobs = BlobStore::new(project_dir.join(".oxplow/snapshots"));
             let snapshots = Arc::new(SqliteSnapshotStore::new(db.clone()));
+            let (marks_store, marks_blobs) = (snapshots.clone(), blobs.clone());
             let capture = Arc::new(
                 crate::snapshot_capture::SnapshotCaptureService::new(
                     snapshots.clone(),
@@ -4410,6 +4423,7 @@ mod tests {
             for spec in crate::producer_metrics::builtin_producer_specs() {
                 facts.upsert_spec(spec).await.unwrap();
             }
+            let marks_captures = captures.clone();
             let service = CollectionService::new(
                 facts,
                 nudges.clone(),
@@ -4444,7 +4458,14 @@ mod tests {
                 db: db.clone(),
                 vocabulary: oxplow_domain::vocabulary::VocabularyHandle::core(),
                 layer: crate::sql_gateway::SqlGateway::new(db.clone()),
-            });
+            })
+            .with_marks(crate::snapshots::registry_over(
+                &marks_captures,
+                marks_store,
+                &db,
+                marks_blobs,
+                &project_dir,
+            ));
             Harness {
                 service,
                 thread: thread.id,

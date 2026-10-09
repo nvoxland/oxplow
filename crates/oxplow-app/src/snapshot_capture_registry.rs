@@ -55,6 +55,8 @@ pub struct SnapshotCaptureRegistry {
     /// Whether takes keep file bytes: every live service has it, and a
     /// service registered later starts with it.
     content_policy: Arc<RwLock<ContentPolicy>>,
+    /// The active snapshot implementation's id, which its takes record.
+    provider: Arc<RwLock<Option<String>>>,
     config: SnapshotCaptureRegistryConfig,
 }
 
@@ -65,6 +67,7 @@ impl SnapshotCaptureRegistry {
             primary_id: Arc::new(RwLock::new(None)),
             workspace_filter: Arc::new(RwLock::new(config.workspace_filter.clone())),
             content_policy: Arc::new(RwLock::new(ContentPolicy::default())),
+            provider: Arc::default(),
             config,
         }
     }
@@ -108,6 +111,12 @@ impl SnapshotCaptureRegistry {
         }
         let svc = Arc::new(svc);
         svc.set_content_policy(self.content_policy());
+        svc.set_provider(
+            self.provider
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone(),
+        );
         let mut services = self.services.write().unwrap_or_else(|e| e.into_inner());
         // Double-check after acquiring the write lock — a concurrent
         // register for the same id may have raced us.
@@ -157,6 +166,14 @@ impl SnapshotCaptureRegistry {
             .unwrap_or_else(|e| e.into_inner()) = policy;
         for svc in self.list() {
             svc.set_content_policy(policy);
+        }
+    }
+
+    /// Record every live service's takes, and later ones', as `provider`.
+    pub fn set_provider(&self, provider: Option<String>) {
+        *self.provider.write().unwrap_or_else(|e| e.into_inner()) = provider.clone();
+        for svc in self.list() {
+            svc.set_provider(provider.clone());
         }
     }
 

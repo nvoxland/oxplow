@@ -280,7 +280,7 @@ The three in progress:
 |---|---|---|---|
 | Work list | yes | oxplow's tasks | Task screens stay core components, written against the interface; moving them into the extension is later work |
 | Effort policy | yes | the three rules above (`CommitOrSwitch`) | An `EffortPolicy`: it composes commands for an event, the dispatcher runs them as `effect:effort_policy:<id>`. A provider process may implement it (`react`) |
-| Snapshots | no | keeps everything | Interface: mark now, what changed between two points, read a path at a point (optional, declared as `contents`); a hashes-only implementation ships too |
+| Snapshots | no | keeps everything (core's `oxplow`) | `SnapshotProvider` (`oxplow_domain::snapshot`): mark now, what changed between two points, read a path at a point (bytes only with `contents`). `Services.snapshots` (a `SnapshotRegistry`) answers the active one; every core take (an effort's brackets, a turn's end, a measured run, an archive) is its mark. Both built-ins are `snapshots::CoreSnapshots`, one capture pipeline under a content policy: `oxplow` keeps every version, `hashes` (bundled, "Track changes only") records identities and keeps no bytes. The captures follow the active one's policy (`SnapshotSwitch` on `capability.switched`, and every reload); a switch changes what's kept from then on, nothing taken before |
 
 ## Status
 

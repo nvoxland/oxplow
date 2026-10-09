@@ -27,9 +27,6 @@ use oxplow_domain::snapshot::SnapshotTrigger;
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::{AgentTurnId, ThreadId};
 
-use crate::snapshot_capture::TakeRequest;
-use crate::snapshot_capture_registry::SnapshotCaptureRegistry;
-
 /// Takes the snapshot a turn ends at. `HookIngestService` calls it after
 /// the turn's row is closed; absent in bare ingest tests.
 #[async_trait]
@@ -41,7 +38,8 @@ pub trait TurnSnapshots: Send + Sync {
 
 /// The production [`TurnSnapshots`]: the thread's stream's capture service.
 pub struct CaptureTurnSnapshots {
-    pub captures: SnapshotCaptureRegistry,
+    /// The snapshot implementations: the take is the active one's mark.
+    pub snapshots: Arc<oxplow_domain::snapshot::SnapshotRegistry>,
     pub threads: Arc<SqliteThreadStore>,
     pub efforts: Arc<SqliteEffortStore>,
     pub config: Arc<RwLock<OxplowConfig>>,
@@ -58,7 +56,7 @@ impl TurnSnapshots for CaptureTurnSnapshots {
                 return;
             }
         };
-        let Some(capture) = self.captures.get(&stream) else {
+        let Some(snapshots) = self.snapshots.active() else {
             return;
         };
         let effort = self
@@ -74,21 +72,16 @@ impl TurnSnapshots for CaptureTurnSnapshots {
                 .unwrap_or_else(|e| e.into_inner())
                 .snapshot_turn_budget_ms,
         );
-        let req = TakeRequest {
-            trigger: SnapshotTrigger::TurnEnd,
-            thread_id: Some(thread),
-            turn_id: Some(turn.value()),
-            effort_id: effort,
+        let req = oxplow_domain::snapshot::MarkRequest {
+            thread: Some(thread),
+            turn: Some(turn.value()),
+            effort,
             budget: Some(budget),
-            provider: None,
+            ..oxplow_domain::snapshot::MarkRequest::new(stream, SnapshotTrigger::TurnEnd)
         };
         // Spawned so it keeps running if we stop waiting at the budget.
-        let take = tokio::spawn(async move {
-            capture
-                .request_snapshot(req)
-                .await
-                .map_err(|e| e.to_string())
-        });
+        let take =
+            tokio::spawn(async move { snapshots.mark(&req).await.map_err(|e| e.to_string()) });
         match tokio::time::timeout(budget, take).await {
             Ok(Ok(Ok(_))) => {}
             Ok(Ok(Err(e))) => tracing::warn!(error = %e, %turn, "turn-end snapshot failed"),

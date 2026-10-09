@@ -127,6 +127,7 @@ pub mod snapshot_capture_registry;
 pub mod snapshot_conformance;
 pub mod snapshot_content;
 pub mod snapshot_files;
+pub mod snapshots;
 #[cfg(test)]
 mod source_guards;
 pub mod sql_gateway;
@@ -533,6 +534,9 @@ pub struct Services {
     /// The effort policies, by id: the declared built-ins and the running
     /// provider instances (`.context/work-tracking.md`).
     pub effort_policies: Arc<oxplow_domain::effort_policy::EffortPolicyRegistry>,
+    /// The snapshot implementations, and the one the project uses
+    /// (`snapshots::CoreSnapshots` for both built-ins).
+    pub snapshots: Arc<oxplow_domain::snapshot::SnapshotRegistry>,
     /// The enabled external provider instances (`.context/providers.md`).
     pub providers: Arc<providers::ProviderRegistry>,
     /// Enabled extensions' `commands:` on the bus (P6b).
@@ -1039,15 +1043,6 @@ impl Services {
             snapshot_captures.register(s);
         }
         snapshot_captures.set_primary(primary_stream.id);
-        let hook_ingest =
-            hook_ingest.with_turn_snapshots(Arc::new(turn_snapshots::CaptureTurnSnapshots {
-                captures: snapshot_captures.clone(),
-                threads: thread_store.clone(),
-                efforts: effort_store.clone(),
-                config: config_arc.clone(),
-            }));
-        // An agent's PTY exiting ends its session (Codex posts no SessionEnd).
-        terminal_sessions.ingest_exits_into(hook_ingest.clone());
         // Built before the metric runner, which reports whole-tree collector sweeps
         // through it (tsk48).
         let background_tasks = BackgroundTaskStore::new();
@@ -1061,6 +1056,59 @@ impl Services {
         let extension_catalog = Arc::new(extension_catalog::ExtensionCatalog::for_project(
             &layout.project_dir,
         ));
+        // Every capability's implementations (`capabilities`): core's (the
+        // VCS here, knowledge once it's built), what the project's
+        // extensions declare, and running provider instances'.
+        let capabilities = Arc::new(capabilities::CapabilityRegistry::new(
+            vec![capabilities::Implementation {
+                capability: "vcs".into(),
+                id: vcs.rev_kind().into(),
+                title: vcs.rev_kind().into(),
+                extension: None,
+                source: capabilities::Source::Core,
+                features: serde_json::to_value(vcs.features()).unwrap_or(serde_json::Value::Null),
+                fields: serde_json::Value::Array(Vec::new()),
+                id_pattern: None,
+                config: serde_json::json!({}),
+            }],
+            vocabulary.clone(),
+        ));
+        let declared = capabilities::declared_by(&extension_catalog.get(&layout.project_dir));
+        capabilities.set_declared(declared.clone());
+        // What's active, published before anything reads it: the work-item
+        // interface shows the active list's items.
+        capabilities
+            .publish_now(&config_service::read_config(&config_arc), &db)
+            .map_err(|e| AppInitError::Capabilities(e.to_string()))?;
+        // The snapshot implementations: core's own (every version), what
+        // the extensions declare (changes only), resolved from the config
+        // as it is now; the captures follow the active one's policy.
+        let snapshot_files = snapshot_files::SnapshotFiles {
+            snapshots: snapshot_store.clone(),
+            streams: stream_store.clone(),
+            content: snapshot_content.clone(),
+            project_dir: layout.project_dir.clone(),
+        };
+        let snapshots = {
+            let (config, capabilities) = (config_arc.clone(), capabilities.clone());
+            Arc::new(oxplow_domain::snapshot::SnapshotRegistry::new(Arc::new(
+                move || {
+                    capabilities
+                        .active(&config_service::read_config(&config), snapshots::CAPABILITY)
+                },
+            )))
+        };
+        snapshots::register_built_ins(&snapshots, &declared, &snapshot_captures, &snapshot_files);
+        snapshots::apply_active_policy(&snapshots, &snapshot_captures);
+        let hook_ingest =
+            hook_ingest.with_turn_snapshots(Arc::new(turn_snapshots::CaptureTurnSnapshots {
+                snapshots: snapshots.clone(),
+                threads: thread_store.clone(),
+                efforts: effort_store.clone(),
+                config: config_arc.clone(),
+            }));
+        // An agent's PTY exiting ends its session (Codex posts no SessionEnd).
+        terminal_sessions.ingest_exits_into(hook_ingest.clone());
         let extension_models = Arc::new(extension_models::ExtensionModelsService::new(
             db.clone(),
             extension_catalog.clone(),
@@ -1089,6 +1137,7 @@ impl Services {
             effort_service::EffortService::new(effort_store.clone(), thread_store.clone())
                 .with_event_pump(event_pump.clone())
                 .with_snapshot_captures(snapshot_captures.clone())
+                .with_snapshots(snapshots.clone())
                 .with_metrics(fact_store.clone(), event_bus.clone())
                 .with_steering_sources(agent_turn_store.clone(), comment_store.clone());
         // The post-commit half of effort open/close runs on the pump.
@@ -1102,30 +1151,6 @@ impl Services {
             db.clone(),
             layout.project_dir.clone(),
         )));
-        // Every capability's implementations (`capabilities`): core's (the
-        // VCS here, knowledge once it's built), what the project's
-        // extensions declare, and running provider instances'.
-        let capabilities = Arc::new(capabilities::CapabilityRegistry::new(
-            vec![capabilities::Implementation {
-                capability: "vcs".into(),
-                id: vcs.rev_kind().into(),
-                title: vcs.rev_kind().into(),
-                extension: None,
-                source: capabilities::Source::Core,
-                features: serde_json::to_value(vcs.features()).unwrap_or(serde_json::Value::Null),
-                fields: serde_json::Value::Array(Vec::new()),
-                id_pattern: None,
-                config: serde_json::json!({}),
-            }],
-            vocabulary.clone(),
-        ));
-        let declared = capabilities::declared_by(&extension_catalog.get(&layout.project_dir));
-        capabilities.set_declared(declared.clone());
-        // What's active, published before anything reads it: the work-item
-        // interface shows the active list's items.
-        capabilities
-            .publish_now(&config_service::read_config(&config_arc), &db)
-            .map_err(|e| AppInitError::Capabilities(e.to_string()))?;
         // The vocabulary reads the active work list's own ids in text
         // (`tsk42`), as that list declares them; from the first read, and
         // at every rebuild (a switch rebuilds it).
@@ -1224,6 +1249,10 @@ impl Services {
             &approvals,
             &layout.project_dir,
         );
+        event_pump.register_async(Arc::new(snapshots::SnapshotSwitch {
+            registry: snapshots.clone(),
+            captures: snapshot_captures.clone(),
+        }));
         // The project's effort policy reacts to items starting and
         // finishing, through this bus (`.context/work-tracking.md`).
         event_pump.register_async(Arc::new(effort_policy::EffortPolicyConsumer {
@@ -1295,6 +1324,7 @@ impl Services {
         .chain(commands::stream::ops(commands::stream::StreamDeps {
             streams: streams.clone(),
             snapshot_captures: snapshot_captures.clone(),
+            snapshots: snapshots.clone(),
             ref_moves: ref_moves.clone(),
             threads: thread_store.clone(),
             sessions: agent_session_store.clone(),
@@ -1372,6 +1402,7 @@ impl Services {
             metric_engine.clone(),
         )
         .with_approvals(approvals.clone())
+        .with_marks(snapshots.clone())
         .with_vocabulary(vocabulary.clone())
         .with_run_log(collector_runner::RunLog {
             db: db.clone(),
@@ -1579,6 +1610,7 @@ impl Services {
             acp_adapters,
             capabilities,
             effort_policies,
+            snapshots,
             providers,
             knowledge,
             wiki_page_store,

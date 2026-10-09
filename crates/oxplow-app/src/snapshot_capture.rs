@@ -225,6 +225,10 @@ struct Inner {
     /// Whether takes keep file bytes; read at each take, set by the
     /// registry when the active snapshot implementation changes.
     content_policy: RwLock<ContentPolicy>,
+    /// The snapshot implementation its takes are recorded as (the active
+    /// one), for a take whose request names none: its own quiet, git-refs
+    /// and sweep takes.
+    provider: RwLock<Option<String>>,
     /// Paths that have changed since the last `request_snapshot()`.
     /// The watcher loop pushes into this map; `request_snapshot`
     /// drains it. Keyed by path so repeated edits between requests
@@ -313,6 +317,7 @@ impl SnapshotCaptureService {
                 max_file_bytes,
                 workspace_filter: RwLock::new(workspace_filter),
                 content_policy: RwLock::new(ContentPolicy::default()),
+                provider: RwLock::new(None),
                 dirty: Mutex::new(HashMap::new()),
                 settle_duration: DEFAULT_SETTLE_DURATION,
                 predrain_delay: DEFAULT_PREDRAIN_DELAY,
@@ -360,6 +365,16 @@ impl SnapshotCaptureService {
             .content_policy
             .write()
             .unwrap_or_else(|e| e.into_inner()) = policy;
+    }
+
+    /// The snapshot implementation a take whose request names none is
+    /// recorded as.
+    pub fn set_provider(&self, provider: Option<String>) {
+        *self
+            .inner
+            .provider
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = provider;
     }
 
     /// Whether takes keep file bytes now.
@@ -1656,7 +1671,13 @@ impl SnapshotCaptureService {
             elapsed_ms: started.elapsed().as_millis() as u64,
             budget_ms: req.budget.map(|b| b.as_millis() as u64),
             source: "system:snapshot_capture".into(),
-            provider: req.provider.clone(),
+            provider: req.provider.clone().or_else(|| {
+                self.inner
+                    .provider
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone()
+            }),
             contents: policy.keeps(),
         };
         let paths: Vec<String> = take.rows.iter().map(|r| r.path.clone()).collect();

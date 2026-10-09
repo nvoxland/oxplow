@@ -81,6 +81,9 @@ pub struct SetPromptInput {
 pub struct StreamDeps {
     pub streams: oxplow_session::StreamService,
     pub snapshot_captures: crate::snapshot_capture_registry::SnapshotCaptureRegistry,
+    /// The snapshot implementations: an archive's end takes are the active
+    /// one's marks.
+    pub snapshots: Arc<oxplow_domain::snapshot::SnapshotRegistry>,
     pub ref_moves: crate::ref_moves::RefMoves,
     pub threads: Arc<oxplow_db::SqliteThreadStore>,
     pub sessions: Arc<oxplow_db::SqliteAgentSessionStore>,
@@ -225,20 +228,21 @@ pub fn archive_op(deps: StreamDeps) -> Op {
                     let Some(effort) = deps.efforts.find_open_for_thread(&t.id).await? else {
                         continue;
                     };
-                    let end = match deps.snapshot_captures.get(&id) {
-                        Some(capture) => capture
-                            .request_snapshot(crate::snapshot_capture::TakeRequest {
-                                trigger: oxplow_domain::snapshot::SnapshotTrigger::EffortEnd,
-                                thread_id: Some(t.id),
-                                turn_id: None,
-                                effort_id: Some(effort.id),
-                                budget: None,
-                                provider: None,
+                    let end = match deps.snapshots.active() {
+                        Some(snapshots) => snapshots
+                            .mark(&oxplow_domain::snapshot::MarkRequest {
+                                thread: Some(t.id),
+                                effort: Some(effort.id),
+                                ..oxplow_domain::snapshot::MarkRequest::new(
+                                    id,
+                                    oxplow_domain::snapshot::SnapshotTrigger::EffortEnd,
+                                )
                             })
                             .await
                             .map_err(|e| CommandError::Failed {
                                 message: format!("the end snapshot of {}: {e}", effort.id),
                             })?
+                            .map(|m| m.snapshot)
                             .or(effort.start_snapshot_id),
                         None => None,
                     };
