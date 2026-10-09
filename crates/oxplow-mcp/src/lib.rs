@@ -3334,27 +3334,31 @@ fn proposed_message(command: &str, proposal: &str, supersedes: &[String]) -> Str
 /// load errors/warnings as they are, every list it contributes counted.
 /// The full listing (the bundled extension's ran to 124k characters) is a
 /// `name` away.
+/// An extension as `list_extensions` summarizes it: its own fields, its
+/// errors and warnings, and how many of each kind it contributes, counted
+/// from its contributions' descriptors and keyed by the manifest key
+/// (`lenses`, `ui.slots`, `event_types`).
 fn extension_summary(ext: &oxplow_app::extensions::Extension) -> serde_json::Value {
     let Ok(serde_json::Value::Object(fields)) = serde_json::to_value(ext) else {
         return serde_json::Value::Null;
     };
     let mut out = serde_json::Map::new();
-    let mut contributes = serde_json::Map::new();
     for (key, value) in fields {
         match value {
             serde_json::Value::Array(items) if key == "errors" || key == "warnings" => {
                 out.insert(key, serde_json::Value::Array(items));
             }
-            serde_json::Value::Array(items) => {
-                if !items.is_empty() {
-                    contributes.insert(key, items.len().into());
-                }
-            }
-            serde_json::Value::Object(_) => {}
+            serde_json::Value::Array(_) | serde_json::Value::Object(_) => {}
             scalar => {
                 out.insert(key, scalar);
             }
         }
+    }
+    let mut contributes = serde_json::Map::new();
+    for d in &ext.contributions {
+        let key = d.id.kind.spec().key;
+        let n = contributes.get(key).and_then(|v| v.as_u64()).unwrap_or(0);
+        contributes.insert(key.into(), (n + 1).into());
     }
     out.insert("contributes".into(), serde_json::Value::Object(contributes));
     serde_json::Value::Object(out)
@@ -3634,7 +3638,11 @@ mod tests {
         };
         w(
             "oxplow/extensions/demo/extension.yaml",
-            "manifest: 2\nname: demo\nintent:\n  purpose: test\n",
+            "manifest: 2\nname: demo\nintent:\n  purpose: test\nui:\n  slots:\n    - { slot: effort.review.details, lens: review }\n",
+        );
+        w(
+            "oxplow/extensions/demo/lenses/review.yaml",
+            "title: Review\nparams:\n  - { name: effort_id }\nquery: SELECT :effort_id AS effort\n",
         );
         w(
             "oxplow/extensions/demo/lenses/streams.yaml",
@@ -3668,7 +3676,10 @@ mod tests {
         // and its errors — not every lens's query.
         let exts = list(None).await;
         assert_eq!(exts[0]["name"], "demo");
-        assert_eq!(exts[0]["contributes"]["lenses"], 2, "{exts}");
+        assert_eq!(exts[0]["contributes"]["lenses"], 3, "{exts}");
+        // Every kind counts, the nested ones too (a slot mount under `ui`).
+        assert_eq!(exts[0]["contributes"]["ui.slots"], 1, "{exts}");
+        assert!(exts[0].get("contributions").is_none(), "{exts}");
         assert!(!exts.to_string().contains("v_stream"), "{exts}");
         // One extension by name: all of it.
         let demo = list(Some("demo")).await;

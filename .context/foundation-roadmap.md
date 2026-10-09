@@ -191,12 +191,13 @@ Prerequisites: none; can start independently.
 
 #### Normalize contribution descriptors and public extension terminology
 
-Status: in progress. The descriptor, its id grammar, the kinds' table and
-the catalog registry exist (`oxplow_domain::contribution`,
-`extensions::descriptors`); collectors, effects, measures, metrics and
-dimensions are described, two extensions can no longer declare one
-global name, and `version:` is required to share. The other kinds,
-discovery and the generated reference remain.
+Status: in progress. Every kind is described (`oxplow_domain::contribution`,
+`extensions::descriptors`): one id grammar and namespace rule, one
+collision policy (two extensions can no longer hold one global name),
+`version:` required to share, `v_contribution` published on every catalog
+change, `list_extensions` counting every kind, and the reference's kinds
+table generated. The change-review impact listing and SDK scaffolds for
+every kind remain.
 
 Scope: Inventory every extension surface and normalize its metadata: stable identity, owner, contract version/stability, input/output schema, trigger, required services, ordering and lifetime. Keep contribution kinds useful, without independent copies of host rules. Distinguish a project capability, its implementation/provider, a contribution, a required service and an approved grant.
 
