@@ -667,6 +667,17 @@ the turn (`observe_files_tx`: skipped when another thread's overlapping
 effort claimed it, never overwriting a row). A file two threads changed
 at once and neither claimed is observed by both. Nothing is declared by
 the agent and nothing is reconciled at close.
+
+V44 (attribution past the door) adds the agent session to the record, all
+`ALTER … ADD COLUMN` with NULL for older rows: `agent_tool_call.
+agent_session_id` (from the finished event's anchor), `subagent_id` and
+`subagent_kind` (from the event's optional `subagent {id, kind}`);
+`effort_file.agent_session_id` (a claimed row: the session whose edit
+named the file) and `shared` (`NOT NULL DEFAULT 0`: an observed file more
+than one session's turns could have changed); `claim.agent_session_id`
+(the acting session — a reasoning claim lands on *that session's* open
+turn, not the thread's newest). `v_tool_call`, `v_effort_file`, `v_claim`
+and `v_struggle` (grouped by session too) expose them.
 See agent-model.md's "Per-effort write log" for the flow. Consumed by `get_effort_files`
 (`crates/oxplow-tauri-ipc/src/commands/effort.rs`) over the
 `EffortStore` and `SnapshotStore`: when ≥2 efforts share an end

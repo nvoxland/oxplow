@@ -189,6 +189,7 @@ pub fn record_claim_op() -> Op {
                     statement: input.statement,
                     kind: input.kind,
                     evidence_ref: input.evidence_ref,
+                    agent_session_id: ctx.actor.session_id().map(|s| s.value()),
                 },
             )
             .map_err(CommandError::from)?;

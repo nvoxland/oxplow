@@ -1410,8 +1410,12 @@ pub(super) fn offered(
 /// `actor` with the agent behind it in `stream`.
 fn with_stream(actor: &Actor, stream: oxplow_domain::StreamId) -> Actor {
     match actor {
-        Actor::Agent { thread_id, .. } => Actor::Agent {
-            session_id: None,
+        Actor::Agent {
+            session_id,
+            thread_id,
+            ..
+        } => Actor::Agent {
+            session_id: *session_id,
             thread_id: *thread_id,
             stream_id: Some(stream),
         },

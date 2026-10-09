@@ -14,7 +14,7 @@ use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use oxplow_domain::{DomainError, EffortId, EffortImpact, ThreadId, Timestamp};
+use oxplow_domain::{AgentSessionId, DomainError, EffortId, EffortImpact, ThreadId, Timestamp};
 
 use crate::database::map_sql_err;
 use crate::database::Database;
@@ -507,12 +507,14 @@ fn record_file_tx(
     path: &str,
     change: EffortFileChange,
     version: FileRefVersion<'_>,
+    session: Option<AgentSessionId>,
 ) -> rusqlite::Result<()> {
     conn.execute(
         "INSERT OR REPLACE INTO effort_file
            (effort_id, path, change_kind,
-            local_snapshot_id, closest_vcs_rev, vcs_rev_exact, source)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'claimed')",
+            local_snapshot_id, closest_vcs_rev, vcs_rev_exact, source,
+            agent_session_id, shared)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'claimed', ?7, 0)",
         params![
             id.value(),
             path,
@@ -520,6 +522,7 @@ fn record_file_tx(
             version.local_snapshot_id,
             version.closest_vcs_rev,
             if version.vcs_rev_exact { 1 } else { 0 },
+            session.map(|s| s.value()),
         ],
     )?;
     Ok(())
@@ -727,13 +730,27 @@ pub trait EffortStore: Send + Sync {
         changes: Vec<(String, EffortFileChange)>,
         version: OwnedFileRefVersion,
     ) -> Result<usize, DomainError>;
+    /// Claim `path` for `id` on behalf of `session` (the agent session
+    /// whose edit named it; `None` when no session is known).
+    async fn record_claimed_file(
+        &self,
+        id: &EffortId,
+        path: &str,
+        change: EffortFileChange,
+        version: FileRefVersion<'_>,
+        session: Option<AgentSessionId>,
+    ) -> Result<(), DomainError>;
+    /// [`Self::record_claimed_file`] with no session known.
     async fn record_file(
         &self,
         id: &EffortId,
         path: &str,
         change: EffortFileChange,
         version: FileRefVersion<'_>,
-    ) -> Result<(), DomainError>;
+    ) -> Result<(), DomainError> {
+        self.record_claimed_file(id, path, change, version, None)
+            .await
+    }
     /// For each snapshot in `snapshot_ids`, return every effort that
     /// was either active at that snapshot OR ending exactly at it.
     /// "Active at S" = `start_snapshot_id <= S` AND
@@ -1370,12 +1387,13 @@ impl EffortStore for SqliteEffortStore {
         Ok(added)
     }
 
-    async fn record_file(
+    async fn record_claimed_file(
         &self,
         id: &EffortId,
         path: &str,
         change: EffortFileChange,
         version: FileRefVersion<'_>,
+        session: Option<AgentSessionId>,
     ) -> Result<(), DomainError> {
         let id_clone = *id;
         let owned = OwnedFileRefVersion {
@@ -1385,7 +1403,9 @@ impl EffortStore for SqliteEffortStore {
         };
         let path_clone = path.to_string();
         self.db
-            .call(move |conn| record_file_tx(conn, id_clone, &path_clone, change, owned.as_ref()))
+            .call(move |conn| {
+                record_file_tx(conn, id_clone, &path_clone, change, owned.as_ref(), session)
+            })
             .await?;
         {
             if let Some(w) = self.work_item_for_effort(id).await? {
@@ -1909,6 +1929,43 @@ mod tests {
         assert_eq!(list.len(), 1);
         assert!(list[0].ended_at.is_some());
         assert_eq!(list[0].summary.as_deref(), Some("done"));
+    }
+
+    /// A claim carries the session whose edit named the file, and
+    /// `shared = 0`.
+    #[tokio::test]
+    async fn a_claimed_file_carries_its_session() {
+        let (store, db, _tid, t) = fixture_with_db().await;
+        let eff = store
+            .start("work_item:oxplow:tsk1", &t, None)
+            .await
+            .unwrap();
+        let v = FileRefVersion {
+            local_snapshot_id: 0,
+            closest_vcs_rev: None,
+            vcs_rev_exact: false,
+        };
+        store
+            .record_claimed_file(
+                &eff.id,
+                "a.rs",
+                EffortFileChange::Updated,
+                v,
+                Some(AgentSessionId::new(4)),
+            )
+            .await
+            .unwrap();
+        let row: (Option<i64>, i64) = db
+            .call(|c| {
+                c.query_row(
+                    "SELECT agent_session_id, shared FROM effort_file WHERE path = 'a.rs'",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(row, (Some(4), 0));
     }
 
     /// A turn's observed files: a file another thread's overlapping effort

@@ -69,6 +69,10 @@ impl EventConsumer for ToolCallProjection {
             ok: env.payload.get("ok").and_then(|v| v.as_bool()),
             event_id: Some(env.id.as_str().to_string()),
             at: Some(env.at),
+            agent_session_id: env.anchors.agent_session_id.map(|s| s.value()),
+            // Absent before the harness reports a subagent, so optional.
+            subagent_id: env.payload["subagent"]["id"].as_str().map(str::to_string),
+            subagent_kind: env.payload["subagent"]["kind"].as_str().map(str::to_string),
         };
         oxplow_db::tool_call_store::record_tx(conn, &call).map(|_| ())
     }
@@ -146,6 +150,7 @@ impl AsyncEventConsumer for EffortClaimConsumer {
                 .claim_effort_file(
                     &thread,
                     event.envelope.anchors.effort_id,
+                    event.envelope.anchors.agent_session_id,
                     path,
                     Some(&worktree),
                 )
@@ -226,6 +231,44 @@ mod tests {
         assert_eq!(
             rows(svc, "SELECT path FROM v_context_read").await,
             json!([[".context/usability.md"]])
+        );
+    }
+
+    /// The row carries the session whose call it was, from the event's
+    /// anchors.
+    #[tokio::test]
+    async fn the_projected_row_carries_the_session() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let svc = &f.svc;
+        let thread = f.thread.value();
+        svc.db
+            .transaction(move |c| {
+                c.execute(
+                    "INSERT INTO agent_session (id, thread_id, kind, harness, opened_at, updated_at)
+                     VALUES (9, ?1, 'terminal', 'claude', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                    [thread],
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let session = Some(oxplow_domain::AgentSessionId::new(9));
+        for (kind, body) in [
+            (HookKind::UserPromptSubmit, json!({})),
+            (
+                HookKind::PostToolUse,
+                json!({"tool_name": "Read", "tool_input": {"file_path": "a.rs"}}),
+            ),
+        ] {
+            let mut h = hook(f.thread, kind, body);
+            h.agent_session_id = session;
+            svc.hook_ingest.ingest(h).await.unwrap();
+        }
+        svc.event_pump.run_once().await.unwrap();
+        assert_eq!(
+            rows(svc, "SELECT agent_session_id, subagent_id FROM v_tool_call").await,
+            json!([[9, null]])
         );
     }
 

@@ -650,7 +650,7 @@ impl EffortService {
         path: &str,
         worktree_root: Option<&Path>,
     ) -> Result<bool, DomainError> {
-        self.claim_effort_file(thread, None, path, worktree_root)
+        self.claim_effort_file(thread, None, None, path, worktree_root)
             .await
     }
 
@@ -663,6 +663,7 @@ impl EffortService {
         &self,
         thread: &ThreadId,
         anchored: Option<oxplow_domain::EffortId>,
+        session: Option<oxplow_domain::AgentSessionId>,
         path: &str,
         worktree_root: Option<&Path>,
     ) -> Result<bool, DomainError> {
@@ -694,7 +695,7 @@ impl EffortService {
         let version = self.resolve_effort_file_version(&effort).await;
         let change = classify_change(worktree_root, path);
         effort_store
-            .record_file(&effort.id, path, change, version.as_ref())
+            .record_claimed_file(&effort.id, path, change, version.as_ref(), session)
             .await?;
         Ok(true)
     }

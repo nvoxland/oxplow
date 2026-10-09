@@ -24,6 +24,11 @@ pub struct NewToolCall {
     pub event_id: Option<String>,
     /// When it ran; now when absent.
     pub at: Option<oxplow_domain::Timestamp>,
+    /// The agent session that made it (`agent_session.id`).
+    pub agent_session_id: Option<i64>,
+    /// The subagent it ran inside, when one is known.
+    pub subagent_id: Option<String>,
+    pub subagent_kind: Option<String>,
 }
 
 #[derive(Clone)]
@@ -50,8 +55,9 @@ pub fn record_tx(conn: &rusqlite::Connection, call: &NewToolCall) -> Result<bool
     let n = conn
         .execute(
             "INSERT INTO agent_tool_call
-               (thread_id, effort_id, turn_id, tool, path, detail, ok, at, event_id, kind)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+               (thread_id, effort_id, turn_id, tool, path, detail, ok, at, event_id, kind,
+                agent_session_id, subagent_id, subagent_kind)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
              ON CONFLICT (event_id) WHERE event_id IS NOT NULL DO NOTHING",
             rusqlite::params![
                 call.thread_id,
@@ -64,6 +70,9 @@ pub fn record_tx(conn: &rusqlite::Connection, call: &NewToolCall) -> Result<bool
                 at,
                 call.event_id,
                 call.kind,
+                call.agent_session_id,
+                call.subagent_id,
+                call.subagent_kind,
             ],
         )
         .map_err(crate::database::map_sql_err)?;
@@ -110,6 +119,35 @@ mod tests {
 
     /// P3.2 (tsk472): the row is a projection of `agent.tool.finished`, so
     /// a redelivered event writes nothing.
+    /// The session and the subagent a call ran in are recorded and read
+    /// back through `v_tool_call`.
+    #[tokio::test]
+    async fn a_call_carries_its_session_and_subagent() {
+        let (store, sl) = seeded().await;
+        store
+            .record(NewToolCall {
+                agent_session_id: Some(3),
+                subagent_id: Some("afd8".into()),
+                subagent_kind: Some("Explore".into()),
+                ..call("read", Some("a.rs"), Some(true))
+            })
+            .await
+            .unwrap();
+        let rows = sl
+            .query_sql(
+                "SELECT agent_session_id, subagent_id, subagent_kind FROM v_tool_call",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap()
+            .rows;
+        assert_eq!(
+            serde_json::to_value(rows).unwrap(),
+            json!([[3, "afd8", "Explore"]])
+        );
+    }
+
     #[tokio::test]
     async fn record_tx_projects_each_event_once() {
         let (store, sl) = seeded().await;

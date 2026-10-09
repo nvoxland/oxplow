@@ -310,6 +310,7 @@ mod tests {
                         statement: "no behavior change".into(),
                         kind: "no_behavior_change".into(),
                         evidence_ref: None,
+                        agent_session_id: None,
                     },
                 )
             })
