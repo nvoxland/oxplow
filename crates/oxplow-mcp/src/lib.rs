@@ -4858,6 +4858,25 @@ mod tests {
     /// Point the in-memory services' `role` at a mock provider at `base`.
     fn assign_mock_role(services: &Services, base: String, role: &str) {
         use oxplow_app::ai_service::{ProviderConfig, Role, RoleBinding};
+        use oxplow_app::exec_consent::{approve_program, list, ProgramKind};
+        // The shipped providers are scripts a person approves first.
+        let project = services.layout.project_dir.clone();
+        let config = services.config.read().unwrap().clone();
+        let extensions = services.extension_catalog.get(&project);
+        for p in list(&services.approvals, &project, &config, &extensions) {
+            if p.kind == ProgramKind::AiProvider {
+                approve_program(
+                    &services.approvals,
+                    &project,
+                    &config,
+                    &extensions,
+                    p.kind,
+                    &p.name,
+                    p.version.as_deref().unwrap(),
+                )
+                .unwrap();
+            }
+        }
         services
             .ai
             .save_provider(

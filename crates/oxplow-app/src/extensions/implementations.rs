@@ -47,6 +47,11 @@ pub struct ImplementationDecl {
     /// schema; `{}` when it says nothing.
     #[specta(type = specta_typescript::Any)]
     pub config: serde_json::Value,
+    /// An AI provider written as a script: its text, when `entry` names a
+    /// file of the extension rather than a built-in.
+    #[serde(skip)]
+    #[specta(skip)]
+    pub script: Option<String>,
 }
 
 /// An `implementations:` entry as the manifest holds it.
@@ -72,6 +77,7 @@ pub fn parse_implementations(
     value: &Value,
     file: &str,
     manifest: &str,
+    read: &dyn Fn(&str) -> Option<String>,
 ) -> (Vec<ImplementationDecl>, Vec<String>) {
     let block = key_line(manifest, "implementations");
     let Some(items) = value.as_sequence() else {
@@ -93,7 +99,7 @@ pub fn parse_implementations(
             }
         };
         let line = item_line;
-        match decl_of(f) {
+        match decl_of(f, read) {
             Ok(d)
                 if out
                     .iter()
@@ -115,7 +121,10 @@ pub fn parse_implementations(
     (out, errors)
 }
 
-fn decl_of(f: ImplementationFile) -> Result<ImplementationDecl, String> {
+fn decl_of(
+    f: ImplementationFile,
+    read: &dyn Fn(&str) -> Option<String>,
+) -> Result<ImplementationDecl, String> {
     use oxplow_domain::capability;
     let Some(spec) = capability::spec(&f.capability).filter(|c| c.choosable || c.many) else {
         return Err(format!(
@@ -149,6 +158,9 @@ fn decl_of(f: ImplementationFile) -> Result<ImplementationDecl, String> {
             "implementation id `{}` must be lowercase letters, digits and `_`, and not `none`",
             f.id
         ));
+    }
+    if !f.entry.starts_with("oxplow:") {
+        return script_decl(f, read);
     }
     let Some(built_in) = crate::capabilities::built_in(&f.entry) else {
         return Err(format!(
@@ -192,6 +204,48 @@ fn decl_of(f: ImplementationFile) -> Result<ImplementationDecl, String> {
         entry: f.entry,
         skills: f.skills,
         config,
+        script: None,
+    })
+}
+
+/// An implementation whose entry is a script in the extension: an AI
+/// provider written as one (`oxplow_ai_providers::scripted`), checked as
+/// it will be registered — its config and its `request` / `response`.
+fn script_decl(
+    f: ImplementationFile,
+    read: &dyn Fn(&str) -> Option<String>,
+) -> Result<ImplementationDecl, String> {
+    if f.capability != "ai_provider" {
+        return Err(format!(
+            "entry `{}` is a script, and only an `ai_provider` is a script (others name a \
+             built-in: `oxplow:<name>`)",
+            f.entry
+        ));
+    }
+    let script =
+        read(&f.entry).ok_or_else(|| format!("entry `{}` isn't in the extension", f.entry))?;
+    let config = match f.config {
+        Some(v) => serde_json::to_value(v).map_err(|e| format!("config: {e}"))?,
+        None => serde_json::json!({}),
+    };
+    let title = f.title.clone().unwrap_or_else(|| f.id.clone());
+    oxplow_ai_providers::scripted(
+        &f.id,
+        &title,
+        &f.entry,
+        &script,
+        &config,
+        std::sync::Arc::new(|| Ok(())),
+    )
+    .map_err(|e| format!("`ai_provider` implementation `{}`: {e}", f.id))?;
+    Ok(ImplementationDecl {
+        capability: f.capability,
+        id: f.id,
+        title: f.title,
+        entry: f.entry,
+        skills: f.skills,
+        config,
+        script: Some(script),
     })
 }
 
@@ -200,9 +254,57 @@ mod tests {
     use super::*;
 
     fn parse(yaml: &str) -> (Vec<ImplementationDecl>, Vec<String>) {
+        parse_with(yaml, &|_| None)
+    }
+
+    fn parse_with(
+        yaml: &str,
+        read: &dyn Fn(&str) -> Option<String>,
+    ) -> (Vec<ImplementationDecl>, Vec<String>) {
         let manifest = format!("implementations:\n{yaml}");
         let doc: Value = serde_yaml::from_str(&manifest).unwrap();
-        parse_implementations(&doc["implementations"], "extension.yaml", &manifest)
+        parse_implementations(&doc["implementations"], "extension.yaml", &manifest, read)
+    }
+
+    const SCRIPT: &str = "def request(x):\n    return None\n\ndef response(x):\n    return {}\n";
+
+    /// An AI provider may be a script in the extension: its entry is the
+    /// file, held with the declaration; its config is the scripted kind's
+    /// (`baseUrl`, `ops`). Only an AI provider is a script, and the script
+    /// must exist and define `request` and `response`.
+    #[test]
+    fn an_ai_provider_may_be_a_script() {
+        let read = |rel: &str| (rel == "providers/p.star").then(|| SCRIPT.to_string());
+        let (decls, errors) = parse_with(
+            "  - { capability: ai_provider, id: acme, title: Acme, entry: providers/p.star, config: { baseUrl: \"https://api.acme.test\" } }\n",
+            &read,
+        );
+        assert_eq!(errors, Vec::<String>::new());
+        assert_eq!(decls[0].script.as_deref(), Some(SCRIPT));
+        assert_eq!(decls[0].config["baseUrl"], "https://api.acme.test");
+        let errors = |yaml: &str| parse_with(yaml, &read).1.join("\n");
+        assert!(
+            errors("  - { capability: work_items, id: acme, entry: providers/p.star }\n")
+                .contains("only an `ai_provider` is a script")
+        );
+        assert!(
+            errors("  - { capability: ai_provider, id: acme, entry: providers/gone.star }\n")
+                .contains("isn't in the extension")
+        );
+        let bad = |rel: &str| {
+            (rel == "providers/p.star").then(|| "def request(x):\n    return None\n".to_string())
+        };
+        assert!(parse_with(
+            "  - { capability: ai_provider, id: acme, entry: providers/p.star }\n",
+            &bad
+        )
+        .1
+        .join("\n")
+        .contains("`response`"));
+        assert!(errors(
+            "  - { capability: ai_provider, id: acme, entry: providers/p.star, config: { nope: 1 } }\n"
+        )
+        .contains("nope"));
     }
 
     #[test]
@@ -219,6 +321,7 @@ mod tests {
                 entry: "oxplow:tasks".into(),
                 skills: vec![],
                 config: serde_json::json!({}),
+                script: None,
             }]
         );
     }

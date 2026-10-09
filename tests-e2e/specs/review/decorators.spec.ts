@@ -17,7 +17,7 @@ test("an accepted effort's page carries the review's verdict chip", async ({ pag
   ).rows[0]?.[0] as string;
   expect(effort).toMatch(/^effort:eff\d+$/);
   await run(daemon, "oxplow.review.accept", { ref: effort });
-  await searchable(daemon, "Wombat fix", "task");
+  await searchable(daemon, "Wombat fix", "work_item");
   await page.goto("/");
   await page.getByTestId("title-bar-search").click();
   await page.keyboard.type("Wombat fix");

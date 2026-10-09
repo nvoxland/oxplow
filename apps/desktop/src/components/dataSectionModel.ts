@@ -59,9 +59,9 @@ export interface ProgramRowModel {
   approved: boolean;
   /** The Approve button's hover: what consenting means. */
   approveTitle: string;
-  /** Its extension comes with oxplow: its files aren't in the project, so
-   *  the row offers to show its entry (tsk953). */
-  bundled: boolean;
+  /** The row offers to show its entry: a bundled program's files aren't
+   *  in the project, and an AI provider's script is what's approved. */
+  showsSource: boolean;
 }
 
 /// A program the project's config would run (an `exec` collector, an ACP
@@ -77,7 +77,7 @@ export function programRow(p: ProjectProgram): ProgramRowModel {
       status: p.approved ? "Approved on this machine" : "Not approved: they won't reach your agent",
       approved: p.approved,
       approveTitle: `Lets these queries' results into your agent's context (${p.program}). Approve only if you trust this extension; any change needs approval again.`,
-      bundled: false,
+      showsSource: false,
     };
   }
   if (p.kind === "provider") {
@@ -101,7 +101,7 @@ export function programRow(p: ProjectProgram): ProgramRowModel {
       approveTitle: p.remote
         ? `Lets oxplow's MCP adapter talk to ${p.program} as an external provider with these grants, approving that address and every file in ${p.tree ?? "its extension"} (its mapping, its pinned tools, its declarations). The server runs elsewhere: its code isn't part of this approval, and oxplow refuses it when its tools stop matching the pinned ones. Approve only if you trust this extension and that server; any change here needs approval again.`
         : `Runs ${p.program} as a long-lived external provider with these grants, approving every file in ${p.tree ?? "its extension"} (its declarations included). Approve only if you trust this extension; any change needs approval again.`,
-      bundled: false,
+      showsSource: false,
     };
   }
   if (p.kind === "effect") {
@@ -119,7 +119,27 @@ export function programRow(p: ProjectProgram): ProgramRowModel {
       approveTitle: ext
         ? `Runs ${entry} from ${ext}, which comes with oxplow, on events logged after you approve, composing commands with an agent's rights (a command that asks becomes a proposal for you), approving every file of ${ext}. A new oxplow that changes it asks again.`
         : `Runs ${p.program} on events logged after you approve, composing commands with an agent's rights (a command that asks becomes a proposal for you), approving every file in ${p.tree ?? "its extension"}. Approve only if you trust this extension; any change needs approval again.`,
-      bundled,
+      showsSource: bundled,
+    };
+  }
+  if (p.kind === "ai-provider") {
+    // Its calls carry the person's key and prompts to where it sends them;
+    // a shipped one comes with oxplow and asks again when a new oxplow
+    // changes it.
+    const bundled = p.tree?.startsWith("bundled:") ?? false;
+    const ext = bundled ? p.tree!.slice("bundled:".length) : null;
+    const entry = ext && p.program.startsWith(`bundled:${ext}/`) ? p.program.slice(`bundled:${ext}/`.length) : p.program;
+    const sendsTo = p.network.length > 0 ? p.network.join(", ") : "the base URL each provider you configure names";
+    return {
+      key: `${p.kind}:${p.name}`,
+      label: `AI provider ${p.name}`,
+      command: [ext ? `${entry}, part of ${ext} (comes with oxplow)` : p.program, `sends to: ${sendsTo}`].join("\n"),
+      status: p.approved ? "Approved on this machine" : "Not approved: calls through it fail",
+      approved: p.approved,
+      approveTitle: ext
+        ? `Lets ${entry}, which comes with oxplow, shape the calls to ${sendsTo} that carry your key and prompts for the AI roles that use it. A new oxplow that changes it asks again.`
+        : `Lets ${p.program} shape the calls to ${sendsTo} that carry your key and prompts for the AI roles that use it. Approve only if you trust this extension; any change to the script needs approval again.`,
+      showsSource: true,
     };
   }
   if (p.kind === "component") {
@@ -133,7 +153,7 @@ export function programRow(p: ProjectProgram): ProgramRowModel {
       status: p.approved ? "Approved on this machine" : "Not approved: it shows and reads, but can't act",
       approved: p.approved,
       approveTitle: `Lets the custom component ${p.name} run ${commands} with your rights when you use it (a command that asks still asks you), approving every file of its bundle (${p.program}). Approve only if you trust this extension; a changed bundle or command list needs approval again.`,
-      bundled: false,
+      showsSource: false,
     };
   }
   const command = [...(p.env ?? []), p.program, ...p.args].join(" ");
@@ -145,7 +165,7 @@ export function programRow(p: ProjectProgram): ProgramRowModel {
     status: p.approved ? "Approved on this machine" : "Not approved: it won't run",
     approved: p.approved,
     approveTitle: `Runs ${command} from this project's config on this machine. Approve only if you trust this repo; a changed program or arguments need approval again.`,
-    bundled: false,
+    showsSource: false,
   };
 }
 

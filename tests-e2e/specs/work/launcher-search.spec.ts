@@ -10,7 +10,7 @@ test("search finds a task and a wiki page, and opens them", async ({ page, daemo
     thread: daemon.thread,
   });
   await run(daemon, "oxplow.knowledge.write_page", { slug: "quokka-notes", title: "Quokka notes", body: "# Quokka notes\n\nWhat we know.\n" });
-  await searchable(daemon, "quokka", "task");
+  await searchable(daemon, "quokka", "work_item");
   await searchable(daemon, "quokka", "wiki");
   await page.goto("/");
   await page.getByTestId("title-bar-search").click();

@@ -508,6 +508,7 @@ mod tests {
     /// Bind `role` to model `x` served by provider `provider`.
     async fn with_provider(svc: &crate::Services, role: Role, provider: &str, reply: Value) {
         let (base, _) = oxplow_ai_fake::mock("/chat/completions", 200, reply).await;
+        crate::test_fixtures::approve_ai_providers(svc);
         svc.ai
             .save_provider(
                 ProviderConfig {

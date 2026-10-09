@@ -113,7 +113,7 @@ test("programRow shows an effect as reacting to events from approval on (P8.D9)"
   expect(m.status).toBe("Not approved: it won't run");
   expect(m.approveTitle).toContain("events logged after you approve");
   expect(m.approveTitle).toContain("every file in oxplow/extensions/acme");
-  expect(m.bundled).toBe(false);
+  expect(m.showsSource).toBe(false);
 });
 
 // tsk960: a component that declares commands runs them with the viewer's
@@ -160,9 +160,37 @@ test("programRow says a bundled effect asks again when a new oxplow changes it",
     approved: false,
     version: "abc",
   });
-  expect(m.bundled).toBe(true);
+  expect(m.showsSource).toBe(true);
   expect(m.command).toBe("effects/verify.star, part of oxplow-bundled (comes with oxplow)");
   expect(m.approveTitle).toContain("comes with oxplow");
+  expect(m.approveTitle).toContain("A new oxplow that changes it asks again");
+});
+
+// An AI provider written as a script carries the person's key and
+// prompts: its row says where it sends them, offers the script to read,
+// and says a new oxplow that changes a shipped one asks again.
+test("programRow shows an AI provider script, what it sends to, and its script", () => {
+  const m = programRow({
+    kind: "ai-provider",
+    name: "oxplow-foundation/anthropic",
+    program: "bundled:oxplow-foundation/providers/anthropic.star",
+    args: [],
+    env: [],
+    credentials: [],
+    network: ["https://api.anthropic.com"],
+    commands: [],
+    scopes: [],
+    tree: "bundled:oxplow-foundation",
+    remote: false,
+    approved: false,
+    version: "abc",
+  });
+  expect(m.label).toBe("AI provider oxplow-foundation/anthropic");
+  expect(m.showsSource).toBe(true);
+  expect(m.command).toContain("providers/anthropic.star, part of oxplow-foundation (comes with oxplow)");
+  expect(m.command).toContain("sends to: https://api.anthropic.com");
+  expect(m.status).toBe("Not approved: calls through it fail");
+  expect(m.approveTitle).toContain("your key");
   expect(m.approveTitle).toContain("A new oxplow that changes it asks again");
 });
 

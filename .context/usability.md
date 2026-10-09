@@ -134,7 +134,12 @@ Things I keep forgetting. Read this before adding any UI.
   submit. Show required-field hints inline.
 - **Autofocus the first input** in any inline edit / prompt strip
   when it mounts (and select existing text so the user can replace
-  it with a single keystroke).
+  it with a single keystroke). A *page* that opens on its own (not from
+  the person's own action) focuses its input only when nothing else has
+  focus: one that mounts late — the New Session page as a thread loads —
+  must not take the keystrokes of a launcher the person already opened
+  (`NewSessionPage`, an effect checking `document.activeElement`, not
+  `autoFocus`).
 - **"Save and Another"** for repetitive-entry flows (see the New Work
   Item modal): saves and re-opens the form with the same
   category/priority/parent pre-filled so the user doesn't re-select

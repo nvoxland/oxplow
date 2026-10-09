@@ -36,6 +36,10 @@ pub const BUNDLED: &[BundledExtension] = &[
         files: &[
             ext_file!("oxplow-foundation", "README.md"),
             ext_file!("oxplow-foundation", "extension.yaml"),
+            ext_file!("oxplow-foundation", "providers/anthropic.star"),
+            ext_file!("oxplow-foundation", "providers/openai_compatible.star"),
+            ext_file!("oxplow-foundation", "providers/openrouter.star"),
+            ext_file!("oxplow-foundation", "providers/typesafe.star"),
         ],
         required: true,
     },

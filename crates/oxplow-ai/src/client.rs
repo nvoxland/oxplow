@@ -27,6 +27,10 @@ pub enum AiError {
     Transport { provider: String, message: String },
     #[error("{provider}: unexpected response: {detail}")]
     BadResponse { provider: String, detail: String },
+    /// Its program — a provider written as a script — runs only once a
+    /// person approves it, and nothing was sent.
+    #[error("{provider}: {message} (Settings → Data → Programs)")]
+    Unapproved { provider: String, message: String },
 }
 
 /// A chat model's reply.

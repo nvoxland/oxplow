@@ -88,7 +88,7 @@ pub async fn bearer_for(services: &Services, session: oxplow_domain::AgentSessio
         .expect("its thread exists");
     services
         .session_auth
-        .mint(oxplow_app::session_auth::Principal {
+        .issue(oxplow_app::session_auth::Principal {
             session,
             thread: thread.id,
             stream: thread.stream_id,

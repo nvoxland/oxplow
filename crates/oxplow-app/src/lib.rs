@@ -1190,7 +1190,12 @@ impl Services {
         // The ACP adapters foundation declares.
         let acp_adapters = oxplow_domain::agent::registry::AcpAdapterRegistry::default();
         harnesses::register_acp_adapters(&acp_adapters, &declared);
-        ai_service::register_built_ins(&model_providers, &declared);
+        ai_service::register_built_ins(
+            &model_providers,
+            &declared,
+            &approvals,
+            &layout.project_dir,
+        );
         // A turn's end take becomes a `thread.checkpoint` a policy reads.
         event_pump.register_async(Arc::new(thread_checkpoint::ThreadCheckpointConsumer {
             log: (*event_log_store).clone(),

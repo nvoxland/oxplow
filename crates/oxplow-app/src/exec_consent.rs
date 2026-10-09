@@ -227,6 +227,12 @@ pub enum ProgramKind {
     /// bundle and the commands it names. One that declares none only shows
     /// and queries, and needs no approval.
     Component,
+    /// An AI provider written as a script (`implementations:` with a
+    /// `.star` entry): its calls carry the person's key and prompts,
+    /// approved over its script and the base URL it sends to — a shipped
+    /// one too, so a changed script asks again.
+    #[serde(rename = "ai-provider")]
+    AiProvider,
 }
 
 /// A program the project's config would run.
@@ -273,6 +279,7 @@ impl ProjectProgram {
             ProgramKind::Provider => format!("provider:{}", self.name),
             ProgramKind::Effect => format!("effect:{}", self.name),
             ProgramKind::Component => format!("component:{}", self.name),
+            ProgramKind::AiProvider => format!("ai_provider:{}", self.name),
         }
     }
 
@@ -343,6 +350,13 @@ impl ProjectProgram {
                 h.update(self.entry_bytes(project_dir)?);
                 h.update([2u8]);
                 h.update(files_hash(&*self.files(project_dir)?, &|_| false)?.as_bytes());
+            }
+            // The script it runs, read where it lives (a shipped one's is
+            // embedded); the base URL it sends to is its `network` (below).
+            ProgramKind::AiProvider => {
+                h.update(self.program.as_bytes());
+                h.update([0u8]);
+                h.update(self.entry_bytes(project_dir)?);
             }
             // Its bundle folder as served, read where it is now (tsk984).
             ProgramKind::Component => {
@@ -559,6 +573,43 @@ fn approved_now(store: &ApprovalStore, project_dir: &Path, p: &ProjectProgram) -
 }
 
 /// Whether `p`, run with working dir `cwd`, is what was approved.
+/// An AI provider written as a script, as a program to approve: its
+/// script (`entry`, in the extension at `tree`) and the base URL it
+/// sends to by default.
+pub fn ai_provider_program(
+    tree: &str,
+    extension: &str,
+    id: &str,
+    entry: &str,
+    base_url: Option<&str>,
+) -> ProjectProgram {
+    let tree = tree.trim_end_matches('/');
+    ProjectProgram {
+        kind: ProgramKind::AiProvider,
+        name: format!("{extension}/{id}"),
+        program: format!("{tree}/{entry}"),
+        args: Vec::new(),
+        env: Vec::new(),
+        credentials: Vec::new(),
+        network: base_url.map(str::to_string).into_iter().collect(),
+        commands: Vec::new(),
+        scopes: Vec::new(),
+        tree: Some(tree.to_string()),
+        remote: false,
+        approved: false,
+        version: None,
+    }
+}
+
+/// Whether a person on this machine approved `program` as it is now.
+pub fn is_program_approved(
+    store: &ApprovalStore,
+    project_dir: &Path,
+    program: &ProjectProgram,
+) -> bool {
+    approved_at(store, project_dir, project_dir, program)
+}
+
 fn approved_at(store: &ApprovalStore, project_dir: &Path, cwd: &Path, p: &ProjectProgram) -> bool {
     p.hash_at(project_dir, cwd)
         .is_ok_and(|h| store.is_approved(&p.key(), &h))
@@ -747,6 +798,7 @@ pub fn needs_approval(kind: ProgramKind, name: &str, program: &str) -> String {
         ProgramKind::Provider => "provider",
         ProgramKind::Effect => "effect",
         ProgramKind::Component => "component",
+        ProgramKind::AiProvider => "AI provider",
     };
     format!(
         "{what} `{name}` runs `{program}` from the project's config and needs a person's approval first \
@@ -797,6 +849,20 @@ pub fn list(
         e.effects
             .iter()
             .map(move |decl| crate::effects::effect_program(e, decl))
+    }));
+    out.extend(extensions.iter().filter(|e| e.enabled).flat_map(|e| {
+        e.implementations
+            .iter()
+            .filter(|d| d.script.is_some())
+            .map(move |d| {
+                ai_provider_program(
+                    &e.path,
+                    &e.name,
+                    &d.id,
+                    &d.entry,
+                    d.config.get("baseUrl").and_then(serde_json::Value::as_str),
+                )
+            })
     }));
     out.extend(extensions.iter().filter(|e| e.enabled).flat_map(|e| {
         e.custom_components

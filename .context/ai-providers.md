@@ -117,23 +117,66 @@ saying so (`oxplow_ai::config::DROPPED_ROLES`; project.yaml's
   (`decide_via_chat`); `test` to a one-word completion. `ModelProviders` is
   the registry (`Services.ai.providers()`), filled from the declarations by
   `ai_service::register_built_ins` at boot and on every capabilities
-  refresh. Shared pieces stay in `oxplow-ai`: the `Http` POST helper and
-  its error mapping, `bearer`, `parse_answers`, `strip_fences`.
-- **The built-ins** live in `crates/oxplow-ai-providers` (`anthropic.rs`,
-  `openai_compatible.rs`, `openrouter.rs`, `typesafe.rs`;
-  `oxplow_ai_providers::built_in(entry, id, title, config)`), hand-rolled
-  on the workspace's `reqwest` rather than `genai`: we need three small
-  request shapes, and owning them keeps Jev's typed-question API
-  first-class. `oxplow:openai-compatible` takes `config: { baseUrl? }` as
-  its default URL (`openai` declares OpenAI's).
-  - Anthropic Messages: `POST {base}/v1/messages`, `x-api-key`,
-    `anthropic-version: 2023-06-01`.
-  - OpenAI, OpenRouter, compatible servers: `POST {base}/chat/completions`,
-    Bearer key, `response_format: json_object` when JSON is asked for.
-  - TypeSafe Jev: `POST {base}/v1/systemone` with `{model, state,
-    questions}`. A `noul` (yes/no) question has no criteria, a `choice`
-    question's criteria are `{option: null}`, and a `score` question's are
-    its ordered levels. OpenRouter serves Jev models at `/systemone` too.
+  refresh — each declared script behind its approval gate. Shared pieces
+  stay in `oxplow-ai`: the `Http` POST helper (`post_with` for headers
+  named at run time) and its error mapping, `parse_answers`,
+  `decide_via_chat`.
+- **Scripted providers.** Every model provider is a Starlark script an
+  extension declares — oxplow's own too: `oxplow-foundation`'s
+  `implementations:` name `providers/{anthropic,openai_compatible,openrouter,typesafe}.star`
+  (`openai` is `openai_compatible.star` with OpenAI's `baseUrl`). There is
+  no Rust built-in any more: `crates/oxplow-ai-providers` is only
+  `scripted` (`Scripted: ModelProvider`). An `implementations:` entry whose
+  `entry` isn't `oxplow:<name>` is a script — for `ai_provider` only —
+  read and checked at load (`implementations::script_decl`: the file
+  exists, defines `request` and `response`, and `config` is `{ baseUrl?,
+  ops? }`), carried as `Source::Script { entry, tree, script }`.
+  - **The contract.** `request(x)` — `{ op: complete, model, system,
+    prompt, json }` or `{ op: decide, model, state, questions }` (oxplow's
+    question shapes) — returns `{ path, headers?, body }`, or `None` for a
+    `decide` to ask as a chat. `response(x)` — `{ op, model, body }`, a 2xx
+    reply's JSON — returns `{ text, usage? }`, `{ answers, usage? }`
+    (oxplow's answer shapes, a noul as `probability`; parsed by
+    `parse_answers`) or `{ error }`. `usage` is `{ input, output }`. Both
+    are pure and sandboxed (`run_starlark_fn`, 5 s each).
+  - **The host does the call.** `path` is relative to the instance's base
+    URL (its `baseUrl`, else the declaration's), so a call never leaves
+    that host — no `network:` grant is needed. `{{key}}` in a header or the
+    path is the instance's key, spliced by the host after `request`
+    returns (`oxplow_domain::template`; the script never sees it); a header
+    that needs a key the instance lacks is dropped (a local server). The
+    host maps 401/403 → `Auth`, 429 → `RateLimited`, other non-2xx →
+    `Http`.
+  - **`ops`** lists what it answers natively: `complete` (the default)
+    and `decide`. Without `decide`, a typed question is asked as a chat
+    (`decide_via_chat`); one with only `decide` (TypeSafe) can't complete,
+    and its connection `test` asks a yes/no question. A script that
+    decides natively but not for every model (OpenRouter: only `jev`
+    models, at `/systemone`) returns `None` for the rest.
+  - **Consent** (decided 2026-10-08: shipped ones too, no exemption). An
+    AI provider script is a program a person approves —
+    `exec_consent::ProgramKind::AiProvider`, key
+    `ai_provider:<extension>/<id>`, hashed over the script (read where it
+    lives through `files_at`, a shipped one's embedded) and its default
+    `baseUrl` (`ai_provider_program`). Settings → Data → Programs lists it
+    ("AI provider …", what it sends to, **Read the script**). Every call
+    asks its `Gate` first (`ai_service::script_gate`, the approvals file
+    read each time, as an effect's is), so approving takes effect at once
+    and an edit stops it: until then a call fails `AiError::Unapproved`
+    naming Settings → Data → Programs, and nothing is sent — it never falls
+    back. **After an upgrade that changes a shipped provider script, AI
+    stops until the person approves it again.** Tests approve with
+    `test_fixtures::approve_ai_providers`.
+  - The shipped scripts speak:
+    - Anthropic Messages: `POST {base}/v1/messages`, `x-api-key`,
+      `anthropic-version: 2023-06-01`.
+    - OpenAI, OpenRouter, compatible servers: `POST {base}/chat/completions`,
+      Bearer key, `response_format: json_object` when JSON is asked for.
+    - TypeSafe Jev: `POST {base}/v1/systemone` with `{model, state,
+      questions}`. A `noul` (yes/no) question has no criteria, a `choice`
+      question's criteria are `{option: null}`, and a `score` question's
+      are its ordered levels. OpenRouter serves Jev models at `/systemone`
+      too. Each has its test in `ai_service` (`the_<name>_script_…`).
 - Two operations: `complete` (text, optionally JSON) and `decide` (typed
   questions: `noul` → probability, `choice` → choice + probabilities,
   `score` → level index + probabilities). Non-Jev models answer `decide`

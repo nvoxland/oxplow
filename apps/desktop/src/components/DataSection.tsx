@@ -278,7 +278,7 @@ export function DataSection() {
                   </button>
                 )}
               </div>
-              {m.bundled ? <ProgramSource rowKey={m.key} program={p} /> : null}
+              {m.showsSource ? <ProgramSource rowKey={m.key} program={p} /> : null}
               {p.kind === "effect" && p.approved ? <BackfillAction rowKey={m.key} effect={p.name} /> : null}
               {impact === "loading" ? (
                 <div style={mutedStyle}>Comparing its declarations…</div>
@@ -409,8 +409,9 @@ function BackfillAction({ rowKey, effect }: { rowKey: string; effect: string }) 
   );
 }
 
-/** A bundled program's entry, shown on request: its files come with
- *  oxplow, so this is where a person reads what they approve (tsk953). */
+/** A program's entry, shown on request: a bundled one's files come with
+ *  oxplow, and an AI provider's script is what's approved — this is where
+ *  a person reads what they approve (tsk953). */
 function ProgramSource({ rowKey, program }: { rowKey: string; program: ProjectProgram }) {
   const [source, setSource] = useState<string | null>(null);
   const [open, setOpen] = useState(false);

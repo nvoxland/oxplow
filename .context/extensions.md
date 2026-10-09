@@ -2484,8 +2484,7 @@ implementations:
 - `config:` configures the built-in, checked at load against its schema
   (`BuiltIn.config_schema`, `capability::check_config`; a built-in with
   none refuses any config): an ACP adapter's `{ command, args?, env?,
-  systemPrompt?: meta|prompt }`, an OpenAI-compatible AI provider's
-  `{ baseUrl? }`.
+  systemPrompt?: meta|prompt }`.
 - `entry` names a built-in in core's standard library
   (`capabilities::BUILT_INS`: `oxplow:tasks`, `oxplow:commit-or-switch`,
   `oxplow:snapshots`), the way a collector names `oxplow:junit`. A
@@ -2493,11 +2492,19 @@ implementations:
   manifest's. A built-in whose items' refs carry a provider id
   (`BuiltIn.provider`: `oxplow:tasks` is `oxplow`) is declared under that
   id and no other.
+- **An `ai_provider` may be a script** instead: an `entry` that isn't
+  `oxplow:<name>` names a `.star` file of the extension, with `config: {
+  baseUrl?, ops? }` (`implementations::script_decl`, `Source::Script`;
+  the contract, consent and the shipped scripts are
+  [ai-providers.md](./ai-providers.md) "Scripted providers"). Only an AI
+  provider is a script; it runs once a person approves it
+  (`ProgramKind::AiProvider`).
 - `oxplow-foundation` declares the agent harnesses (`oxplow:claude-code`,
   `oxplow:codex-cli`, `oxplow:opencode`, `oxplow:acp`), the ACP agents'
   programs (`oxplow:acp-adapter`, one declaration per preset) and the AI
-  providers (`oxplow:anthropic`, `oxplow:openai-compatible`,
-  `oxplow:openrouter`, `oxplow:typesafe`); foundation is required, so
+  providers, as scripts (`providers/anthropic.star`,
+  `openai_compatible.star` — twice, `openai` with OpenAI's `baseUrl` —
+  `openrouter.star`, `typesafe.star`); foundation is required, so
   `CapabilityRegistry::new` registers nothing for them. The harnesses are
   registered by declaration (`harnesses::register_built_ins` →
   `Services.harnesses`, an `oxplow_domain::agent::registry::HarnessRegistry`).

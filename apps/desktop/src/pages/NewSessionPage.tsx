@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { listAcpAgents, type Thread } from "../api.js";
 import { agentChoices, parseAgentChoice } from "../agentKinds.js";
@@ -38,6 +38,14 @@ export function NewSessionPage({ thread, harnesses, onStart, onNoSession }: NewS
   }, [acpEnabled]);
   const choices = agentChoices(harnesses, acpAgents);
   const [choice, setChoice] = useState<string>(choices[0]?.value ?? "");
+  // Focus the picker when the page opens — unless focus is already
+  // somewhere (the launcher a person opened while it loaded): a page that
+  // mounts late must not take their typing.
+  const agentRef = useRef<HTMLSelectElement>(null);
+  useEffect(() => {
+    const active = document.activeElement;
+    if (!active || active === document.body) agentRef.current?.focus();
+  }, []);
   const picked = choices.some((c) => c.value === choice) ? choice : (choices[0]?.value ?? "");
   return (
     <Page testId="page-new-session" showNavBar={false} titleInBody>
@@ -71,7 +79,7 @@ export function NewSessionPage({ thread, harnesses, onStart, onNoSession }: NewS
               disabled={busy || !thread}
               onChange={(e) => setChoice(e.target.value)}
               style={selectStyle}
-              autoFocus
+              ref={agentRef}
             >
               {choices.map((c) => (
                 <option key={c.value} value={c.value}>
