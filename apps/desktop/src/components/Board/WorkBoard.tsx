@@ -13,6 +13,7 @@ import { FieldBadge } from "../WorkItemFields.js";
 import { NO_READS, useRerunOnChange } from "../../lens/lensRerun.js";
 import { RouteLink } from "../../tabs/RouteLink.js";
 import { workItemTabRef } from "../../tabs/pageRefs.js";
+import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import type { TabRef } from "../../tabs/tabState.js";
 import type { Reads } from "../../tauri-bridge/generated/bindings.js";
 import {
@@ -36,6 +37,7 @@ export function WorkBoard({ scope, onOpenPage }: { scope: WorkItemScope; onOpenP
   const [reads, setReads] = useState<Reads>(NO_READS);
   const [over, setOver] = useState<CanonicalState | null>(null);
   const ctxMenu = useContextMenu();
+  const nav = useOptionalPageNavigation();
   const refOffersFor = useRefOffers();
   const { fields } = useWorkListProfile();
   const scopeKey = JSON.stringify(scope);
@@ -96,8 +98,22 @@ export function WorkBoard({ scope, onOpenPage }: { scope: WorkItemScope; onOpenP
                     fromThreadId: item.threadId,
                   })
                 }
-                onContextMenu={(e) =>
+                // The card's menu, wherever on the card: in the capture
+                // phase, so its title link's own right-click (open in a new
+                // tab) never runs as well; the menu offers that instead.
+                onContextMenuCapture={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
                   ctxMenu.open(e, [
+                    {
+                      id: "board-open-new-tab",
+                      label: "Open in New Tab",
+                      enabled: true,
+                      run: () =>
+                        nav
+                          ? nav.navigate(workItemTabRef(item.ref), { newTab: true })
+                          : onOpenPage?.(workItemTabRef(item.ref)),
+                    },
                     ...CANONICAL_STATES.filter((s) => s !== item.state).map((s) => ({
                       id: `board-move-${s}`,
                       label: `Move to ${STATE_LABEL[s]}`,
@@ -106,8 +122,8 @@ export function WorkBoard({ scope, onOpenPage }: { scope: WorkItemScope; onOpenP
                     })),
                     // The commands about a work item (their `ui.about`).
                     ...refCommandMenuItems(refOffersFor(item.ref)),
-                  ])
-                }
+                  ]);
+                }}
               >
                 <RouteLink
                   to={workItemTabRef(item.ref)}
