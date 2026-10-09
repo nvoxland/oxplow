@@ -5,7 +5,8 @@
 # mostly dead copies in a day (13 incremental caches of oxplow-app alone,
 # 8 of them unused since the morning's merges), and three worktrees filled
 # the disk. cargo-sweep drops artifacts of toolchains no longer installed,
-# then the oldest until `target/` is under the cap — above one worktree's
+# then the oldest until `target/` is under the cap (incremental caches,
+# which cargo-sweep doesn't count, are trimmed to each crate's newest two) — above one worktree's
 # working set (a full test + clippy + binary build, ~23 GB), so what's in
 # use stays.
 #
@@ -23,6 +24,15 @@ if [ "$1" != "--now" ] && [ -f "$STAMP" ] && [ -z "$(find "$STAMP" -mmin +30)" ]
   exit 0
 fi
 mkdir -p target
+# Incremental caches first: cargo-sweep doesn't count them, and each
+# dependency change starts a crate a new one (`<crate>-<hash>`) beside the
+# old — 808 of them, 65 GB, in one worktree. A crate builds from its
+# newest, so keep the two newest per crate per profile.
+for dir in target/*/incremental; do
+  [ -d "$dir" ] || continue
+  ls -t "$dir" | awk '{ crate = $0; sub(/-[^-]*$/, "", crate); if (++seen[crate] > 2) print }' |
+    while read -r stale; do rm -rf "${dir:?}/$stale"; done
+done
 cargo sweep --installed >/dev/null 2>&1
 cargo sweep --maxsize "$CAP" 2>&1 | grep -i "cleaned" >&2
 touch "$STAMP"
