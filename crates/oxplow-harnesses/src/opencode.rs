@@ -274,7 +274,7 @@ mod tests {
     /// call's exit code (its bash tool's `metadata.exit`): what it posts maps
     /// to a call oxplow can pair and judge.
     #[test]
-    fn its_bridge_sends_the_call_id_and_a_shell_calls_exit_code() {
+    fn its_bridge_sends_the_call_id_the_exit_code_and_a_childs_parent() {
         let dir = tempfile::tempdir().unwrap();
         let driver = dir.path().join("drive.mjs");
         let bridge =
@@ -289,7 +289,7 @@ globalThis.fetch = async (url, init) => {{
   return {{ json: async () => ({{}}) }};
 }};
 process.env.OXPLOW_HOOK_BASE_URL = "http://hook.invalid";
-const hooks = await OxplowHooks({{ client: {{ session: {{ get: async () => ({{ data: {{}} }}) }} }} }});
+const hooks = await OxplowHooks({{ client: {{ session: {{ get: async ({{ path }}) => ({{ data: path.id === "ses_child" ? {{ parentID: "ses1" }} : {{}} }}) }} }} }});
 await hooks["tool.execute.before"]({{ tool: "bash", sessionID: "ses1", callID: "call_1" }}, {{ args: {{ command: "false" }} }});
 await hooks["tool.execute.after"](
   {{ tool: "bash", sessionID: "ses1", callID: "call_1", args: {{ command: "false" }} }},
@@ -298,6 +298,10 @@ await hooks["tool.execute.after"](
 await hooks["tool.execute.after"](
   {{ tool: "read", sessionID: "ses1", callID: "call_2", args: {{ filePath: "a.txt" }} }},
   {{ title: "a.txt", output: "x", metadata: {{}} }},
+);
+await hooks["tool.execute.after"](
+  {{ tool: "read", sessionID: "ses_child", callID: "call_3", args: {{ filePath: "b.txt" }} }},
+  {{ title: "b.txt", output: "y", metadata: {{}} }},
 );
 console.log(JSON.stringify(posts));
 "#,
@@ -334,6 +338,19 @@ console.log(JSON.stringify(posts));
         assert_eq!(read.call_id.as_deref(), Some("call_2"));
         assert_eq!(read.exit_code, None);
         assert_eq!(posts[2]["payload"]["tool_response"].get("exit_code"), None);
+        assert_eq!(tool(2).subagent, None);
+
+        // A child session's tool hook is posted as its parent's, run by the
+        // child as a `task` subagent.
+        assert_eq!(posts[3]["payload"]["session_id"], "ses1");
+        let child = tool(3);
+        assert_eq!(
+            child.subagent,
+            Some(oxplow_domain::agent::tool::Subagent {
+                id: "ses_child".into(),
+                kind: Some("task".into()),
+            })
+        );
     }
 
     use super::*;

@@ -25,7 +25,9 @@ failure after your edit is yours:
   (red until you write the program); `--capability <cap>` picks what it
   implements: `work_items` (the default), `effort_policy` or
   `agent_harness` (a harness launching agent sessions: its command runs in
-  the person's terminal, so a person approves it knowing that);
+  the person's terminal, so a person approves it knowing that; if it can
+  tell its subagents apart it declares the `subagents` feature and answers
+  the `prompt` and `subagent` verbs);
 - `effect` — a script reacting to a logged event by composing commands
   (private; runs only once a person approves it);
 - `component` — a custom component (private): its `viz: custom` lens and

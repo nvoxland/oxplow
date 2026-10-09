@@ -57,6 +57,7 @@ ui:
     - { slot: vcs.commit.details, lens: tests-weakened }
     - { slot: vcs.status.details, lens: tests-weakened }
     - { slot: effort.review.details, lens: struggled }
+    - { slot: effort.review.details, lens: session-files }
     - { slot: effort.review.details, lens: context-read }
     - { slot: effort.review.details, lens: review-prompt }
   # The verdict where the effort is shown: it shows; it never acts.

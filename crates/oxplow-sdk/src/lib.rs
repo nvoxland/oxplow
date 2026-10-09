@@ -609,6 +609,20 @@ fn verb_input(capability: &str, verb: &str) -> (String, serde_json::Value) {
             json!({ "type": "object", "required": ["answer"],
                     "properties": { "answer": { "type": "object" } } }),
         ),
+        ("agent_harness", "prompt") => (
+            "What a prompt hook's body is (feature `subagents`): { prompt: { kind: person, text } | \
+             { kind: handback, subagent: { id, kind? } } } — null for a body with no prompt."
+                .into(),
+            json!({ "type": "object", "required": ["body"],
+                    "properties": { "body": { "type": "object" } } }),
+        ),
+        ("agent_harness", "subagent") => (
+            "The subagent a SubagentStart / SubagentStop hook's body names (feature `subagents`): \
+             { subagent: { id, kind? } }, null for none."
+                .into(),
+            json!({ "type": "object", "required": ["body"],
+                    "properties": { "body": { "type": "object" } } }),
+        ),
         ("effort_policy", "react") => (
             "Compose the commands an event calls for: { commands } to run, or { skip }.".into(),
             json!({ "type": "object", "required": ["event"],
@@ -1096,6 +1110,17 @@ mod tests {
         .unwrap();
         assert!(report.ok, "{}", render_findings(&report, Format::Text));
         assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+    }
+
+    /// The feature-gated harness verbs have real descriptions to declare
+    /// them with, not a TODO.
+    #[test]
+    fn the_subagent_verbs_have_a_description_to_declare() {
+        for verb in ["prompt", "subagent"] {
+            let (doc, schema) = verb_input("agent_harness", verb);
+            assert!(!doc.starts_with("TODO"), "{verb}: {doc}");
+            assert_eq!(schema["required"], serde_json::json!(["body"]));
+        }
     }
 
     /// A harness provider scaffolds its hook-path verbs and its `data`

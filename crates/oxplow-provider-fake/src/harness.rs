@@ -6,6 +6,9 @@
 //!   in a terminal, found on the input's search path);
 //! - `tool_use { body }` → `{ tool }` (`null` when the body names none);
 //! - `render { answer }` → `{ body }`, in its own `{"fake": …}` shape;
+//! - `prompt { body }` → `{ prompt }` (`{"handback": id}` is a subagent's
+//!   report, `{"prompt": …}` a person's) and `subagent { body }` →
+//!   `{ subagent }` (`subagent_id`, `subagent_kind?`), its `subagents`;
 //! - `token_readings { records }` → `{ readings }` (its `telemetry`).
 //!
 //! It declares itself as a harness provider does: features (`terminal`,
@@ -32,7 +35,7 @@ pub fn declarations() -> InitializeResult {
         },
         capabilities: vec![CapabilityDecl {
             capability: "agent_harness".into(),
-            features: json!({ "terminal": true, "telemetry": true }),
+            features: json!({ "terminal": true, "telemetry": true, "subagents": true }),
             data: json!({
                 "instruction_files": ["AGENTS.md"],
                 "env_markers": [MARKER],
@@ -59,6 +62,16 @@ pub fn declarations() -> InitializeResult {
                 "render",
                 "A hook answer in its hooks' shape.",
                 json!({ "type": "object", "required": ["answer"] }),
+            ),
+            crate::command(
+                "prompt",
+                "What a prompt hook's body is: a person's words or a subagent's hand-back.",
+                json!({ "type": "object", "required": ["body"] }),
+            ),
+            crate::command(
+                "subagent",
+                "The subagent a subagent hook's body names.",
+                json!({ "type": "object", "required": ["body"] }),
             ),
             crate::command(
                 "token_readings",
@@ -95,6 +108,8 @@ pub(crate) fn answer(verb: &str, input: &Value) -> Result<Value, ProtocolError> 
                 serde_json::from_value(input["answer"].clone()).map_err(|e| invalid("/answer", e))?;
             Ok(json!({ "body": oxplow_harness_fake::render(&answer) }))
         }
+        "prompt" => Ok(json!({ "prompt": oxplow_harness_fake::prompt(&input["body"]) })),
+        "subagent" => Ok(json!({ "subagent": oxplow_harness_fake::subagent(&input["body"]) })),
         "token_readings" => {
             let records: Vec<OtlpRecord> = serde_json::from_value(input["records"].clone())
                 .map_err(|e| invalid("/records", e))?;
@@ -106,7 +121,7 @@ pub(crate) fn answer(verb: &str, input: &Value) -> Result<Value, ProtocolError> 
         }
         other => Err(invalid(
             "/command",
-            format!("an agent harness answers launch, tool_use, render or token_readings, not `{other}`"),
+            format!("an agent harness answers launch, tool_use, render, prompt, subagent or token_readings, not `{other}`"),
         )),
     }
 }

@@ -10,13 +10,15 @@
 //!   differently from a plain acknowledgement;
 //! - a launch keeps the session's bearer out of the command line (any
 //!   process can list it) and, for a terminal, in its environment;
-//! - a hook body naming no tool maps to none;
+//! - a hook body naming no tool maps to none, and one naming no subagent
+//!   names none; a plain prompt body is a person's prompt (a harness with
+//!   `subagents` says a hand-back by other means, never by default);
 //! - the instruction files it names are paths inside the worktree.
 
 use std::path::{Component, Path, PathBuf};
 
 use oxplow_domain::agent::harness::{AgentHarness, Endpoints, LaunchInput, LaunchSpec, SessionIds};
-use oxplow_domain::agent::observe::HookAnswer;
+use oxplow_domain::agent::observe::{HookAnswer, Prompt};
 use oxplow_domain::hook::HookKind;
 use oxplow_domain::{AgentSessionId, StreamId, ThreadId};
 use serde_json::json;
@@ -98,6 +100,20 @@ async fn run(
             "a_body_naming_no_tool_maps_to_none",
             format!("an empty hook body mapped to {tool:?}"),
         );
+    }
+
+    if let Some(subagent) = h.subagent(&json!({})).await {
+        fail(
+            "a_body_naming_no_subagent_names_none",
+            format!("an empty hook body named subagent {subagent:?}"),
+        );
+    }
+    match h.prompt(&json!({ "prompt": "hi" })).await {
+        Some(Prompt::Person { text }) if text == "hi" => {}
+        other => fail(
+            "a_plain_prompt_is_a_persons",
+            format!("a body with `prompt: hi` read as {other:?}, not a person's \"hi\""),
+        ),
     }
 
     for file in h.instruction_files() {
@@ -259,6 +275,9 @@ mod tests {
             async fn render(&self, _: &HookAnswer) -> serde_json::Value {
                 json!({})
             }
+            async fn prompt(&self, _: &serde_json::Value) -> Option<Prompt> {
+                None
+            }
         }
 
         let fx = services_with_effort().await;
@@ -271,6 +290,7 @@ mod tests {
             [
                 "a_refusal_and_context_read_unlike_an_acknowledgement",
                 "a_body_naming_no_tool_maps_to_none",
+                "a_plain_prompt_is_a_persons",
                 "instruction_files_are_inside_the_worktree",
                 "a_launch_keeps_the_bearer_in_its_env",
             ],

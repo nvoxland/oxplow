@@ -499,11 +499,15 @@ depends only on the domain; core's text and the answerability questions live in
   `callID` as `tool_use_id`, so a call's two hooks pair; its bash tool's
   `metadata.exit` as `tool_response.exit_code`, so a failed command reads
   as failed — `opencode.rs`
-  `its_bridge_sends_the_call_id_and_a_shell_calls_exit_code` runs the
+  `its_bridge_sends_the_call_id_the_exit_code_and_a_childs_parent` runs the
   bridge under bun), and the
   `session.idle` event → `Stop`. Subagent sessions (`parentID` set) are filtered out of
   UserPromptSubmit/Stop so child activity doesn't flip the thread's
-  turn lifecycle.
+  turn lifecycle; their tool hooks are posted as the parent's
+  (`session_id: parentID`) with `agent_id: <child sessionID>` and
+  `agent_type: "task"`, which `shared::subagent_of` reads as the call's
+  subagent (opencode declares `subagents`). The parent's resume pointer is
+  never the child's.
   The offered commands ride `OPENCODE_CONFIG_CONTENT`'s inline `command` key
   (`command_definitions` in `opencode.rs`, frontmatter
   description + body template) as `/oxplow-review-comments` etc. — opencode

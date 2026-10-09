@@ -10,7 +10,9 @@
 ///
 /// Mappings:
 ///   chat.message        -> UserPromptSubmit
-///   tool.execute.before -> PreToolUse   (deny response -> throw, which
+///   tool.execute.before -> PreToolUse   (a child session's are posted as
+///                          its parent's, run by subagent `agent_type: task`;
+///                          deny response -> throw, which
 ///                          blocks the tool call in opencode)
 ///   tool.execute.after  -> PostToolUse
 ///   event session.idle  -> Stop         (closes the turn; never refused)
@@ -70,21 +72,33 @@ export const OxplowHooks = async ({ client }) => {
 
   // Subagent sessions have a parentID; their prompts/idles must not
   // drive the thread's turn lifecycle (mirrors Claude's SubagentStop
-  // handling). Cached per session id; on lookup failure assume main.
-  const childCache = new Map();
-  async function isChildSession(sessionID) {
-    if (!sessionID) return false;
-    if (childCache.has(sessionID)) return childCache.get(sessionID);
-    let child = false;
+  // handling), and their tool hooks are posted as the parent's, run by
+  // a subagent. Cached per session id; on lookup failure assume main.
+  const parentCache = new Map();
+  async function parentOf(sessionID) {
+    if (!sessionID) return null;
+    if (parentCache.has(sessionID)) return parentCache.get(sessionID);
+    let parent = null;
     try {
       const res = await client.session.get({ path: { id: sessionID } });
       const session = res && typeof res === "object" && "data" in res ? res.data : res;
-      child = !!(session && session.parentID);
+      parent = (session && session.parentID) || null;
     } catch {
-      child = false;
+      parent = null;
     }
-    childCache.set(sessionID, child);
-    return child;
+    parentCache.set(sessionID, parent);
+    return parent;
+  }
+  const isChildSession = async (sessionID) => !!(await parentOf(sessionID));
+
+  // Who a tool hook comes from: the session itself, or, for a child
+  // session, its parent with the child named as the subagent (what
+  // Claude's `agent_id`/`agent_type` say).
+  async function whose(sessionID) {
+    const parent = await parentOf(sessionID);
+    return parent
+      ? { session_id: parent, agent_id: sessionID, agent_type: "task" }
+      : { session_id: sessionID };
   }
 
   return {
@@ -100,7 +114,7 @@ export const OxplowHooks = async ({ client }) => {
 
     "tool.execute.before": async (input, output) => {
       const res = await post("PreToolUse", {
-        session_id: input.sessionID,
+        ...(await whose(input.sessionID)),
         tool_use_id: input.callID,
         tool_name: toolName(input.tool),
         tool_input: toolInput(output.args),
@@ -118,7 +132,7 @@ export const OxplowHooks = async ({ client }) => {
       // other tools have none, and send none.
       const exit = output?.metadata?.exit;
       await post("PostToolUse", {
-        session_id: input.sessionID,
+        ...(await whose(input.sessionID)),
         tool_use_id: input.callID,
         tool_name: toolName(input.tool),
         tool_input: toolInput(input.args),

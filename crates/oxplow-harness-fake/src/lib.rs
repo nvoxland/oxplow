@@ -9,8 +9,8 @@
 use oxplow_domain::agent::harness::{
     AgentHarness, HarnessError, Interact, Launch, LaunchInput, LaunchSpec, Transcript,
 };
-use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, TokenReading};
-use oxplow_domain::agent::tool::{ToolKind, ToolUse};
+use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, Prompt, TokenReading};
+use oxplow_domain::agent::tool::{Subagent, ToolKind, ToolUse};
 use oxplow_domain::events::schema::TokenKind;
 
 /// Its registry key.
@@ -63,6 +63,14 @@ impl AgentHarness for FakeHarness {
     async fn render(&self, answer: &HookAnswer) -> serde_json::Value {
         render(answer)
     }
+
+    async fn prompt(&self, body: &serde_json::Value) -> Option<Prompt> {
+        prompt(body)
+    }
+
+    async fn subagent(&self, body: &serde_json::Value) -> Option<Subagent> {
+        subagent(body)
+    }
 }
 
 /// Its launch: this crate's binary, resolved on the input's search path,
@@ -111,7 +119,35 @@ pub fn tool_use(body: &serde_json::Value) -> Option<ToolUse> {
             .map(|r| r["success"].as_bool().unwrap_or(false)),
         name,
         kind,
+        subagent: subagent(body),
         ..ToolUse::default()
+    })
+}
+
+/// A prompt hook's body: `{"handback": "<id>"}` is a subagent handing its
+/// report back, `{"prompt": …}` a person's words.
+pub fn prompt(body: &serde_json::Value) -> Option<Prompt> {
+    if let Some(id) = body.get("handback").and_then(|h| h.as_str()) {
+        return Some(Prompt::Handback {
+            subagent: Subagent {
+                id: id.to_string(),
+                kind: None,
+            },
+        });
+    }
+    body.get("prompt")
+        .and_then(|p| p.as_str())
+        .map(|text| Prompt::Person { text: text.into() })
+}
+
+/// The subagent a body names: `{"subagent_id": …, "subagent_kind"?: …}`.
+pub fn subagent(body: &serde_json::Value) -> Option<Subagent> {
+    Some(Subagent {
+        id: body.get("subagent_id")?.as_str()?.to_string(),
+        kind: body
+            .get("subagent_kind")
+            .and_then(|k| k.as_str())
+            .map(str::to_string),
     })
 }
 

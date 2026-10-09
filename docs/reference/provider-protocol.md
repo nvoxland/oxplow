@@ -12,6 +12,16 @@ oxplow extension new provider my-agent --capability agent_harness
 oxplow extension test my-tracker           # handshake, examples, conformance suite
 ```
 
+An agent harness that can tell its subagents apart declares the
+`subagents` feature and the two verbs it enables: `prompt { body }`
+answers `{ prompt }` — `{ kind: person, text }`, or `{ kind: handback,
+subagent: { id, kind? } }` when a subagent's report arrives as a prompt
+(it opens no turn) — and `subagent { body }` answers `{ subagent: { id,
+kind? } }` for a subagent hook. Its `tool_use` answer may carry the same
+`subagent` for a call a subagent made. Without the feature a prompt is a
+person's. The conformance suite checks that a plain `{ "prompt": … }`
+body reads as a person's and an empty body names no subagent.
+
 ## Declaring one
 
 ```yaml

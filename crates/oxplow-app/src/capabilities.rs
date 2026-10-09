@@ -109,9 +109,19 @@ pub const BUILT_INS: &[BuiltIn] = &[
     harness(
         "oxplow:codex-cli",
         "Codex",
-        &["terminal", "resume", "telemetry", "runtime_text", "subagents"],
+        &[
+            "terminal",
+            "resume",
+            "telemetry",
+            "runtime_text",
+            "subagents",
+        ],
     ),
-    harness("oxplow:opencode", "opencode", &["terminal", "runtime_text"]),
+    harness(
+        "oxplow:opencode",
+        "opencode",
+        &["terminal", "runtime_text", "subagents"],
+    ),
     harness(
         "oxplow:acp",
         "An ACP agent",

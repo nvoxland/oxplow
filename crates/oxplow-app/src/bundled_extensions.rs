@@ -94,6 +94,7 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-bundled", "lenses/recent-snapshots.yaml"),
             ext_file!("oxplow-bundled", "lenses/review-prompt.yaml"),
             ext_file!("oxplow-bundled", "lenses/review.yaml"),
+            ext_file!("oxplow-bundled", "lenses/session-files.yaml"),
             ext_file!("oxplow-bundled", "lenses/struggled.yaml"),
             ext_file!("oxplow-bundled", "lenses/task-token-summary.yaml"),
             ext_file!("oxplow-bundled", "lenses/task-tokens.yaml"),
@@ -1164,6 +1165,35 @@ mod tests {
                 // Linked to nothing, the effort is titled by its first prompt.
                 ("Build the parser".into(), "Build the parser".into()),
             ]
+        );
+    }
+
+    /// `session-files` groups an effort's files by the session that changed
+    /// them, shared ones apart; the thread's activity names each turn's
+    /// session.
+    #[tokio::test]
+    async fn the_session_lenses_name_who_changed_what() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let effort = f.effort.value();
+        f.svc
+            .db
+            .transaction(move |tx| {
+                tx.execute_batch(&format!(
+                    "INSERT INTO effort_file (effort_id, path, change_kind, local_snapshot_id, source, agent_session_id, shared)
+                       VALUES ({effort}, 'a.rs', 'updated', 0, 'claimed', 4, 0),
+                              ({effort}, 'b.rs', 'updated', 0, 'observed', NULL, 1);"
+                ))
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let rows = run_analytics_lens(&f, "session-files", "effort_id", effort).await;
+        assert_eq!(
+            rows,
+            serde_json::json!([
+                ["Session 4", "a.rs", "updated", "claimed"],
+                ["Shared", "b.rs", "updated", "observed"],
+            ])
         );
     }
 

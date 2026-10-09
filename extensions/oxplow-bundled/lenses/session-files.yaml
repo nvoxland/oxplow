@@ -1,0 +1,20 @@
+title: Files by Session
+description: The files an effort changed, and which agent session changed each — "Shared" when more than one session was running and none can be named. Sessions on one thread are told apart here.
+hidden: true    # needs a slot param (effort_id); shown on the effort review
+params:
+  - { name: effort_id, label: Effort }
+query: |
+  SELECT CASE WHEN f.shared = 1 THEN 'Shared'
+              WHEN f.agent_session_id IS NOT NULL THEN 'Session ' || f.agent_session_id
+              ELSE 'Unknown session' END AS session,
+         f.path, f.change_kind, f.source
+  FROM v_effort_file f
+  WHERE f.effort_id = :effort_id
+  ORDER BY f.shared, f.agent_session_id, f.path
+viz: list
+group: { by: session }
+columns:
+  - { key: path, label: File, link: { kind: file } }
+  - { key: change_kind, label: Change }
+  - { key: source, label: How }
+empty: This effort has no files yet.

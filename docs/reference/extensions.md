@@ -15,8 +15,9 @@ oxplow extension test my-review            # run its examples on a throwaway oxp
 starter: `lens`, `collector`, `command`, `effect`, `provider`,
 `component` or `policy`. A provider takes `--capability` for what it
 implements: `work_items` (the default), `effort_policy` or
-`agent_harness`. Each scaffold checks clean and passes `test` as
-written.
+`agent_harness` (a harness that tells its subagents apart also declares
+the `subagents` feature; see the provider protocol). Each scaffold checks
+clean and passes `test` as written.
 
 ## Editor support
 
