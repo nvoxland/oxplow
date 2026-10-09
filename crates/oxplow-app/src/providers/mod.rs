@@ -18,6 +18,7 @@ pub mod effort_policy;
 pub mod host;
 pub mod oauth;
 pub mod registry;
+pub mod snapshots;
 pub mod spec;
 pub mod sync;
 pub mod work_items;

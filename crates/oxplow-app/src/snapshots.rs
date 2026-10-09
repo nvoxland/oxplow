@@ -87,21 +87,41 @@ impl SnapshotProvider for CoreSnapshots {
         from: Option<i64>,
         to: i64,
     ) -> Result<Vec<FileChange>, SnapshotError> {
-        self.files
-            .snapshots
-            .diff_snapshots(from, to)
-            .await
-            .map_err(|e| SnapshotError::Storage(e.to_string()))
+        changed_in(&self.files, from, to).await
     }
 
     async fn read_at(&self, snapshot: i64, path: &str) -> Result<Vec<u8>, SnapshotError> {
-        match self.files.read_file_at_snapshot(snapshot, path).await {
-            Ok(Some(bytes)) => Ok(bytes),
-            Ok(None) => Err(SnapshotError::NotFound(format!(
-                "{path} at snapshot {snapshot}"
-            ))),
-            Err(e) => Err(snapshot_error(e)),
-        }
+        read_recorded(&self.files, snapshot, path).await
+    }
+}
+
+/// What changed between two snapshots, from core's record: every
+/// implementation's marks land there.
+pub async fn changed_in(
+    files: &SnapshotFiles,
+    from: Option<i64>,
+    to: i64,
+) -> Result<Vec<FileChange>, SnapshotError> {
+    files
+        .snapshots
+        .diff_snapshots(from, to)
+        .await
+        .map_err(|e| SnapshotError::Storage(e.to_string()))
+}
+
+/// `path`'s bytes at `snapshot`, from core's record (`NoContents` for a
+/// take that kept none).
+pub async fn read_recorded(
+    files: &SnapshotFiles,
+    snapshot: i64,
+    path: &str,
+) -> Result<Vec<u8>, SnapshotError> {
+    match files.read_file_at_snapshot(snapshot, path).await {
+        Ok(Some(bytes)) => Ok(bytes),
+        Ok(None) => Err(SnapshotError::NotFound(format!(
+            "{path} at snapshot {snapshot}"
+        ))),
+        Err(e) => Err(snapshot_error(e)),
     }
 }
 

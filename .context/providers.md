@@ -402,10 +402,39 @@ it out again. `Services` builds one per capability and hands them to the
 registers an external policy in `Services.effort_policies`; the agent
 harness's (`agent_harness::HarnessHost`) registers an `ExternalHarness` in
 `Services.harnesses` under the instance id, beside the built-ins (a
-catalog reload keeps it). A record
+catalog reload keeps it); the snapshots' (`snapshots::SnapshotsHost`)
+registers an `ExternalSnapshots` in `Services.snapshots`. A record
 row carries its own `ref`; the host logs it as the contract's event with
-the row under the contract's key and that ref the subject. Snapshots have
-no contract yet.
+the row under the contract's key and that ref the subject.
+
+**A snapshots provider** marks the worktree; core keeps the record
+(`snapshot`, `file_snapshot`, `snapshot_op`, `snapshot.taken`), so
+change entries, tree hashes, retention and every reader treat its
+snapshots as core's own. A mark is `mark { stream, worktree, trigger,
+thread?, turn?, effort?, budget_ms?, parent }` → `{ handle, unchanged,
+file_count, branch?, revision? }`; then, unless it's unchanged from a
+parent it named, `changed { stream, from, to }` → `{ changes: [{ path,
+kind: added | modified | deleted, identity?, size? }] }`; then one
+`record_take` with the handle on its op (V46). `parent` is the handle
+on the stream's newest op: `null` when core's capture took it (the
+first mark after a switch) or nothing has, and then the listing is its
+whole tree, which the host reconciles with the record (unchanged files
+left out, unlisted ones tombstoned). An identity is the xxh3-128 of the
+bytes, 32 lower-case hex digits, oxplow's own; a file over
+`snapshot_max_file_bytes` is `oversize`. With **`contents`** the host
+pulls each new identity the blob store lacks (`read_at { handle, path }`
+→ `{ bytes }`, base64), checks the bytes hash to it, and keeps them, so
+every read of its snapshots is local; without it its rows are
+identities with no bytes, as the hashes-only built-in's are, and a read
+answers "no contents". Provider output is data: a path outside the
+worktree, a file listed twice, a bad identity or bytes that don't hash
+to theirs fail the mark, and nothing is recorded. The trait's `changed`
+and `read_at` answer from the record. Marks are one at a time per
+instance. While it's the active implementation, core's capture pipeline
+idles (`.context/data-model.md` "An idle pipeline"), and the take on a
+turn's Stop path is its `mark` under `snapshotTurnBudgetMs` (an overrun
+is recorded, never cut short; the call itself is bounded by the
+instance's call timeout).
 
 **A harness provider** answers what a built-in harness answers in code
 (`.context/agent-model.md` "What a harness implements"). Its title is its

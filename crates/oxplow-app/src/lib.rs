@@ -1363,6 +1363,14 @@ impl Services {
                     effort_policies.clone(),
                 )),
                 Arc::new(providers::agent_harness::HarnessHost(harnesses.clone())),
+                Arc::new(providers::snapshots::SnapshotsHost {
+                    registry: snapshots.clone(),
+                    ledger: providers::snapshots::Ledger {
+                        captures: snapshot_captures.clone(),
+                        blobs: blobs.clone(),
+                        files: snapshot_files.clone(),
+                    },
+                }),
             ],
         );
         // An extension's provider commands run on its instances.

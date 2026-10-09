@@ -191,6 +191,11 @@ impl SnapshotCaptureRegistry {
         }
     }
 
+    /// The size above which a file's bytes aren't kept (`oversize`).
+    pub fn max_file_bytes(&self) -> u64 {
+        self.config.max_file_bytes
+    }
+
     /// The snapshot implementations this pipeline takes for: the rest are
     /// processes that mark the worktree themselves.
     pub fn set_serves(&self, ids: impl IntoIterator<Item = String>) {
