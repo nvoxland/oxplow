@@ -217,7 +217,7 @@ describe("reviewModel", () => {
     gitRef: null,
     sha: "0123456789abcdef0123456789abcdef01234567",
     problems,
-    impact: { lenses: [], models: [], collectors: [], providers: [], effects: [], lines: [] },
+    impact: { lenses: [], models: [], collectors: [], providers: [], effects: [], contributions: [], outOfTime: [], lines: [] },
   });
 
   test("spells out what runs, where it reaches and what it reads", () => {
@@ -234,6 +234,32 @@ describe("reviewModel", () => {
       "Collector hot runs hot.star (starlark, sandboxed: no network, files or credentials)",
     ]);
     expect(m.canInstall).toBe(true);
+  });
+
+  const described = (kind: string, local: string) =>
+    ({ id: { extension: "shared", kind, local } }) as unknown as Extension["contributions"][number];
+
+  test("every other kind of contribution is a row of its own", () => {
+    const m = reviewModel(
+      review({
+        lenses: [{} as Extension["lenses"][number]],
+        contributions: [
+          described("lens", "todos"),
+          described("collector", "gh"),
+          described("metric", "acme.todos"),
+          described("event_type", "acme.opened"),
+          described("custom_component", "chart"),
+          described("slot", "effort.review.details-0"),
+        ],
+      }),
+    );
+    expect(m.declares).toEqual([
+      "1 lens",
+      "Metric acme.todos",
+      "Event type acme.opened",
+      "Custom component chart",
+      "Slot effort.review.details-0",
+    ]);
   });
 
   test("load errors block the install; dry-run problems don't", () => {

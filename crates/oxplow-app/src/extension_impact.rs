@@ -675,6 +675,81 @@ pub struct ProviderImpact {
     pub lines: Vec<String>,
 }
 
+/// A contribution of a kind with no impact detail of its own, by its
+/// descriptors before and after.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ContributionImpact {
+    pub kind: oxplow_domain::contribution::ContributionKind,
+    /// The kind as a person names it (`Event type`).
+    pub title: String,
+    /// `<extension>/<kind>/<local>`.
+    pub id: String,
+    /// The part of the id after the kind: what a row is called.
+    pub local: String,
+    pub change: Change,
+    /// For a change: which of `version`, `needs`, `runs_on` and `global`
+    /// differ.
+    pub differs: Vec<String>,
+}
+
+/// The kinds whose impact has detail of its own (lens text, model rows,
+/// grants, dry runs): everything else gets a [`ContributionImpact`].
+const DETAILED: &[oxplow_domain::contribution::ContributionKind] = {
+    use oxplow_domain::contribution::ContributionKind as K;
+    &[K::Lens, K::Model, K::Collector, K::Provider, K::Effect]
+};
+
+/// What differs between two versions' descriptors of the kinds without
+/// detail of their own, by id: added, removed, or changed (a contract
+/// version, needs, how it runs or its global name). Unchanged ones are
+/// left out.
+pub fn contributions_diff(
+    before: &[oxplow_domain::contribution::Descriptor],
+    after: &[oxplow_domain::contribution::Descriptor],
+) -> Vec<ContributionImpact> {
+    use oxplow_domain::contribution::{ContributionId, Descriptor};
+    fn index(ds: &[Descriptor]) -> BTreeMap<ContributionId, &Descriptor> {
+        ds.iter()
+            .filter(|d| !DETAILED.contains(&d.id.kind))
+            .map(|d| (d.id.clone(), d))
+            .collect()
+    }
+    let (b, a) = (index(before), index(after));
+    let ids: BTreeSet<_> = b.keys().chain(a.keys()).cloned().collect();
+    ids.into_iter()
+        .filter_map(|id| {
+            let (x, y) = (b.get(&id), a.get(&id));
+            let change = change_of(x, y);
+            let differs: Vec<String> = match (x, y) {
+                (Some(x), Some(y)) => [
+                    ("version", x.contract_version != y.contract_version),
+                    ("needs", x.needs != y.needs),
+                    ("runs_on", x.trigger != y.trigger),
+                    ("global", x.global != y.global),
+                ]
+                .into_iter()
+                .filter(|(_, differs)| *differs)
+                .map(|(what, _)| what.to_string())
+                .collect(),
+                _ => Vec::new(),
+            };
+            // Same id, same contract: nothing a review needs to say.
+            if change == Change::Changed && differs.is_empty() {
+                return None;
+            }
+            (change != Change::Unchanged).then(|| ContributionImpact {
+                kind: id.kind,
+                title: id.kind.spec().title.to_string(),
+                local: id.local.clone(),
+                id: id.to_string(),
+                change,
+                differs,
+            })
+        })
+        .collect()
+}
+
 /// Everything installing or updating an extension would change.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -686,6 +761,10 @@ pub struct ImpactReport {
     /// Its effects: what each reacts to, and what each version
     /// composes on the same events.
     pub effects: Vec<EffectImpact>,
+    /// Every other contribution it adds, removes or changes, from the
+    /// descriptors: the kinds above have their own detail, these a
+    /// generic row.
+    pub contributions: Vec<ContributionImpact>,
     /// What its dry runs didn't get to (`collector <id>`, `effect <id>`):
     /// the review stops running scripts at its deadline.
     pub out_of_time: Vec<String>,
@@ -1005,6 +1084,13 @@ pub fn summary(report: &ImpactReport) -> Vec<String> {
             }
             None => {}
         }
+    }
+    for c in &report.contributions {
+        let what = match c.change {
+            Change::Changed => format!("changed ({})", c.differs.join(", ")),
+            other => change_word(other).to_string(),
+        };
+        out.push(format!("{} {}: {what}", c.title, c.local));
     }
     if !report.out_of_time.is_empty() {
         out.push(format!(
@@ -1673,6 +1759,12 @@ pub async fn impact_within(
         collectors,
         providers,
         effects,
+        contributions: contributions_diff(
+            before
+                .as_ref()
+                .map_or(&[][..], |b| b.extension.contributions.as_slice()),
+            &after.extension.contributions,
+        ),
         out_of_time,
         lines: Vec::new(),
     };
@@ -3049,6 +3141,14 @@ mod tests {
                     outputs: vec![],
                 },
             ],
+            contributions: vec![ContributionImpact {
+                kind: oxplow_domain::contribution::ContributionKind::Metric,
+                title: "Metric".into(),
+                id: "shared/metric/acme.todos".into(),
+                local: "acme.todos".into(),
+                change: Change::Changed,
+                differs: vec!["global".into(), "needs".into()],
+            }],
             out_of_time: vec![],
             lines: vec![],
         };
@@ -3069,7 +3169,85 @@ mod tests {
                 "Lens shared/count: changed",
                 "Lens shared/new: added",
                 "Lens shared/bad: added; its query fails: no such table",
+                "Metric acme.todos: changed (global, needs)",
             ]
         );
+    }
+
+    fn described(
+        kind: oxplow_domain::contribution::ContributionKind,
+        local: &str,
+    ) -> oxplow_domain::contribution::Descriptor {
+        use oxplow_domain::contribution::{ContributionId, DeclaredAt, Descriptor, Owner, RunsOn};
+        Descriptor::new(
+            ContributionId::new("shared", kind, local),
+            Owner {
+                extension: "shared".into(),
+                origin: "project".into(),
+                version: None,
+            },
+            RunsOn::Query,
+            DeclaredAt {
+                file: "x".into(),
+                line: None,
+            },
+        )
+    }
+
+    /// Every kind without detail of its own gets a generic row, by id:
+    /// added, removed, or changed when its contract version, needs, how it
+    /// runs or its global name differs. The kinds with detail are left to
+    /// it; an unchanged one says nothing.
+    #[test]
+    fn contributions_are_compared_by_id() {
+        use oxplow_domain::contribution::{ContributionKind as K, RunsOn};
+        let kept = described(K::Metric, "kept");
+        let mut changed_before = described(K::EventType, "acme.opened");
+        changed_before.contract_version = Some(1);
+        let mut changed_after = changed_before.clone();
+        changed_after.contract_version = Some(2);
+        changed_after.needs = vec!["work_items".into()];
+        changed_after.trigger = RunsOn::Declared;
+        changed_after.global = Some("acme.opened".into());
+        let before = vec![
+            kept.clone(),
+            changed_before,
+            described(K::Page, "gone"),
+            described(K::Lens, "lens-has-its-own-detail"),
+        ];
+        let after = vec![
+            kept,
+            changed_after,
+            described(K::Panel, "new"),
+            described(K::Collector, "so-does-this-one"),
+        ];
+        let rows = contributions_diff(&before, &after);
+        let seen: Vec<(String, Change, Vec<String>)> = rows
+            .iter()
+            .map(|r| (r.id.clone(), r.change, r.differs.clone()))
+            .collect();
+        assert_eq!(
+            seen,
+            vec![
+                (
+                    "shared/event_type/acme.opened".to_string(),
+                    Change::Changed,
+                    vec![
+                        "version".to_string(),
+                        "needs".into(),
+                        "runs_on".into(),
+                        "global".into()
+                    ]
+                ),
+                ("shared/page/gone".into(), Change::Removed, vec![]),
+                ("shared/panel/new".into(), Change::Added, vec![]),
+            ]
+        );
+        assert_eq!(rows[1].title, "Page");
+        assert_eq!(rows[2].local, "new");
+        // An install has nothing to compare with: everything is added.
+        assert!(contributions_diff(&[], &after)
+            .iter()
+            .all(|r| r.change == Change::Added));
     }
 }
