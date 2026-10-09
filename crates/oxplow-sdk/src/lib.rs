@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 use oxplow_app::extension_catalog::ExtensionCatalog;
 use oxplow_app::extensions::{self, Extension, EXTENSIONS_DIR};
 use oxplow_app::sql_gateway::SqlGateway;
+use oxplow_domain::contribution::ContributionKind;
 use oxplow_domain::DomainError;
 use serde::Serialize;
 
@@ -65,11 +66,19 @@ pub enum Kind {
     /// whose script opens an item's effort when it starts on a thread and
     /// closes it when it ends, run once a person approves it.
     Policy,
+    /// Guidance for the coding agent: a query run at a moment, whose rows
+    /// reach the agent.
+    Advisory,
+    /// A skill the coding agent loads when it's relevant (`SKILL.md`).
+    Skill,
+    /// A full page showing one lens, in the launcher.
+    Page,
+    /// A left-nav panel showing one lens compact.
+    Panel,
 }
 
 impl Kind {
-    pub const NAMES: &'static str =
-        "`lens`, `extension`, `provider`, `collector`, `command`, `effect`, `component` or `policy`";
+    pub const NAMES: &'static str = "`lens`, `extension`, `provider`, `collector`, `command`, `effect`, `component`, `policy`, `advisory`, `skill`, `page` or `panel`";
 
     pub fn parse(s: &str) -> Option<Kind> {
         match s {
@@ -83,6 +92,10 @@ impl Kind {
             "effect" => Some(Kind::Effect),
             "component" => Some(Kind::Component),
             "policy" => Some(Kind::Policy),
+            "advisory" => Some(Kind::Advisory),
+            "skill" => Some(Kind::Skill),
+            "page" => Some(Kind::Page),
+            "panel" => Some(Kind::Panel),
             _ => None,
         }
     }
@@ -167,12 +180,14 @@ pub fn scaffold(
     let provider_id = oxplow_domain::contribution::extension_namespace(name);
     // The intent example, and its fixture (what `extension test` runs).
     let (example_input, example_expect, fixture_expect) = match kind {
-        Kind::Lens | Kind::Component => (
+        Kind::Lens | Kind::Component | Kind::Page | Kind::Panel => (
             format!("{{ lens: {name}, params: {{ stream_id: 1 }} }}"),
             "one row per open task in the stream, newest first",
             Some("{ rows: $any }".to_string()),
         ),
-        Kind::Extension => ("{}".to_string(), "TODO: what a run should show", None),
+        Kind::Extension | Kind::Advisory | Kind::Skill => {
+            ("{}".to_string(), "TODO: what a run should show", None)
+        }
         Kind::Policy => (
             format!(
                 "{{ implementation: {provider_id}, event: {{ type: thread.checkpoint, payload: {{}} }} }}"
@@ -292,6 +307,49 @@ pub fn scaffold(
              \x20   title: {title}\n\
              \x20   entry: policies/{name}.star\n\
              \x20   needs: [sql.read]\n",
+            title = title_case(name)
+        )),
+        Kind::Advisory => manifest.push_str(&format!(
+            "advisories:\n\
+             \x20 # A {advisory}: a query run at a moment (`on`: post-tool-use, prompt or\n\
+             \x20 # turn-end) whose rows reach the agent (`audience: person` raises them in\n\
+             \x20 # Alerts instead). Each row's `message` is what it hears; `once_per` says how\n\
+             \x20 # often. Params: :thread_id, :stream_id, :turn_id, :effort_id. A shared\n\
+             \x20 # extension's advisories run once a person approves them.\n\
+             \x20 - id: {name}\n\
+             \x20   on: turn-end\n\
+             \x20   once_per: effort\n\
+             \x20   query: |\n\
+             \x20     SELECT printf('TODO: what the agent should hear. Here: this effort has changed %d files.',\n\
+             \x20                    count(DISTINCT f.path)) AS message\n\
+             \x20     FROM v_effort e JOIN v_effort_file f ON f.effort_id = e.id\n\
+             \x20     WHERE e.id = :effort_id AND e.ended_at IS NULL\n\
+             \x20     HAVING count(DISTINCT f.path) >= 15\n",
+            advisory = ContributionKind::Advisory.spec().title.to_lowercase()
+        )),
+        Kind::Skill => manifest.push_str(&format!(
+            "skills:\n\
+             \x20 # A {skill} the coding agent loads when it's relevant; `kind: command`\n\
+             \x20 # makes it a slash command a person runs. `needs: [work_items]` offers it only\n\
+             \x20 # while that capability is active.\n\
+             \x20 - name: {name}\n\
+             \x20   file: skills/{name}/SKILL.md\n",
+            skill = ContributionKind::Skill.spec().title.to_lowercase()
+        )),
+        Kind::Page => manifest.push_str(&format!(
+            "pages:\n\
+             \x20 # A {page}: one of this extension's lenses, full size, in the launcher\n\
+             \x20 # under `category`.\n\
+             \x20 - {{ id: {name}, title: {title}, category: Work, lens: {name} }}\n",
+            page = ContributionKind::Page.spec().title.to_lowercase(),
+            title = title_case(name)
+        )),
+        Kind::Panel => manifest.push_str(&format!(
+            "panels:\n\
+             \x20 # A {panel} in the left nav: its `body` lens, compact. `scope` says what it\n\
+             \x20 # follows (project, stream or thread) and the lens declares that param.\n\
+             \x20 - {{ id: {name}, title: {title}, scope: stream, body: {name} }}\n",
+            panel = ContributionKind::Panel.spec().title.to_lowercase(),
             title = title_case(name)
         )),
         Kind::Lens | Kind::Extension => {}
@@ -476,6 +534,36 @@ pub fn scaffold(
                     .to_string(),
             )?;
         }
+        Kind::Page | Kind::Panel => write(
+            &format!("{rel_dir}/lenses/{name}.yaml"),
+            format!(
+                "{modeline}title: {title}\n\
+                 description: \"TODO: what this answers.\"\n\
+                 params:\n\
+                 \x20 # Filled in with the viewer's stream unless a value is given.\n\
+                 \x20 - {{ name: stream_id, label: Stream }}\n\
+                 query: |\n\
+                 \x20 SELECT w.ref, w.title, w.state\n\
+                 \x20 FROM v_work_item w JOIN v_thread t ON t.id = w.thread_id\n\
+                 \x20 WHERE t.stream_id = :stream_id AND w.state IN ('todo', 'in_progress', 'blocked')\n\
+                 \x20 ORDER BY w.updated_at DESC\n\
+                 viz: table\n\
+                 columns:\n\
+                 \x20 - {{ key: title, label: Item, link: {{ kind: page, from: ref }} }}\n\
+                 \x20 - {{ key: state }}\n\
+                 empty: No open work items in this stream.\n",
+                modeline = lens_modeline,
+                title = title_case(name)
+            ),
+        )?,
+        Kind::Skill => write(
+            &format!("{rel_dir}/skills/{name}/SKILL.md"),
+            format!(
+                "---\nname: {name}\ndescription: \"TODO: when the agent should load this.\"\n---\n\n\
+                 # {title}\n\nTODO: what the agent should know or do.\n",
+                title = title_case(name)
+            ),
+        )?,
         Kind::Policy => write(
             &format!("{rel_dir}/policies/{name}.star"),
             r#"# Gets {"event": {id, type, v, seq, source, subject, payload, anchors}} — one of
@@ -502,7 +590,7 @@ def transform(x):
 "#
             .to_string(),
         )?,
-        Kind::Extension => {}
+        Kind::Extension | Kind::Advisory => {}
     }
     Ok(Scaffolded {
         name: name.to_string(),
@@ -1058,6 +1146,10 @@ mod tests {
             Kind::Effect,
             Kind::Component,
             Kind::Policy,
+            Kind::Advisory,
+            Kind::Skill,
+            Kind::Page,
+            Kind::Panel,
         ] {
             let dir = tempfile::tempdir().unwrap();
             let made = scaffold(dir.path(), kind, "demo", None).unwrap();

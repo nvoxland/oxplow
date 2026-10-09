@@ -47,7 +47,26 @@ failure after your edit is yours:
   `needs: [sql.read]`) that opens an item's effort when it starts on a
   thread and closes it when it ends; it passes the effort-policy suite
   as written, and runs once a person approves it;
+- `advisory` — guidance for you: a query run at a turn's end whose rows
+  reach the agent (`audience: person` raises them in Alerts instead); a
+  shared extension's advisories run once a person approves them;
+- `skill` — a skill (`SKILL.md` with `name:` and `description:`
+  frontmatter) you load when it's relevant; `kind: command` makes it a
+  slash command;
+- `page` / `panel` — a lens as a full page in the launcher, or compact in
+  the left nav (a panel's `scope` is the param its lens declares);
 - `extension` — the manifest only.
+
+Words used exactly: an **extension** is the folder; a **contribution** is
+one thing it declares (a lens, collector, command, effect, provider …); a
+**capability** is a swappable slot a project chooses an implementation of
+(`work_items`, `effort_policy`, `snapshots`); an **implementation** fills
+one (a built-in, a script, or a provider's instance); a **provider** is
+the process implementing a capability (an *external provider* speaks the
+provider protocol). A **need** is what a contribution says it requires (a
+capability, a feature, a scope); a **grant** is what a person approved. A
+need is never a grant: declaring `needs: [sql.read]` doesn't give a
+program that scope; it runs only once a person approves it.
 
 ## 0. Answering with a lens (`show_lens`)
 
