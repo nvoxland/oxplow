@@ -348,10 +348,10 @@ export function Navigator({
           width: STRIP_WIDTH,
           flexShrink: 0,
           height: "100%",
-          // Part of the lighter chrome frame, like the HUD rail to its
-          // right; its own edge is where the tabs end, so they don't read
-          // as cut off against the rail.
-          background: "var(--surface-chrome)",
+          // The panel colour that sits left of the tabs runs the rail's
+          // whole height, below the tabs too; its own edge is where the
+          // tabs end, so they don't read as cut off against the HUD rail.
+          background: "var(--surface-card)",
           borderRightWidth: 1,
           borderRightStyle: "solid",
           // The same 1px line that frames the content area.
@@ -374,7 +374,7 @@ export function Navigator({
           style={{ flex: 1, overflowY: "auto", paddingTop: 0 }}
         >
           {streamGroups.map((g) => (
-            <div key={g.stream.id} style={STRIP_PANEL_STYLE}>
+            <div key={g.stream.id} style={STREAM_PANEL_STYLE}>
               <StripRow
                 letter={titleInitials(g.stream.title)}
                 label={g.stream.title}
@@ -1152,14 +1152,12 @@ const ADD_ROW_HEIGHT = 40;
 const OVERLAY_WIDTH = 240;
 
 // Each stream + its threads renders inside this box: a surface-card panel
-// flush along the left window edge, square-cornered so the tabs inside it
+// flush along the left window edge, with no outline of its own (the tabs
+// carry the borders), square-cornered so the tabs inside it
 // keep their square right edges, with a gap below it. Shared by the strip
 // and the slide-over overlay.
 const STREAM_PANEL_STYLE: CSSProperties = {
   background: "var(--surface-card)",
-  border: "1px solid var(--border-strong)",
   marginBottom: 6,
   overflow: "hidden",
 };
-// In the strip the strip's own edge is the panel's right side.
-const STRIP_PANEL_STYLE: CSSProperties = { ...STREAM_PANEL_STYLE, borderRight: "none" };
