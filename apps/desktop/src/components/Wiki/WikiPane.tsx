@@ -234,7 +234,9 @@ export function WikiPane({ stream, selectedSlug, onOpenWikiPage }: Props) {
         gap: 6,
       }}>
         <span style={{ fontSize: "var(--text-xs)", opacity: 0.7 }}>Wiki pages ({notes.length})</span>
-        <button type="button" onClick={beginNew} title="New wiki page" disabled={newSlugDraft !== null}>+ New</button>
+        {noStore ? null : (
+          <button type="button" onClick={beginNew} title="New wiki page" disabled={newSlugDraft !== null}>+ New</button>
+        )}
       </div>
 
       <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--border-subtle)" }}>
