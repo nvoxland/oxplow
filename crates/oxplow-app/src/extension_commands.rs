@@ -797,7 +797,7 @@ pub fn extension_command(
     let source = format!("extension:{extension}/{}", decl.name);
     let compose: std::sync::Arc<Composer> = std::sync::Arc::new(
         move |conn: &rusqlite::Connection,
-              trace: &crate::scope_calls::ScopeTrace,
+              trace: &oxplow_domain::scope::ScopeTrace,
               input: &Value| {
             let read =
                 Box::new(|q: oxplow_db::SqlQuery| oxplow_db::semantic_layer::read_on(conn, &q));
@@ -1201,7 +1201,7 @@ pub async fn dry_run(
     let (layer, answers) = (layer.clone(), answers.clone());
     let runtime = tokio::runtime::Handle::current();
     let decided = tokio::task::spawn_blocking(move || {
-        let trace = crate::scope_calls::ScopeTrace::default();
+        let trace = oxplow_domain::scope::ScopeTrace::default();
         let read = Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(layer.run(q)));
         let mut calls = crate::scope_calls::Calls::new(&needs, &trace, read).with_answers(&answers);
         compose_calls(&script, input, &mut calls)

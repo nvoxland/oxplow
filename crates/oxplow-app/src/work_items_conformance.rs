@@ -11,7 +11,9 @@
 use async_trait::async_trait;
 use std::sync::Arc;
 
-use oxplow_domain::work_items::{CanonicalState, WorkItemRecord, WorkItemVerbs, WorkItemsFeatures};
+use oxplow_domain::work_items::{
+    CanonicalState, VerbCall, WorkItemRecord, WorkItemVerbs, WorkItemsFeatures,
+};
 use oxplow_domain::Actor;
 
 use crate::work_items::{NewItem, WorkItems};
@@ -447,18 +449,32 @@ pub async fn suite(
                 let key = format!("conformance:{}", uuid::Uuid::new_v4().simple());
                 let other_key = format!("conformance:{}", uuid::Uuid::new_v4().simple());
                 let first = verbs
-                    .invoke(actor, "create", input.clone(), Some(key.clone()))
+                    .invoke(
+                        VerbCall::bare(actor, Some(key.clone())),
+                        "create",
+                        input.clone(),
+                    )
                     .await;
                 let again = verbs
-                    .invoke(actor, "create", input.clone(), Some(key.clone()))
+                    .invoke(
+                        VerbCall::bare(actor, Some(key.clone())),
+                        "create",
+                        input.clone(),
+                    )
                     .await;
                 let other = verbs
-                    .invoke(actor, "create", input.clone(), Some(other_key))
+                    .invoke(
+                        VerbCall::bare(actor, Some(other_key)),
+                        "create",
+                        input.clone(),
+                    )
                     .await;
                 // Across a restart of its process: a provider that keeps its
                 // keys only in memory would make it again (tsk916).
                 verbs.restart().await;
-                let restarted = verbs.invoke(actor, "create", input, Some(key)).await;
+                let restarted = verbs
+                    .invoke(VerbCall::bare(actor, Some(key)), "create", input)
+                    .await;
                 let item_of = |r: &serde_json::Value| r["ref"].as_str().map(str::to_string);
                 // Whatever was made is cleaned up below, however it went.
                 for r in [&first, &again, &other, &restarted]

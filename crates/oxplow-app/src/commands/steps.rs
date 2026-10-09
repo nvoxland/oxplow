@@ -157,7 +157,7 @@ impl Router<'_> {
                 ),
             });
         }
-        let trace = crate::scope_calls::ScopeTrace::default();
+        let trace = oxplow_domain::scope::ScopeTrace::default();
         let composition = (compose.compose)(self.conn, &trace, input)?;
         let (calls, outside) = self.route_calls(composition.calls, depth, at)?;
         Ok(Routed {
@@ -561,7 +561,7 @@ impl CommandBus {
             let ran = ran.and_then(|(out, used)| Ok((honest(out, &step.call.name)?, used)));
             match ran {
                 Ok((mut out, used)) => {
-                    crate::scope_calls::add_counts(&mut scopes, used);
+                    oxplow_domain::scope::add_counts(&mut scopes, used);
                     if let Some(after) = out.after_commit.take() {
                         after();
                     }
@@ -705,7 +705,7 @@ impl CommandBus {
         let vocabulary = self.log.vocabulary().clone();
         self.db
             .transaction_or(move |tx| {
-                let trace = crate::scope_calls::ScopeTrace::default();
+                let trace = oxplow_domain::scope::ScopeTrace::default();
                 let ctx = TxCtx {
                     conn: tx,
                     actor: &actor,

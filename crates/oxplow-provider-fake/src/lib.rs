@@ -168,9 +168,10 @@ pub struct Hooks {
     pub plain_writes: bool,
     /// `started-file:<path>`: each `invoke` writes `<path>` as it begins.
     pub started_file: Option<String>,
-    /// `host-read`: an `estimate` first reads the host (`host/call`
-    /// `sql.read`, `SELECT 7 AS n`, naming its key) and answers what it
-    /// read beside its result (`read`).
+    /// `host-read`: an `estimate` or an `update` first reads the host
+    /// (`host/call` `sql.read`, `SELECT 7 AS n`, naming its key) and
+    /// answers what it read beside its result (`read`): its own command's
+    /// read, and a capability verb's.
     pub host_read: bool,
     /// `shutdown-file:<path>`: a `shutdown` writes `<path>` before it
     /// answers — a graceful stop, which a kill never is.
@@ -747,7 +748,7 @@ async fn handle(
                     });
                 }
             }
-            let read = if hooks.host_read && p.command == "estimate" {
+            let read = if hooks.host_read && matches!(p.command.as_str(), "estimate" | "update") {
                 Some(
                     peer.request(
                         method::HOST_CALL,

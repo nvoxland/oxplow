@@ -474,7 +474,10 @@ the instance's `host::HostCalls` through the gate a command's handler
 meets (`scope_calls::Calls`: its `needs`; `sql.read` on a read of
 the database), each call counted into the trace of the run whose key it
 names (`ProviderRegistry::run_op` registers the run's
-`Invocation::trace` under its key) — so the run's audit row records it.
+`Invocation::trace` under its key, and `ExternalWorkItems` the
+`work_item.<verb>` run's, from `VerbCall::trace`) — so the run's audit
+row records it. An effort policy's `react` is no command run: its reads
+count nowhere.
 The conformance kit has no project: it answers `host/call` like any
 other request.
 

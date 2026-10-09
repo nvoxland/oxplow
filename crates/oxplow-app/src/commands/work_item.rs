@@ -361,10 +361,13 @@ fn dispatching(
             let out = provider
                 .verbs
                 .invoke(
-                    &invocation.actor,
+                    oxplow_domain::work_items::VerbCall {
+                        actor: &invocation.actor,
+                        idempotency_key: invocation.idempotency_key,
+                        trace: invocation.trace.clone(),
+                    },
                     verb,
                     input.clone(),
-                    invocation.idempotency_key,
                 )
                 .await?;
             let inverse = out

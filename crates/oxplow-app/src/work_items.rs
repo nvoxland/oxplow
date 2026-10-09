@@ -118,10 +118,9 @@ struct Sink;
 impl WorkItemVerbs for Sink {
     async fn invoke(
         &self,
-        _actor: &oxplow_domain::Actor,
+        _call: oxplow_domain::work_items::VerbCall<'_>,
         _verb: &str,
         _input: serde_json::Value,
-        _idempotency_key: Option<String>,
     ) -> Result<oxplow_domain::work_items::VerbOutcome, oxplow_domain::CommandError> {
         Ok(oxplow_domain::work_items::VerbOutcome {
             result: serde_json::json!({ "tracked": false }),

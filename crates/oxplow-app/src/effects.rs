@@ -384,7 +384,7 @@ pub async fn dry_run(
     let (layer, answers) = (layer.clone(), answers.clone());
     let runtime = tokio::runtime::Handle::current();
     let reaction = tokio::task::spawn_blocking(move || {
-        let trace = crate::scope_calls::ScopeTrace::default();
+        let trace = oxplow_domain::scope::ScopeTrace::default();
         let read = Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(layer.run(q)));
         let mut calls = crate::scope_calls::Calls::new(&needs, &trace, read).with_answers(&answers);
         run_script(&script, event, &mut calls)

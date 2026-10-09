@@ -260,11 +260,13 @@ everyone unconfirmed; `CommandBus::open_ops` lists those, pinned by
 choice. A manifest command's `invokers` is **required** (an omitted one
 once meant everyone, agents included).
 
-**The per-run trace.** Each run has a `ScopeTrace` (`TxCtx::trace`):
-fresh per transaction attempt, shared by the runs nested in it; steps
-add each step's to the composing pass's. An `External` run's is its
-`Invocation::trace`: a provider's `host/call`s during it count there
-([providers.md](./providers.md) "The protocol"). Its summary — per scope,
+**The per-run trace.** Each run has a `ScopeTrace`
+(`oxplow_domain::scope`; `TxCtx::trace`): fresh per transaction attempt,
+shared by the runs nested in it; steps add each step's to the composing
+pass's. An `External` run's is its `Invocation::trace`: a provider's
+`host/call`s during it count there — its own command's (`run_op`) and a
+capability verb's, which the `work_item.<verb>` run hands its verbs in
+`VerbCall::trace` ([providers.md](./providers.md) "The protocol"). Its summary — per scope,
 how many calls (`{"sql.read": 2}`) — is written on the run's audit row
 (`command_audit.scopes_json`, V27, named so in V34; NULL when it used
 none). The

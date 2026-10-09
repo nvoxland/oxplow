@@ -10,7 +10,7 @@ use serde_json::Value;
 
 use oxplow_db::Database;
 use oxplow_domain::events::schema::{WorkItemRecorded, WorkItemRecordedV2};
-use oxplow_domain::work_items::{VerbOutcome, WorkItemRecord, WorkItemVerbs};
+use oxplow_domain::work_items::{VerbCall, VerbOutcome, WorkItemRecord, WorkItemVerbs};
 use oxplow_domain::{Actor, CommandError, DomainError, Envelope};
 
 use crate::verbs::{self, Answer};
@@ -77,12 +77,11 @@ impl WorkItemVerbs for OxplowTasks {
     /// keeps no idempotency keys (it declares no `idempotent_writes`).
     async fn invoke(
         &self,
-        actor: &Actor,
+        call: VerbCall<'_>,
         verb: &str,
         input: Value,
-        _idempotency_key: Option<String>,
     ) -> Result<VerbOutcome, CommandError> {
-        let (actor, verb) = (actor.clone(), verb.to_string());
+        let (actor, verb) = (call.actor.clone(), verb.to_string());
         // A refusal rolls the transaction back: it's kept here and the
         // transaction is failed.
         let refused: Arc<Mutex<Option<CommandError>>> = Arc::default();
@@ -131,7 +130,11 @@ mod tests {
     async fn a_verb_answers_with_the_records_of_what_it_changed() {
         let (tasks, _db) = tasks().await;
         let created = tasks
-            .invoke(&Actor::Human, "create", json!({ "title": "t" }), None)
+            .invoke(
+                VerbCall::bare(&Actor::Human, None),
+                "create",
+                json!({ "title": "t" }),
+            )
             .await
             .unwrap();
         let item = created.result["ref"].as_str().unwrap().to_string();
@@ -144,10 +147,9 @@ mod tests {
 
         let moved = tasks
             .invoke(
-                &Actor::Human,
+                VerbCall::bare(&Actor::Human, None),
                 "transition",
                 json!({ "ref": item, "to": "done" }),
-                None,
             )
             .await
             .unwrap();
@@ -171,26 +173,28 @@ mod tests {
         let (tasks, _db) = tasks().await;
         let filed = tasks
             .invoke(
-                &Actor::Human,
+                VerbCall::bare(&Actor::Human, None),
                 "create",
                 json!({ "title": "t", "state": "done", "native_state": "archived" }),
-                None,
             )
             .await
             .unwrap();
         assert_eq!(recorded_state(&filed), ("done".into(), "archived".into()));
 
         let plain = tasks
-            .invoke(&Actor::Human, "create", json!({ "title": "u" }), None)
+            .invoke(
+                VerbCall::bare(&Actor::Human, None),
+                "create",
+                json!({ "title": "u" }),
+            )
             .await
             .unwrap();
         let item = plain.result["ref"].as_str().unwrap().to_string();
         let updated = tasks
             .invoke(
-                &Actor::Human,
+                VerbCall::bare(&Actor::Human, None),
                 "update",
                 json!({ "ref": item, "state": "done", "native_state": "archived" }),
-                None,
             )
             .await
             .unwrap();
@@ -204,20 +208,18 @@ mod tests {
         let (tasks, _db) = tasks().await;
         let filed = tasks
             .invoke(
-                &Actor::Human,
+                VerbCall::bare(&Actor::Human, None),
                 "create",
                 json!({ "title": "t", "state": "done", "native_state": "archived" }),
-                None,
             )
             .await
             .unwrap();
         let item = filed.result["ref"].as_str().unwrap().to_string();
         let reopened = tasks
             .invoke(
-                &Actor::Human,
+                VerbCall::bare(&Actor::Human, None),
                 "update",
                 json!({ "ref": item, "state": "todo" }),
-                None,
             )
             .await
             .unwrap();
@@ -225,7 +227,7 @@ mod tests {
         let inverse = reopened.inverse.unwrap();
         assert_eq!(inverse.name, "update");
         let undone = tasks
-            .invoke(&Actor::Human, "update", inverse.input, None)
+            .invoke(VerbCall::bare(&Actor::Human, None), "update", inverse.input)
             .await
             .unwrap();
         assert_eq!(recorded_state(&undone), ("done".into(), "archived".into()));
@@ -238,10 +240,9 @@ mod tests {
         let (tasks, db) = tasks().await;
         let err = tasks
             .invoke(
-                &Actor::Human,
+                VerbCall::bare(&Actor::Human, None),
                 "create",
                 json!({ "title": "t", "native_state": "nope" }),
-                None,
             )
             .await
             .unwrap_err();

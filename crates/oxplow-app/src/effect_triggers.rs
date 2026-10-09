@@ -916,7 +916,7 @@ async fn run_script(
     let (script, needs, layer) = (decl.script.clone(), decl.needs.clone(), svc.sql.clone());
     let runtime = tokio::runtime::Handle::current();
     tokio::task::spawn_blocking(move || {
-        let trace = crate::scope_calls::ScopeTrace::default();
+        let trace = oxplow_domain::scope::ScopeTrace::default();
         let read = Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(layer.run(q)));
         let mut calls = crate::scope_calls::Calls::new(&needs, &trace, read);
         let reaction = effects::run_script(&script, event, &mut calls)?;

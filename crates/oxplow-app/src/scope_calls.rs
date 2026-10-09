@@ -1,7 +1,7 @@
 //! Serving the scopes (`oxplow_domain::scope`) to a command's handler
 //! (`.context/commands.md` "Scopes"): each call checked against the
 //! command's `needs` — one it didn't declare is refused — counted in
-//! the run's [`ScopeTrace`], and answered.
+//! the run's `ScopeTrace` (`oxplow_domain::scope`), and answered.
 //!
 //! The same [`Calls`] serves a run inside the bus's transaction (reading
 //! on its connection) and a dry run of an example (reading through the
@@ -9,6 +9,7 @@
 
 use std::collections::{BTreeMap, VecDeque};
 
+use oxplow_domain::scope::ScopeTrace;
 use oxplow_domain::DomainError;
 use serde::Deserialize;
 use serde_json::Value;
@@ -40,36 +41,6 @@ pub fn check_callable(id: &str) -> Result<(), String> {
 
 /// The most rows one `sql.read` answers.
 pub const SQL_READ_ROW_CAP: usize = 1_000;
-
-/// What a run called, per scope: the per-run summary its audit row
-/// records. One per run, shared by the runs nested in it; a retried run
-/// starts a fresh one.
-#[derive(Debug, Default)]
-pub struct ScopeTrace(parking_lot::Mutex<BTreeMap<String, u32>>);
-
-impl ScopeTrace {
-    fn count(&self, id: &str) {
-        *self.0.lock().entry(id.to_string()).or_default() += 1;
-    }
-
-    /// Calls made before the run, counted with it (an effect's script
-    /// runs before its reaction does).
-    pub fn add(&self, counts: &BTreeMap<String, u32>) {
-        add_counts(&mut self.0.lock(), counts.clone());
-    }
-
-    /// Each scope called, and how often.
-    pub fn summary(&self) -> BTreeMap<String, u32> {
-        self.0.lock().clone()
-    }
-}
-
-/// `from`'s counts added to `into`'s.
-pub fn add_counts(into: &mut BTreeMap<String, u32>, from: BTreeMap<String, u32>) {
-    for (id, n) in from {
-        *into.entry(id).or_default() += n;
-    }
-}
 
 /// How `sql.read` is answered: the query's result.
 pub type Reader<'a> =

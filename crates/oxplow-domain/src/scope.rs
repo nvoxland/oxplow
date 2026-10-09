@@ -13,7 +13,50 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use std::collections::BTreeMap;
+use std::sync::Mutex;
+
 use crate::commands::Access;
+
+/// What a run called, per scope: the per-run summary its audit row
+/// records. One per run, shared by the runs nested in it and by the
+/// provider calls it makes (a capability verb's `host/call`s); a retried
+/// run starts a fresh one.
+#[derive(Debug, Default)]
+pub struct ScopeTrace(Mutex<BTreeMap<String, u32>>);
+
+impl ScopeTrace {
+    /// Count one call of scope `id`.
+    pub fn count(&self, id: &str) {
+        *self
+            .0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(id.to_string())
+            .or_default() += 1;
+    }
+
+    /// Calls made before the run, counted with it (an effect's script
+    /// runs before its reaction does).
+    pub fn add(&self, counts: &BTreeMap<String, u32>) {
+        add_counts(
+            &mut self.0.lock().unwrap_or_else(|e| e.into_inner()),
+            counts.clone(),
+        );
+    }
+
+    /// Each scope called, and how often.
+    pub fn summary(&self) -> BTreeMap<String, u32> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+}
+
+/// `from`'s counts added to `into`'s.
+pub fn add_counts(into: &mut BTreeMap<String, u32>, from: BTreeMap<String, u32>) {
+    for (id, n) in from {
+        *into.entry(id).or_default() += n;
+    }
+}
 
 /// Where a scope's handler lives: a command it backs runs there,
 /// and a call from anywhere else is a round trip to it (VS Code's model).

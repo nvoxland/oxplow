@@ -18,9 +18,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use oxplow_domain::work_items::{
-    VerbOutcome, WorkItemVerbs, WorkItemsFeatures, WorkItemsProvider, WorkItemsRegistry,
+    VerbCall, VerbOutcome, WorkItemVerbs, WorkItemsFeatures, WorkItemsProvider, WorkItemsRegistry,
 };
-use oxplow_domain::{Actor, CommandCall, CommandError, InputValidator};
+use oxplow_domain::{CommandCall, CommandError, InputValidator};
 use serde_json::Value;
 
 use super::registry::{CapabilityHost, Instance};
@@ -112,11 +112,11 @@ impl WorkItemVerbs for ExternalWorkItems {
 
     async fn invoke(
         &self,
-        actor: &Actor,
+        call: VerbCall<'_>,
         verb: &str,
         input: Value,
-        idempotency_key: Option<String>,
     ) -> Result<VerbOutcome, CommandError> {
+        let actor = call.actor;
         let id = &self.instance.id;
         // The thread a create is filed on is oxplow's record, not the
         // tracker's (tsk1058): it anchors the item, the provider never sees it.
@@ -138,7 +138,15 @@ impl WorkItemVerbs for ExternalWorkItems {
             },
             other => other,
         })?;
-        let out = self.instance.invoke(verb, input, idempotency_key).await?;
+        // Its `host/call`s name this key: they're counted with the
+        // `work_item.<verb>` run.
+        let key = call
+            .idempotency_key
+            .unwrap_or_else(|| format!("call:{}", uuid::Uuid::new_v4().simple()));
+        self.instance.host_calls.begin(&key, call.trace);
+        let out = self.instance.invoke(verb, input, Some(key.clone())).await;
+        self.instance.host_calls.finish(&key);
+        let out = out?;
         let events = out
             .events
             .into_iter()

@@ -372,8 +372,9 @@ pub fn serve_incoming(
 pub struct HostCalls {
     needs: Vec<String>,
     db: oxplow_db::Database,
-    traces:
-        parking_lot::Mutex<std::collections::HashMap<String, Arc<crate::scope_calls::ScopeTrace>>>,
+    traces: parking_lot::Mutex<
+        std::collections::HashMap<String, Arc<oxplow_domain::scope::ScopeTrace>>,
+    >,
 }
 
 impl HostCalls {
@@ -386,7 +387,7 @@ impl HostCalls {
     }
 
     /// Count the calls naming `key` into `trace` until [`Self::finish`].
-    pub fn begin(&self, key: &str, trace: Arc<crate::scope_calls::ScopeTrace>) {
+    pub fn begin(&self, key: &str, trace: Arc<oxplow_domain::scope::ScopeTrace>) {
         self.traces.lock().insert(key.to_string(), trace);
     }
 

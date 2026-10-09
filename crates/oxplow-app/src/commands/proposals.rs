@@ -155,7 +155,7 @@ impl CommandBus {
                     confirmed: true,
                     may_write: gates.may_write,
                     depth: 0,
-                    trace: &crate::scope_calls::ScopeTrace::default(),
+                    trace: &oxplow_domain::scope::ScopeTrace::default(),
                 };
                 match handler(&ctx, input.clone()) {
                     Ok(out) => Ok(out.result),

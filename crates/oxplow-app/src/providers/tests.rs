@@ -965,6 +965,60 @@ async fn a_provider_reads_the_host_through_what_it_needs() {
     }
 }
 
+/// A capability verb's `host/call`s are recorded with the
+/// `work_item.<verb>` run that called it, as a provider's own command's
+/// are with its run.
+#[tokio::test]
+async fn a_verbs_host_reads_are_recorded_with_its_run() {
+    let fx = services_with_effort().await;
+    let root = fx.svc.layout.project_dir.clone();
+    write_extension(&root, "host-read");
+    let manifest = root.join("oxplow/extensions/tracker/extension.yaml");
+    let text = std::fs::read_to_string(&manifest).unwrap();
+    std::fs::write(&manifest, format!("{text}    needs: [sql.read]\n")).unwrap();
+    let ext = extension(&root);
+    approve(&fx, &ext);
+    make_active(&fx, "fake");
+    fx.svc
+        .providers
+        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
+        .await
+        .unwrap();
+    let item = fx
+        .svc
+        .work_items_client()
+        .create(
+            &Actor::Human,
+            crate::work_items::NewItem {
+                title: "theirs".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    let out = fx
+        .svc
+        .commands
+        .run(
+            &Actor::Human,
+            "oxplow.work_item.update",
+            json!({ "ref": item, "title": "renamed" }),
+            false,
+        )
+        .await
+        .unwrap();
+    let audit = fx
+        .svc
+        .commands
+        .audit_store()
+        .get(out.audit_id.unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(audit.scopes, [("sql.read".to_string(), 1)].into());
+}
+
 /// A provider's command is declared in its extension's manifest over an
 /// operation its declarations list (`provider:` + `op:`): its input is the
 /// operation's, with an optional `instance`; a capability verb, an

@@ -44,7 +44,7 @@ pub struct Composition {
 /// what it routed and checked is what runs.
 pub type Composer = dyn Fn(
         &rusqlite::Connection,
-        &crate::scope_calls::ScopeTrace,
+        &oxplow_domain::scope::ScopeTrace,
         &Value,
     ) -> Result<Composition, CommandError>
     + Send

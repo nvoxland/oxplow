@@ -145,7 +145,7 @@ pub struct TxCtx<'a> {
     pub depth: usize,
     /// The scopes the run has called: shared by the runs
     /// nested in it, recorded on its audit row.
-    pub trace: &'a crate::scope_calls::ScopeTrace,
+    pub trace: &'a oxplow_domain::scope::ScopeTrace,
 }
 
 /// The deepest a composite may nest (`oxplow.command.sequence` and extension
@@ -170,7 +170,7 @@ pub struct Invocation {
     pub idempotency_key: Option<String>,
     /// The scopes the run calls on its way (a provider's
     /// `host/call`s): recorded with the run, like `TxCtx::trace`.
-    pub trace: Arc<crate::scope_calls::ScopeTrace>,
+    pub trace: Arc<oxplow_domain::scope::ScopeTrace>,
 }
 
 /// The idempotency key of step `index` (calling `call` with `input`) of
@@ -1110,7 +1110,7 @@ impl CommandBus {
                     .transaction_or(move |tx| {
                         let executed_id = oxplow_domain::EventId::generate();
                         // Fresh per attempt: a retried run counts its calls once.
-                        let trace = crate::scope_calls::ScopeTrace::default();
+                        let trace = oxplow_domain::scope::ScopeTrace::default();
                         let ctx = TxCtx {
                             conn: tx,
                             actor: &actor_c,
@@ -1359,7 +1359,7 @@ impl CommandBus {
                             confirmed: false,
                             may_write: None,
                             depth: 0,
-                            trace: &crate::scope_calls::ScopeTrace::default(),
+                            trace: &oxplow_domain::scope::ScopeTrace::default(),
                         };
                         handler(&ctx, input.clone()).map_err(TxError::Aborted)
                     })

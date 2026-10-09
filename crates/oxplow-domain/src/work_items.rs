@@ -234,23 +234,44 @@ pub struct VerbOutcome {
 /// `work_item.recorded` events they answer with.
 /// `input` is the `work_item.<verb>` input, less the host-side
 /// `provider`; the implementation checks it against what the provider
-/// declared and refuses anything else before calling. `idempotency_key`
-/// is the write's key when the caller has one (an effect's step: the same
-/// on every attempt); without one the provider's host mints one.
+/// declared and refuses anything else before calling.
 #[async_trait]
 pub trait WorkItemVerbs: Send + Sync {
     async fn invoke(
         &self,
-        actor: &Actor,
+        call: VerbCall<'_>,
         verb: &str,
         input: Value,
-        idempotency_key: Option<String>,
     ) -> Result<VerbOutcome, CommandError>;
 
     /// End the provider's process: the next call starts a new one. What
     /// the conformance kit re-sends a keyed write across (tsk916) — a
     /// provider that keeps its keys only in memory would do it again.
     async fn restart(&self);
+}
+
+/// Who calls a verb, and for which run.
+pub struct VerbCall<'a> {
+    pub actor: &'a Actor,
+    /// The write's key when the caller has one (an effect's step: the same
+    /// on every attempt); without one the provider's host mints one.
+    pub idempotency_key: Option<String>,
+    /// The run's scope calls: what the provider calls of oxplow while it
+    /// serves the verb (`host/call`) is counted with the
+    /// `work_item.<verb>` run that called it.
+    pub trace: Arc<crate::scope::ScopeTrace>,
+}
+
+impl<'a> VerbCall<'a> {
+    /// A call by `actor` outside any command run: its scope calls are
+    /// counted nowhere (the conformance kit's direct re-send).
+    pub fn bare(actor: &'a Actor, idempotency_key: Option<String>) -> Self {
+        Self {
+            actor,
+            idempotency_key,
+            trace: Arc::default(),
+        }
+    }
 }
 
 /// One source of work items: its ref segment (`oxplow`, `issues`), what
@@ -439,10 +460,9 @@ mod tests {
     impl WorkItemVerbs for Nothing {
         async fn invoke(
             &self,
-            _actor: &Actor,
+            _call: VerbCall<'_>,
             _verb: &str,
             _input: Value,
-            _idempotency_key: Option<String>,
         ) -> Result<VerbOutcome, CommandError> {
             unreachable!("the registry never calls a verb")
         }
