@@ -773,6 +773,55 @@ async fn a_scaffolded_snapshots_provider_is_red_until_a_program_speaks_for_it() 
     );
 }
 
+/// A scaffolded knowledge provider is red until a program speaks for it; the
+/// fake in knowledge mode behind it passes the kit — its scaffolded example
+/// (a page written) and the knowledge suite.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_scaffolded_knowledge_provider_is_red_until_a_program_speaks_for_it() {
+    let dir = project().await;
+    scaffold(
+        dir.path(),
+        Kind::provider("knowledge").unwrap(),
+        "shelf",
+        Some("effort:eff1"),
+    )
+    .unwrap();
+    let report = test_extension(dir.path(), "shelf", false).await.unwrap();
+    assert!(
+        report.errors.join("\n").contains("initialize failed"),
+        "{:?}",
+        report.errors
+    );
+    let ext = dir.path().join("oxplow/extensions/shelf");
+    std::fs::write(
+        ext.join("bin/provider"),
+        format!(
+            "#!/bin/sh\nOXPLOW_FAKE_CAPABILITY=knowledge exec '{}' \"$@\"\n",
+            fake_bin().display()
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        ext.join("provider.json"),
+        serde_json::to_string_pretty(&oxplow_provider_fake::knowledge_declarations()).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        ext.join("fixtures/provider-shelf.yaml"),
+        "config: { team: core }\n",
+    )
+    .unwrap();
+    let blessed = test_extension(dir.path(), "shelf", true).await.unwrap();
+    assert_eq!(blessed.errors, Vec::<String>::new());
+    let report = test_extension(dir.path(), "shelf", false).await.unwrap();
+    assert_eq!(report.errors, Vec::<String>::new());
+    assert!(
+        report.ran.iter().any(|r| r == "knowledge suite"),
+        "{:?}",
+        report.ran
+    );
+}
+
 /// The fields `scripts/record-just-works.sh` strips from a recorded
 /// `run.json`: the author's machine (denied commands carry local paths),
 /// the session and the cost.

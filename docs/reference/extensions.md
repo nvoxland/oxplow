@@ -16,12 +16,10 @@ starter: `lens`, `collector`, `command`, `effect`, `provider`,
 `component` or `policy`. A provider takes `--capability` for what it
 implements: `work_items` (the default), `effort_policy`,
 `agent_harness` (a harness that tells its subagents apart also declares
-the `subagents` feature; see the provider protocol) or `snapshots` (its
+the `subagents` feature; see the provider protocol), `snapshots` (its
 example marks a one-file tree under `fixtures/tree`; the `contents`
-feature adds `read_at`). A knowledge provider (`write_page`, `delete_page`,
-`link` and the `knowledge.page.recorded` event; see the provider protocol)
-has no scaffold yet. Each scaffold checks
-clean and passes `test` as written.
+feature adds `read_at`) or `knowledge` (its example writes a page). Each
+scaffold checks clean and passes `test` as written.
 
 ## Editor support
 
