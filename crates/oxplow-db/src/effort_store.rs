@@ -528,10 +528,44 @@ fn record_file_tx(
     Ok(())
 }
 
+/// Whose work an observed change was, over the window a turn ran in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Attribution {
+    /// Exactly one session had a turn running: it owns the change.
+    Session(AgentSessionId),
+    /// One turn no session claims (a hook from an agent oxplow didn't
+    /// start): nobody to name, and nobody else it could be.
+    Unattributed,
+    /// More than one session had a turn running: any could have done it.
+    /// Never settled by whose turn ended first.
+    Shared,
+}
+
+/// [`Attribution`] over `thread`'s window `from`..=`to`.
+fn attribution_tx(
+    conn: &rusqlite::Connection,
+    thread: ThreadId,
+    from: &str,
+    to: &str,
+) -> rusqlite::Result<Attribution> {
+    let active = crate::agent_stores::sessions_active_tx(conn, thread, from, to)
+        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+    Ok(match active[..] {
+        [Some(session)] => Attribution::Session(session),
+        [] | [None] => Attribution::Unattributed,
+        _ => Attribution::Shared,
+    })
+}
+
 /// Record the files a turn of `thread` changed (`changes`, in the window
 /// `from`..=`to`) as `effort`'s `observed` files, at `version`: each one
 /// it hasn't already, unless another thread's effort that overlaps the
 /// window claimed it (an edit tool there named it).
+///
+/// A row carries the session when exactly one session had a turn running
+/// in the window, and is `shared` (no session) when more than one did. A
+/// path observed again by a different session, or shared, becomes shared;
+/// a claimed row is never touched.
 pub fn observe_files_tx(
     conn: &rusqlite::Connection,
     effort: EffortId,
@@ -541,6 +575,12 @@ pub fn observe_files_tx(
     changes: &[(String, EffortFileChange)],
     version: FileRefVersion<'_>,
 ) -> rusqlite::Result<usize> {
+    let attribution = attribution_tx(conn, thread, from, to)?;
+    let (session, shared) = match attribution {
+        Attribution::Session(s) => (Some(s.value()), 0),
+        Attribution::Unattributed => (None, 0),
+        Attribution::Shared => (None, 1),
+    };
     let mut observed = 0;
     for (path, change) in changes {
         let claimed_elsewhere: bool = conn.query_row(
@@ -557,9 +597,14 @@ pub fn observe_files_tx(
         observed += conn.execute(
             "INSERT INTO effort_file
                (effort_id, path, change_kind,
-                local_snapshot_id, closest_vcs_rev, vcs_rev_exact, source)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'observed')
-             ON CONFLICT (effort_id, path) DO NOTHING",
+                local_snapshot_id, closest_vcs_rev, vcs_rev_exact, source,
+                agent_session_id, shared)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'observed', ?7, ?8)
+             ON CONFLICT (effort_id, path) DO UPDATE
+               SET shared = 1, agent_session_id = NULL
+               WHERE effort_file.source = 'observed' AND effort_file.shared = 0
+                 AND (excluded.shared = 1
+                      OR effort_file.agent_session_id IS NOT excluded.agent_session_id)",
             params![
                 effort.value(),
                 path,
@@ -567,6 +612,8 @@ pub fn observe_files_tx(
                 version.local_snapshot_id,
                 version.closest_vcs_rev,
                 if version.vcs_rev_exact { 1 } else { 0 },
+                session,
+                shared,
             ],
         )?;
     }
@@ -1966,6 +2013,140 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(row, (Some(4), 0));
+    }
+
+    /// (path, session, shared) of an effort's files, by path.
+    async fn attributed(db: &Database, effort: EffortId) -> Vec<(String, Option<i64>, i64)> {
+        db.call(move |c| {
+            let mut stmt = c.prepare(
+                "SELECT path, agent_session_id, shared FROM effort_file
+                  WHERE effort_id = ?1 ORDER BY path",
+            )?;
+            let rows =
+                stmt.query_map([effort.value()], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+            rows.collect()
+        })
+        .await
+        .unwrap()
+    }
+
+    /// Observe `paths` over the window the seeded turns span.
+    async fn observe(store: &SqliteEffortStore, effort: EffortId, paths: &[&str]) {
+        store
+            .observe_files(
+                &effort,
+                ThreadId::new(1),
+                ("2026-01-01T00:00:00Z".into(), "2026-01-01T00:10:00Z".into()),
+                paths
+                    .iter()
+                    .map(|p| (p.to_string(), EffortFileChange::Updated))
+                    .collect(),
+                OwnedFileRefVersion {
+                    local_snapshot_id: 0,
+                    closest_vcs_rev: None,
+                    vcs_rev_exact: false,
+                },
+            )
+            .await
+            .unwrap();
+    }
+
+    /// Turns of `sessions` on thread 1, each (session, start, end) in
+    /// 2026-01-01T00:`start`:00Z.
+    async fn seed_turns(db: &Database, turns: &[(i64, u32, u32)]) {
+        let turns = turns.to_vec();
+        db.call(move |c| {
+            for (session, start, end) in turns {
+                c.execute(
+                    "INSERT OR IGNORE INTO agent_session (id, thread_id, kind, harness, opened_at, updated_at)
+                     VALUES (?1, 1, 'terminal', 'claude', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                    [session],
+                )?;
+                c.execute(
+                    "INSERT INTO agent_turn (thread_id, agent_session_id, prompt, started_at, ended_at)
+                     VALUES (1, ?1, 'p', ?2, ?3)",
+                    rusqlite::params![
+                        session,
+                        format!("2026-01-01T00:{start:02}:00Z"),
+                        format!("2026-01-01T00:{end:02}:00Z")
+                    ],
+                )?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+    }
+
+    /// With one session's turn in the window, the files are that
+    /// session's; observed again by it, they stay its own.
+    #[tokio::test]
+    async fn observed_files_carry_the_only_active_session() {
+        let (store, db, _tid, t) = fixture_with_db().await;
+        seed_turns(&db, &[(1, 1, 5)]).await;
+        let e = store.start("work_item:issues:A-1", &t, None).await.unwrap();
+        observe(&store, e.id, &["a.rs"]).await;
+        observe(&store, e.id, &["a.rs"]).await;
+        assert_eq!(attributed(&db, e.id).await, [("a.rs".into(), Some(1), 0)]);
+    }
+
+    /// Two sessions with turns overlapping the window: the files are
+    /// shared, whoever's turn ended first.
+    #[tokio::test]
+    async fn files_seen_while_two_sessions_ran_are_shared() {
+        let (store, db, _tid, t) = fixture_with_db().await;
+        seed_turns(&db, &[(1, 1, 5), (2, 3, 8)]).await;
+        let e = store.start("work_item:issues:A-1", &t, None).await.unwrap();
+        observe(&store, e.id, &["a.rs"]).await;
+        assert_eq!(attributed(&db, e.id).await, [("a.rs".into(), None, 1)]);
+    }
+
+    /// A path one session observed and another later does too becomes
+    /// shared; a path a session claimed stays its own.
+    #[tokio::test]
+    async fn a_path_two_sessions_observe_is_shared_and_a_claim_is_not_touched() {
+        let (store, db, _tid, t) = fixture_with_db().await;
+        seed_turns(&db, &[(1, 1, 2)]).await;
+        let e = store.start("work_item:issues:A-1", &t, None).await.unwrap();
+        let v = FileRefVersion {
+            local_snapshot_id: 0,
+            closest_vcs_rev: None,
+            vcs_rev_exact: false,
+        };
+        store
+            .record_claimed_file(
+                &e.id,
+                "claimed.rs",
+                EffortFileChange::Updated,
+                v,
+                Some(AgentSessionId::new(1)),
+            )
+            .await
+            .unwrap();
+        observe(&store, e.id, &["a.rs", "claimed.rs"]).await;
+        // Session 2's turn alone, later, sees both paths again.
+        seed_turns(&db, &[(2, 20, 25)]).await;
+        store
+            .observe_files(
+                &e.id,
+                t,
+                ("2026-01-01T00:20:00Z".into(), "2026-01-01T00:25:00Z".into()),
+                vec![
+                    ("a.rs".into(), EffortFileChange::Updated),
+                    ("claimed.rs".into(), EffortFileChange::Updated),
+                ],
+                OwnedFileRefVersion {
+                    local_snapshot_id: 0,
+                    closest_vcs_rev: None,
+                    vcs_rev_exact: false,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            attributed(&db, e.id).await,
+            [("a.rs".into(), None, 1), ("claimed.rs".into(), Some(1), 0)]
+        );
     }
 
     /// A turn's observed files: a file another thread's overlapping effort

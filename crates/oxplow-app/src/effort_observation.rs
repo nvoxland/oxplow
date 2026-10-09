@@ -10,6 +10,12 @@
 //! thread's. A file two threads changed at once and neither claimed is
 //! observed by both: it changed during each, and `source` says nobody
 //! claimed it. Changes between turns (the person's own) belong to no one.
+//!
+//! An observed file carries the session when exactly one session had a
+//! turn running in the turn's window, and is `shared` (no session) when
+//! more than one did, or when a second session observes the same path
+//! (`effort_store::observe_files_tx`); it is never assigned by which turn
+//! ended first. A claimed file keeps the session that claimed it.
 
 use async_trait::async_trait;
 use oxplow_db::effort_store::{EffortFileChange, EffortStore as _, OwnedFileRefVersion};
