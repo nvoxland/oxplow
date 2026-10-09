@@ -157,11 +157,13 @@ pub fn register_built_ins(
                 _ => None,
             }),
     );
+    captures.set_serves(all.iter().map(|p| p.id().to_string()));
     registry.set_declared(all);
 }
 
 /// Set every stream's capture policy to what the active implementation
-/// keeps.
+/// keeps, and idle the captures while it's one they don't serve (a
+/// provider process, which marks the worktree itself).
 pub fn apply_active_policy(registry: &SnapshotRegistry, captures: &SnapshotCaptureRegistry) {
     let active = registry.active();
     let policy = match &active {
@@ -169,7 +171,9 @@ pub fn apply_active_policy(registry: &SnapshotRegistry, captures: &SnapshotCaptu
         _ => ContentPolicy::Keep,
     };
     captures.set_content_policy(policy);
-    captures.set_provider(active.map(|p| p.id().to_string()));
+    let id = active.map(|p| p.id().to_string());
+    captures.follow(id.as_deref());
+    captures.set_provider(id);
 }
 
 /// On `capability.switched` for snapshots: the captures follow the newly
@@ -292,6 +296,64 @@ mod tests {
             .unwrap()
             .expect("a snapshot")
             .snapshot
+    }
+
+    /// An implementation the capture pipeline doesn't serve (a provider
+    /// process) idles the pipeline while it's active; choosing one it
+    /// serves again resumes it. Decided by what the pipeline serves, never
+    /// by core's id.
+    #[tokio::test]
+    async fn an_implementation_the_pipeline_doesnt_serve_idles_it() {
+        struct Elsewhere;
+        #[async_trait]
+        impl SnapshotProvider for Elsewhere {
+            fn id(&self) -> &str {
+                "elsewhere"
+            }
+            fn contents(&self) -> bool {
+                false
+            }
+            async fn mark(&self, _: &MarkRequest) -> Result<Option<Marked>, SnapshotError> {
+                Ok(None)
+            }
+            async fn changed(
+                &self,
+                _: StreamId,
+                _: Option<i64>,
+                _: i64,
+            ) -> Result<Vec<FileChange>, SnapshotError> {
+                Ok(Vec::new())
+            }
+            async fn read_at(&self, _: i64, _: &str) -> Result<Vec<u8>, SnapshotError> {
+                Err(SnapshotError::NotFound("nothing".into()))
+            }
+        }
+        let f = services_with_effort().await;
+        let (_, svc) = stream_of(&f);
+        let chosen = Arc::new(std::sync::Mutex::new("elsewhere".to_string()));
+        let registry = SnapshotRegistry::new({
+            let chosen = chosen.clone();
+            Arc::new(move || chosen.lock().unwrap().clone())
+        });
+        register_built_ins(
+            &registry,
+            &[],
+            &f.svc.snapshot_captures,
+            &f.svc.snapshot_files(),
+        );
+        registry.register(Arc::new(Elsewhere));
+
+        apply_active_policy(&registry, &f.svc.snapshot_captures);
+        assert!(svc.is_idle());
+        assert_eq!(
+            f.svc.snapshot_captures.no_contents_reason(),
+            Some(crate::snapshot_capture_registry::NO_CONTENTS_REASON)
+        );
+
+        *chosen.lock().unwrap() = "oxplow".into();
+        apply_active_policy(&registry, &f.svc.snapshot_captures);
+        assert!(!svc.is_idle());
+        assert_eq!(f.svc.snapshot_captures.no_contents_reason(), None);
     }
 
     /// "Track changes only" records what changed and keeps no bytes; its

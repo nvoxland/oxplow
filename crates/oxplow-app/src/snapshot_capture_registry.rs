@@ -62,6 +62,12 @@ pub struct SnapshotCaptureRegistry {
     content_policy: Arc<RwLock<ContentPolicy>>,
     /// The active snapshot implementation's id, which its takes record.
     provider: Arc<RwLock<Option<String>>>,
+    /// The snapshot implementations these services take for (the
+    /// built-ins over this pipeline), set as they're registered.
+    serves: Arc<RwLock<std::collections::BTreeSet<String>>>,
+    /// Set while the active implementation is one it doesn't serve: every
+    /// service, and a later one, takes nothing of its own.
+    idle: Arc<std::sync::atomic::AtomicBool>,
     config: SnapshotCaptureRegistryConfig,
 }
 
@@ -73,6 +79,8 @@ impl SnapshotCaptureRegistry {
             workspace_filter: Arc::new(RwLock::new(config.workspace_filter.clone())),
             content_policy: Arc::new(RwLock::new(ContentPolicy::default())),
             provider: Arc::default(),
+            serves: Arc::default(),
+            idle: Arc::default(),
             config,
         }
     }
@@ -116,6 +124,7 @@ impl SnapshotCaptureRegistry {
         }
         let svc = Arc::new(svc);
         svc.set_content_policy(self.content_policy());
+        svc.set_idle(self.idle.load(std::sync::atomic::Ordering::SeqCst));
         svc.set_provider(
             self.provider
                 .read()
@@ -179,6 +188,29 @@ impl SnapshotCaptureRegistry {
         *self.provider.write().unwrap_or_else(|e| e.into_inner()) = provider.clone();
         for svc in self.list() {
             svc.set_provider(provider.clone());
+        }
+    }
+
+    /// The snapshot implementations this pipeline takes for: the rest are
+    /// processes that mark the worktree themselves.
+    pub fn set_serves(&self, ids: impl IntoIterator<Item = String>) {
+        *self.serves.write().unwrap_or_else(|e| e.into_inner()) = ids.into_iter().collect();
+    }
+
+    /// Follow the active snapshot implementation `id`: when it's one this
+    /// pipeline serves the services take as usual, otherwise they idle
+    /// ([`SnapshotCaptureService::set_idle`]).
+    pub fn follow(&self, id: Option<&str>) {
+        let idle = id.is_some_and(|id| {
+            !self
+                .serves
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains(id)
+        });
+        self.idle.store(idle, std::sync::atomic::Ordering::SeqCst);
+        for svc in self.list() {
+            svc.set_idle(idle);
         }
     }
 

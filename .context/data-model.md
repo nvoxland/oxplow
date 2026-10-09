@@ -988,6 +988,17 @@ then pruned"). The lookup runs only for a row whose bytes are missing, so
 a normal read costs nothing extra. A switch deletes nothing: the record
 holds both kinds of op, and a path unchanged since a kept take still reads
 at a later hashes-only snapshot.
+
+**An idle pipeline (a provider process active).** The capture registry
+knows which snapshot implementations it serves (`set_serves`, filled by
+`snapshots::register_built_ins`); `follow(active)` idles every service
+while the active one is anything else. An idle service takes nothing of
+its own: `request_snapshot` (the quiet, startup and baseline takes),
+`request_snapshot_for_git_refs` and the startup sweep's staging answer
+nothing, so no snapshot the provider never marked lands in its chain.
+The watcher keeps the dirty set, and the first take after resuming
+records what changed meanwhile. `request_take` (a built-in's mark) is not
+gated: only the active implementation marks.
 Only `oxplow`-class rows hold blob-store hashes; `git` rows reference
 the git odb, which this GC never touches. The blob store is shared
 across all streams, so GC runs at the project level and dedupes

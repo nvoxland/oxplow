@@ -229,6 +229,10 @@ struct Inner {
     /// one), for a take whose request names none: its own quiet, git-refs
     /// and sweep takes.
     provider: RwLock<Option<String>>,
+    /// Set while a snapshot provider process is the active implementation:
+    /// the pipeline takes nothing of its own ([`SnapshotCaptureService::
+    /// set_idle`]).
+    idle: std::sync::atomic::AtomicBool,
     /// Paths that have changed since the last `request_snapshot()`.
     /// The watcher loop pushes into this map; `request_snapshot`
     /// drains it. Keyed by path so repeated edits between requests
@@ -318,6 +322,7 @@ impl SnapshotCaptureService {
                 workspace_filter: RwLock::new(workspace_filter),
                 content_policy: RwLock::new(ContentPolicy::default()),
                 provider: RwLock::new(None),
+                idle: std::sync::atomic::AtomicBool::new(false),
                 dirty: Mutex::new(HashMap::new()),
                 settle_duration: DEFAULT_SETTLE_DURATION,
                 predrain_delay: DEFAULT_PREDRAIN_DELAY,
@@ -375,6 +380,22 @@ impl SnapshotCaptureService {
             .provider
             .write()
             .unwrap_or_else(|e| e.into_inner()) = provider;
+    }
+
+    /// Stop (or resume) the takes the pipeline starts itself — the
+    /// startup sweep, the quiet, git-refs and baseline takes — while a
+    /// snapshot provider process is the active implementation: the
+    /// provider marks the worktree, and a take of the pipeline's own would
+    /// interleave a snapshot it never marked. The watcher keeps the dirty
+    /// set, so the first take after resuming records what changed.
+    pub fn set_idle(&self, idle: bool) {
+        self.inner
+            .idle
+            .store(idle, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub(crate) fn is_idle(&self) -> bool {
+        self.inner.idle.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Whether takes keep file bytes now.
@@ -677,6 +698,9 @@ impl SnapshotCaptureService {
     pub async fn request_snapshot_for_git_refs(
         &self,
     ) -> Result<Option<i64>, Box<dyn std::error::Error + Send + Sync>> {
+        if self.is_idle() {
+            return Ok(None);
+        }
         // One lock from the drain to the stamp: a take slipping in between
         // would capture a fresh edit that the stamp would then call HEAD.
         let started = Instant::now();
@@ -954,6 +978,9 @@ impl SnapshotCaptureService {
     pub async fn enqueue_startup_diff(
         &self,
     ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+        if self.is_idle() {
+            return Ok(0);
+        }
         // The old `enqueue_full_tree` variant (enqueue EVERY path so the next
         // snapshot lists the whole tree) is gone (tsk71): metric baselines now
         // run `scan_kind = 'full'` captures over the RECONSTRUCTED tree of an
@@ -1330,14 +1357,19 @@ impl SnapshotCaptureService {
         &self,
         req: impl Into<TakeRequest>,
     ) -> Result<Option<i64>, Box<dyn std::error::Error + Send + Sync>> {
+        // A take the pipeline starts itself: none while idle.
+        if self.is_idle() {
+            return Ok(None);
+        }
         self.request_take(req)
             .await
             .map(|o| o.map(|o| o.snapshot_id))
     }
 
-    /// [`Self::request_snapshot`], answering with the whole outcome: the
-    /// snapshot, its parent, whether nothing changed, the files recorded
-    /// and whether the take ran over its budget.
+    /// The take a built-in's mark asks for, answering with the whole
+    /// outcome: the snapshot, its parent, whether nothing changed, the
+    /// files recorded and whether the take ran over its budget. It takes
+    /// even while idle: only the active implementation marks.
     pub async fn request_take(
         &self,
         req: impl Into<TakeRequest>,
@@ -1942,6 +1974,42 @@ mod tests {
             .unwrap();
         assert_ne!(edited, base);
         assert_eq!(store.list_for_path("lib.rs").await.unwrap().len(), 2);
+    }
+
+    /// While a snapshot provider process is active the pipeline takes
+    /// nothing of its own (the sweep, the quiet and git-refs takes): its
+    /// takes would interleave snapshots the provider never marked. The
+    /// watcher keeps the dirty set, so the first take after it captures
+    /// again records what changed meanwhile.
+    #[tokio::test]
+    async fn an_idle_pipeline_takes_nothing_of_its_own_and_keeps_what_changed() {
+        let project = tempdir().unwrap();
+        init_git_repo_with(project.path(), &[("lib.rs", "fn a() {}\n")]);
+        let (svc, store) = svc_for(project.path()).await;
+        svc.set_idle(true);
+        let path = project.path().join("new.rs");
+        std::fs::write(&path, "fn n() {}\n").unwrap();
+        assert_eq!(svc.enqueue_startup_diff().await.unwrap(), 0);
+        svc.mark_dirty(path.clone(), WatchEventKind::Other);
+        assert_eq!(
+            svc.request_snapshot(SnapshotTrigger::Quiet).await.unwrap(),
+            None
+        );
+        assert_eq!(svc.request_snapshot_for_git_refs().await.unwrap(), None);
+        assert!(store
+            .list_ops(svc.stream_id().to_owned(), 5)
+            .await
+            .unwrap()
+            .is_empty());
+
+        svc.set_idle(false);
+        let taken = svc
+            .request_snapshot(SnapshotTrigger::Quiet)
+            .await
+            .unwrap()
+            .unwrap();
+        let tree = store.tree_at(taken).await.unwrap();
+        assert!(tree.contains_key("new.rs"), "{:?}", tree.keys());
     }
 
     #[tokio::test]
