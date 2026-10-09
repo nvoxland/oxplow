@@ -1363,6 +1363,66 @@
         }
       ],
       "key": []
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Claim id."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread it was made in."
+        },
+        {
+          "name": "work_item",
+          "type": "TEXT",
+          "doc": "The work item it was made on (`work_item:<provider>:<id>`), if any."
+        },
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "Effort, if one was open."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "Turn it happened in (v_agent_turn.id), when known."
+        },
+        {
+          "name": "agent_session_id",
+          "type": "INTEGER",
+          "doc": "The agent session that made it (v_agent_session.id); NULL when not recorded. (v4)"
+        },
+        {
+          "name": "statement",
+          "type": "TEXT",
+          "doc": "The claim in words."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`tests_pass`, `no_behavior_change`, `handles_case` or `other`."
+        },
+        {
+          "name": "evidence_ref",
+          "type": "TEXT",
+          "doc": "What backs it (`run:<id>`, a test, a file, or `reviewer` when a person verified it with `oxplow.effort.verify_claim`); NULL if nothing was cited."
+        },
+        {
+          "name": "verified",
+          "type": "",
+          "doc": "1 if it cites evidence, or is `tests_pass` and its effort's latest test run (in `v_test_run`) passed with at least one test; else 0."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        }
+      ],
+      "key": []
     }
   },
   "code_quality_finding": {
@@ -2436,6 +2496,51 @@
           "name": "source",
           "type": "TEXT",
           "doc": "`claimed` (an edit tool named it) or `observed` (it changed during one of the thread's turns and no other thread claimed it)."
+        }
+      ],
+      "key": []
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "The effort (v_effort.id)."
+        },
+        {
+          "name": "work_item",
+          "type": "TEXT",
+          "doc": "That effort's work item ref."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "Repo-relative file path."
+        },
+        {
+          "name": "change_kind",
+          "type": "TEXT",
+          "doc": "`created`, `updated` or `deleted`."
+        },
+        {
+          "name": "closest_vcs_rev",
+          "type": "TEXT",
+          "doc": "The VCS revision (a git sha) nearest the file when recorded."
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "doc": "`claimed` (an edit tool named it) or `observed` (it changed during one of the thread's turns and no other thread claimed it)."
+        },
+        {
+          "name": "agent_session_id",
+          "type": "INTEGER",
+          "doc": "The agent session: the one whose edit claimed it, or the only one with a turn running when it was observed; NULL when `shared` or not recorded. (v4)"
+        },
+        {
+          "name": "shared",
+          "type": "INTEGER",
+          "doc": "1 for an observed file more than one session's turns could have changed, so no session owns it. (v4)"
         }
       ],
       "key": []
@@ -4106,6 +4211,41 @@
           "name": "thread_id",
           "type": "INTEGER",
           "doc": "Thread."
+        },
+        {
+          "name": "kind",
+          "type": "",
+          "doc": "`repeated_edits` or `failed_commands`."
+        },
+        {
+          "name": "subject",
+          "type": "TEXT",
+          "doc": "The file path, or `shell` (failed shell commands, whatever the harness)."
+        },
+        {
+          "name": "count",
+          "type": "",
+          "doc": "How many edits / failures."
+        }
+      ],
+      "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "Effort."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread."
+        },
+        {
+          "name": "agent_session_id",
+          "type": "INTEGER",
+          "doc": "The agent session it happened in; NULL when not recorded. (v3)"
         },
         {
           "name": "kind",
@@ -5900,6 +6040,81 @@
           "name": "event_id",
           "type": "TEXT",
           "doc": "The `agent.tool.finished` event (v_event.id) this row records; NULL for rows written before the event log carried tool calls."
+        }
+      ],
+      "key": []
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Row id."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread."
+        },
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "Effort open at the time, if any."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "Turn it happened in (v_agent_turn.id), when known."
+        },
+        {
+          "name": "tool",
+          "type": "TEXT",
+          "doc": "The harness's own name for the tool (`Edit`, `apply_patch`, an ACP agent's title, …)."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "What it does, the same for every harness: `read`, `edit`, `shell`, `subagent`, `ask`, `plan`, `search`, `fetch`, `mcp` or `other`."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "File it touched, repo-relative when inside the project."
+        },
+        {
+          "name": "detail",
+          "type": "TEXT",
+          "doc": "Short context: a shell command (truncated), a search pattern, …"
+        },
+        {
+          "name": "ok",
+          "type": "INTEGER",
+          "doc": "1 succeeded, 0 failed, NULL unknown (a shell call often reports no exit code)."
+        },
+        {
+          "name": "at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "event_id",
+          "type": "TEXT",
+          "doc": "The `agent.tool.finished` event (v_event.id) this row records; NULL for rows written before the event log carried tool calls."
+        },
+        {
+          "name": "agent_session_id",
+          "type": "INTEGER",
+          "doc": "The agent session that made it (v_agent_session.id); NULL when not recorded. (v4)"
+        },
+        {
+          "name": "subagent_id",
+          "type": "TEXT",
+          "doc": "The subagent it ran inside, when the harness or the Task call bracketing it says so; NULL for the session's own. (v4)"
+        },
+        {
+          "name": "subagent_kind",
+          "type": "TEXT",
+          "doc": "That subagent's kind (`Explore`, `task`, …). (v4)"
         }
       ],
       "key": []
