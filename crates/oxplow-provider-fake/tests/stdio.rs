@@ -558,3 +558,110 @@ async fn the_fake_takes_its_id_from_the_host_and_reports_a_missing_credential() 
         "{refused:?}"
     );
 }
+
+/// Its effort-policy mode (`OXPLOW_FAKE_CAPABILITY=effort_policy`): it
+/// declares the one verb `react` and composes efforts for an item's
+/// moves — open on `in_progress` with a thread, close the item's open
+/// efforts (read through `host/call`) on `done` — and skips the rest.
+#[tokio::test]
+async fn as_an_effort_policy_it_composes_efforts() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_oxplow-provider-fake"))
+        .env("OXPLOW_FAKE_CAPABILITY", "effort_policy")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("spawn the fake");
+    let stdout = child.stdout.take().unwrap();
+    let stdin = child.stdin.take().unwrap();
+    let (peer, mut incoming) = Peer::spawn(stdout, stdin);
+    let declared = initialize(&peer).await;
+    assert_eq!(declared, oxplow_provider_fake::policy_declarations());
+    assert_eq!(declared.capabilities[0].capability, "effort_policy");
+    assert_eq!(
+        declared
+            .commands
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["react"]
+    );
+    assert!(declared.event_types.is_empty() && declared.collectors.is_empty());
+    let handle = check(&peer).await;
+    // The host answers its reads: the item's one open effort.
+    let answering = peer.clone();
+    let asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen = asked.clone();
+    tokio::spawn(async move {
+        while let Some(Incoming::Request { id, method, params }) = incoming.recv().await {
+            assert_eq!(method, method::HOST_CALL);
+            seen.lock().unwrap().push(params);
+            let _ = answering.respond(id, Ok(json!([{ "id": 7 }]))).await;
+        }
+    });
+    let event = |to: &str, thread: Option<&str>| {
+        json!({ "event": {
+            "id": format!("e-{to}"), "type": "work_item.state_changed", "v": 1, "seq": 1,
+            "source": "human", "subject": ["work_item:oxplow:tsk1"],
+            "payload": { "work_item": "work_item:oxplow:tsk1", "to": to },
+            "anchors": { "thread_id": thread },
+        }})
+    };
+    let started = keyed(
+        &peer,
+        &handle,
+        "react",
+        event("in_progress", Some("thr3")),
+        Some("react:e1"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        started.result,
+        json!({ "commands": [{ "name": "oxplow.effort.open",
+                               "input": { "thread": "thread:thr3", "work_item": "work_item:oxplow:tsk1" } }] })
+    );
+    let done = keyed(
+        &peer,
+        &handle,
+        "react",
+        event("done", None),
+        Some("react:e2"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        done.result,
+        json!({ "commands": [{ "name": "oxplow.effort.close",
+                               "input": { "effort": "effort:eff7", "reason": "switch" } }] })
+    );
+    let asked = asked.lock().unwrap().clone();
+    assert_eq!(asked.len(), 1);
+    assert_eq!(asked[0]["key"], "react:e2");
+    assert_eq!(asked[0]["scope"], "sql.read");
+    assert_eq!(
+        asked[0]["args"]["params"]["work_item"],
+        "work_item:oxplow:tsk1"
+    );
+    let skipped = keyed(
+        &peer,
+        &handle,
+        "react",
+        event("blocked", Some("thr3")),
+        Some("react:e3"),
+    )
+    .await
+    .unwrap();
+    assert!(skipped.result.get("skip").is_some(), "{}", skipped.result);
+    // A start with no thread has nowhere to open an effort.
+    let nowhere = keyed(
+        &peer,
+        &handle,
+        "react",
+        event("in_progress", None),
+        Some("react:e4"),
+    )
+    .await
+    .unwrap();
+    assert!(nowhere.result.get("skip").is_some(), "{}", nowhere.result);
+}

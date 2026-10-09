@@ -5902,3 +5902,272 @@ async fn a_provider_needs_only_scopes_host_call_serves() {
         "{errs}"
     );
 }
+
+const POLICY: &str = "steward/fake";
+
+/// A private extension whose provider runs the fake as an effort policy
+/// with `hooks` (its state, `reacts` included, kept beside the project).
+fn write_policy_extension(project: &Path, hooks: &str) {
+    let dir = project.join("oxplow/extensions/steward");
+    std::fs::create_dir_all(dir.join("bin")).unwrap();
+    std::fs::write(
+        dir.join("extension.yaml"),
+        "manifest: 2\nname: steward\nsharing: private\nintent:\n  purpose: the fake effort policy\n  examples: [{ name: a }]\nproviders:\n  - id: fake\n    capability: effort_policy\n    entry: bin/provider\n    declarations: provider.json\n    needs: [sql.read]\n",
+    )
+    .unwrap();
+    let script = dir.join("bin/provider");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nOXPLOW_FAKE_CAPABILITY=effort_policy OXPLOW_FAKE_HOOKS='{hooks}' OXPLOW_FAKE_STATE=\"{}/fake-policy-$OXPLOW_PROVIDER_ID.json\" exec '{}' \"$@\"\n",
+            project.join(".oxplow").display(),
+            fake_bin().display()
+        ),
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(
+        dir.join("provider.json"),
+        serde_json::to_string_pretty(&oxplow_provider_fake::policy_declarations()).unwrap(),
+    )
+    .unwrap();
+}
+
+/// The fixture with the policy extension approved and its instance
+/// running; the fixture's own effort closed, so the policy's are the only
+/// ones open.
+async fn running_policy(hooks: &str) -> (EffortFixture, Extension) {
+    let fx = services_with_effort().await;
+    let project = fx.svc.layout.project_dir.clone();
+    write_policy_extension(&project, hooks);
+    let ext = crate::extensions::load_extensions(&project)
+        .into_iter()
+        .find(|e| e.name == "steward")
+        .expect("the policy extension loads");
+    assert_eq!(ext.errors, Vec::<String>::new());
+    approve(&fx, &ext);
+    fx.svc
+        .providers
+        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
+        .await
+        .unwrap();
+    fx.svc
+        .commands
+        .run(
+            &Actor::Human,
+            crate::commands::effort::CLOSE,
+            json!({ "effort": oxplow_domain::refs::build::effort_ref(fx.effort) }),
+            false,
+        )
+        .await
+        .unwrap();
+    (fx, ext)
+}
+
+/// `id` as the project's effort policy.
+fn choose_policy(fx: &EffortFixture, id: &str) {
+    fx.svc
+        .config
+        .write()
+        .unwrap()
+        .active_providers
+        .insert("effort_policy".into(), id.into());
+    republish(fx);
+}
+
+/// A task filed on the fixture's thread, moved by the thread's agent to
+/// `to` (its anchors carry the thread); the policy has reacted when this
+/// returns.
+async fn agent_moves(fx: &EffortFixture, item: &str, to: &str) {
+    let agent = Actor::Agent {
+        session_id: None,
+        thread_id: Some(fx.thread),
+        stream_id: Some(oxplow_domain::StreamId::new(1)),
+    };
+    fx.svc
+        .commands
+        .run(
+            &agent,
+            crate::commands::work_item::NAME,
+            json!({ "ref": item, "to": to }),
+            false,
+        )
+        .await
+        .unwrap();
+    fx.svc
+        .event_pump
+        .settle(
+            &[crate::effort_policy::NAME],
+            std::time::Duration::from_secs(10),
+        )
+        .await;
+}
+
+async fn file_task(fx: &EffortFixture) -> String {
+    make_active(fx, "oxplow");
+    let out = fx
+        .svc
+        .commands
+        .run(
+            &Actor::Human,
+            crate::commands::work_item::CREATE,
+            json!({ "title": "policy work", "thread": fx.thread.to_string() }),
+            false,
+        )
+        .await
+        .unwrap();
+    out.result["ref"].as_str().unwrap().to_string()
+}
+
+/// `(work_item, open?)` of the thread's efforts, oldest first, and the
+/// source of the last `effort.opened`.
+async fn policy_efforts(fx: &EffortFixture) -> (Vec<(Option<String>, bool)>, Option<String>) {
+    use oxplow_db::SqlCell;
+    let efforts = fx
+        .svc
+        .sql
+        .query_sql(
+            "SELECT work_item, ended_at IS NULL FROM v_effort WHERE thread_id = ?1 ORDER BY id",
+            vec![SqlCell::Int(fx.thread.value())],
+            None,
+        )
+        .await
+        .unwrap()
+        .rows
+        .into_iter()
+        .map(|r| {
+            let item = match &r[0] {
+                SqlCell::Text(t) => Some(t.clone()),
+                _ => None,
+            };
+            (item, matches!(r[1], SqlCell::Int(1)))
+        })
+        .collect();
+    let source = fx
+        .svc
+        .db
+        .read(|c| {
+            Ok(c.query_row(
+                "SELECT source FROM event_log WHERE type = 'effort.opened' ORDER BY seq DESC LIMIT 1",
+                [],
+                |r| r.get::<_, String>(0),
+            )
+            .ok())
+        })
+        .await
+        .unwrap();
+    (efforts, source)
+}
+
+/// How many `react`s the fake answered.
+fn reacts(fx: &EffortFixture) -> u64 {
+    std::fs::read_to_string(
+        fx.svc
+            .layout
+            .project_dir
+            .join(".oxplow/fake-policy-fake.json"),
+    )
+    .ok()
+    .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+    .and_then(|v| v["reacts"].as_u64())
+    .unwrap_or(0)
+}
+
+/// A provider process as the project's effort policy: it is listed under
+/// the capability while it runs; a task its thread's agent starts opens an
+/// effort linked to it, run as `effect:effort_policy:fake`, and finishing
+/// the task closes it — the close read through `host/call`.
+#[tokio::test]
+async fn a_provider_is_the_projects_effort_policy() {
+    let (fx, _ext) = running_policy("").await;
+    let listed = fx
+        .svc
+        .sql
+        .query_sql(
+            "SELECT provider FROM v_capability_provider WHERE capability = 'effort_policy' ORDER BY provider",
+            vec![],
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(
+        serde_json::to_value(&listed.rows)
+            .unwrap()
+            .to_string()
+            .contains("\"fake\""),
+        "{:?}",
+        listed.rows
+    );
+    choose_policy(&fx, "fake");
+    let task = file_task(&fx).await;
+    agent_moves(&fx, &task, "in_progress").await;
+    let (efforts, source) = policy_efforts(&fx).await;
+    assert_eq!(
+        efforts.last().unwrap(),
+        &(Some(task.clone()), true),
+        "{efforts:?}"
+    );
+    assert_eq!(source.as_deref(), Some("effect:effort_policy:fake"));
+    agent_moves(&fx, &task, "done").await;
+    let (efforts, _) = policy_efforts(&fx).await;
+    assert!(efforts.iter().all(|e| !e.1), "it closed: {efforts:?}");
+}
+
+/// Only the chosen policy hears events: with `oxplow` or `none` active,
+/// the running provider is asked nothing.
+#[tokio::test]
+async fn a_provider_policy_not_chosen_hears_nothing() {
+    let (fx, _ext) = running_policy("").await;
+    for chosen in ["oxplow", "none"] {
+        choose_policy(&fx, chosen);
+        let task = file_task(&fx).await;
+        agent_moves(&fx, &task, "in_progress").await;
+        agent_moves(&fx, &task, "done").await;
+    }
+    assert_eq!(reacts(&fx), 0);
+}
+
+/// What a policy composes is checked before any of it runs: a command
+/// that doesn't exist runs nothing, and the task's state stands.
+#[tokio::test]
+async fn a_provider_policy_composing_no_command_runs_nothing() {
+    let (fx, _ext) = running_policy("bogus-react").await;
+    choose_policy(&fx, "fake");
+    let task = file_task(&fx).await;
+    agent_moves(&fx, &task, "in_progress").await;
+    assert!(reacts(&fx) > 0, "it was asked");
+    let (efforts, _) = policy_efforts(&fx).await;
+    assert!(efforts.iter().all(|e| !e.1), "nothing opened: {efforts:?}");
+    let state = fx
+        .svc
+        .sql
+        .query_sql(
+            "SELECT state FROM v_work_item WHERE ref = ?1",
+            vec![oxplow_db::SqlCell::Text(task)],
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(&state.rows).unwrap(),
+        json!([["in_progress"]])
+    );
+}
+
+/// A stopped instance is no policy: the choice falls back to `none`, and
+/// starting a task opens nothing.
+#[tokio::test]
+async fn a_stopped_provider_policy_resolves_to_none() {
+    let (fx, _ext) = running_policy("").await;
+    choose_policy(&fx, "fake");
+    assert!(fx.svc.providers.stop(POLICY).await);
+    republish(&fx);
+    let config = crate::config_service::read_config(&fx.svc.config);
+    assert_eq!(fx.svc.capabilities.active(&config, "effort_policy"), "none");
+    assert!(!fx.svc.effort_policies.has("fake"));
+    let task = file_task(&fx).await;
+    agent_moves(&fx, &task, "in_progress").await;
+    let (efforts, _) = policy_efforts(&fx).await;
+    assert!(efforts.iter().all(|e| !e.1), "nothing opened: {efforts:?}");
+}
