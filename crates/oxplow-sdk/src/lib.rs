@@ -331,6 +331,12 @@ pub fn scaffold(
                 "# The instance config `oxplow extension test` checks the provider with.\nconfig: {}\n"
                     .to_string(),
             )?;
+            if capability == "snapshots" {
+                write(
+                    &format!("{rel_dir}/fixtures/tree/hello.txt"),
+                    "The tree the example marks: one file.\n".to_string(),
+                )?;
+            }
         }
         Kind::Lens => write(
             &format!("{rel_dir}/lenses/{name}.yaml"),
@@ -553,6 +559,15 @@ fn provider_starter(capability: &str) -> ProviderStarter {
                 "settings": [],
             }),
         },
+        "snapshots" => ProviderStarter {
+            // A small tree beside the fixtures (`fixtures/tree`) stands in for a worktree.
+            input: "{ command: mark, input: { stream: 'stream:str1', worktree: fixtures/tree, trigger: manual, parent: null } }"
+                .to_string(),
+            expect: "a handle for the marked state",
+            fixture: "{ handle: $any, unchanged: false, file_count: 1 }".to_string(),
+            needs: None,
+            data: serde_json::Value::Null,
+        },
         _ => {
             let verb = oxplow_domain::capability::contract(capability)
                 .and_then(|c| c.verbs.first())
@@ -622,6 +637,32 @@ fn verb_input(capability: &str, verb: &str) -> (String, serde_json::Value) {
                 .into(),
             json!({ "type": "object", "required": ["body"],
                     "properties": { "body": { "type": "object" } } }),
+        ),
+        ("snapshots", "mark") => (
+            "Mark the worktree's state: { handle, unchanged, file_count } — `unchanged` when the tree \
+             equals `parent`'s (null: the empty tree)."
+                .into(),
+            json!({ "type": "object", "required": ["stream", "worktree", "trigger"],
+                    "additionalProperties": false,
+                    "properties": { "stream": str_prop, "worktree": str_prop, "trigger": str_prop,
+                                    "thread": str_prop, "turn": { "type": "integer" },
+                                    "effort": str_prop, "budget_ms": { "type": "integer" },
+                                    "parent": { "type": ["string", "null"] } } }),
+        ),
+        ("snapshots", "changed") => (
+            "What changed between two marked states: { changes: [{ path, kind: added|modified|deleted, \
+             identity (xxh3-128 hex), size }] } — `from` null is the empty tree."
+                .into(),
+            json!({ "type": "object", "required": ["stream", "from", "to"],
+                    "additionalProperties": false,
+                    "properties": { "stream": str_prop, "from": { "type": ["string", "null"] },
+                                    "to": str_prop } }),
+        ),
+        ("snapshots", "read_at") => (
+            "A file's bytes at a marked state (feature `contents`): { bytes }, base64.".into(),
+            json!({ "type": "object", "required": ["handle", "path"],
+                    "additionalProperties": false,
+                    "properties": { "handle": str_prop, "path": str_prop } }),
         ),
         ("effort_policy", "react") => (
             "Compose the commands an event calls for: { commands } to run, or { skip }.".into(),
@@ -982,6 +1023,7 @@ mod tests {
             Kind::provider("work_items").unwrap(),
             Kind::provider("effort_policy").unwrap(),
             Kind::provider("agent_harness").unwrap(),
+            Kind::provider("snapshots").unwrap(),
             Kind::Collector,
             Kind::Command,
             Kind::Effect,

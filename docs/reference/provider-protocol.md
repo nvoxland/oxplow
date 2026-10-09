@@ -9,6 +9,7 @@ stdin/stdout, and reads and writes through it.
 oxplow extension new provider my-tracker   # declarations, a stub program, a test config
 oxplow extension new provider my-policy --capability effort_policy
 oxplow extension new provider my-agent --capability agent_harness
+oxplow extension new provider my-shutter --capability snapshots
 oxplow extension test my-tracker           # handshake, examples, conformance suite
 ```
 

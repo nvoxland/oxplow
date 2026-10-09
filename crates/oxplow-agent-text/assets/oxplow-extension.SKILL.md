@@ -23,12 +23,12 @@ failure after your edit is yours:
   item's Commands menu;
 - `provider` — an external provider's declarations and a stub program
   (red until you write the program); `--capability <cap>` picks what it
-  implements: `work_items` (the default), `effort_policy` or
-  `agent_harness` (a harness launching agent sessions: its command runs in
+  implements: `work_items` (the default), `effort_policy`,
+  `snapshots` or `agent_harness` (a harness launching agent sessions: its command runs in
   the person's terminal, so a person approves it knowing that; if it can
   tell its subagents apart it declares the `subagents` feature and answers
   the `prompt` and `subagent` verbs).
-  A `snapshots` provider (no scaffold yet) answers `mark { stream, worktree,
+  A `snapshots` provider answers `mark { stream, worktree,
   trigger, parent? }` → `{ handle, unchanged, file_count }`, `changed { stream,
   from, to }` → `{ changes: [{ path, kind: added|modified|deleted, identity
   (xxh3-128 hex), size }] }` (`from: null` is the empty tree) and, with the

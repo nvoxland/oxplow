@@ -14,11 +14,11 @@ oxplow extension test my-review            # run its examples on a throwaway oxp
 `new` takes a kind instead of `extension` to start from that kind's
 starter: `lens`, `collector`, `command`, `effect`, `provider`,
 `component` or `policy`. A provider takes `--capability` for what it
-implements: `work_items` (the default), `effort_policy` or
+implements: `work_items` (the default), `effort_policy`,
 `agent_harness` (a harness that tells its subagents apart also declares
-the `subagents` feature; see the provider protocol). A snapshots provider
-(`mark`, `changed` and, with the `contents` feature, `read_at`; see the
-provider protocol) has no scaffold yet. Each scaffold checks
+the `subagents` feature; see the provider protocol) or `snapshots` (its
+example marks a one-file tree under `fixtures/tree`; the `contents`
+feature adds `read_at`). Each scaffold checks
 clean and passes `test` as written.
 
 ## Editor support
