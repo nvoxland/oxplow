@@ -1,0 +1,7 @@
+input:
+  implementation: prompt_efforts
+  event: { type: work_item.state_changed, payload: { work_item: "work_item:oxplow:tsk2", to: done } }
+  answers:
+    sql.read:
+      - [{ id: 4 }]
+expect: { commands: [oxplow.effort.close] }

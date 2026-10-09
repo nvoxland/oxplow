@@ -1,0 +1,7 @@
+input:
+  implementation: prompt_efforts
+  event: { type: work_item.state_changed, payload: { work_item: "work_item:oxplow:tsk2", to: in_progress }, anchors: { thread_id: thr1 } }
+  answers:
+    sql.read:
+      - [{ id: 4, work_item: null, started_at: "2026-10-09T10:00:05Z" }]
+expect: { commands: [oxplow.effort.link] }

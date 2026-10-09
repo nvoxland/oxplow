@@ -210,3 +210,47 @@ async fn the_github_example_checks_tests_and_its_pr_opens() {
         "{hits:?}"
     );
 }
+
+/// The one-effort-per-prompt policy example checks clean, its examples
+/// dry-run as their fixtures say, and the effort-policy suite passes over
+/// it in a throwaway host.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_prompt_efforts_example_checks_and_passes_the_policy_suite() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    oxplow_app::vcs::GitProvider
+        .init_repository(root)
+        .await
+        .unwrap();
+    let example =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/prompt-efforts");
+    copy_dir(&example, &root.join("oxplow/extensions/prompt-efforts"));
+
+    let report = check(
+        root,
+        "prompt-efforts",
+        &ExtensionCatalog::new(),
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(report.ok, "{}", render_findings(&report, Format::Text));
+    let tested = test_extension(root, "prompt-efforts", false).await.unwrap();
+    assert_eq!(tested.errors, Vec::<String>::new());
+    for ran in [
+        "example a-prompt-that-changed-files",
+        "example a-question-only-prompt",
+        "example a-prompt-already-covered",
+        "example an-item-started",
+        "example an-item-finished",
+        "effort_policy suite",
+    ] {
+        assert!(
+            tested.ran.contains(&ran.to_string()),
+            "{ran}: {:?}",
+            tested.ran
+        );
+    }
+}

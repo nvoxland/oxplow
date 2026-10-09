@@ -91,6 +91,13 @@ def transform(x):
     /// effort closed so the policy's are the only ones.
     async fn scripted(script: &str) -> EffortFixture {
         let fx = services_with_effort().await;
+        install(&fx, script).await;
+        fx
+    }
+
+    /// `script` as the private extension `acme`'s effort policy `tidy`,
+    /// chosen as the project's, the fixture's own effort closed.
+    async fn install(fx: &EffortFixture, script: &str) {
         let dir = fx.svc.layout.project_dir.join("oxplow/extensions/acme");
         std::fs::create_dir_all(dir.join("policies")).unwrap();
         std::fs::write(
@@ -122,7 +129,6 @@ def transform(x):
             )
             .await
             .unwrap();
-        fx
     }
 
     fn approve(fx: &EffortFixture) {
@@ -328,5 +334,68 @@ def transform(x):
         let item = task(&fx).await;
         agent_moves(&fx, &item, "in_progress").await;
         assert_eq!(open_for(&fx, &item).await, 1);
+    }
+
+    /// The one-effort-per-prompt example (`examples/extensions/
+    /// prompt-efforts`) over real turns: each prompt that changes files gets
+    /// an effort of its own — the previous one closed as of the next turn's
+    /// start — and a read-only prompt gets none.
+    #[tokio::test]
+    async fn the_prompt_efforts_example_gives_each_changing_prompt_its_own_effort() {
+        const EXAMPLE: &str = include_str!(
+            "../../../examples/extensions/prompt-efforts/policies/prompt_efforts.star"
+        );
+        let fx = crate::thread_checkpoint::tests::with_baseline().await;
+        install(&fx, EXAMPLE).await;
+        approve(&fx);
+        let settle = || async {
+            fx.svc
+                .event_pump
+                .settle(
+                    &[crate::effort_policy::NAME],
+                    std::time::Duration::from_secs(10),
+                )
+                .await;
+        };
+        let policy_efforts = || async {
+            fx.svc
+                .sql
+                .query_sql(
+                    "SELECT id, CASE WHEN ended_at IS NULL THEN 'open' ELSE 'closed' END
+                       FROM v_effort WHERE thread_id = ?1 AND id <> ?2 ORDER BY id",
+                    vec![
+                        SqlCell::Int(fx.thread.value()),
+                        SqlCell::Int(fx.effort.value()),
+                    ],
+                    None,
+                )
+                .await
+                .unwrap()
+                .rows
+        };
+        crate::thread_checkpoint::tests::turn(&fx, Some(("one.txt", "1")), &["edit"]).await;
+        settle().await;
+        assert_eq!(policy_efforts().await.len(), 1, "the first prompt's effort");
+        crate::thread_checkpoint::tests::turn(&fx, None, &["read"]).await;
+        settle().await;
+        assert_eq!(
+            policy_efforts().await.len(),
+            1,
+            "a read-only prompt gets none"
+        );
+        crate::thread_checkpoint::tests::turn(&fx, Some(("two.txt", "2")), &["edit"]).await;
+        settle().await;
+        let efforts = policy_efforts().await;
+        assert_eq!(efforts.len(), 2, "{efforts:?}");
+        assert_eq!(efforts[0][1], SqlCell::Text("closed".into()));
+        assert_eq!(efforts[1][1], SqlCell::Text("open".into()));
+        assert_eq!(dead_letters(&fx).await, Vec::<String>::new());
+        assert_eq!(
+            sources(&fx, "effort.opened")
+                .await
+                .last()
+                .map(String::as_str),
+            Some("effect:effort_policy:tidy")
+        );
     }
 }

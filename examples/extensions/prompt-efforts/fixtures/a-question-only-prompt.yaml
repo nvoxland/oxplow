@@ -1,0 +1,4 @@
+input:
+  implementation: prompt_efforts
+  event: { type: thread.checkpoint, payload: { changed: false, writing_tools: 0 }, anchors: { thread_id: thr1, turn_id: 8 } }
+expect: { skip: $any }

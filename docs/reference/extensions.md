@@ -183,7 +183,9 @@ An effort policy decides when a thread's effort opens, closes and links
 to a work item. oxplow's own opens one per commit or task switch; a
 script can be yours instead. `oxplow extension new policy <name>`
 writes one that opens an item's effort when an agent starts it on a
-thread and closes it when the item is done.
+thread and closes it when the item is done. For a fuller one, see
+`examples/extensions/prompt-efforts`: it gives every prompt that changes
+files an effort of its own, reacting to each turn's `thread.checkpoint`.
 
 ```yaml
 implementations:

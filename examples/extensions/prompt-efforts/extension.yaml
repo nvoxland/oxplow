@@ -1,0 +1,37 @@
+manifest: 2
+name: prompt-efforts
+description: An effort policy that gives every prompt that changes files its own effort.
+sharing: shared
+engine: ">=0.7"
+intent:
+  purpose: >-
+    One effort per prompt: each prompt whose turn changed the worktree gets an
+    effort of its own, so an effort's review, files and runs are exactly that
+    prompt's. Starting a work item opens or links the thread's effort, and
+    finishing it closes that effort, as every effort policy does.
+  origin: null
+  examples:
+    - name: a-prompt-that-changed-files
+      input: { implementation: prompt_efforts, event: { type: thread.checkpoint } }
+      expect: the thread's open effort closes as of the turn's start and a new one opens for the turn, keeping its work item
+    - name: a-question-only-prompt
+      input: { implementation: prompt_efforts, event: { type: thread.checkpoint } }
+      expect: nothing; a turn that changed nothing gets no effort
+    - name: a-prompt-already-covered
+      input: { implementation: prompt_efforts, event: { type: thread.checkpoint } }
+      expect: nothing; an effort opened during the turn already covers it
+    - name: an-item-started
+      input: { implementation: prompt_efforts, event: { type: work_item.state_changed } }
+      expect: the thread's open effort links to the item
+    - name: an-item-finished
+      input: { implementation: prompt_efforts, event: { type: work_item.state_changed } }
+      expect: the item's open effort closes
+implementations:
+  # The project's effort policy once chosen in Settings → Capabilities. It
+  # runs once a person approves it (Settings → Data → Programs) and reads
+  # oxplow only through `sql.read`.
+  - capability: effort_policy
+    id: prompt_efforts
+    title: One effort per prompt
+    entry: policies/prompt_efforts.star
+    needs: [sql.read]

@@ -1,0 +1,8 @@
+input:
+  implementation: prompt_efforts
+  event: { type: thread.checkpoint, payload: { changed: true, writing_tools: 1 }, anchors: { thread_id: thr1, turn_id: 9 } }
+  answers:
+    sql.read:
+      - [{ started_at: "2026-10-09T10:00:00Z" }]
+      - [{ id: 4, work_item: null, started_at: "2026-10-09T10:00:05Z" }]
+expect: { skip: $any }

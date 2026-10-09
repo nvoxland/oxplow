@@ -1,0 +1,8 @@
+input:
+  implementation: prompt_efforts
+  event: { type: thread.checkpoint, payload: { changed: true, writing_tools: 2 }, anchors: { thread_id: thr1, turn_id: 7 } }
+  answers:
+    sql.read:
+      - [{ started_at: "2026-10-09T10:00:00Z" }]
+      - [{ id: 3, work_item: "work_item:oxplow:tsk1", started_at: "2026-10-09T09:00:00Z" }]
+expect: { commands: [oxplow.effort.close, oxplow.effort.open] }

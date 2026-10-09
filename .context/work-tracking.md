@@ -134,7 +134,9 @@ under the effects' sandbox, its `scope("sql.read", …)` limited to its
 (`ProgramKind::EffortPolicy`, `exec_consent::script_gate`, asked before
 each event): unapproved, each event it's offered fails saying so and the
 pump dead-letters it — nothing falls back. Its reads aren't audited, as
-an external policy's aren't.
+an external policy's aren't. `examples/extensions/prompt-efforts` is one:
+an effort per prompt that changes files (checked by `oxplow extension
+test` and run over real turns in `effort_policy_script`'s tests).
 
 **A provider process may be the policy** (`providers:` with `capability:
 effort_policy`, [providers.md](./providers.md) "What a provider may
