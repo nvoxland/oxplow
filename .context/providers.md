@@ -1285,7 +1285,11 @@ and the throwaway host the conformance suite runs in
   `ExternalWorkItems`, or — the instance made the project's effort policy —
   `effort_policy_conformance::suite` (an agent starting an item on its
   thread opens an effort linked to it, finishing it closes it, each run as
-  `effect:effort_policy:<id>`), which the built-in passes too.
+  `effect:effort_policy:<id>`), which the built-in passes too; or — the
+  instance made the project's snapshots, the captures following it —
+  `snapshot_conformance::suite` on the primary stream (round-trip, an
+  unchanged mark keeps its snapshot, diffs with deletions, turn-end
+  anchoring, the budget recorded), which both built-ins pass too.
 
 The red test (`extension_cli.rs`,
 `extension_test_blesses_a_provider_then_a_changed_transcript_fails`)

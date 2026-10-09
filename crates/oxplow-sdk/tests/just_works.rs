@@ -604,6 +604,69 @@ async fn extension_test_runs_the_harness_suite_over_a_harness_provider() {
     );
 }
 
+/// `extension test` runs the snapshot suite over a snapshots provider —
+/// here the fake in snapshots mode, keeping contents — made the throwaway
+/// project's snapshots; `ran` shows it.
+#[tokio::test(flavor = "multi_thread")]
+async fn extension_test_runs_the_snapshot_suite_over_a_snapshots_provider() {
+    let dir = project().await;
+    let ext = dir.path().join("oxplow/extensions/shutter");
+    let tree = dir.path().join("example-tree");
+    std::fs::create_dir_all(ext.join("bin")).unwrap();
+    std::fs::create_dir_all(ext.join("fixtures")).unwrap();
+    std::fs::create_dir_all(&tree).unwrap();
+    std::fs::write(tree.join("a.txt"), "alpha").unwrap();
+    let mark = format!(
+        "{{ command: mark, input: {{ stream: 'stream:str1', worktree: '{}', trigger: manual, parent: null }} }}",
+        tree.display()
+    );
+    std::fs::write(
+        ext.join("extension.yaml"),
+        format!("manifest: 2\nname: shutter\nsharing: private\nintent:\n  purpose: Snapshots over the protocol.\n  examples:\n    - {{ name: basic, input: {mark}, expect: a handle }}\nproviders:\n  - id: shutter\n    capability: snapshots\n    entry: bin/provider\n    declarations: provider.json\n"),
+    )
+    .unwrap();
+    std::fs::write(
+        ext.join("fixtures/basic.yaml"),
+        format!("input: {mark}\nexpect: {{ handle: $any, unchanged: false, file_count: 1 }}\n"),
+    )
+    .unwrap();
+    std::fs::write(
+        ext.join("fixtures/provider-shutter.yaml"),
+        "config: { team: core }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        ext.join("provider.json"),
+        serde_json::to_string_pretty(&oxplow_provider_fake::snapshots_declarations(true)).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        ext.join("bin/provider"),
+        format!(
+            "#!/bin/sh\nOXPLOW_FAKE_CAPABILITY=snapshots OXPLOW_FAKE_FEATURES=contents exec '{}' \"$@\"\n",
+            fake_bin().display()
+        ),
+    )
+    .unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(
+            ext.join("bin/provider"),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+    }
+    let blessed = test_extension(dir.path(), "shutter", true).await.unwrap();
+    assert_eq!(blessed.errors, Vec::<String>::new());
+    let report = test_extension(dir.path(), "shutter", false).await.unwrap();
+    assert_eq!(report.errors, Vec::<String>::new());
+    assert!(
+        report.ran.iter().any(|r| r == "snapshots suite"),
+        "{:?}",
+        report.ran
+    );
+}
+
 /// The fields `scripts/record-just-works.sh` strips from a recorded
 /// `run.json`: the author's machine (denied commands carry local paths),
 /// the session and the cost.

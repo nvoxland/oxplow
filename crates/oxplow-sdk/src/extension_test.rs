@@ -1584,6 +1584,33 @@ async fn suite(
                 )
                 .await
             }
+            providers::snapshots::SnapshotsHost::CAPABILITY => {
+                // The instance under test is the project's snapshots, and
+                // the captures follow it now (the throwaway host's pump
+                // may not have delivered the switch yet).
+                svc.config
+                    .write()
+                    .map_err(|e| e.to_string())?
+                    .active_providers
+                    .insert(spec.capability.clone(), spec.id.clone());
+                let config = oxplow_app::config_service::read_config(&svc.config);
+                svc.capabilities
+                    .publish(&config, &svc.db)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                oxplow_app::snapshots::apply_active_policy(&svc.snapshots, &svc.snapshot_captures);
+                let provider = svc
+                    .snapshots
+                    .get(&spec.id)
+                    .ok_or_else(|| format!("`{}` isn't a snapshot implementation", spec.id))?;
+                let stream = svc
+                    .snapshot_captures
+                    .primary()
+                    .ok_or("the throwaway project has no worktree to mark")?
+                    .stream_id()
+                    .to_owned();
+                oxplow_app::snapshot_conformance::suite(&svc, provider.as_ref(), stream).await
+            }
             other => return Err(format!("no conformance suite for `{other}`")),
         };
         svc.providers.stop(&spec.approval_name(&ext.name)).await;
