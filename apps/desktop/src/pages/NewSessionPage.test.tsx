@@ -53,3 +53,18 @@ test("start passes whether to remember the choice", async () => {
   fireEvent.click(getByTestId("new-session-start"));
   await waitFor(() => expect(started).toEqual([["codex", null, true]]));
 });
+
+/** The page focuses its picker when it opens, but a page that opens late
+ *  doesn't take focus from where a person already is (the launcher). */
+test("the picker takes focus only when nothing else has it", () => {
+  const first = renderPicker();
+  expect(document.activeElement).toBe(first.getByTestId("new-session-agent"));
+  cleanup();
+
+  const input = document.createElement("input");
+  document.body.appendChild(input);
+  input.focus();
+  renderPicker();
+  expect(document.activeElement).toBe(input);
+  input.remove();
+});
