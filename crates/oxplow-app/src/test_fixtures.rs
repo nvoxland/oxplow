@@ -254,3 +254,19 @@ pub fn approve_ai_providers(svc: &crate::Services) {
         }
     }
 }
+
+/// A tool hook's call as the hook route maps it (`AgentHarness::tool_use`
+/// of the bearer's harness), for a test posting Claude Code's bodies;
+/// `None` for any other hook.
+pub fn claude_tool(
+    kind: oxplow_domain::HookKind,
+    body: &serde_json::Value,
+) -> Option<oxplow_domain::agent::tool::ToolUse> {
+    use oxplow_domain::HookKind;
+    if !matches!(kind, HookKind::PreToolUse | HookKind::PostToolUse) {
+        return None;
+    }
+    let claude =
+        oxplow_harnesses::built_in("oxplow:claude-code", "claude", "Claude").expect("the built-in");
+    futures::executor::block_on(claude.tool_use(body))
+}

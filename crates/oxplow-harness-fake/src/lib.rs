@@ -32,6 +32,7 @@ fn quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
+#[async_trait::async_trait]
 impl AgentHarness for FakeHarness {
     fn id(&self) -> &str {
         ID
@@ -47,86 +48,110 @@ impl AgentHarness for FakeHarness {
         }
     }
 
-    fn launch(&self, input: &LaunchInput<'_>) -> Result<Launch, HarnessError> {
-        let program = (input.resolve_program)(BIN)
-            .ok_or_else(|| HarnessError::Config(format!("{BIN} isn't built")))?;
-        let ep = input.endpoints;
-        // The identity env carries the hook URL and token; the OTLP
-        // receiver is the fake's own addition, as each harness's is.
-        let mut env = input.identity_env.to_vec();
-        env.push((
-            "OXPLOW_FAKE_OTLP_URL".to_string(),
-            format!("{}/v1/metrics", ep.otlp_base_url),
-        ));
-        Ok(Launch {
-            spec: LaunchSpec::Pty {
-                command: format!(
-                    "cd {} && exec {}",
-                    quote(&input.workspace.to_string_lossy()),
-                    quote(&program)
-                ),
-                env,
-            },
-            resume_dropped: false,
-        })
+    async fn launch(&self, input: &LaunchInput) -> Result<Launch, HarnessError> {
+        launch(input)
     }
 
-    /// Its scripted session posts one edit, `{"tool_name": "Edit",
-    /// "tool_input": {"file_path": …}}`.
-    fn tool_use(&self, body: &serde_json::Value) -> Option<ToolUse> {
-        let name = body.get("tool_name")?.as_str()?.to_string();
-        let kind = if name == "Edit" {
-            ToolKind::Edit
-        } else {
-            ToolKind::Other
-        };
-        Some(ToolUse {
-            paths: body["tool_input"]["file_path"]
-                .as_str()
-                .map(|p| vec![p.to_string()])
-                .unwrap_or_default(),
-            ok: body
-                .get("tool_response")
-                .map(|r| r["success"].as_bool().unwrap_or(false)),
-            name,
-            kind,
-            ..ToolUse::default()
-        })
+    async fn tool_use(&self, body: &serde_json::Value) -> Option<ToolUse> {
+        tool_use(body)
     }
 
-    fn token_readings(&self, record: &OtlpRecord<'_>) -> Vec<TokenReading> {
-        let OtlpRecord::Point {
-            metric: TOKEN_METRIC,
-            value,
-            attributes,
-            time_unix_nano,
-            start_time_unix_nano,
-            ..
-        } = record
-        else {
-            return Vec::new();
-        };
-        let kind = match attributes.str("kind") {
-            Some("input") => TokenKind::Input,
-            Some("output") => TokenKind::Output,
-            _ => return Vec::new(),
-        };
-        vec![TokenReading {
-            model: record.model(),
-            kind,
-            value: *value,
-            at_unix_nano: *time_unix_nano,
-            from_unix_nano: *start_time_unix_nano,
-        }]
+    async fn token_readings(&self, records: &[OtlpRecord]) -> Vec<TokenReading> {
+        records.iter().flat_map(token_reading).collect()
     }
 
-    fn render(&self, answer: &HookAnswer) -> serde_json::Value {
-        match answer {
-            HookAnswer::Ack => serde_json::json!({ "fake": "ack" }),
-            HookAnswer::Deny { reason } => serde_json::json!({ "fake": "deny", "reason": reason }),
-            HookAnswer::Context { text, .. } => {
-                serde_json::json!({ "fake": "context", "text": text })
-            }
+    async fn render(&self, answer: &HookAnswer) -> serde_json::Value {
+        render(answer)
+    }
+}
+
+/// Its launch: this crate's binary, resolved on the input's search path,
+/// told the hook and OTLP receivers through its env.
+pub fn launch(input: &LaunchInput) -> Result<Launch, HarnessError> {
+    let program = input
+        .resolve_program(BIN)
+        .ok_or_else(|| HarnessError::Config(format!("{BIN} isn't built")))?;
+    let ep = &input.endpoints;
+    // The identity env carries the hook URL and token; the OTLP
+    // receiver is the fake's own addition, as each harness's is.
+    let mut env = input.identity_env.clone();
+    env.push((
+        "OXPLOW_FAKE_OTLP_URL".to_string(),
+        format!("{}/v1/metrics", ep.otlp_base_url),
+    ));
+    Ok(Launch {
+        spec: LaunchSpec::Pty {
+            command: format!(
+                "cd {} && exec {}",
+                quote(&input.workspace.to_string_lossy()),
+                quote(&program)
+            ),
+            env,
+        },
+        resume_dropped: false,
+    })
+}
+
+/// Its scripted session posts one edit, `{"tool_name": "Edit",
+/// "tool_input": {"file_path": …}}`.
+pub fn tool_use(body: &serde_json::Value) -> Option<ToolUse> {
+    let name = body.get("tool_name")?.as_str()?.to_string();
+    let kind = if name == "Edit" {
+        ToolKind::Edit
+    } else {
+        ToolKind::Other
+    };
+    Some(ToolUse {
+        paths: body["tool_input"]["file_path"]
+            .as_str()
+            .map(|p| vec![p.to_string()])
+            .unwrap_or_default(),
+        ok: body
+            .get("tool_response")
+            .map(|r| r["success"].as_bool().unwrap_or(false)),
+        name,
+        kind,
+        ..ToolUse::default()
+    })
+}
+
+/// One record's token counts: its metric's `kind` attribute.
+pub fn token_reading(record: &OtlpRecord) -> Vec<TokenReading> {
+    let OtlpRecord::Point {
+        metric,
+        value,
+        attributes,
+        time_unix_nano,
+        start_time_unix_nano,
+        ..
+    } = record
+    else {
+        return Vec::new();
+    };
+    if metric != TOKEN_METRIC {
+        return Vec::new();
+    }
+    let kind = match attributes.str("kind") {
+        Some("input") => TokenKind::Input,
+        Some("output") => TokenKind::Output,
+        _ => return Vec::new(),
+    };
+    vec![TokenReading {
+        model: record.model(),
+        kind,
+        value: *value,
+        at_unix_nano: *time_unix_nano,
+        from_unix_nano: *start_time_unix_nano,
+    }]
+}
+
+/// Its answers' shape (`{"fake": …}`), which its binary insists on.
+pub fn render(answer: &HookAnswer) -> serde_json::Value {
+    match answer {
+        HookAnswer::Ack => serde_json::json!({ "fake": "ack" }),
+        HookAnswer::Deny { reason } => serde_json::json!({ "fake": "deny", "reason": reason }),
+        HookAnswer::Context { text, .. } => {
+            serde_json::json!({ "fake": "context", "text": text })
         }
     }
 }

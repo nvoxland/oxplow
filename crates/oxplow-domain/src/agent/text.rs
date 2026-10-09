@@ -5,14 +5,15 @@
 
 /// One piece of text for the agent: a skill (its `SKILL.md`, whose
 /// frontmatter `name:` is `name`) or a slash command (its markdown).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Text {
     pub name: String,
     pub body: String,
 }
 
 /// Every skill and slash command an agent runtime gets.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct AgentText {
     pub skills: Vec<Text>,
     pub commands: Vec<Text>,

@@ -57,7 +57,7 @@ impl OtlpIngestService {
         session: Option<AgentSessionId>,
         body: &[u8],
     ) -> Result<bool, DomainError> {
-        let Some(export) = decode_token_export(body, &self.harnesses) else {
+        let Some(export) = decode_token_export(body, &self.harnesses).await else {
             return Ok(false);
         };
         let dedupe = format!(

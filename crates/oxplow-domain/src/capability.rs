@@ -91,6 +91,10 @@ pub struct ProviderContract {
     pub ref_kind: Option<&'static str>,
     /// Whether it keeps items: a manifest's `fields` and `id_pattern` apply.
     pub items: bool,
+    /// The JSON Schema of what it declares of itself beyond its features
+    /// (its capability declaration's `data`); `None` when it declares
+    /// nothing more.
+    pub data: Option<&'static str>,
 }
 
 /// One verb of a [`ProviderContract`].
@@ -185,6 +189,7 @@ pub const WORK_ITEMS: ProviderContract = ProviderContract {
     }),
     ref_kind: Some("work_item"),
     items: true,
+    data: None,
 };
 
 /// An effort policy's: core offers it each event a policy reacts to and
@@ -199,7 +204,73 @@ pub const EFFORT_POLICY: ProviderContract = ProviderContract {
     records: None,
     ref_kind: None,
     items: false,
+    data: None,
 };
+
+/// An agent harness's (`.context/agent-model.md`): core launches its
+/// sessions through it, has it map its tool hooks and render its answers,
+/// and — as its features say — read its transcript and telemetry and
+/// rewrite its runtimes' text. What a built-in answers from code
+/// (instruction files, environment markers, settings) it declares as its
+/// `data` ([`HARNESS_DATA`]); a structured transcript is its feature.
+pub const AGENT_HARNESS: ProviderContract = ProviderContract {
+    verbs: &[
+        Verb {
+            name: "launch",
+            needs: Need::Always,
+        },
+        Verb {
+            name: "tool_use",
+            needs: Need::Always,
+        },
+        Verb {
+            name: "render",
+            needs: Need::Always,
+        },
+        Verb {
+            name: "refresh_text",
+            needs: Need::Feature("runtime_text"),
+        },
+        Verb {
+            name: "turns",
+            needs: Need::Feature("transcript"),
+        },
+        Verb {
+            name: "token_readings",
+            needs: Need::Feature("telemetry"),
+        },
+    ],
+    dispatch: None,
+    events: &[],
+    records: None,
+    ref_kind: None,
+    items: false,
+    data: Some(HARNESS_DATA),
+};
+
+/// What a harness declares of itself (`agent::harness::HarnessData`).
+pub const HARNESS_DATA: &str = r#"{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "instruction_files": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "env_markers": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "settings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "title"],
+        "properties": {
+          "key": { "type": "string", "minLength": 1 },
+          "title": { "type": "string", "minLength": 1 },
+          "hint": { "type": "string" },
+          "placeholder": { "type": "string" }
+        }
+      }
+    }
+  }
+}"#;
 
 /// The implementation id of "nothing implements it", for an optional
 /// capability.
@@ -278,8 +349,11 @@ pub const CAPABILITIES: &[CapabilitySpec] = &[
             "permission_prompts",
             "resume",
             "programmatic",
+            "transcript",
+            "telemetry",
+            "runtime_text",
         ],
-        provider: None,
+        provider: Some(&AGENT_HARNESS),
     },
     CapabilitySpec {
         id: "acp_adapter",
@@ -342,10 +416,17 @@ pub fn choosable() -> impl Iterator<Item = &'static CapabilitySpec> {
 /// Check a declaration's `config` against its built-in's JSON Schema
 /// (`schema`, its text). The error says what's wrong, where.
 pub fn check_config(schema: &str, config: &serde_json::Value) -> Result<(), String> {
+    check_against(schema, config, "config")
+}
+
+/// Check `value` against the JSON Schema `schema` (its text); the error
+/// names it `what`, then what's wrong, where.
+pub fn check_against(schema: &str, value: &serde_json::Value, what: &str) -> Result<(), String> {
     let schema: serde_json::Value =
-        serde_json::from_str(schema).map_err(|e| format!("the built-in's config schema: {e}"))?;
-    let validator = jsonschema::validator_for(&schema)
-        .map_err(|e| format!("the built-in's config schema: {e}"))?;
+        serde_json::from_str(schema).map_err(|e| format!("the {what} schema: {e}"))?;
+    let validator =
+        jsonschema::validator_for(&schema).map_err(|e| format!("the {what} schema: {e}"))?;
+    let config = value;
     let errors: Vec<String> = validator
         .iter_errors(config)
         .map(|e| {
@@ -360,7 +441,7 @@ pub fn check_config(schema: &str, config: &serde_json::Value) -> Result<(), Stri
     if errors.is_empty() {
         Ok(())
     } else {
-        Err(format!("config: {}", errors.join("; ")))
+        Err(format!("{what}: {}", errors.join("; ")))
     }
 }
 
@@ -403,6 +484,34 @@ pub fn check_need(need: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A harness's declared data passes the contract's schema as the
+    /// domain shape writes it; anything else is named.
+    #[test]
+    fn harness_data_is_checked_against_the_contract() {
+        use crate::agent::harness::{HarnessData, HarnessSetting};
+        let schema = AGENT_HARNESS.data.unwrap();
+        let data = HarnessData {
+            instruction_files: vec!["AGENTS.md".into()],
+            env_markers: vec!["ACME_SESSION".into()],
+            settings: vec![HarnessSetting {
+                key: "model".into(),
+                title: "Model".into(),
+                hint: String::new(),
+                placeholder: "m".into(),
+            }],
+        };
+        check_against(schema, &serde_json::to_value(&data).unwrap(), "data").unwrap();
+        check_against(schema, &serde_json::json!({}), "data").unwrap();
+        let err = check_against(schema, &serde_json::json!({"interact": "x"}), "data").unwrap_err();
+        assert!(err.starts_with("data:"), "{err}");
+        assert!(check_against(
+            schema,
+            &serde_json::json!({"settings": [{"title": "no key"}]}),
+            "data"
+        )
+        .is_err());
+    }
 
     #[test]
     fn a_need_may_name_a_scope() {
@@ -452,7 +561,8 @@ mod tests {
     }
 
     /// What a process may implement is what core gives a contract: the
-    /// work list and the effort policy. The rest are core's or built-ins'.
+    /// work list, the effort policy and an agent harness. The rest are
+    /// core's or built-ins'.
     #[test]
     fn a_process_implements_only_a_capability_with_a_contract() {
         assert_eq!(
@@ -461,7 +571,7 @@ mod tests {
                 .filter(|c| c.provider.is_some())
                 .map(|c| c.id)
                 .collect::<Vec<_>>(),
-            ["work_items", "effort_policy"]
+            ["work_items", "effort_policy", "agent_harness"]
         );
         assert!(contract("snapshots").is_none() && contract("nope").is_none());
     }

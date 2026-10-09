@@ -22,6 +22,7 @@ use super::Named;
 
 pub(super) struct Codex(pub(super) Named);
 
+#[async_trait::async_trait]
 impl AgentHarness for Codex {
     fn id(&self) -> &str {
         &self.0.id
@@ -37,19 +38,19 @@ impl AgentHarness for Codex {
         }
     }
 
-    fn launch(&self, input: &LaunchInput<'_>) -> Result<Launch, HarnessError> {
-        let ep = input.endpoints;
-        write_worktree_skills(input.workspace, &input.text.skills).map_err(runtime)?;
-        let mut overrides = config_overrides(input.oxplow_executable, &ep.mcp_endpoint_url);
+    async fn launch(&self, input: &LaunchInput) -> Result<Launch, HarnessError> {
+        let ep = &input.endpoints;
+        write_worktree_skills(&input.workspace, &input.text.skills).map_err(runtime)?;
+        let mut overrides = config_overrides(&input.oxplow_executable, &ep.mcp_endpoint_url);
         // Codex has no OTEL env vars: its exporter rides `--config otel.*`,
         // to the same receiver as Claude's, with the session's bearer.
         overrides.extend(otel_overrides(&ep.otlp_base_url, &ep.hook_token));
-        let program = (input.resolve_program)("codex");
+        let program = input.resolve_program("codex");
         Ok(Launch {
             spec: LaunchSpec::Pty {
                 command: command(
                     &input.workspace.to_string_lossy(),
-                    input.resume.filter(|r| !r.is_empty()),
+                    input.resume.as_deref().filter(|r| !r.is_empty()),
                     program.as_deref(),
                     &overrides,
                 ),
@@ -59,83 +60,93 @@ impl AgentHarness for Codex {
         })
     }
 
-    fn instruction_files(&self) -> &[&str] {
-        &["CLAUDE.md"]
+    fn instruction_files(&self) -> Vec<String> {
+        vec!["CLAUDE.md".into()]
     }
 
-    fn refresh_text(&self, roots: &RuntimeRoots<'_>, text: &AgentText) -> Result<(), HarnessError> {
-        refresh_worktree_skills(roots.workspaces, &text.skills).map_err(runtime)
+    async fn refresh_text(
+        &self,
+        roots: &RuntimeRoots,
+        text: &AgentText,
+    ) -> Result<(), HarnessError> {
+        refresh_worktree_skills(&roots.workspaces, &text.skills).map_err(runtime)
     }
 
-    fn tool_use(&self, body: &serde_json::Value) -> Option<ToolUse> {
+    async fn tool_use(&self, body: &serde_json::Value) -> Option<ToolUse> {
         codex_tool_use(body)
     }
 
-    fn token_readings(&self, record: &OtlpRecord<'_>) -> Vec<TokenReading> {
-        match record {
-            OtlpRecord::Point {
-                metric: TOKEN_METRIC,
-                value,
-                attributes,
-                time_unix_nano,
-                start_time_unix_nano,
-                ..
-            } => {
-                let kind = match attributes.str("token_type") {
-                    Some("input") => TokenKind::Input,
-                    Some("output" | "reasoning_output") => TokenKind::Output,
-                    Some("cached_input") => TokenKind::CacheRead,
-                    _ => return Vec::new(),
-                };
-                if *value <= 0 {
-                    return Vec::new();
-                }
-                vec![TokenReading {
-                    model: record.model(),
-                    kind,
-                    value: *value,
-                    at_unix_nano: *time_unix_nano,
-                    from_unix_nano: *start_time_unix_nano,
-                }]
-            }
-            OtlpRecord::Log {
-                attributes,
-                time_unix_nano,
-                ..
-            } if attributes.str("event.kind") == Some(TOKEN_EVENT_KIND) => {
-                // An untrusted body: a negative count is none, and the
-                // arithmetic saturates rather than overflows.
-                let count = |key| attributes.int(key).unwrap_or(0).max(0);
-                let input = count("input_token_count");
-                let cached = count("cached_token_count");
-                // New (uncached) input this request; reasoning folded into
-                // output; the cached prefix is its own CacheRead count.
-                let readings = [
-                    (TokenKind::Input, input.saturating_sub(cached).max(0)),
-                    (TokenKind::CacheRead, cached),
-                    (
-                        TokenKind::Output,
-                        count("output_token_count").saturating_add(count("reasoning_token_count")),
-                    ),
-                ];
-                readings
-                    .into_iter()
-                    .filter(|(_, value)| *value > 0)
-                    .map(|(kind, value)| TokenReading {
-                        model: record.model(),
-                        kind,
-                        value,
-                        at_unix_nano: *time_unix_nano,
-                        from_unix_nano: *time_unix_nano,
-                    })
-                    .collect()
-            }
-            _ => Vec::new(),
-        }
+    async fn token_readings(&self, records: &[OtlpRecord]) -> Vec<TokenReading> {
+        records.iter().flat_map(token_reading).collect()
     }
 
-    fn render(&self, answer: &HookAnswer) -> serde_json::Value {
+    async fn render(&self, answer: &HookAnswer) -> serde_json::Value {
         super::shared::render(answer)
+    }
+}
+
+/// Its token counts: the `codex.turn.token_usage` counter, else a
+/// `response.completed` log event's counts.
+fn token_reading(record: &OtlpRecord) -> Vec<TokenReading> {
+    match record {
+        OtlpRecord::Point {
+            metric,
+            value,
+            attributes,
+            time_unix_nano,
+            start_time_unix_nano,
+            ..
+        } if metric == TOKEN_METRIC => {
+            let kind = match attributes.str("token_type") {
+                Some("input") => TokenKind::Input,
+                Some("output" | "reasoning_output") => TokenKind::Output,
+                Some("cached_input") => TokenKind::CacheRead,
+                _ => return Vec::new(),
+            };
+            if *value <= 0 {
+                return Vec::new();
+            }
+            vec![TokenReading {
+                model: record.model(),
+                kind,
+                value: *value,
+                at_unix_nano: *time_unix_nano,
+                from_unix_nano: *start_time_unix_nano,
+            }]
+        }
+        OtlpRecord::Log {
+            attributes,
+            time_unix_nano,
+            ..
+        } if attributes.str("event.kind") == Some(TOKEN_EVENT_KIND) => {
+            // An untrusted body: a negative count is none, and the
+            // arithmetic saturates rather than overflows.
+            let count = |key| attributes.int(key).unwrap_or(0).max(0);
+            let input = count("input_token_count");
+            let cached = count("cached_token_count");
+            // New (uncached) input this request; reasoning folded into
+            // output; the cached prefix is its own CacheRead count.
+            let readings = [
+                (TokenKind::Input, input.saturating_sub(cached).max(0)),
+                (TokenKind::CacheRead, cached),
+                (
+                    TokenKind::Output,
+                    count("output_token_count").saturating_add(count("reasoning_token_count")),
+                ),
+            ];
+            readings
+                .into_iter()
+                .filter(|(_, value)| *value > 0)
+                .map(|(kind, value)| TokenReading {
+                    model: record.model(),
+                    kind,
+                    value,
+                    at_unix_nano: *time_unix_nano,
+                    from_unix_nano: *time_unix_nano,
+                })
+                .collect()
+        }
+        _ => Vec::new(),
     }
 }
 
@@ -448,13 +459,13 @@ mod tests {
         let h = harness("oxplow:codex-cli", "codex");
         let text = oxplow_agent_text::core_text();
         let workspaces = [ours.clone(), theirs.clone()];
-        h.refresh_text(
+        crate::test_launch::block(h.refresh_text(
             &RuntimeRoots {
-                project_dir: tmp.path(),
-                workspaces: &workspaces,
+                project_dir: tmp.path().to_path_buf(),
+                workspaces: workspaces.to_vec(),
             },
             &text,
-        )
+        ))
         .unwrap();
         for skill in &text.skills {
             assert_eq!(
@@ -513,30 +524,31 @@ mod tests {
             ("model", AttrValue::Str("gpt-5.5".into())),
         ]);
         let none = Attrs::default();
-        let r = h.token_readings(&OtlpRecord::Log {
-            attributes: &a,
-            resource: &none,
-            time_unix_nano: 7,
-        });
+        let other = attrs(&[("event.name", AttrValue::Str("codex.api_request".into()))]);
+        // One export's records, read in one call: the other event reads
+        // as nothing.
+        let r = crate::test_launch::block(h.token_readings(&[
+            OtlpRecord::Log {
+                attributes: other.clone(),
+                resource: none.clone(),
+                time_unix_nano: 0,
+            },
+            OtlpRecord::Log {
+                attributes: a.clone(),
+                resource: none.clone(),
+                time_unix_nano: 7,
+            },
+        ]));
         assert_eq!(sums(&r), [111258, 296, 2432]);
         assert!(r
             .iter()
             .all(|r| r.model == "gpt-5.5" && r.at_unix_nano == 7));
-        let other = attrs(&[("event.name", AttrValue::Str("codex.api_request".into()))]);
-        assert!(h
-            .token_readings(&OtlpRecord::Log {
-                attributes: &other,
-                resource: &none,
-                time_unix_nano: 0,
-            })
-            .is_empty());
     }
 
     /// The body is untrusted: counts at the ends of i64 saturate, and a
     /// negative count is no count.
     #[test]
     fn hostile_counts_saturate_and_negative_ones_are_dropped() {
-        let h = harness("oxplow:codex-cli", "codex");
         let none = Attrs::default();
         let log = |input: i64, cached: i64, output: i64, reasoning: i64| {
             attrs(&[
@@ -548,9 +560,9 @@ mod tests {
             ])
         };
         let read = |a: &Attrs| -> Vec<(TokenKind, i64)> {
-            h.token_readings(&OtlpRecord::Log {
-                attributes: a,
-                resource: &none,
+            token_reading(&OtlpRecord::Log {
+                attributes: a.clone(),
+                resource: none.clone(),
                 time_unix_nano: 0,
             })
             .into_iter()
@@ -572,7 +584,6 @@ mod tests {
     /// dropped.
     #[test]
     fn the_token_histogram_folds_reasoning_and_drops_the_total() {
-        let h = harness("oxplow:codex-cli", "codex");
         let none = Attrs::default();
         let readings: Vec<TokenReading> = [
             ("input", 100),
@@ -587,11 +598,11 @@ mod tests {
                 ("token_type", AttrValue::Str((*kind).into())),
                 ("model", AttrValue::Str("gpt-5-codex".into())),
             ]);
-            h.token_readings(&OtlpRecord::Point {
-                metric: TOKEN_METRIC,
+            token_reading(&OtlpRecord::Point {
+                metric: TOKEN_METRIC.into(),
                 value: *value,
-                attributes: &a,
-                resource: &none,
+                attributes: a.clone(),
+                resource: none.clone(),
                 time_unix_nano: 0,
                 start_time_unix_nano: 0,
             })

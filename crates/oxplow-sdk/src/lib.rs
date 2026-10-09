@@ -615,6 +615,7 @@ fn provider_declarations(
         capabilities: vec![CapabilityDecl {
             capability: capability.into(),
             features: serde_json::Value::Object(features.clone()),
+            data: serde_json::Value::Null,
         }],
         commands: contract
             .required(&serde_json::Value::Object(features))

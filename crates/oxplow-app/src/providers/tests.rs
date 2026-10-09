@@ -1751,6 +1751,93 @@ fn a_provider_may_implement_an_effort_policy_by_its_contract() {
     );
 }
 
+/// A harness's declarations: the fake policy's, its `react` verb copied
+/// under each of `verbs`, the capability `agent_harness` with `features`
+/// and `data`.
+fn harness_declarations(
+    verbs: &[&str],
+    features: serde_json::Value,
+    data: serde_json::Value,
+) -> oxplow_provider_protocol::model::InitializeResult {
+    let mut declared = oxplow_provider_fake::policy_declarations();
+    let react = declared.commands[0].clone();
+    declared.commands = verbs
+        .iter()
+        .map(|v| oxplow_provider_protocol::model::CommandDecl {
+            name: (*v).into(),
+            ..react.clone()
+        })
+        .collect();
+    declared.capabilities[0].capability = "agent_harness".into();
+    declared.capabilities[0].features = features;
+    declared.capabilities[0].data = data;
+    declared
+}
+
+/// A process may be an agent harness: it declares `launch`, `tool_use`
+/// and `render`, each optional verb its feature asks for, and what it
+/// declares of itself (instruction files, environment markers, settings)
+/// as its capability's `data`, checked against the contract.
+#[test]
+fn a_provider_may_implement_an_agent_harness_by_its_contract() {
+    let mut spec = policy_spec();
+    spec.capability = "agent_harness".into();
+    let data = json!({
+        "instruction_files": ["AGENTS.md"],
+        "env_markers": ["ACME_SESSION"],
+        "settings": [{ "key": "model", "title": "Model" }]
+    });
+    let base = ["launch", "tool_use", "render"];
+    spec::check_declarations(&spec, &harness_declarations(&base, json!({}), data.clone())).unwrap();
+    spec::check_declarations(
+        &spec,
+        &harness_declarations(
+            &["launch", "tool_use", "render", "turns"],
+            json!({ "transcript": true, "terminal": true }),
+            serde_json::Value::Null,
+        ),
+    )
+    .unwrap();
+    let err = spec::check_declarations(
+        &spec,
+        &harness_declarations(&["tool_use", "render"], json!({}), data.clone()),
+    )
+    .unwrap_err();
+    assert!(err.contains("`launch`"), "{err}");
+    let err = spec::check_declarations(
+        &spec,
+        &harness_declarations(&base, json!({ "transcript": true }), data.clone()),
+    )
+    .unwrap_err();
+    assert!(err.contains("`turns`"), "{err}");
+    let err = spec::check_declarations(
+        &spec,
+        &harness_declarations(&base, json!({}), json!({ "interact": "chat" })),
+    )
+    .unwrap_err();
+    assert!(err.contains("agent_harness data"), "{err}");
+    let err = spec::check_declarations(
+        &spec,
+        &harness_declarations(
+            &base,
+            json!({}),
+            json!({ "settings": [{ "title": "Model" }] }),
+        ),
+    )
+    .unwrap_err();
+    assert!(err.contains("key"), "{err}");
+}
+
+/// A capability whose contract asks for nothing more takes no `data`.
+#[test]
+fn a_policy_declares_no_data() {
+    let spec = policy_spec();
+    let mut declared = oxplow_provider_fake::policy_declarations();
+    declared.capabilities[0].data = json!({ "anything": 1 });
+    let err = spec::check_declarations(&spec, &declared).unwrap_err();
+    assert!(err.contains("declares no `data`"), "{err}");
+}
+
 /// The manifest names any capability with a contract; one without (the
 /// VCS), or a work list's own fields on a policy, is refused.
 #[test]

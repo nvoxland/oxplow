@@ -28,6 +28,7 @@ struct Program {
     system_prompt_via_meta: bool,
 }
 
+#[async_trait::async_trait]
 impl AgentHarness for Acp {
     fn id(&self) -> &str {
         &self.0.id
@@ -43,7 +44,7 @@ impl AgentHarness for Acp {
         }
     }
 
-    fn launch(&self, input: &LaunchInput<'_>) -> Result<Launch, HarnessError> {
+    async fn launch(&self, input: &LaunchInput) -> Result<Launch, HarnessError> {
         let p: Program = serde_json::from_value(input.config.clone())
             .map_err(|e| HarnessError::Config(format!("an ACP agent's program: {e}")))?;
         Ok(Launch {
@@ -57,21 +58,21 @@ impl AgentHarness for Acp {
         })
     }
 
-    fn instruction_files(&self) -> &[&str] {
-        &["CLAUDE.md"]
+    fn instruction_files(&self) -> Vec<String> {
+        vec!["CLAUDE.md".into()]
     }
 
     /// The canonical names its tool calls are recorded under
     /// (`acp::mapping::canonical_name`).
     /// An ACP agent's calls arrive already mapped, by the protocol's tool
     /// kinds (`oxplow_app::acp::mapping`); it posts no hook bodies.
-    fn tool_use(&self, _: &serde_json::Value) -> Option<ToolUse> {
+    async fn tool_use(&self, _: &serde_json::Value) -> Option<ToolUse> {
         None
     }
 
     /// It posts no hooks (its tool gate answers in-process); one naming its
     /// session gets the common shape.
-    fn render(&self, answer: &HookAnswer) -> serde_json::Value {
+    async fn render(&self, answer: &HookAnswer) -> serde_json::Value {
         super::shared::render(answer)
     }
 }

@@ -25,6 +25,7 @@ pub fn declarations() -> InitializeResult {
         capabilities: vec![CapabilityDecl {
             capability: "effort_policy".into(),
             features: json!({}),
+            data: serde_json::Value::Null,
         }],
         commands: vec![crate::command(
             "react",

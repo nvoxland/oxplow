@@ -320,6 +320,7 @@ fn declared(idempotent_writes: bool) -> InitializeResult {
             features: json!({
                 "hierarchy": true, "comments": true, "links": true, "delete": true, "idempotent_writes": idempotent_writes
             }),
+            data: serde_json::Value::Null,
         }],
         commands: vec![
             command(

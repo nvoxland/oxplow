@@ -29,6 +29,7 @@ pub(super) struct Opencode(pub(super) Named);
 /// auth store.
 pub const DEFAULT_MODEL: &str = "github-copilot/gpt-5-mini";
 
+#[async_trait::async_trait]
 impl AgentHarness for Opencode {
     fn id(&self) -> &str {
         &self.0.id
@@ -44,12 +45,12 @@ impl AgentHarness for Opencode {
         }
     }
 
-    fn launch(&self, input: &LaunchInput<'_>) -> Result<Launch, HarnessError> {
-        let paths = write_runtime(input.project_dir, input.text).map_err(runtime)?;
+    async fn launch(&self, input: &LaunchInput) -> Result<Launch, HarnessError> {
+        let paths = write_runtime(&input.project_dir, &input.text).map_err(runtime)?;
         // No --append-system-prompt: the prompt is an instructions file,
         // one per session (two sessions of a thread run apart).
         let mut instructions = Vec::new();
-        if let Some(prompt) = input.system_prompt.filter(|p| !p.is_empty()) {
+        if let Some(prompt) = input.system_prompt.as_deref().filter(|p| !p.is_empty()) {
             let path = paths
                 .prompts_dir
                 .join(format!("{}.md", input.session.session));
@@ -64,7 +65,7 @@ impl AgentHarness for Opencode {
                 &paths.hooks_plugin,
                 &instructions,
                 &paths.skills_dir,
-                input.text,
+                &input.text,
             ),
         ));
         let model = input
@@ -72,12 +73,12 @@ impl AgentHarness for Opencode {
             .get("model")
             .and_then(|m| m.as_str())
             .unwrap_or(DEFAULT_MODEL);
-        let program = (input.resolve_program)("opencode");
+        let program = input.resolve_program("opencode");
         Ok(Launch {
             spec: LaunchSpec::Pty {
                 command: command(
                     &input.workspace.to_string_lossy(),
-                    input.resume.filter(|r| !r.is_empty()),
+                    input.resume.as_deref().filter(|r| !r.is_empty()),
                     program.as_deref(),
                     model,
                 ),
@@ -87,21 +88,25 @@ impl AgentHarness for Opencode {
         })
     }
 
-    fn instruction_files(&self) -> &[&str] {
-        &["CLAUDE.md"]
+    fn instruction_files(&self) -> Vec<String> {
+        vec!["CLAUDE.md".into()]
     }
 
-    fn settings(&self) -> &[HarnessSetting] {
-        &[HarnessSetting {
-            key: "model",
-            title: "Model",
-            hint: "The model OpenCode launches with (`provider/model`). Blank uses its default; applies to sessions started after Save.",
-            placeholder: DEFAULT_MODEL,
+    fn settings(&self) -> Vec<HarnessSetting> {
+        vec![HarnessSetting {
+            key: "model".into(),
+            title: "Model".into(),
+            hint: "The model OpenCode launches with (`provider/model`). Blank uses its default; applies to sessions started after Save.".into(),
+            placeholder: DEFAULT_MODEL.into(),
         }]
     }
 
     /// Its skills are on disk; its commands ride each launch's config.
-    fn refresh_text(&self, roots: &RuntimeRoots<'_>, text: &AgentText) -> Result<(), HarnessError> {
+    async fn refresh_text(
+        &self,
+        roots: &RuntimeRoots,
+        text: &AgentText,
+    ) -> Result<(), HarnessError> {
         let skills_dir = roots.project_dir.join(RUNTIME_DIR_REL).join("skills");
         if skills_dir.is_dir() {
             write_skills(&skills_dir, &text.skills).map_err(runtime)?;
@@ -111,11 +116,11 @@ impl AgentHarness for Opencode {
 
     /// Its bridge posts Claude Code's shape, `patch` as `Edit`
     /// (`assets/opencode-hooks.js`).
-    fn tool_use(&self, body: &serde_json::Value) -> Option<ToolUse> {
+    async fn tool_use(&self, body: &serde_json::Value) -> Option<ToolUse> {
         claude_shaped_tool_use(body)
     }
 
-    fn render(&self, answer: &HookAnswer) -> serde_json::Value {
+    async fn render(&self, answer: &HookAnswer) -> serde_json::Value {
         super::shared::render(answer)
     }
 }
@@ -375,12 +380,12 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let h = harness("oxplow:opencode", "opencode");
         let text = oxplow_agent_text::core_text();
-        h.refresh_text(&project_only(tmp.path()), &text).unwrap();
+        crate::test_launch::block(h.refresh_text(&project_only(tmp.path()), &text)).unwrap();
         assert!(!tmp.path().join(RUNTIME_DIR_REL).exists());
         let skills = tmp.path().join(RUNTIME_DIR_REL).join("skills");
         fs::create_dir_all(skills.join("oxplow-extension")).unwrap();
         fs::write(skills.join("oxplow-extension/SKILL.md"), "stale").unwrap();
-        h.refresh_text(&project_only(tmp.path()), &text).unwrap();
+        crate::test_launch::block(h.refresh_text(&project_only(tmp.path()), &text)).unwrap();
         for skill in &text.skills {
             assert_eq!(
                 fs::read_to_string(skills.join(&skill.name).join("SKILL.md")).unwrap(),

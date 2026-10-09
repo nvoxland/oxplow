@@ -763,6 +763,21 @@ pub fn check_declarations(spec: &ProviderSpec, declared: &InitializeResult) -> R
             ))
         }
     }
+    // What it declares of itself beyond its features: the contract's
+    // shape, or nothing.
+    match (contract.data, &capability.data) {
+        (_, serde_json::Value::Null) => {}
+        (Some(schema), data) => {
+            capability::check_against(schema, data, &format!("{} data", spec.capability))
+                .map_err(|e| format!("provider `{id}`: {e}"))?;
+        }
+        (None, _) => {
+            return Err(format!(
+                "provider `{id}`: a {} provider declares no `data`",
+                spec.capability
+            ))
+        }
+    }
     for name in contract.required(&capability.features) {
         if !declared.commands.iter().any(|c| c.name == name) {
             return Err(format!(

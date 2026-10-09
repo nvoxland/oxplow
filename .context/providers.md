@@ -365,7 +365,10 @@ on a capability that keeps no items; an entry or declarations path
 outside the folder (or the manifest, or under `lenses/`); a bad host
 pattern; and declarations that don't parse, speak another protocol
 version, lack the named capability, declare a feature that isn't the
-capability's (each `true` or `false`), lack a verb its contract requires
+capability's (each `true` or `false`), declare a capability `data` that
+isn't its contract's shape (`ProviderContract::data`, a JSON Schema: an
+agent harness's instruction files, environment markers and settings) or
+any `data` when the contract asks for none, lack a verb its contract requires
 for the features it declares, declare a verb that isn't `confirm: never`
 and `access: record` (core's call of it — `work_item.<verb>`, the effort
 policy's dispatcher — is what a person confirms and what is gated), or

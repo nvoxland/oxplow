@@ -246,11 +246,10 @@ impl TokenUsageService {
 
         // The turn's harness reads its own transcript; one no longer
         // registered reads as none.
-        let turns = self
-            .harnesses
-            .get(&kind)
-            .map(|h| h.turns(&tail))
-            .unwrap_or_default();
+        let turns = match self.harnesses.get(&kind) {
+            Ok(h) => h.turns(&tail).await,
+            Err(_) => Vec::new(),
+        };
         if turns.is_empty() {
             // Nothing to record from this chunk (no usage / no prompt / a
             // harness that reads no transcript), but the bytes are consumed —

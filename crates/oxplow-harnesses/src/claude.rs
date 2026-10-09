@@ -62,6 +62,7 @@ const MARKERS: &[&str] = &[
     "CLAUDE_CODE_EXECPATH",
 ];
 
+#[async_trait::async_trait]
 impl AgentHarness for Claude {
     fn id(&self) -> &str {
         &self.0.id
@@ -77,10 +78,10 @@ impl AgentHarness for Claude {
         }
     }
 
-    fn launch(&self, input: &LaunchInput<'_>) -> Result<Launch, HarnessError> {
-        let ep = input.endpoints;
+    async fn launch(&self, input: &LaunchInput) -> Result<Launch, HarnessError> {
+        let ep = &input.endpoints;
         let plugin_dir =
-            write_plugin(input.project_dir, &ep.hook_base_url, input.text).map_err(runtime)?;
+            write_plugin(&input.project_dir, &ep.hook_base_url, &input.text).map_err(runtime)?;
         // Its MCP config can't read env vars, so the session's bearer is
         // written into a per-session file only its owner can read.
         let mcp_config = write_mcp_config(
@@ -95,7 +96,10 @@ impl AgentHarness for Claude {
         let cwd = input.workspace.to_string_lossy();
         // A resume id whose transcript is gone launches fresh, with no raw
         // "No conversation found" error, and core forgets the id.
-        let (resume, resume_dropped) = match (input.resume.filter(|r| !r.is_empty()), input.home) {
+        let (resume, resume_dropped) = match (
+            input.resume.as_deref().filter(|r| !r.is_empty()),
+            input.home.as_deref(),
+        ) {
             (None, _) => (Resume::Fresh, false),
             (Some(id), home) => match home.map(|h| resume_state(h, &cwd, id)) {
                 Some(ResumeState::Missing) => (Resume::Fresh, true),
@@ -109,8 +113,9 @@ impl AgentHarness for Claude {
                 ),
             },
         };
-        let program =
-            (input.resolve_program)("claude").or_else(|| input.home.and_then(local_install));
+        let program = input
+            .resolve_program("claude")
+            .or_else(|| input.home.as_deref().and_then(local_install));
         Ok(Launch {
             spec: LaunchSpec::Pty {
                 command: command(Command {
@@ -118,7 +123,7 @@ impl AgentHarness for Claude {
                     resume,
                     program: program.as_deref(),
                     plugin_dir: Some(&plugin_dir.to_string_lossy()),
-                    system_prompt: input.system_prompt,
+                    system_prompt: input.system_prompt.as_deref(),
                     mcp_config: Some(&mcp_config.to_string_lossy()),
                 }),
                 env,
@@ -127,11 +132,15 @@ impl AgentHarness for Claude {
         })
     }
 
-    fn env_markers(&self) -> &[&str] {
-        MARKERS
+    fn env_markers(&self) -> Vec<String> {
+        MARKERS.iter().map(|m| m.to_string()).collect()
     }
 
-    fn refresh_text(&self, roots: &RuntimeRoots<'_>, text: &AgentText) -> Result<(), HarnessError> {
+    async fn refresh_text(
+        &self,
+        roots: &RuntimeRoots,
+        text: &AgentText,
+    ) -> Result<(), HarnessError> {
         let plugin_dir = roots.project_dir.join(PLUGIN_DIR_REL);
         let skills_dir = plugin_dir.join("skills");
         if skills_dir.is_dir() {
@@ -144,54 +153,62 @@ impl AgentHarness for Claude {
         Ok(())
     }
 
-    fn tool_use(&self, body: &serde_json::Value) -> Option<ToolUse> {
+    async fn tool_use(&self, body: &serde_json::Value) -> Option<ToolUse> {
         claude_shaped_tool_use(body)
     }
 
-    fn turns(&self, transcript: &str) -> Vec<Turn> {
+    async fn turns(&self, transcript: &str) -> Vec<Turn> {
         transcript_turns(transcript)
             .into_iter()
             .filter(Turn::is_recordable)
             .collect()
     }
 
-    /// Its `claude_code.token.usage` counter (delta temporality): the
-    /// `type` attribute is the kind.
-    fn token_readings(&self, record: &OtlpRecord<'_>) -> Vec<TokenReading> {
-        let OtlpRecord::Point {
-            metric: TOKEN_METRIC,
-            value,
-            attributes,
-            time_unix_nano,
-            start_time_unix_nano,
-            ..
-        } = record
-        else {
-            return Vec::new();
-        };
-        let kind = match attributes.str("type") {
-            Some("input") => TokenKind::Input,
-            Some("output") => TokenKind::Output,
-            Some("cacheRead") => TokenKind::CacheRead,
-            Some("cacheCreation") => TokenKind::CacheCreation,
-            _ => return Vec::new(),
-        };
-        // An untrusted body: a negative count is no count.
-        if *value <= 0 {
-            return Vec::new();
-        }
-        vec![TokenReading {
-            model: record.model(),
-            kind,
-            value: *value,
-            at_unix_nano: *time_unix_nano,
-            from_unix_nano: *start_time_unix_nano,
-        }]
+    async fn token_readings(&self, records: &[OtlpRecord]) -> Vec<TokenReading> {
+        records.iter().flat_map(token_reading).collect()
     }
 
-    fn render(&self, answer: &HookAnswer) -> serde_json::Value {
+    async fn render(&self, answer: &HookAnswer) -> serde_json::Value {
         super::shared::render(answer)
     }
+}
+
+/// Its `claude_code.token.usage` counter (delta temporality): the `type`
+/// attribute is the kind.
+fn token_reading(record: &OtlpRecord) -> Vec<TokenReading> {
+    let OtlpRecord::Point {
+        metric,
+        value,
+        attributes,
+        time_unix_nano,
+        start_time_unix_nano,
+        ..
+    } = record
+    else {
+        return Vec::new();
+    };
+    if metric != TOKEN_METRIC {
+        return Vec::new();
+    }
+
+    let kind = match attributes.str("type") {
+        Some("input") => TokenKind::Input,
+        Some("output") => TokenKind::Output,
+        Some("cacheRead") => TokenKind::CacheRead,
+        Some("cacheCreation") => TokenKind::CacheCreation,
+        _ => return Vec::new(),
+    };
+    // An untrusted body: a negative count is no count.
+    if *value <= 0 {
+        return Vec::new();
+    }
+    vec![TokenReading {
+        model: record.model(),
+        kind,
+        value: *value,
+        at_unix_nano: *time_unix_nano,
+        from_unix_nano: *start_time_unix_nano,
+    }]
 }
 
 /// Claude Code's per-model token counter.
@@ -733,8 +750,10 @@ mod tests {
         assert!(skills.join("work-items").join("SKILL.md").exists());
         assert!(commands.join("work-next.md").exists());
         let h = harness("oxplow:claude-code", "claude");
-        h.refresh_text(&project_only(tmp.path()), &oxplow_agent_text::core_text())
-            .unwrap();
+        crate::test_launch::block(
+            h.refresh_text(&project_only(tmp.path()), &oxplow_agent_text::core_text()),
+        )
+        .unwrap();
         assert!(!skills.join("work-items").exists());
         assert!(!commands.join("work-next.md").exists());
         assert!(skills.join("someone-elses").exists());
@@ -748,12 +767,12 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let h = harness("oxplow:claude-code", "claude");
         let text = oxplow_agent_text::core_text();
-        h.refresh_text(&project_only(tmp.path()), &text).unwrap();
+        crate::test_launch::block(h.refresh_text(&project_only(tmp.path()), &text)).unwrap();
         assert!(!tmp.path().join(PLUGIN_DIR_REL).exists());
         let skills = tmp.path().join(PLUGIN_DIR_REL).join("skills");
         fs::create_dir_all(skills.join("oxplow-extension")).unwrap();
         fs::write(skills.join("oxplow-extension/SKILL.md"), "stale").unwrap();
-        h.refresh_text(&project_only(tmp.path()), &text).unwrap();
+        crate::test_launch::block(h.refresh_text(&project_only(tmp.path()), &text)).unwrap();
         for skill in &text.skills {
             assert_eq!(
                 fs::read_to_string(skills.join(&skill.name).join("SKILL.md")).unwrap(),
@@ -901,7 +920,7 @@ mod tests {
             "{}\n{ASSISTANT_LINE}\nnot json at all\n{ASSISTANT_LINE}\n",
             user_line("hi")
         );
-        let turns = h.turns(&content);
+        let turns = crate::test_launch::block(h.turns(&content));
         assert_eq!(turns.len(), 1);
         let d = &turns[0].usage;
         assert_eq!(
@@ -915,7 +934,7 @@ mod tests {
             (2, 200, 40, 100, 400)
         );
         assert_eq!(d.model.as_deref(), Some("claude-opus-4-8"));
-        assert!(h.turns("{\"type\":\"user\"}\n").is_empty());
+        assert!(crate::test_launch::block(h.turns("{\"type\":\"user\"}\n")).is_empty());
     }
 
     #[test]
@@ -936,7 +955,8 @@ mod tests {
             user_line("prompt A"),
             user_line("prompt B"),
         );
-        let turns = harness("oxplow:claude-code", "claude").turns(&content);
+        let turns =
+            crate::test_launch::block(harness("oxplow:claude-code", "claude").turns(&content));
         assert_eq!(turns.len(), 2);
         assert_eq!(turns[0].prompt.as_deref(), Some("prompt A"));
         assert_eq!(turns[0].usage.input_tokens, 100);
@@ -984,14 +1004,14 @@ mod tests {
         let resource = Attrs(vec![("model".into(), AttrValue::Str("claude-x".into()))]);
         let read = |metric: &str, kind: &str, value: i64| {
             let a = Attrs(vec![("type".into(), AttrValue::Str(kind.into()))]);
-            h.token_readings(&OtlpRecord::Point {
-                metric,
+            crate::test_launch::block(h.token_readings(&[OtlpRecord::Point {
+                metric: metric.into(),
                 value,
-                attributes: &a,
-                resource: &resource,
+                attributes: a.clone(),
+                resource: resource.clone(),
                 time_unix_nano: 9,
                 start_time_unix_nano: 3,
-            })
+            }]))
         };
         for (kind, want) in [
             ("input", TokenKind::Input),

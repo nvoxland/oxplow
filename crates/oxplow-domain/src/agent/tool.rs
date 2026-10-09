@@ -67,8 +67,10 @@ impl ToolKind {
 }
 
 /// One tool call, as its harness maps it: the harness's own name for the
-/// tool, and what oxplow reads of it.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+/// tool, and what oxplow reads of it. On the wire, these fields; one left
+/// out is empty.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
 pub struct ToolUse {
     /// The harness's name for the tool (`Edit`, `apply_patch`), as it
     /// reports it — shown and recorded, never matched by core.

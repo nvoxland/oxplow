@@ -3,12 +3,16 @@
 //! own wire shape), the turns in a transcript ([`Turn`]), and the token
 //! counts in a telemetry export ([`OtlpRecord`] → [`TokenReading`]).
 
+use serde::{Deserialize, Serialize};
+
 use crate::events::schema::TokenKind;
 use crate::hook::HookKind;
 
 /// What core answers a hook. The harness renders it
-/// (`AgentHarness::render`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// (`AgentHarness::render`). On the wire: `{ "kind": "ack" }`,
+/// `{ "kind": "deny", "reason" }`, `{ "kind": "context", "event", "text" }`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum HookAnswer {
     /// Nothing to say: the call proceeds.
     Ack,
@@ -20,7 +24,8 @@ pub enum HookAnswer {
 }
 
 /// Summed usage across a chunk of transcript.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct UsageDelta {
     pub input_tokens: i64,
     pub output_tokens: i64,
@@ -40,11 +45,13 @@ impl UsageDelta {
 /// One agent turn within a transcript chunk: the person's prompt that
 /// opened it (when present) and the summed usage of the messages that
 /// answered it.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Turn {
     /// The opening prompt, or `None` for a continuation with no fresh
     /// prompt at the head of the chunk.
+    #[serde(default)]
     pub prompt: Option<String>,
+    #[serde(default)]
     pub usage: UsageDelta,
 }
 
@@ -55,8 +62,9 @@ impl Turn {
     }
 }
 
-/// An OTLP attribute's value.
-#[derive(Debug, Clone, PartialEq)]
+/// An OTLP attribute's value: on the wire, the JSON value itself.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum AttrValue {
     Str(String),
     Int(i64),
@@ -64,9 +72,43 @@ pub enum AttrValue {
     Bool(bool),
 }
 
-/// An OTLP record's attributes, in order.
+/// An OTLP record's attributes, in order. On the wire, an object.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Attrs(pub Vec<(String, AttrValue)>);
+
+impl Serialize for Attrs {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap as _;
+        let mut map = serializer.serialize_map(Some(self.0.len()))?;
+        for (k, v) in &self.0 {
+            map.serialize_entry(k, v)?;
+        }
+        map.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for Attrs {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visit;
+        impl<'de> serde::de::Visitor<'de> for Visit {
+            type Value = Attrs;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("an object of attribute values")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<Attrs, A::Error> {
+                let mut out = Vec::new();
+                while let Some((k, v)) = map.next_entry::<String, AttrValue>()? {
+                    out.push((k, v));
+                }
+                Ok(Attrs(out))
+            }
+        }
+        deserializer.deserialize_map(Visit)
+    }
+}
 
 impl Attrs {
     fn get(&self, key: &str) -> Option<&AttrValue> {
@@ -93,29 +135,39 @@ impl Attrs {
     }
 }
 
-/// One record of an OTLP export, as decoded by core.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum OtlpRecord<'a> {
+/// One record of an OTLP export, as decoded by core. On the wire,
+/// `{ "kind": "point", "metric", "value", "attributes", "resource",
+/// "time_unix_nano", "start_time_unix_nano" }` or `{ "kind": "log", … }`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum OtlpRecord {
     /// A metric data point: a counter's or gauge's value, or a
     /// histogram's sum, truncated to an integer.
     Point {
-        metric: &'a str,
+        metric: String,
         value: i64,
-        attributes: &'a Attrs,
-        resource: &'a Attrs,
+        #[serde(default)]
+        attributes: Attrs,
+        #[serde(default)]
+        resource: Attrs,
+        #[serde(default)]
         time_unix_nano: u64,
+        #[serde(default)]
         start_time_unix_nano: u64,
     },
     /// A log record; its time is when it happened, else when it was
     /// observed.
     Log {
-        attributes: &'a Attrs,
-        resource: &'a Attrs,
+        #[serde(default)]
+        attributes: Attrs,
+        #[serde(default)]
+        resource: Attrs,
+        #[serde(default)]
         time_unix_nano: u64,
     },
 }
 
-impl OtlpRecord<'_> {
+impl OtlpRecord {
     /// The model it names: the record's `model`, else the resource's,
     /// else `"unknown"`.
     pub fn model(&self) -> String {
@@ -140,15 +192,17 @@ impl OtlpRecord<'_> {
 }
 
 /// A token count a harness read out of a telemetry record.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TokenReading {
     pub model: String,
     pub kind: TokenKind,
     pub value: i64,
     /// When it was measured (0: it didn't say).
+    #[serde(default)]
     pub at_unix_nano: u64,
     /// Where its window starts: a delta point's start (the previous
     /// collection), a log record's own time (0: it didn't say).
+    #[serde(default)]
     pub from_unix_nano: u64,
 }
 
@@ -170,17 +224,56 @@ mod tests {
         assert_eq!(a.str("s"), Some("x"));
         let resource = Attrs(vec![("model".into(), AttrValue::Str("m".into()))]);
         let log = OtlpRecord::Log {
-            attributes: &a,
-            resource: &resource,
+            attributes: a,
+            resource,
             time_unix_nano: 0,
         };
         assert_eq!(log.model(), "m");
-        let none = Attrs::default();
         let bare = OtlpRecord::Log {
-            attributes: &none,
-            resource: &none,
+            attributes: Attrs::default(),
+            resource: Attrs::default(),
             time_unix_nano: 0,
         };
         assert_eq!(bare.model(), "unknown");
+    }
+
+    /// What a provider harness reads and answers: a record's attributes as
+    /// an object, in order, each value the JSON value; an answer by `kind`.
+    #[test]
+    fn the_wire_shapes_round_trip() {
+        let record = OtlpRecord::Point {
+            metric: "m.tokens".into(),
+            value: 7,
+            attributes: Attrs(vec![
+                ("type".into(), AttrValue::Str("input".into())),
+                ("n".into(), AttrValue::Int(2)),
+                ("x".into(), AttrValue::Double(1.5)),
+                ("b".into(), AttrValue::Bool(true)),
+            ]),
+            resource: Attrs::default(),
+            time_unix_nano: 9,
+            start_time_unix_nano: 0,
+        };
+        let wire = serde_json::to_value(&record).unwrap();
+        assert_eq!(wire["kind"], "point");
+        assert_eq!(
+            wire["attributes"],
+            serde_json::json!({"type": "input", "n": 2, "x": 1.5, "b": true})
+        );
+        assert_eq!(serde_json::from_value::<OtlpRecord>(wire).unwrap(), record);
+        let deny = HookAnswer::Deny {
+            reason: "no".into(),
+        };
+        let wire = serde_json::to_value(&deny).unwrap();
+        assert_eq!(wire, serde_json::json!({"kind": "deny", "reason": "no"}));
+        assert_eq!(serde_json::from_value::<HookAnswer>(wire).unwrap(), deny);
+        let context = HookAnswer::Context {
+            event: HookKind::PostToolUse,
+            text: "t".into(),
+        };
+        assert_eq!(
+            serde_json::from_value::<HookAnswer>(serde_json::to_value(&context).unwrap()).unwrap(),
+            context
+        );
     }
 }

@@ -319,7 +319,8 @@ async fn handle_hook(
         &ctx.services.harnesses,
         Some(&principal.harness),
         &HookAnswer::Ack,
-    );
+    )
+    .await;
     bounded_hook_response(
         HOOK_HANDLING_TIMEOUT,
         &event_name,
@@ -421,7 +422,8 @@ async fn handle_hook_inner(
             &ctx.services.harnesses,
             harness.as_deref(),
             &HookAnswer::Ack,
-        );
+        )
+        .await;
     }
 
     let kind = match parse_hook_kind(&event) {
@@ -429,7 +431,7 @@ async fn handle_hook_inner(
         None => {
             // Unknown but non-fatal — record nothing, ack so the agent
             // doesn't block.
-            return respond(&ctx.services.harnesses, None, &HookAnswer::Ack);
+            return respond(&ctx.services.harnesses, None, &HookAnswer::Ack).await;
         }
     };
 
@@ -446,12 +448,12 @@ async fn handle_hook_inner(
     // A tool hook's call in oxplow's vocabulary, as the bearer's harness
     // maps its body: what the policy, the ingest and the context read.
     let tool = match (kind, body_value.as_ref()) {
-        (HookKind::PreToolUse | HookKind::PostToolUse, Some(body)) => ctx
-            .services
-            .harnesses
-            .get(&principal.harness)
-            .ok()
-            .and_then(|h| h.tool_use(body)),
+        (HookKind::PreToolUse | HookKind::PostToolUse, Some(body)) => {
+            match ctx.services.harnesses.get(&principal.harness) {
+                Ok(h) => h.tool_use(body).await,
+                Err(_) => None,
+            }
+        }
         _ => None,
     };
 
@@ -486,7 +488,8 @@ async fn handle_hook_inner(
                 &ctx.services.harnesses,
                 harness.as_deref(),
                 &HookAnswer::Deny { reason },
-            );
+            )
+            .await;
         }
     }
 
@@ -513,7 +516,7 @@ async fn handle_hook_inner(
             // prints a "non-blocking status code" warning into the user's
             // terminal. Log the cause server-side and ack anyway.
             warn!(?event, ?err, "hook ingest failed");
-            return respond(&ctx.services.harnesses, None, &HookAnswer::Ack);
+            return respond(&ctx.services.harnesses, None, &HookAnswer::Ack).await;
         }
     };
     let harness = harness.as_deref();
@@ -544,7 +547,8 @@ async fn handle_hook_inner(
                         event: HookKind::PostToolUse,
                         text: context,
                     },
-                );
+                )
+                .await;
             }
         }
     }
@@ -570,14 +574,15 @@ async fn handle_hook_inner(
                         event: HookKind::UserPromptSubmit,
                         text: combined,
                     },
-                );
+                )
+                .await;
             }
         }
     }
 
     // Stop is never refused: the ingest closed the turn; the ack ends it
     // (.context/work-tracking.md "No gates").
-    respond(&ctx.services.harnesses, harness, &HookAnswer::Ack)
+    respond(&ctx.services.harnesses, harness, &HookAnswer::Ack).await
 }
 
 /// `answer` as the hook's harness renders it (`AgentHarness::render`): its
@@ -587,12 +592,18 @@ async fn handle_hook_inner(
 /// non-blocking status code" warning into the user's terminal, which fills
 /// the xterm with noise on Edit/Write-heavy turns. See
 /// `.context/agent-model.md`.
-fn respond(harnesses: &HarnessRegistry, harness: Option<&str>, answer: &HookAnswer) -> Response {
-    let body = harness
+async fn respond(
+    harnesses: &HarnessRegistry,
+    harness: Option<&str>,
+    answer: &HookAnswer,
+) -> Response {
+    let body = match harness
         .and_then(|h| harnesses.get(h).ok())
         .or_else(|| harnesses.default().ok())
-        .map(|h| h.render(answer))
-        .unwrap_or_else(|| serde_json::json!({}));
+    {
+        Some(h) => h.render(answer).await,
+        None => serde_json::json!({}),
+    };
     (StatusCode::OK, Json(body)).into_response()
 }
 
@@ -651,7 +662,7 @@ mod tests {
         let resp = bounded_hook_response(
             std::time::Duration::from_millis(10),
             "PreToolUse",
-            respond(&none, None, &HookAnswer::Ack),
+            respond(&none, None, &HookAnswer::Ack).await,
             std::future::pending::<Response>(),
         )
         .await;

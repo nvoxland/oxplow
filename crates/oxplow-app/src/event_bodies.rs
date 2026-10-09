@@ -100,6 +100,11 @@ mod tests {
     async fn a_body_is_read_by_event_scoped_and_capped() {
         let f = crate::test_fixtures::services_with_effort().await;
         let big = "x".repeat(MAX_READ_BYTES * 2);
+        let body = serde_json::json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "ls"},
+            "tool_response": {"stdout": big},
+        });
         f.svc
             .hook_ingest
             .ingest(HookEnvelope {
@@ -108,15 +113,10 @@ mod tests {
                 stream_id: None,
                 agent_session_id: None,
                 session_id: Some("s".into()),
-                payload_json: serde_json::json!({
-                    "tool_name": "Bash",
-                    "tool_input": {"command": "ls"},
-                    "tool_response": {"stdout": big},
-                })
-                .to_string(),
+                payload_json: body.to_string(),
                 prompt: None,
                 decision: None::<ToolDecision>,
-                tool: None,
+                tool: crate::test_fixtures::claude_tool(HookKind::PostToolUse, &body),
             })
             .await
             .unwrap();

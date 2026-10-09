@@ -77,26 +77,32 @@ pub fn resolve_program_in(
     path_var: Option<&OsStr>,
     extra: &[PathBuf],
 ) -> Option<PathBuf> {
-    let as_path = Path::new(bin);
-    if as_path.components().count() > 1 {
-        return as_path.is_file().then(|| as_path.to_path_buf());
-    }
-    let from_path = path_var
-        .into_iter()
-        .flat_map(std::env::split_paths)
-        .map(|dir| dir.join(bin))
-        .find(|c| c.is_file());
-    from_path.or_else(|| extra.iter().map(|dir| dir.join(bin)).find(|c| c.is_file()))
+    oxplow_domain::agent::harness::resolve_program_in(bin, &search_path_in(path_var, extra))
 }
 
-/// [`resolve_program_in`] for any program (an ACP agent's command),
-/// against the live environment plus the well-known install dirs, so a
-/// GUI-launched daemon with a thin PATH still finds it (tsk245).
-pub fn resolve_program(bin: &str) -> Option<String> {
+/// The PATH's dirs, then `extra`, in order.
+fn search_path_in(path_var: Option<&OsStr>, extra: &[PathBuf]) -> Vec<PathBuf> {
+    path_var
+        .into_iter()
+        .flat_map(std::env::split_paths)
+        .chain(extra.iter().cloned())
+        .collect()
+}
+
+/// Where a program is looked for: the live PATH, then the well-known
+/// install dirs, so a GUI-launched daemon with a thin PATH still finds it
+/// (tsk245). What a harness's launch is given (`LaunchInput::search_path`).
+pub fn search_path() -> Vec<PathBuf> {
     let extra = home_dir()
         .map(|h| well_known_bin_dirs(&h))
         .unwrap_or_default();
-    resolve_program_in(bin, std::env::var_os("PATH").as_deref(), &extra)
+    search_path_in(std::env::var_os("PATH").as_deref(), &extra)
+}
+
+/// [`resolve_program_in`] for any program (an ACP agent's command), on
+/// [`search_path`].
+pub fn resolve_program(bin: &str) -> Option<String> {
+    oxplow_domain::agent::harness::resolve_program_in(bin, &search_path())
         .map(|p| p.to_string_lossy().into_owned())
 }
 
@@ -153,7 +159,7 @@ pub fn not_inherited(harnesses: &oxplow_domain::agent::registry::HarnessRegistry
     let mut out: Vec<String> = NOT_INHERITED.iter().map(|s| s.to_string()).collect();
     for id in harnesses.names() {
         if let Ok(h) = harnesses.get(&id) {
-            out.extend(h.env_markers().iter().map(|s| s.to_string()));
+            out.extend(h.env_markers());
         }
     }
     out.sort();

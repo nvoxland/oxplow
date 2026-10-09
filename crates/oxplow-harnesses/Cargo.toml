@@ -7,6 +7,7 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
+async-trait = { workspace = true }
 oxplow-domain = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -15,6 +16,7 @@ oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
 [dev-dependencies]
 oxplow-agent-text = { workspace = true }
 tempfile = { workspace = true }
+tokio = { workspace = true }
 
 [lints]
 workspace = true

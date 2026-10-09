@@ -50,7 +50,6 @@ use oxplow_db::agent_stores::{
 };
 use oxplow_db::event_log_store::{append_unique_tx, EventCtx};
 use oxplow_db::{event_content_store, Database};
-use oxplow_domain::agent::registry::HarnessRegistry;
 use oxplow_domain::agent::tool::{ToolKind, ToolUse};
 use oxplow_domain::events::schema::{
     AgentPromptSubmitted, AgentPromptSubmittedV1, AgentSessionEnded, AgentSessionEndedV1,
@@ -107,10 +106,11 @@ pub struct HookEnvelope {
     /// PreToolUse only: the policy's verdict (`None` reads as allowed).
     #[serde(default)]
     pub decision: Option<ToolDecision>,
-    /// A tool hook's call in oxplow's vocabulary, when the sender mapped it
-    /// (the control plane, with the hook's harness; the ACP host). `None`:
-    /// the ingest maps the body with its session's harness. In-process
-    /// only: an envelope that crosses a wire carries none.
+    /// A tool hook's call in oxplow's vocabulary, as the sender mapped it
+    /// (the hook route, with the bearer's harness; the ACP host, by the
+    /// protocol's tool kinds). `None`: the body names no tool, and nothing
+    /// is recorded of it. In-process only: an envelope that crosses a wire
+    /// (a person's interrupt) is never a tool hook.
     #[serde(skip)]
     #[specta(skip)]
     pub tool: Option<ToolUse>,
@@ -163,9 +163,6 @@ pub struct HookIngestService {
     pump: Option<Arc<crate::event_pump::EventPump>>,
     /// Snapshots the worktree when a turn ends (P2.3); `None` in bare tests.
     turn_snapshots: Option<Arc<dyn crate::turn_snapshots::TurnSnapshots>>,
-    /// Maps a tool hook's body the sender didn't map, by its session's
-    /// harness.
-    harnesses: HarnessRegistry,
 }
 
 impl HookIngestService {
@@ -174,7 +171,6 @@ impl HookIngestService {
         vocabulary: VocabularyHandle,
         project_dir: PathBuf,
         events: EventBus,
-        harnesses: HarnessRegistry,
     ) -> Self {
         Self {
             log: oxplow_db::SqliteEventLogStore::new(db.clone(), vocabulary.clone()),
@@ -185,7 +181,6 @@ impl HookIngestService {
             events,
             pump: None,
             turn_snapshots: None,
-            harnesses,
         }
     }
 
@@ -233,13 +228,12 @@ impl HookIngestService {
         let order = order_lock.lock().await;
         let vocabulary = self.vocabulary.clone();
         let project_dir = self.project_dir.clone();
-        let harnesses = self.harnesses.clone();
         let applied = self
             .db
             .transaction(move |tx| {
                 let vocabulary = vocabulary.current();
                 let ev = EventCtx::system(&vocabulary, "hook_ingest");
-                record_tx(tx, &ev, &project_dir, &harnesses, thread, &env, now)
+                record_tx(tx, &ev, &project_dir, thread, &env, now)
             })
             .await?;
 
@@ -432,7 +426,6 @@ fn record_tx(
     conn: &rusqlite::Connection,
     ev: &EventCtx<'_>,
     project_dir: &Path,
-    harnesses: &HarnessRegistry,
     thread: ThreadId,
     env: &HookEnvelope,
     now: Timestamp,
@@ -511,14 +504,10 @@ fn record_tx(
             status = Some((AgentStatusState::Running, None));
         }
         HookKind::PreToolUse | HookKind::PostToolUse => {
-            // The call as its harness maps it: the sender's, else the
-            // session's harness's reading of the body.
-            let tool = env.tool.clone().or_else(|| {
-                row.harness
-                    .as_deref()
-                    .and_then(|h| harnesses.get(h).ok())
-                    .and_then(|h| h.tool_use(&body))
-            });
+            // The call as its harness mapped it: the sender's reading (the
+            // hook route maps the body by the bearer's harness, the ACP
+            // host by the protocol's tool kinds).
+            let tool = env.tool.clone();
             // A body that names no tool records nothing.
             if let Some(tool) = &tool {
                 log_tool_tx(conn, ev, thread, &row, env, tool, &body, session)?;
@@ -933,20 +922,8 @@ mod tests {
             oxplow_domain::vocabulary::VocabularyHandle::core(),
             std::path::PathBuf::from("/p"),
             EventBus::new(),
-            claude_registry(),
         );
         (svc, t.id)
-    }
-
-    /// The harnesses the fixture's sessions run: Claude Code, whose hook
-    /// bodies these tests post.
-    fn claude_registry() -> HarnessRegistry {
-        let registry = HarnessRegistry::new(std::sync::Arc::new(String::new));
-        registry.register(
-            oxplow_harnesses::built_in("oxplow:claude-code", "claude", "Claude")
-                .expect("the built-in"),
-        );
-        registry
     }
 
     /// A new service over the same database: a restarted daemon.
@@ -956,7 +933,6 @@ mod tests {
             svc.vocabulary.clone(),
             svc.project_dir.clone(),
             EventBus::new(),
-            svc.harnesses.clone(),
         )
     }
 
@@ -1028,7 +1004,7 @@ mod tests {
                 .and_then(|p| p.as_str())
                 .map(str::to_string),
             decision: None,
-            tool: None,
+            tool: crate::test_fixtures::claude_tool(kind, &body),
         }
     }
 

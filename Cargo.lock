@@ -4698,6 +4698,7 @@ dependencies = [
  "serde_json",
  "specta",
  "specta-typescript",
+ "tempfile",
  "thiserror 2.0.21",
  "time",
  "uuid",
@@ -4752,6 +4753,7 @@ dependencies = [
 name = "oxplow-harness-fake"
 version = "0.7.0"
 dependencies = [
+ "async-trait",
  "opentelemetry-proto",
  "oxplow-domain",
  "oxplow-workspace-hack",
@@ -4765,12 +4767,14 @@ dependencies = [
 name = "oxplow-harnesses"
 version = "0.7.0"
 dependencies = [
+ "async-trait",
  "oxplow-agent-text",
  "oxplow-domain",
  "oxplow-workspace-hack",
  "serde",
  "serde_json",
  "tempfile",
+ "tokio",
 ]
 
 [[package]]

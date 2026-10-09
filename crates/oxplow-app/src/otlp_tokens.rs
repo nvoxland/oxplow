@@ -11,9 +11,10 @@
 //! facts. Every registered harness is asked, since the names are each
 //! harness's own: reading the session's harness first would cost a database
 //! read for every export, most of which (Codex's log events) carry no
-//! counts.
+//! counts. Each harness is asked once per export, with all its records — a
+//! provider harness answers in one call.
 //!
-//! Pure + no IO → fully unit-testable. [`summarize_metrics_request`] is the
+//! No IO of its own → fully unit-testable. [`summarize_metrics_request`] is the
 //! opt-in wire-format diagnostic (tsk25), which also decodes logs.
 
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
@@ -40,27 +41,15 @@ pub struct TokenExport {
 /// its one endpoint here, and its token counts ride log events), and read
 /// its token counts through `harnesses`. `None` when it carries none —
 /// most Codex log events don't.
-pub fn decode_token_export(body: &[u8], harnesses: &HarnessRegistry) -> Option<TokenExport> {
-    let read = |records: Vec<Owned>| -> Vec<TokenReading> {
-        let harnesses = harnesses.all();
-        records
-            .iter()
-            .flat_map(|r| {
-                let record = r.record();
-                harnesses
-                    .iter()
-                    .flat_map(|h| h.token_readings(&record))
-                    .collect::<Vec<_>>()
-            })
-            .collect()
+pub async fn decode_token_export(body: &[u8], harnesses: &HarnessRegistry) -> Option<TokenExport> {
+    let mut counts = match decode_metrics_request(body) {
+        Ok(req) => read(harnesses, &metric_records(&req)).await,
+        Err(_) => Vec::new(),
     };
-    let mut counts = decode_metrics_request(body)
-        .map(|req| read(metric_records(&req)))
-        .unwrap_or_default();
     if counts.is_empty() {
-        counts = decode_logs_request(body)
-            .map(|req| read(log_records(&req)))
-            .unwrap_or_default();
+        if let Ok(req) = decode_logs_request(body) {
+            counts = read(harnesses, &log_records(&req)).await;
+        }
     }
     if counts.is_empty() {
         return None;
@@ -84,6 +73,19 @@ pub fn decode_token_export(body: &[u8], harnesses: &HarnessRegistry) -> Option<T
     })
 }
 
+/// The token counts every registered harness reads in `records`, one
+/// call each.
+async fn read(harnesses: &HarnessRegistry, records: &[OtlpRecord]) -> Vec<TokenReading> {
+    if records.is_empty() {
+        return Vec::new();
+    }
+    let mut counts = Vec::new();
+    for h in harnesses.all() {
+        counts.extend(h.token_readings(records).await);
+    }
+    counts
+}
+
 /// Decode an OTLP/HTTP protobuf metrics export body.
 pub fn decode_metrics_request(
     body: &[u8],
@@ -97,57 +99,9 @@ pub fn decode_logs_request(body: &[u8]) -> Result<ExportLogsServiceRequest, pros
     ExportLogsServiceRequest::decode(body)
 }
 
-/// A decoded record, owning what an [`OtlpRecord`] borrows.
-enum Owned {
-    Point {
-        metric: String,
-        value: i64,
-        attributes: Attrs,
-        resource: Attrs,
-        time_unix_nano: u64,
-        start_time_unix_nano: u64,
-    },
-    Log {
-        attributes: Attrs,
-        resource: Attrs,
-        time_unix_nano: u64,
-    },
-}
-
-impl Owned {
-    fn record(&self) -> OtlpRecord<'_> {
-        match self {
-            Owned::Point {
-                metric,
-                value,
-                attributes,
-                resource,
-                time_unix_nano,
-                start_time_unix_nano,
-            } => OtlpRecord::Point {
-                metric,
-                value: *value,
-                attributes,
-                resource,
-                time_unix_nano: *time_unix_nano,
-                start_time_unix_nano: *start_time_unix_nano,
-            },
-            Owned::Log {
-                attributes,
-                resource,
-                time_unix_nano,
-            } => OtlpRecord::Log {
-                attributes,
-                resource,
-                time_unix_nano: *time_unix_nano,
-            },
-        }
-    }
-}
-
 /// Every data point of a metrics export: a counter's or gauge's value, a
 /// histogram's sum.
-fn metric_records(req: &ExportMetricsServiceRequest) -> Vec<Owned> {
+fn metric_records(req: &ExportMetricsServiceRequest) -> Vec<OtlpRecord> {
     let mut out = Vec::new();
     for rm in &req.resource_metrics {
         let resource = attrs(
@@ -158,7 +112,7 @@ fn metric_records(req: &ExportMetricsServiceRequest) -> Vec<Owned> {
         );
         for m in rm.scope_metrics.iter().flat_map(|sm| &sm.metrics) {
             let mut point = |value: i64, a: &[KeyValue], time: u64, start: u64| {
-                out.push(Owned::Point {
+                out.push(OtlpRecord::Point {
                     metric: m.name.clone(),
                     value,
                     attributes: attrs(a),
@@ -198,7 +152,7 @@ fn metric_records(req: &ExportMetricsServiceRequest) -> Vec<Owned> {
 
 /// Every log record of a logs export, timed when it happened, else when it
 /// was observed.
-fn log_records(req: &ExportLogsServiceRequest) -> Vec<Owned> {
+fn log_records(req: &ExportLogsServiceRequest) -> Vec<OtlpRecord> {
     let mut out = Vec::new();
     for rl in &req.resource_logs {
         let resource = attrs(
@@ -208,7 +162,7 @@ fn log_records(req: &ExportLogsServiceRequest) -> Vec<Owned> {
                 .unwrap_or(&[]),
         );
         for lr in rl.scope_logs.iter().flat_map(|sl| &sl.log_records) {
-            out.push(Owned::Log {
+            out.push(OtlpRecord::Log {
                 attributes: attrs(&lr.attributes),
                 resource: resource.clone(),
                 time_unix_nano: if lr.time_unix_nano > 0 {
@@ -544,8 +498,77 @@ pub(crate) mod tests {
         r
     }
 
+    /// [`decode_token_export`], run to its end.
+    fn decode(body: &[u8], harnesses: &HarnessRegistry) -> Option<TokenExport> {
+        futures::executor::block_on(decode_token_export(body, harnesses))
+    }
+
+    /// A harness counting its calls, reading every record as one input
+    /// token.
+    struct Counting(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+    #[async_trait::async_trait]
+    impl oxplow_domain::agent::harness::AgentHarness for Counting {
+        fn id(&self) -> &str {
+            "counting"
+        }
+        fn title(&self) -> &str {
+            "Counting"
+        }
+        fn interact(&self) -> oxplow_domain::agent::harness::Interact {
+            oxplow_domain::agent::harness::Interact {
+                transcript: oxplow_domain::agent::harness::Transcript::Terminal,
+            }
+        }
+        async fn launch(
+            &self,
+            _: &oxplow_domain::agent::harness::LaunchInput,
+        ) -> Result<
+            oxplow_domain::agent::harness::Launch,
+            oxplow_domain::agent::harness::HarnessError,
+        > {
+            Err(oxplow_domain::agent::harness::HarnessError::Config(
+                "none".into(),
+            ))
+        }
+        async fn tool_use(
+            &self,
+            _: &serde_json::Value,
+        ) -> Option<oxplow_domain::agent::tool::ToolUse> {
+            None
+        }
+        async fn render(&self, _: &oxplow_domain::agent::observe::HookAnswer) -> serde_json::Value {
+            serde_json::json!({})
+        }
+        async fn token_readings(&self, records: &[OtlpRecord]) -> Vec<TokenReading> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            records
+                .iter()
+                .map(|r| TokenReading {
+                    model: r.model(),
+                    kind: TokenKind::Input,
+                    value: 1,
+                    at_unix_nano: 0,
+                    from_unix_nano: 0,
+                })
+                .collect()
+        }
+    }
+
+    /// Each harness is asked once per export, with all its records: a
+    /// provider harness answers an export in one call.
+    #[test]
+    fn each_harness_reads_an_export_in_one_call() {
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let r = HarnessRegistry::new(std::sync::Arc::new(String::new));
+        r.register(std::sync::Arc::new(Counting(calls.clone())));
+        let export = decode(&encoded_claude_export("m", 100, 20), &r).unwrap();
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(export.counts.len(), 2, "both points, in one call");
+    }
+
     fn readings(body: &[u8]) -> Vec<TokenReading> {
-        decode_token_export(body, &harnesses())
+        decode(body, &harnesses())
             .map(|e| e.counts)
             .unwrap_or_default()
     }
@@ -636,16 +659,16 @@ pub(crate) mod tests {
     #[test]
     fn an_export_reports_its_window_end() {
         let at = oxplow_domain::Timestamp::from_unix_nanos(1_790_000_000_123_456_000).unwrap();
-        let export = decode_token_export(
+        let export = decode(
             &encoded_claude_export_at("m", 100, 20, Some(at)),
             &harnesses(),
         )
         .expect("token counts");
         assert_eq!(export.window_end, Some(at));
         assert_eq!(export.counts.len(), 2);
-        let undated = decode_token_export(&encoded_claude_export("m", 100, 20), &harnesses());
+        let undated = decode(&encoded_claude_export("m", 100, 20), &harnesses());
         assert_eq!(undated.unwrap().window_end, None);
-        assert_eq!(decode_token_export(b"not otlp", &harnesses()), None);
+        assert_eq!(decode(b"not otlp", &harnesses()), None);
     }
 
     /// A counter's points reach the harness with their attributes and the
@@ -742,17 +765,14 @@ pub(crate) mod tests {
             attributes: vec![kv("event.name", "codex.api_request")],
             ..Default::default()
         };
-        assert_eq!(decode_token_export(&logs(vec![other]), &harnesses()), None);
+        assert_eq!(decode(&logs(vec![other]), &harnesses()), None);
     }
 
     /// No harness registered reads no counts.
     #[test]
     fn with_no_harness_an_export_reads_as_none() {
         let none = HarnessRegistry::new(std::sync::Arc::new(String::new));
-        assert_eq!(
-            decode_token_export(&encoded_claude_export("m", 100, 20), &none),
-            None
-        );
+        assert_eq!(decode(&encoded_claude_export("m", 100, 20), &none), None);
     }
 
     #[test]

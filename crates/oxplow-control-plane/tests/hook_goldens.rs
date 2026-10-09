@@ -237,7 +237,8 @@ async fn every_built_in_harness_renders_the_golden_deny() {
         assert_eq!(
             h.render(&oxplow_domain::agent::observe::HookAnswer::Deny {
                 reason: reason.clone()
-            }),
+            })
+            .await,
             golden,
             "{}",
             h.id()

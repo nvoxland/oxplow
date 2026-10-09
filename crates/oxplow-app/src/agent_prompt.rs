@@ -48,7 +48,7 @@ impl RoleMode {
 
 /// The text of each of `files` under `project_dir` that exists, in order,
 /// a blank line apart. Empty when none does.
-pub fn load_instruction_files(project_dir: &Path, files: &[&str]) -> String {
+pub fn load_instruction_files(project_dir: &Path, files: &[String]) -> String {
     files
         .iter()
         .filter_map(|f| std::fs::read_to_string(project_dir.join(f)).ok())
@@ -131,7 +131,7 @@ pub fn role_change_banner(initial: RoleMode, current: RoleMode) -> String {
 /// blank lines so Claude renders each as its own block.
 pub fn assemble_system_prompt(
     project_dir: &Path,
-    instruction_files: &[&str],
+    instruction_files: &[String],
     config: &OxplowConfig,
     stream: &Stream,
     thread: Option<&Thread>,
@@ -146,7 +146,7 @@ pub fn assemble_system_prompt(
 /// gets `skills`' index instead (`capabilities::agent_text`).
 pub fn assemble_acp_system_prompt(
     project_dir: &Path,
-    instruction_files: &[&str],
+    instruction_files: &[String],
     config: &OxplowConfig,
     stream: &Stream,
     thread: Option<&Thread>,
@@ -166,7 +166,7 @@ pub fn assemble_acp_system_prompt(
 /// session context instead and discovers its skill files.
 fn assemble(
     project_dir: &Path,
-    instruction_files: &[&str],
+    instruction_files: &[String],
     config: &OxplowConfig,
     stream: &Stream,
     thread: Option<&Thread>,
@@ -326,7 +326,7 @@ mod tests {
         std::fs::write(dir.path().join("CLAUDE.md"), "## Repo rules\nRule 1.").unwrap();
         let prompt = assemble_system_prompt(
             dir.path(),
-            &["CLAUDE.md"],
+            &["CLAUDE.md".to_string()],
             &config(),
             &stream(),
             Some(&thread()),
@@ -342,8 +342,13 @@ mod tests {
         let dir = tempdir().unwrap();
         let mut cfg = config();
         cfg.testing.agent_hint = Some("Run tests with bun run test:collect".into());
-        let prompt =
-            assemble_system_prompt(dir.path(), &["CLAUDE.md"], &cfg, &stream(), Some(&thread()));
+        let prompt = assemble_system_prompt(
+            dir.path(),
+            &["CLAUDE.md".to_string()],
+            &cfg,
+            &stream(),
+            Some(&thread()),
+        );
         assert!(prompt.contains("# Testing\n"));
         assert!(prompt.contains("bun run test:collect"));
     }
@@ -353,7 +358,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let prompt = assemble_system_prompt(
             dir.path(),
-            &["CLAUDE.md"],
+            &["CLAUDE.md".to_string()],
             &config(),
             &stream(),
             Some(&thread()),
@@ -366,7 +371,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let prompt = assemble_system_prompt(
             dir.path(),
-            &["CLAUDE.md"],
+            &["CLAUDE.md".to_string()],
             &config(),
             &stream(),
             Some(&thread()),
@@ -435,14 +440,14 @@ mod tests {
         let dir = tempdir().unwrap();
         let full = assemble_system_prompt(
             dir.path(),
-            &["CLAUDE.md"],
+            &["CLAUDE.md".to_string()],
             &config(),
             &stream(),
             Some(&thread()),
         );
         let acp = assemble_acp_system_prompt(
             dir.path(),
-            &["CLAUDE.md"],
+            &["CLAUDE.md".to_string()],
             &config(),
             &stream(),
             Some(&thread()),
@@ -461,14 +466,14 @@ mod tests {
         let dir = tempdir().unwrap();
         let full = assemble_system_prompt(
             dir.path(),
-            &["CLAUDE.md"],
+            &["CLAUDE.md".to_string()],
             &config(),
             &stream(),
             Some(&thread()),
         );
         let acp = assemble_acp_system_prompt(
             dir.path(),
-            &["CLAUDE.md"],
+            &["CLAUDE.md".to_string()],
             &config(),
             &stream(),
             Some(&thread()),

@@ -68,13 +68,17 @@ pub struct InitializeParams {
 }
 
 /// A capability the provider implements (`work_items`), with the
-/// capability's own feature flags.
+/// capability's own feature flags and, for a capability whose contract
+/// asks for more (an agent harness's instruction files, environment
+/// markers and settings), what it declares of itself as `data`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CapabilityDecl {
     pub capability: String,
     #[serde(default)]
     pub features: Value,
+    #[serde(default, skip_serializing_if = "Value::is_null")]
+    pub data: Value,
 }
 
 /// A command the provider runs, registered on the host's bus as

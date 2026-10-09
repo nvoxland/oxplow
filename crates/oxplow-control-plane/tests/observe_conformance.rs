@@ -94,8 +94,8 @@ async fn the_fake_harness_session_is_recorded_canonically() {
         .unwrap();
 
     let harness = svc.harnesses.get(oxplow_harness_fake::ID).unwrap();
-    let bin = fake_bin().to_string_lossy().into_owned();
-    let resolve = move |_: &str| Some(bin.clone());
+    // The fake's binary is found where cargo built it.
+    let bin_dir = fake_bin().parent().unwrap().to_path_buf();
     let token = common::bearer_for(&svc, session.id).await;
     let identity = vec![
         ("OXPLOW_HOOK_TOKEN".to_string(), token.clone()),
@@ -111,23 +111,24 @@ async fn the_fake_harness_session_is_recorded_canonically() {
                 thread: thread.id,
                 session: session.id,
             },
-            workspace: &root,
-            project_dir: &root,
-            endpoints: &Endpoints {
+            workspace: root.clone(),
+            project_dir: root.clone(),
+            endpoints: Endpoints {
                 hook_base_url: cp.hook_base_url(),
                 mcp_endpoint_url: cp.mcp_endpoint_url(),
                 otlp_base_url: cp.otlp_base_url(),
                 hook_token: token.clone(),
             },
-            identity_env: &identity,
+            identity_env: identity,
             system_prompt: None,
             resume: None,
-            text: &AgentText::default(),
-            config: &serde_json::json!({}),
-            oxplow_executable: std::path::Path::new("/bin/false"),
+            text: AgentText::default(),
+            config: serde_json::json!({}),
+            oxplow_executable: "/bin/false".into(),
             home: None,
-            resolve_program: &resolve,
+            search_path: vec![bin_dir],
         })
+        .await
         .unwrap();
     let LaunchSpec::Pty { command, env } = launch.spec else {
         panic!("the fake runs in a terminal");

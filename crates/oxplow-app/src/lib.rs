@@ -901,7 +901,6 @@ impl Services {
             vocabulary.clone(),
             layout.project_dir.clone(),
             event_bus.clone(),
-            harnesses.clone(),
         )
         .with_event_pump(event_pump.clone());
         let recovery_svc = recovery::RecoveryService::new(agent_turn_store.clone());

@@ -8,6 +8,7 @@ license.workspace = true
 description = "A scripted fake agent harness for oxplow's observe conformance suite"
 
 [dependencies]
+async-trait = { workspace = true }
 oxplow-domain = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }

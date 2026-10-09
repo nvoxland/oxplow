@@ -178,7 +178,7 @@ pub async fn open_terminal_session(
     let config = read_config(&ctx.config);
     let prompt = assemble_system_prompt(
         &ctx.layout.project_dir,
-        harness.instruction_files(),
+        &harness.instruction_files(),
         &config,
         &stream,
         Some(&thread),
@@ -261,7 +261,6 @@ pub(crate) async fn launch_session(
     let executable = std::env::current_exe()
         .map_err(|e| IpcError::internal(format!("the oxplow binary: {e}")))?;
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
-    let resolve = |bin: &str| oxplow_app::agent_path::resolve_program(bin);
     let launch = harness
         .launch(&LaunchInput {
             session: SessionIds {
@@ -269,18 +268,19 @@ pub(crate) async fn launch_session(
                 thread: thread.id,
                 session: session.id,
             },
-            workspace: std::path::Path::new(&stream.worktree_path),
-            project_dir: &ctx.layout.project_dir,
-            endpoints,
-            identity_env: &identity,
-            system_prompt,
-            resume: Some(session.resume_session_id.as_str()).filter(|r| !r.is_empty()),
-            text: &text,
-            config,
-            oxplow_executable: &executable,
-            home: home.as_deref(),
-            resolve_program: &resolve,
+            workspace: std::path::PathBuf::from(&stream.worktree_path),
+            project_dir: ctx.layout.project_dir.clone(),
+            endpoints: endpoints.clone(),
+            identity_env: identity,
+            system_prompt: system_prompt.map(str::to_string),
+            resume: Some(session.resume_session_id.clone()).filter(|r| !r.is_empty()),
+            text,
+            config: config.clone(),
+            oxplow_executable: executable,
+            home,
+            search_path: oxplow_app::agent_path::search_path(),
         })
+        .await
         .map_err(|e| IpcError::internal(e.to_string()))?;
     if launch.resume_dropped {
         if let Err(err) = oxplow_app::resume_check::forget_missing(

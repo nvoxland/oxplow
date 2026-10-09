@@ -96,10 +96,21 @@ pub const BUILT_INS: &[BuiltIn] = &[
     harness(
         "oxplow:claude-code",
         "Claude Code",
-        &["terminal", "permission_prompts", "resume"],
+        &[
+            "terminal",
+            "permission_prompts",
+            "resume",
+            "transcript",
+            "telemetry",
+            "runtime_text",
+        ],
     ),
-    harness("oxplow:codex-cli", "Codex", &["terminal", "resume"]),
-    harness("oxplow:opencode", "opencode", &["terminal"]),
+    harness(
+        "oxplow:codex-cli",
+        "Codex",
+        &["terminal", "resume", "telemetry", "runtime_text"],
+    ),
+    harness("oxplow:opencode", "opencode", &["terminal", "runtime_text"]),
     harness(
         "oxplow:acp",
         "An ACP agent",
@@ -875,11 +886,11 @@ pub async fn refresh_agent_text(svc: &crate::Services) {
         }
     };
     let roots = oxplow_domain::agent::harness::RuntimeRoots {
-        project_dir,
-        workspaces: &workspaces,
+        project_dir: project_dir.clone(),
+        workspaces,
     };
     for harness in svc.harnesses.all() {
-        if let Err(error) = harness.refresh_text(&roots, &text) {
+        if let Err(error) = harness.refresh_text(&roots, &text).await {
             tracing::warn!(%error, harness = harness.id(), "refreshing the agent's skills failed");
         }
     }

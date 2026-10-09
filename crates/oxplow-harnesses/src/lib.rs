@@ -71,11 +71,19 @@ mod test_launch {
     const WORKSPACE: &str = "worktrees/s1";
 
     /// The roots of a project with no worktrees.
-    pub fn project_only(project: &Path) -> RuntimeRoots<'_> {
+    pub fn project_only(project: &Path) -> RuntimeRoots {
         RuntimeRoots {
-            project_dir: project,
-            workspaces: &[],
+            project_dir: project.to_path_buf(),
+            workspaces: Vec::new(),
         }
+    }
+
+    /// Run a harness's call to its end, for a test.
+    pub fn block<F: std::future::Future>(f: F) -> F::Output {
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(f)
     }
 
     /// A PTY launch's command and env. Its bearer (`secret-bearer`) is in
@@ -181,27 +189,32 @@ mod test_launch {
             ("OXPLOW_THREAD_ID".to_string(), "thr2".to_string()),
             ("OXPLOW_SESSION".to_string(), "ses3".to_string()),
         ];
-        let resolve = |bin: &str| Some(format!("/opt/agents/{bin}"));
-        let launch = h
-            .launch(&LaunchInput {
-                session: SessionIds {
-                    stream: StreamId::new(1),
-                    thread: ThreadId::new(2),
-                    session: AgentSessionId::new(3),
-                },
-                workspace: &workspace,
-                project_dir: &project,
-                endpoints: &endpoints,
-                identity_env: &identity,
-                system_prompt,
-                resume,
-                text: &oxplow_agent_text::core_text(),
-                config,
-                oxplow_executable: Path::new("/bin/oxplow"),
-                home,
-                resolve_program: &resolve,
-            })
-            .expect("it launches");
+        // Programs resolve under `<scratch>/opt/agents`: a search path
+        // holding each one a launch asks for.
+        let agents = project.join("opt/agents");
+        std::fs::create_dir_all(&agents).unwrap();
+        for bin in ["claude", "codex", "opencode"] {
+            std::fs::write(agents.join(bin), "").unwrap();
+        }
+        let launch = block(h.launch(&LaunchInput {
+            session: SessionIds {
+                stream: StreamId::new(1),
+                thread: ThreadId::new(2),
+                session: AgentSessionId::new(3),
+            },
+            workspace: workspace.clone(),
+            project_dir: project.clone(),
+            endpoints,
+            identity_env: identity,
+            system_prompt: system_prompt.map(str::to_string),
+            resume: resume.map(str::to_string),
+            text: oxplow_agent_text::core_text(),
+            config: config.clone(),
+            oxplow_executable: "/bin/oxplow".into(),
+            home: home.map(Path::to_path_buf),
+            search_path: vec![agents],
+        }))
+        .expect("it launches");
         Launched {
             launch,
             project,

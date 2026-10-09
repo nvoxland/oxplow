@@ -174,7 +174,7 @@ mod tests {
                 allowed: true,
                 reason: None,
             }),
-            tool: None,
+            tool: crate::test_fixtures::claude_tool(kind, &body),
         }
     }
 

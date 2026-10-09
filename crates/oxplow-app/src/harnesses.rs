@@ -11,7 +11,7 @@ use crate::capabilities::{Implementation, Source};
 /// Register the harnesses `declared` names (the project's extensions'
 /// `implementations:`), in declaration order, and nothing else.
 pub fn register_built_ins(registry: &HarnessRegistry, declared: &[Implementation]) {
-    registry.set(
+    registry.set_declared(
         declared
             .iter()
             .filter(|i| i.capability == "agent_harness")
@@ -69,12 +69,12 @@ pub fn listing(registry: &HarnessRegistry, agents: &[String]) -> Vec<HarnessList
             enabled: agents.is_empty() || agents.iter().any(|a| a == h.id()),
             settings: h
                 .settings()
-                .iter()
+                .into_iter()
                 .map(|s| HarnessSettingListing {
-                    key: s.key.into(),
-                    title: s.title.into(),
-                    hint: s.hint.into(),
-                    placeholder: s.placeholder.into(),
+                    key: s.key,
+                    title: s.title,
+                    hint: s.hint,
+                    placeholder: s.placeholder,
                 })
                 .collect(),
         })

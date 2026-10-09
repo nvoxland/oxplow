@@ -191,6 +191,21 @@ reads), `token_readings` (telemetry core reads). So a harness implements
 only what it uses; adding a harness-specific feature is a defaulted method,
 not a requirement on every harness.
 
+The operations are async and their data owned — `launch`, `tool_use`,
+`render`, `refresh_text`, `turns`, `token_readings` await; the launch's
+input, `LaunchInput`, and every answer are serde shapes
+(`LaunchSpec` and `HookAnswer` tagged by `kind`, an `OtlpRecord`'s
+attributes an object) — because a harness may be a provider's process
+(`.context/providers.md`, the `agent_harness` contract): what a built-in
+answers in code, a provider declares (its features and its capability's
+`data`: `instruction_files`, `env_markers`, `settings`) or answers by a
+verb of the same name. `token_readings` takes one export's records at
+once: the OTLP route asks each registered harness once per export.
+A built-in's declaration names the optional verbs it has as features —
+`transcript` (`turns`), `telemetry` (`token_readings`), `runtime_text`
+(`refresh_text`); Claude has all three, Codex the last two, opencode
+`runtime_text`.
+
 **Resuming.** `shared::resume_or_fresh` builds the resume: a session the
 harness found on disk (Claude's transcript, `resume_state`) is `exec`'d
 directly, so its process is the agent's and its exit ends the PTY; one it
@@ -232,8 +247,10 @@ or declines, and `run_command` tells the agent so ([commands.md](./commands.md),
 
 **A harness is a registry key, never an enum.** An agent session's
 `harness` is the key of a registered harness (`HarnessRegistry`, the
-`agent_harness` declarations, in declaration order); nothing in core names
-one. `.oxplow/project.yaml`'s `agents: [...]` lists the enabled ones in
+`agent_harness` declarations, in declaration order, then the provider
+instances); nothing in core names one. A catalog reload restates the
+declared ones (`set_declared`) and keeps a registered instance, as the
+effort policies' registry does. `.oxplow/project.yaml`'s `agents: [...]` lists the enabled ones in
 priority order (the first is a new session's default); left out, every
 registered harness is enabled and the first declared is the default. The
 config checks only the keys' shape; `set_agents` and
@@ -282,8 +299,10 @@ mode (tsk1018): it went with the "Open in tmux" toggle and the
 
 ### The agent is spawned by absolute path, on purpose (tsk245)
 
-A harness resolves its CLI through `LaunchInput::resolve_program` (backed by
-`agent_path::resolve_program`) and launches the absolute path. **Don't "simplify" it back to the bare
+A harness resolves its CLI through `LaunchInput::resolve_program`, over the
+launch's `search_path` (`agent_path::search_path`: the PATH, then the
+well-known install dirs; data, so a provider harness gets it too) and
+launches the absolute path. **Don't "simplify" it back to the bare
 binary name** — that is a bug that only reproduces on a GUI launch:
 
 - A **GUI-launched** app (Finder, dock, oxplow's own launcher) gets macOS's
@@ -335,8 +354,9 @@ its outcome (`ok`, `exit_code`) and an `ask`'s `question`.
 - **Where.** The hook route maps a PreToolUse / PostToolUse body with the
   bearer's harness before the policy runs, and hands the call to the
   ingest (`HookEnvelope.tool`); the ACP host does the same with its
-  mapping; a sender that didn't map (a test, an in-process caller) is
-  mapped by the ingest with its session's harness.
+  mapping. The ingest maps nothing: it runs in one transaction, and a
+  harness's `tool_use` may be a provider's call. A tool hook with no
+  call (its body names no tool) records nothing.
 - **What reads it.** The write guard (`kind == edit`, every path), the
   status derivation (`subagent`, `ask`, `plan`), the ROLE CHANGE banner
   (`plan`), effort claims (`edit`), test-run collection (`shell`, its
