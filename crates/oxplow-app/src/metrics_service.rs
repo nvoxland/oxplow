@@ -5998,6 +5998,52 @@ def transform(input):
             .is_err());
     }
 
+    /// Two project extensions declaring one metric key: the load says so once,
+    /// naming both, and the first extension's metric stays active. Today the
+    /// catalog keeps the later definition while activation takes the first
+    /// extension and then fails its scope test, so neither activates and
+    /// nothing is reported.
+    #[tokio::test]
+    #[ignore = "red until contribution descriptors land"]
+    async fn two_extensions_declaring_one_metric_key_report_it_and_keep_the_first() {
+        let (svc, dir) = fixture().await;
+        for (name, measure) in [("alpha", "alpha.todo"), ("beta", "beta.todo")] {
+            let ext = dir.path().join("oxplow/extensions").join(name);
+            std::fs::create_dir_all(&ext).unwrap();
+            std::fs::write(
+                ext.join("extension.yaml"),
+                format!(
+                    "manifest: 2\nname: {name}\nintent:\n  purpose: test\n\
+                     measures:\n  - {{ key: {measure}, title: TODOs }}\n\
+                     metrics:\n  - {{ key: shared.todos, title: TODOs, sourceMeasure: {measure}, aggregation: sum }}\n"
+                ),
+            )
+            .unwrap();
+        }
+
+        svc.metrics.seed_catalog().await;
+
+        let reports: Vec<String> = svc
+            .listed_extensions(dir.path())
+            .await
+            .into_iter()
+            .flat_map(|e| e.errors)
+            .filter(|e| e.contains("shared.todos"))
+            .collect();
+        assert_eq!(reports.len(), 1, "one load error, got {reports:?}");
+        assert!(
+            reports[0].contains("alpha") && reports[0].contains("beta"),
+            "it names both extensions: {reports:?}"
+        );
+        let spec = svc
+            .fact_store
+            .get_spec("shared.todos")
+            .await
+            .unwrap()
+            .expect("the first extension's metric is still active");
+        assert_eq!(spec.scope, "extension:alpha");
+    }
+
     #[tokio::test]
     async fn an_extension_contributes_dimensions_that_slice_its_entity_metrics() {
         let (svc, dir) = fixture().await;
