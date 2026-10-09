@@ -44,9 +44,10 @@ pub enum Kind {
     Lens,
     /// A v2 manifest only.
     Extension,
-    /// A work-items provider: its declarations, a stub program to replace,
-    /// and the fixtures `extension test` runs.
-    Provider,
+    /// A provider of `capability` (one a process may implement): its
+    /// declarations from the capability's contract, a stub program to
+    /// replace, and the fixtures `extension test` runs.
+    Provider { capability: &'static str },
     /// A derived (Starlark) collector of an entity, a model over it and a
     /// lens over the model.
     Collector,
@@ -70,12 +71,35 @@ impl Kind {
         match s {
             "lens" => Some(Kind::Lens),
             "extension" => Some(Kind::Extension),
-            "provider" => Some(Kind::Provider),
+            "provider" => Some(Kind::Provider {
+                capability: "work_items",
+            }),
             "collector" => Some(Kind::Collector),
             "command" => Some(Kind::Command),
             "effect" => Some(Kind::Effect),
             "component" => Some(Kind::Component),
             _ => None,
+        }
+    }
+
+    /// A provider of `capability`; refused unless a process may implement
+    /// it (its spec carries a provider contract).
+    pub fn provider(capability: &str) -> Result<Kind, SdkError> {
+        match oxplow_domain::capability::spec(capability).filter(|c| c.provider.is_some()) {
+            Some(spec) => Ok(Kind::Provider {
+                capability: spec.id,
+            }),
+            None => {
+                let may: Vec<String> = oxplow_domain::capability::CAPABILITIES
+                    .iter()
+                    .filter(|c| c.provider.is_some())
+                    .map(|c| format!("`{}`", c.id))
+                    .collect();
+                Err(SdkError::Invalid(format!(
+                    "`{capability}` isn't a capability a provider can implement; one of {}",
+                    may.join(", ")
+                )))
+            }
         }
     }
 }
@@ -142,11 +166,10 @@ pub fn scaffold(
             Some("{ rows: $any }".to_string()),
         ),
         Kind::Extension => ("{}".to_string(), "TODO: what a run should show", None),
-        Kind::Provider => (
-            "{ command: create, input: { title: First } }".to_string(),
-            "the new item's ref",
-            Some("{ ref: $any }".to_string()),
-        ),
+        Kind::Provider { capability } => {
+            let starter = provider_starter(capability);
+            (starter.input, starter.expect, Some(starter.fixture))
+        }
         Kind::Collector => (
             "{ collector: items, rows: [{ ref: \"work_item:demo:1\", title: First, state: todo }, { ref: \"work_item:demo:2\", title: Second, state: done }] }"
                 .to_string(),
@@ -177,9 +200,14 @@ pub fn scaffold(
         shared: false,
     });
     match kind {
-        Kind::Provider => manifest.push_str(&format!(
-            "providers:\n  - id: {provider_id}\n    capability: work_items\n    entry: bin/provider\n    declarations: provider.json\n"
-        )),
+        Kind::Provider { capability } => {
+            manifest.push_str(&format!(
+                "providers:\n  - id: {provider_id}\n    capability: {capability}\n    entry: bin/provider\n    declarations: provider.json\n"
+            ));
+            if let Some(needs) = provider_starter(capability).needs {
+                manifest.push_str(needs);
+            }
+        }
         Kind::Collector => manifest.push_str(&format!(
             "collectors:\n\
              \x20 # Runs its script over its `input` rows when synced (`trigger: manual`;\n\
@@ -254,10 +282,10 @@ pub fn scaffold(
         )?;
     }
     match kind {
-        Kind::Provider => {
+        Kind::Provider { capability } => {
             write(
                 &format!("{rel_dir}/provider.json"),
-                serde_json::to_string_pretty(&provider_declarations(name))
+                serde_json::to_string_pretty(&provider_declarations(name, capability))
                     .expect("declarations serialize")
                     + "\n",
             )?;
@@ -425,23 +453,107 @@ pub fn scaffold(
     })
 }
 
-/// A work-items provider's starting declarations: create, update and
-/// transition (`record` access, no confirmation), the core
-/// `work_item.recorded@2` event and an empty config schema.
-fn provider_declarations(name: &str) -> oxplow_provider_protocol::model::InitializeResult {
-    use oxplow_domain::events::schema::{schema_for, EventType, WorkItemRecorded};
+/// What a scaffolded provider of `capability` starts with beyond its
+/// contract: the intent example's input, what it should show and the
+/// fixture's `expect`, and the scopes it `needs` (the manifest's lines).
+struct ProviderStarter {
+    input: String,
+    expect: &'static str,
+    fixture: String,
+    needs: Option<&'static str>,
+}
+
+fn provider_starter(capability: &str) -> ProviderStarter {
+    match capability {
+        "work_items" => ProviderStarter {
+            input: "{ command: create, input: { title: First } }".to_string(),
+            expect: "the new item's ref",
+            fixture: "{ ref: $any }".to_string(),
+            needs: None,
+        },
+        "effort_policy" => ProviderStarter {
+            input: "{ command: react, input: { event: { id: e1, type: thread.checkpoint, v: 1, seq: 1, source: system, subject: [], payload: {}, anchors: {} } } }"
+                .to_string(),
+            expect: "nothing to do: a checkpoint opens or closes no effort here",
+            fixture: "{ skip: $any }".to_string(),
+            // It hears events only: what it closes, it reads of oxplow.
+            needs: Some(
+                "    # A policy hears events only; it reads oxplow (`host/call`) for the rest,\n\
+                 \x20   # such as the open efforts of an item that finished.\n\
+                 \x20   needs: [sql.read]\n",
+            ),
+        },
+        _ => {
+            let verb = oxplow_domain::capability::contract(capability)
+                .and_then(|c| c.verbs.first())
+                .map_or("TODO", |v| v.name);
+            ProviderStarter {
+                input: format!("{{ command: {verb}, input: {{}} }}"),
+                expect: "TODO: what it answers",
+                fixture: "$any".to_string(),
+                needs: None,
+            }
+        }
+    }
+}
+
+/// The summary and input schema a scaffold declares for `verb` of
+/// `capability`: what core calls it with.
+fn verb_input(capability: &str, verb: &str) -> (String, serde_json::Value) {
+    use serde_json::json;
+    let str_prop = json!({ "type": "string" });
+    let state = json!({ "type": "string",
+                        "enum": ["todo", "in_progress", "blocked", "done", "canceled"] });
+    match (capability, verb) {
+        ("work_items", "create") => (
+            "Create a work item.".into(),
+            json!({ "type": "object", "required": ["title"], "additionalProperties": false,
+                    "properties": { "title": str_prop, "body": str_prop,
+                                    "state": state, "native_state": str_prop } }),
+        ),
+        ("work_items", "update") => (
+            "Change a work item's title, body or state.".into(),
+            json!({ "type": "object", "required": ["ref"], "additionalProperties": false,
+                    "properties": { "ref": str_prop, "title": str_prop, "body": str_prop,
+                                    "state": state, "native_state": str_prop } }),
+        ),
+        ("work_items", "transition") => (
+            "Move a work item to a canonical state, optionally naming a native one.".into(),
+            json!({ "type": "object", "required": ["ref", "to"], "additionalProperties": false,
+                    "properties": { "ref": str_prop, "to": state, "native_state": str_prop } }),
+        ),
+        ("effort_policy", "react") => (
+            "Compose the commands an event calls for: { commands } to run, or { skip }.".into(),
+            json!({ "type": "object", "required": ["event"],
+                    "properties": { "event": { "type": "object" } } }),
+        ),
+        _ => (
+            format!("TODO: what `{verb}` does."),
+            json!({ "type": "object" }),
+        ),
+    }
+}
+
+/// A provider's starting declarations, from `capability`'s contract
+/// (`.context/providers.md` "What a provider may implement"): the verbs it
+/// always needs (`record` access, no confirmation; declare the others with
+/// their features), every feature off, the events it may emit with core's
+/// schemas, a collector of what it records, and an empty config schema.
+fn provider_declarations(
+    name: &str,
+    capability: &str,
+) -> oxplow_provider_protocol::model::InitializeResult {
     use oxplow_provider_protocol::model::*;
-    let command = |name: &str, summary: &str, input: serde_json::Value| CommandDecl {
-        name: name.into(),
-        summary: summary.into(),
-        input_schema: input,
-        confirm: "never".into(),
-        access: "record".into(),
-        undoable: false,
-    };
-    let str_prop = serde_json::json!({ "type": "string" });
-    let state = serde_json::json!({ "type": "string",
-                                    "enum": ["todo", "in_progress", "blocked", "done", "canceled"] });
+    let spec = oxplow_domain::capability::spec(capability).expect("a provider kind's capability");
+    let contract = spec
+        .provider
+        .expect("a provider kind's capability has a contract");
+    let features: serde_json::Map<String, serde_json::Value> = spec
+        .features
+        .iter()
+        .map(|f| (f.to_string(), serde_json::Value::Bool(false)))
+        .collect();
+    let vocabulary = oxplow_domain::vocabulary::Vocabulary::core();
     InitializeResult {
         protocol_version: PROTOCOL_VERSION.into(),
         provider: Party {
@@ -449,44 +561,45 @@ fn provider_declarations(name: &str) -> oxplow_provider_protocol::model::Initial
             version: "0.1.0".into(),
         },
         capabilities: vec![CapabilityDecl {
-            capability: "work_items".into(),
-            features: serde_json::json!({
-                "hierarchy": false,
-                "comments": false,
-                "links": false,
-                "delete": false,
-            }),
+            capability: capability.into(),
+            features: serde_json::Value::Object(features.clone()),
         }],
-        // The work-items contract's verbs (`.context/work-items.md`); declare
-        // `link` / `comment` / `delete` with their features.
-        commands: vec![
-            command(
-                "create",
-                "Create a work item.",
-                serde_json::json!({ "type": "object", "required": ["title"], "additionalProperties": false,
-                                    "properties": { "title": str_prop, "body": str_prop,
-                                                    "state": state, "native_state": str_prop } }),
-            ),
-            command(
-                "update",
-                "Change a work item's title, body or state.",
-                serde_json::json!({ "type": "object", "required": ["ref"], "additionalProperties": false,
-                                    "properties": { "ref": str_prop, "title": str_prop, "body": str_prop,
-                                                    "state": state, "native_state": str_prop } }),
-            ),
-            command(
-                "transition",
-                "Move a work item to a canonical state, optionally naming a native one.",
-                serde_json::json!({ "type": "object", "required": ["ref", "to"], "additionalProperties": false,
-                                    "properties": { "ref": str_prop, "to": state, "native_state": str_prop } }),
-            ),
-        ],
-        event_types: vec![EventTypeDecl {
-            event_type: WorkItemRecorded::TYPE.into(),
-            v: WorkItemRecorded::V,
-            schema: schema_for::<WorkItemRecorded>(),
-        }],
-        collectors: Vec::new(),
+        commands: contract
+            .required(&serde_json::Value::Object(features))
+            .into_iter()
+            .map(|verb| {
+                let (summary, input_schema) = verb_input(capability, verb);
+                CommandDecl {
+                    name: verb.into(),
+                    summary,
+                    input_schema,
+                    confirm: "never".into(),
+                    access: "record".into(),
+                    undoable: false,
+                }
+            })
+            .collect(),
+        event_types: contract
+            .events
+            .iter()
+            .map(|(event_type, v)| EventTypeDecl {
+                event_type: (*event_type).into(),
+                v: *v,
+                schema: vocabulary
+                    .schema(event_type, *v)
+                    .expect("a contract's events are core's")
+                    .clone(),
+            })
+            .collect(),
+        collectors: contract
+            .records
+            .map(|r| CollectorDecl {
+                name: capability.into(),
+                entity: r.entity.into(),
+                description: format!("Every {} changed after the cursor.", r.entity),
+            })
+            .into_iter()
+            .collect(),
         config_schema: serde_json::json!({ "type": "object" }),
     }
 }
@@ -764,7 +877,8 @@ mod tests {
         for kind in [
             Kind::Lens,
             Kind::Extension,
-            Kind::Provider,
+            Kind::provider("work_items").unwrap(),
+            Kind::provider("effort_policy").unwrap(),
             Kind::Collector,
             Kind::Command,
             Kind::Effect,
@@ -794,6 +908,104 @@ mod tests {
                 assert!(problems.is_empty(), "{kind:?} {file}: {problems:?}");
             }
         }
+    }
+
+    fn declarations(root: &Path, name: &str) -> serde_json::Value {
+        let text =
+            std::fs::read_to_string(root.join(format!("oxplow/extensions/{name}/provider.json")))
+                .unwrap();
+        serde_json::from_str(&text).unwrap()
+    }
+
+    /// A provider scaffolds for any capability a process may implement,
+    /// its declarations from the capability's contract: the verbs it
+    /// always needs (`confirm: never`, `access: record`), the events it
+    /// may emit with core's schema, and a collector of what it records.
+    /// Its example and fixture are the capability's.
+    #[tokio::test]
+    async fn a_provider_scaffolds_any_capability_by_its_contract() {
+        assert_eq!(
+            Kind::parse("provider"),
+            Some(Kind::provider("work_items").unwrap())
+        );
+        for no_contract in ["vcs", "nope"] {
+            let err = Kind::provider(no_contract).unwrap_err().to_string();
+            assert!(
+                err.contains(&format!("`{no_contract}`"))
+                    && err.contains("work_items")
+                    && err.contains("effort_policy"),
+                "{err}"
+            );
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        scaffold(
+            dir.path(),
+            Kind::provider("work_items").unwrap(),
+            "tracker",
+            None,
+        )
+        .unwrap();
+        let d = declarations(dir.path(), "tracker");
+        assert_eq!(d["capabilities"][0]["capability"], "work_items");
+        let verbs: Vec<&str> = d["commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(verbs, ["create", "update", "transition"]);
+        let vocabulary = oxplow_domain::vocabulary::Vocabulary::core();
+        assert_eq!(d["event_types"][0]["type"], "work_item.recorded");
+        assert_eq!(d["event_types"][0]["v"], 2);
+        assert_eq!(
+            Some(&d["event_types"][0]["schema"]),
+            vocabulary.schema("work_item.recorded", 2)
+        );
+        assert_eq!(d["collectors"][0]["entity"], "work_item");
+
+        let dir = tempfile::tempdir().unwrap();
+        let made = scaffold(
+            dir.path(),
+            Kind::provider("effort_policy").unwrap(),
+            "steward",
+            None,
+        )
+        .unwrap();
+        let manifest =
+            std::fs::read_to_string(dir.path().join(format!("{}/extension.yaml", made.dir)))
+                .unwrap();
+        assert!(
+            manifest.contains("capability: effort_policy\n"),
+            "{manifest}"
+        );
+        let d = declarations(dir.path(), "steward");
+        assert_eq!(d["capabilities"][0]["capability"], "effort_policy");
+        assert_eq!(d["commands"].as_array().unwrap().len(), 1);
+        assert_eq!(d["commands"][0]["name"], "react");
+        assert_eq!(d["commands"][0]["confirm"], "never");
+        assert_eq!(d["commands"][0]["access"], "record");
+        assert_eq!(d["event_types"], serde_json::json!([]));
+        assert_eq!(d["collectors"], serde_json::json!([]));
+        let fixture =
+            std::fs::read_to_string(dir.path().join(format!("{}/fixtures/basic.yaml", made.dir)))
+                .unwrap();
+        assert!(
+            fixture.contains("command: react") && fixture.contains("expect: { skip: $any }"),
+            "{fixture}"
+        );
+        let report = check(
+            dir.path(),
+            "steward",
+            &ExtensionCatalog::new(),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(report.ok, "{}", render_findings(&report, Format::Text));
+        assert!(report.warnings.is_empty(), "{:?}", report.warnings);
     }
 
     #[tokio::test]

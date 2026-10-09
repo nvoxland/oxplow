@@ -792,7 +792,8 @@ and one calling MCP read identical `file:line: what — fix` lines.
   `crates/oxplow-sdk/tests/just_works.rs` holds each kind to it, through
   to loading in a real oxplow: the lens's row action names a registered
   command, the collector syncs and its model publishes, the command runs
-  through the bus.
+  through the bus; a work list and an effort policy each pass the kit
+  with the fake behind their stub, the policy with its scaffolded example.
 - **Recorded fresh-agent runs** (`crates/oxplow-sdk/fixtures/just-works/
   <kind>/`): `scripts/record-just-works.sh <kind>` gives `prompt.md` to
   `claude -p` in an empty git project — `--safe-mode`, so nothing but
@@ -825,13 +826,25 @@ and one calling MCP read identical `file:line: what — fix` lines.
   its own unpublished model. It returns a `CheckReport { ok, errors,
   warnings, dry_run, extension }`; `render_findings` prints it as text
   (`error: <file:line …>` lines then a one-line summary) or JSON.
-- **`scaffold(…, Kind::Provider, …)`** (`extension new provider <name>`,
-  P5.D5) adds a `providers:` entry (id = the name with `_` for `-`,
-  capability `work_items`), `provider.json` (create / update /
-  transition, the core `work_item.recorded@2`, an object config
-  schema), a stub `bin/provider` that exits 1, `fixtures/basic.yaml`
-  invoking `create` and expecting `{ ref: $any }`, and
-  `fixtures/provider-<id>.yaml` (`config: {}`).
+- **`scaffold(…, Kind::Provider { capability }, …)`** (`extension new
+  provider <name> [--capability <cap>]`, P5.D5) adds a `providers:` entry
+  (id = the name with `_` for `-`, the capability). `Kind::parse("provider")`
+  is `work_items`; `Kind::provider(cap)` refuses a capability without a
+  provider contract (the CLI exits 2), and `--capability` on another kind
+  is a usage error. `provider.json` comes from the capability's
+  `ProviderContract`: the verbs it always needs (`confirm: never`,
+  `access: record`; every feature off, so no feature-gated verb), the
+  events it may emit with `Vocabulary::core()`'s schemas, a collector of
+  its records' entity when it streams records, and an object config
+  schema. What the contract doesn't say is the SDK's starter per
+  capability (`provider_starter`, `verb_input`): each verb's summary and
+  input schema, the intent example and its fixture — `create` expecting
+  `{ ref: $any }` for a work list; `react` to a checkpoint expecting
+  `{ skip: $any }` for an effort policy, whose manifest also `needs:
+  [sql.read]` (it hears events only, and reads oxplow for what to close).
+  A capability with no starter gets its first verb with `{}` and `$any`.
+  Then a stub `bin/provider` that exits 1 and `fixtures/provider-<id>.yaml`
+  (`config: {}`).
 - **`extension_test::test_extension(root, name, layer, bless)`** (`extension
   test <name> [--bless] [--json]`, P5.D5) runs `check` and then, per
   declared provider, the conformance kit ([providers.md](./providers.md)
