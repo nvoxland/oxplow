@@ -989,7 +989,7 @@ async fn a_provider_command_is_declared_over_an_operation_it_lists() {
     for (entry, says) in [
         (
             "  - { name: item.comment, summary: S., provider: fake, op: comment, invokers: { human: true, agent: true, lens: true } }\n",
-            "`comment` is a work-item verb",
+            "`comment` is a work_items verb",
         ),
         (
             "  - { name: item.nope, summary: S., provider: fake, op: nope, invokers: { human: true, agent: true, lens: true } }\n",
@@ -1353,10 +1353,16 @@ fn a_provider_event_names_only_its_own_refs() {
     use super::registry::check_subject;
     // P9.B1: the id is the instance's — a second instance of `fake` may
     // name its own items, not the first's.
-    assert!(check_subject("fake_second", "tracker", "work_item:fake_second:W-1").is_ok());
-    assert!(check_subject("fake_second", "tracker", "work_item:fake:W-1").is_err());
-    assert!(check_subject("fake", "tracker", "work_item:fake:W-1").is_ok());
-    assert!(check_subject("fake", "tracker", "extension:tracker").is_ok());
+    assert!(check_subject(
+        "work_items",
+        "fake_second",
+        "tracker",
+        "work_item:fake_second:W-1"
+    )
+    .is_ok());
+    assert!(check_subject("work_items", "fake_second", "tracker", "work_item:fake:W-1").is_err());
+    assert!(check_subject("work_items", "fake", "tracker", "work_item:fake:W-1").is_ok());
+    assert!(check_subject("work_items", "fake", "tracker", "extension:tracker").is_ok());
     for bad in [
         "work_item:oxplow:tsk1",
         "extension:other",
@@ -1364,7 +1370,10 @@ fn a_provider_event_names_only_its_own_refs() {
         "file:src/a.rs",
         "garbage",
     ] {
-        assert!(check_subject("fake", "tracker", bad).is_err(), "{bad}");
+        assert!(
+            check_subject("work_items", "fake", "tracker", bad).is_err(),
+            "{bad}"
+        );
     }
 }
 
@@ -1649,6 +1658,120 @@ fn a_capability_verb_is_record_and_never_confirms() {
     no_delete.commands.retain(|c| c.name != "delete");
     let err = spec::check_declarations(&spec, &no_delete).unwrap_err();
     assert!(err.contains("`delete`"), "{err}");
+}
+
+/// An effort policy's declarations: its one verb, `react`.
+fn policy_declarations() -> oxplow_provider_protocol::model::InitializeResult {
+    use oxplow_provider_protocol::model::*;
+    InitializeResult {
+        protocol_version: PROTOCOL_VERSION.into(),
+        provider: Party {
+            name: "policy".into(),
+            version: "0".into(),
+        },
+        capabilities: vec![CapabilityDecl {
+            capability: "effort_policy".into(),
+            features: json!({}),
+        }],
+        commands: vec![CommandDecl {
+            name: "react".into(),
+            summary: "React to an event.".into(),
+            input_schema: json!({ "type": "object" }),
+            confirm: "never".into(),
+            access: "record".into(),
+            undoable: false,
+        }],
+        event_types: vec![],
+        collectors: vec![],
+        config_schema: json!({ "type": "object" }),
+    }
+}
+
+/// The fake's spec, as an effort policy.
+fn policy_spec() -> spec::ProviderSpec {
+    let dir = tempfile::tempdir().unwrap();
+    write_extension(dir.path(), "");
+    let mut spec = extension(dir.path()).providers[0].clone();
+    spec.capability = "effort_policy".into();
+    spec
+}
+
+/// A process may implement any capability with a contract: an effort
+/// policy declares `react`, and the contract's rules hold for it as for a
+/// work list — its verb is `confirm: never`, `access: record`, and it may
+/// emit nothing of core's.
+#[test]
+fn a_provider_may_implement_an_effort_policy_by_its_contract() {
+    let spec = policy_spec();
+    spec::check_declarations(&spec, &policy_declarations()).unwrap();
+    let mut silent = policy_declarations();
+    silent.commands.clear();
+    let err = spec::check_declarations(&spec, &silent).unwrap_err();
+    assert!(
+        err.contains("effort_policy") && err.contains("`react`"),
+        "{err}"
+    );
+    let mut asking = policy_declarations();
+    asking.commands[0].confirm = "always".into();
+    let err = spec::check_declarations(&spec, &asking).unwrap_err();
+    assert!(err.contains("react") && err.contains("confirm"), "{err}");
+    let mut emitting = policy_declarations();
+    emitting.event_types = oxplow_provider_fake::declarations().event_types;
+    let err = spec::check_declarations(&spec, &emitting).unwrap_err();
+    assert!(
+        err.contains("work_item.recorded@2") && err.contains("may emit only"),
+        "{err}"
+    );
+}
+
+/// The manifest names any capability with a contract; one without (the
+/// VCS), or a work list's own fields on a policy, is refused.
+#[test]
+fn a_manifest_names_a_capability_a_process_may_implement() {
+    let manifest = |capability: &str, extra: &str| {
+        format!(
+            "  - id: fake\n    capability: {capability}\n    entry: bin/provider\n    declarations: provider.json\n{extra}"
+        )
+    };
+    let read = |rel: &str| {
+        (rel == "provider.json").then(|| serde_json::to_string(&policy_declarations()).unwrap())
+    };
+    let parse = |text: String| {
+        spec::parse_providers(&serde_yaml::from_str(&text).unwrap(), &|rel| {
+            if rel == "bin/provider" {
+                Some(String::new())
+            } else {
+                read(rel)
+            }
+        })
+    };
+    let (specs, errors) = parse(manifest("effort_policy", ""));
+    assert_eq!((specs.len(), errors), (1, Vec::<String>::new()));
+    let (_, errors) = parse(manifest("vcs", ""));
+    assert!(
+        errors[0].contains("`vcs` isn't one a provider can implement"),
+        "{errors:?}"
+    );
+    let (_, errors) = parse(manifest(
+        "effort_policy",
+        "    fields: [{ name: points, title: Points, kind: number }]\n",
+    ));
+    assert!(errors[0].contains("fields are a work list's"), "{errors:?}");
+    let (_, errors) = parse(manifest("effort_policy", "    idPattern: \"P-\\\\d+\"\n"));
+    assert!(
+        errors[0].contains("id_pattern is a work list's"),
+        "{errors:?}"
+    );
+}
+
+/// An instance's event names its own refs, of its capability's kind; one
+/// that owns none names only its extension.
+#[test]
+fn an_event_names_only_its_capabilitys_own_refs() {
+    use super::registry::check_subject;
+    assert!(check_subject("work_items", "fake", "tracker", "work_item:fake:W-1").is_ok());
+    assert!(check_subject("effort_policy", "fake", "tracker", "work_item:fake:W-1").is_err());
+    assert!(check_subject("effort_policy", "fake", "tracker", "extension:tracker").is_ok());
 }
 
 /// The fake's three items, filed through `oxplow.work_item.create`.

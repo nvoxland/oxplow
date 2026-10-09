@@ -747,7 +747,7 @@ fn no_tmux_in_the_app() {
 const SPECIAL_CASES: &[(&str, &str, &str)] = &[
     // Reserving the name, so no provider takes oxplow's refs: no decision
     // about how to call one.
-    ("crates/oxplow-domain/src/work_items.rs", "== OXPLOW", "the reserved provider id"),
+    ("crates/oxplow-domain/src/capability.rs", "== OXPLOW", "the reserved provider id"),
 ];
 
 /// Each `(file, pattern)` in production code, comments left out.

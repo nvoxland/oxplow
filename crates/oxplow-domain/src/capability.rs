@@ -9,6 +9,8 @@
 //! person's and the project's choices (`oxplow_app::capabilities`).
 
 use schemars::JsonSchema;
+
+use crate::work_items::OXPLOW;
 use serde::{Deserialize, Serialize};
 
 /// Why a capability's active implementation is the one it is.
@@ -320,9 +322,7 @@ pub fn instance_id_problem(id: &str) -> Option<String> {
         Some(format!(
             "`{id}` must be lowercase letters, digits and underscores, starting with a letter"
         ))
-    } else if id == crate::work_items::OXPLOW
-        || crate::events::schema::CORE_NAMESPACES.contains(&id)
-    {
+    } else if id == OXPLOW || crate::events::schema::CORE_NAMESPACES.contains(&id) {
         Some(format!("`{id}` is reserved for oxplow"))
     } else {
         None

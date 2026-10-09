@@ -27,8 +27,6 @@ use std::time::{Duration, Instant};
 use oxplow_ai::secrets::SecretStore;
 use oxplow_db::ContributionKey;
 use oxplow_db::{Database, SqliteEventLogStore};
-use oxplow_domain::events::schema::{EventType as _, WorkItemRecorded};
-use oxplow_domain::work_items::WorkItemsRegistry;
 use oxplow_domain::{Actor, CommandCall, CommandError, DomainError, Envelope};
 use oxplow_provider_protocol::model::{
     method, CheckParams, CheckResult, EventDraft, Handle, InitializeResult, InvokeParams,
@@ -1093,18 +1091,24 @@ impl Instance {
                 self.name, draft.event_type, draft.v
             )));
         }
-        if draft.event_type == WorkItemRecorded::TYPE {
-            let item = draft.payload["item"]["ref"].as_str().unwrap_or_default();
-            let owner = oxplow_domain::work_items::provider_of(item).ok();
-            if owner != Some(self.id.as_str()) {
+        let contract = spec::contract_of(&self.spec);
+        if let Some(record) = contract
+            .records
+            .filter(|r| r.event == (draft.event_type.as_str(), draft.v))
+        {
+            let row = draft.payload[record.key]["ref"]
+                .as_str()
+                .unwrap_or_default();
+            if !owns(contract, &self.id, row) {
                 return Err(failed(format!(
-                    "provider `{}` recorded `{item}`, which isn't one of its items",
-                    self.name
+                    "provider `{}` recorded `{row}`, which isn't one of its {}s",
+                    self.name, record.entity
                 )));
             }
         }
         for subject in &draft.subject {
-            check_subject(&self.id, &self.ext.name, subject).map_err(&failed)?;
+            check_subject(&self.spec.capability, &self.id, &self.ext.name, subject)
+                .map_err(&failed)?;
         }
         // The thread an item was filed on anchors its record, so it keeps
         // that thread (tsk1041, tsk1058); otherwise an agent's thread
@@ -1122,12 +1126,18 @@ impl Instance {
     }
 }
 
-/// Whether an instance's event may name `subject`: only its own items
-/// (`work_item:<instance id>:…`) and its extension (`extension:<ext>`).
-pub fn check_subject(provider: &str, extension: &str, subject: &str) -> Result<(), String> {
-    let own_item = subject.starts_with("work_item:")
-        && oxplow_domain::work_items::provider_of(subject).ok() == Some(provider);
-    if own_item || subject == format!("extension:{extension}") {
+/// Whether an instance of `capability` may name `subject` in an event:
+/// only its own refs, of its capability's kind (`work_item:<instance
+/// id>:…`), and its extension (`extension:<ext>`).
+pub fn check_subject(
+    capability: &str,
+    provider: &str,
+    extension: &str,
+    subject: &str,
+) -> Result<(), String> {
+    let own =
+        oxplow_domain::capability::contract(capability).is_some_and(|c| owns(c, provider, subject));
+    if own || subject == format!("extension:{extension}") {
         Ok(())
     } else {
         Err(format!(
@@ -1136,12 +1146,48 @@ pub fn check_subject(provider: &str, extension: &str, subject: &str) -> Result<(
     }
 }
 
+/// Whether `r` is one of instance `id`'s own refs under `contract`
+/// (`<kind>:<id>:<native id>`).
+pub(super) fn owns(
+    contract: &oxplow_domain::capability::ProviderContract,
+    id: &str,
+    r: &str,
+) -> bool {
+    contract
+        .ref_kind
+        .and_then(|kind| instance_in(kind, r))
+        .is_some_and(|instance| instance == id)
+}
+
+/// The instance segment of a ref of `kind` (`work_item:<instance>:ENG-12`).
+fn instance_in<'r>(kind: &str, r: &'r str) -> Option<&'r str> {
+    let (instance, native) = r.strip_prefix(kind)?.strip_prefix(':')?.split_once(':')?;
+    (!instance.is_empty() && !native.is_empty()).then_some(instance)
+}
+
+/// One capability's side of the host: what turns a started instance into
+/// the capability's implementation (the work list's `ExternalWorkItems`,
+/// an external effort policy) and takes it out again.
+pub trait CapabilityHost: Send + Sync {
+    /// The capability it hosts (`work_items`).
+    fn capability(&self) -> &'static str;
+    /// Whether `id` already names one of this capability's
+    /// implementations: an instance can't take it.
+    fn has(&self, id: &str) -> bool;
+    /// Register a started instance as an implementation, answering the
+    /// features published for it (what the UI gates on).
+    fn admit(&self, instance: &Arc<Instance>) -> Result<Value, String>;
+    /// Take a stopped instance's implementation out.
+    fn retire(&self, id: &str);
+}
+
 /// The instances and their health.
 pub struct ProviderRegistry {
     pub(super) deps: HostDeps,
     me: Weak<ProviderRegistry>,
     pub(super) bus: Weak<CommandBus>,
-    work_items: WorkItemsRegistry,
+    /// Each capability's host, by capability.
+    hosts: BTreeMap<&'static str, Arc<dyn CapabilityHost>>,
     pub(super) running: tokio::sync::Mutex<BTreeMap<String, Arc<Instance>>>,
     health: parking_lot::Mutex<BTreeMap<String, InstanceHealth>>,
     /// One reconcile at a time.
@@ -1249,7 +1295,14 @@ fn listed_or_none(ids: &[&str]) -> String {
 }
 
 impl ProviderRegistry {
-    pub fn new(deps: HostDeps, bus: &Arc<CommandBus>, work_items: WorkItemsRegistry) -> Arc<Self> {
+    /// A registry over `hosts`, one for each capability a provider may
+    /// implement.
+    pub fn new(
+        deps: HostDeps,
+        bus: &Arc<CommandBus>,
+        hosts: Vec<Arc<dyn CapabilityHost>>,
+    ) -> Arc<Self> {
+        let hosts = hosts.into_iter().map(|h| (h.capability(), h)).collect();
         let contribution_health = crate::contribution_health::ContributionHealth::new(
             deps.db.clone(),
             deps.log.vocabulary().clone(),
@@ -1269,7 +1322,7 @@ impl ProviderRegistry {
             deps,
             me: me.clone(),
             bus: Arc::downgrade(bus),
-            work_items,
+            hosts,
             running: tokio::sync::Mutex::new(BTreeMap::new()),
             health: parking_lot::Mutex::new(BTreeMap::new()),
             reconciling: tokio::sync::Mutex::new(()),
@@ -1865,7 +1918,7 @@ impl ProviderRegistry {
                 "the command namespace `{id}` is already {owner}'s — give the instance another id"
             )));
         }
-        if self.work_items.get(id).is_ok() {
+        if self.hosts.values().any(|h| h.has(id)) {
             return Err(refused(format!(
                 "`{id}` is already a provider — give the instance another id"
             )));
@@ -1892,7 +1945,7 @@ impl ProviderRegistry {
             Ok(live) => {
                 instance.supervise(live.conn.peer.clone());
                 *instance.live.lock().await = Some(live);
-                self.admit(&bus, instance, epoch).await.map_err(&refuse)?;
+                self.admit(instance, epoch).await.map_err(&refuse)?;
                 {
                     let mut health = self.health.lock();
                     let h = health
@@ -1923,9 +1976,7 @@ impl ProviderRegistry {
             // It may come up: enabled and failing, its next call restarts
             // it with backoff.
             Err(e @ HostError::Failed { .. }) => {
-                self.admit(&bus, instance.clone(), epoch)
-                    .await
-                    .map_err(&refuse)?;
+                self.admit(instance.clone(), epoch).await.map_err(&refuse)?;
                 self.failed(&name, Some(&instance), e.to_string()).await;
                 Ok(())
             }
@@ -1944,39 +1995,21 @@ impl ProviderRegistry {
     /// Register a started `instance` and count it running — unless it
     /// was disabled since its start began (`epoch`): the disable wins.
     /// Under the `running` lock, which a disable takes too.
-    async fn admit(
-        &self,
-        bus: &Arc<CommandBus>,
-        instance: Arc<Instance>,
-        epoch: u64,
-    ) -> Result<(), String> {
+    async fn admit(&self, instance: Arc<Instance>, epoch: u64) -> Result<(), String> {
         let mut running = self.running.lock().await;
         if self.disable_epoch(&instance.name) != epoch {
             return Err(format!("`{}` was disabled while it started", instance.name));
         }
-        self.register(bus, &instance)?;
-        self.publish(&instance).await;
+        let features = self.host_of(&instance)?.admit(&instance)?;
+        self.publish(&instance, features).await;
         running.insert(instance.name.clone(), instance);
         Ok(())
     }
 
-    /// Its capability and features in `v_capability_provider`, while it
-    /// runs: a work-items provider's as the host reads them (what the UI
-    /// gates on), any other's as declared.
-    async fn publish(&self, instance: &Instance) {
+    /// Its capability and `features` (as its capability's host read them)
+    /// in `v_capability_provider`, while it runs.
+    async fn publish(&self, instance: &Instance, features: Value) {
         let capability = &instance.spec.capability;
-        let features = match self.work_items.get(&instance.id) {
-            Ok(p) if capability == spec::WORK_ITEMS => {
-                serde_json::to_value(p.features).unwrap_or(Value::Null)
-            }
-            _ => instance
-                .declared
-                .capabilities
-                .iter()
-                .find(|c| &c.capability == capability)
-                .map(|c| c.features.clone())
-                .unwrap_or(Value::Null),
-        };
         self.deps.capabilities.set_external(
             crate::capabilities::Implementation {
                 capability: capability.clone(),
@@ -1997,16 +2030,12 @@ impl ProviderRegistry {
         }
     }
 
-    /// Put `instance`'s capability provider in its registry. Its commands
-    /// are its extension's (`provider:` + `op:` in the manifest), run on
-    /// it through the provider router (`ProviderRouter for
-    /// ProviderRegistry`).
-    fn register(&self, _bus: &Arc<CommandBus>, instance: &Arc<Instance>) -> Result<(), String> {
-        if instance.spec.capability == spec::WORK_ITEMS {
-            let provider = super::work_items::ExternalWorkItems::provider(instance)?;
-            self.work_items.register(provider);
-        }
-        Ok(())
+    /// The host of `instance`'s capability. Every capability a spec may
+    /// name has one (`Services` builds them), so none is a wiring fault.
+    fn host_of(&self, instance: &Instance) -> Result<&Arc<dyn CapabilityHost>, String> {
+        self.hosts
+            .get(instance.spec.capability.as_str())
+            .ok_or_else(|| format!("nothing hosts `{}` providers", instance.spec.capability))
     }
 
     /// A run of `call` on the instance its input names: an `instance`
@@ -2064,13 +2093,18 @@ impl ProviderRegistry {
             .collect::<Result<Vec<_>, _>>()?;
         let inverse = match out.inverse {
             None => None,
-            Some(c)
-                if oxplow_domain::capability::WORK_ITEMS
-                    .verb(c.command.as_str())
-                    .is_some() =>
-            {
+            Some(c) if spec::contract_of(&instance.spec).verb(&c.command).is_some() => {
+                let Some(family) = spec::contract_of(&instance.spec).dispatch else {
+                    return Err(CommandError::Failed {
+                        message: format!(
+                            "provider `{}` returned an inverse `{}`, a {} verb nothing undoes \
+                             through",
+                            instance.name, c.command, instance.spec.capability
+                        ),
+                    });
+                };
                 Some(CommandCall {
-                    name: format!("oxplow.work_item.{}", c.command),
+                    name: format!("{family}.{}", c.command),
                     input: c.input,
                 })
             }
@@ -2135,7 +2169,9 @@ impl ProviderRegistry {
 
     /// Unregister a stopped instance and end its process.
     async fn tear_down(&self, running: Arc<Instance>) {
-        self.work_items.unregister(&running.id);
+        if let Ok(host) = self.host_of(&running) {
+            host.retire(&running.id);
+        }
         self.deps.capabilities.set_external(
             crate::capabilities::Implementation {
                 capability: running.spec.capability.clone(),
@@ -3293,11 +3329,14 @@ impl crate::commands::ProviderRouter for ProviderRegistry {
     }
 }
 
-/// The instance a ref is of: a work item's (`work_item:<instance>:ENG-12`).
+/// The instance a ref is of: one of the refs a capability's instances
+/// own (`work_item:<instance>:ENG-12`).
 fn instance_of_ref(r: &str) -> Option<String> {
-    let rest = r.strip_prefix("work_item:")?;
-    rest.split_once(':')
-        .map(|(instance, _)| instance.to_string())
+    oxplow_domain::capability::CAPABILITIES
+        .iter()
+        .filter_map(|c| c.provider?.ref_kind)
+        .find_map(|kind| instance_in(kind, r))
+        .map(str::to_string)
 }
 
 impl HostError {

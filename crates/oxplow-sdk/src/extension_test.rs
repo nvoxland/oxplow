@@ -1063,9 +1063,17 @@ async fn session(
             .await
         {
             Ok(out) => {
-                // A work item filed is left in the provider's system.
-                if spec.capability == providers::spec::WORK_ITEMS && command == "create" {
-                    if let Some(made) = out.result.get("ref").and_then(Value::as_str) {
+                // A ref of its own kind it answers with (an item it filed)
+                // is left in the provider's system.
+                let kind =
+                    oxplow_domain::capability::contract(&spec.capability).and_then(|c| c.ref_kind);
+                if let Some(made) = out
+                    .result
+                    .get("ref")
+                    .and_then(Value::as_str)
+                    .filter(|r| kind.is_some_and(|k| r.starts_with(&format!("{k}:"))))
+                {
+                    if !report.left.iter().any(|l| l == made) {
                         report.left.push(made.to_string());
                     }
                 }
@@ -1350,7 +1358,7 @@ async fn suite(
             .await
             .map_err(|e| e.to_string())?;
         let findings = match spec.capability.as_str() {
-            providers::spec::WORK_ITEMS => {
+            providers::work_items::WorkItemsHost::CAPABILITY => {
                 let provider = svc.work_items.get(&spec.id).map_err(|e| e.to_string())?;
                 // Every create files on the active tracker (tsk1058): the
                 // throwaway host's is the one under test.

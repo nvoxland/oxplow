@@ -17,16 +17,46 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use oxplow_domain::work_items::{VerbOutcome, WorkItemVerbs, WorkItemsFeatures, WorkItemsProvider};
+use oxplow_domain::work_items::{
+    VerbOutcome, WorkItemVerbs, WorkItemsFeatures, WorkItemsProvider, WorkItemsRegistry,
+};
 use oxplow_domain::{Actor, CommandCall, CommandError, InputValidator};
 use serde_json::Value;
 
-use super::registry::Instance;
-use super::spec;
+use super::registry::{CapabilityHost, Instance};
 
 /// A provider's declared work-items features.
 pub fn features_of(features: &Value) -> Result<WorkItemsFeatures, String> {
     serde_json::from_value(features.clone()).map_err(|e| e.to_string())
+}
+
+/// The work list's side of the host: a started instance is a work list
+/// in `Services.work_items`, its features what the host read of them.
+pub struct WorkItemsHost(pub WorkItemsRegistry);
+
+impl WorkItemsHost {
+    pub const CAPABILITY: &'static str = "work_items";
+}
+
+impl CapabilityHost for WorkItemsHost {
+    fn capability(&self) -> &'static str {
+        Self::CAPABILITY
+    }
+
+    fn has(&self, id: &str) -> bool {
+        self.0.get(id).is_ok()
+    }
+
+    fn admit(&self, instance: &Arc<Instance>) -> Result<Value, String> {
+        let provider = ExternalWorkItems::provider(instance)?;
+        let features = serde_json::to_value(provider.features).map_err(|e| e.to_string())?;
+        self.0.register(provider);
+        Ok(features)
+    }
+
+    fn retire(&self, id: &str) {
+        self.0.unregister(id);
+    }
 }
 
 pub struct ExternalWorkItems {
@@ -43,7 +73,7 @@ impl ExternalWorkItems {
             .declared
             .capabilities
             .iter()
-            .find(|c| c.capability == spec::WORK_ITEMS)
+            .find(|c| c.capability == WorkItemsHost::CAPABILITY)
             .ok_or("it doesn't declare the work_items capability")?;
         let features = features_of(&decl.features)?;
         let inputs = instance

@@ -1904,12 +1904,15 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                     .iter()
                     .find(|p| p.id == provider)
                     .ok_or_else(|| format!("no provider `{provider}` in this extension"))?;
-                if spec.capability == crate::providers::spec::WORK_ITEMS
-                    && oxplow_domain::capability::WORK_ITEMS.verb(op).is_some()
-                {
-                    return Err(format!(
-                        "`{op}` is a work-item verb: it runs as `oxplow.work_item.{op}`"
-                    ));
+                let contract = crate::providers::spec::contract_of(spec);
+                if contract.verb(op).is_some() {
+                    return Err(match contract.dispatch {
+                        Some(family) => format!(
+                            "`{op}` is a {} verb: it runs as `{family}.{op}`",
+                            spec.capability
+                        ),
+                        None => format!("`{op}` is a {} verb: core calls it", spec.capability),
+                    });
                 }
                 crate::providers::spec::read_declarations(spec, &|rel| files.read(rel))?
                     .commands

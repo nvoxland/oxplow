@@ -22,8 +22,6 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use oxplow_domain::events::schema::{WorkItemRecorded, WorkItemRecordedV2};
-use oxplow_domain::work_items::{provider_of, WorkItemRecord};
 use oxplow_domain::{Actor, CommandError, Envelope};
 use oxplow_provider_protocol::codec::notify;
 use oxplow_provider_protocol::model::{method, CollectorDecl, ReadParams, ReadResult};
@@ -335,9 +333,10 @@ impl Instance {
         Ok(streamed)
     }
 
-    /// A streamed `$/record` as the envelope it is logged as: the
-    /// collector's entity, and — for a work-items provider — a record of
-    /// one of its own items.
+    /// A streamed `$/record` as the envelope it is logged as: a row of
+    /// the collector's entity — the one its capability's contract streams —
+    /// that is one of the instance's own (its `ref`), logged as the
+    /// contract's event with the row under its key and its ref the subject.
     fn record(
         &self,
         actor: &Actor,
@@ -352,29 +351,38 @@ impl Instance {
                 decl.name, record.entity, decl.entity
             ));
         }
-        if self.spec.capability != spec::WORK_ITEMS || decl.entity != "work_item" {
+        let Some(contract) = spec::contract_of(&self.spec)
+            .records
+            .filter(|r| r.entity == decl.entity)
+        else {
             return Err(format!(
-                "collector `{}`: a {} provider's records are `work_item`s",
-                decl.name, self.spec.capability
+                "collector `{}`: a {} provider streams no `{}` records",
+                decl.name, self.spec.capability, decl.entity
+            ));
+        };
+        let own = record.row["ref"].as_str().unwrap_or_default().to_string();
+        if !super::registry::owns(spec::contract_of(&self.spec), &self.id, &own) {
+            return Err(format!(
+                "collector `{}` streamed `{own}`, which isn't one of its {}s",
+                decl.name, contract.entity
             ));
         }
-        let item: WorkItemRecord = serde_json::from_value(record.row).map_err(|e| {
-            format!(
-                "collector `{}` streamed a record that isn't a work item: {e}",
-                decl.name
-            )
-        })?;
-        if provider_of(&item.item_ref).ok() != Some(self.id.as_str()) {
-            return Err(format!(
-                "collector `{}` streamed `{}`, which isn't one of its items",
-                decl.name, item.item_ref
-            ));
-        }
-        let subject = item.item_ref.clone();
-        Ok(
-            Envelope::typed::<WorkItemRecorded>(actor.source(), &WorkItemRecordedV2 { item })
-                .with_subject([subject]),
-        )
+        let (event_type, v) = contract.event;
+        let payload = serde_json::json!({ contract.key: record.row });
+        self.deps
+            .log
+            .vocabulary()
+            .current()
+            .validate(event_type, v, &payload)
+            .map_err(|e| {
+                format!(
+                    "collector `{}` streamed a record that isn't a {}: {e}",
+                    decl.name, contract.entity
+                )
+            })?;
+        Envelope::new(event_type, v, actor.source(), payload)
+            .map(|e| e.with_subject([own]))
+            .map_err(|e| e.to_string())
     }
 
     /// Append `batch` and the checkpoint covering it, in one transaction —
@@ -392,11 +400,16 @@ impl Instance {
         let (instance, collector) = (self.name.clone(), collector.to_string());
         let vocabulary = self.deps.log.vocabulary().clone();
         let at = now();
+        let key = spec::contract_of(&self.spec).records.map(|r| r.key);
         self.deps
             .db
             .transaction(move |tx| {
                 for envelope in &batch {
-                    if restates(tx, envelope)? {
+                    let restated = match key {
+                        Some(k) => restates(tx, k, envelope)?,
+                        None => false,
+                    };
+                    if restated {
                         continue;
                     }
                     oxplow_db::event_log_store::append_tx(tx, &vocabulary.current(), envelope)?;
@@ -414,23 +427,28 @@ impl Instance {
     }
 }
 
-/// Whether `record` (a `work_item.recorded`) says what its item's last
-/// record already said.
+/// Whether `record` says what the last event of its type about the same
+/// row (its `<key>.ref`) already said. The path is the contract's literal
+/// (`$.item.ref`), so the lookup is the expression `event_log_work_item_ref`
+/// indexes; a capability that streams another entity indexes its own.
 fn restates(
     tx: &rusqlite::Connection,
+    key: &'static str,
     record: &Envelope,
 ) -> Result<bool, oxplow_domain::DomainError> {
     use rusqlite::OptionalExtension;
-    let Some(item) = record.payload["item"]["ref"].as_str() else {
+    let path = format!("$.{key}.ref");
+    let Some(row) = record.payload[key]["ref"].as_str() else {
         return Ok(false);
     };
     let last: Option<String> = tx
         .query_row(
-            "SELECT payload FROM event_log
-              WHERE type = 'work_item.recorded'
-                AND json_extract(payload, '$.item.ref') = ?1
-              ORDER BY seq DESC LIMIT 1",
-            [item],
+            &format!(
+                "SELECT payload FROM event_log
+                  WHERE type = ?1 AND json_extract(payload, '{path}') = ?2
+                  ORDER BY seq DESC LIMIT 1"
+            ),
+            rusqlite::params![record.event_type, row],
             |r| r.get(0),
         )
         .optional()

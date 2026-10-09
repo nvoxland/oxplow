@@ -1,10 +1,11 @@
 # External providers
 
 An external provider is a program oxplow talks to — an issue tracker's bridge, a
-docs system's — that implements one of oxplow's capabilities (work items
-first) outside the app (P5.D). This doc
-covers the protocol (D1), the fake provider (D2) and the host with its
-consent and spawn rules (D3), instances with health (D4), the
+docs system's — that implements one of oxplow's capabilities outside the
+app (P5.D): one core gives a provider contract (the work list, the effort
+policy; "What a provider may implement"). This doc
+covers the protocol (D1), the fake provider (D2), what a provider may
+implement, the host with its consent and spawn rules (D3), instances with health (D4), the
 conformance kit with `oxplow extension test` (D5), which trackers are
 backends, and the MCP adapter (P7.A6).
 
@@ -320,7 +321,7 @@ has none):
 ```yaml
 providers:
   - id: fake                     # the ref segment and command namespace
-    capability: work_items       # the only one a provider implements today
+    capability: work_items       # one with a provider contract (below)
     entry: bin/provider          # a program in the extension folder
     args: [--stdio]
     env: [TRACKER_URL]           # host variables passed through by name
@@ -341,14 +342,48 @@ command resolves to its item (`work_item::with_loose_refs`,
 work-items.md).
 
 The loader refuses (into `errors`) an id that isn't lowercase
-snake_case, is `oxplow` or a core namespace, or repeats; an unknown
-capability; an `id_pattern` that isn't a regex, or on another capability; an entry or declarations path outside the folder (or the
-manifest, or under `lenses/`); a bad host pattern; and declarations that
-don't parse, speak another protocol version, lack the named capability,
-or — for `work_items` — lack `create` / `update` / `transition` (and
-`link` / `comment` / `delete` when its features say so), declare a verb
-that isn't `confirm: never` and `access: record` (the `work_item.<verb>`
-command running it is what a person confirms and what is gated).
+snake_case, is `oxplow` or a core namespace, or repeats
+(`capability::instance_id_problem`); a capability with no provider
+contract; an `id_pattern` that isn't a regex, or `fields` / `idPattern`
+on a capability that keeps no items; an entry or declarations path
+outside the folder (or the manifest, or under `lenses/`); a bad host
+pattern; and declarations that don't parse, speak another protocol
+version, lack the named capability, declare a feature that isn't the
+capability's (each `true` or `false`), lack a verb its contract requires
+for the features it declares, declare a verb that isn't `confirm: never`
+and `access: record` (core's call of it — `work_item.<verb>`, the effort
+policy's dispatcher — is what a person confirms and what is gated), or
+declare an event type its contract doesn't let it emit.
+
+## What a provider may implement
+
+A capability a process may implement carries a **provider contract**
+(`oxplow_domain::capability::ProviderContract`, on its `CapabilitySpec`).
+The host enforces the contract, never a capability's name: the verbs it
+requires (each always, or when a feature is declared), the command family
+a verb runs as (so an inverse naming a verb undoes through it), the event
+types it may emit, what its collectors stream, the refs an instance owns,
+and whether it keeps items.
+
+| | `work_items` | `effort_policy` |
+|---|---|---|
+| verbs | `create`, `update`, `transition`; `link` ← links, `comment` ← comments, `delete` ← delete, `reorder` ← ordering, `move` ← lists | `react` |
+| verbs run as | `oxplow.work_item.<verb>` | the dispatcher's call (nothing undoes it) |
+| may emit | `work_item.recorded@2` | nothing |
+| collectors stream | `work_item` rows, logged as `work_item.recorded@2` `{ item: row }` | nothing |
+| owns refs | `work_item:<instance>:…` | none |
+| keeps items (`fields`, `idPattern`) | yes | no |
+
+Each such capability has a **host** (`registry::CapabilityHost`): what
+turns a started instance into the capability's implementation and takes
+it out again. `Services` builds one per capability and hands them to the
+`ProviderRegistry`: `work_items::WorkItemsHost` registers an
+`ExternalWorkItems` in `Services.work_items`; the effort policy's
+registers an external policy in `Services.effort_policies`. A record
+row carries its own `ref`; the host logs it as the contract's event with
+the row under the contract's key and that ref the subject. Snapshots and
+the agent harnesses have no contract yet. The MCP adapter
+(`oxplow-provider-mcp`) still maps work-item refs only.
 
 **Consent precedes execution** (`exec_consent`, `ProgramKind::Provider`,
 key `provider:<ext>/<id>`): the approval hash covers every file in the
@@ -765,12 +800,13 @@ extension catalog's change signal (`spawn_reconciler`) and on an
 `extensionInstances` / `activeProviders` change (the `config.providers`
 reactor on `config.changed`, P7.B6), starting enabled instances and
 stopping the rest (a config or spec change restarts one). `enable(ext,
-spec, config)` starts an instance and only then registers its capability
-provider (`ExternalWorkItems::provider`: id, declared features, and the
+spec, config)` starts an instance and only then hands it to its
+capability's host (`CapabilityHost::admit`) — for a work list,
+`ExternalWorkItems::provider` (id, declared features, and the
 `WorkItemVerbs` the `work_item.*` commands call — the trait every list
 implements, oxplow's own tasks included (`oxplow_tasks::OxplowTasks`) — each verb's
 input checked against its declared schema first) in
-`Services.work_items`, and its **other** declared commands on the bus as
+`Services.work_items` — and its **other** declared commands on the bus as
 `<id>.<name>` (`External`, `Experimental`; the manifest's `invokers`,
 required like any command's; confirm / access / undoable as declared). Its capability's verbs are never
 commands of their own: `work_item.<verb>` is the one write surface
@@ -796,22 +832,22 @@ ProviderRegistry::run_op`) to the instance its input names — an
 (`work_item:<instance>:…`), else the provider's default instance —
 `Unavailable` when that one isn't running; its inverse names an
 operation, made a call of the command declared over it (with the
-instance), or `oxplow.work_item.<verb>` for a capability verb. A
-capability verb can't be declared this way: it runs as
-`oxplow.work_item.<verb>`. An instance registers only its work list (no
-bus namespace). **A provider emits only its capability's event
-types** (`spec::allowed_event_types`: `work_items` → `work_item.recorded@2`
-or `@2` — a published version's schema never changes, since declarations
-are compared to it exactly;
+instance), or `<family>.<verb>` for a capability verb (its contract's
+`dispatch`: `oxplow.work_item.<verb>`). A capability verb can't be
+declared this way: core calls it. An instance registers only its
+capability's implementation (no bus namespace). **A provider emits only
+its capability's event types** (its contract's `events`: `work_items` →
+`work_item.recorded@2` — a published version's schema never changes,
+since declarations are compared to it exactly;
 tsk548): declaring any other type — another core one such as
 `contribution.enabled`, which would clear another contribution's disable — is
 refused when the manifest loads, and the declared schema must equal
 core's (checked at enable). Its own types are P7. A command's run
 invokes the process and hands the bus its result, its inverse (as
 `<id>.<command>`, or for a verb `work_item.<verb>`) and its events —
-refused if a type isn't declared, a
-`work_item.recorded` names another provider's item, or a subject isn't
-one of its own refs (`check_subject`: `work_item:<id>:…` or
+refused if a type isn't declared, a record names another provider's row
+(a `work_item.recorded` another's item), or a subject isn't one of its
+own refs (`check_subject`: its contract's kind, `work_item:<id>:…`, or
 `extension:<ext>`).
 
 **Calls are bounded** (tsk549): `check` and `invoke` time out after
@@ -909,14 +945,16 @@ runs one declared collector's `read` — **one at a time per collector**
 (a second sync waits, then resumes after the first; tsk715) — from the
 checkpoint it last stored
 (`provider_collector_state`, [data-model.md](./data-model.md)), through
-`start_streaming`. Each `$/record` must be the collector's entity and —
-for a work-items provider — a `WorkItemRecord` of its own item; it is
-kept as a `work_item.recorded@2` envelope (the actor's source) until the
+`start_streaming`. Each `$/record` must be the collector's entity — the
+one its contract streams — and a row of its own (its `ref`), valid as
+the contract's event; it is kept as that envelope (`work_item.recorded@2`
+`{ item }`, the actor's source) until the
 next `$/state`, which commits the batch **and** the checkpoint in one
 transaction, so a read that fails midway keeps exactly what its last
 checkpoint covered and the next read resumes there. A record equal to its
 item's last `work_item.recorded` (a write's or an earlier read's —
-looked up by `json_extract(payload, '$.item.ref')`, index V153) is
+looked up by the contract key's literal path, `json_extract(payload,
+'$.item.ref')`, the expression index `event_log_work_item_ref`) is
 **not logged**: it restates nothing, and logging it would echo a write
 back to whatever reacted to it — an effect that writes another
 provider's item would hear its own write again on every sync (tsk799).

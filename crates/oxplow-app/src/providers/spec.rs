@@ -35,25 +35,23 @@
 use oxplow_provider_protocol::model::InitializeResult;
 use serde::{Deserialize, Serialize};
 
-/// The capabilities an external provider may implement today.
-pub const CAPABILITIES: &[&str] = &[WORK_ITEMS];
-pub const WORK_ITEMS: &str = "work_items";
+use oxplow_domain::capability::{self, ProviderContract};
 
-/// The event types a provider of each capability may declare (and emit):
-/// its capability's projection event, nothing else — no other core type
-/// (`contribution.enabled` would clear another contribution's disable), and no
-/// types of its own yet.
-pub fn allowed_event_types(capability: &str) -> &'static [(&'static str, u32)] {
-    match capability {
-        WORK_ITEMS => &[("work_item.recorded", 2)],
-        _ => &[],
-    }
+/// The capabilities a provider may implement: the ones core gives a
+/// contract (`oxplow_domain::capability::ProviderContract`).
+pub fn capabilities() -> impl Iterator<Item = &'static str> {
+    capability::CAPABILITIES
+        .iter()
+        .filter(|c| c.provider.is_some())
+        .map(|c| c.id)
 }
 
-/// The verbs a work-items provider must declare (`link`, `comment` and
-/// `delete` too when its features say so): what the dispatching
-/// `work_item.*` commands call through `ExternalWorkItems`.
-pub const WORK_ITEMS_COMMANDS: &[&str] = &["create", "update", "transition"];
+/// The contract of the capability a spec names; the loader refused any
+/// other, so a loaded spec always has one.
+pub fn contract_of(spec: &ProviderSpec) -> &'static ProviderContract {
+    capability::contract(&spec.capability)
+        .unwrap_or_else(|| panic!("`{}` was loaded without a contract", spec.capability))
+}
 
 /// One declared provider.
 #[derive(
@@ -699,7 +697,16 @@ pub fn check_declarations(spec: &ProviderSpec, declared: &InitializeResult) -> R
             spec.capability
         ));
     };
-    let allowed = allowed_event_types(&spec.capability);
+    let Some(contract) = capability::contract(&spec.capability) else {
+        return Err(format!(
+            "provider `{id}`: `{}` isn't a capability a provider can implement",
+            spec.capability
+        ));
+    };
+    // Its capability's own events only — no other core type
+    // (`contribution.enabled` would clear another contribution's disable),
+    // and no types of its own yet.
+    let allowed = contract.events;
     if let Some(t) = declared
         .event_types
         .iter()
@@ -730,48 +737,54 @@ pub fn check_declarations(spec: &ProviderSpec, declared: &InitializeResult) -> R
             .and(crate::providers::host::access_of(&command.access))
             .map_err(|e| format!("provider `{id}` command `{}`: {e}", command.name))?;
     }
-    if spec.capability == WORK_ITEMS {
-        let features = crate::providers::work_items::features_of(&capability.features)
-            .map_err(|e| format!("provider `{id}`: work_items features: {e}"))?;
-        let mut needed: Vec<&str> = WORK_ITEMS_COMMANDS.to_vec();
-        if features.links {
-            needed.push("link");
-        }
-        if features.comments {
-            needed.push("comment");
-        }
-        if features.delete {
-            needed.push("delete");
-        }
-        if features.ordering {
-            needed.push("reorder");
-        }
-        if features.lists {
-            needed.push("move");
-        }
-        for name in needed {
-            if !declared.commands.iter().any(|c| c.name == name) {
+    // Its features are the capability's, each on or off.
+    let known = capability::spec(&spec.capability)
+        .map(|c| c.features)
+        .unwrap_or_default();
+    match &capability.features {
+        serde_json::Value::Null => {}
+        serde_json::Value::Object(features) => {
+            if let Some((name, _)) = features
+                .iter()
+                .find(|(name, on)| !known.contains(&name.as_str()) || !on.is_boolean())
+            {
                 return Err(format!(
-                    "provider `{id}` implements work_items but declares no `{name}` verb"
+                    "provider `{id}`: {} features: `{name}` isn't one of its features ({}), \
+                     each true or false",
+                    spec.capability,
+                    known.join(", ")
                 ));
             }
         }
-        // `work_item.<verb>` runs it, and that command's spec — not the
-        // verb's — is what is confirmed and gated: a verb records an item
-        // and never asks on its own.
-        for command in declared.commands.iter().filter(|c| {
-            oxplow_domain::capability::WORK_ITEMS
-                .verb(c.name.as_str())
-                .is_some()
-        }) {
-            if command.confirm != "never" || command.access != "record" {
-                return Err(format!(
-                    "provider `{id}` verb `{}`: a work_items verb is `confirm: never` and \
-                     `access: record` (the `work_item.{}` command calling it is what a person \
-                     confirms)",
-                    command.name, command.name
-                ));
-            }
+        _ => {
+            return Err(format!(
+                "provider `{id}`: {} features are an object of flags",
+                spec.capability
+            ))
+        }
+    }
+    for name in contract.required(&capability.features) {
+        if !declared.commands.iter().any(|c| c.name == name) {
+            return Err(format!(
+                "provider `{id}` implements {} but declares no `{name}` verb",
+                spec.capability
+            ));
+        }
+    }
+    // Core's call of a verb — `work_item.<verb>`, the effort policy's
+    // dispatcher — is what a person confirms and what is gated: a verb
+    // records and never asks on its own.
+    for command in declared
+        .commands
+        .iter()
+        .filter(|c| contract.verb(&c.name).is_some())
+    {
+        if command.confirm != "never" || command.access != "record" {
+            return Err(format!(
+                "provider `{id}` verb `{}`: a {} verb is `confirm: never` and `access: record` \
+                 (core's call of it is what a person confirms)",
+                command.name, spec.capability
+            ));
         }
     }
     Ok(())
@@ -801,11 +814,11 @@ pub fn parse_providers(
             Some(format!("provider id {why}"))
         } else if specs.iter().any(|s| s.id == id) {
             Some(format!("provider id `{id}` is declared twice"))
-        } else if !CAPABILITIES.contains(&spec.capability.as_str()) {
+        } else if capability::contract(&spec.capability).is_none() {
             Some(format!(
                 "provider `{id}`: capability `{}` isn't one a provider can implement ({})",
                 spec.capability,
-                CAPABILITIES.join(", ")
+                capabilities().collect::<Vec<_>>().join(", ")
             ))
         } else if let Some(problem) = program_problem(&spec, read) {
             Some(problem)
@@ -824,7 +837,7 @@ pub fn parse_providers(
             .find(|h| !crate::net_sandbox::valid_host_pattern(h))
         {
             Some(format!("provider `{id}`: `{bad}` isn't a host pattern"))
-        } else if let Some(problem) = (!spec.fields.is_empty() && spec.capability != "work_items")
+        } else if let Some(problem) = (!spec.fields.is_empty() && !contract_of(&spec).items)
             .then(|| {
                 format!(
                     "provider `{id}`: fields are a work list's; `{}` has none",
@@ -842,7 +855,7 @@ pub fn parse_providers(
                 Err(e) => Some(format!(
                     "provider `{id}`: id_pattern `{pattern}` isn't a regex: {e}"
                 )),
-                Ok(_) if spec.capability != "work_items" => Some(format!(
+                Ok(_) if !contract_of(&spec).items => Some(format!(
                     "provider `{id}`: id_pattern is a work list's; `{}` has no ids",
                     spec.capability
                 )),
