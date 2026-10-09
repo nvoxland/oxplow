@@ -123,6 +123,35 @@ fn event_name(kind: HookKind) -> &'static str {
     }
 }
 
+/// The files an `apply_patch` names (`*** Add File: a`, `*** Update File:
+/// b`, `*** Delete File: c`, `*** Move to: d`), from its patch text —
+/// Codex's `input` or `patch`, OpenCode's `patchText` — or an explicit
+/// `path`. Codex's and OpenCode's edit tools both take this format.
+pub fn patch_paths(input: &serde_json::Value) -> Vec<String> {
+    let text = ["input", "patch", "patchText"]
+        .iter()
+        .find_map(|k| input.get(*k).and_then(|v| v.as_str()))
+        .unwrap_or_default();
+    let mut paths: Vec<String> = text
+        .lines()
+        .filter_map(|l| {
+            [
+                "*** Add File: ",
+                "*** Update File: ",
+                "*** Delete File: ",
+                "*** Move to: ",
+            ]
+            .iter()
+            .find_map(|p| l.strip_prefix(p))
+        })
+        .map(|p| p.trim().to_string())
+        .collect();
+    if let Some(p) = input.get("path").and_then(|p| p.as_str()) {
+        paths.push(p.to_string());
+    }
+    paths
+}
+
 /// A tool hook's body in Claude Code's shape (`tool_name`, `tool_input`,
 /// `tool_response`, `tool_use_id`) mapped onto oxplow's vocabulary — what
 /// Claude Code sends, and what opencode's bridge translates its calls to.

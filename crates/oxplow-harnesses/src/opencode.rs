@@ -14,7 +14,7 @@ use oxplow_domain::agent::harness::{
 };
 use oxplow_domain::agent::observe::HookAnswer;
 use oxplow_domain::agent::text::AgentText;
-use oxplow_domain::agent::tool::ToolUse;
+use oxplow_domain::agent::tool::{ToolKind, ToolUse};
 
 use super::shared::{
     claude_shaped_tool_use, in_shell, program_and_guard, resume_or_fresh, runtime, shell_escape,
@@ -114,10 +114,16 @@ impl AgentHarness for Opencode {
         Ok(())
     }
 
-    /// Its bridge posts Claude Code's shape, `patch` as `Edit`
-    /// (`assets/opencode-hooks.js`).
+    /// Its bridge posts Claude Code's shape, its tools renamed to Claude's
+    /// (`assets/opencode-hooks.js`), except its patch tool: `apply_patch`
+    /// with the patch as `patchText`, an edit of every file it names.
     async fn tool_use(&self, body: &serde_json::Value) -> Option<ToolUse> {
-        claude_shaped_tool_use(body)
+        let mut tool = claude_shaped_tool_use(body)?;
+        if tool.name == "apply_patch" {
+            tool.kind = ToolKind::Edit;
+            tool.paths = super::shared::patch_paths(&body["tool_input"]);
+        }
+        Some(tool)
     }
 
     async fn render(&self, answer: &HookAnswer) -> serde_json::Value {
@@ -245,6 +251,24 @@ fn config_content(
 
 #[cfg(test)]
 mod tests {
+
+    /// Its edit tool is `apply_patch`, the patch as `patchText` (a
+    /// recorded OpenCode 2026-10 body): an edit of every file it names,
+    /// which the write guard and the effort's claims read.
+    #[test]
+    fn its_apply_patch_is_an_edit_of_the_files_it_names() {
+        let h = harness("oxplow:opencode", "opencode");
+        let body = serde_json::json!({
+            "session_id": "ses_ee095c454ffep2jtN6LDC21YZJ",
+            "tool_name": "apply_patch",
+            "tool_input": {"patchText": "*** Begin Patch\n*** Add File: opencode.txt\n+2026-10-09 01:47:04 CDT\n+\n*** End Patch"}
+        });
+        let tool = crate::test_launch::block(h.tool_use(&body)).expect("a call");
+        assert_eq!(tool.kind, oxplow_domain::agent::tool::ToolKind::Edit);
+        assert_eq!(tool.paths, ["opencode.txt"]);
+        assert_eq!(tool.name, "apply_patch");
+    }
+
     use super::*;
     use crate::test_launch::{harness, launch_in, project_only};
     use tempfile::TempDir;

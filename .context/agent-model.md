@@ -347,9 +347,11 @@ its outcome (`ok`, `exit_code`) and an `ask`'s `question`.
 
 - **Who maps.** The harness: `AgentHarness::tool_use(body)`. Claude Code's
   shape is mapped by `oxplow_harnesses::shared::claude_shaped_tool_use`
-  (Claude, and opencode, whose bridge translates its calls to that shape);
-  Codex maps its own (`apply_patch` → `edit` of every file its patch
-  names, `shell` / `exec_command` → `shell`, joining an argv list); an ACP
+  (Claude, and opencode, whose bridge translates its calls to that shape
+  but for its patch tool, `apply_patch` with a `patchText`);
+  Codex's and opencode's `apply_patch` → `edit` of every file the patch
+  names (`shared::patch_paths`); Codex's `shell` / `exec_command` →
+  `shell`, joining an argv list; an ACP
   agent's calls are mapped by the protocol's kinds (`acp::mapping`).
 - **Where.** The hook route maps a PreToolUse / PostToolUse body with the
   bearer's harness before the policy runs, and hands the call to the

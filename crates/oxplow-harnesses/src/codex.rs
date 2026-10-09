@@ -268,7 +268,7 @@ fn codex_tool_use(body: &serde_json::Value) -> Option<ToolUse> {
         }
     };
     let (kind, paths, command) = match name.as_str() {
-        "apply_patch" => (ToolKind::Edit, patch_paths(&input), None),
+        "apply_patch" => (ToolKind::Edit, super::shared::patch_paths(&input), None),
         "shell" | "exec_command" | "local_shell" => (ToolKind::Shell, Vec::new(), command()),
         n if n.starts_with("mcp__") => (ToolKind::Mcp, Vec::new(), None),
         _ => (ToolKind::Other, Vec::new(), None),
@@ -294,34 +294,6 @@ fn codex_tool_use(body: &serde_json::Value) -> Option<ToolUse> {
         exit_code,
         question: None,
     })
-}
-
-/// The files a Codex patch names (`*** Add File: a`, `*** Update File: b`,
-/// `*** Delete File: c`, `*** Move to: d`), from its `input` / `patch`
-/// text or an explicit `path`.
-fn patch_paths(input: &serde_json::Value) -> Vec<String> {
-    let text = ["input", "patch"]
-        .iter()
-        .find_map(|k| input.get(*k).and_then(|v| v.as_str()))
-        .unwrap_or_default();
-    let mut paths: Vec<String> = text
-        .lines()
-        .filter_map(|l| {
-            [
-                "*** Add File: ",
-                "*** Update File: ",
-                "*** Delete File: ",
-                "*** Move to: ",
-            ]
-            .iter()
-            .find_map(|p| l.strip_prefix(p))
-        })
-        .map(|p| p.trim().to_string())
-        .collect();
-    if let Some(p) = input.get("path").and_then(|p| p.as_str()) {
-        paths.push(p.to_string());
-    }
-    paths
 }
 
 /// The command a Codex hook runs: the oxplow binary, which forwards it.
