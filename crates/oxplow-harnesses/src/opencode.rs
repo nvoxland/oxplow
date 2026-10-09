@@ -269,6 +269,73 @@ mod tests {
         assert_eq!(tool.name, "apply_patch");
     }
 
+    /// The bridge (`assets/opencode-hooks.js`, run under bun with `fetch`
+    /// caught) posts each call's id (OpenCode's `callID`) and a shell
+    /// call's exit code (its bash tool's `metadata.exit`): what it posts maps
+    /// to a call oxplow can pair and judge.
+    #[test]
+    fn its_bridge_sends_the_call_id_and_a_shell_calls_exit_code() {
+        let dir = tempfile::tempdir().unwrap();
+        let driver = dir.path().join("drive.mjs");
+        let bridge =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/opencode-hooks.js");
+        std::fs::write(
+            &driver,
+            format!(
+                r#"import {{ OxplowHooks }} from {bridge};
+const posts = [];
+globalThis.fetch = async (url, init) => {{
+  posts.push({{ event: url.split("/").pop(), payload: JSON.parse(init.body) }});
+  return {{ json: async () => ({{}}) }};
+}};
+process.env.OXPLOW_HOOK_BASE_URL = "http://hook.invalid";
+const hooks = await OxplowHooks({{ client: {{ session: {{ get: async () => ({{ data: {{}} }}) }} }} }});
+await hooks["tool.execute.before"]({{ tool: "bash", sessionID: "ses1", callID: "call_1" }}, {{ args: {{ command: "false" }} }});
+await hooks["tool.execute.after"](
+  {{ tool: "bash", sessionID: "ses1", callID: "call_1", args: {{ command: "false" }} }},
+  {{ title: "false", output: "", metadata: {{ output: "", exit: 1, description: "fails" }} }},
+);
+await hooks["tool.execute.after"](
+  {{ tool: "read", sessionID: "ses1", callID: "call_2", args: {{ filePath: "a.txt" }} }},
+  {{ title: "a.txt", output: "x", metadata: {{}} }},
+);
+console.log(JSON.stringify(posts));
+"#,
+                bridge = serde_json::to_string(&format!("file://{}", bridge.display())).unwrap()
+            ),
+        )
+        .unwrap();
+        let out = std::process::Command::new("bun")
+            .arg(&driver)
+            .output()
+            .expect("bun runs the bridge (the repo's JS runtime)");
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let posts: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout).unwrap();
+        let h = harness("oxplow:opencode", "opencode");
+        let tool = |i: usize| crate::test_launch::block(h.tool_use(&posts[i]["payload"])).unwrap();
+
+        assert_eq!(posts[0]["event"], "PreToolUse");
+        let pre = tool(0);
+        assert_eq!(pre.call_id.as_deref(), Some("call_1"));
+        assert_eq!(pre.exit_code, None);
+
+        assert_eq!(posts[1]["event"], "PostToolUse");
+        let ran = tool(1);
+        assert_eq!(ran.kind, oxplow_domain::agent::tool::ToolKind::Shell);
+        assert_eq!(ran.call_id.as_deref(), Some("call_1"));
+        assert_eq!((ran.exit_code, ran.ok), (Some(1), Some(false)));
+
+        // A tool with no exit code sends none.
+        let read = tool(2);
+        assert_eq!(read.call_id.as_deref(), Some("call_2"));
+        assert_eq!(read.exit_code, None);
+        assert_eq!(posts[2]["payload"]["tool_response"].get("exit_code"), None);
+    }
+
     use super::*;
     use crate::test_launch::{harness, launch_in, project_only};
     use tempfile::TempDir;

@@ -471,7 +471,12 @@ depends only on the domain; core's text and the answerability questions live in
   response throws inside opencode, which blocks the tool call — so the
   write guard works; opencode's lowercase tool
   names and `filePath` arg are mapped to Claude's `Edit`/`Write`/… and
-  `file_path`), `tool.execute.after` → `PostToolUse`, and the
+  `file_path`), `tool.execute.after` → `PostToolUse` (each call's
+  `callID` as `tool_use_id`, so a call's two hooks pair; its bash tool's
+  `metadata.exit` as `tool_response.exit_code`, so a failed command reads
+  as failed — `opencode.rs`
+  `its_bridge_sends_the_call_id_and_a_shell_calls_exit_code` runs the
+  bridge under bun), and the
   `session.idle` event → `Stop`. Subagent sessions (`parentID` set) are filtered out of
   UserPromptSubmit/Stop so child activity doesn't flip the thread's
   turn lifecycle.

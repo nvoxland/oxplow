@@ -3,7 +3,8 @@
 /// Loaded via the `plugin` array in the OPENCODE_CONFIG_CONTENT env
 /// var oxplow sets at spawn. Translates opencode plugin hooks into the
 /// Claude-shaped lifecycle payloads the oxplow control plane already
-/// parses (`session_id` / `prompt` / `tool_name` / `tool_input`), and
+/// parses (`session_id` / `prompt` / `tool_name` / `tool_input` /
+/// `tool_use_id` / `tool_response`), and
 /// POSTs them to `$OXPLOW_HOOK_BASE_URL/<Event>` with the session's
 /// bearer, which is the whole of who they come from.
 ///
@@ -100,6 +101,7 @@ export const OxplowHooks = async ({ client }) => {
     "tool.execute.before": async (input, output) => {
       const res = await post("PreToolUse", {
         session_id: input.sessionID,
+        tool_use_id: input.callID,
         tool_name: toolName(input.tool),
         tool_input: toolInput(output.args),
       });
@@ -112,11 +114,19 @@ export const OxplowHooks = async ({ client }) => {
     },
 
     "tool.execute.after": async (input, output) => {
+      // Its bash tool reports the command's exit code as `metadata.exit`;
+      // other tools have none, and send none.
+      const exit = output?.metadata?.exit;
       await post("PostToolUse", {
         session_id: input.sessionID,
+        tool_use_id: input.callID,
         tool_name: toolName(input.tool),
         tool_input: toolInput(input.args),
-        tool_response: { title: output?.title, output: output?.output },
+        tool_response: {
+          title: output?.title,
+          output: output?.output,
+          ...(typeof exit === "number" ? { exit_code: exit } : {}),
+        },
       });
     },
 
