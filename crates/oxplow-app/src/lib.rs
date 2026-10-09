@@ -546,8 +546,9 @@ pub struct Services {
     pub effect_services: commands::effect::ServicesSlot,
     /// The daemon's line to its window: the window's capabilities' calls.
     pub client_host: Arc<client_host::ClientHost>,
-    /// The knowledge provider: oxplow's wiki (`.context/knowledge.md`).
-    pub knowledge: Arc<dyn oxplow_domain::knowledge::KnowledgeProvider>,
+    /// The knowledge implementations and the active one: oxplow's wiki
+    /// (bundled), a provider's, or none (`.context/knowledge.md`).
+    pub knowledge: Arc<oxplow_domain::knowledge::KnowledgeRegistry>,
     pub wiki_page_store: Arc<SqliteWikiPageStore>,
     pub page_visit_store: Arc<SqlitePageVisitStore>,
     pub usage_store: Arc<SqliteUsageStore>,
@@ -1444,19 +1445,19 @@ impl Services {
         }
         let thread_answer_store = oxplow_db::SqliteThreadAnswerStore::new(db.clone());
         let panel_layout_store = oxplow_db::SqlitePanelLayoutStore::new(db.clone());
-        let knowledge: Arc<dyn oxplow_domain::knowledge::KnowledgeProvider> =
-            Arc::new(knowledge::OxplowKnowledge::new(&commands, db.clone()));
-        capabilities.add_core(capabilities::Implementation {
-            capability: "knowledge".into(),
-            id: knowledge.provider().into(),
-            title: knowledge.provider().into(),
-            extension: None,
-            source: capabilities::Source::Core,
-            features: serde_json::json!({}),
-            fields: serde_json::Value::Array(Vec::new()),
-            id_pattern: None,
-            config: serde_json::json!({}),
-        });
+        // Where pages are kept: the wiki under each id an extension
+        // declares it, none (a sink) always, a provider's instance once it
+        // runs; the active one is the project's choice.
+        let knowledge = {
+            let (config, capabilities) = (config_arc.clone(), capabilities.clone());
+            Arc::new(oxplow_domain::knowledge::KnowledgeRegistry::new(Arc::new(
+                move || {
+                    capabilities
+                        .active(&config_service::read_config(&config), knowledge::CAPABILITY)
+                },
+            )))
+        };
+        knowledge::register_built_ins(&knowledge, &declared, &commands, &db);
         for command in knowledge::ops(knowledge::KnowledgeTarget {
             project_dir: layout.project_dir.clone(),
             vcs: vcs.clone(),

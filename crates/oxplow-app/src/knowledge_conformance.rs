@@ -273,7 +273,12 @@ mod tests {
         };
         // As a person: a delete is destructive, and an agent's is left for
         // the person to confirm.
-        let findings = suite(&*fx.svc.knowledge, &probe, &Actor::Human).await;
+        let findings = suite(
+            &*fx.svc.knowledge.active().expect("the wiki is active"),
+            &probe,
+            &Actor::Human,
+        )
+        .await;
         assert_eq!(findings, vec![]);
     }
 }

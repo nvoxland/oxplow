@@ -131,11 +131,25 @@ reopening the page (`WikiFreshnessPage.rerun.test.tsx`). The RPCs
 
 ## The capability
 
-`oxplow_domain::knowledge::KnowledgeProvider`: `provider()`,
+Knowledge is a **choosable, optional** capability: a project keeps its
+pages in oxplow's wiki (`oxplow:wiki`, which `oxplow-bundled` declares
+under the id `oxplow`), in a documentation system an extension's provider
+speaks to (an Obsidian vault, a Confluence or MediaWiki server), or
+nowhere. `Services.knowledge` is an `oxplow_domain::knowledge::
+KnowledgeRegistry`; `active()` is the project's choice
+(`activeProviders.knowledge`, personal over project over the default).
+`knowledge::register_built_ins` registers the wiki under each id
+declared and core's **none**, `NoneKnowledge`: a sink, as the work
+list's none is — a write lands nowhere and answers its page ref, a
+delete and a link succeed, freshness is empty — so nothing that writes
+pages is refused while no store is active, and the record reads empty.
+Bundled disabled, knowledge is none.
+
+`oxplow_domain::knowledge::KnowledgeProvider`: `id()`,
 `write_page(actor, PageDraft)`, `delete_page`, `link`, and
 `freshness(page) -> Vec<RefFreshness>` — freshness is the provider's to
 say (a provider that can't pin to snapshots reports what it can).
-`OxplowKnowledge` (`Services.knowledge`) runs the `knowledge.*` commands
+`OxplowKnowledge` (the wiki) runs the `knowledge.*` commands
 as the actor (a destructive one confirmed: the provider call is the
 caller's decision — an agent's is still left for a person, by the bus)
 and reads freshness from the pins.
