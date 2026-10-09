@@ -116,6 +116,23 @@ Snapshot **content** is expired on a 24-hour schedule
 time). Tune the retention window from the project's settings
 page if the default doesn't fit (most users never touch this).
 
+### Keeping snapshots
+
+Settings → Capabilities chooses how snapshots are kept:
+
+- **Keep every version** (the default) reads any file at any point in
+  its history; the blob store grows with your edits, trimmed by the
+  retention window above.
+- **Track changes only** records what changed at every point and keeps
+  no file contents: what changed, never what it said, and no blob store
+  growth. Anything that needs a file's text from a past snapshot (diff
+  coverage, the search index, code-quality scans and metrics over
+  snapshots, wiki drift, change analysis) is skipped with a note in the
+  log, and a read of such a file says the snapshot kept no contents. It
+  applies from the next snapshot on; nothing already kept is deleted.
+  It is offered by the bundled extension, so it appears once that is
+  enabled.
+
 ### Other project keys
 
 Everything else `.oxplow/project.yaml` accepts, with its default:

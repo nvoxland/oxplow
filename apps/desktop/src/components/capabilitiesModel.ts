@@ -86,6 +86,16 @@ export function chosenNote(capability: ChoosableCapability): string {
   }
 }
 
+/** What a choice of `capability` means for a person, from the features it
+ *  declares (`null` when there's nothing to add to its title): a snapshot
+ *  implementation either keeps every file's bytes, or only what changed. */
+export function choiceHint(capability: string, features: string[]): string | null {
+  if (capability !== "snapshots") return null;
+  return features.includes("contents")
+    ? "reads any file at any point; grows the blob store"
+    : "what changed, never what it said; no blob store growth";
+}
+
 /** `activeProviders` with `capability` set to `id`, or its entry removed
  *  (`null`: the default, or the same as the project); `null` when nothing
  *  is left, so the key is unset. */

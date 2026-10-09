@@ -15,7 +15,7 @@ import { useCallback, useEffect, useState } from "react";
 import { effectiveConfig, listExtensions, querySql, runCommand, subscribeOxplowEvents } from "../api.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
 import type { Extension, Reads } from "../tauri-bridge/generated/bindings.js";
-import { capabilitiesFromResult, chosenNote, nextChoices, offWithout, type ChoosableCapability } from "./capabilitiesModel.js";
+import { capabilitiesFromResult, choiceHint, chosenNote, nextChoices, offWithout, type ChoosableCapability } from "./capabilitiesModel.js";
 import { recordOpError } from "./opErrorsStore.js";
 
 const QUERY =
@@ -108,6 +108,11 @@ export function CapabilitiesSection() {
                     onChange={() => void choose("project", p.capability, c.id)}
                   />
                   {c.title}
+                  {choiceHint(p.capability, c.features) ? (
+                    <span style={mutedStyle} data-testid={`capabilities-${p.capability}-${c.id}-hint`}>
+                      — {choiceHint(p.capability, c.features)}
+                    </span>
+                  ) : null}
                   {c.features.length > 0 ? <span style={mutedStyle}>· {c.features.join(", ")}</span> : null}
                   {c.source === "none" && off.length > 0 ? (
                     <span style={mutedStyle} data-testid={`capabilities-${p.capability}-off`}>

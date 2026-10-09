@@ -281,6 +281,11 @@ empty: Nothing is waiting on you.
   run returned at least that many rows) or `{ column: pct, below: 80 }` /
   `above:` (the first row's value), with an optional `label`. `run_lens`
   returns the alert state.
+- **`needs:`** (a lens or a hint) names the capabilities or features it
+  can't run without, e.g. `needs: [work_items, snapshots.contents]`. A
+  lens that reads a file's text from a past snapshot declares
+  `snapshots.contents`: under "Track changes only" the snapshots keep no
+  text, and the lens shows as inactive with that reason instead of failing.
 - **`actions:`** are commands the lens offers:
   `{ id, label, command, input, row? }`. `input` is the command's input;
   `"{{param.x}}"` binds a lens param and, with `row: true` (a row's

@@ -635,6 +635,15 @@ async fn analyze(
         .change_store
         .get_or_create(stream_val, kind, &key, base.as_ref(), &head)
         .await?;
+    // Analyzing reads each side's file bytes; a snapshot kept none under
+    // "Track changes only". Skipped with the reason, the row as it was —
+    // not a failure to retry.
+    if let Some(reason) = svc.snapshot_captures.no_contents_reason() {
+        if matches!(base, Some(Revision::Snapshot(_))) || matches!(head, Revision::Snapshot(_)) {
+            tracing::info!(change = row.id, "change analysis skipped: {reason}");
+            return Ok(row);
+        }
+    }
     let only = own_files(svc, kind, &key).await?;
     let from = analyzed_from(svc, stream, base.as_ref(), &head, only.as_ref()).await?;
     {
@@ -1329,6 +1338,53 @@ mod tests {
             .await,
             serde_json::json!([["tests/it.rs", 2, 1, 3, 1, 0, 1]])
         );
+    }
+
+    /// Analyzing a change reads each side's bytes: under "Track changes
+    /// only" a snapshot-to-snapshot change is left as it was (not done,
+    /// not failed) rather than analyzed from nothing.
+    #[tokio::test]
+    async fn a_snapshot_change_is_not_analyzed_without_contents() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        f.svc
+            .snapshot_captures
+            .set_content_policy(crate::snapshot_capture::ContentPolicy::HashesOnly);
+        let (start, end): (i64, i64) = (
+            f.svc
+                .snapshot_store
+                .create_snapshot(oxplow_domain::StreamId::new(1))
+                .await
+                .unwrap(),
+            f.svc
+                .snapshot_store
+                .create_snapshot(oxplow_domain::StreamId::new(1))
+                .await
+                .unwrap(),
+        );
+        let turn: i64 = f
+            .svc
+            .db
+            .transaction(move |c| {
+                c.execute(
+                    "INSERT INTO agent_turn (thread_id, prompt, started_at, start_snapshot_id, snapshot_id)
+                     VALUES (1, 'p', '2026-01-01T00:00:00.000000Z', ?1, ?2)",
+                    rusqlite::params![start, end],
+                )
+                .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))?;
+                Ok(c.last_insert_rowid())
+            })
+            .await
+            .unwrap();
+        let c = ensure_change(
+            &f.svc,
+            ChangeTarget::Turn {
+                turn_id: oxplow_domain::AgentTurnId::new(turn).to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_ne!(c.status, "done");
+        assert_ne!(c.status, "failed");
     }
 
     /// P2.10 (tsk434): a turn diffs its start snapshot → its end snapshot

@@ -1980,6 +1980,11 @@ impl CollectionService {
         let (Some(start), Some(measured)) = (effort.start_snapshot_id, measured) else {
             return Ok(None);
         };
+        // The changed lines come from both sides' bytes.
+        if let Some(reason) = self.captures.no_contents_reason() {
+            tracing::info!(effort = %effort.id, "diff coverage skipped: {reason}");
+            return Ok(None);
+        }
         let start_tree = self.snapshots.tree_at(start).await?;
         let measured_tree = self.snapshots.tree_at(measured).await?;
         let to_set = |v: Option<&serde_json::Value>| -> BTreeSet<u32> {
@@ -4547,6 +4552,22 @@ mod tests {
             std::fs::write(h.tmp.path().join("src/foo.rs"), "x\n").unwrap();
             let pct = diff_pct(&h).await.expect("a diff");
             assert!((pct - 50.0).abs() < 1e-6, "got {pct}");
+        }
+
+        /// The diff is of two snapshots' bytes: under "Track changes only"
+        /// there is none to derive — skipped with a reason, not an error.
+        #[tokio::test]
+        async fn diff_coverage_is_skipped_when_snapshots_keep_no_contents() {
+            let h = build(Some(COBERTURA_50PCT)).await;
+            sync_coverage(&h).await;
+            h.service
+                .captures
+                .set_content_policy(crate::snapshot_capture::ContentPolicy::HashesOnly);
+            assert_eq!(diff_pct(&h).await, None);
+            h.service
+                .captures
+                .set_content_policy(crate::snapshot_capture::ContentPolicy::Keep);
+            assert!(diff_pct(&h).await.is_some());
         }
 
         /// tsk862: the diff reads snapshots, never a working tree: with the

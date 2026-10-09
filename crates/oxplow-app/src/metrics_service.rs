@@ -1579,7 +1579,7 @@ impl MetricsService {
             })
             .collect();
         let gauges = self.runnable(gauges, event.as_deref()).await;
-        if gauges.is_empty() {
+        if gauges.is_empty() || self.skips_without_contents("snapshot collectors") {
             return SweepReport::default();
         }
         let needing: std::collections::HashSet<String> = if force_full {
@@ -1777,7 +1777,7 @@ impl MetricsService {
             })
             .collect();
         let gauges = self.runnable(gauges, event.as_deref()).await;
-        if gauges.is_empty() {
+        if gauges.is_empty() || self.skips_without_contents("effort collectors") {
             return;
         }
         let stream_val = match self.thread_store.get(thread_id).await {
@@ -1875,7 +1875,7 @@ impl MetricsService {
             })
             .collect();
         let collectors = self.runnable(collectors, Some(&event)).await;
-        if collectors.is_empty() {
+        if collectors.is_empty() || self.skips_without_contents("event collectors") {
             return;
         }
         let stream_val = event.envelope.anchors.stream_id.map_or(1, |s| s.value());
@@ -1930,6 +1930,13 @@ impl MetricsService {
                 ));
             }
         }
+        if let Some(reason) = self
+            .snapshot_captures
+            .as_ref()
+            .and_then(|c| c.no_contents_reason())
+        {
+            return Err(format!("collector `{owner}/{key}` can't run: {reason}"));
+        }
         let stream_val = match stream {
             Some(s) => s.value(),
             None => 1, // primary stream default
@@ -1962,6 +1969,23 @@ impl MetricsService {
             FactRun::Recorded(n) => Ok(n),
             FactRun::Failed(e) => Err(e),
             FactRun::Skipped => Ok(0),
+        }
+    }
+
+    /// Whether `what` is skipped because the active snapshot implementation
+    /// keeps no file contents (the collectors read snapshots' bytes). Logged
+    /// at info, never an error.
+    fn skips_without_contents(&self, what: &str) -> bool {
+        match self
+            .snapshot_captures
+            .as_ref()
+            .and_then(|c| c.no_contents_reason())
+        {
+            Some(reason) => {
+                tracing::info!(%what, "skipped: {reason}");
+                true
+            }
+            None => false,
         }
     }
 
@@ -4434,6 +4458,42 @@ def transform(input):
             !needing.contains(&"oxplow.rust.unsafe_blocks".to_string()),
             "the gauge that scanned the full tree must NOT need one; got {needing:?}"
         );
+    }
+
+    /// The collectors read snapshots' bytes: under "Track changes only"
+    /// nothing runs, and a collector asked for by name says why.
+    #[tokio::test]
+    async fn collectors_do_not_run_without_snapshot_contents() {
+        let (svc, dir) = fixture().await;
+        std::fs::write(
+            oxplow_config::config_path(dir.path()),
+            "metrics:\n  - use: oxplow.rust.unsafe_blocks\n",
+        )
+        .unwrap();
+        svc.reload_config_from_disk().unwrap();
+        svc.metrics.seed_catalog().await;
+        svc.snapshot_captures
+            .set_content_policy(crate::snapshot_capture::ContentPolicy::HashesOnly);
+        let snapshot =
+            snapshot_with_files(&svc, &[("f0.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
+        let report = svc
+            .metrics
+            .run_snapshot_collectors(
+                oxplow_domain::StreamId::new(1),
+                snapshot,
+                true,
+                None,
+                &|_| true,
+                None,
+            )
+            .await;
+        assert_eq!(report.ran, 0);
+        let err = svc
+            .metrics
+            .run_collector_by_key("built-in", "oxplow.rust.unsafe_blocks", None, "human")
+            .await
+            .unwrap_err();
+        assert!(err.contains("keeps no file contents"), "{err}");
     }
 
     #[tokio::test]

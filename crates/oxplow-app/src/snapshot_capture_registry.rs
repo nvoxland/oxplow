@@ -21,6 +21,11 @@ use oxplow_fs_watch::WorkspaceFilter;
 use crate::blob_store::BlobStore;
 use crate::snapshot_capture::{ContentPolicy, SnapshotCaptureService};
 
+/// Why work that needs a snapshot's file bytes is skipped under "Track
+/// changes only" (the `snapshots.contents` feature is unmet).
+pub const NO_CONTENTS_REASON: &str = "the active snapshot implementation keeps no file contents; \
+     choose Keep every version in Settings → Capabilities to keep them";
+
 /// Build parameters shared across every per-stream service. The
 /// registry holds these so `register()` can construct fresh services
 /// at runtime (e.g. when a new stream is created) without callers
@@ -175,6 +180,13 @@ impl SnapshotCaptureRegistry {
         for svc in self.list() {
             svc.set_provider(provider.clone());
         }
+    }
+
+    /// Why work that reads file bytes of snapshots can't run: the active
+    /// snapshot implementation keeps none ("Track changes only"). `None`
+    /// when it keeps them. Such work skips with this reason, never errors.
+    pub fn no_contents_reason(&self) -> Option<&'static str> {
+        (!self.content_policy().keeps()).then_some(NO_CONTENTS_REASON)
     }
 
     /// Whether takes keep file bytes now.

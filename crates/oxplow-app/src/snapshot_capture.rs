@@ -3285,6 +3285,17 @@ mod tests {
             }
             other => panic!("expected NoContents, got {other:?}"),
         }
+        // One wording for every reader (MCP, restore): who took it, and how
+        // to keep contents.
+        let message = files
+            .read_file_at_snapshot(hashed, "hashed.txt")
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            message.contains("`hashes`") && message.contains("choose Keep every version"),
+            "{message}"
+        );
         // The same by file row.
         let row = store.list_for_path("hashed.txt").await.unwrap().remove(0);
         assert!(matches!(

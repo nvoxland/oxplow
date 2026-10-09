@@ -171,6 +171,22 @@ mod tests {
     /// `effort`, closed now: its end snapshot taken over the working tree,
     /// and `paths` as its files.
     async fn close_effort(svc: &crate::Services, effort: EffortId, paths: &[&str]) {
+        close_effort_keeping(
+            svc,
+            effort,
+            paths,
+            crate::snapshot_capture::ContentPolicy::Keep,
+        )
+        .await
+    }
+
+    /// [`close_effort`], its end snapshot taken under `policy`.
+    async fn close_effort_keeping(
+        svc: &crate::Services,
+        effort: EffortId,
+        paths: &[&str],
+        policy: crate::snapshot_capture::ContentPolicy,
+    ) {
         let root = svc.layout.project_dir.clone();
         let capture = crate::snapshot_capture::SnapshotCaptureService::new(
             svc.snapshot_store.clone(),
@@ -183,6 +199,7 @@ mod tests {
         )
         .with_settle_duration(std::time::Duration::ZERO)
         .with_predrain_delay(std::time::Duration::ZERO);
+        capture.set_content_policy(policy);
         for p in paths {
             capture.mark_dirty(root.join(p), oxplow_fs_watch::WatchEventKind::Other);
         }
@@ -292,6 +309,41 @@ mod tests {
         close_effort(&f.svc, f.effort, &["src/a.rs"]).await;
         // Its bytes age out.
         f.svc.blobs.gc(&Default::default()).unwrap();
+        let later = f
+            .svc
+            .effort_store
+            .start(&oxplow_tasks::work_item_ref(f.task), &f.thread, None)
+            .await
+            .unwrap()
+            .id;
+        std::fs::write(root.join("src/a.rs"), "fn a() { 2 }\n").unwrap();
+        close_effort(&f.svc, later, &["src/a.rs"]).await;
+        let sha = commit_all(&root, "the second fix");
+        index_and_link(&f.svc, &sha).await;
+        assert_eq!(
+            items_of(&f.svc, &sha).await,
+            serde_json::json!([[format!("work_item:oxplow:{}", f.task)]])
+        );
+    }
+
+    /// An older effort whose end version was never kept ("Track changes
+    /// only") can't hold the commit either, and mustn't stop it linking to
+    /// the effort that does.
+    #[tokio::test]
+    async fn an_effort_that_kept_no_contents_doesnt_stop_a_commit_linking() {
+        let f = crate::test_fixtures::services_with_task_effort().await;
+        let root = f.svc.layout.project_dir.clone();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/a.rs"), "fn a() {}\n").unwrap();
+        commit_all(&root, "base");
+        std::fs::write(root.join("src/a.rs"), "fn a() { 1 }\n").unwrap();
+        close_effort_keeping(
+            &f.svc,
+            f.effort,
+            &["src/a.rs"],
+            crate::snapshot_capture::ContentPolicy::HashesOnly,
+        )
+        .await;
         let later = f
             .svc
             .effort_store
