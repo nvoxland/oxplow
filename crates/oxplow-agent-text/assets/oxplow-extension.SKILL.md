@@ -32,7 +32,13 @@ failure after your edit is yours:
   trigger, parent? }` → `{ handle, unchanged, file_count }`, `changed { stream,
   from, to }` → `{ changes: [{ path, kind: added|modified|deleted, identity
   (xxh3-128 hex), size }] }` (`from: null` is the empty tree) and, with the
-  `contents` feature, `read_at { handle, path }` → `{ bytes }` (base64);
+  `contents` feature, `read_at { handle, path }` → `{ bytes }` (base64).
+  A `knowledge` provider (no scaffold yet) answers `write_page { slug, title?,
+  body, verified_refs, removed_refs }` → `{ page }`, `delete_page { slug }` and
+  `link { page, target }`, each also answering the page's
+  `knowledge.page.recorded@1` event `{ page: { ref: "wiki:<slug>", title,
+  body, refs, updated_at, deleted? } }` (`refs`: the body's links as `file:…` /
+  `wiki:…`), and a `knowledge_pages` collector of the same rows;
 - `effect` — a script reacting to a logged event by composing commands
   (private; runs only once a person approves it);
 - `component` — a custom component (private): its `viz: custom` lens and

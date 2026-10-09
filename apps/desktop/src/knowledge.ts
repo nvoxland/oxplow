@@ -7,6 +7,7 @@
  */
 import { querySql, searchSite } from "./api.js";
 import { unionReads } from "./lens/lensRerun.js";
+import type { CapabilityProvider } from "./workItems.js";
 import type { Reads, SearchHit, SqlCell, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
 
 /** One file ref of a page and whether its file drifted since it was
@@ -131,4 +132,13 @@ export function searchHitsOf(hits: SearchHit[]): WikiPageSearchHit[] {
 /** Pages whose title or body matches `query` (the site search). */
 export async function searchWikiPages(query: string, limit = 30): Promise<WikiPageSearchHit[]> {
   return searchHitsOf(await searchSite(query, null, ["wiki"], limit));
+}
+
+/** What the wiki's surfaces say when knowledge's active row is `none`. */
+export const NO_KNOWLEDGE_STORE = "No knowledge store — choose one in Settings → Capabilities";
+
+/** Whether knowledge's active row is `none` (`providers` being its rows of
+ *  `v_capability_provider`); nothing listed yet is not none. */
+export function knowledgeIsNone(providers: CapabilityProvider[]): boolean {
+  return providers.some((p) => p.capability === "knowledge" && p.active && p.provider === "none");
 }

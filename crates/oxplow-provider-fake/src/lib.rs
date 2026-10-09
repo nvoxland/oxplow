@@ -35,6 +35,12 @@
 //! changed between marks; what it marked stays in memory and the `mark`s
 //! answered are counted in its state (`marks`).
 //!
+//! With `OXPLOW_FAKE_CAPABILITY=knowledge` it is a **knowledge provider**
+//! (`knowledge`): it declares [`knowledge_declarations`], keeps pages
+//! (in its state, as items are), and each write answers the page's
+//! `knowledge.page.recorded` event; collector `knowledge_pages` streams
+//! the pages changed after the cursor.
+//!
 //! Two notifications act at once: `fake/changed { collectors? }` makes
 //! it send the host `host/changed` (what a webhook would), and
 //! `fake/exit` makes it exit on its own (status 3).
@@ -111,10 +117,12 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{oneshot, Mutex};
 
 mod harness;
+mod knowledge;
 mod policy;
 mod snapshots;
 
 pub use harness::declarations as harness_declarations;
+pub use knowledge::declarations as knowledge_declarations;
 pub use policy::declarations as policy_declarations;
 pub use snapshots::declarations as snapshots_declarations;
 
@@ -134,6 +142,8 @@ pub enum Capability {
     Snapshots {
         contents: bool,
     },
+    /// A knowledge provider ([`knowledge_declarations`]).
+    Knowledge,
 }
 
 impl Capability {
@@ -145,8 +155,9 @@ impl Capability {
             "effort_policy" => Ok(Capability::EffortPolicy),
             "agent_harness" => Ok(Capability::AgentHarness),
             "snapshots" => Ok(Capability::Snapshots { contents: false }),
+            "knowledge" => Ok(Capability::Knowledge),
             other => Err(format!(
-                "the fake implements work_items, effort_policy, agent_harness or snapshots, not `{other}`"
+                "the fake implements work_items, effort_policy, agent_harness, snapshots or knowledge, not `{other}`"
             )),
         }
     }
@@ -453,6 +464,8 @@ struct World {
     /// its state; what it marked stays in memory.
     marks: u64,
     snapshot_marks: snapshots::Marks,
+    /// A knowledge provider's pages, by slug.
+    pages: knowledge::Pages,
     hooks: Hooks,
     items: BTreeMap<u64, Item>,
     next: u64,
@@ -478,6 +491,8 @@ struct Saved {
     reacts: u64,
     #[serde(default)]
     marks: u64,
+    #[serde(default)]
+    pages: knowledge::Pages,
 }
 
 impl World {
@@ -493,6 +508,7 @@ impl World {
             answered: self.answered.clone(),
             reacts: self.reacts,
             marks: self.marks,
+            pages: self.pages.clone(),
         };
         let kept = path
             .parent()
@@ -519,6 +535,7 @@ impl World {
         self.answered = saved.answered;
         self.reacts = saved.reacts;
         self.marks = saved.marks;
+        self.pages = saved.pages;
     }
 }
 
@@ -715,6 +732,8 @@ async fn handle(
                 policy_declarations()
             } else if capability == Capability::AgentHarness {
                 harness_declarations()
+            } else if capability == Capability::Knowledge {
+                knowledge_declarations()
             } else if let Capability::Snapshots { contents } = capability {
                 snapshots_declarations(contents)
             } else if hooks.bad_declarations {
@@ -832,6 +851,13 @@ async fn handle(
                 _ if capability == Capability::AgentHarness => {
                     json!({ "result": harness::answer(&p.command, &p.input)?, "events": [] })
                 }
+                _ if capability == Capability::Knowledge => {
+                    let mut w = world.lock().await;
+                    let w = &mut *w;
+                    let (result, events) =
+                        knowledge::answer(&mut w.pages, &mut w.rev, &p.command, &p.input)?;
+                    json!({ "result": result, "events": events })
+                }
                 _ if matches!(capability, Capability::Snapshots { .. }) => {
                     let Capability::Snapshots { contents } = capability else {
                         unreachable!()
@@ -886,7 +912,13 @@ async fn handle(
             refuse_auth(world).await?;
             let p: ReadParams = parse(params)?;
             require_handle(&p.handle)?;
-            if p.collector != "work_items" {
+            let knowledge_mode = world.lock().await.capability == Capability::Knowledge;
+            let (collector, entity) = if knowledge_mode {
+                ("knowledge_pages", "knowledge_page")
+            } else {
+                ("work_items", "work_item")
+            };
+            if p.collector != collector {
                 return Err(ProtocolError::InvalidInput {
                     field: "/collector".into(),
                     message: format!("no collector `{}`", p.collector),
@@ -907,17 +939,24 @@ async fn handle(
                 .unwrap_or(0);
             let (hooks, mut rows) = {
                 let w = world.lock().await;
-                let mut rows: Vec<(u64, Value)> = w
-                    .items
-                    .values()
-                    .filter(|item| item.rev > after)
-                    .map(|item| {
-                        (
-                            item.rev,
-                            serde_json::to_value(&item.record).expect("record serializes"),
-                        )
-                    })
-                    .collect();
+                let mut rows: Vec<(u64, Value)> = if knowledge_mode {
+                    w.pages
+                        .values()
+                        .filter(|page| page.rev > after)
+                        .map(|page| (page.rev, page.record().clone()))
+                        .collect()
+                } else {
+                    w.items
+                        .values()
+                        .filter(|item| item.rev > after)
+                        .map(|item| {
+                            (
+                                item.rev,
+                                serde_json::to_value(&item.record).expect("record serializes"),
+                            )
+                        })
+                        .collect()
+                };
                 rows.sort_by_key(|(rev, _)| *rev);
                 (w.hooks.clone(), rows)
             };
@@ -952,7 +991,7 @@ async fn handle(
                 }
                 peer.notify(
                     notify::RECORD,
-                    json!({ "id": id, "entity": "work_item", "row": row }),
+                    json!({ "id": id, "entity": entity, "row": row }),
                 )
                 .await?;
                 if hooks.checkpoint_at_end && i + 1 < total {

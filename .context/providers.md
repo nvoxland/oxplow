@@ -189,6 +189,25 @@ in memory only; the `mark`s it answered are counted in its state
 (`marks`, also what the next handle is numbered from), so a test can see a
 provider that wasn't chosen was asked nothing.
 
+**As a knowledge provider** (`OXPLOW_FAKE_CAPABILITY=knowledge`) it
+declares `knowledge_declarations()` — the `knowledge` capability (no
+features), the verbs `write_page { slug, title?, body, verified_refs,
+removed_refs }` → `{ page: "wiki:<slug>" }`, `delete_page { slug }` and
+`link { page, target }` → `{}` (each `confirm: never`, `access: record`,
+inputs `additionalProperties: false`), the event type
+`knowledge.page.recorded@1`, a `knowledge_pages` collector over entity
+`knowledge_page`, and the same `team` config. Pages live in its state
+like items do. Every verb answers the page's record as that event:
+`{ page: { ref: "wiki:<slug>", title, body, refs, updated_at, deleted? } }`.
+`refs` is the body's `[[…]]` interiors in oxplow's grammar (one with a `/`
+or a `.` is `file:<path>`, a bare one `wiki:<slug>`); the title defaults to
+the slug; `verified_refs` and `removed_refs` are accepted and ignored (it
+keeps no pins). `link` appends `[[target]]` under a `## Related` heading;
+`delete_page` answers the record with `deleted: true`, and a page that is
+absent or already deleted is `InvalidInput`. `read` of `knowledge_pages`
+streams the pages changed after the cursor in revision order, each
+followed by a `$/state` checkpoint, as the work list's does.
+
 ## Which trackers are backends (decided 2026-10-05)
 
 A work-items provider is a **backend for the project's own work**: when

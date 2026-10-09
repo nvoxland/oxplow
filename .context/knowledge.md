@@ -154,7 +154,11 @@ declared and core's **none**, `NoneKnowledge`: a sink, as the work
 list's none is — a write lands nowhere and answers its page ref, a
 delete and a link succeed, freshness is empty — so nothing that writes
 pages is refused while no store is active, and the record reads empty.
-Bundled disabled, knowledge is none.
+Bundled disabled, knowledge is none. The wiki pages list and a page's
+freshness page say "No knowledge store — choose one in Settings →
+Capabilities" when the active row is `none` (`useKnowledgeIsNone`); the
+Settings row for the wiki reads "oxplow's wiki — pages as Markdown under
+.oxplow/wiki, pinned to snapshots".
 
 `oxplow_domain::knowledge::KnowledgeProvider` is a **store**: `id()`,
 `sink()` (none's `true`: it takes any page), and `write_page(call,
