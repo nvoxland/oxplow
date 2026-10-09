@@ -2,7 +2,8 @@
 //! come from `OXPLOW_FAKE_HOOKS` (see the library), and the instance it
 //! is from `OXPLOW_PROVIDER_ID` (`fake` when the host doesn't say), the
 //! capability it implements from `OXPLOW_FAKE_CAPABILITY` (`work_items`,
-//! the default, or `effort_policy`). It exits when serving
+//! the default, `effort_policy`, `agent_harness` or `snapshots`; a
+//! snapshots provider's features, `contents`, from `OXPLOW_FAKE_FEATURES`). It exits when serving
 //! ends — at once, since the runtime would otherwise wait on its blocked
 //! stdin reader — with status 3 after a `crash`.
 
@@ -13,7 +14,9 @@ async fn main() {
     let state = std::env::var_os("OXPLOW_FAKE_STATE").map(std::path::PathBuf::from);
     let capability = match oxplow_provider_fake::Capability::named(
         std::env::var("OXPLOW_FAKE_CAPABILITY").ok().as_deref(),
-    ) {
+    )
+    .and_then(|c| c.with_features(std::env::var("OXPLOW_FAKE_FEATURES").ok().as_deref()))
+    {
         Ok(c) => c,
         Err(e) => {
             eprintln!("fake: {e}");

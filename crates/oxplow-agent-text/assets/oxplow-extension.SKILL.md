@@ -27,7 +27,12 @@ failure after your edit is yours:
   `agent_harness` (a harness launching agent sessions: its command runs in
   the person's terminal, so a person approves it knowing that; if it can
   tell its subagents apart it declares the `subagents` feature and answers
-  the `prompt` and `subagent` verbs);
+  the `prompt` and `subagent` verbs).
+  A `snapshots` provider (no scaffold yet) answers `mark { stream, worktree,
+  trigger, parent? }` → `{ handle, unchanged, file_count }`, `changed { stream,
+  from, to }` → `{ changes: [{ path, kind: added|modified|deleted, identity
+  (xxh3-128 hex), size }] }` (`from: null` is the empty tree) and, with the
+  `contents` feature, `read_at { handle, path }` → `{ bytes }` (base64);
 - `effect` — a script reacting to a logged event by composing commands
   (private; runs only once a person approves it);
 - `component` — a custom component (private): its `viz: custom` lens and

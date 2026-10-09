@@ -29,6 +29,12 @@
 //! and answers `react { event }` with the commands to run; the `react`s it
 //! answered are counted in its state (`reacts`).
 //!
+//! With `OXPLOW_FAKE_CAPABILITY=snapshots` it is a **snapshots provider**
+//! (`snapshots`): it declares [`snapshots_declarations`] (`read_at` only
+//! with `OXPLOW_FAKE_FEATURES=contents`), marks a worktree and answers what
+//! changed between marks; what it marked stays in memory and the `mark`s
+//! answered are counted in its state (`marks`).
+//!
 //! Two notifications act at once: `fake/changed { collectors? }` makes
 //! it send the host `host/changed` (what a webhook would), and
 //! `fake/exit` makes it exit on its own (status 3).
@@ -106,9 +112,11 @@ use tokio::sync::{oneshot, Mutex};
 
 mod harness;
 mod policy;
+mod snapshots;
 
 pub use harness::declarations as harness_declarations;
 pub use policy::declarations as policy_declarations;
+pub use snapshots::declarations as snapshots_declarations;
 
 pub const PROVIDER: &str = "fake";
 
@@ -121,6 +129,11 @@ pub enum Capability {
     WorkItems,
     EffortPolicy,
     AgentHarness,
+    /// A snapshots provider; `contents` is its feature of that name
+    /// (`OXPLOW_FAKE_FEATURES`, see [`Capability::with_features`]).
+    Snapshots {
+        contents: bool,
+    },
 }
 
 impl Capability {
@@ -131,9 +144,41 @@ impl Capability {
             "work_items" => Ok(Capability::WorkItems),
             "effort_policy" => Ok(Capability::EffortPolicy),
             "agent_harness" => Ok(Capability::AgentHarness),
+            "snapshots" => Ok(Capability::Snapshots { contents: false }),
             other => Err(format!(
-                "the fake implements work_items, effort_policy or agent_harness, not `{other}`"
+                "the fake implements work_items, effort_policy, agent_harness or snapshots, not `{other}`"
             )),
+        }
+    }
+
+    /// The capability with the features `list` names (`OXPLOW_FAKE_FEATURES`,
+    /// comma-separated); only a snapshots provider has any (`contents`).
+    pub fn with_features(self, list: Option<&str>) -> Result<Self, String> {
+        let mut features = list
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|f| !f.is_empty())
+            .peekable();
+        if features.peek().is_none() {
+            return Ok(self);
+        }
+        match self {
+            Capability::Snapshots { .. } => {
+                let mut contents = false;
+                for f in features {
+                    match f {
+                        "contents" => contents = true,
+                        other => {
+                            return Err(format!(
+                                "a snapshots provider's feature is `contents`, not `{other}`"
+                            ))
+                        }
+                    }
+                }
+                Ok(Capability::Snapshots { contents })
+            }
+            _ => Err("only a snapshots provider takes features".into()),
         }
     }
 }
@@ -404,6 +449,10 @@ struct World {
     /// How many `react`s it answered (an effort policy's), kept with its
     /// state so a test can tell whether it was asked.
     reacts: u64,
+    /// How many `mark`s it answered (a snapshots provider's), kept with
+    /// its state; what it marked stays in memory.
+    marks: u64,
+    snapshot_marks: snapshots::Marks,
     hooks: Hooks,
     items: BTreeMap<u64, Item>,
     next: u64,
@@ -427,6 +476,8 @@ struct Saved {
     answered: HashMap<String, (String, Value, Value)>,
     #[serde(default)]
     reacts: u64,
+    #[serde(default)]
+    marks: u64,
 }
 
 impl World {
@@ -441,6 +492,7 @@ impl World {
             rev: self.rev,
             answered: self.answered.clone(),
             reacts: self.reacts,
+            marks: self.marks,
         };
         let kept = path
             .parent()
@@ -466,6 +518,7 @@ impl World {
         self.rev = saved.rev;
         self.answered = saved.answered;
         self.reacts = saved.reacts;
+        self.marks = saved.marks;
     }
 }
 
@@ -662,6 +715,8 @@ async fn handle(
                 policy_declarations()
             } else if capability == Capability::AgentHarness {
                 harness_declarations()
+            } else if let Capability::Snapshots { contents } = capability {
+                snapshots_declarations(contents)
             } else if hooks.bad_declarations {
                 bad_declarations()
             } else if hooks.plain_writes {
@@ -776,6 +831,20 @@ async fn handle(
             let mut answer = match (policy, p.command.as_str()) {
                 _ if capability == Capability::AgentHarness => {
                     json!({ "result": harness::answer(&p.command, &p.input)?, "events": [] })
+                }
+                _ if matches!(capability, Capability::Snapshots { .. }) => {
+                    let Capability::Snapshots { contents } = capability else {
+                        unreachable!()
+                    };
+                    let mut w = world.lock().await;
+                    let marked = w.marks;
+                    let result = w
+                        .snapshot_marks
+                        .answer(&p.command, &p.input, marked, contents)?;
+                    if p.command == "mark" {
+                        w.marks += 1;
+                    }
+                    json!({ "result": result, "events": [] })
                 }
                 (true, "react") if hooks.bogus_react => {
                     world.lock().await.reacts += 1;
