@@ -8,7 +8,8 @@
 //! rest keep their own checks until then.
 
 use oxplow_domain::contribution::{
-    Collision, ContributionId, ContributionKind, DeclaredAt, Descriptor, Owner, Registry, RunsOn,
+    extension_namespace, Collision, ContributionId, ContributionKind, DeclaredAt, Descriptor,
+    Owner, Registry, RunsOn,
 };
 
 use super::Extension;
@@ -33,6 +34,102 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
         )
     };
     let mut out = Vec::new();
+    // `file:line` as a vocabulary declaration records it.
+    let declared_at = |at: &str| {
+        let (file, line) = at.rsplit_once(':').unwrap_or((at, ""));
+        DeclaredAt {
+            file: file.to_string(),
+            line: line.parse().ok(),
+        }
+    };
+    for m in ext.models.iter().filter(|m| m.twin.is_none()) {
+        let view = oxplow_db::models::extension_view(&ext.name, &m.decl.name);
+        let mut d = new(ContributionKind::Model, &m.decl.name, RunsOn::Query);
+        d.contract_version = Some(m.decl.version);
+        d.global = Some(view.clone());
+        d.aliases = vec![view];
+        d.source.file = format!("{}/{}", ext.path.trim_end_matches('/'), m.file);
+        out.push(d);
+    }
+    // One descriptor per type, whatever versions of it are declared.
+    let mut typed: Vec<&str> = Vec::new();
+    for t in &ext.event_types.types {
+        if typed.contains(&t.event_type.as_str()) {
+            continue;
+        }
+        typed.push(&t.event_type);
+        let mut d = new(ContributionKind::EventType, &t.event_type, RunsOn::Declared);
+        d.contract_version = ext
+            .event_types
+            .types
+            .iter()
+            .filter(|o| o.event_type == t.event_type)
+            .map(|o| o.v)
+            .max();
+        d.global = Some(t.event_type.clone());
+        d.aliases = vec![t.event_type.clone()];
+        d.source = declared_at(&t.declared_at);
+        out.push(d);
+    }
+    for k in &ext.ref_kinds {
+        let mut d = new(ContributionKind::RefKind, &k.kind, RunsOn::Declared);
+        d.global = Some(k.kind.clone());
+        d.aliases = vec![k.kind.clone()];
+        d.source = declared_at(&k.declared_at);
+        out.push(d);
+    }
+    for l in &ext.lenses {
+        let mut d = new(ContributionKind::Lens, &l.slug, RunsOn::Mount);
+        d.needs = l.needs.clone();
+        d.aliases = vec![format!("lens:{}", l.id)];
+        d.source = DeclaredAt {
+            file: l.path.clone(),
+            line: None,
+        };
+        out.push(d);
+    }
+    for p in &ext.pages {
+        let mut d = new(ContributionKind::Page, &p.id, RunsOn::Mount);
+        d.aliases = vec![p.page_ref.clone()];
+        out.push(d);
+    }
+    for p in &ext.panels {
+        let local =
+            p.id.strip_prefix(&format!("{}/", ext.name))
+                .unwrap_or(&p.id);
+        let mut d = new(ContributionKind::Panel, local, RunsOn::Mount);
+        d.aliases = vec![p.id.clone()];
+        out.push(d);
+    }
+    for (n, slot) in ext.ui.slots.iter().enumerate() {
+        let mut d = new(
+            ContributionKind::Slot,
+            &format!("{}-{n}", slot.slot),
+            RunsOn::Mount,
+        );
+        d.aliases = vec![slot.slot.clone()];
+        out.push(d);
+    }
+    for dec in &ext.ui.decorators {
+        let n = dec.id.rsplit('/').next().unwrap_or_default();
+        let mut d = new(
+            ContributionKind::Decorator,
+            &format!("decorator-{n}"),
+            RunsOn::Mount,
+        );
+        d.aliases = vec![dec.id.clone()];
+        out.push(d);
+    }
+    for r in &ext.ui.replacements {
+        let mut d = new(ContributionKind::Replacement, &r.target, RunsOn::Mount);
+        d.aliases = vec![r.id.clone()];
+        out.push(d);
+    }
+    for c in &ext.custom_components {
+        let mut d = new(ContributionKind::CustomComponent, &c.id, RunsOn::Mount);
+        d.aliases = vec![format!("{}/{}", ext.name, c.id)];
+        out.push(d);
+    }
     for c in &ext.collectors {
         let trigger = match &c.trigger {
             oxplow_config::collectors::Trigger::Manual => RunsOn::Call,
@@ -152,13 +249,36 @@ pub fn check_ids(ext: &mut Extension) {
 /// both, and is taken out of it so nothing downstream sees two.
 pub fn check_catalog(exts: &mut [Extension]) -> Registry {
     let mut registry = Registry::default();
-    for ext in exts.iter_mut().filter(|e| e.enabled) {
-        let mut refused = Vec::new();
-        for d in &ext.contributions {
+    let mut refused: Vec<Vec<Collision>> = vec![Vec::new(); exts.len()];
+    // A ref kind in two extensions' namespaces is the more specific
+    // namespace's (`acme-pr`'s `acme_pr_` holds inside `acme`'s `acme_`),
+    // so those are registered most specific first; equal namespaces, and
+    // every other kind, go in catalog order.
+    let mut by_specificity: Vec<usize> = (0..exts.len()).filter(|&i| exts[i].enabled).collect();
+    by_specificity.sort_by_key(|&i| std::cmp::Reverse(extension_namespace(&exts[i].name).len()));
+    for i in by_specificity {
+        for d in exts[i]
+            .contributions
+            .iter()
+            .filter(|d| d.id.kind == ContributionKind::RefKind)
+        {
             if let Err(collision) = registry.add(d.clone()) {
-                refused.push(*collision);
+                refused[i].push(*collision);
             }
         }
+    }
+    for (i, ext) in exts.iter().enumerate().filter(|(_, e)| e.enabled) {
+        for d in ext
+            .contributions
+            .iter()
+            .filter(|d| d.id.kind != ContributionKind::RefKind)
+        {
+            if let Err(collision) = registry.add(d.clone()) {
+                refused[i].push(*collision);
+            }
+        }
+    }
+    for (ext, refused) in exts.iter_mut().zip(refused) {
         for c in refused {
             ext.errors.push(format!(
                 "{}/extension.yaml: {c}",
@@ -174,6 +294,11 @@ pub fn check_catalog(exts: &mut [Extension]) -> Registry {
 fn remove(ext: &mut Extension, c: &Collision) {
     let local = c.refused.local.as_str();
     match c.kind {
+        ContributionKind::Model => ext
+            .models
+            .retain(|x| x.decl.name != local && x.twin.as_ref().is_none_or(|t| t.of != local)),
+        ContributionKind::EventType => ext.event_types.types.retain(|x| x.event_type != local),
+        ContributionKind::RefKind => ext.ref_kinds.retain(|x| x.kind != local),
         ContributionKind::Collector => ext.collectors.retain(|x| x.id != local),
         ContributionKind::Measure => ext.measures.retain(|x| x.key.as_deref() != Some(local)),
         ContributionKind::Metric => ext.metrics.retain(|x| x.key.as_deref() != Some(local)),
@@ -196,6 +321,291 @@ fn remove(ext: &mut Extension, c: &Collision) {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
+    use oxplow_domain::contribution::{ContributionKind as K, Descriptor, RunsOn};
+
+    use super::*;
+    use crate::extensions::load_extensions;
+
+    fn write(root: &Path, rel: &str, body: &str) {
+        let p = root.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, body).unwrap();
+    }
+
+    const NUMBER_SCHEMA: &str =
+        r#"{"type":"object","required":["n"],"properties":{"n":{"type":"integer"}}}"#;
+
+    /// An extension with one of each data and UI kind (but a replacement,
+    /// which needs a provider: that one is built by hand below).
+    fn acme_manifest(name: &str) -> String {
+        let ns = name.replace('-', "_");
+        format!(
+            "manifest: 2\nname: {name}\nsharing: private\nintent: {{ purpose: p, origin: null, examples: [] }}\n\
+             models:\n  - name: prs\n    version: 3\n    description: Pull requests.\n    columns:\n      - {{ name: ref, type: TEXT, doc: The ref. }}\n      - {{ name: title, type: TEXT, doc: Its title. }}\n\
+             event_types:\n  types:\n    - {{ type: {ns}.merged, v: 1, schema: merged.json, summary: Merged. }}\n\
+             pages:\n  - {{ id: pr, title: Pull request, category: Work, lens: open }}\n\
+             panels:\n  - {{ id: inbox, title: Inbox, scope: project, body: open }}\n\
+             ref_kinds:\n  - {{ kind: {ns}_pr, label: Pull request, id: '^\\\\d+$', resolve: prs, page: pr, icon: git-pull-request }}\n\
+             custom_components:\n  - {{ id: chart }}\n\
+             ui:\n  slots:\n    - {{ slot: effort.review.details, lens: open }}\n    - {{ slot: vcs.commit.details, lens: open }}\n  decorators:\n    - {{ model: prs, kind: work_item, placement: ref-chip, label: title }}\n"
+        )
+    }
+
+    fn write_acme(root: &Path, name: &str) {
+        let dir = format!("oxplow/extensions/{name}");
+        write(root, &format!("{dir}/extension.yaml"), &acme_manifest(name));
+        write(
+            root,
+            &format!("{dir}/models/prs.sql"),
+            "SELECT 'work_item:oxplow:tsk1' AS ref, 'One' AS title",
+        );
+        write(
+            root,
+            &format!("{dir}/lenses/open.yaml"),
+            "title: Open\nquery: \"SELECT 1 AS n WHERE :change_id = :change_id\"\nparams:\n  - { name: change_id, label: Change, default: \"\" }\n",
+        );
+        write(root, &format!("{dir}/merged.json"), NUMBER_SCHEMA);
+        write(
+            root,
+            &format!("{dir}/components/chart/index.html"),
+            "<html></html>",
+        );
+    }
+
+    fn acme() -> crate::extensions::Extension {
+        let dir = tempfile::tempdir().unwrap();
+        write_acme(dir.path(), "acme-pr");
+        load_extensions(dir.path())
+            .into_iter()
+            .find(|e| e.name == "acme-pr")
+            .unwrap()
+    }
+
+    fn of(ext: &crate::extensions::Extension, kind: K) -> Vec<&Descriptor> {
+        ext.contributions
+            .iter()
+            .filter(|d| d.id.kind == kind)
+            .collect()
+    }
+
+    fn one(ext: &crate::extensions::Extension, kind: K) -> &Descriptor {
+        let all = of(ext, kind);
+        assert_eq!(all.len(), 1, "{kind:?}: {all:?} (errors {:?})", ext.errors);
+        all[0]
+    }
+
+    #[test]
+    fn the_fixture_extension_loads_clean() {
+        assert_eq!(acme().errors, Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_model_is_a_query_named_by_its_view() {
+        let ext = acme();
+        let d = one(&ext, K::Model);
+        assert_eq!(d.id.to_string(), "acme-pr/model/prs");
+        assert_eq!(d.trigger, RunsOn::Query);
+        assert_eq!(d.contract_version, Some(3));
+        assert_eq!(d.global.as_deref(), Some("v_acme_pr_prs"));
+        assert_eq!(d.aliases, vec!["v_acme_pr_prs"]);
+    }
+
+    #[test]
+    fn an_event_type_is_declared_and_named_by_its_type() {
+        let ext = acme();
+        let d = one(&ext, K::EventType);
+        assert_eq!(d.id.to_string(), "acme-pr/event_type/acme_pr.merged");
+        assert_eq!(d.trigger, RunsOn::Declared);
+        assert_eq!(d.contract_version, Some(1));
+        assert_eq!(d.global.as_deref(), Some("acme_pr.merged"));
+        assert_eq!(d.aliases, vec!["acme_pr.merged"]);
+        assert!(d.source.line.is_some(), "{:?}", d.source);
+    }
+
+    #[test]
+    fn a_ref_kind_is_declared_and_named_by_its_kind() {
+        let ext = acme();
+        let d = one(&ext, K::RefKind);
+        assert_eq!(d.id.to_string(), "acme-pr/ref_kind/acme_pr_pr");
+        assert_eq!(d.trigger, RunsOn::Declared);
+        assert_eq!(d.global.as_deref(), Some("acme_pr_pr"));
+        assert_eq!(d.aliases, vec!["acme_pr_pr"]);
+    }
+
+    #[test]
+    fn the_ui_kinds_are_mounted_and_claim_no_global_name() {
+        let ext = acme();
+        let lens = one(&ext, K::Lens);
+        assert_eq!(lens.id.to_string(), "acme-pr/lens/open");
+        assert_eq!(lens.aliases, vec!["lens:acme-pr/open"]);
+        let page = one(&ext, K::Page);
+        assert_eq!(page.id.to_string(), "acme-pr/page/pr");
+        assert_eq!(page.aliases, vec!["page:ext.acme-pr.pr"]);
+        let panel = one(&ext, K::Panel);
+        assert_eq!(panel.id.to_string(), "acme-pr/panel/inbox");
+        assert_eq!(panel.aliases, vec!["acme-pr/inbox"]);
+        let component = one(&ext, K::CustomComponent);
+        assert_eq!(component.id.to_string(), "acme-pr/custom_component/chart");
+        assert_eq!(component.aliases, vec!["acme-pr/chart"]);
+        for d in [lens, page, panel, component] {
+            assert_eq!(d.trigger, RunsOn::Mount, "{}", d.id);
+            assert_eq!(d.global, None, "{}", d.id);
+        }
+    }
+
+    #[test]
+    fn slot_mounts_are_numbered_and_share_their_slot() {
+        let ext = acme();
+        let slots = of(&ext, K::Slot);
+        let ids: Vec<String> = slots.iter().map(|d| d.id.to_string()).collect();
+        assert_eq!(
+            ids,
+            vec![
+                "acme-pr/slot/effort.review.details-0",
+                "acme-pr/slot/vcs.commit.details-1"
+            ]
+        );
+        assert_eq!(slots[0].aliases, vec!["effort.review.details"]);
+        for d in slots {
+            assert_eq!((d.trigger.clone(), d.global.clone()), (RunsOn::Mount, None));
+        }
+    }
+
+    #[test]
+    fn a_decorator_is_named_by_its_position() {
+        let ext = acme();
+        let d = one(&ext, K::Decorator);
+        assert_eq!(d.id.to_string(), "acme-pr/decorator/decorator-0");
+        assert_eq!(d.aliases, vec!["acme-pr/0"]);
+        assert_eq!((d.trigger.clone(), d.global.clone()), (RunsOn::Mount, None));
+    }
+
+    #[test]
+    fn a_replacement_is_mounted_by_its_target() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "oxplow/extensions/tracker/extension.yaml",
+            "manifest: 2\nname: tracker\nintent: { purpose: p, origin: null, examples: [] }\n",
+        );
+        let mut ext = load_extensions(dir.path())
+            .into_iter()
+            .find(|e| e.name == "tracker")
+            .unwrap();
+        ext.ui
+            .replacements
+            .push(crate::extensions::replacements::UiReplacement {
+                id: "tracker/work_item.board".into(),
+                extension: "tracker".into(),
+                target: "work_item.board".into(),
+                capability: "work_items".into(),
+                lens_id: "tracker/board".into(),
+                label: "board".into(),
+            });
+        let d = describe(&ext)
+            .into_iter()
+            .find(|d| d.id.kind == K::Replacement)
+            .expect("described");
+        assert_eq!(d.id.to_string(), "tracker/replacement/work_item.board");
+        assert_eq!(d.id.problem(), None);
+        assert_eq!(d.aliases, vec!["tracker/work_item.board"]);
+        assert_eq!((d.trigger.clone(), d.global.clone()), (RunsOn::Mount, None));
+        assert_eq!(
+            d.stability,
+            oxplow_domain::contribution::Stability::Experimental
+        );
+    }
+
+    /// Two extensions claiming one event type and one ref kind: the first
+    /// keeps each, one load error per kind names both, and the second's is
+    /// gone. (Valid extension names make distinct namespaces, so a second
+    /// extension claims the first's names only by declaring them outright;
+    /// here its manifest is the first's.)
+    #[test]
+    fn two_extensions_claiming_one_name_keep_the_first_and_report_each_kind() {
+        let first = acme();
+        let mut second = acme();
+        second.name = "acme-qr".into();
+        second.path = "oxplow/extensions/acme-qr".into();
+        // The model's view is named for its extension, so a second one's
+        // never matches; claim it outright.
+        second.contributions = describe(&second);
+        for d in &mut second.contributions {
+            if d.id.kind == K::Model {
+                d.global = Some("v_acme_pr_prs".into());
+            }
+        }
+        let mut exts = vec![first, second];
+        check_catalog(&mut exts);
+        let (first, second) = (&exts[0], &exts[1]);
+        assert_eq!(first.errors, Vec::<String>::new());
+        for (what, name) in [
+            ("model", "v_acme_pr_prs"),
+            ("event type", "acme_pr.merged"),
+            ("ref kind", "acme_pr_pr"),
+        ] {
+            let reports: Vec<&String> = second
+                .errors
+                .iter()
+                .filter(|e| e.contains(&format!("{what} `{name}`")))
+                .collect();
+            assert_eq!(reports.len(), 1, "{what}: {:?}", second.errors);
+            assert!(
+                reports[0].contains("`acme-pr`") && reports[0].contains("`acme-qr`"),
+                "{}",
+                reports[0]
+            );
+        }
+        assert!(second.models.is_empty() && second.ref_kinds.is_empty());
+        assert!(second.event_types.types.is_empty());
+        assert_eq!(first.models.len(), 1);
+        assert_eq!(first.ref_kinds.len(), 1);
+        assert_eq!(first.event_types.types.len(), 1);
+        for kind in [K::Model, K::EventType, K::RefKind] {
+            assert!(of(second, kind).is_empty(), "{kind:?}");
+            assert_eq!(of(first, kind).len(), 1, "{kind:?}");
+        }
+    }
+
+    /// A kind in the namespaces of two extensions (`acme`'s `acme_` holds
+    /// `acme-pr`'s `acme_pr_`) is the more specific one's, whichever loads
+    /// first.
+    #[test]
+    fn a_ref_kind_in_two_namespaces_is_the_more_specific_ones() {
+        let manifest = |name: &str| {
+            acme_manifest("acme-pr")
+                .replace("name: acme-pr", &format!("name: {name}"))
+                .replace("acme_pr_pr", "acme_pr_x")
+        };
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["acme", "acme-pr"] {
+            write_acme(dir.path(), name);
+            write(
+                dir.path(),
+                &format!("oxplow/extensions/{name}/extension.yaml"),
+                &manifest(name),
+            );
+        }
+        let exts = load_extensions(dir.path());
+        let acme = exts.iter().find(|e| e.name == "acme").unwrap();
+        let specific = exts.iter().find(|e| e.name == "acme-pr").unwrap();
+        assert!(acme.ref_kinds.is_empty(), "{:?}", acme.errors);
+        assert!(
+            acme.errors
+                .iter()
+                .any(|e| e.contains("ref kind `acme_pr_x`") && e.contains("`acme-pr`")),
+            "{:?}",
+            acme.errors
+        );
+        assert_eq!(specific.ref_kinds.len(), 1);
+        assert!(!specific.errors.iter().any(|e| e.contains("acme_pr_x")));
+    }
+}
+
+#[cfg(test)]
+mod catalog_tests {
     use super::*;
 
     /// The reference's "What it can declare" table, from the kinds' table:

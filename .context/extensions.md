@@ -48,29 +48,42 @@ error of the later extension naming both — and the contribution is taken
 out of that extension, so nothing downstream sees two (this is what keeps
 the first extension's metric when two declare one key). `version:` is
 required for `sharing: shared` (`manifest_v2::valid_version`); a bundled
-extension's version is oxplow's own. The kinds with adapters so far:
-collectors, effects, commands (global: the bus id), advisories, skills
-(global: the name), implementations (global: `<capability>/<id>`),
-providers (global: the id, which is also the default instance's id, its
-refs' segment and its commands' namespace), measures, metrics,
-dimensions. The id rules each kind used to restate are the domain's:
-`valid_local` (effects, advisories, pages, panels, skills, custom
-components), `valid_extension_name`, `extension_namespace` (the `-`→`_`
-rule, used by command namespaces, model and entity views, entity tables,
-event types and the SDK). Two rules stay their own on purpose:
-`refuse_shared_namespaces` refuses *both* extensions whose commands map to
-one namespace (a namespace is one extension's), and
-`capability::instance_id_problem` keeps provider ids to snake_case (the id
-is also a command namespace); the rest keep their own checks until they move **Discovery:**
-`capabilities::refresh` (boot and every catalog change) restates the
-`contribution` table (V47, `oxplow_db::contribution_store`) from every
-enabled extension's descriptors, read as `v_contribution`; the
-reference's "What it can declare" table is generated from
+extension's version is oxplow's own. Every kind is described: collectors
+(global: a fact collector's id), effects, commands (global: the bus id),
+advisories, skills (global: the name), implementations (global:
+`<capability>/<id>`), providers (global: the id, which is also the default
+instance's id, its refs' segment and its commands' namespace), measures,
+metrics and dimensions (global: the key), models (global: the
+`v_<ext>_<name>` view), event types (global: the type string; one
+descriptor per type, its highest `v` the contract version), ref kinds
+(global: the kind; registered first, most specific namespace first, so
+`acme-pr`'s `acme_pr_` wins inside `acme`'s `acme_`), lenses, pages,
+panels, slot mounts (`<slot>-<n>`), decorators (`decorator-<n>`),
+replacements and custom components (all mounted, no global name).
+
+The id rules each kind used to restate are the domain's: `valid_local`
+(effects, advisories, pages, panels, skills, custom components),
+`valid_extension_name`, `extension_namespace` (the `-`→`_` rule, used by
+command namespaces, model and entity views, entity tables, event types
+and the SDK). Rules that stay their own on purpose:
+`refuse_shared_namespaces` refuses *both* extensions whose commands map
+to one namespace (a namespace is one extension's);
+`capability::instance_id_problem` keeps provider ids to snake_case (the
+id is also a command namespace); a model can't take a core model's name
+or be declared twice in one extension; the event-type "two extensions
+make one namespace" check (unreachable with valid names, kept for an
+invalid-named folder, which still loads).
+
+**Discovery.** `capabilities::refresh` (boot and every catalog change)
+restates the `contribution` table (V47, `oxplow_db::contribution_store`)
+from every enabled extension's descriptors, read as `v_contribution`.
+The reference's "What it can declare" table is generated from
 `contribution::KINDS` (each kind's `summary`) between markers in
-`docs/reference/extensions.md`, and
-`descriptors::tests::the_reference_lists_every_kind` fails when they
-drift (`OXPLOW_BLESS=1` rewrites it). (the inventory and plan are the foundation
-roadmap's "Normalize contribution descriptors").
+`docs/reference/extensions.md`;
+`descriptors::catalog_tests::the_reference_lists_every_kind` fails when
+they drift (`OXPLOW_BLESS=1` rewrites it). The inventory and plan behind
+all this are the foundation roadmap's "Normalize contribution
+descriptors".
 
 > **Status: built (epic tsk275; host finished in tsk278).**
 > - **Current:**
@@ -1843,8 +1856,11 @@ one listing that adds model and vocabulary health):
 - a schema that differs from the one `event_type_contract` recorded at
   that `type@v` — a published shape is a contract, so a new shape is a
   new version with an upcast;
-- two extensions whose names make one namespace (`acme-pr`, `acme_pr`) —
-  neither registers.
+- two extensions whose names make one namespace (`acme-pr`, `acme_pr`)
+  and declare different types — neither registers. One *type* two
+  extensions both declare is settled earlier, at load, by the
+  descriptor registry: the first keeps it and the second's declaration is
+  a load error naming both.
 
 The same pass restates `event_type_contract` (read as `v_event_type`:
 type, v, extension, summary, `registered`, `latest`, schema). A removed
@@ -1990,8 +2006,10 @@ kind's namespace is a string prefix, so one may hold another's (`acme`'s
 `acme_` holds `acme-pr`'s `acme_pr_`): a kind in both is **the more
 specific namespace's** (tsk933) — `acme-pr` keeps `acme_pr_x`, and
 `acme`'s declaration of it is an error naming whose namespace it is.
-Otherwise a kind two extensions both declare is an error on each, and
-neither registers it. A `wikilink:` that is one of the extension's own
+That, and any other kind two extensions both declare (the first keeps
+it), is settled at load by the descriptor registry
+(`descriptors::check_catalog`, which registers ref kinds most specific
+namespace first); the second's declaration is a load error naming both. A `wikilink:` that is one of the extension's own
 kinds is refused at load and costs only the sugar (both kinds load), so no name is both a
 kind and a sugar, and both resolvers read a sugar before a kind's own
 name (`canonical_wikilink`, `extensionWikilinkRef`). A **`wikilink:` prefix** another extension also uses (as

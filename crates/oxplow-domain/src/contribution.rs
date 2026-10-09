@@ -291,7 +291,7 @@ pub const KINDS: &[KindSpec] = &[
         "Slot mount",
         "a lens mounted into a core page",
         Stable,
-        false,
+        true,
         true,
     ),
     spec(
@@ -309,7 +309,7 @@ pub const KINDS: &[KindSpec] = &[
         "Replacement",
         "a lens in place of a core component (private extensions only)",
         Experimental,
-        false,
+        true,
         false,
     ),
     spec(

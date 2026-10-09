@@ -1702,16 +1702,9 @@ fn pass(
                 );
                 continue;
             }
-            if let Some(other) = declared.insert(view.clone(), e.extension.clone()) {
-                push(
-                    &mut errors,
-                    &e.extension,
-                    format!(
-                        "{}: `{view}` is also `{other}`'s model; rename one",
-                        src.file
-                    ),
-                );
-            }
+            // Two extensions' one view was settled at load
+            // (`extensions::descriptors::check_catalog`).
+            declared.insert(view.clone(), e.extension.clone());
         }
         for src in &e.sources {
             known
