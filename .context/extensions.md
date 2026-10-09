@@ -2492,6 +2492,11 @@ implementations:
   manifest's. A built-in whose items' refs carry a provider id
   (`BuiltIn.provider`: `oxplow:tasks` is `oxplow`) is declared under that
   id and no other.
+- **A process implements a capability through `providers:`**, not
+  here: a capability whose spec carries a provider contract (the work
+  list, the effort policy) may be an external provider's instance, chosen
+  by `activeProviders` like a built-in ([providers.md](./providers.md)
+  "What a provider may implement").
 - **An `ai_provider` may be a script** instead: an `entry` that isn't
   `oxplow:<name>` names a `.star` file of the extension, with `config: {
   baseUrl?, ops? }` (`implementations::script_decl`, `Source::Script`;

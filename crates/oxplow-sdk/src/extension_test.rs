@@ -1384,6 +1384,20 @@ async fn suite(
                 )
                 .await
             }
+            providers::effort_policy::EffortPolicyHost::CAPABILITY => {
+                // The instance under test is the project's effort policy.
+                svc.config
+                    .write()
+                    .map_err(|e| e.to_string())?
+                    .active_providers
+                    .insert(spec.capability.clone(), spec.id.clone());
+                let config = oxplow_app::config_service::read_config(&svc.config);
+                svc.capabilities
+                    .publish(&config, &svc.db)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                oxplow_app::effort_policy_conformance::suite(&svc, &spec.id).await
+            }
             other => return Err(format!("no conformance suite for `{other}`")),
         };
         svc.providers.stop(&spec.approval_name(&ext.name)).await;

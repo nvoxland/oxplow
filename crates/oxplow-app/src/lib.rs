@@ -59,6 +59,7 @@ pub mod effort_landing;
 pub mod effort_lifecycle;
 pub mod effort_observation;
 pub mod effort_policy;
+pub mod effort_policy_conformance;
 pub mod effort_reactors;
 pub mod effort_service;
 pub mod entity_metrics;

@@ -1151,8 +1151,12 @@ and the throwaway host the conformance suite runs in
 - **The capability suite** runs through a throwaway host: a temp
   project (`GitProvider::init_repository`: an empty root commit) with a
   copy of the extension, `Services::in_memory` over it, the provider
-  approved there and enabled with the fixture config, then
-  `work_items_conformance::suite` against its `ExternalWorkItems`.
+  approved there and enabled with the fixture config, then its
+  capability's suite: `work_items_conformance::suite` against its
+  `ExternalWorkItems`, or — the instance made the project's effort policy —
+  `effort_policy_conformance::suite` (an agent starting an item on its
+  thread opens an effort linked to it, finishing it closes it, each run as
+  `effect:effort_policy:<id>`), which the built-in passes too.
 
 The red test (`extension_cli.rs`,
 `extension_test_blesses_a_provider_then_a_changed_transcript_fails`)
