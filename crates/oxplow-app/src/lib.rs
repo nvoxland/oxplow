@@ -1340,6 +1340,34 @@ impl Services {
         })) {
             commands.add_op(command).expect("core ops register");
         }
+        // Where pages are kept: the wiki under each id an extension
+        // declares it, none (a sink) always, a provider's instance once it
+        // runs; the active one is the project's choice.
+        let knowledge = {
+            let (config, capabilities) = (config_arc.clone(), capabilities.clone());
+            Arc::new(oxplow_domain::knowledge::KnowledgeRegistry::new(Arc::new(
+                move || {
+                    capabilities
+                        .active(&config_service::read_config(&config), knowledge::CAPABILITY)
+                },
+            )))
+        };
+        let wiki = Arc::new(knowledge::WikiFollow::default());
+        knowledge::register_built_ins(&knowledge, &declared, &layout.project_dir, &wiki);
+        event_pump.register_async(Arc::new(knowledge::KnowledgeSwitch {
+            stores: knowledge.clone(),
+            wiki: wiki.clone(),
+            db: db.clone(),
+            vocabulary: event_log_store.vocabulary().clone(),
+            project_dir: layout.project_dir.clone(),
+            pages: wiki_page_store.clone(),
+        }));
+        event_pump.register_async(Arc::new(providers::knowledge::KnowledgeRecords {
+            stores: knowledge.clone(),
+            db: db.clone(),
+            vocabulary: event_log_store.vocabulary().clone(),
+            project_dir: layout.project_dir.clone(),
+        }));
         let providers = providers::ProviderRegistry::new(
             providers::HostDeps {
                 project_dir: layout.project_dir.clone(),
@@ -1367,6 +1395,7 @@ impl Services {
                     effort_policies.clone(),
                 )),
                 Arc::new(providers::agent_harness::HarnessHost(harnesses.clone())),
+                Arc::new(providers::knowledge::KnowledgeHost(knowledge.clone())),
                 Arc::new(providers::snapshots::SnapshotsHost {
                     registry: snapshots.clone(),
                     ledger: providers::snapshots::Ledger {
@@ -1448,28 +1477,6 @@ impl Services {
         }
         let thread_answer_store = oxplow_db::SqliteThreadAnswerStore::new(db.clone());
         let panel_layout_store = oxplow_db::SqlitePanelLayoutStore::new(db.clone());
-        // Where pages are kept: the wiki under each id an extension
-        // declares it, none (a sink) always, a provider's instance once it
-        // runs; the active one is the project's choice.
-        let knowledge = {
-            let (config, capabilities) = (config_arc.clone(), capabilities.clone());
-            Arc::new(oxplow_domain::knowledge::KnowledgeRegistry::new(Arc::new(
-                move || {
-                    capabilities
-                        .active(&config_service::read_config(&config), knowledge::CAPABILITY)
-                },
-            )))
-        };
-        let wiki = Arc::new(knowledge::WikiFollow::default());
-        knowledge::register_built_ins(&knowledge, &declared, &layout.project_dir, &wiki);
-        event_pump.register_async(Arc::new(knowledge::KnowledgeSwitch {
-            stores: knowledge.clone(),
-            wiki: wiki.clone(),
-            db: db.clone(),
-            vocabulary: event_log_store.vocabulary().clone(),
-            project_dir: layout.project_dir.clone(),
-            pages: wiki_page_store.clone(),
-        }));
         for command in knowledge::ops(knowledge::KnowledgeTarget {
             project_dir: layout.project_dir.clone(),
             vcs: vcs.clone(),

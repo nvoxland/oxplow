@@ -63,6 +63,10 @@ pub struct PageCall<'a> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Kept {
     pub body: String,
+    /// The refs it states for the page, in oxplow's grammar (`file:…`,
+    /// `wiki:…`): a provider whose body isn't oxplow's markdown says what
+    /// it links. `None`: core parses the body (the wiki's).
+    pub refs: Option<Vec<String>>,
     pub events: Vec<Envelope>,
 }
 

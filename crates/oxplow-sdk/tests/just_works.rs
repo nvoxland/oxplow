@@ -604,6 +604,63 @@ async fn extension_test_runs_the_harness_suite_over_a_harness_provider() {
     );
 }
 
+/// `extension test` runs the knowledge suite over a knowledge provider —
+/// here the fake in knowledge mode — made the throwaway project's knowledge
+/// store; `ran` shows it.
+#[tokio::test(flavor = "multi_thread")]
+async fn extension_test_runs_the_knowledge_suite_over_a_knowledge_provider() {
+    let dir = project().await;
+    let ext = dir.path().join("oxplow/extensions/shelf");
+    std::fs::create_dir_all(ext.join("bin")).unwrap();
+    std::fs::create_dir_all(ext.join("fixtures")).unwrap();
+    let write = "{ command: write_page, input: { slug: example, body: '# Example', verified_refs: [], removed_refs: [] } }";
+    std::fs::write(
+        ext.join("extension.yaml"),
+        format!("manifest: 2\nname: shelf\nsharing: private\nintent:\n  purpose: Knowledge over the protocol.\n  examples:\n    - {{ name: basic, input: {write}, expect: the page }}\nproviders:\n  - id: shelf\n    capability: knowledge\n    entry: bin/provider\n    declarations: provider.json\n"),
+    )
+    .unwrap();
+    std::fs::write(
+        ext.join("fixtures/basic.yaml"),
+        format!("input: {write}\nexpect: {{ page: 'wiki:example' }}\n"),
+    )
+    .unwrap();
+    std::fs::write(
+        ext.join("fixtures/provider-shelf.yaml"),
+        "config: { team: core }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        ext.join("provider.json"),
+        serde_json::to_string_pretty(&oxplow_provider_fake::knowledge_declarations()).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        ext.join("bin/provider"),
+        format!(
+            "#!/bin/sh\nOXPLOW_FAKE_CAPABILITY=knowledge exec '{}' \"$@\"\n",
+            fake_bin().display()
+        ),
+    )
+    .unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(
+            ext.join("bin/provider"),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+    }
+    let blessed = test_extension(dir.path(), "shelf", true).await.unwrap();
+    assert_eq!(blessed.errors, Vec::<String>::new());
+    let report = test_extension(dir.path(), "shelf", false).await.unwrap();
+    assert_eq!(report.errors, Vec::<String>::new());
+    assert!(
+        report.ran.iter().any(|r| r == "knowledge suite"),
+        "{:?}",
+        report.ran
+    );
+}
+
 /// `extension test` runs the snapshot suite over a snapshots provider —
 /// here the fake in snapshots mode, keeping contents — made the throwaway
 /// project's snapshots; `ran` shows it.

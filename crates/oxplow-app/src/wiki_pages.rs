@@ -81,6 +81,26 @@ pub fn parse_wiki_file_ref(interior: &str) -> Option<WikiFileRef> {
 }
 
 /// Parse `[[…]]` wikilinks + inline file paths out of `body`.
+/// The refs a store states (a provider's record), as a body's would parse.
+pub fn stated_refs(refs: &[String]) -> ParsedRefs {
+    let of = |kind: &str| -> Vec<String> {
+        let mut out: Vec<String> = refs
+            .iter()
+            .filter_map(|r| r.strip_prefix(kind)?.strip_prefix(':'))
+            .map(str::to_string)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        out.retain(|s| !s.is_empty());
+        out
+    };
+    ParsedRefs {
+        file_refs: of("file"),
+        dir_refs: of("dir"),
+        related_notes: of("wiki"),
+    }
+}
+
 pub fn parse_refs(body: &str) -> ParsedRefs {
     if body.is_empty() {
         return ParsedRefs::default();
@@ -202,6 +222,7 @@ pub fn sync_page_tx(
             verified: &[],
             removed: &[],
             updated_at: file_mtime(&file_path).unwrap_or_else(Timestamp::now),
+            stated: None,
             anchors: oxplow_domain::Anchors::default(),
         },
     )?;

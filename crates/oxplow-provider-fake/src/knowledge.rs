@@ -83,18 +83,14 @@ pub fn declarations() -> InitializeResult {
         event_types: vec![EventTypeDecl {
             event_type: RECORDED.into(),
             v: 1,
-            schema: json!({
-                "type": "object", "required": ["page"], "additionalProperties": false,
-                "properties": { "page": {
-                    "type": "object",
-                    "required": ["ref", "title", "body", "refs", "updated_at"],
-                    "additionalProperties": false,
-                    "properties": {
-                        "ref": string, "title": string, "body": string, "refs": refs,
-                        "updated_at": string, "deleted": { "type": "boolean" },
-                    },
-                } },
-            }),
+            // Core's schema, as a provider must declare it.
+            schema: oxplow_domain::vocabulary::Vocabulary::core()
+                .schema(
+                    <oxplow_domain::events::schema::KnowledgePageRecorded as oxplow_domain::events::schema::EventType>::TYPE,
+                    1,
+                )
+                .cloned()
+                .unwrap_or(Value::Null),
         }],
         collectors: vec![CollectorDecl {
             name: "knowledge_pages".into(),

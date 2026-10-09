@@ -788,14 +788,17 @@ async fn handle(
         method::DISCOVER => {
             let p: DiscoverParams = parse(params)?;
             require_handle(&p.handle)?;
-            // A policy or a harness reads nothing.
-            if world.lock().await.capability != Capability::WorkItems {
-                return Ok(json!({ "entities": [] }));
-            }
+            // A work list reads its items, a knowledge store its pages;
+            // a policy or a harness reads nothing.
+            let (name, description) = match world.lock().await.capability {
+                Capability::WorkItems => ("work_item", "A work item as the fake has it."),
+                Capability::Knowledge => ("knowledge_page", "A page as the fake keeps it."),
+                _ => return Ok(json!({ "entities": [] })),
+            };
             Ok(serde_json::to_value(DiscoverResult {
                 entities: vec![EntityDecl {
-                    name: "work_item".into(),
-                    description: "A work item as the fake has it.".into(),
+                    name: name.into(),
+                    description: description.into(),
                     schema: json!({ "type": "object" }),
                 }],
             })

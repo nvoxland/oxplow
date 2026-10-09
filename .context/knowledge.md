@@ -169,7 +169,14 @@ draft)` / `link(call, slug, target)` → `Option<Kept { body, events }>`
 snapshots: the record, links and **freshness are core's**
 (`knowledge::freshness(db, page)` over `v_knowledge_ref`, the one
 definition of staleness), the same for every store. `WikiKnowledge` is
-the wiki: it keeps `.oxplow/wiki/<slug>.md`.
+the wiki: it keeps `.oxplow/wiki/<slug>.md`. A provider's store is
+`providers::knowledge::ExternalKnowledge` (`.context/providers.md` "A
+knowledge provider"): its write verbs answer the page's
+`knowledge.page.recorded@1`, whose `refs` (oxplow's grammar) core links
+and pins from (`PageWrite.stated`, `page_ref_projections::stated_edges`)
+instead of parsing a body written in the store's own grammar; its
+collector's records of pages edited outside oxplow are restated by
+`providers::knowledge::KnowledgeRecords` while it is the active store.
 
 **The record is the active store's pages.** Page refs are bare
 (`wiki:<slug>`, `.context/refs.md`), so one record can't hold two

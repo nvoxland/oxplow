@@ -85,11 +85,7 @@ fn now() -> String {
 impl Instance {
     /// Run `collector`'s `read` from its last checkpoint, committing each
     /// checkpoint with the records it covers; record the outcome.
-    pub async fn read(
-        &self,
-        actor: &Actor,
-        collector: &str,
-    ) -> Result<CollectorRead, CommandError> {
+    pub async fn read(&self, collector: &str) -> Result<CollectorRead, CommandError> {
         let decl = self
             .declared
             .collectors
@@ -136,7 +132,7 @@ impl Instance {
             let outcome = match self.connection().await {
                 Ok((peer, handle)) => {
                     called = Instant::now();
-                    let mut outcome = self.stream(actor, &peer, handle, &decl, resume).await;
+                    let mut outcome = self.stream(&peer, handle, &decl, resume).await;
                     // Ended under it to renew the sign-in for another
                     // caller: as refused, so it tries again on the renewal.
                     if let Err(failure) = &mut outcome {
@@ -207,7 +203,6 @@ impl Instance {
     /// The read itself: how many records it delivered.
     async fn stream(
         &self,
-        actor: &Actor,
         peer: &oxplow_provider_protocol::Peer,
         handle: oxplow_provider_protocol::model::Handle,
         decl: &CollectorDecl,
@@ -245,7 +240,7 @@ impl Instance {
                 break;
             };
             match method.as_str() {
-                notify::RECORD => match self.record(actor, decl, params) {
+                notify::RECORD => match self.record(decl, params) {
                     Ok(_) if batch.len() >= self.deps.max_uncheckpointed => {
                         return Err(failed(format!(
                             "its read streamed more than {} records without a `$/state`; a \
@@ -337,12 +332,7 @@ impl Instance {
     /// the collector's entity — the one its capability's contract streams —
     /// that is one of the instance's own (its `ref`), logged as the
     /// contract's event with the row under its key and its ref the subject.
-    fn record(
-        &self,
-        actor: &Actor,
-        decl: &CollectorDecl,
-        params: Value,
-    ) -> Result<Envelope, String> {
+    fn record(&self, decl: &CollectorDecl, params: Value) -> Result<Envelope, String> {
         let record: notify::Record =
             serde_json::from_value(params).map_err(|e| format!("a `$/record`: {e}"))?;
         if record.entity != decl.entity {
@@ -380,7 +370,10 @@ impl Instance {
                     decl.name, contract.entity
                 )
             })?;
-        Envelope::new(event_type, v, actor.source(), payload)
+        // Read from the instance: it is the record's source, so a
+        // consumer can tell whose records it is (a knowledge store's
+        // projection follows only the active one's).
+        Envelope::new(event_type, v, format!("provider:{}", self.id), payload)
             .map(|e| e.with_subject([own]))
             .map_err(|e| e.to_string())
     }
@@ -598,7 +591,7 @@ pub fn sync_op(registry: &Arc<ProviderRegistry>) -> crate::commands::ops::Op {
         "sync",
         serde_json::to_value(schemars::schema_for!(SyncInput)).expect("schema serializes"),
         false,
-        Handler::External(Arc::new(move |Invocation { actor, .. }, input| {
+        Handler::External(Arc::new(move |_: Invocation, input| {
             let registry = registry.clone();
             Box::pin(async move {
                 let SyncInput {
@@ -630,7 +623,7 @@ pub fn sync_op(registry: &Arc<ProviderRegistry>) -> crate::commands::ops::Op {
                 };
                 let mut reads = Vec::new();
                 for c in collectors {
-                    reads.push(running.read(&actor, &c).await?);
+                    reads.push(running.read(&c).await?);
                 }
                 Ok(HandlerOutput {
                     result: json!({ "reads": reads }),

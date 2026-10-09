@@ -123,6 +123,9 @@ pub struct PageWrite<'a> {
     pub verified: &'a [String],
     pub removed: &'a [String],
     pub updated_at: Timestamp,
+    /// The refs its store states (a provider's record); `None`: parsed
+    /// from the body (the wiki's grammar).
+    pub stated: Option<&'a [String]>,
     /// Who wrote it, on the event (a command's actor's thread and
     /// stream; none for the watcher).
     pub anchors: Anchors,
@@ -140,11 +143,10 @@ pub struct Written {
 /// ref still cited, a verified one neither cited nor under a cited
 /// directory.
 pub fn refs_borne_out(
-    body: &str,
+    refs: &crate::wiki_pages::ParsedRefs,
     verified: &[String],
     removed: &[String],
 ) -> Result<(), CommandError> {
-    let refs = parse_refs(body);
     let still_cited: Vec<&str> = removed
         .iter()
         .filter(|p| refs.file_refs.contains(p))
@@ -194,10 +196,14 @@ pub fn write_page_tx(
         verified,
         removed,
         updated_at,
+        stated,
         ref anchors,
     } = *write;
-    let refs = parse_refs(body);
-    refs_borne_out(body, verified, removed).map_err(|e| DomainError::Invalid(e.to_string()))?;
+    let refs = match stated {
+        Some(stated) => crate::wiki_pages::stated_refs(stated),
+        None => parse_refs(body),
+    };
+    refs_borne_out(&refs, verified, removed).map_err(|e| DomainError::Invalid(e.to_string()))?;
     let created_at = oxplow_db::wiki_page_store::get_tx(conn, slug)?
         .map(|(page, _)| page.created_at)
         .unwrap_or(updated_at);
@@ -216,7 +222,10 @@ pub fn write_page_tx(
     oxplow_db::wiki_page_store::upsert_tx(conn, &page, body, &body_hash(body))?;
 
     let pin = pin_tx(conn)?;
-    let mut edges = wiki_edges(&ev.vocabulary.kinds, slug, body);
+    let mut edges = match stated {
+        Some(stated) => oxplow_db::page_ref_projections::stated_edges(slug, stated),
+        None => wiki_edges(&ev.vocabulary.kinds, slug, body),
+    };
     if let Some(id) = pin.snapshot_id {
         stamp_file_versions(
             &mut edges,
@@ -375,6 +384,7 @@ impl KnowledgeProvider for WikiKnowledge {
         write_file(&page_path(&self.project_dir, &draft.slug), &draft.body)?;
         Ok(Some(Kept {
             body: draft.body.clone(),
+            refs: None,
             events: Vec::new(),
         }))
     }
@@ -406,6 +416,7 @@ impl KnowledgeProvider for WikiKnowledge {
         write_file(&path, &body)?;
         Ok(Some(Kept {
             body,
+            refs: None,
             events: Vec::new(),
         }))
     }
@@ -537,6 +548,15 @@ impl crate::event_pump::AsyncEventConsumer for KnowledgeSwitch {
         if event.envelope.payload["capability"] != CAPABILITY {
             return Ok(());
         }
+        self.follow_active().await
+    }
+}
+
+impl KnowledgeSwitch {
+    /// Make the record the active store's pages: empty it, then, when the
+    /// wiki is the store, restate it from its files. A provider's pages
+    /// come in on its collector's sync.
+    pub async fn follow_active(&self) -> Result<(), DomainError> {
         clear_record(&self.db).await?;
         if self.wiki.follow(&self.stores.active_id()) {
             crate::wiki_pages::scan_and_sync_all(
@@ -883,6 +903,7 @@ async fn record(
     );
     let (source, anchors) = (actor.source(), actor.anchors());
     let body = strip_body_version_literals(&kept.body);
+    let stated = kept.refs.clone();
     let (written, env) = target
         .db
         .transaction(move |tx| {
@@ -902,6 +923,7 @@ async fn record(
                     verified: &verified,
                     removed: &removed,
                     updated_at: Timestamp::now(),
+                    stated: stated.as_deref(),
                     anchors: anchors.clone(),
                 },
             )
@@ -962,7 +984,7 @@ pub fn ops(target: KnowledgeTarget) -> Vec<Op> {
                 let (verified, removed) = (input.verified_refs.clone(), input.removed_refs.clone());
                 check(&t, move |conn, vocabulary| {
                     links_resolve(&t2, conn, &vocabulary.kinds, &slug, &body)?;
-                    refs_borne_out(&body, &verified, &removed)
+                    refs_borne_out(&parse_refs(&body), &verified, &removed)
                 })
                 .await?;
             }
@@ -1106,6 +1128,7 @@ pub fn ops(target: KnowledgeTarget) -> Vec<Op> {
                         verified: &[],
                         removed: &[],
                         updated_at: Timestamp::now(),
+                        stated: None,
                         anchors: ctx.actor.anchors(),
                     },
                 )
@@ -1810,6 +1833,7 @@ mod tests {
             ));
             Ok(Some(Kept {
                 body: draft.body.clone(),
+                refs: None,
                 events: Vec::new(),
             }))
         }
@@ -1830,6 +1854,7 @@ mod tests {
             self.0.lock().unwrap().push(format!("link {slug} {target}"));
             Ok(Some(Kept {
                 body: format!("# Kept\n\n- [[{target}]]\n"),
+                refs: None,
                 events: Vec::new(),
             }))
         }

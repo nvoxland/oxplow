@@ -298,6 +298,28 @@ pub fn wiki_edges(kinds: &KindRegistry, slug: &str, body: &str) -> Vec<PageRefEd
     out
 }
 
+/// Edges of a wiki page whose store states its refs (a provider's record:
+/// `file:src/lib.rs`, `wiki:other`, `work_item:oxplow:tsk1`, `dir:…`,
+/// `finding:…`, `commit:…`) rather than a body core parses. A ref of
+/// another kind isn't an edge a page has.
+pub fn stated_edges(slug: &str, refs: &[String]) -> Vec<PageRefEdge> {
+    refs.iter()
+        .filter_map(|r| {
+            let (kind, id) = r.split_once(':')?;
+            let ref_type = match kind {
+                KIND_FILE => RT_WIKI_FILE,
+                KIND_DIR => RT_WIKI_DIR,
+                KIND_WIKI => RT_WIKILINK,
+                KIND_WORK_ITEM => RT_BODY_WORK_ITEM,
+                KIND_FINDING => RT_BODY_FINDING,
+                KIND_COMMIT => RT_BODY_COMMIT,
+                _ => return None,
+            };
+            (!id.is_empty()).then(|| PageRefEdge::new(KIND_WIKI, slug, kind, id, ref_type))
+        })
+        .collect()
+}
+
 /// Edges contributed by a task-note body. Single-owner source.
 pub fn note_edges(
     kinds: &KindRegistry,
