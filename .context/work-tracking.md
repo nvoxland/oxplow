@@ -66,7 +66,14 @@ reacted to the turn's `thread.checkpoint`; a file two threads changed at
 once and neither claimed is observed by both, and changes between turns
 (the person's own) belong to no effort. Runs go to the effort of the tool
 call that caused them (`metric_capture.effort_id`). Nothing is declared or
-reconciled at close. A commit is linked to the efforts whose changes it
+reconciled at close. A claimed file, a tool call and a reasoning claim
+carry the agent session that made them (`agent_session_id`; a claim lands
+on that session's own open turn), so two sessions on one thread are told
+apart past the door. An observed file
+carries the session when exactly one session had a turn running in the
+turn's window, and is `shared` (no session) when more than one did or a
+second session observes the same path; it is never assigned by overlap
+luck, and a claimed row is never touched. A commit is linked to the efforts whose changes it
 holds, by content.
 
 **A policy decides** when to open, close and link, reacting to core's

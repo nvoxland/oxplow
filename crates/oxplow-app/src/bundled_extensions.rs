@@ -758,6 +758,7 @@ mod tests {
                             statement: statement.into(),
                             kind: "tests_pass".into(),
                             evidence_ref: evidence.map(str::to_string),
+                            agent_session_id: None,
                         },
                     )
                 })
@@ -1451,6 +1452,7 @@ mod tests {
                         statement: "no behavior change".into(),
                         kind: "no_behavior_change".into(),
                         evidence_ref: None,
+                        agent_session_id: None,
                     },
                 )
             })
@@ -1888,6 +1890,7 @@ mod tests {
                         ),
                         kind: "tests_pass".into(),
                         evidence_ref: None,
+                        agent_session_id: None,
                     },
                 )
             })
@@ -2022,6 +2025,7 @@ mod tests {
                                 .into(),
                             kind: "tests_pass".into(),
                             evidence_ref: None,
+                            agent_session_id: None,
                         },
                     )
                 })

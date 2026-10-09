@@ -37,6 +37,8 @@ pub struct NewClaim {
     pub kind: String,
     /// What backs it (`run:<id>`, a test name, a file); `None` = unbacked.
     pub evidence_ref: Option<String>,
+    /// The agent session making it: it lands on that session's open turn.
+    pub agent_session_id: Option<i64>,
 }
 
 #[derive(Clone)]
@@ -148,10 +150,11 @@ pub fn record_claim_tx(conn: &rusqlite::Connection, c: &NewClaim) -> Result<i64,
         return Err(DomainError::Invalid("a claim needs a statement".into()));
     }
     conn.execute(
-        "INSERT INTO claim (thread_id, work_item, effort_id, statement, kind, evidence_ref, created_at, turn_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, (SELECT id FROM agent_turn
-            WHERE thread_id = ?1 AND ended_at IS NULL ORDER BY started_at DESC, id DESC LIMIT 1))",
-        rusqlite::params![c.thread_id, c.work_item, c.effort_id, c.statement, c.kind, c.evidence_ref, now_string()],
+        "INSERT INTO claim (thread_id, work_item, effort_id, statement, kind, evidence_ref, created_at, agent_session_id, turn_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, (SELECT id FROM agent_turn
+            WHERE thread_id = ?1 AND ended_at IS NULL AND agent_session_id IS ?8
+            ORDER BY started_at DESC, id DESC LIMIT 1))",
+        rusqlite::params![c.thread_id, c.work_item, c.effort_id, c.statement, c.kind, c.evidence_ref, now_string(), c.agent_session_id],
     )
     .map_err(map_sql_err)?;
     Ok(conn.last_insert_rowid())
@@ -299,12 +302,53 @@ mod tests {
                 statement: "s".into(),
                 kind: "vibes".into(),
                 evidence_ref: None,
+                agent_session_id: None,
             })
             .await
             .unwrap_err();
         assert!(
             matches!(err, DomainError::Invalid(ref m) if m.contains("kind")),
             "{err:?}"
+        );
+    }
+
+    /// Two sessions on one thread, each with an open turn: a claim lands on
+    /// the acting session's turn and carries the session, not the thread's
+    /// newest turn.
+    #[tokio::test]
+    async fn a_claim_lands_on_the_acting_sessions_turn() {
+        let (db, store, sl) = seeded().await;
+        db.call(|c| {
+            c.execute_batch(
+                "INSERT INTO agent_session (id, thread_id, kind, harness, opened_at, updated_at) VALUES (1, 1, 'terminal', 'claude', '2026-01-03T00:00:00Z', '2026-01-03T00:00:00Z'), (2, 1, 'terminal', 'claude', '2026-01-03T00:00:00Z', '2026-01-03T00:00:00Z');
+                 INSERT INTO agent_turn (id, thread_id, agent_session_id, prompt, started_at) VALUES (10, 1, 1, 'a', '2026-01-03T00:00:01Z'), (11, 1, 2, 'b', '2026-01-03T00:00:02Z');",
+            )
+        })
+        .await
+        .unwrap();
+        let claim = |session| NewClaim {
+            thread_id: 1,
+            work_item: None,
+            effort_id: Some(2),
+            statement: "s".into(),
+            kind: "other".into(),
+            evidence_ref: None,
+            agent_session_id: Some(session),
+        };
+        store.record_claim(claim(1)).await.unwrap();
+        store.record_claim(claim(2)).await.unwrap();
+        let rows = sl
+            .query_sql(
+                "SELECT agent_session_id, turn_id FROM v_claim ORDER BY id",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap()
+            .rows;
+        assert_eq!(
+            serde_json::to_value(rows).unwrap(),
+            json!([[1, 10], [2, 11]])
         );
     }
 
@@ -315,7 +359,7 @@ mod tests {
         let (db, store, sl) = seeded().await;
         db.call(|c| {
             c.execute_batch(
-                "INSERT INTO effort (id, work_item, thread_id, started_at, ended_at) VALUES (3, 'work_item:oxplow:tsk1', 1, '2026-01-03', '2026-01-03');
+                "INSERT INTO effort (id, work_item, thread_id, started_at, ended_at) VALUES (3, 'work_item:oxplow:tsk1', 1, '2026-01-03T00:00:00Z', '2026-01-03T00:00:00Z');
                  INSERT INTO effort (id, work_item, thread_id, started_at, ended_at) VALUES (4, 'work_item:oxplow:tsk1', 1, '2026-01-04', '2026-01-04');",
             )
         })
@@ -328,6 +372,7 @@ mod tests {
             statement: format!("{kind} on effort {effort}"),
             kind: kind.into(),
             evidence_ref: evidence.map(str::to_string),
+            agent_session_id: None,
         };
         // Effort 1: passed, then a later failure → not verified.
         test_run(&db, Some(1), 0, 5, "2026-01-01T00:00:00Z").await;

@@ -2474,3 +2474,24 @@ async fn only_a_person_decides_a_proposal() {
     );
     assert_eq!(kv_value(&db, "a").await, None);
 }
+
+/// The agent placed in its stream is still the session that acted: its
+/// claims and reasoning land on that session's turns.
+#[test]
+fn placing_an_agent_in_its_stream_keeps_its_session() {
+    let agent = Actor::Agent {
+        session_id: Some(oxplow_domain::AgentSessionId::new(5)),
+        thread_id: Some(ThreadId::new(7)),
+        stream_id: None,
+    };
+    let lens = Actor::Lens {
+        lens_id: "l".into(),
+        on_behalf_of: Box::new(agent),
+    };
+    let placed = with_stream(&lens, oxplow_domain::StreamId::new(1));
+    assert_eq!(
+        placed.session_id(),
+        Some(oxplow_domain::AgentSessionId::new(5))
+    );
+    assert_eq!(placed.thread_id(), Some(ThreadId::new(7)));
+}

@@ -253,7 +253,7 @@
     - { name: "skips_before", type: "INTEGER", doc: "Skip markers on the base side." }
     - { name: "skips_after", type: "INTEGER", doc: "Skip markers on the head side." }
 - name: claim
-  version: 3
+  version: 4
   description: "Claims the agent made about its work (\"tests pass\", \"no behavior change\"), and whether anything backs them."
   columns:
     - { name: "id", type: "INTEGER", doc: "Claim id." }
@@ -261,6 +261,7 @@
     - { name: "work_item", type: "TEXT", doc: "The work item it was made on (`work_item:<provider>:<id>`), if any." }
     - { name: "effort_id", type: "INTEGER", doc: "Effort, if one was open." }
     - { name: "turn_id", type: "INTEGER", doc: "Turn it happened in (v_agent_turn.id), when known." }
+    - { name: "agent_session_id", type: "INTEGER", doc: "The agent session that made it (v_agent_session.id); NULL when not recorded. (v4)" }
     - { name: "statement", type: "TEXT", doc: "The claim in words." }
     - { name: "kind", type: "TEXT", doc: "`tests_pass`, `no_behavior_change`, `handles_case` or `other`." }
     - { name: "evidence_ref", type: "TEXT", doc: "What backs it (`run:<id>`, a test, a file, or `reviewer` when a person verified it with `oxplow.effort.verify_claim`); NULL if nothing was cited." }
@@ -433,7 +434,7 @@
     - { name: "title", type: "", doc: "Its own title, else its work item's, else the first line of its first prompt. (v2)" }
     - { name: "closed_by", type: "TEXT", doc: "What closed it: `commit`, `switch`, `person`, `agent` or `system`; NULL while open. (v2)" }
 - name: effort_file
-  version: 3
+  version: 4
   description: "Files each effort changed, with how they changed: claimed by an edit tool, or observed changing during one of its thread's turns."
   columns:
     - { name: "effort_id", type: "INTEGER", doc: "The effort (v_effort.id)." }
@@ -442,6 +443,8 @@
     - { name: "change_kind", type: "TEXT", doc: "`created`, `updated` or `deleted`." }
     - { name: "closest_vcs_rev", type: "TEXT", doc: "The VCS revision (a git sha) nearest the file when recorded." }
     - { name: "source", type: "TEXT", doc: "`claimed` (an edit tool named it) or `observed` (it changed during one of the thread's turns and no other thread claimed it)." }
+    - { name: "agent_session_id", type: "INTEGER", doc: "The agent session: the one whose edit claimed it, or the only one with a turn running when it was observed; NULL when `shared` or not recorded. (v4)" }
+    - { name: "shared", type: "INTEGER", doc: "1 for an observed file more than one session's turns could have changed, so no session owns it. (v4)" }
 - name: effort_metric_delta
   version: 1
   description: "How each metric moved during an effort (before → after), computed by oxplow's metric engine and refreshed when the effort closes and as data arrives while it's open."
@@ -807,11 +810,12 @@
     - { not_null: id }
     - { unique: id }
 - name: struggle
-  version: 2
+  version: 3
   description: "Where the agent had trouble in an effort: a file edited 5+ times (`repeated_edits`) or 3+ failed commands (`failed_commands`). Likely places for mistakes."
   columns:
     - { name: "effort_id", type: "INTEGER", doc: "Effort." }
     - { name: "thread_id", type: "INTEGER", doc: "Thread." }
+    - { name: "agent_session_id", type: "INTEGER", doc: "The agent session it happened in; NULL when not recorded. (v3)" }
     - { name: "kind", type: "", doc: "`repeated_edits` or `failed_commands`." }
     - { name: "subject", type: "TEXT", doc: "The file path, or `shell` (failed shell commands, whatever the harness)." }
     - { name: "count", type: "", doc: "How many edits / failures." }
@@ -1089,7 +1093,7 @@
     - { unique: id }
     - { relationships: { column: thread_id, to: thread, field: id } }
 - name: tool_call
-  version: 3
+  version: 4
   description: "Every tool call the agent made (from the PostToolUse hook): reads, edits, commands."
   columns:
     - { name: "id", type: "INTEGER", doc: "Row id." }
@@ -1103,6 +1107,9 @@
     - { name: "ok", type: "INTEGER", doc: "1 succeeded, 0 failed, NULL unknown (a shell call often reports no exit code)." }
     - { name: "at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "event_id", type: "TEXT", doc: "The `agent.tool.finished` event (v_event.id) this row records; NULL for rows written before the event log carried tool calls." }
+    - { name: "agent_session_id", type: "INTEGER", doc: "The agent session that made it (v_agent_session.id); NULL when not recorded. (v4)" }
+    - { name: "subagent_id", type: "TEXT", doc: "The subagent it ran inside, when the harness or the Task call bracketing it says so; NULL for the session's own. (v4)" }
+    - { name: "subagent_kind", type: "TEXT", doc: "That subagent's kind (`Explore`, `task`, …). (v4)" }
   tests:
     - { not_null: id }
     - { unique: id }
