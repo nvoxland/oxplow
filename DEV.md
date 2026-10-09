@@ -499,4 +499,4 @@ gitignored. On a fresh clone, your IDE will report
 - **Tests**: real DB (`Database::in_memory()` or tempfile-backed),
   real SQLite, no mocking.
 - **Work items as durable records**: every Edit/Write to project
-  files needs a tracked task. See CLAUDE.md for filing rules.
+  files needs a tracked task. See AGENTS.md for filing rules.

@@ -2161,7 +2161,7 @@ a task's status change (`oxplow.work_item.create` / `.update` / `.transition`,
 all audited to the actor); work tracked outside oxplow brackets itself
 with `oxplow.effort.open` / `oxplow.effort.close` (any thread; [commands.md](./commands.md)). No edit waits on an open effort.
 
-Agent rules (mirrored verbatim in the project root `CLAUDE.md`):
+Agent rules (mirrored verbatim in the project root `AGENTS.md`):
 
 - **Start of work** — file an `in_progress` task before editing
   project files.

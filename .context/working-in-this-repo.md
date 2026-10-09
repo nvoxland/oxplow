@@ -1,10 +1,11 @@
 # Working in this repo — full contributor guide
 
-The project root `CLAUDE.md` is a lean, always-on index: the essential
-rules plus the subsystem routing table. This doc holds the full detail
+The project root `AGENTS.md` is a lean, always-on index: the essential
+rules plus the subsystem routing table (`CLAUDE.md` only imports it, for
+Claude Code, which doesn't read `AGENTS.md` itself). This doc holds the full detail
 those essentials point at — repo layout, test/lint policy, and how
 work is tracked. Read it when you need the *why* or the
-exact mechanics; the always-on gist lives in `CLAUDE.md`.
+exact mechanics; the always-on gist lives in `AGENTS.md`.
 
 ## `.context/` is the knowledge base
 

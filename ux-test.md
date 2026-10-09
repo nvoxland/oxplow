@@ -26,7 +26,7 @@ Feed tasks one at a time (or in small threads). For each:
    succeeding is less interesting than where it stumbled.
 4. **Propose fixes** for friction points, grouped by subsystem, then implement
    the highest-value ones. Update the matching `.context/*.md` doc in the same
-   commit per CLAUDE.md rules.
+   commit per AGENTS.md rules.
 
 ## Task catalog
 

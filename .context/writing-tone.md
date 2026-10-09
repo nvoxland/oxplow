@@ -5,7 +5,7 @@ reference, philosophy) and other reader-facing prose we ship — release
 notes, changelogs, README copy.
 
 Code comments and `.context/` docs are exempt; they're for ourselves
-and follow different rules (see `CLAUDE.md`'s "default to writing no
+and follow different rules (see `AGENTS.md`'s "default to writing no
 comments" guidance).
 
 Blog posts skew personal and casual; docs skew terse and reference-
