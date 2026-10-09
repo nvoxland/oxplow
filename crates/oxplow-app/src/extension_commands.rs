@@ -182,13 +182,6 @@ struct ExampleFile {
     refuses: Option<String>,
 }
 
-/// The namespace an extension's commands register under when its
-/// manifest declares none: its name with `-` → `_` (a command id's
-/// segments are snake_case).
-pub fn command_namespace(extension: &str) -> String {
-    extension.replace('-', "_")
-}
-
 /// An operation's name — a provider's command, a scope's op: one
 /// snake_case segment.
 pub fn valid_op(name: &str) -> bool {
@@ -866,7 +859,7 @@ pub fn register_required(bus: &std::sync::Arc<crate::commands::CommandBus>) -> R
         let namespace = doc["namespace"]
             .as_str()
             .map(str::to_string)
-            .unwrap_or_else(|| command_namespace(b.name));
+            .unwrap_or_else(|| oxplow_domain::contribution::extension_namespace(b.name));
         let (decls, errors) = parse_commands(
             &namespace,
             true,
@@ -1374,7 +1367,10 @@ mod tests {
             c.examples[0].expect_commands,
             vec!["oxplow.work_item.transition"]
         );
-        assert_eq!(command_namespace("my-review"), "my_review");
+        assert_eq!(
+            oxplow_domain::contribution::extension_namespace("my-review"),
+            "my_review"
+        );
     }
 
     /// A command declares what it needs and how a person meets

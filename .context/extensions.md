@@ -49,8 +49,19 @@ out of that extension, so nothing downstream sees two (this is what keeps
 the first extension's metric when two declare one key). `version:` is
 required for `sharing: shared` (`manifest_v2::valid_version`); a bundled
 extension's version is oxplow's own. The kinds with adapters so far:
-collectors, effects, measures, metrics, dimensions; the rest keep their
-own checks until they move (the inventory and plan are the foundation
+collectors, effects, commands (global: the bus id), advisories, skills
+(global: the name), implementations (global: `<capability>/<id>`),
+providers (global: the id, which is also the default instance's id, its
+refs' segment and its commands' namespace), measures, metrics,
+dimensions. The id rules each kind used to restate are the domain's:
+`valid_local` (effects, advisories, pages, panels, skills, custom
+components), `valid_extension_name`, `extension_namespace` (the `-`→`_`
+rule, used by command namespaces, model and entity views, entity tables,
+event types and the SDK). Two rules stay their own on purpose:
+`refuse_shared_namespaces` refuses *both* extensions whose commands map to
+one namespace (a namespace is one extension's), and
+`capability::instance_id_problem` keeps provider ids to snake_case (the id
+is also a command namespace); the rest keep their own checks until they move (the inventory and plan are the foundation
 roadmap's "Normalize contribution descriptors").
 
 > **Status: built (epic tsk275; host finished in tsk278).**

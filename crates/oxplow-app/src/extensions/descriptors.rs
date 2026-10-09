@@ -67,6 +67,49 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
         d.aliases = vec![e.name()];
         out.push(d);
     }
+    // A command's bus id is `<namespace>.<name>`: its local id is the
+    // manifest's `<area>.<verb>`, its global the bus id.
+    for c in &ext.commands {
+        let local = c
+            .name
+            .strip_prefix(&format!("{}.", ext.namespace))
+            .unwrap_or(&c.name);
+        let mut d = new(ContributionKind::Command, local, RunsOn::Call);
+        d.needs = c.needs.clone();
+        d.global = Some(c.name.clone());
+        d.aliases = vec![c.name.clone()];
+        out.push(d);
+    }
+    for a in &ext.advisories {
+        let mut d = new(ContributionKind::Advisory, &a.id, RunsOn::Agent);
+        d.needs = a.needs.clone();
+        d.aliases = vec![format!("{}/{}", ext.name, a.id)];
+        out.push(d);
+    }
+    // A skill's name is what an agent's runtime files it under: one per
+    // project.
+    for k in &ext.skills {
+        let mut d = new(ContributionKind::Skill, &k.name, RunsOn::Agent);
+        d.needs = k.needs.clone();
+        d.global = Some(k.name.clone());
+        out.push(d);
+    }
+    // An implementation is chosen by `<capability>/<id>`.
+    for i in &ext.implementations {
+        let mut d = new(ContributionKind::Implementation, &i.id, RunsOn::Call);
+        d.needs = i.needs.clone();
+        d.global = Some(format!("{}/{}", i.capability, i.id));
+        d.aliases = vec![format!("{}/{}", i.capability, i.id)];
+        out.push(d);
+    }
+    // A provider's id is its default instance's id, its refs' segment and
+    // its commands' namespace: one per project.
+    for p in &ext.providers {
+        let mut d = new(ContributionKind::Provider, &p.id, RunsOn::Call);
+        d.global = Some(p.id.clone());
+        d.aliases = vec![format!("{}/{}", ext.name, p.id)];
+        out.push(d);
+    }
     for m in &ext.measures {
         if let Some(key) = &m.key {
             let mut d = new(ContributionKind::Measure, key, RunsOn::Query);
@@ -135,7 +178,95 @@ fn remove(ext: &mut Extension, c: &Collision) {
         ContributionKind::Measure => ext.measures.retain(|x| x.key.as_deref() != Some(local)),
         ContributionKind::Metric => ext.metrics.retain(|x| x.key.as_deref() != Some(local)),
         ContributionKind::Dimension => ext.dimensions.retain(|x| x.key.as_deref() != Some(local)),
+        ContributionKind::Command => {
+            let global = c.global.as_str();
+            ext.commands.retain(|x| x.name != global)
+        }
+        ContributionKind::Skill => ext.skills.retain(|x| x.name != local),
+        ContributionKind::Implementation => {
+            let global = c.global.as_str();
+            ext.implementations
+                .retain(|x| format!("{}/{}", x.capability, x.id) != global)
+        }
+        ContributionKind::Provider => ext.providers.retain(|x| x.id != local),
         _ => {}
     }
     ext.contributions.retain(|d| d.id != c.refused);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write(root: &std::path::Path, ext: &str, body: &str) {
+        let dir = root.join("oxplow/extensions").join(ext);
+        std::fs::create_dir_all(dir.join("skills")).unwrap();
+        std::fs::write(
+            dir.join("extension.yaml"),
+            format!(
+                "manifest: 2\nname: {ext}\nintent:\n  purpose: p\n  examples: [{{ name: a }}]\n{body}"
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("skills/deploy.md"),
+            "---\nname: deploy\ndescription: d\n---\nShip it.\n",
+        )
+        .unwrap();
+    }
+
+    /// Two extensions naming one skill: the first (alphabetically) keeps
+    /// it, the other gets a load error naming both and loses its skill.
+    #[test]
+    fn a_skill_name_is_one_extensions() {
+        let dir = tempfile::tempdir().unwrap();
+        let skill = "skills:\n  - { name: deploy, file: skills/deploy.md }\n";
+        write(dir.path(), "alpha", skill);
+        write(dir.path(), "beta", skill);
+        let exts = crate::extensions::load_extensions(dir.path());
+        let alpha = exts.iter().find(|e| e.name == "alpha").unwrap();
+        let beta = exts.iter().find(|e| e.name == "beta").unwrap();
+        assert_eq!(alpha.errors, Vec::<String>::new());
+        assert_eq!(alpha.skills.len(), 1);
+        assert!(beta.skills.is_empty());
+        let errors: Vec<_> = beta
+            .errors
+            .iter()
+            .filter(|e| e.contains("`deploy`"))
+            .collect();
+        assert_eq!(errors.len(), 1, "{:?}", beta.errors);
+        assert!(
+            errors[0].contains("`alpha`") && errors[0].contains("`beta`"),
+            "{}",
+            errors[0]
+        );
+        assert!(beta
+            .contributions
+            .iter()
+            .all(|d| d.id.kind != ContributionKind::Skill));
+    }
+
+    /// Every contribution an extension loads is described, with its owner.
+    #[test]
+    fn an_extensions_contributions_are_described() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "acme",
+            "skills:\n  - { name: deploy, file: skills/deploy.md }\nmeasures:\n  - { key: acme.loc, title: Lines, unit: lines, subjectKind: file }\n",
+        );
+        let exts = crate::extensions::load_extensions(dir.path());
+        let acme = exts.iter().find(|e| e.name == "acme").unwrap();
+        assert_eq!(acme.errors, Vec::<String>::new());
+        let ids: Vec<String> = acme
+            .contributions
+            .iter()
+            .map(|d| d.id.to_string())
+            .collect();
+        assert_eq!(ids, ["acme/skill/deploy", "acme/measure/acme.loc"]);
+        assert!(acme
+            .contributions
+            .iter()
+            .all(|d| d.owner.extension == "acme" && d.owner.origin == "project"));
+    }
 }

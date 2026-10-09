@@ -1660,7 +1660,7 @@ fn subscribes(
 pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension {
     Extension {
         name: name.to_string(),
-        namespace: crate::extension_commands::command_namespace(name),
+        namespace: oxplow_domain::contribution::extension_namespace(name),
         description: String::new(),
         path: path.to_string(),
         errors: Vec::new(),
@@ -1693,13 +1693,6 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         version: None,
         contributions: Vec::new(),
     }
-}
-
-fn is_advisory_id(id: &str) -> bool {
-    !id.is_empty()
-        && id
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
 /// Load one extension. Always returns an `Extension`; problems go in
@@ -1986,14 +1979,21 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                         }
                     }
                 }
-                Ok(a) if !is_advisory_id(&a.id) => ext.errors.push(at(
-                    &file,
-                    line_under(&manifest, "advisories", &a.id),
-                    format!(
-                        "advisory id `{}` must be lowercase letters, digits and dashes",
-                        a.id
-                    ),
-                )),
+                Ok(a)
+                    if !oxplow_domain::contribution::valid_local(
+                        oxplow_domain::contribution::ContributionKind::Advisory,
+                        &a.id,
+                    ) =>
+                {
+                    ext.errors.push(at(
+                        &file,
+                        line_under(&manifest, "advisories", &a.id),
+                        format!(
+                            "advisory id `{}` must be lowercase letters, digits and dashes",
+                            a.id
+                        ),
+                    ))
+                }
                 Ok(a) => ext.advisories.push(a),
                 Err(e) => ext.errors.push(at(
                     &file,
@@ -2359,7 +2359,10 @@ fn parse_pages(
             }
         };
         let err = |e: String| (Some(i), format!("page `{}`: {e}", p.id));
-        if !is_advisory_id(&p.id) {
+        if !oxplow_domain::contribution::valid_local(
+            oxplow_domain::contribution::ContributionKind::Page,
+            &p.id,
+        ) {
             errors.push(err("a page id is lowercase letters, digits and `-`".into()));
         } else if pages.iter().any(|q| q.id == p.id) {
             errors.push(err("declared twice".into()));
@@ -2403,7 +2406,10 @@ fn parse_panels(
             }
         };
         let err = |e: String| (Some(i), format!("panel `{}`: {e}", p.id));
-        if !is_advisory_id(&p.id) {
+        if !oxplow_domain::contribution::valid_local(
+            oxplow_domain::contribution::ContributionKind::Panel,
+            &p.id,
+        ) {
             errors.push(err("a panel id is lowercase letters, digits and `-`".into()));
             continue;
         }
@@ -3512,12 +3518,7 @@ fn installed_source(
 /// safe as a folder name, a lens-id prefix and (dashes as underscores) a
 /// command namespace.
 pub fn is_valid_name(name: &str) -> bool {
-    name.starts_with(|c: char| c.is_ascii_lowercase())
-        && !name.ends_with('-')
-        && !name.contains("--")
-        && name
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    oxplow_domain::contribution::valid_extension_name(name)
 }
 
 fn run_git(dir: &Path, args: &[&str]) -> Result<String, String> {

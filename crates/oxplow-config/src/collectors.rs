@@ -371,7 +371,11 @@ pub fn valid_host_pattern(p: &str) -> bool {
 /// owner become underscores; extension names have none, so the mapping
 /// is unambiguous). The project's own collectors' owner is `project`.
 pub fn entity_view_name(owner: &str, entity: &str) -> String {
-    format!("v_{}_{}", owner.replace('-', "_"), entity)
+    format!(
+        "v_{}_{}",
+        oxplow_domain::contribution::extension_namespace(owner),
+        entity
+    )
 }
 
 /// The owner of the collectors in `.oxplow/project.yaml`.

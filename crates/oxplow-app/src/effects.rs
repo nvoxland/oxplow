@@ -84,10 +84,10 @@ pub(crate) struct EffectFile {
 }
 
 fn valid_id(id: &str) -> bool {
-    !id.is_empty()
-        && id
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    oxplow_domain::contribution::valid_local(
+        oxplow_domain::contribution::ContributionKind::Effect,
+        id,
+    )
 }
 
 /// Parse an `effects:` block: each effect's trigger (`on`, `where`, by the

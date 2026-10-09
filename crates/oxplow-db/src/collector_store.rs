@@ -359,7 +359,10 @@ pub struct PendingRun {
 
 /// `ext__<extension>__` with dashes as underscores.
 fn table_prefix(extension: &str) -> String {
-    format!("ext__{}__", extension.replace('-', "_"))
+    format!(
+        "ext__{}__",
+        oxplow_domain::contribution::extension_namespace(extension)
+    )
 }
 
 fn table_name(t: &EntityTable) -> String {
@@ -392,7 +395,13 @@ fn validate_table(t: &EntityTable) -> Result<(), DomainError> {
             t.extension, t.entity
         ));
     }
-    if t.view != format!("v_{}_{}", t.extension.replace('-', "_"), t.entity) {
+    if t.view
+        != format!(
+            "v_{}_{}",
+            oxplow_domain::contribution::extension_namespace(&t.extension),
+            t.entity
+        )
+    {
         return bad(format!("view `{}` doesn't match its entity", t.view));
     }
     if t.columns.is_empty() || t.columns.iter().any(|c| !is_ident(&c.name)) {

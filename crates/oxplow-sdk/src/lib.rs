@@ -130,7 +130,7 @@ pub fn scaffold(
     name: &str,
     origin: Option<&str>,
 ) -> Result<Scaffolded, SdkError> {
-    if !extensions::is_valid_name(name) {
+    if !oxplow_domain::contribution::valid_extension_name(name) {
         return Err(SdkError::Invalid(format!(
             "`{name}` must start with a letter and be lowercase letters, digits and single dashes (e.g. `review-notes`)"
         )));
@@ -160,11 +160,11 @@ pub fn scaffold(
         files.push(rel.to_string());
         Ok(())
     };
-    let ns = oxplow_app::extension_commands::command_namespace(name);
+    let ns = oxplow_domain::contribution::extension_namespace(name);
     // Each lens file names its schema, as the manifest does.
     let lens_modeline = extensions::schema::modeline(extensions::schema::LENS_SCHEMA_URL);
     // An identifier from the name: a provider's or a policy's id.
-    let provider_id = name.replace('-', "_");
+    let provider_id = oxplow_domain::contribution::extension_namespace(name);
     // The intent example, and its fixture (what `extension test` runs).
     let (example_input, example_expect, fixture_expect) = match kind {
         Kind::Lens | Kind::Component => (

@@ -1501,7 +1501,11 @@ pub struct ExtensionModels {
 /// The view an extension's model (or entity) publishes:
 /// `v_<extension>_<name>`, dashes as underscores.
 pub fn extension_view(extension: &str, name: &str) -> String {
-    format!("v_{}_{}", extension.replace('-', "_"), name)
+    format!(
+        "v_{}_{}",
+        oxplow_domain::contribution::extension_namespace(extension),
+        name
+    )
 }
 
 /// Compile every enabled extension's models in one pass (P4.9), after the
@@ -1648,8 +1652,8 @@ fn pass(
         // check's queries, which only read its columns, an empty SELECT.
         let table = format!(
             "ext__{}__{}",
-            stub.owner.replace('-', "_"),
-            stub.name.replace('-', "_")
+            oxplow_domain::contribution::extension_namespace(&stub.owner),
+            oxplow_domain::contribution::extension_namespace(&stub.name)
         );
         let typed: Vec<String> = stub
             .columns
@@ -1718,7 +1722,10 @@ fn pass(
     let tables = stored_tables(tx)?;
     let mut resolved: Vec<(String, Resolved<'_>)> = Vec::new();
     for e in extensions {
-        let own_prefix = format!("ext__{}__", e.extension.replace('-', "_"));
+        let own_prefix = format!(
+            "ext__{}__",
+            oxplow_domain::contribution::extension_namespace(&e.extension)
+        );
         let ref_view = |target: &str| match target.split_once('/') {
             Some((ext, name)) => known.get(&(ext.to_string(), name.to_string())).cloned(),
             None => known

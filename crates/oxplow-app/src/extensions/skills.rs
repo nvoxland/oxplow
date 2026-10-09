@@ -127,10 +127,10 @@ pub(crate) fn parse_skills(
 }
 
 fn well_formed(name: &str) -> bool {
-    name.chars().next().is_some_and(|c| c.is_ascii_lowercase())
-        && name
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    oxplow_domain::contribution::valid_local(
+        oxplow_domain::contribution::ContributionKind::Skill,
+        name,
+    )
 }
 
 /// A skill's frontmatter names it (the runtimes key discovery on it) and

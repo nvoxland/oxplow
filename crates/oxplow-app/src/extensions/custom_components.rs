@@ -432,10 +432,10 @@ fn tags(html: &str) -> Vec<Tag> {
 }
 
 fn valid_id(id: &str) -> bool {
-    !id.is_empty()
-        && id
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    oxplow_domain::contribution::valid_local(
+        oxplow_domain::contribution::ContributionKind::CustomComponent,
+        id,
+    )
 }
 
 /// A relative path inside the extension, without `..`.
