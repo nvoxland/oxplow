@@ -94,6 +94,32 @@ test("programRow shows a provider with the secrets and hosts it gets", () => {
   expect(m.approveTitle).toContain("every file in oxplow/extensions/tracker");
 });
 
+// A harness provider launches the person's agent sessions: the command
+// its launch answers runs in their terminal, outside its own grants.
+test("programRow says an agent harness provider launches agent sessions", () => {
+  const m = programRow({
+    kind: "provider",
+    capability: "agent_harness",
+    name: "conductor/fake",
+    program: "oxplow/extensions/conductor/bin/provider",
+    args: [],
+    env: [],
+    credentials: [],
+    network: [],
+    scopes: [],
+    tree: "oxplow/extensions/conductor",
+    remote: false,
+    approved: false,
+    version: "abc",
+  } as never);
+  expect(m.label).toBe("Agent harness conductor/fake");
+  expect(m.command).toBe(
+    "oxplow/extensions/conductor/bin/provider\nlaunches agent sessions: the command it answers runs in your terminal",
+  );
+  expect(m.approveTitle).toContain("runs in your terminal");
+  expect(m.approveTitle).toContain("session's bearer");
+});
+
 test("programRow shows an effect as reacting to events from approval on (P8.D9)", () => {
   const m = programRow({
     kind: "effect",

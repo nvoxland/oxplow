@@ -191,6 +191,7 @@ pub fn effect_program(ext: &Extension, decl: &EffectDecl) -> ProjectProgram {
     let dir = ext.path.trim_end_matches('/');
     ProjectProgram {
         kind: ProgramKind::Effect,
+        capability: None,
         name: decl.name(),
         program: format!("{dir}/{}", decl.entry),
         args: Vec::new(),

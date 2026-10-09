@@ -384,24 +384,50 @@ a verb runs as (so an inverse naming a verb undoes through it), the event
 types it may emit, what its collectors stream, the refs an instance owns,
 and whether it keeps items.
 
-| | `work_items` | `effort_policy` |
-|---|---|---|
-| verbs | `create`, `update`, `transition`; `link` ← links, `comment` ← comments, `delete` ← delete, `reorder` ← ordering, `move` ← lists | `react` |
-| verbs run as | `oxplow.work_item.<verb>` | the dispatcher's call (nothing undoes it) |
-| may emit | `work_item.recorded@2` | nothing |
-| collectors stream | `work_item` rows, logged as `work_item.recorded@2` `{ item: row }` | nothing |
-| owns refs | `work_item:<instance>:…` | none |
-| keeps items (`fields`, `idPattern`) | yes | no |
+| | `work_items` | `effort_policy` | `agent_harness` |
+|---|---|---|---|
+| verbs | `create`, `update`, `transition`; `link` ← links, `comment` ← comments, `delete` ← delete, `reorder` ← ordering, `move` ← lists | `react` | `launch`, `tool_use`, `render`; `turns` ← transcript, `token_readings` ← telemetry, `refresh_text` ← runtime_text |
+| verbs run as | `oxplow.work_item.<verb>` | the dispatcher's call (nothing undoes it) | core's call: a session's launch, the hook route, the OTLP route, a transcript read, a text refresh |
+| declares as `data` | nothing | nothing | `instruction_files`, `env_markers`, `settings` |
+| may emit | `work_item.recorded@2` | nothing | nothing |
+| collectors stream | `work_item` rows, logged as `work_item.recorded@2` `{ item: row }` | nothing | nothing |
+| owns refs | `work_item:<instance>:…` | none | none |
+| keeps items (`fields`, `idPattern`) | yes | no | no |
 
 Each such capability has a **host** (`registry::CapabilityHost`): what
 turns a started instance into the capability's implementation and takes
 it out again. `Services` builds one per capability and hands them to the
 `ProviderRegistry`: `work_items::WorkItemsHost` registers an
 `ExternalWorkItems` in `Services.work_items`; the effort policy's
-registers an external policy in `Services.effort_policies`. A record
+registers an external policy in `Services.effort_policies`; the agent
+harness's (`agent_harness::HarnessHost`) registers an `ExternalHarness` in
+`Services.harnesses` under the instance id, beside the built-ins (a
+catalog reload keeps it). A record
 row carries its own `ref`; the host logs it as the contract's event with
-the row under the contract's key and that ref the subject. Snapshots and
-the agent harnesses have no contract yet. The MCP adapter
+the row under the contract's key and that ref the subject. Snapshots have
+no contract yet.
+
+**A harness provider** answers what a built-in harness answers in code
+(`.context/agent-model.md` "What a harness implements"). Its title is its
+`provider.name`; it's a chat (a structured transcript) when it declares
+`structured_transcript`; its instruction files, environment markers and
+settings are its capability's `data`. Each operation is one invoke:
+`launch` takes the launch's input as it is (`LaunchInput`: the session,
+its worktree and project, the endpoints and the session's bearer, the
+identity env, the system prompt, the resume id, the agent text, its
+`agentConfig`, oxplow's executable, home, and the program `search_path`)
+and answers a `Launch` (`{ spec: { kind: pty, command, env } | { kind:
+acp, program, args, env, system_prompt_via_meta }, resume_dropped? }`);
+`tool_use { body }` → `{ tool }`; `render { answer }` (`{ kind: ack |
+deny | context, … }`) → `{ body }`; `refresh_text { roots, text }` → `{}`;
+`turns { transcript }` → `{ turns }`; `token_readings { records }` (one
+export's) → `{ readings }`. An optional verb it doesn't declare answers
+none, uncalled. `tool_use` and `render` are on the hook route's path:
+each is bounded at 1 s (`HOOK_VERB_TIMEOUT`, inside the route's 5 s), and
+a late or failed answer reads as no call and `{}`. Approving one is
+approving what its launch answers: that command runs in the person's
+terminal with their rights, outside the provider's own grants, so its
+Programs row says so. The MCP adapter
 (`oxplow-provider-mcp`) still maps work-item refs only.
 
 **Consent precedes execution** (`exec_consent`, `ProgramKind::Provider`,

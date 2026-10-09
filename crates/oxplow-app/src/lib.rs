@@ -1331,6 +1331,7 @@ impl Services {
                 Arc::new(providers::effort_policy::EffortPolicyHost(
                     effort_policies.clone(),
                 )),
+                Arc::new(providers::agent_harness::HarnessHost(harnesses.clone())),
             ],
         );
         // An extension's provider commands run on its instances.

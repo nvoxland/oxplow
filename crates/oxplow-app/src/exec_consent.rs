@@ -246,6 +246,9 @@ pub enum ProgramKind {
 #[serde(rename_all = "camelCase")]
 pub struct ProjectProgram {
     pub kind: ProgramKind,
+    /// The capability it implements (a provider): what approving it lets
+    /// it do (an agent harness launches the person's agent sessions).
+    pub capability: Option<String>,
     /// The collector, agent, extension or component it belongs to.
     pub name: String,
     /// Project-relative path of the program.
@@ -530,6 +533,7 @@ pub(crate) fn files_hash(
 pub fn program_hash(project_dir: &Path, program: &str, args: &[String]) -> std::io::Result<String> {
     ProjectProgram {
         kind: ProgramKind::Collector,
+        capability: None,
         name: String::new(),
         program: program.to_string(),
         args: args.to_vec(),
@@ -558,6 +562,7 @@ pub fn may_run(
 ) -> bool {
     let p = ProjectProgram {
         kind,
+        capability: None,
         name: name.to_string(),
         program: program.to_string(),
         args: args.to_vec(),
@@ -593,6 +598,7 @@ pub fn ai_provider_program(
     let tree = tree.trim_end_matches('/');
     ProjectProgram {
         kind: ProgramKind::AiProvider,
+        capability: None,
         name: format!("{extension}/{id}"),
         program: format!("{tree}/{entry}"),
         args: Vec::new(),
@@ -627,6 +633,7 @@ fn approved_at(store: &ApprovalStore, project_dir: &Path, cwd: &Path, p: &Projec
 pub fn acp_program(agent: &oxplow_config::AcpAgentConfig) -> ProjectProgram {
     ProjectProgram {
         kind: ProgramKind::AcpAgent,
+        capability: None,
         name: agent.name.clone(),
         program: agent.command.clone(),
         args: agent.args.clone(),
@@ -651,6 +658,7 @@ pub fn advisory_program(ext: &crate::extensions::Extension) -> ProjectProgram {
     let text = |v: serde_json::Value| v.as_str().unwrap_or_default().to_string();
     ProjectProgram {
         kind: ProgramKind::Advisories,
+        capability: None,
         name: ext.name.clone(),
         program: format!("{}/extension.yaml", ext.path.trim_end_matches('/')),
         args: ext
@@ -717,6 +725,7 @@ pub fn provider_program(
     let remote = spec.is_remote();
     ProjectProgram {
         kind: ProgramKind::Provider,
+        capability: Some(spec.capability.clone()),
         name: spec.approval_name(&ext.name),
         program: if remote {
             program
@@ -749,6 +758,7 @@ pub fn component_program(
     let dir = ext.path.trim_end_matches('/');
     ProjectProgram {
         kind: ProgramKind::Component,
+        capability: None,
         name: format!("{}/{}", ext.name, component.id),
         program: format!("{dir}/{}", component.bundle.trim_end_matches('/')),
         args: Vec::new(),
@@ -850,6 +860,7 @@ pub fn effort_policy_program(
     let tree = tree.trim_end_matches('/');
     ProjectProgram {
         kind: ProgramKind::EffortPolicy,
+        capability: None,
         name: format!("{extension}/{id}"),
         program: format!("{tree}/{entry}"),
         args: Vec::new(),
@@ -896,6 +907,7 @@ pub fn list(
         let Some(program) = program else { return };
         out.push(ProjectProgram {
             kind,
+            capability: None,
             name: name.to_string(),
             program: program.to_string(),
             args: args.to_vec(),
@@ -1074,6 +1086,7 @@ mod tests {
         // An effect program in a bundled extension has a version to approve.
         let program = ProjectProgram {
             kind: ProgramKind::Effect,
+            capability: None,
             name: "oxplow-bundled/x".into(),
             program: "bundled:oxplow-bundled/extension.yaml".into(),
             args: Vec::new(),
@@ -1097,6 +1110,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let bundled = ProjectProgram {
             kind: ProgramKind::Effect,
+            capability: None,
             name: "oxplow-bundled/x".into(),
             program: "bundled:oxplow-bundled/extension.yaml".into(),
             args: Vec::new(),

@@ -6286,3 +6286,193 @@ async fn a_stopped_provider_policy_resolves_to_none() {
     let (efforts, _) = policy_efforts(&fx).await;
     assert!(efforts.iter().all(|e| !e.1), "nothing opened: {efforts:?}");
 }
+
+const HARNESS: &str = "conductor/fake";
+
+/// A private extension whose provider runs the fake as an agent harness
+/// with `hooks`.
+fn write_harness_extension(project: &Path, hooks: &str) {
+    let dir = project.join("oxplow/extensions/conductor");
+    std::fs::create_dir_all(dir.join("bin")).unwrap();
+    std::fs::write(
+        dir.join("extension.yaml"),
+        "manifest: 2\nname: conductor\nsharing: private\nintent:\n  purpose: the fake agent harness\n  examples: [{ name: a }]\nproviders:\n  - id: fake\n    capability: agent_harness\n    entry: bin/provider\n    declarations: provider.json\n",
+    )
+    .unwrap();
+    let script = dir.join("bin/provider");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nOXPLOW_FAKE_CAPABILITY=agent_harness OXPLOW_FAKE_HOOKS='{hooks}' OXPLOW_FAKE_STATE=\"{}/fake-harness-$OXPLOW_PROVIDER_ID.json\" exec '{}' \"$@\"\n",
+            project.join(".oxplow").display(),
+            fake_bin().display()
+        ),
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(
+        dir.join("provider.json"),
+        serde_json::to_string_pretty(&oxplow_provider_fake::harness_declarations()).unwrap(),
+    )
+    .unwrap();
+}
+
+/// The fixture with the harness extension approved and its instance
+/// running.
+async fn running_harness(hooks: &str) -> (EffortFixture, Extension) {
+    let fx = services_with_effort().await;
+    let project = fx.svc.layout.project_dir.clone();
+    write_harness_extension(&project, hooks);
+    let ext = crate::extensions::load_extensions(&project)
+        .into_iter()
+        .find(|e| e.name == "conductor")
+        .expect("the harness extension loads");
+    assert_eq!(ext.errors, Vec::<String>::new());
+    approve(&fx, &ext);
+    fx.svc
+        .providers
+        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
+        .await
+        .unwrap();
+    (fx, ext)
+}
+
+/// An enabled harness provider is a registered harness under its instance
+/// id, with what it declared — its instruction files, environment markers
+/// and settings — beside the built-ins; a catalog reload keeps it, and
+/// stopping it takes it out.
+#[tokio::test]
+async fn a_harness_provider_is_a_registered_harness() {
+    let (fx, _ext) = running_harness("").await;
+    let h = fx.svc.harnesses.get("fake").expect("registered as `fake`");
+    assert_eq!(h.title(), "fake");
+    assert_eq!(
+        h.interact().transcript,
+        oxplow_domain::agent::harness::Transcript::Terminal
+    );
+    assert_eq!(h.instruction_files(), ["AGENTS.md"]);
+    assert_eq!(h.env_markers(), ["OXPLOW_FAKE_HARNESS_SESSION".to_string()]);
+    assert_eq!(h.settings()[0].key, "model");
+    assert!(crate::agent_path::not_inherited(&fx.svc.harnesses)
+        .contains(&"OXPLOW_FAKE_HARNESS_SESSION".to_string()));
+    let listed = crate::harnesses::listing(&fx.svc.harnesses, &[]);
+    assert!(listed
+        .iter()
+        .any(|l| l.id == "fake" && l.settings[0].key == "model"));
+
+    crate::capabilities::refresh(&fx.svc).await.unwrap();
+    assert!(fx.svc.harnesses.has("fake"), "a reload keeps it");
+    assert!(fx.svc.harnesses.has("claude"), "beside the built-ins");
+
+    assert!(fx.svc.providers.stop(HARNESS).await);
+    assert!(!fx.svc.harnesses.has("fake"));
+}
+
+/// Its verbs are its process's: a tool hook maps, an answer renders in
+/// its own shape, an export's records read in one call, and a launch
+/// answers the command its terminal runs — the bearer in its env only. A
+/// verb it doesn't declare (`turns`) answers none without a call.
+#[tokio::test]
+async fn a_harness_providers_verbs_are_its_process() {
+    use oxplow_domain::agent::observe::{AttrValue, Attrs, HookAnswer, OtlpRecord};
+    let (fx, _ext) = running_harness("").await;
+    let h = fx.svc.harnesses.get("fake").unwrap();
+
+    let tool = h
+        .tool_use(&json!({ "tool_name": "Edit", "tool_input": { "file_path": "a.txt" } }))
+        .await
+        .expect("an edit");
+    assert_eq!(tool.kind, oxplow_domain::agent::tool::ToolKind::Edit);
+    assert_eq!(tool.paths, ["a.txt"]);
+    assert_eq!(h.tool_use(&json!({ "nothing": 1 })).await, None);
+
+    assert_eq!(
+        h.render(&HookAnswer::Deny {
+            reason: "no".into()
+        })
+        .await,
+        json!({ "fake": "deny", "reason": "no" })
+    );
+
+    let point = |kind: &str, value| OtlpRecord::Point {
+        metric: oxplow_harness_fake::TOKEN_METRIC.into(),
+        value,
+        attributes: Attrs(vec![("kind".into(), AttrValue::Str(kind.into()))]),
+        resource: Attrs(vec![("model".into(), AttrValue::Str("m".into()))]),
+        time_unix_nano: 9,
+        start_time_unix_nano: 0,
+    };
+    let readings = h
+        .token_readings(&[point("input", 7), point("output", 3)])
+        .await;
+    assert_eq!(readings.iter().map(|r| r.value).collect::<Vec<_>>(), [7, 3]);
+    assert!(h.turns("anything").await.is_empty());
+
+    let bin_dir = tempfile::tempdir().unwrap();
+    std::fs::write(bin_dir.path().join(oxplow_harness_fake::BIN), "").unwrap();
+    let launch = h
+        .launch(&launch_input(&fx, vec![bin_dir.path().to_path_buf()]))
+        .await
+        .expect("it launches");
+    let oxplow_domain::agent::harness::LaunchSpec::Pty { command, env } = launch.spec else {
+        panic!("a terminal launch");
+    };
+    assert!(command.contains(oxplow_harness_fake::BIN), "{command}");
+    assert!(!command.contains("secret-bearer"), "{command}");
+    assert!(env.iter().any(|(_, v)| v == "secret-bearer"));
+}
+
+/// The hook route waits on a harness's mapping and answer: a provider
+/// too slow to answer reads as no call and the empty answer, within the
+/// hook verbs' bound — the route's fail-open stance.
+#[tokio::test]
+async fn a_slow_harness_provider_reads_as_none_on_the_hook_path() {
+    use oxplow_domain::agent::observe::HookAnswer;
+    let (fx, _ext) = running_harness("slow:3000").await;
+    let h = fx.svc.harnesses.get("fake").unwrap();
+    let started = std::time::Instant::now();
+    assert_eq!(
+        h.tool_use(&json!({ "tool_name": "Edit", "tool_input": { "file_path": "a" } }))
+            .await,
+        None
+    );
+    assert_eq!(h.render(&HookAnswer::Ack).await, json!({}));
+    assert!(
+        started.elapsed() < std::time::Duration::from_millis(2_900),
+        "bounded: {:?}",
+        started.elapsed()
+    );
+}
+
+/// A launch's input for the fixture's thread, programs looked for in
+/// `search_path`.
+fn launch_input(
+    fx: &EffortFixture,
+    search_path: Vec<PathBuf>,
+) -> oxplow_domain::agent::harness::LaunchInput {
+    use oxplow_domain::agent::harness::{Endpoints, LaunchInput, SessionIds};
+    LaunchInput {
+        session: SessionIds {
+            stream: oxplow_domain::StreamId::new(1),
+            thread: fx.thread,
+            session: oxplow_domain::AgentSessionId::new(1),
+        },
+        workspace: fx.svc.layout.project_dir.clone(),
+        project_dir: fx.svc.layout.project_dir.clone(),
+        endpoints: Endpoints {
+            hook_base_url: "http://127.0.0.1:9/hook".into(),
+            mcp_endpoint_url: "http://127.0.0.1:9/mcp".into(),
+            otlp_base_url: "http://127.0.0.1:9".into(),
+            hook_token: "secret-bearer".into(),
+        },
+        identity_env: vec![("OXPLOW_HOOK_TOKEN".into(), "secret-bearer".into())],
+        system_prompt: None,
+        resume: None,
+        text: Default::default(),
+        config: json!({}),
+        oxplow_executable: "/bin/false".into(),
+        home: None,
+        search_path,
+    }
+}

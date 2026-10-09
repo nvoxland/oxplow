@@ -85,20 +85,26 @@ export function programRow(p: ProjectProgram): ProgramRowModel {
     // credentials, hosts, and every file of its extension.
     // A server reached by url (`remote`) runs nothing of its own here:
     // the url, then the adapter's mapping, pinned tools and bearer.
+    // An agent harness launches the person's agent sessions: what its
+    // launch answers runs in their terminal, outside its own grants.
+    const harness = p.capability === "agent_harness";
     const command = [
       ...(p.remote ? [`MCP server at ${p.program}`, `with: ${p.args.join(" ")}`] : [[p.program, ...p.args].join(" ")]),
       ...(p.env.length > 0 ? [`env: ${p.env.join(", ")}`] : []),
       ...(p.credentials.length > 0 ? [`credentials: ${p.credentials.join(", ")}`] : []),
       ...(p.network.length > 0 ? [`reaches: ${p.network.join(", ")}`] : []),
       ...(p.scopes.length > 0 ? [`calls oxplow's: ${p.scopes.join(", ")}`] : []),
+      ...(harness ? ["launches agent sessions: the command it answers runs in your terminal"] : []),
     ].join("\n");
     return {
       key: `${p.kind}:${p.name}`,
-      label: `External provider ${p.name}`,
+      label: harness ? `Agent harness ${p.name}` : `External provider ${p.name}`,
       command,
       status: p.approved ? "Approved on this machine" : "Not approved: it won't run",
       approved: p.approved,
-      approveTitle: p.remote
+      approveTitle: harness
+        ? `Runs ${p.program} as an agent harness with these grants, approving every file in ${p.tree ?? "its extension"}. It launches your agent sessions: the command it answers runs in your terminal with your rights, and it's given each session's bearer and system prompt. Approve only if you trust this extension; any change needs approval again.`
+        : p.remote
         ? `Lets oxplow's MCP adapter talk to ${p.program} as an external provider with these grants, approving that address and every file in ${p.tree ?? "its extension"} (its mapping, its pinned tools, its declarations). The server runs elsewhere: its code isn't part of this approval, and oxplow refuses it when its tools stop matching the pinned ones. Approve only if you trust this extension and that server; any change here needs approval again.`
         : `Runs ${p.program} as a long-lived external provider with these grants, approving every file in ${p.tree ?? "its extension"} (its declarations included). Approve only if you trust this extension; any change needs approval again.`,
       showsSource: false,

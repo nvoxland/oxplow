@@ -4429,6 +4429,7 @@ dependencies = [
  "oxplow-domain",
  "oxplow-fs-watch",
  "oxplow-git",
+ "oxplow-harness-fake",
  "oxplow-harnesses",
  "oxplow-lsp",
  "oxplow-lsp-installer",
@@ -4868,6 +4869,7 @@ name = "oxplow-provider-fake"
 version = "0.7.0"
 dependencies = [
  "oxplow-domain",
+ "oxplow-harness-fake",
  "oxplow-provider-protocol",
  "serde",
  "serde_json",

@@ -4933,6 +4933,11 @@ export type ProgramKind =
 // A program the project's config would run.
 export type ProjectProgram = {
 	kind: ProgramKind,
+	/**
+	 *  The capability it implements (a provider): what approving it lets
+	 *  it do (an agent harness launches the person's agent sessions).
+	 */
+	capability: string | null,
 	// The collector, agent, extension or component it belongs to.
 	name: string,
 	// Project-relative path of the program.

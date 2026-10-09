@@ -2529,9 +2529,11 @@ implementations:
   id and no other.
 - **A process implements a capability through `providers:`**, not
   here: a capability whose spec carries a provider contract (the work
-  list, the effort policy) may be an external provider's instance, chosen
-  by `activeProviders` like a built-in ([providers.md](./providers.md)
-  "What a provider may implement").
+  list, the effort policy, an agent harness) may be an external
+  provider's instance — the work list and the effort policy chosen by
+  `activeProviders` like a built-in, a harness registered beside the
+  built-ins under its instance id, as many as run
+  ([providers.md](./providers.md) "What a provider may implement").
 - **An `ai_provider` or an `effort_policy` may be a script** instead: an
   `entry` that isn't `oxplow:<name>` names a `.star` file of the extension
   (`implementations::script_decl`, `Source::Script`). Nothing else is a

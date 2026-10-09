@@ -13,6 +13,7 @@
 //! - [`sync`] — reading an instance's collectors (`oxplow.provider.sync`, the
 //!   schedule), checkpointed.
 
+pub mod agent_harness;
 pub mod effort_policy;
 pub mod host;
 pub mod oauth;

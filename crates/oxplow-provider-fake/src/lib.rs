@@ -104,30 +104,35 @@ use serde_json::{json, Value};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{oneshot, Mutex};
 
+mod harness;
 mod policy;
 
+pub use harness::declarations as harness_declarations;
 pub use policy::declarations as policy_declarations;
 
 pub const PROVIDER: &str = "fake";
 
 /// The capability it implements (`OXPLOW_FAKE_CAPABILITY`): a work list,
-/// the default, or an effort policy ([`policy_declarations`]).
+/// the default, an effort policy ([`policy_declarations`]) or an agent
+/// harness ([`harness_declarations`]).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Capability {
     #[default]
     WorkItems,
     EffortPolicy,
+    AgentHarness,
 }
 
 impl Capability {
-    /// The capability `name` names (`work_items` — also when unset — or
-    /// `effort_policy`).
+    /// The capability `name` names (`work_items` — also when unset —,
+    /// `effort_policy` or `agent_harness`).
     pub fn named(name: Option<&str>) -> Result<Self, String> {
         match name.unwrap_or("work_items") {
             "work_items" => Ok(Capability::WorkItems),
             "effort_policy" => Ok(Capability::EffortPolicy),
+            "agent_harness" => Ok(Capability::AgentHarness),
             other => Err(format!(
-                "the fake implements work_items or effort_policy, not `{other}`"
+                "the fake implements work_items, effort_policy or agent_harness, not `{other}`"
             )),
         }
     }
@@ -655,6 +660,8 @@ async fn handle(
             };
             let declared = if capability == Capability::EffortPolicy {
                 policy_declarations()
+            } else if capability == Capability::AgentHarness {
+                harness_declarations()
             } else if hooks.bad_declarations {
                 bad_declarations()
             } else if hooks.plain_writes {
@@ -707,8 +714,8 @@ async fn handle(
         method::DISCOVER => {
             let p: DiscoverParams = parse(params)?;
             require_handle(&p.handle)?;
-            // A policy reads nothing.
-            if world.lock().await.capability == Capability::EffortPolicy {
+            // A policy or a harness reads nothing.
+            if world.lock().await.capability != Capability::WorkItems {
                 return Ok(json!({ "entities": [] }));
             }
             Ok(serde_json::to_value(DiscoverResult {
@@ -764,8 +771,12 @@ async fn handle(
             } else {
                 None
             };
-            let policy = world.lock().await.capability == Capability::EffortPolicy;
+            let capability = world.lock().await.capability;
+            let policy = capability == Capability::EffortPolicy;
             let mut answer = match (policy, p.command.as_str()) {
+                _ if capability == Capability::AgentHarness => {
+                    json!({ "result": harness::answer(&p.command, &p.input)?, "events": [] })
+                }
                 (true, "react") if hooks.bogus_react => {
                     world.lock().await.reacts += 1;
                     json!({ "result": { "commands": [{ "name": "oxplow.nope.never", "input": {} }] },
