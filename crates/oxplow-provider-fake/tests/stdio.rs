@@ -665,3 +665,204 @@ async fn as_an_effort_policy_it_composes_efforts() {
     .unwrap();
     assert!(nowhere.result.get("skip").is_some(), "{}", nowhere.result);
 }
+
+/// Its snapshots mode (`OXPLOW_FAKE_CAPABILITY=snapshots`): a fake that
+/// marks a directory, tells what changed between marks, and (with
+/// `OXPLOW_FAKE_FEATURES=contents`) gives a file's bytes back.
+fn spawn_snapshots(features: &str) -> (Child, Peer) {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_oxplow-provider-fake"))
+        .env("OXPLOW_FAKE_CAPABILITY", "snapshots")
+        .env("OXPLOW_FAKE_FEATURES", features)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("spawn the fake");
+    let stdout = child.stdout.take().expect("piped stdout");
+    let stdin = child.stdin.take().expect("piped stdin");
+    let (peer, _incoming) = Peer::spawn(stdout, stdin);
+    (child, peer)
+}
+
+#[tokio::test]
+async fn as_a_snapshots_provider_it_declares_its_verbs_by_feature() {
+    for (features, contents, verbs) in [
+        ("contents", true, vec!["mark", "changed", "read_at"]),
+        ("", false, vec!["mark", "changed"]),
+    ] {
+        let (_child, peer) = spawn_snapshots(features);
+        let declared = initialize(&peer).await;
+        assert_eq!(
+            declared,
+            oxplow_provider_fake::snapshots_declarations(contents)
+        );
+        let capability = &declared.capabilities[0];
+        assert_eq!(capability.capability, "snapshots");
+        assert_eq!(capability.features, json!({ "contents": contents }));
+        assert_eq!(capability.data, Value::Null);
+        assert_eq!(
+            declared
+                .commands
+                .iter()
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>(),
+            verbs
+        );
+        for c in &declared.commands {
+            assert_eq!((c.confirm.as_str(), c.access.as_str()), ("never", "record"));
+            assert_eq!(
+                c.input_schema["additionalProperties"],
+                json!(false),
+                "{}",
+                c.name
+            );
+        }
+        assert!(declared.event_types.is_empty() && declared.collectors.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn as_a_snapshots_provider_it_marks_tells_what_changed_and_gives_bytes_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::create_dir_all(root.join(".git")).unwrap();
+    std::fs::write(root.join(".git/HEAD"), "ref").unwrap();
+    std::fs::write(root.join("a.txt"), "one").unwrap();
+    std::fs::write(root.join("src/b.txt"), "two").unwrap();
+    let (_child, peer) = spawn_snapshots("contents");
+    initialize(&peer).await;
+    let handle = check(&peer).await;
+    let mark = |parent: Value| {
+        json!({ "stream": "stream:str1", "worktree": root, "trigger": "turn_end",
+                "parent": parent })
+    };
+
+    let first = invoke(&peer, &handle, "mark", mark(Value::Null))
+        .await
+        .unwrap()
+        .result;
+    assert_eq!(
+        first,
+        json!({ "handle": "m1", "unchanged": false, "file_count": 2 })
+    );
+
+    // xxh3-128 of "one", as core formats a content hash.
+    let all = invoke(
+        &peer,
+        &handle,
+        "changed",
+        json!({ "stream": "stream:str1", "from": null, "to": "m1" }),
+    )
+    .await
+    .unwrap()
+    .result;
+    assert_eq!(
+        all["changes"],
+        json!([
+            { "path": "a.txt", "kind": "added", "size": 3,
+              "identity": format!("{:032x}", xxhash_rust::xxh3::xxh3_128(b"one")) },
+            { "path": "src/b.txt", "kind": "added", "size": 3,
+              "identity": format!("{:032x}", xxhash_rust::xxh3::xxh3_128(b"two")) },
+        ])
+    );
+
+    let same = invoke(&peer, &handle, "mark", mark(json!("m1")))
+        .await
+        .unwrap()
+        .result;
+    assert_eq!(
+        same,
+        json!({ "handle": "m2", "unchanged": true, "file_count": 2 })
+    );
+
+    std::fs::write(root.join("a.txt"), "uno").unwrap();
+    std::fs::write(root.join("c.txt"), "three").unwrap();
+    std::fs::remove_file(root.join("src/b.txt")).unwrap();
+    let third = invoke(&peer, &handle, "mark", mark(json!("m2")))
+        .await
+        .unwrap()
+        .result;
+    assert_eq!(
+        third,
+        json!({ "handle": "m3", "unchanged": false, "file_count": 2 })
+    );
+    let diff = invoke(
+        &peer,
+        &handle,
+        "changed",
+        json!({ "stream": "stream:str1", "from": "m2", "to": "m3" }),
+    )
+    .await
+    .unwrap()
+    .result;
+    let kinds: Vec<_> = diff["changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| {
+            (
+                c["path"].as_str().unwrap(),
+                c["kind"].as_str().unwrap(),
+                c.get("identity").is_some(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![
+            ("a.txt", "modified", true),
+            ("c.txt", "added", true),
+            ("src/b.txt", "deleted", false)
+        ]
+    );
+
+    // The bytes of an earlier state are still there, and base64.
+    let bytes = invoke(
+        &peer,
+        &handle,
+        "read_at",
+        json!({ "handle": "m1", "path": "src/b.txt" }),
+    )
+    .await
+    .unwrap()
+    .result;
+    assert_eq!(bytes, json!({ "bytes": "dHdv" }));
+
+    for (verb, input) in [
+        ("read_at", json!({ "handle": "m9", "path": "a.txt" })),
+        ("read_at", json!({ "handle": "m1", "path": "nope.txt" })),
+        (
+            "changed",
+            json!({ "stream": "stream:str1", "from": "m9", "to": "m1" }),
+        ),
+        (
+            "changed",
+            json!({ "stream": "stream:str1", "from": null, "to": "m9" }),
+        ),
+    ] {
+        let refused = invoke(&peer, &handle, verb, input).await;
+        assert!(
+            matches!(refused, Err(ProtocolError::InvalidInput { .. })),
+            "{verb}: {refused:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_snapshots_provider_without_contents_has_no_read_at() {
+    let (_child, peer) = spawn_snapshots("");
+    initialize(&peer).await;
+    let handle = check(&peer).await;
+    let refused = invoke(
+        &peer,
+        &handle,
+        "read_at",
+        json!({ "handle": "m1", "path": "a" }),
+    )
+    .await;
+    assert!(
+        matches!(refused, Err(ProtocolError::InvalidInput { .. })),
+        "{refused:?}"
+    );
+}

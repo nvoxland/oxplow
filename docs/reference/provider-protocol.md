@@ -22,6 +22,24 @@ kind? } }` for a subagent hook. Its `tool_use` answer may carry the same
 person's. The conformance suite checks that a plain `{ "prompt": … }`
 body reads as a person's and an empty body names no subagent.
 
+A snapshots provider keeps the project's snapshots in its own way and
+declares the `snapshots` capability with a `contents` feature. It answers
+three verbs, each `confirm: never`, `access: record`, over inputs that
+refuse unknown keys (`read_at` only with `contents`):
+
+- `mark { stream, worktree, trigger, thread?, turn?, effort?, budget_ms?,
+  parent? }` → `{ handle, unchanged, file_count, branch?, revision? }`:
+  it names the worktree's state with its own `handle`. `parent` is the
+  handle of the last state it marked (`null` when there is none, and the
+  whole tree is then new); `unchanged` says the tree equals the parent's.
+- `changed { stream, from, to }` → `{ changes: [{ path, kind, identity,
+  size }] }`: `kind` is `added`, `modified` or `deleted` (no `identity` or
+  `size` for a deletion), `path` is relative to the worktree with `/`, and
+  `identity` is the file's xxh3-128 as 32 lower-case hex digits. A `from`
+  of `null` is the empty tree.
+- `read_at { handle, path }` → `{ bytes }`, base64: a file's bytes at a
+  marked state. An unknown handle or path is `InvalidInput`.
+
 ## Declaring one
 
 ```yaml

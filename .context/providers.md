@@ -171,6 +171,24 @@ state (`reacts`), so a test can see a policy that wasn't chosen was asked
 nothing. The `bogus-react` hook makes `react` compose a command that
 doesn't exist.
 
+**As a snapshots provider** (`OXPLOW_FAKE_CAPABILITY=snapshots`, with
+`OXPLOW_FAKE_FEATURES=contents` for the feature of that name, which is
+the only one; any other feature or a feature on another mode exits 2) it
+declares `snapshots_declarations(contents)` — the `snapshots` capability
+with `features: { contents }` and `data: null`, the verbs `mark` and
+`changed` and, with `contents`, `read_at` (each `confirm: never`,
+`access: record`, inputs `additionalProperties: false`), no event types or
+collectors, the same `team` config. `mark` walks `worktree` (skipping
+`.git` and `.oxplow`), hashes each file xxh3-128 (lower-case hex, as
+core's `content_hash`), names the state `m<N>` and answers `{ handle,
+unchanged, file_count }` (no `branch`/`revision`); `unchanged` is whether
+the tree equals `parent`'s. `changed` diffs two marked states (`from:
+null` is the empty tree, an unknown handle `InvalidInput`) and `read_at`
+answers a file's bytes as base64. What it marked, bytes included, lives
+in memory only; the `mark`s it answered are counted in its state
+(`marks`, also what the next handle is numbered from), so a test can see a
+provider that wasn't chosen was asked nothing.
+
 ## Which trackers are backends (decided 2026-10-05)
 
 A work-items provider is a **backend for the project's own work**: when
