@@ -100,3 +100,15 @@ test("a card's menu offers the commands about its item", async () => {
   fireEvent.click(item);
   await waitFor(() => expect(ran).toEqual([["tracker.item.estimate", { ref: "work_item:fake:W-1" }]]));
 });
+
+// A right-click anywhere on a card — its title link too — opens the card's
+// menu and nothing else; opening the item in a new tab is in that menu.
+test("right-clicking a card's title opens the card's menu, not a new tab", async () => {
+  const opened: string[] = [];
+  const view = render(<WorkBoard scope="all" onOpenPage={(ref) => opened.push(ref.id)} />);
+  fireEvent.contextMenu(await waitFor(() => view.getByText("Ship it")));
+  await waitFor(() => view.getByTestId("menu-item-board-move-done"));
+  expect(opened).toEqual([]);
+  fireEvent.click(view.getByTestId("menu-item-board-open-new-tab"));
+  expect(opened.length).toBe(1);
+});

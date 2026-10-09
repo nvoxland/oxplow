@@ -8,6 +8,7 @@ test("moving a card transitions its item, and Undo moves it back", async ({ page
   await openFromLauncher(page, "Board");
   const todo = page.getByTestId("board-column-todo");
   const inProgress = page.getByTestId("board-column-in_progress");
+  // Anywhere on the card, its title link too: the card's menu.
   await todo.getByTestId("board-card").filter({ hasText: "Card to move" }).click({ button: "right" });
   await page.getByTestId("menu-item-board-move-in_progress").click();
   await expect(inProgress).toContainText("Card to move");

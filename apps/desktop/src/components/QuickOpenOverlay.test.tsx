@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render } from "@testing-library/react";
 
 import type { Stream } from "../api.js";
 import { QuickOpenOverlay } from "./QuickOpenOverlay.js";
@@ -37,4 +37,29 @@ test("renders the static launcher tree and omits Recent when there are no visits
   const { getByTestId, queryByTestId } = renderOverlay();
   expect(getByTestId("launcher-category-Work")).toBeTruthy();
   expect(queryByTestId("launcher-category-Recent")).toBeNull();
+});
+
+// Opened before the window's stream has loaded, the launcher shows — and
+// takes the focus — once it has; a query typed then survives the stream
+// being restated (only opening starts a fresh one).
+test("the launcher focuses when its stream arrives and keeps what was typed", () => {
+  const props = {
+    open: true,
+    threadId: "thr1",
+    selectedFilePath: null,
+    pages,
+    offers: [],
+    onClose: () => {},
+    onOpenFile: () => {},
+    onOpenPage: () => {},
+    onOpenSearchHit: () => {},
+  };
+  const view = render(<QuickOpenOverlay {...props} stream={null} />);
+  expect(view.queryByPlaceholderText(/Search everything/)).toBeNull();
+  view.rerender(<QuickOpenOverlay {...props} stream={stream} />);
+  const input = view.getByPlaceholderText(/Search everything/) as HTMLInputElement;
+  expect(document.activeElement).toBe(input);
+  fireEvent.change(input, { target: { value: "Settings" } });
+  view.rerender(<QuickOpenOverlay {...props} stream={{ ...stream } as Stream} />);
+  expect(input.value).toBe("Settings");
 });

@@ -25,6 +25,8 @@ export async function openNewTask(page: Page): Promise<void> {
  *  typing, and "Ask the Agent: <query>" names any query. */
 export async function openFromLauncher(page: Page, query: string): Promise<void> {
   await page.getByTestId("title-bar-search").click();
+  // It shows once the window's stream has loaded; type into it then.
+  await expect(page.getByPlaceholder(/^Search everything/)).toBeFocused();
   await page.keyboard.type(query);
   const first = page.locator(
     '[data-row-index="0"]:is([data-testid^="launcher-page-"], [data-testid^="launcher-command-"], [data-testid^="launcher-hit-"])',
