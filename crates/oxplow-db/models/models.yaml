@@ -778,7 +778,7 @@
     - { unique: id }
     - { not_null: path }
 - name: snapshot_op
-  version: 2
+  version: 3
   description: "The snapshot operation log: one row per take (why it ran, what it is anchored to, the snapshot it left the worktree at and its parent). A take that changed nothing points at its parent."
   columns:
     - { name: "seq", type: "INTEGER", doc: "Operation order within the project." }
@@ -796,6 +796,7 @@
     - { name: "file_count", type: "INTEGER", doc: "File rows recorded (0 when nothing changed)." }
     - { name: "provider", type: "TEXT", doc: "The snapshot implementation that took it (`oxplow`, `hashes`, …); NULL for takes recorded before it was kept. (v2)" }
     - { name: "contents", type: "INTEGER", doc: "1 when the take kept file contents; 0 when it recorded identities only ('Track changes only'): a read of that snapshot answers 'no contents', not 'expired'. (v2)" }
+    - { name: "handle", type: "TEXT", doc: "A snapshot provider's own name for the state the take marked, which core hands back to it as the next mark's parent; NULL for takes by oxplow's own capture. (v3)" }
 - name: stream
   version: 1
   description: "Streams: parallel lines of work, each its own git worktree. Exactly one is `primary` (the repo itself)."

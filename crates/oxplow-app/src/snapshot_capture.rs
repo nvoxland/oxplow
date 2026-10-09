@@ -1679,6 +1679,7 @@ impl SnapshotCaptureService {
                     .clone()
             }),
             contents: policy.keeps(),
+            handle: None,
         };
         let paths: Vec<String> = take.rows.iter().map(|r| r.path.clone()).collect();
         let outcome = match self.inner.store.record_take(take).await {
