@@ -397,10 +397,11 @@ as another, and two sessions on one thread are told apart.
   PTY spawn from `LaunchSpec::Pty.env`, never spelled in the `sh -lc`
   command line), Claude's per-session `mcp-config.<ses>.json` (owner-only,
   like every runtime JSON file `shared::write_json` writes; no runtime
-  file every session shares holds a bearer), its OTLP exporter's headers,
-  and an ACP agent's `McpHttp` entry. The one exception is Codex's OTLP
-  exporter: Codex reads its exporter's headers only from config, so that
-  bearer is a `--config` argument on its command line.
+  file every session shares holds a bearer), its OTLP exporter's headers
+  (`OTEL_EXPORTER_OTLP_HEADERS` in its env — Claude's and Codex's alike:
+  Codex's config names no headers, and its OpenTelemetry exporter adds the
+  env variable's), and an ACP agent's `McpHttp` entry. A bearer is never
+  on a command line: its text any process can list.
 - **What it protects.** One agent posting, exporting or calling as
   another by naming it, and agents being told apart. It is not a wall
   between processes of the same OS user: such a process can read another
