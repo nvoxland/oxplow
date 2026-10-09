@@ -15,9 +15,10 @@ rename. Each piece looks reasonable. The combined diff is
 unreviewable.
 
 **Oxplow primitive: the work queue.** A task is a row, not a vibe.
-The agent is steered by the queue lifecycle, with filing required
-before any edit. If new scope appears mid-flight, it gets a new
-row — visible to you, not silently rolled into the current diff.
+When a work list is active, tasks make scope and follow-ups durable.
+New scope can get its own row rather than disappearing into a diff.
+Filing is optional; observed turns, changes and evidence are recorded
+without requiring a task before an edit.
 
 ## Failure mode 2: silent regressions
 
@@ -25,8 +26,8 @@ The agent fixes the thing you asked about and breaks the thing you
 didn't. Because the prompt doesn't mention the broken thing, the
 agent has no incentive to notice.
 
-**Oxplow primitive: Local History.** Every effort snapshots the
-files it touched, before and after. When something looks wrong,
+**Oxplow primitive: Local History.** Observed changes and agent turn boundaries produce snapshots,
+independently of task bookkeeping. When something looks wrong,
 you diff the current state against the snapshot from before the
 agent started — and you can restore a single file without
 disturbing the rest of the working tree.
@@ -40,11 +41,11 @@ the rejected approach.
 
 **Oxplow primitive: durable tasks + wiki pages + threads.**
 The task is the persistent intent. Notes on it carry rationale
-across turns. The project wiki captures non-trivial Q&A as wiki
-pages automatically — design rationale, comparisons, walkthroughs —
-with backlinks so it stays discoverable. A read-only thread can ask the
-writer thread anything without changing files, so context can be
-reconstructed without restarting work.
+across turns. When a knowledge store is active, agent guidance encourages retaining
+useful Q&A — rationale, comparisons, walkthroughs — with links back to
+its evidence. Threads preserve lines of work across sessions. Research
+threads can investigate and record understanding without owning
+worktree edits. Work-list and knowledge providers are optional.
 
 ## Failure mode 4: no review trail
 
@@ -53,10 +54,10 @@ The diff exists; the conversation that shaped it does not. Six
 months later, nobody knows whether the weird-looking thing in
 `auth.ts` was deliberate or a one-shot artifact.
 
-**Oxplow primitive: efforts and notes.** Each task accumulates
-efforts (one per attempt) with the files touched, the snapshots
-taken, and the agent's own notes. The trail outlives the
-conversation.
+**Oxplow primitive: efforts and notes.** Activity, references and snapshots preserve evidence of the work.
+Optional effort policies group that activity and can link it to tasks;
+an effort is not a mandatory task attempt. Descriptions and decisions
+can connect the observed change to its rationale.
 
 ## Failure mode 5: no rollback
 
@@ -64,9 +65,10 @@ When the agent goes wrong, the recovery is `git reset` and hope.
 That's fine if the bad change is the most recent one and you
 haven't committed since. It's a disaster otherwise.
 
-**Oxplow primitive: per-effort snapshots.** Restore the state of
-just the files an effort touched, without affecting the rest of
-the working tree. Targeted undo, not nuclear reset.
+**Oxplow primitive: file history.** Inspect a captured version and
+restore the selected file without rewriting git history or restoring
+unrelated files. Review the resulting diff so newer work is accounted
+for.
 
 ## What "beyond" actually means
 

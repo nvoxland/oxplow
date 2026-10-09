@@ -1,125 +1,97 @@
 # Architecture vision
 
-!!! note "Direction changed (September 2026)"
-    This page predates the current direction. Oxplow is now a small
-    core (streams, threads, tasks, agents, comments, wiki, diff,
-    navigation) plus a data layer that every chart and report reads
-    from. Anything that measures or visualizes is an extension:
-    oxplow's own analytics and review ship as one bundled
-    extension, `oxplow-bundled`, in the same format you'd write one in (see
-    [Lenses](../guide/lenses.md)). Agents can run as terminal
-    harnesses or over ACP, and oxplow can call models directly for
-    small jobs ([AI models](../guide/ai-models.md)).
+Oxplow is an understanding and steering tool for software developers.
+Agents do development work; people need to understand the software,
+decide what should happen, and verify what happened. The product starts
+from those needs rather than the layout and assumptions of a code editor.
 
-    Superseded below: **Metrics** and **Change Analysis** under
-    "Today" (the pages are now lenses; the engine is still core),
-    **Acting on what the metrics say** (extensions now nudge the agent
-    through advisories), and **Common control surface for additional
-    agents** (ACP agents are built). The rest still holds.
+The intended advantage is a fresh foundation for software engineering:
+descriptions, questions, evidence, and connected views are the primary
+working surface. Real code remains the authority and is always available
+for drill-down. Monaco and language servers serve that role; oxplow is
+explicitly not an IDE.
 
-Where oxplow is heading, in rough order of conviction. This is a
-statement of direction, not a roadmap with dates. Some of this is
-shipped today; most is not.
+## Collection and analysis are central
 
-## Today
+Useful understanding requires more than a transcript or a diff. Oxplow
+connects development activity, code structure, changes, tests, metrics,
+decisions, claims, and knowledge. Collectors bring data in; models derive
+and connect it; measures, metrics, and dimensions make comparisons
+possible; lenses and the agent turn it into useful explanations and views.
 
-- **Streams + worktrees.** One agent per branch, isolated checkout,
-  no cross-stream writes. This is the foundation everything else
-  rests on.
-- **Threads inside streams.** Independent lines of work per stream
-  — a writer that ships, plus optional read-only research threads
-  with their own agents and tab sets.
-- **Durable work queue.** tasks as rows with a real lifecycle
-  (`ready` → `in_progress` → `done`), ordered by `sort_index`,
-  grouped by epic, persisted in SQLite. Filing-enforcement and
-  Stop-hook audits keep the queue honest.
-- **Local History.** Per-effort file snapshots, grouped under their
-  task, with a page that lets you compare and restore.
-- **Project wiki.** First-class markdown pages under
-  `.oxplow/wiki/`, with `[[wikilinks]]` to other wiki pages,
-  files, and commits, plus cross-kind backlinks.
-- **Web-style UI.** Pages, tabs per thread, browser-style
-  back / forward, right-click row menus, drag-to-add-context onto
-  the agent terminal. Plain-click navigates in-tab; modifier-click
-  opens a new tab. Modals have been retired in favor of inline
-  confirms / inline edits / context menus. (We shipped `⋯` kebabs
-  for a while on the discoverability argument and reverted them —
-  right-click won on density once every row had actions.)
-- **Metrics.** A durable, branch-aware metric substrate: measures,
-  gauges, and facts in SQLite, aggregated by an engine in core and
-  served to the Metrics pages, user-built dashboards and lenses. Covers both code
-  shape (complexity, duplication, lint suppressions, coverage) and
-  the driving itself (steering per effort, redo rate, time to
-  green, wasted tokens).
-- **MCP control plane.** Oxplow exposes its primitives (work
-  items, wiki pages, threads, dispatch, LSP) over MCP so the
-  agent can drive them directly.
-- **Change Analysis.** Lenses from `oxplow-bundled`, the
-  extension that ships with oxplow, shown on diff and commit pages, that rank files
-  by interestingness (churn × complexity × tests-missing ×
-  duplication) and supports drilldown by extension / directory /
-  status. Per-function before/after metrics come from
-  `analyze_functions_at_refs`; cards read from in-process
-  scanners (complexity, duplication) — no external `lizard` /
-  `jscpd` invocation.
-- **Tauri shell over Rust.** As of 0.3 the app runs on Tauri 2
-  with a Rust backend (`oxplow-domain`, `oxplow-db`,
-  `oxplow-app`, `oxplow-mcp`, `oxplow-tauri-ipc`, …) under the
-  same React / Monaco / xterm frontend. The runtime fits in a
-  fraction of what the Electron version needed.
+Built-in sources are a starting point. Every project has its own
+architecture, vocabulary, external systems, and questions. Developers
+and their agents should be able to add what gets collected and analyzed,
+then connect it to the existing record. A deployment event linked to a
+change, a test result linked to an effort, and a decision linked to the
+affected code together can explain more than any one source alone.
 
-## Near-term direction
+Questions need not start with a dashboard. Ask the agent, inspect the
+evidence, and refine the question. Keep a lens or workflow when it proves
+useful enough to repeat.
 
-- **Richer review affordances.** The task-level diff is a
-  better unit than the file-level diff. Surface it more
-  prominently. Make accept / push-back / reopen one click.
-- **Better wiki.** Wiki pages are shipping as a first-class
-  surface; the next step is treating them as durable memory the
-  agent can consult, not just the human.
-- **Acting on what the metrics say.** The substrate records the
-  numbers; it doesn't yet do anything with them. The obvious next
-  step is the runtime noticing that a task is on its fourth effort,
-  or that this week's steering rate doubled, and saying so at the
-  time rather than leaving it for you to find on a chart.
-- **Smarter dispatch.** Today the user resumes queue work by
-  prompting or running `/work-next`, which dispatches either an
-  epic-as-unit or the next standalone cluster. Eventually the
-  runtime should propose the next item with rationale, not just
-  hand back the head of the queue.
+## Personal tools, shared when useful
 
-## Medium-term direction
+Agents make personal software practical. Oxplow's extension system is
+intended to let developers customize their visibility and workflows to
+exactly what they need, then share useful extensions with a team and,
+eventually, more broadly.
 
-- **Multi-repo streams.** Real systems span repos. A stream should
-  be able to coordinate work across more than one of them — same
-  branch model, same queue, same Local History.
-- **Agent-to-agent handoff via threads.** Today threads are
-  read-only-vs-writer. The richer model is: a query thread does
-  research, hands a finding to the writer, the writer acts. That
-  needs structured handoff, not just "you can also call MCP tools."
-- **Common control surface for additional agents.** The MCP layer
-  is the right abstraction. Anything that can speak it should be
-  able to drive an oxplow stream.
+The foundation should own the plumbing: identity, references, provenance,
+query contracts, scheduling, cancellation, permissions, consent, retries,
+state, lifecycle, and diagnostics. Extension authors should spend their
+effort on their unique analysis, presentation, or workflow.
 
-## What's deliberately not on the list
+This is the design goal; the infrastructure is not equally complete for
+every contribution type today. See [Extensions](../reference/extensions.md)
+for the current authoring surface and restrictions.
 
-- **A general-purpose chat IDE.** Plenty of those exist. Oxplow is
-  opinionated about the workflow, not a blank canvas.
-- **Cloud sync, accounts, teams.** Local-first, single-user. If
-  multi-user becomes a real ask, it joins the list. Not before.
-- **Replacing the editor.** Monaco is the editor. The work happens
-  around it.
-- **Replacing git.** Git is the source of truth. Streams are
-  branches. Commits are user-driven and unchanged. Local History
-  is *additive* — it doesn't fight the git model.
+## Safety without relying on a marketplace review process
 
-## Honest about what's not built
+An extension may come from a public repository, a teammate, or your own
+agent. None of those origins makes its code trustworthy. Personal tools
+will be too numerous and change too quickly to depend on many reviewers
+examining every version.
 
-The things in "today" work and are used daily. The things in
-"near-term direction" are partially landed; specifics will change
-as the work happens. The "medium-term" section is the bet — what
-the project is shaped *toward*, even when this week's work is
-filling in something smaller.
+Safety therefore belongs in the host's enforceable contracts: constrained
+execution, explicit access, version-bound consent, shared action gates,
+resource limits, and inspectable behavior. Give extensions useful host
+services and controlled escape paths instead of making them recreate
+credentials, persistence, or authorization themselves.
 
-Direction beats roadmap when the underlying technology is moving
-this fast. Oxplow tries to publish the direction honestly and let
-the roadmap fall out of it.
+The current product already has constrained scripts, declared provider
+access, audited commands, and sandboxed UI components. Execution
+containment and consistency across extension kinds remain work to do;
+approval alone is not a guarantee that arbitrary code is harmless.
+
+## The platform boundary
+
+Core owns the shared record, integrity rules, service contracts, and
+navigation/interaction mechanisms. Extensions supply integrations,
+analyses, interpretations, presentations, and replaceable workflow policy.
+Built-in features should exercise the same public mechanisms wherever
+practical.
+
+Effort attribution and command authorization need consistent rules.
+Which review signals matter, how work is grouped, which AI prompt
+extracts a decision, or how a result is displayed should be replaceable.
+
+## Current shape and future direction
+
+Today the product has isolated worktree streams; threads with agent
+sessions; turn/tool-call recording; optional effort and work-item
+integration; snapshots; a semantic SQL layer; metrics and dimensions;
+declarative extensions; and code drill-down. A desktop shell connects to
+a per-project Rust daemon with SQLite state and an event log.
+
+The next foundation work is to make combinations of extension types
+consistent: shared run context and services, coherent activation and
+resource ownership, explicit compatibility, and better authoring tools.
+AI interfaces should evolve to support new functionality while keeping
+provenance, usage, permissions, and cancellation under host control.
+
+Interactive terminal and ACP prompts currently come from the person.
+Separate recorded AI API computations are built. Programmatic agent
+sessions and additional remote-host capabilities are future work; they
+should preserve the ability to use oxplow with a person driving an agent
+and the platform observing it.

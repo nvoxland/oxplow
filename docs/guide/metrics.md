@@ -17,8 +17,8 @@ your test and coverage tooling already emits -- see
 
 ## Metrics about the driving
 
-The less familiar kind, and the reason metrics are in oxplow at all.
-If the agent does the typing and you do the engineering, the open
+The less familiar kind. If the agent does the typing and you do the
+engineering, the open
 question is whether your steering is any good. These measure that:
 
 - **Steering per effort** -- average steering events per closed
@@ -70,6 +70,14 @@ slice a metric's history by worktree, thread, effort, task, or commit,
 and roll it up by day, week, or month, e.g. "tokens per task per week".
 
 ## Where the numbers come from
+
+Collection and analysis also extend beyond these built-in examples.
+Add sources that describe your architecture or external systems, derive
+new entities and measures, and connect them to existing work and code
+records. Dimensions let you ask the same question by package, service,
+team-relevant category, or any other declared breakdown. The goal is
+understanding the software and its development, not only measuring agent
+collaboration. See [Lenses and extensions](lenses.md).
 
 Four config blocks in `.oxplow/project.yaml`:
 

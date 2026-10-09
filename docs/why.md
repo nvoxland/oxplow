@@ -53,23 +53,32 @@ get three agents stomping on the same working tree, three threads
 of context only one of which you can hold in your head, and a diff
 nobody dares to merge.
 
-Streams are oxplow's answer: each agent gets its own branch, its own
-worktree, its own work queue, its own threads. You move between them.
-They never see each other's writes. Review is per-stream, with Local
-History showing exactly what changed in each effort.
+Streams are oxplow's answer: parallel lines of development use separate
+branches and worktrees. Threads organize the work within a stream, and
+each thread can have several agent sessions. You move between them,
+with linked activity and Local History showing what changed. One writer
+thread per stream owns worktree edits.
 
-## The IDE for the next phase
+## Understanding software as the starting point
 
-VS Code was built for one human typing into one repo. That's a fine
-tool for the world it was designed for. It's not the world we're
-in now.
+Oxplow is explicitly not an IDE. It starts with the developer's need to
+understand the software and what is happening as agents change it.
+Descriptions, questions, evidence, and connected views are the working
+surface. Code is available for drill-down when you need to verify an
+explanation or make a manual change.
 
-Oxplow is built for one human directing several agents across
-parallel branches of the same repo, with review, rollback, durable
-intent, and a project wiki as first-class primitives — not plugins
-bolted onto a single-player editor. The UI is web-style: pages,
-tabs, links, backlinks. The agent and the human navigate the same
-graph.
+Data collection, analysis, metrics, and dimensions are central to that
+approach. Connect changes to tests, development activity to decisions,
+or deployment results to the code that produced them. Built-in sources
+provide a starting point; you and your agents add what matters to your
+project and build the views and workflows you want.
+
+Agents also make personal tools practical. A useful customization can
+start with a conversation, become an extension, and be shared with a
+team. The foundation should provide the plumbing and enforceable
+guardrails so extension authors can focus on their own ideas. Sharing
+an extension does not make its code trusted; safety cannot depend on
+every version receiving a marketplace review.
 
 That's the bet. The rest of these docs are how it shows up in the
 product.

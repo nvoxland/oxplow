@@ -198,7 +198,8 @@ slots:
 
 Settings → Extensions → **Disable** turns an extension off for the
 project, including the ones that ship with oxplow. Oxplow
-ships one, `oxplow-bundled`: it holds the Usage, Planning, Review, and
+ships the required `oxplow-foundation` extension and the optional
+`oxplow-bundled` extension. The latter holds the Usage, Planning, Review, and
 Quality lenses, Change Analysis, the effort's tests and coverage, the
 review packet, and the token panels. With it off, oxplow is the plain workbench: the pages keep
 their file lists and diffs, and the Metrics pages and dashboards still
@@ -405,8 +406,11 @@ def transform(input):
     return {"entities": {"hot_item": input["rows"]}}
 ```
 
-These scripts can't reach the network, files, environment or keychain, so
-they run without approval.
+Pure scripts cannot directly reach the network, files, environment, or
+keychain, so they need no program approval. A collector that calls
+`ai.complete` or `ai.decide` also needs its source approved, an approved
+AI provider, and a configured role. Those model calls can send data
+outside the project and use your provider account.
 
 ### Syncing only what changed
 

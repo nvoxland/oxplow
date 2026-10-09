@@ -64,11 +64,11 @@ one with that name. Settings → AI marks these roles "Set by this project".
 
 ## What oxplow uses them for
 
-- **Decisions Oxplow Noticed.** When an effort closes, the `summarize` model
+- **Decisions Oxplow Noticed.** When an effort closes, the `main` model
   reads that effort's conversation and tool calls and lists decisions the
   agent made without recording them. They show on the effort's review,
   next to the decisions the agent did record. They're guesses, and your
-  agent never sees them. Nothing runs until `summarize` has a model.
+  agent never sees them. Nothing runs until `main` has a model.
 
 ## What your agent can do
 

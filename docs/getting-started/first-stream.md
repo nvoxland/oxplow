@@ -1,159 +1,103 @@
 # Your first stream
 
-This page walks through the first five minutes: open a project,
-send a prompt, watch what oxplow does, accept the work.
+Open a project, ask what is going on, and follow the evidence. You can
+then shape the views around the questions that matter to you.
 
 ## 1. Open the project
 
-Launch oxplow and pick the directory you want to work in — the
-prebuilt app prompts you to choose a project on first launch.
-(Building from source? `bun run tauri:dev` opens the current
-directory; see
-[DEV.md](https://github.com/nvoxland/oxplow/blob/main/DEV.md).)
-Oxplow scopes itself to that directory — it will not climb upward
-looking for an enclosing repo. Whatever you opened *is* the
-workspace.
+Launch oxplow and choose the project directory. That directory is the
+workspace; oxplow does not climb upward looking for an enclosing repo.
+For a source build, see
+[DEV.md](https://github.com/nvoxland/oxplow/blob/main/DEV.md).
 
-The first time you open a project, oxplow creates `.oxplow/`
-inside it:
+Oxplow stores local data and runtime files under `.oxplow/`, including
+`local.sqlite`, snapshots, and generated agent integration files. The
+built-in knowledge provider also uses `.oxplow/wiki/` when selected.
 
-```
-.oxplow/
-  local.sqlite           # tasks, threads, snapshots, settings
-  wiki/                  # wiki markdown files (`<slug>.md`)
-  snapshots/             # per-effort file snapshots (Local History)
-  runtime/               # generated agent runtime files
-  lsp/                   # cached LSP server binaries (Mason packages)
-```
-
-Worktree streams live as siblings of the project root, not under
-`.oxplow/` (git's `worktree add` defaults).
-
-The first stream — the **primary** — uses the project directory
-itself as its worktree and tracks whatever branch is currently
-checked out.
+The **primary** stream uses the project directory and its current
+branch. Additional streams have separate worktree directories.
 
 ## 2. Look at the layout
 
-The window is web-style, not IDE-style:
+- **Navigator:** streams and their threads. Expand it to see names and
+  right-click actions.
+- **Rail HUD:** search, active work, bookmarks, recent pages, and the
+  page directory.
+- **Page tabs:** descriptions, lenses, dashboards, agent sessions,
+  tasks, knowledge, files, and diffs. Follow links and backlinks between
+  them.
+- **Status bar:** branch and background activity.
 
-- **Navigator** (thin strip, far left) — a two-letter glyph per
-  stream, with its threads listed under it. The primary stream is
-  always first. Click a stream glyph to switch to that stream, or a
-  thread glyph to switch to that thread. Click the chevron at the
-  bottom (or empty space in the strip) to expand it with full names;
-  right-click a row there for its actions.
-- **Rail HUD** (next to the navigator) — your home base. Search trigger, active
-  item, up-next, bookmarks, recent files, and a directory of
-  every page you can open.
-- **Page tabs** (center) — the thread's agent terminal, plus files,
-  diffs, tasks, wiki pages, dashboards, lenses, and more. Each page has back/forward navigation and a Backlinks
-  panel.
-- **Status bar** (bottom) — branch chip, background-task
-  indicator.
+Start with the view that answers your question. You do not need to open
+an editor or create a task first.
 
-The amber accents are deliberate: anything amber is a primitive
-oxplow added on top of git or your coding agent.
+## 3. Ask a question
 
-## 3. Send a prompt
+Open an agent session in the thread. If it has none, use **New Agent
+Session…** and choose an available harness. A thread can have several
+sessions; [Agents](../guide/agents.md) explains configuration.
 
-Click the first page tab, named after the thread's agent (e.g.
-**Claude**). The agent terminal is always there, one per thread.
-Type a concrete prompt:
+Try:
 
-> List the files in this repo and write a one-paragraph summary
-> of what the project does. Don't change any files.
+> Describe what this project does and how its main parts fit together.
+> Link to the code that supports your explanation. Don't change files.
 
-The agent runs. The thread's glyph in the navigator (and the agent
-tab) shows a pulsing yellow dot while it's working, and a blue one
-when the agent asked you a question and is waiting on the answer.
-Hover the dot to see which. Asking the agent a question that doesn't need file edits
-just stops cleanly when it's answered — there's nothing to file.
+Use the explanation to navigate. When a knowledge provider is active,
+agent guidance also encourages saving useful understanding there; it is
+not required to answer the question.
 
-Oxplow supports Claude Code, Codex, and OpenCode. The project Settings page
-controls which agents are enabled and their default order. If both are
-enabled, choose one when creating a thread; the assignment stays with
-that thread. See [Agents](../guide/agents.md).
+## 4. Follow a small change
 
-Non-trivial Q&A is captured into a wiki page automatically (the
-runtime nudges the agent to do this). Look for a new file under
-`.oxplow/wiki/` after the answer.
+In the writer thread, ask for a small, reversible improvement appropriate
+to your project, such as correcting a README typo. Watch the activity,
+then inspect the resulting description and diff.
 
-## 4. Send a prompt that changes files
+Tasks are available when you want durable scope and follow-ups. They are
+optional: there is no mandatory filing step before an edit. Snapshots
+record observed changes, and enabled effort policies can group them and
+link them to tasks. Completing an effort does not automatically close a
+task.
 
-Try something small and reversible:
+Open **Local History** from the launcher (++cmd+p++) to inspect captured
+versions and compare a file with its current contents. A file restore
+changes the working tree; review it as you would any other edit. See
+[Local History](../guide/local-history.md).
 
-> Add a single-line comment at the top of README.md that says
-> "// touched by oxplow first-run". Don't change anything else.
+## 5. Add a stream or thread
 
-A few things happen:
+Use **New Stream…** to work on another branch in a separate checkout.
+The original stream remains available independently.
 
-1. The agent files a task before editing — it has to. The
-   filing-enforcement hook denies edits unless an `in_progress`
-   item is open.
-2. The task appears in the rail's **Active item** slot with
-   a live status dot.
-3. The agent edits `README.md` and snapshots it before/after.
-4. The agent closes the item to `done` with a summary note.
+Use **New Thread…** for another line of work in the same stream. One
+thread owns worktree edits; other threads can research or review with
+write guards. **Make writer** transfers that role. Agent sessions are
+separate from the thread's writer role, so you can choose the harness for
+each session.
 
-Open **Local History** from the launcher (++cmd+p++) (or
-right-click the file → Local History) and you'll see the
-snapshot. Click to diff against current; click **Restore** to
-revert just that file.
+## 6. Build your own view
 
-## 5. Add a second stream
+Ask your agent for a view over the collected data, such as:
 
-Expand the navigator and click **+ Add stream** at the bottom (or
-pick **New Stream…** from the launcher). Give it a name and pick a
-branch: an existing one, a new one from a start point, or a worktree
-you already have. Oxplow runs `git worktree add` next to the project
-root and switches to the new stream. The first stream keeps running
-independently.
+> Build a lens showing failed tests by effort, with links to the affected
+> changes and the recorded test runs.
 
-You now have two agents on two branches in the same repo, with
-isolated working trees. Switch between them by clicking their glyphs
-in the navigator.
+**New Lens with Your Agent…** in the launcher provides a starter prompt.
+The agent inspects the data, writes an extension under
+`oxplow/extensions/<name>/`, and validates it. Open the lens like another
+page. Commit the extension files to share the view with your team.
 
-## 6. Add a second thread
+If the data is missing, a collector can add it; metrics and dimensions
+can turn it into comparisons over time. Extensions that run programs or
+call models need the relevant approvals. See [Lenses](../guide/lenses.md)
+and [Metrics](../guide/metrics.md).
 
-Right-click the stream in the expanded navigator → **Add thread**
-(or pick **New Thread…** from the launcher). Type a title, pick the
-agent if you have more than one enabled, and press Enter. By default
-new threads are read-only — their writes are
-denied at the hook level. Use them to ask "how does X work" or
-"trace this codepath" without risking file edits.
+## 7. What to read next
 
-Make a thread the writer by right-clicking it in the expanded
-navigator → **Make writer**, when you want it to ship changes (only
-one writer per stream). The writer's glyph is highlighted.
-
-## 7. Build your own view
-
-Oxplow's pages are built from **lenses**: a query over oxplow's data
-(tasks, efforts, threads, comments, the wiki, test runs, …) plus how to
-show it. You don't write them by hand. Ask your agent.
-
-Open the launcher (++cmd+p++) and pick **New Lens with Your Agent…**.
-It puts a starter prompt in the agent's input; finish the sentence and
-send it yourself, e.g. "…shows every blocked task in this stream, with
-how long it's been blocked". The agent looks up the data, writes the
-lens under `oxplow/extensions/`, checks it and tells you its name. Open
-it from the launcher like any other page.
-
-Lenses are ordinary files in the repo: commit them and your team gets
-them too. See [Lenses](../guide/lenses.md) for the format.
-
-## 8. What to read next
-
-- [Concepts](concepts.md) — streams, threads, pages, tasks,
-  wiki pages, efforts.
-- [Lenses](../guide/lenses.md) — your own pages over oxplow's data,
-  and sharing them.
-- [Work queue](../guide/work-queue.md) — when to file work
-  items and how the lifecycle behaves.
-- [Wiki pages](../guide/wiki.md) — wiki pages, wikilinks,
-  backlinks, how the agent uses them.
-- [Agent control](../guide/agent-control.md) — Stop hook, write
-  guard, filing enforcement.
-- [Agents](../guide/agents.md) — Claude Code / Codex / OpenCode selection,
-  configuration, and runtime integration.
+- [Concepts](concepts.md) — data, pages, streams, threads, and optional
+  work and knowledge tracking.
+- [Lenses](../guide/lenses.md) — custom views, collection, and sharing.
+- [Metrics](../guide/metrics.md) — facts, measures, and dimensions.
+- [Work queue](../guide/work-queue.md) — optional work items.
+- [Agent control](../guide/agent-control.md) — observed activity and
+  worktree write guards.
+- [Agents](../guide/agents.md) — sessions and harnesses.

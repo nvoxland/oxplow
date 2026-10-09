@@ -5,7 +5,7 @@ in the UI, notes on the **git provider** (`oxplow_app::vcs::GitProvider`,
 the one place that touches git — `oxplow_git` or libgit2), and the rule
 that agents never call `git` directly. Core reaches version control only
 through the VCS capability — see [vcs.md](./vcs.md). For the data side
-of commits (commit points), see [data-model.md](./data-model.md) and
+of commits and their work links, see [data-model.md](./data-model.md) and
 [agent-model.md](./agent-model.md).
 
 ## Three watchers

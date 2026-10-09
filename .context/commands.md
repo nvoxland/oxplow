@@ -165,7 +165,19 @@ Today there is one: **`sql.read`** — `{ sql, params? }`, one read-only
 statement over the published models (`v_*`), its `:name`s bound from
 `params`, at most `SQL_READ_ROW_CAP` (1000) rows, answered as a list of
 row objects (`semantic_layer::read_on` on the run's connection: the
-`query_sql` authorizer, inside the transaction).
+`query_sql` authorizer, inside the transaction). More than 1000 result
+rows fails with an error; it never hands a script a silently truncated
+list. Exactly 1000 rows is allowed. Aggregate in SQL to calculate across
+all matching source rows, or explicitly narrow the query with a filter
+or `LIMIT` when a subset is intended. The same `scope_calls::Calls`
+guard serves commands, effects, effort policies, dry runs and provider
+`host/call`. Fixture `answers` stand in for the scope's complete row list.
+
+Completeness here is **of the query's result**, not collection coverage
+or freshness. An explicit `LIMIT` is part of the authored query; the
+scope cannot infer whether that subset answers the author's question.
+The row-only scope does not expose the gateway's model-change timestamps
+or prove that every source has been collected.
 
 A Starlark handler calls one with `scope(id, args)`
 (`oxplow_script::scope`). The script runs on the sandbox's

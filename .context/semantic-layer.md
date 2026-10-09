@@ -667,6 +667,15 @@ An extension entity `<entity>` owned by extension `<ext>` is exposed as
   - A 5 s interrupt timer (`InterruptHandle`) stops runaway queries.
   - The row cap defaults to 500 and can be raised to at most 10 000.
     `truncated: true` means more rows existed.
+    Hosts that return only rows must check that flag before discarding
+    the result metadata: collector `input_rows` refuses truncation at
+    10 000, and `scope_calls::Calls` refuses it at 1000 for `sql.read`
+    (commands, effects, effort policies and provider host calls).
+    Exactly the cap is allowed; SQL aggregation sees all matching rows
+    before the result cap, and an authored `LIMIT` explicitly defines
+    the query's subset. These guarantees say nothing about collection
+    coverage. `freshness` records model changes observed since startup,
+    not source collection completeness or a successful last collection.
   - Caller mistakes (bad SQL, writes, timeouts) are `Invalid` errors: the
     IPC `INVALID` code, and MCP `invalid_params`.
   - `reads.tables` is empty except in a raw read. Every bundled lens,

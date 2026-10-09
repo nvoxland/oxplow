@@ -70,7 +70,7 @@ never edit").
 ### Agents
 
 Per-project `agents` controls which agent implementations are offered
-when a thread is created. Configure it from the project Settings page
+when an agent session is opened. Configure it from the project Settings page
 or in `.oxplow/project.yaml`:
 
 ```yaml
@@ -79,7 +79,7 @@ agents:
   - codex
 ```
 
-Supported values:
+Built-in terminal harness keys:
 
 | Value | CLI Oxplow launches |
 | --- | --- |
@@ -87,26 +87,25 @@ Supported values:
 | `codex` | Codex (`codex`) |
 | `opencode` | OpenCode (`opencode`) |
 
-The list order matters: the first entry is the default for new threads.
-The Settings page's **Up** and **Down** buttons change that order. If
-only one agent is enabled, new threads use it automatically; if both
-are enabled, the new-thread row shows a selector.
+The list order matters: the first available entry is the default for new
+sessions. The Settings page's **Up** and **Down** buttons change that
+order. ACP and extension implementations add other registered keys.
 
 The setting must contain at least one value and cannot contain
-duplicates. Omitting it defaults to `[claude]`. Oxplow rejects unknown
-agent names, an empty list, and a list with duplicate entries.
+duplicates. Omitting it offers the registered harnesses. Names are
+registry keys rather than a fixed enum; an unavailable implementation
+cannot launch a session. Empty explicit lists and duplicates are rejected.
 
-Each thread stores its assigned agent at creation time. The assignment
-cannot be changed from Thread Settings, and reordering or disabling
-agents does not rewrite existing threads. This allows Claude and Codex
-threads to run concurrently while preserving their independent
-sessions and history.
+Sessions store their selected harness and resume identity. A thread can
+have none or several, including different harnesses. Reordering the
+project list does not rewrite existing sessions. A personal new-thread
+preference can choose a default session or show the session picker.
 
 The singular `agent:` key is not accepted: a file that has it is
 refused as having an unknown key. Use `agents`.
 
 The selected CLI must be installed, authenticated, and available on
-`PATH`. See [Agents](../guide/agents.md) for thread selection, runtime
+`PATH`. See [Agents](../guide/agents.md) for session selection, runtime
 integration, and concurrent operation.
 
 ### Snapshot retention

@@ -39,7 +39,8 @@ pub fn check_callable(id: &str) -> Result<(), String> {
     ))
 }
 
-/// The most rows one `sql.read` answers.
+/// The most rows one `sql.read` answers. A result over this cap is
+/// refused: the row-only answer cannot represent truncation.
 pub const SQL_READ_ROW_CAP: usize = 1_000;
 
 /// How `sql.read` is answered: the query's result.
@@ -124,6 +125,10 @@ impl<'a> Calls<'a> {
             )
             .limit(Some(SQL_READ_ROW_CAP));
         match (self.read)(query) {
+            Ok(result) if result.truncated => Err(format!(
+                "`sql.read` returned more than {SQL_READ_ROW_CAP} rows; aggregate in SQL \
+                 or explicitly narrow the query; partial results are not returned"
+            )),
             Ok(result) => Ok(Value::Array(rows_json(&result))),
             Err(DomainError::Busy(m)) => {
                 self.busy = Some(m.clone());
@@ -243,5 +248,78 @@ mod tests {
         );
         assert!(calls.serve("sql.read", json!({ "sql": "x" })).is_err());
         assert_eq!(calls.take_busy().as_deref(), Some("locked"));
+    }
+
+    const NUMBER_ROWS: &str = "WITH RECURSIVE numbers(n) AS (
+        SELECT 1 WHERE :total > 0
+        UNION ALL SELECT n + 1 FROM numbers WHERE n < :total
+    ) SELECT n FROM numbers ORDER BY n";
+
+    /// The row-only scope must never present a capped prefix as the full
+    /// input. The gateway probes one extra row, so exactly the cap is OK.
+    #[tokio::test]
+    async fn sql_read_requires_complete_results_at_the_row_cap() {
+        let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
+        for total in [
+            0,
+            SQL_READ_ROW_CAP - 1,
+            SQL_READ_ROW_CAP,
+            SQL_READ_ROW_CAP + 1,
+        ] {
+            let result = crate::effects::run_over(
+                &layer,
+                &needs(&["sql.read"]),
+                &format!(
+                    r#"def transform(x):
+    rows = scope("sql.read", {{"sql": {sql:?}, "params": {{"total": {total}}}}})
+    return {{"skip": str(len(rows))}}
+"#,
+                    sql = NUMBER_ROWS,
+                ),
+                json!({}),
+                None,
+            )
+            .await;
+            if total > SQL_READ_ROW_CAP {
+                let err = result.unwrap_err();
+                assert!(
+                    err.contains("`sql.read` returned more than 1000 rows"),
+                    "{err}"
+                );
+            } else {
+                assert_eq!(
+                    result.unwrap(),
+                    crate::effects::Reaction::Skip(total.to_string())
+                );
+            }
+        }
+    }
+
+    /// Aggregate in SQL to keep all source rows in the calculation while
+    /// returning a complete result that fits the scope's cap.
+    #[tokio::test]
+    async fn sql_read_aggregates_all_rows_before_applying_the_cap() {
+        let db = oxplow_db::Database::in_memory();
+        db.read(|conn| {
+            let (needs, trace) = (needs(&["sql.read"]), ScopeTrace::default());
+            let mut calls = Calls::new(
+                &needs,
+                &trace,
+                Box::new(|q| oxplow_db::semantic_layer::read_on(conn, &q)),
+            );
+            let sql = format!("SELECT count(*) AS n, sum(n) AS total FROM ({NUMBER_ROWS})");
+            assert_eq!(
+                calls
+                    .serve(
+                        "sql.read",
+                        json!({ "sql": sql, "params": { "total": 1001 } })
+                    )
+                    .unwrap(),
+                json!([{ "n": 1001, "total": 501501 }]),
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
     }
 }

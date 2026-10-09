@@ -1,104 +1,67 @@
 # Agents
 
-Oxplow supports **Claude Code**, **Codex**, and **OpenCode** as agent
-backends. A
-project can enable either one or both, and every thread records which
-agent it runs.
+A thread is a line of work, not the home of one fixed agent. It can have
+no agent session or several. Sessions have their own agent implementation,
+process, resume identity, activity, and status; they share the thread's
+context, tabs, and writer role.
 
-The agent is a property of the thread, not the stream. That means a
-Claude thread and a Codex thread can run at the same time in one
-project, including on the same stream. The stream still has exactly one
-writer thread; all other threads are read-only regardless of which
-agent they use.
+Oxplow ships harness integrations for Claude Code, Codex, OpenCode, and
+ACP, with implementations declared by its foundation extension. An ACP
+session uses a structured conversation; terminal harnesses use a PTY in
+the stream's worktree.
 
-## Enable agents for a project
+## Choose available harnesses
 
-Open the project **Settings** page and enable any combination of
-Claude, Codex, and OpenCode.
-Use **Up** and **Down** to set their priority. The first enabled agent is
-the default when a new thread is created.
-
-The same setting lives in `.oxplow/project.yaml`:
+Project Settings or `.oxplow/project.yaml` can limit and order the
+harnesses offered for new sessions:
 
 ```yaml
 agents:
   - claude
   - codex
+  - opencode
 ```
 
-The supported values are `claude` and `codex`. At least one must be
-enabled, and an agent cannot appear twice. When the setting is omitted,
-Oxplow defaults to:
+Names are registered harness keys. Omitting the setting offers the
+registered harnesses; an explicit list must be nonempty and contain no
+duplicates. Its first available entry is the default. Additional
+implementations can extend the registry.
 
-```yaml
-agents:
-  - claude
-```
+ACP agent commands are configured separately. Enabling an implementation
+does not install its CLI or authenticate it. See
+[Settings](../reference/settings.md#agents).
 
-See [Settings](../reference/settings.md#agents) for validation and
-legacy configuration details.
+## Sessions inside a thread
 
-## Choose an agent for a thread
+Open a session from the session picker or **New Agent Session…**. Choose
+its implementation and, for ACP, the configured ACP agent. Each open
+session has its own tab. A personal new-thread preference can seed a
+session when a thread is created; otherwise a thread can start empty.
 
-When more than one agent is enabled, the new-thread row includes an
-agent selector. Its initial value is the first entry in `agents`. When
-only one agent is enabled, Oxplow uses it without showing a selector.
+To use a different agent, open another session. Closing or renaming a
+session does not replace the thread or discard its recorded work. A
+session's resume identity belongs to that session and harness.
 
-The assignment is fixed after the thread is created. Thread Settings
-shows the assigned agent, but does not change it. Create another thread
-to switch agent implementations while preserving the original thread's
-session and history.
+Several agents can run in one thread. They share the same worktree;
+separate streams provide separate worktrees. Writer status is per thread,
+so running several writer sessions requires coordinating their edits.
 
-Changing the project-level `agents` setting affects the choices for new
-threads. It does not rewrite existing threads, so a previously-created
-thread keeps its assigned agent even if that agent is later removed
-from the enabled list.
+## Shared observations and services
 
-## What Oxplow provides to each agent
+Harness integrations feed turns, tool calls, status, usage, and changes
+into the shared record. Agents can read the same semantic models and use
+the same audited commands through MCP. Generated integration files live
+under `.oxplow/runtime/` and are rewritten as needed; configure the
+project rather than editing those generated files.
 
-Both agents receive the same project and thread context and connect to
-the same Oxplow MCP control plane. They can work with tasks, threads,
-follow-ups, wiki pages, LSP tools, snapshots, and the other project
-primitives exposed through MCP.
+Only the writer thread may change its stream's worktree. No session needs
+an in-progress task to make an edit, and work tracking never gates Stop.
+Efforts belong to the thread and can span sessions. See
+[Agent control](agent-control.md) and [Local History](local-history.md).
 
-Oxplow generates the integration files needed by each CLI under
-`.oxplow/runtime/` whenever it starts an agent session:
+## Input
 
-- Claude Code uses `.oxplow/runtime/claude-plugin/` for hooks, skills,
-  commands, and MCP configuration.
-- Codex uses `.oxplow/runtime/codex-plugin/` for hooks, skills, and MCP
-  configuration.
-
-The generated files are implementation details and are rewritten as
-needed. Do not edit them as project configuration.
-
-Each thread also has its own terminal session and resume identity. A
-Claude session is never resumed as Codex, or vice versa. Both CLIs run
-with the stream worktree as their working directory.
-
-## Control rules are agent-independent
-
-Agent selection does not change Oxplow's safety model:
-
-- Only the stream's writer thread may edit project files.
-- A writer needs an `in_progress` task before authored edits.
-- Lifecycle hooks feed activity and stop events into Oxplow.
-- MCP calls are scoped to the current thread and stream.
-- Efforts and Local History attribute changes to the same task model.
-
-The generated integration translates each CLI's hook and configuration
-format into those shared rules. See [Agent control](agent-control.md)
-for the full lifecycle.
-
-## CLI prerequisites
-
-Oxplow launches the selected agent's command from your environment. The
-corresponding CLI must already be installed, authenticated, and
-available on `PATH`:
-
-- `claude` for Claude Code
-- `codex` for Codex
-- `opencode` for OpenCode
-
-Enabling an agent in `.oxplow/project.yaml` does not install its CLI or configure
-its model provider credentials.
+The person sends terminal input and ACP prompts. Oxplow context and
+advisories supply steering information without automatically typing into
+those interactive surfaces. Recorded AI API computations are separate;
+see [AI models](ai-models.md).

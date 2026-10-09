@@ -1,72 +1,94 @@
 # Oxplow
 
-A desktop app for guiding and tracking coding agents (Claude Code, Codex,
-and others) across many parallel branches of one project. Each **stream** is
-its own branch, worktree, and agent instance.
+Oxplow helps software developers understand and steer development while
+coding agents do the implementation work. Start with descriptions,
+questions, evidence, and connected views of what is happening; drill down
+to the real code when you need to verify an explanation or make a change.
 
-Oxplow is built around steering an agent like a pair-programming
-partner. The agent does the typing; your job is to plan, review, and
-understand the big picture. It's a comprehension and steering surface --
-a work queue, commit/wait points, file snapshots, and a Local History
-view sit on top of the agent so you can keep several agents moving
-through real work without them clobbering each other. Monaco + LSP are
-there for reading code and the occasional manual change, but oxplow is
-not an IDE: the focus is the system, not the editor.
+Oxplow is explicitly not an IDE. Its pages, navigation, data model, and
+extension system are built around understanding software and the work
+that changes it. Monaco and language servers provide code drill-down;
+the editor does not define the product's structure.
 
-## What it gives you
+## Build the visibility you need
 
-- **Streams + worktrees.** Each stream owns a branch and its own
-  checkout, created as a sibling of the main repo at
-  `<parent>/<project_basename>-<slug>/`. Running agents never share
-  a working tree — writes from non-writer threads are denied at the
-  hook level.
-- **Threads inside a stream.** One active "writer" thread, any number
-  of read-only query threads. Agents on query threads can ask the
-  writer anything but can't modify files.
-- **Work queue.** A durable list of tasks with status lifecycle
-  (`ready → in_progress → done`, plus `blocked` / `canceled` /
-  `archived`), grouped by epic,
-  dragged between sections, and ordered by a single `sort_index`
-  shared with commit points and wait points.
-- **Commit points and wait points.** Inline markers in the queue.
-  Commit points fire a git commit when the agent reaches them; wait
-  points block the agent until the user releases the gate. Auto-
-  commit mode replaces the commit-point queue with an every-stop
-  default.
-- **Local History.** Every turn produces file snapshots. Efforts are
-  grouped per task; the modal shows per-effort file-change
-  counts and lets you jump back to any end snapshot.
-- **Editor + file browser.** Monaco-based editor with blame overlay,
-  diff tabs, and Git-aware decorations. Custom React file tree rather
-  than the VS Code explorer.
-- **Agent control plane.** MCP tool surface (`mcp__oxplow__…`) plus
-  agent hook integration — stop-hook directives feed a work-
-  queue orchestrator that auto-progresses the agent without oxplow
-  ever sending it a raw prompt.
+Data collection, analysis, metrics, and dimensions are central to oxplow.
+Built-in integrations collect development activity, code and change
+information, test results, and agent usage. Developers and their agents
+can add sources and analyses, connect them to existing data, and build
+the descriptions, reports, and workflows useful to their project.
 
-## Architecture in one paragraph
+Ask an agent a question first. When an answer or workflow is worth
+keeping, have it build an extension: a collector, model, metric, lens,
+page, command, or event reaction. Extensions are ordinary project files
+that can be personal or shared with a team. The long-term goal is to
+make broader sharing practical too.
 
-A Rust backend (Tauri 2 shell + a set of `oxplow-*` crates) owns the
-SQLite database, the stores (streams, threads, work items, commit/wait
-points, snapshots, efforts), and an MCP server + hook endpoint that
-Claude Code or Codex connects to per thread. The React/Monaco/xterm frontend
-subscribes to store events and renders the rail HUD + pages UI (work
-queue, file browser, editor/diff pages, terminal, Local History).
-This repo keeps its own internal architecture notes under
-[.context/](./.context/) (a convention for *this* codebase, not an oxplow
-feature).
+The foundation supplies shared identity, references, provenance, query
+services, action gates, and execution infrastructure. Extensions should
+focus on their own business value. Repository-supplied code is not
+trusted merely because an agent wrote it or a teammate shared it:
+programs and privileged contributions use explicit declarations and
+human consent. These guardrails are part of the platform, with current
+limits documented in the [extension reference](docs/reference/extensions.md).
+
+## What it provides today
+
+- **Connected evidence.** Turns, tool calls, changes, snapshots, test
+  runs, metrics, claims, decisions, and knowledge can be read through
+  published SQL models. Observations, claims, and AI inference retain
+  their provenance.
+- **Collectors, metrics, and dimensions.** Collect raw data, derive new
+  entities and facts, aggregate measures, and compare them across the
+  dimensions relevant to your system and development process.
+- **Custom views and workflows.** Extensions contribute models, lenses,
+  pages, panels, guidance, commands, effects, and sandboxed components.
+  Bundled features use these mechanisms as well.
+- **Parallel streams.** A stream has its own branch and worktree. Each
+  stream has one writer thread; other threads can research, review, and
+  record understanding without editing that stream's worktree.
+- **Threads and agent sessions.** A thread is a line of work, with its
+  own tabs and context. It can have no agent session or several, using
+  terminal harnesses or ACP conversations.
+- **Work tracking and history.** Activity is recorded without requiring
+  task bookkeeping. Optional effort policies group work and link it to
+  work items. Snapshots preserve working-tree history alongside git.
+- **Code drill-down.** File, diff, history, and language-server views let
+  you check the implementation behind an explanation.
+- **Shared actions.** Commands validate inputs and apply permissions,
+  confirmation, audit, and transaction rules. Agents use the same
+  semantic data and command surfaces through MCP.
+
+Commits are user-driven. Oxplow does not require a task before an edit
+or refuse an agent's stop because bookkeeping is incomplete. Terminal
+input and ACP prompts originate from the person; recorded AI API
+computations are a separate service.
+
+## Architecture
+
+A Tauri desktop shell opens project windows, each connected to a
+per-project Rust daemon. The daemon owns SQLite state, the event log,
+semantic models, integration services, and extension execution. The
+React frontend renders the page graph, lenses, agent sessions, and
+code drill-down. Read contracts connect data from different sources;
+commands provide the action side.
+
+See the [architecture vision](docs/philosophy/architecture-vision.md)
+for the product direction and [.context/](.context/) for internal design
+and implementation notes.
 
 ## Running
 
-See [DEV.md](./DEV.md) for installing, building, and running from
-source. Prebuilt installers are produced by CI on every push —
-download the `oxplow-<os>` artifact from the latest Actions run to
-grab an unsigned `.dmg` / `.exe` / `.AppImage` / `.deb`.
+See [DEV.md](DEV.md) for building and running from source and
+[the documentation](https://nvoxland.github.io/oxplow/) for usage.
 
 ## Status
 
-Early / personal — not yet signed, not yet in a store. APIs and
-on-disk schema change freely; migrations are the forward-only path.
+Oxplow is early and actively evolving. Contribution kinds have explicit
+stable or experimental status; broader extension compatibility,
+execution containment, and authoring ergonomics are still being improved.
+Database migrations are the forward path for stored data. The next work
+is specified in the [foundation roadmap](.context/foundation-roadmap.md).
 
 ## License
 

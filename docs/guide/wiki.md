@@ -1,7 +1,9 @@
 # Wiki pages
 
-Oxplow's wiki is a per-project folder of markdown files at
-`.oxplow/wiki/`, indexed in SQLite, with first-class backlinks.
+Oxplow's built-in knowledge store keeps per-project markdown pages at
+`.oxplow/wiki/`, indexed in SQLite, with first-class backlinks. A project
+can choose another knowledge implementation or none in Settings →
+Capabilities. With no store active, knowledge writes are not retained.
 Wiki pages are how durable understanding lands — codebase
 walkthroughs, design rationale, comparisons, recommendations,
 the "why we did it this way" stuff that doesn't belong in a
@@ -68,22 +70,19 @@ bodies, task touched files, findings) — no manual upkeep.
 
 ## Agent capture
 
-Non-trivial exploratory Q&A is captured into a wiki page
-automatically. The runtime nudges the agent when it sees
-patterns like "how does X work", "explain X", "trace X",
-"why does X", "what's the difference", "compare", "tradeoffs",
-"recommend". The agent searches existing wiki pages first, then
-writes / appends to `.oxplow/wiki/<slug>.md`, then re-syncs the
-index.
+The wiki-capture skill guides agents to retain useful exploratory Q&A:
+walkthroughs, rationale, comparisons, and recommendations. The agent
+searches existing pages first, then creates or updates one through
+`oxplow.knowledge.write_page`. The command maintains the page, links,
+and freshness references together. With the built-in store it also
+writes the markdown file.
 
-This works on read-only threads too — the write guard exempts
-the wiki directory because wiki capture is research output, not
-authored project change.
+This works on non-writer threads too: recording understanding is
+independent of permission to edit the stream's worktree.
 
 ## Resyncing
 
-If you edit wiki pages externally (your own editor, a script),
-the file watcher catches it and re-baselines. If you want to
-force a sync immediately, right-click the page (or use the
-agent does it after its own writes).
+With the built-in store, the file watcher detects external edits and
+updates the index. Agents should use the write command so reference
+validation and freshness handling occur with the write.
 

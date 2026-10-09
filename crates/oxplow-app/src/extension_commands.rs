@@ -2057,6 +2057,63 @@ mod tests {
         assert_eq!(task(&fx).await.status, oxplow_tasks::TaskStatus::InProgress);
     }
 
+    /// A truncated read must stop composition before its children can
+    /// change any records. Narrowing the query explicitly still works.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sql_read_truncation_prevents_a_commands_child_writes() {
+        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let r = oxplow_tasks::work_item_ref(fx.task);
+        let sql = "WITH RECURSIVE numbers(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM numbers WHERE n < 1001) SELECT n FROM numbers ORDER BY n";
+        let handler = |query: &str| {
+            format!(
+                r#"def transform(x):
+    rows = scope("sql.read", {{"sql": {query:?}}})
+    return {{
+        "commands": [{{
+            "name": "oxplow.work_item.transition",
+            "input": {{"ref": x["input"]["ref"], "to": "done"}},
+        }}],
+        "result": {{"rows": len(rows)}},
+    }}
+"#
+            )
+        };
+        with_finish(&fx, &handler(sql)).await;
+        let err = fx
+            .svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "my_review.review.finish",
+                json!({ "ref": r }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("`sql.read` returned more than 1000 rows"),
+            "{err}"
+        );
+        assert_eq!(task(&fx).await.status, oxplow_tasks::TaskStatus::InProgress);
+
+        // A result bounded by the author's SQL is complete for that query.
+        with_finish(&fx, &handler(&format!("{sql} LIMIT 1000"))).await;
+        let out = fx
+            .svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "my_review.review.finish",
+                json!({ "ref": r }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(out.result["result"]["rows"], json!(1000));
+        assert_eq!(task(&fx).await.status, oxplow_tasks::TaskStatus::Done);
+    }
+
     /// `access: read`: it reads and answers, and nothing is recorded; one
     /// that composes a command is refused.
     #[tokio::test(flavor = "multi_thread")]

@@ -16,6 +16,27 @@ to. But that editor is a **drill-down detail view, not the primary
 surface** — it is reached *from* the comprehension/steering surface, it
 does not define the app the way it defines an IDE.
 
+Data collection, analysis, metrics and dimensions are central to this
+goal. Built-in sources and developer/agent-authored collectors feed a
+shared semantic layer. Models connect different sources; lenses and
+conversation describe what is happening and let the person drill down
+to evidence and code. The product should make it practical to work at
+that descriptive level rather than repeatedly reconstruct understanding
+from individual files.
+
+Agents make personal tools cheap to build. Extensions should let a
+developer customize that understanding and connect data and functionality,
+then share useful work with a team and eventually more broadly. Core
+owns identity, provenance, permissions, consent, execution, lifecycle,
+state and diagnostics; extensions supply their unique business value.
+This is a design rule, not a claim that every shared service is complete.
+
+Extension safety cannot rely on marketplace review or assume an agent's
+own output is trusted. Use host-enforced, declared access and scoped
+services, with useful controlled escape paths. See
+[foundation-roadmap.md](./foundation-roadmap.md) for the unification work
+and [extensions.md](./extensions.md) for today's contracts.
+
 We still borrow **workflow concepts** and small building blocks from VS
 Code (Monaco, codicons, decorations, the URI/model patterns) — we just
 don't organize the product around an editor.
@@ -46,7 +67,7 @@ which is that oxplow steers and never drives a doing-agent.
   semantic layer — the `ai_*` collector builtins, recorded computations
   (`AiCompute`). That is oxplow's own computation. It never prompts the
   agent doing the work and never touches an agent terminal.
-- **ACP agents** (tsk281, built): an agent spoken to over the Agent Client
+- **ACP agents** (built): an agent spoken to over the Agent Client
   Protocol receives a prompt **only** when a human presses Enter in the
   thread's prompt box. oxplow's context (session context, advisories,
   decisions, post-tool nudges) rides **only** on that human prompt, as a
@@ -116,8 +137,13 @@ None of these run until a person approves that program on their machine.
   Approving sends that version back, and a program that changed between
   the listing and the click is refused, so nothing can swap it in the
   meantime.
-- **Not gated:** in-process Starlark/jq (sandboxed, no I/O) and the user's
-  own global-scope config.
+- **Not gated:** pure in-process Starlark/jq transforms without privileged
+  host access, and the user's own global-scope config. Model-calling
+  collectors, scripted effort policies, effects, AI-provider scripts and
+  components that invoke commands have their own consent gates. I/O
+  restriction alone does not contain CPU or memory: current in-process
+  script timeouts can leave a worker running; the foundation roadmap
+  includes enforceable computation limits.
 
 A new way for config to start a program must go through the same gate.
 

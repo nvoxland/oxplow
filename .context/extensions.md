@@ -588,26 +588,32 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
 
 ## The rules
 
-- **Controls in core, instruments in extensions.** Core ships what you
-  steer with: threads, tasks and efforts, agent surfaces, comments, wiki,
-  diff, the page graph. Everything that measures or visualizes is an
-  extension over the [semantic layer](./semantic-layer.md). That includes
-  what oxplow itself ships.
+- **Controls in core, instruments in extensions.** Core supplies the page
+  and reference graph, stream/thread shell,
+  agent surfaces, diff and inspection primitives, the semantic layer, and
+  safe host services. Tasks, knowledge storage, and effort policy have
+  selectable implementations, including none where supported. Collected
+  evidence and analysis mechanisms are shared infrastructure; particular
+  workflow policies and presentations belong in extensions. The
+  [foundation roadmap](./foundation-roadmap.md) identifies remaining core
+  policies to extract through public APIs.
 - **One format for first- and third-party.** The bundled
   `oxplow-bundled` extension uses exactly the format a user or their
   agent writes. If extracting it needs something the format lacks, that
   feature is added to core for everyone and logged under "Added for
   extraction" below. No private backdoors.
-- **Declarative and scripted only.** An extension is YAML, SQL,
-  Starlark/jq/exec sources and declarative lenses. No user-authored code
-  runs in the app window. Reason: code in the window holds the daemon's UI
+- **Host-mediated execution.** Extensions use YAML, SQL, scripts,
+  external programs, and optional custom components in sandboxed frames.
+  Extension JavaScript does not execute with the app window's authority.
+  Code in the window holds the daemon's UI
   token, and `/ipc` includes `forward_terminal_input`, so agent-written JS
-  in the window could drive the agent. Revisit only after a scoped, read-only IPC
-  surface exists ([remote-daemon.md](./remote-daemon.md) names the
-  extension point).
-- **Exceptions over trends.** Shipped lenses are live exception lists at the
-  effort boundary (rows disappear when addressed), not dashboards of
-  totals.
+  in the window could drive the agent. Custom components use the declared,
+  scoped bridge instead; arbitrary app-window code remains outside that
+  contract.
+- **Presentations are policy.** Bundled lenses provide useful starting
+  views, including exceptions at an effort boundary. Trends, reports and
+  domain-specific dashboards are equally valid extension presentations;
+  the semantic data and metrics are reusable independently of a view.
 
 ## Where extensions live
 
@@ -2275,7 +2281,15 @@ A script's scope needs are the scopes a script can call
 (`scope_calls::CALLABLE`, `check_callable`): one it can't is refused at
 load, the one rule a command's `entry:`, an effect and a provider's
 `host/call` meet. A capability need (`work_items.comments`) gates the
-command instead:
+command instead.
+
+`sql.read` returns complete row lists only: more than 1000 result rows
+fails in `scope_calls::Calls` before composition can act on a partial
+set. Exactly 1000 is allowed. Aggregate in SQL when all matching data
+must contribute, or explicitly filter/limit a query when a subset is
+intended. Commands, effects, effort policies, provider host calls and
+dry runs share this check. A complete query result does not establish
+collection coverage or freshness; the row-only scope carries neither.
 
 ```yaml
 commands:

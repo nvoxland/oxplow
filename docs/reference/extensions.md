@@ -5,6 +5,18 @@ An extension is a folder under `oxplow/extensions/<name>/` with an
 lenses, models, collectors, commands, effects, providers and the rest.
 Each of those is a *contribution*.
 
+The goal is personal tools that agents can help you build, with useful
+customizations shareable with a team and eventually more broadly. Core
+provides the shared data and action contracts; an extension adds its own
+analysis, presentation, integration, or workflow.
+
+Repository code is untrusted regardless of who authored or shared it.
+Access declarations, version-bound approval, command gates, and component
+isolation provide guardrails. Current in-process script timeouts stop
+waiting for a result but may leave computation running: they are not yet
+CPU/memory containment. External-program isolation also depends on the
+platform; see [collector limits](../guide/lenses.md#collectors-bringing-in-outside-data).
+
 ```sh
 oxplow extension new extension my-review   # scaffold one that checks clean
 oxplow extension check my-review           # every problem, as file:line
@@ -114,6 +126,12 @@ commands:
 
 - A script reaches oxplow only through the scopes in `needs`. Today a
   script can call `sql.read`; naming another scope is a load error.
+- `scope("sql.read", { sql, params })` returns a list of row objects.
+  More than 1,000 result rows fails instead of returning a partial list;
+  exactly 1,000 is allowed. Aggregate in SQL to calculate over all
+  matching rows, or explicitly filter/limit the query when you want a
+  subset. This rule also applies to effects, effort policies and provider
+  host calls. A complete result does not prove every source was collected.
 - `ui` says how a person meets it. `about` offers it on that kind of
   ref's page and rows. `input` binds `{{stream}}`, `{{thread}}`,
   `{{ref}}` or `{{ref.id}}`, each as a whole string. `form` opens a

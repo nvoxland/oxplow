@@ -1,138 +1,63 @@
 # Agent control
 
-Oxplow steers the agent through three mechanisms: the **Stop
-hook**, the **MCP control plane**, and the **filing-enforcement
-hook**. You don't normally touch them directly — but
-understanding them is what makes the rest of oxplow's behavior
-obvious instead of magical.
+Oxplow observes agent activity, supplies context and guidance, and exposes
+shared data and actions. It does not require task bookkeeping before an
+edit or keep an agent working after Stop to reconcile the work queue.
 
-## Key invariant
+## Human input and recorded AI computations
 
-**The runtime never sends prompts to the agent.** The only ways
-the runtime steers the agent are:
+Interactive terminal input comes from the person. ACP prompts are sent
+when the person submits the prompt box; visible oxplow context can
+accompany that prompt. Neither path automatically types prompts or
+answers into a coding agent.
 
-1. The system prompt set at launch.
-2. Hook responses returned over HTTP — especially the Stop
-   hook's continuation directive, which tells the active agent
-   to keep going.
-3. MCP tool responses (when the agent calls one).
+Oxplow can separately call a configured model's API for recorded
+computations such as classification, scoring, summarization, and
+extraction. Those computations contribute data; they are distinct from
+driving the agent doing the development work. See [AI models](ai-models.md).
 
-There is no auto-typing into the terminal. Auto-progression
-through queued work happens because Stop directives keep the
-agent from quitting until its obligations are settled.
+## Hooks and observations
 
-## Stop hook
+Each harness translates its activity into oxplow's shared record. Turns,
+tool calls, status, snapshots, test evidence, and usage can be associated
+with the session and thread that produced them.
 
-When the agent finishes a turn, its generated Claude Code or Codex
-integration fires the Stop hook. Oxplow's response decides whether the
-agent gets to stop or has to keep working. The pipeline runs in
-priority order:
+At turn end, oxplow records the turn and requests a snapshot. Optional
+effort policies group the observed activity. Guidance is advisory:
+there is no filing-before-editing gate or in-progress-task Stop audit.
 
-1. **Q&A short-circuit.** If the turn had no qualifying tool
-   activity (no edits, no task filing, no dispatch), the
-   agent answered or asked a question and is allowed to stop.
-   Every directive is suppressed.
-2. **Awaiting-user gate.** If the agent has flagged that it is
-   waiting on the user, the runtime allows the stop and
-   suppresses every directive until the user replies.
-3. **In-progress audit.** If the writer thread has any
-   `in_progress` tasks, the runtime blocks with an audit
-   directive: reconcile each item — still active → leave alone;
-   change shipped → close it (a `oxplow.work_item.transition` to `done`
-   plus an `oxplow.effort.report`, run together as one
-   `oxplow.command.sequence`); stuck → mark
-   `blocked`; obsolete → mark `canceled`. A signature dedup
-   prevents the same audit firing repeatedly when nothing
-   changed.
-4. **Filed-but-didn't-ship advisory.** Catches the misread
-   where the agent logged a `ready` row instead of doing the
-   work the user asked for.
-5. **Otherwise.** Allow stop.
+## Writer boundary
 
-Cross-turn queue progression is **user-driven**. When the agent
-finishes its obligations and Stops, it stops — you resume queue
-work by sending a new prompt or running the bundled `/work-next`
-slash command (which dispatches the next ready cluster).
+Each stream has one writer thread. Other threads may research, review,
+and record work items, notes, knowledge, and other project records, but
+may not change that stream's worktree. Sessions inherit their thread's
+writer role. If several sessions run in the writer thread, the person
+coordinates their concurrent work.
 
-## Filing-enforcement hook (PreToolUse)
+This is an enforced worktree ownership rule, not a general operating
+system sandbox around the coding agent. It does not make every shell
+command or every file outside the stream read-only.
 
-When the agent invokes `Edit` / `Write` / `MultiEdit` /
-`NotebookEdit` on the writer thread without an `in_progress`
-task, the hook denies the edit before it lands. The agent
-files an item at `in_progress` (or flips an existing `ready`
-row) and re-issues the edit.
+## MCP and commands
 
-A `ready`-status filing alone does not satisfy the guard.
-`ready` is "noticed for later" (backlog); only `in_progress` is
-"committed to ship now."
+Agents read published models through SQL and use commands for changes.
+Commands validate inputs and apply actor permissions, confirmation,
+audit, and transaction rules. The session/thread context identifies
+where a call came from.
 
-`Bash` is exempt — shell commands routinely mutate the worktree
-as a side effect (`git merge`, `git pull`, codegen, formatters)
-without representing authored change worth filing.
+Wiki writes use `oxplow.knowledge.write_page`, which maintains the page
+and its references together. Capturing understanding works from
+non-writer threads too; it needs an active knowledge store to retain it.
 
-## Write guard
+## What you choose
 
-Each thread has a role:
+- Available agent harnesses and defaults for new sessions.
+- Which sessions a thread uses; a thread can have none or several.
+- Which thread is the stream's writer.
+- Optional work-item, effort-policy, and knowledge implementations.
+- Which repository-supplied programs and privileged contributions you
+  approve, on your machine and for the version reviewed.
 
-- **Writer.** Edits files. One per stream.
-- **Read-only.** Cannot edit files; can read, search, query.
-
-The role is enforced in the hook. When a non-writer thread
-tries to edit, the hook returns an error before the edit runs.
-This is non-bypassable from the agent side — the guard is
-out-of-process. Promote a different thread to writer (or switch
-to the writer thread) if you need to edit.
-
-The wiki directory (`.oxplow/wiki/`) is exempt — wiki capture
-works on read-only threads too, because the wiki is research
-output, not authored project change.
-
-## MCP control plane
-
-Oxplow exposes its primitives over MCP — tasks, dispatch,
-threads, follow-ups, wiki pages, LSP — so the agent can drive
-them directly without raw shell escapes. Each thread gets its
-own MCP endpoint scoped to that thread, so tool calls implicitly
-target the right stream and writer status.
-
-Wiki bodies are an exception: the agent writes them directly
-with its built-in `Write` / `Edit` tools rather than through
-MCP, which avoids round-tripping full bodies through tool args.
-The wiki watcher syncs metadata on every file event.
-
-## What you can change
-
-Most of this is infrastructure — set up once, then invisible.
-You can:
-
-- Enable and order Claude Code and Codex for the project (project
-  Settings or `.oxplow/project.yaml`). The selected agent is fixed when a thread
-  is created.
-- Switch the writer thread per stream (right-click the thread in
-  the navigator → "Make
-  to writer").
-- Promote a read-only thread when you want it to commit.
-- Edit per-stream / per-thread custom prompts (Stream Settings
-  / Thread Settings pages).
-- Pause or resume a thread's agent process from the thread
-  tab's context menu.
-
-See [Agents](agents.md) for agent selection and generated runtime
-details.
-
-The internal details (hook endpoints, MCP transport, snapshot
-storage) are not user-configurable on purpose — changing them
-would break the durability guarantees the rest of the product
-depends on.
-
-## What's deliberately not here
-
-- **Auto-commit.** The runtime never runs `git commit`. Commits
-  are user-driven — run them in the terminal yourself, click
-  commit in the Uncommitted Changes page, or tell the agent
-  "go run `git commit -m …`".
-- **Wait points / commit points.** Removed in favor of
-  user-driven commits and the in-progress-audit Stop directive.
-- **Auto-progression through the queue.** When the agent
-  Stops, it stops. The user resumes by prompting or running
-  `/work-next`.
+See [Agents](agents.md) and [Extensions](../reference/extensions.md).
+Commits remain user-driven. Commit/wait queue markers and automatic
+queue progression are removed.

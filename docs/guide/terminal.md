@@ -1,62 +1,37 @@
 # Terminal
 
-Each thread has an **Agent** tab running the thread's assigned agent —
-Claude Code, Codex, or OpenCode — in a terminal in the stream's worktree.
-Switching threads or streams leaves it running; coming back replays what it
-printed. Quitting oxplow stops it, and the next open resumes the agent's own
-session.
+Terminal agent sessions run their selected harness in a PTY in the
+stream's worktree. A thread can have several sessions or none; each
+session has its own tab and resume identity. ACP sessions instead use a
+structured conversation. See [Agents](agents.md).
 
 ## Agent terminal
 
-The project-level `agents` list controls which agents are available;
-the first enabled agent is the default for new threads. When both are
-enabled, choose an agent while creating the thread. The assignment is
-fixed after creation. See [Agents](agents.md) for configuration and
-runtime details.
+Open a terminal session from the session picker or **New Agent Session…**,
+then type a prompt and press Enter. Switching tabs, threads, or streams
+leaves the session running. The session's status contributes to the
+thread and stream status indicators.
 
-Type a prompt, hit enter, and watch the agent work. The status dot on
-the thread's glyph in the navigator (and on the agent tab) pulses
-yellow while it's working, turns blue when it asked you a question, and
-goes pale red when it's idle and waiting for input.
+Harness hooks record activity and turn boundaries. Snapshots, test
+evidence, usage, and optional efforts help explain what happened. There
+is no task-filing gate or Stop audit requiring an agent to keep working.
 
-Per-thread bits worth knowing:
+Non-writer threads may not change their stream's worktree. Other project
+records remain available. This ownership rule is not a general sandbox
+around the agent's shell.
 
-- **Lifecycle hook integration.** Each agent loads its own
-  generated hook configuration. Stop and tool events drive the
-  in-progress audit, filing enforcement, and snapshot tracking. Oxplow
-  installs the per-agent files under `.oxplow/runtime/` automatically.
-- **Write guard.** If the active thread is read-only,
-  Edit / Write / MultiEdit / NotebookEdit are denied at the
-  hook level. The agent can still read, search, and answer
-  questions.
-- **Filing enforcement.** Even on the writer thread, edits are
-  denied if there's no `in_progress` task. The agent
-  files one and re-issues.
-- **Per-stream isolation.** The agent's CWD is the stream's
-  worktree. It cannot see other streams' working trees.
+## Context and tab actions
 
-## Tab actions
+Use the session's tab actions to rename or close it. Selecting terminal
+text copies it; paste uses the platform shortcut. See
+[Keybindings](../reference/keybindings.md).
 
-Right-click a terminal's tab in the tab strip to rename or close
-it. Copy is automatic on selection and paste is the platform
-shortcut — see [Keybindings](../reference/keybindings.md).
-
-## Drag-to-add-context
-
-Drag rows from the rail's Work and Go To panes, backlinks lists,
-task rows, or the file tree
-onto the agent terminal to inject them into the agent's
-context. Multi-select drag works for task lists.
+Dragging supported rows or references into the agent input lets you add
+context to your prompt. Send the prompt yourself; oxplow does not submit
+it automatically.
 
 ## Shells
 
-Open a shell tab from the **+** in any tab strip — it's just a
-pty in the stream's worktree. Use it for `git status`, `npm
-install`, running tests. Multiple shells per thread are fine;
-they share the worktree but are otherwise independent.
-
-## Copy / paste
-
-Standard terminal copy/paste. Selecting text copies on release.
-`Cmd/Ctrl+V` pastes. The pty is real, the shell is real, your
-`.zshrc` works.
+Open a shell tab from the **+** in the tab strip. It is a separate PTY in
+the stream's worktree, useful for inspecting git state, installing
+dependencies, and running tests. Multiple shells share that worktree.

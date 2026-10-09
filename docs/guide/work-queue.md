@@ -1,115 +1,63 @@
 # Work queue
 
-The work queue is the durable, ordered list of tasks for a thread.
-Each row is a **task**. tasks survive turn boundaries,
-restarts, and crashes — they are the difference between "what the
-agent is doing right now" and "what we're trying to ship."
+Work items keep plans and follow-ups durable. They can describe a coherent
+change, or group independently reviewable steps under an epic. Oxplow can
+use its built-in task list, an external work-item provider, or no work
+list at all.
+
+Work tracking does not require filing an item before an edit. Turns,
+tool calls, snapshots, and test evidence are recorded independently.
+Use work items when they help people and agents follow the work.
 
 ## Lifecycle
 
+Every provider maps its states to a common vocabulary:
+
+```text
+todo → in_progress → done
+                   ↘ blocked / canceled
 ```
-ready → in_progress → done
-                    ↘ blocked
-                    ↘ canceled / archived
-```
 
-- **ready** — filed but not yet picked up. Backlog.
-- **in_progress** — the agent (or you) is actively working it.
-- **blocked** — paused; needs your input or an external answer.
-- **done** — finished. The agent closes its own items when the
-  change has shipped; you can reopen anything by flipping it
-  back to `in_progress`.
-- **canceled** — abandoned without shipping.
-- **archived** — drops out of the default views.
+The built-in list displays `todo` as **To Do** and can archive items.
+Another provider may have additional native states or fields.
 
-`ready` vs `in_progress` is **not** "noticed it" vs "started it" —
-it's "backlog" vs "committed to ship now". The agent's filing
-guard cares about the difference: it can't edit project files
-unless an item is `in_progress`.
+- **To Do** — planned work that has not started.
+- **In Progress** — work someone is doing.
+- **Blocked** — work waiting on an answer or another dependency.
+- **Done** — finished work.
+- **Canceled** — work that will not be completed.
 
-## Where to find work
+Oxplow does not automatically mark work done. A person or agent updates
+the item. The selected effort policy can link activity to an item and
+move linked To Do work into progress; see
+[Local History](local-history.md#effort).
 
-The rail HUD's **Work** pane surfaces the live state of the queue:
+## Planning useful items
 
-- **Active item** — the highest-priority `in_progress` item for
-  the current thread (the one with the lowest `sort_index`), with
-  a live agent-status dot.
-- **Up next** — the next `ready` items, up to ten.
-- A **Backlog** entry with a count badge for the stream-global
-  backlog.
+Give each item an outcome a reviewer can assess independently. Its
+markdown description can include scope, acceptance criteria, evidence,
+and dependencies. Use an epic when the work has several separately
+reviewable steps.
 
-Full lists live in dedicated pages, opened from the launcher
-(++cmd+p++):
+Reopen an existing item when correcting the same outcome. File a new
+item for a new concern or a follow-up you will not do now. Link
+prerequisites rather than hiding them in prose alone.
 
-- **Tasks** — the current thread's planning surface (To Do +
-  Blocked, with previews of recently done).
-- **Done Work** — full descending list of done + canceled items.
-- **Backlog** — the stream-global backlog.
-- **Archived** — archived items only.
+## Lists and actions
 
-## When the agent files an item
+The built-in work list provides thread lists and a backlog, with grouping,
+ordering, comments, and links. Open work pages from the launcher; use
+their row actions to create, edit, move, or archive items. An external
+provider's available actions depend on its declared capabilities.
 
-The agent files an item before it starts changing project files.
-Two shapes:
+Agents read work through the semantic layer and change it through the
+same audited commands as the UI. Starting an item does not send a prompt
+to a coding agent or force it to continue after it stops.
 
-- **Task** — one coherent change, even if it touches a few files.
-  Most work is tasks.
-- **Epic with children** — work that has three or more sub-steps a
-  reviewer would naturally check off independently.
+## Work items and efforts
 
-A `PreToolUse` hook on the writer thread denies `Edit` / `Write` /
-`MultiEdit` / `NotebookEdit` if the thread has no `in_progress`
-item — so the filing-before-editing rule is mechanical, not a
-convention.
-
-## One concern per row
-
-A row should be something a reviewer can accept or push back on
-independently. If two requests would be QA'd separately ("show
-the placeholder" + "drop the elapsed counter"), they get two
-rows, even when the agent intends to land them in one diff.
-
-When you send a new prompt mid-flight while an item is still
-in progress, the runtime injects a reminder: file a new row, or
-explicitly reopen the existing one if this is a fix to the same
-concern. Multi-prompt turns shouldn't quietly pile new asks into
-whichever item happened to be open.
-
-## Reopening vs filing fresh
-
-When you push back on a `done` row — "no, redo this" — the
-correct move is to flip it back to `in_progress`, redo the work,
-and close it again. A new effort opens against the same item,
-attributed to the redo.
-
-This is why oxplow does *not* file new tasks for fixes: a redo of
-the same concern stays on the same row, with multiple efforts
-inside it. Otherwise the queue fills with "Fix what I just did"
-noise.
-
-Genuinely new asks still get new items.
-
-## Sort order and grouping
-
-`sort_index` is a single ordered field per thread. Drag a row to
-reorder; the agent's queue follows. Children of an epic render
-under the epic header.
-
-## Where to drive it
-
-- **Tasks / Backlog pages** — drag, drop, reorder, file,
-  edit, archive. Multi-select for bulk transitions.
-- **Rail HUD** — quick navigation; never auto-opens tabs.
-- **Inline new-row** at the top of any work list — type a title,
-  press Enter.
-- **The agent itself** — drives the queue from inside the work
-  it's already doing.
-
-## Followups
-
-The agent can stash transient sub-asks ("come back to this in
-this same turn") as in-memory follow-ups. They aren't durable
-rows — they live in memory, survive only until the runtime
-restarts, and surface as italic muted "↳ follow-up: …" lines at
-the top of To Do. Use them to defer something mid-turn without
-polluting the work queue.
+An effort is a span of a thread's activity, optionally linked to a work
+item. One item can have several efforts; an effort needs no item. The
+effort policy determines grouping, while core records attribution and
+evidence. Planning and recording therefore remain useful independently
+of one another.

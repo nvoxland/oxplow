@@ -1,85 +1,58 @@
 # Pair programming
 
-Pair programming has two roles. The **driver** has the keyboard:
-they type the code, run the tests, fight the syntax, navigate the
-file tree. The **navigator** holds the larger picture: where this
-change fits, what it might break, when to stop, what to do next.
-Good pairs swap roles often, because both jobs are tiring in
-different ways.
-
-Agent-assisted development pins one of those roles in place: the
-agent is always the driver. You are always the navigator.
+A coding agent can handle implementation while the developer holds the
+larger picture: what the software should do, where a change fits, and
+whether the result is sound. Oxplow is built for that developer's need
+to understand and steer the work.
 
 ## What the agent is good at
 
-- **Typing.** Boilerplate, obvious refactors, mechanical edits.
-- **Searching.** Finding every call site, every test, every
-  reference, faster than you can grep.
-- **Holding local context.** What's on screen, what was just edited,
-  what tests are running.
-- **Trying things.** Spinning up an experiment, throwing it out,
-  trying a different shape.
+Agents search, write code, run tests, and try alternatives. They can
+also build the custom collectors, analyses, and views that make a
+particular project understandable. That personal development should
+be practical without rebuilding the host's infrastructure.
 
-## What the human is good at
+## What the human brings
 
-- **Taste.** "This is the wrong abstraction" is still your call.
-- **Scope.** Knowing what *not* to do, when "while we're here" is a
-  trap, when to stop.
-- **Tradeoffs.** Performance vs. simplicity, now vs. later, this
-  team vs. that one.
-- **Direction.** Where this codebase needs to be in three months,
-  and whether this PR moves toward or away from it.
-- **Review.** Catching the thing that looks fine in isolation but
-  breaks the contract three modules over.
+The developer supplies direction, domain knowledge, taste, and
+judgment. A useful explanation connects implementation activity to
+those concerns, then provides evidence when a closer look is needed.
+A diff alone rarely supplies all that context.
 
-## How oxplow maps onto the split
+## How oxplow supports the navigator
 
-Each navigator job has a primitive in the product:
-
-| Navigator job | Oxplow primitive |
+| Need | Oxplow surface |
 |---|---|
-| Hold the scope | **Work queue** — the durable list of what's in this thread and what isn't |
-| Capture rationale | **Wiki pages** — durable Q&A and decisions, with backlinks |
-| Pause for taste | **Awaiting-user gate** — the agent asks; the runtime suppresses every directive until you reply |
-| Catch regressions | **Local History** — every effort snapshots the files it touched |
-| Switch contexts cleanly | **Streams** — each agent has its own branch, worktree, and queue |
-| Talk without losing your place | **Threads** — query an agent in a read-only thread without risking writes |
-| Tell whether it's working | **Metrics** — steering per effort, redo rate, time to green, tokens spent on work you reverted |
+| Understand the software | Descriptions, connected references, knowledge, and custom lenses |
+| See what changed | Observed activity, snapshots, analysis, and diffs |
+| Preserve scope and rationale | Optional work-list and knowledge providers |
+| Develop in parallel | Separate stream worktrees and a writer thread per stream |
+| Ask and investigate | Agent sessions in research and review threads |
+| Compare evidence | Collected facts, metrics, and dimensions |
+| Tailor the workflow | Extensions that connect data, presentation, and actions |
 
-You stay in the problem. The agent stays in the keys.
+The developer chooses the questions and views. Code remains available
+for inspection, but it does not dictate the starting point.
 
-## Measuring the pairing, not just the code
+## Measuring the work as well as the code
 
-The last row is the newest and the least obvious. Most code metrics
-answer "is the codebase healthy". A navigator has a second question
-that no existing tool answers: *am I any good at this?*
+Commits do not explain every attempt, test result, or intervention that
+led to them. Collected activity and test evidence make more of that
+process available for analysis. Developers can add their own collectors
+and metrics to ask whether a workflow is improving.
 
-You can't tell from the diff. A task that took six attempts and one
-that took one attempt produce the same final diff. A task where you
-had to correct the agent nine times looks, in git, exactly like one
-that went cleanly. That information exists only in the working
-session, and it evaporates when the session ends.
+A metric such as time to a passing test or effort spent on rework needs
+an explicit definition and suitable collected evidence. These are
+questions the extensible data model can support, rather than a promise
+that every such metric ships configured. See [Metrics](../guide/metrics.md).
 
-So oxplow records it: how many steering events a closed effort
-needed, how many attempts a task took, how long from first red test
-to first green, how many tokens went into commits that were later
-reverted. None of it says whether the code is good -- that's still
-your call. It says whether the way you're briefing, scoping, and
-gating the agent is producing less rework than it did last month.
+## Staying present during development
 
-That's a feedback loop for a skill that's about three years old and
-that nobody has good instincts for yet. See
-[Metrics](../guide/metrics.md).
+Oxplow aims to make work understandable while it is happening. An agent
+can explain a decision, a lens can surface a concerning trend, and a
+reference can lead from that description to the relevant change.
+Work items and knowledge help when enabled, without becoming mandatory
+bookkeeping before an edit or the end of a turn.
 
-## Why this doesn't reduce to "review the diff"
-
-The naive workflow — let the agent do whatever, then read the diff —
-fails for the same reason "throw it over the wall" fails between
-teams. By the time you're reading the diff, the design decisions
-are baked in, the scope has drifted, and either you accept it or
-you start over.
-
-Pair programming worked because the navigator was *present* during
-the work, not at the end of it. Oxplow tries to keep you present:
-queue first, gates in the middle, history at the end. The diff is
-the last line of defense, not the only one.
+This approach gives developers room to invent their own ways of
+supervising software development as agents' capabilities change.
