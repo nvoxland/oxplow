@@ -23,7 +23,9 @@ failure after your edit is yours:
   item's Commands menu;
 - `provider` — an external provider's declarations and a stub program
   (red until you write the program); `--capability <cap>` picks what it
-  implements: `work_items` (the default) or `effort_policy`;
+  implements: `work_items` (the default), `effort_policy` or
+  `agent_harness` (a harness launching agent sessions: its command runs in
+  the person's terminal, so a person approves it knowing that);
 - `effect` — a script reacting to a logged event by composing commands
   (private; runs only once a person approves it);
 - `component` — a custom component (private): its `viz: custom` lens and

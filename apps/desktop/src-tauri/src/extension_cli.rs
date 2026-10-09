@@ -18,7 +18,8 @@ usage:
       scaffold oxplow/extensions/<name>/ with a v2 manifest, an intent
       (--origin = the effort/thread ref that asked for it), one example
       and its fixture, and the kind's starter: a lens with a row action; a
-      provider of --capability (work_items, the default, or effort_policy)
+      provider of --capability (work_items, the default, effort_policy or
+      agent_harness)
       with its contract's declarations, a stub program and test config; a Starlark
       collector with a model and a lens over it; a command composing core
       commands; an effect reacting to an event; a custom component with

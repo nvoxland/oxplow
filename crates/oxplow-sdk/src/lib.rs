@@ -507,12 +507,14 @@ def transform(x):
 
 /// What a scaffolded provider of `capability` starts with beyond its
 /// contract: the intent example's input, what it should show and the
-/// fixture's `expect`, and the scopes it `needs` (the manifest's lines).
+/// fixture's `expect`, the scopes it `needs` (the manifest's lines), and
+/// its capability's `data` (null when the contract asks none).
 struct ProviderStarter {
     input: String,
     expect: &'static str,
     fixture: String,
     needs: Option<&'static str>,
+    data: serde_json::Value,
 }
 
 fn provider_starter(capability: &str) -> ProviderStarter {
@@ -522,6 +524,7 @@ fn provider_starter(capability: &str) -> ProviderStarter {
             expect: "the new item's ref",
             fixture: "{ ref: $any }".to_string(),
             needs: None,
+            data: serde_json::Value::Null,
         },
         "effort_policy" => ProviderStarter {
             input: "{ command: react, input: { event: { id: e1, type: thread.checkpoint, v: 1, seq: 1, source: system, subject: [], payload: {}, anchors: {} } } }"
@@ -534,6 +537,21 @@ fn provider_starter(capability: &str) -> ProviderStarter {
                  \x20   # such as the open efforts of an item that finished.\n\
                  \x20   needs: [sql.read]\n",
             ),
+            data: serde_json::Value::Null,
+        },
+        "agent_harness" => ProviderStarter {
+            input: "{ command: render, input: { answer: { kind: ack } } }".to_string(),
+            expect: "its hooks' acknowledgement",
+            fixture: "{ body: $any }".to_string(),
+            needs: None,
+            // The files its agent reads as instructions; the environment
+            // variables that mark a shell as one of its sessions; the
+            // settings a person gives its launch (`agentConfig.<id>`).
+            data: serde_json::json!({
+                "instruction_files": ["AGENTS.md"],
+                "env_markers": [],
+                "settings": [],
+            }),
         },
         _ => {
             let verb = oxplow_domain::capability::contract(capability)
@@ -544,6 +562,7 @@ fn provider_starter(capability: &str) -> ProviderStarter {
                 expect: "TODO: what it answers",
                 fixture: "$any".to_string(),
                 needs: None,
+                data: serde_json::Value::Null,
             }
         }
     }
@@ -573,6 +592,22 @@ fn verb_input(capability: &str, verb: &str) -> (String, serde_json::Value) {
             "Move a work item to a canonical state, optionally naming a native one.".into(),
             json!({ "type": "object", "required": ["ref", "to"], "additionalProperties": false,
                     "properties": { "ref": str_prop, "to": state, "native_state": str_prop } }),
+        ),
+        ("agent_harness", "launch") => (
+            "How a session of it starts: the launch's input in, { spec: { kind: pty, command, env } } out — \
+             the session's bearer in `env`, never in `command`."
+                .into(),
+            json!({ "type": "object", "required": ["session", "endpoints"] }),
+        ),
+        ("agent_harness", "tool_use") => (
+            "A tool hook's body in oxplow's vocabulary: { tool } (null when it names none).".into(),
+            json!({ "type": "object", "required": ["body"],
+                    "properties": { "body": { "type": "object" } } }),
+        ),
+        ("agent_harness", "render") => (
+            "A hook answer (ack, deny or context) in its hooks' shape: { body }.".into(),
+            json!({ "type": "object", "required": ["answer"],
+                    "properties": { "answer": { "type": "object" } } }),
         ),
         ("effort_policy", "react") => (
             "Compose the commands an event calls for: { commands } to run, or { skip }.".into(),
@@ -615,7 +650,7 @@ fn provider_declarations(
         capabilities: vec![CapabilityDecl {
             capability: capability.into(),
             features: serde_json::Value::Object(features.clone()),
-            data: serde_json::Value::Null,
+            data: provider_starter(capability).data,
         }],
         commands: contract
             .required(&serde_json::Value::Object(features))
@@ -932,6 +967,7 @@ mod tests {
             Kind::Extension,
             Kind::provider("work_items").unwrap(),
             Kind::provider("effort_policy").unwrap(),
+            Kind::provider("agent_harness").unwrap(),
             Kind::Collector,
             Kind::Command,
             Kind::Effect,
@@ -1051,6 +1087,52 @@ mod tests {
         let report = check(
             dir.path(),
             "steward",
+            &ExtensionCatalog::new(),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(report.ok, "{}", render_findings(&report, Format::Text));
+        assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+    }
+
+    /// A harness provider scaffolds its hook-path verbs and its `data`
+    /// (the instruction files it reads, no markers, no settings); its
+    /// example renders an acknowledgement.
+    #[tokio::test]
+    async fn a_harness_provider_scaffolds_its_data_and_hook_verbs() {
+        let dir = tempfile::tempdir().unwrap();
+        let made = scaffold(
+            dir.path(),
+            Kind::provider("agent_harness").unwrap(),
+            "relay",
+            None,
+        )
+        .unwrap();
+        let d = declarations(dir.path(), "relay");
+        let verbs: Vec<&str> = d["commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(verbs, ["launch", "tool_use", "render"]);
+        assert_eq!(
+            d["capabilities"][0]["data"],
+            serde_json::json!({ "instruction_files": ["AGENTS.md"], "env_markers": [], "settings": [] })
+        );
+        let fixture =
+            std::fs::read_to_string(dir.path().join(format!("{}/fixtures/basic.yaml", made.dir)))
+                .unwrap();
+        assert!(
+            fixture.contains("command: render") && fixture.contains("expect: { body: $any }"),
+            "{fixture}"
+        );
+        let report = check(
+            dir.path(),
+            "relay",
             &ExtensionCatalog::new(),
             None,
             None,

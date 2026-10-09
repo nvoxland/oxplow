@@ -13,9 +13,10 @@ oxplow extension test my-review            # run its examples on a throwaway oxp
 
 `new` takes a kind instead of `extension` to start from that kind's
 starter: `lens`, `collector`, `command`, `effect`, `provider`,
-`component` or `policy`. A provider takes `--capability` for what it implements:
-`work_items` (the default) or `effort_policy`. Each scaffold checks
-clean and passes `test` as written.
+`component` or `policy`. A provider takes `--capability` for what it
+implements: `work_items` (the default), `effort_policy` or
+`agent_harness`. Each scaffold checks clean and passes `test` as
+written.
 
 ## Editor support
 
