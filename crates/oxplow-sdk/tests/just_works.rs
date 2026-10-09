@@ -375,6 +375,75 @@ async fn a_scaffolded_provider_is_red_until_a_program_speaks_for_it() {
     );
 }
 
+/// A scaffolded effort policy is red until a program speaks for it; the
+/// fake in policy mode behind it passes the kit with the scaffold's own
+/// example (a checkpoint it skips).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_scaffolded_effort_policy_is_red_until_a_program_speaks_for_it() {
+    let dir = project().await;
+    scaffold(
+        dir.path(),
+        Kind::provider("effort_policy").unwrap(),
+        "fake",
+        Some("effort:eff1"),
+    )
+    .unwrap();
+    let report = test_extension(dir.path(), "fake", false).await.unwrap();
+    assert!(
+        report.errors.join("\n").contains("initialize failed"),
+        "{:?}",
+        report.errors
+    );
+    let ext = dir.path().join("oxplow/extensions/fake");
+    std::fs::write(
+        ext.join("bin/provider"),
+        fake_script(dir.path(), "").replace(
+            "#!/bin/sh\n",
+            "#!/bin/sh\nexport OXPLOW_FAKE_CAPABILITY=effort_policy\n",
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        ext.join("provider.json"),
+        serde_json::to_string_pretty(&oxplow_provider_fake::policy_declarations()).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        ext.join("fixtures/provider-fake.yaml"),
+        "config: { team: core }\n",
+    )
+    .unwrap();
+    let blessed = kit_on_a_fresh_service(dir.path(), true).await;
+    assert_eq!(blessed.errors, Vec::<String>::new());
+    let report = kit_on_a_fresh_service(dir.path(), false).await;
+    assert_eq!(report.errors, Vec::<String>::new());
+    for ran in ["provider fake", "effort_policy suite"] {
+        assert!(
+            report.ran.iter().any(|r| r == ran),
+            "{ran}: {:?}",
+            report.ran
+        );
+    }
+    // The scaffold's example ran: one expecting commands for that
+    // checkpoint fails, naming its fixture.
+    let fixture = ext.join("fixtures/basic.yaml");
+    let text = std::fs::read_to_string(&fixture).unwrap();
+    std::fs::write(
+        &fixture,
+        text.replace("expect: { skip: $any }", "expect: { commands: $any }"),
+    )
+    .unwrap();
+    let report = kit_on_a_fresh_service(dir.path(), false).await;
+    assert!(
+        report
+            .errors
+            .iter()
+            .any(|e| e.contains("fixtures/basic.yaml")),
+        "{:?}",
+        report.errors
+    );
+}
+
 /// The fields `scripts/record-just-works.sh` strips from a recorded
 /// `run.json`: the author's machine (denied commands carry local paths),
 /// the session and the cost.

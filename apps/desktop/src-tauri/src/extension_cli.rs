@@ -14,11 +14,12 @@ use oxplow_sdk::{Format, Kind};
 
 const USAGE: &str = "\
 usage:
-  oxplow extension new <lens|extension|provider|collector|command|effect|component> <name> [--origin <ref>] [--root <dir>]
+  oxplow extension new <lens|extension|provider|collector|command|effect|component> <name> [--origin <ref>] [--capability <cap>] [--root <dir>]
       scaffold oxplow/extensions/<name>/ with a v2 manifest, an intent
       (--origin = the effort/thread ref that asked for it), one example
       and its fixture, and the kind's starter: a lens with a row action; a
-      provider's declarations, stub program and test config; a Starlark
+      provider of --capability (work_items, the default, or effort_policy)
+      with its contract's declarations, a stub program and test config; a Starlark
       collector with a model and a lens over it; a command composing core
       commands; an effect reacting to an event; a custom component with
       its lens and bundle. Each checks clean and passes `test` as written
@@ -82,6 +83,8 @@ impl From<oxplow_sdk::SdkError> for Failure {
 struct Parsed {
     positional: Vec<String>,
     origin: Option<String>,
+    /// `new provider --capability`: the capability it implements.
+    capability: Option<String>,
     root: Option<PathBuf>,
     json: bool,
     bless: bool,
@@ -94,6 +97,7 @@ fn parse(args: &[String]) -> Result<Parsed, Failure> {
     let mut p = Parsed {
         positional: Vec::new(),
         origin: None,
+        capability: None,
         root: None,
         json: false,
         bless: false,
@@ -107,6 +111,13 @@ fn parse(args: &[String]) -> Result<Parsed, Failure> {
                 p.origin = Some(
                     it.next()
                         .ok_or_else(|| Failure::Usage("--origin needs a ref".into()))?
+                        .clone(),
+                )
+            }
+            "--capability" => {
+                p.capability = Some(
+                    it.next()
+                        .ok_or_else(|| Failure::Usage("--capability needs a capability".into()))?
                         .clone(),
                 )
             }
@@ -148,6 +159,17 @@ fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Resul
                 .next()
                 .and_then(|k| Kind::parse(k))
                 .ok_or_else(|| Failure::Usage(format!("new needs a kind: {}", Kind::NAMES)))?;
+            let kind =
+                match (kind, p.capability.as_deref()) {
+                    (Kind::Provider { .. }, Some(capability)) => {
+                        Kind::provider(capability).map_err(|e| Failure::Usage(e.to_string()))?
+                    }
+                    (_, Some(_)) => return Err(Failure::Usage(
+                        "--capability is a provider's: `new provider <name> --capability <cap>`"
+                            .into(),
+                    )),
+                    (kind, None) => kind,
+                };
             let name = pos
                 .next()
                 .ok_or_else(|| Failure::Usage("new needs a name".into()))?;
@@ -359,6 +381,54 @@ mod tests {
         let (code, _, err) = cli(&["new", "lens", "x", "--origin", "junk", "--root", root]);
         assert_eq!(code, 1);
         assert!(err.contains("not a canonical ref"), "{err}");
+    }
+
+    /// `new provider --capability` scaffolds a provider of that
+    /// capability; one without a contract is refused, and the flag is a
+    /// provider's alone.
+    #[test]
+    fn new_provider_takes_a_capability() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_str().unwrap();
+        let (code, _, err) = cli(&[
+            "new",
+            "provider",
+            "steward",
+            "--capability",
+            "effort_policy",
+            "--root",
+            root,
+        ]);
+        assert_eq!(code, 0, "{err}");
+        let manifest =
+            std::fs::read_to_string(dir.path().join("oxplow/extensions/steward/extension.yaml"))
+                .unwrap();
+        assert!(
+            manifest.contains("capability: effort_policy\n"),
+            "{manifest}"
+        );
+        let (code, _, err) = cli(&[
+            "new",
+            "provider",
+            "git",
+            "--capability",
+            "vcs",
+            "--root",
+            root,
+        ]);
+        assert_eq!(code, 2, "{err}");
+        assert!(err.contains("`vcs`"), "{err}");
+        let (code, _, err) = cli(&[
+            "new",
+            "lens",
+            "demo",
+            "--capability",
+            "effort_policy",
+            "--root",
+            root,
+        ]);
+        assert_eq!(code, 2, "{err}");
+        assert!(err.contains("--capability"), "{err}");
     }
 
     /// `check` must never migrate or write the project's database, and an

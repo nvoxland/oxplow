@@ -21,8 +21,9 @@ failure after your edit is yours:
   (`ref('item')`) and a lens over the model;
 - `command` — a command whose script comments on a work item, on a work
   item's Commands menu;
-- `provider` — an external work-items provider's declarations and a stub program
-  (red until you write the program);
+- `provider` — an external provider's declarations and a stub program
+  (red until you write the program); `--capability <cap>` picks what it
+  implements: `work_items` (the default) or `effort_policy`;
 - `effect` — a script reacting to a logged event by composing commands
   (private; runs only once a person approves it);
 - `component` — a custom component (private): its `viz: custom` lens and
@@ -328,15 +329,16 @@ names the file and line and says what to change.
 4. An extension with an **external provider** (`providers:` — a program that
    connects an outside system, such as an issue tracker; private
    extensions only) is tested with `oxplow extension test <name>`:
-   `oxplow extension new provider <name>` scaffolds one (its `provider.json`
-   declarations, a stub `bin/provider` to replace, and the fixtures).
+   `oxplow extension new provider <name> [--capability <cap>]` scaffolds
+   one (its `provider.json` declarations from the capability's contract, a
+   stub `bin/provider` to replace, and the fixtures).
    The test runs `check`, then the provider: its `initialize` must equal
    `provider.json`, its `check` must accept `fixtures/provider-<id>.yaml`'s
    `config`, each intent example's fixture (`input: { command, input }`,
    `expect`, `$any` matching anything) is invoked, every message must
    match the protocol, the session must match the golden
    `fixtures/transcripts/<id>.jsonl` (`--bless` writes it when a change is
-   intended — commit it), and the work-items conformance suite must pass.
+   intended — commit it), and its capability's conformance suite must pass.
    A `ref_kinds:` entry may add `searchable: <model>` (a model of yours
    with `ref`, `title`, `body`): its rows are then found by the launcher's
    search and open the kind's page.

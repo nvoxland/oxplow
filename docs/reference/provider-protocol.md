@@ -7,6 +7,7 @@ stdin/stdout, and reads and writes through it.
 
 ```sh
 oxplow extension new provider my-tracker   # declarations, a stub program, a test config
+oxplow extension new provider my-policy --capability effort_policy
 oxplow extension test my-tracker           # handshake, examples, conformance suite
 ```
 
