@@ -1660,33 +1660,6 @@ fn a_capability_verb_is_record_and_never_confirms() {
     assert!(err.contains("`delete`"), "{err}");
 }
 
-/// An effort policy's declarations: its one verb, `react`.
-fn policy_declarations() -> oxplow_provider_protocol::model::InitializeResult {
-    use oxplow_provider_protocol::model::*;
-    InitializeResult {
-        protocol_version: PROTOCOL_VERSION.into(),
-        provider: Party {
-            name: "policy".into(),
-            version: "0".into(),
-        },
-        capabilities: vec![CapabilityDecl {
-            capability: "effort_policy".into(),
-            features: json!({}),
-        }],
-        commands: vec![CommandDecl {
-            name: "react".into(),
-            summary: "React to an event.".into(),
-            input_schema: json!({ "type": "object" }),
-            confirm: "never".into(),
-            access: "record".into(),
-            undoable: false,
-        }],
-        event_types: vec![],
-        collectors: vec![],
-        config_schema: json!({ "type": "object" }),
-    }
-}
-
 /// The fake's spec, as an effort policy.
 fn policy_spec() -> spec::ProviderSpec {
     let dir = tempfile::tempdir().unwrap();
@@ -1703,19 +1676,19 @@ fn policy_spec() -> spec::ProviderSpec {
 #[test]
 fn a_provider_may_implement_an_effort_policy_by_its_contract() {
     let spec = policy_spec();
-    spec::check_declarations(&spec, &policy_declarations()).unwrap();
-    let mut silent = policy_declarations();
+    spec::check_declarations(&spec, &oxplow_provider_fake::policy_declarations()).unwrap();
+    let mut silent = oxplow_provider_fake::policy_declarations();
     silent.commands.clear();
     let err = spec::check_declarations(&spec, &silent).unwrap_err();
     assert!(
         err.contains("effort_policy") && err.contains("`react`"),
         "{err}"
     );
-    let mut asking = policy_declarations();
+    let mut asking = oxplow_provider_fake::policy_declarations();
     asking.commands[0].confirm = "always".into();
     let err = spec::check_declarations(&spec, &asking).unwrap_err();
     assert!(err.contains("react") && err.contains("confirm"), "{err}");
-    let mut emitting = policy_declarations();
+    let mut emitting = oxplow_provider_fake::policy_declarations();
     emitting.event_types = oxplow_provider_fake::declarations().event_types;
     let err = spec::check_declarations(&spec, &emitting).unwrap_err();
     assert!(
@@ -1734,7 +1707,8 @@ fn a_manifest_names_a_capability_a_process_may_implement() {
         )
     };
     let read = |rel: &str| {
-        (rel == "provider.json").then(|| serde_json::to_string(&policy_declarations()).unwrap())
+        (rel == "provider.json")
+            .then(|| serde_json::to_string(&oxplow_provider_fake::policy_declarations()).unwrap())
     };
     let parse = |text: String| {
         spec::parse_providers(&serde_yaml::from_str(&text).unwrap(), &|rel| {

@@ -419,6 +419,71 @@ mod tests {
         cli(args)
     }
 
+    /// `extension test` on a provider that is an effort policy: the kit
+    /// runs the effort-policy suite against it, made the project's policy
+    /// in a throwaway host — the fake in policy mode passes once blessed.
+    #[test]
+    fn extension_test_runs_the_effort_policy_suite_against_a_policy_provider() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_str().unwrap();
+        let ext = dir.path().join("oxplow/extensions/steward");
+        std::fs::create_dir_all(ext.join("bin")).unwrap();
+        std::fs::create_dir_all(ext.join("fixtures")).unwrap();
+        std::fs::write(
+            ext.join("extension.yaml"),
+            "manifest: 2\nname: steward\ndescription: An effort policy.\nsharing: private\n\
+             intent:\n  purpose: Open and close efforts as items start and finish.\n  examples:\n\
+             \x20   - name: basic\n      input: { command: react, input: { event: { id: e1, type: thread.checkpoint, v: 1, seq: 1, source: system, subject: [], payload: {}, anchors: {} } } }\n\
+             \x20     expect: nothing to do\n\
+             providers:\n  - id: steward\n    capability: effort_policy\n    entry: bin/provider\n    declarations: provider.json\n    needs: [sql.read]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            ext.join("fixtures/basic.yaml"),
+            "name: basic\ninput: { command: react, input: { event: { id: e1, type: thread.checkpoint, v: 1, seq: 1, source: system, subject: [], payload: {}, anchors: {} } } }\nexpect: { skip: $any }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            ext.join("fixtures/provider-steward.yaml"),
+            "config: { team: core }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            ext.join("provider.json"),
+            serde_json::to_string_pretty(&oxplow_provider_fake::policy_declarations()).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            ext.join("bin/provider"),
+            format!(
+                "#!/bin/sh\nOXPLOW_FAKE_CAPABILITY=effort_policy OXPLOW_FAKE_STATE=\"{}/fake-state-$OXPLOW_PROVIDER_ID.json\" exec '{}' \"$@\"\n",
+                dir.path().join(".oxplow").display(),
+                fake_bin().display()
+            ),
+        )
+        .unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(
+                ext.join("bin/provider"),
+                std::fs::Permissions::from_mode(0o755),
+            )
+            .unwrap();
+        }
+        let (code, out, err) = cli(&["check", "steward", "--root", root]);
+        assert_eq!(code, 0, "{out}{err}");
+        let (code, out, err) =
+            test_on_a_fresh_service(dir.path(), &["test", "steward", "--bless", "--root", root]);
+        assert_eq!(code, 0, "{out}{err}");
+        assert!(
+            out.contains("ran check, provider steward, effort_policy suite"),
+            "{out}"
+        );
+        let (code, out, _) =
+            test_on_a_fresh_service(dir.path(), &["test", "steward", "--root", root]);
+        assert_eq!(code, 0, "a blessed transcript matches: {out}");
+    }
+
     /// P5.D5's red: `extension test` on a scaffolded provider — the stub
     /// fails, the fake behind it passes once blessed, and a changed
     /// golden transcript fails naming the file and line.
