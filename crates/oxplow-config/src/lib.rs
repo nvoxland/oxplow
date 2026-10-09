@@ -126,6 +126,14 @@ const DEFAULT_SNAPSHOT_MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
 pub const DEFAULT_SNAPSHOT_TURN_BUDGET_MS: u64 = 2000;
 /// The smallest budget accepted: the capture's own predrain wait is 300 ms.
 const MIN_SNAPSHOT_TURN_BUDGET_MS: u64 = 100;
+/// The most script workers that run at once, by default (capped by the
+/// machine's parallelism).
+const DEFAULT_SCRIPTS_MAX_CONCURRENT_CAP: usize = 4;
+/// A script worker's memory cap, in MiB, by default.
+const DEFAULT_SCRIPTS_MEMORY_MB: u64 = 512;
+/// The smallest cap accepted: a worker's own runtime and the tree shipped
+/// to it need room before any script runs.
+const MIN_SCRIPTS_MEMORY_MB: u64 = 64;
 /// How many changed files one snapshot's symbol collection asks the
 /// language servers about (P5.C6).
 pub const DEFAULT_SYMBOLS_MAX_FILES_PER_SNAPSHOT: u32 = 50;
@@ -508,6 +516,29 @@ pub struct TestingConfig {
     pub agent_hint: Option<String>,
 }
 
+/// The limits on the processes that run extension and project scripts
+/// (the `scripts:` block): how many run at once, host-wide, and how much
+/// memory one may use before it is stopped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct ScriptsConfig {
+    /// Workers running at once; a run past it waits for a slot. Default
+    /// `min(4, available parallelism)`, minimum 1.
+    pub max_concurrent: usize,
+    /// A worker's memory cap in bytes (`memoryMb` in the file). Default
+    /// 512 MiB, minimum 64 MiB.
+    pub memory_bytes: u64,
+}
+
+impl Default for ScriptsConfig {
+    fn default() -> Self {
+        let parallelism = std::thread::available_parallelism().map_or(1, |n| n.get());
+        Self {
+            max_concurrent: parallelism.min(DEFAULT_SCRIPTS_MAX_CONCURRENT_CAP),
+            memory_bytes: DEFAULT_SCRIPTS_MEMORY_MB * 1024 * 1024,
+        }
+    }
+}
+
 /// What oxplow watches / snapshots / indexes, on top of the always-on
 /// `.git`/`.oxplow` ignores and the repo's `.gitignore`.
 ///
@@ -645,6 +676,8 @@ pub struct OxplowConfig {
     pub icon_tint: Option<String>,
     /// How the project's tests run (the `testing:` block).
     pub testing: TestingConfig,
+    /// Limits on script workers (the `scripts:` block).
+    pub scripts: ScriptsConfig,
     /// Project-declared metric SPECS (the `metrics:` block) — the author-able
     /// read surface (epic tsk12, E). Each entry enables a catalog metric
     /// (`use:`) or defines a new spec (`key:`) over a measure. The runner resolves
@@ -896,6 +929,9 @@ struct RawConfig {
     /// How the project's tests run: its test commands, the extra command patterns that count as a test or analysis run, and a hint injected into every agent prompt. Steers agents.
     #[serde(default)]
     testing: Option<RawTestingBlock>,
+    /// Limits on the processes that run scripts: `maxConcurrent` (workers at once, minimum 1) and `memoryMb` (one worker's memory cap, minimum 64). Defaults: min(4, cores) and 512.
+    #[serde(default)]
+    scripts: Option<RawScriptsBlock>,
     /// Metric specs: enable a catalog metric (`use`) or define one (`key`) over a measure.
     #[serde(default)]
     metrics: Option<Vec<MetricEntry>>,
@@ -941,6 +977,15 @@ struct RawConfig {
     /// Extensions turned off for this project: `{ disabled: [names] }`.
     #[serde(default)]
     extensions: Option<RawExtensionsBlock>,
+}
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct RawScriptsBlock {
+    #[serde(rename = "maxConcurrent", default)]
+    max_concurrent: Option<f64>,
+    #[serde(rename = "memoryMb", default)]
+    memory_mb: Option<f64>,
 }
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
@@ -1473,6 +1518,21 @@ pub fn config_entries(config: &OxplowConfig, fallback_name: &str) -> Vec<ConfigE
         let set = !m.is_empty();
         put("testing", serde_yaml::Value::Mapping(m), set);
     }
+    {
+        let defaults = ScriptsConfig::default();
+        let mut m = serde_yaml::Mapping::new();
+        if config.scripts.max_concurrent != defaults.max_concurrent {
+            m.insert("maxConcurrent".into(), config.scripts.max_concurrent.into());
+        }
+        if config.scripts.memory_bytes != defaults.memory_bytes {
+            m.insert(
+                "memoryMb".into(),
+                (config.scripts.memory_bytes / (1024 * 1024)).into(),
+            );
+        }
+        let set = !m.is_empty();
+        put("scripts", serde_yaml::Value::Mapping(m), set);
+    }
     put(
         "metrics",
         serde_yaml::Value::Sequence(config.metrics.iter().map(minimal_yaml).collect()),
@@ -1645,6 +1705,7 @@ fn default_config(project_name: String) -> OxplowConfig {
         inject_session_context: DEFAULT_INJECT_SESSION_CONTEXT,
         icon_tint: None,
         testing: TestingConfig::default(),
+        scripts: ScriptsConfig::default(),
         metrics: Vec::new(),
         collectors: Vec::new(),
         collectors_yaml: None,
@@ -2136,6 +2197,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
     };
 
     let testing = validate_testing(raw.testing)?;
+    let scripts = validate_scripts(raw.scripts)?;
     let metrics = validate_metrics(raw.metrics)?;
     let collectors_yaml = raw.collectors;
     let collectors = parse_project_collectors(collectors_yaml.as_ref())?;
@@ -2213,6 +2275,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         inject_session_context,
         icon_tint,
         testing,
+        scripts,
         metrics,
         collectors,
         collectors_yaml,
@@ -3248,6 +3311,29 @@ fn validate_agent_config(
         }
     }
     Ok(raw)
+}
+
+fn validate_scripts(raw: Option<RawScriptsBlock>) -> Result<ScriptsConfig, ConfigError> {
+    let mut out = ScriptsConfig::default();
+    let Some(raw) = raw else {
+        return Ok(out);
+    };
+    let whole = |field: &str, n: f64, min: u64| {
+        if n.is_finite() && n >= min as f64 {
+            Ok(n.floor() as u64)
+        } else {
+            Err(ConfigError::Invalid(format!(
+                "scripts.{field} must be a number >= {min}"
+            )))
+        }
+    };
+    if let Some(n) = raw.max_concurrent {
+        out.max_concurrent = whole("maxConcurrent", n, 1)? as usize;
+    }
+    if let Some(n) = raw.memory_mb {
+        out.memory_bytes = whole("memoryMb", n, MIN_SCRIPTS_MEMORY_MB)? * 1024 * 1024;
+    }
+    Ok(out)
 }
 
 fn validate_testing(raw: Option<RawTestingBlock>) -> Result<TestingConfig, ConfigError> {
@@ -4656,6 +4742,102 @@ testing:
         );
         assert_eq!(cfg.testing.run_patterns, vec!["cargo cov", "bun test"]);
         assert_eq!(cfg.testing.analysis_patterns, vec!["lint:collect"]);
+    }
+
+    #[test]
+    fn scripts_default_to_a_bounded_pool_and_512_mib() {
+        let dir = tempdir().unwrap();
+        let cfg = load_project_config(dir.path()).unwrap();
+        let parallelism = std::thread::available_parallelism().map_or(1, |n| n.get());
+        assert_eq!(cfg.scripts.max_concurrent, parallelism.min(4));
+        assert_eq!(cfg.scripts.memory_bytes, 512 * 1024 * 1024);
+        assert_eq!(cfg.scripts, ScriptsConfig::default());
+    }
+
+    #[test]
+    fn scripts_block_sets_both_limits() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            cfg_path(dir.path()),
+            "scripts:\n  maxConcurrent: 2\n  memoryMb: 256\n",
+        )
+        .unwrap();
+        let cfg = load_project_config(dir.path()).unwrap();
+        assert_eq!(cfg.scripts.max_concurrent, 2);
+        assert_eq!(cfg.scripts.memory_bytes, 256 * 1024 * 1024);
+    }
+
+    #[test]
+    fn scripts_keys_are_independent() {
+        let dir = tempdir().unwrap();
+        std::fs::write(cfg_path(dir.path()), "scripts:\n  memoryMb: 128\n").unwrap();
+        let cfg = load_project_config(dir.path()).unwrap();
+        assert_eq!(cfg.scripts.memory_bytes, 128 * 1024 * 1024);
+        assert_eq!(
+            cfg.scripts.max_concurrent,
+            ScriptsConfig::default().max_concurrent
+        );
+    }
+
+    #[test]
+    fn scripts_minimums_are_one_slot_and_64_mib() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            cfg_path(dir.path()),
+            "scripts:\n  maxConcurrent: 1\n  memoryMb: 64\n",
+        )
+        .unwrap();
+        let cfg = load_project_config(dir.path()).unwrap();
+        assert_eq!(cfg.scripts.max_concurrent, 1);
+        assert_eq!(cfg.scripts.memory_bytes, 64 * 1024 * 1024);
+        for (text, key) in [
+            ("scripts:\n  maxConcurrent: 0\n", "maxConcurrent"),
+            ("scripts:\n  memoryMb: 63\n", "memoryMb"),
+        ] {
+            std::fs::write(cfg_path(dir.path()), text).unwrap();
+            let err = load_project_config(dir.path()).unwrap_err().to_string();
+            assert!(err.contains(key) && err.contains("scripts."), "got: {err}");
+        }
+    }
+
+    #[test]
+    fn scripts_bad_values_are_refused() {
+        let dir = tempdir().unwrap();
+        for text in [
+            "scripts:\n  maxConcurrent: -1\n",
+            "scripts:\n  maxConcurrent: lots\n",
+            "scripts:\n  memoryMb: .nan\n",
+            "scripts:\n  threads: 3\n",
+        ] {
+            std::fs::write(cfg_path(dir.path()), text).unwrap();
+            assert!(load_project_config(dir.path()).is_err(), "accepted: {text}");
+        }
+    }
+
+    #[test]
+    fn scripts_round_trip_writes_only_what_differs() {
+        let dir = tempdir().unwrap();
+        let cfg = OxplowConfig {
+            scripts: ScriptsConfig {
+                max_concurrent: 3,
+                memory_bytes: 128 * 1024 * 1024,
+            },
+            ..default_config("test".into())
+        };
+        write_rendered(dir.path(), &cfg);
+        let raw = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
+        assert!(
+            raw.contains("maxConcurrent: 3") && raw.contains("memoryMb: 128"),
+            "{raw}"
+        );
+        assert_eq!(
+            load_project_config(dir.path()).unwrap().scripts,
+            cfg.scripts
+        );
+
+        write_rendered(dir.path(), &default_config("test".into()));
+        let raw = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
+        assert!(!raw.contains("scripts"), "defaults are not written:\n{raw}");
     }
 
     /// tsk863: reports are read by collectors (`records:`) now; the old

@@ -144,6 +144,8 @@ Everything else `.oxplow/project.yaml` accepts, with its default:
 | `metricDetailMaxPerProducer` | `100` | Keep each run's drill-in payload (`detail_json`) for only the newest N runs *per producer*. `0` disables the cap. |
 | `metricDetailRetentionDays` | `30` | Also drop drill-in payloads older than this many days. `0` disables. |
 | `snapshotMaxFileBytes` | `5242880` (5 MiB) | Files larger than this are recorded but their bytes aren't stored. |
+| `scripts.maxConcurrent` | `min(4, CPU cores)` | How many script workers run at once, across collectors, effects, command scripts and the rest. A run past it waits for a slot. Minimum `1`. |
+| `scripts.memoryMb` | `512` | The memory one script worker may use, in MiB, before it is stopped. Minimum `64`. |
 | `injectSessionContext` | `true` | Whether oxplow prepends the session-context block (stream / worktree / branch / thread) to the agent's prompt. |
 | `agentPromptAppend` | *empty* | Free text appended to every agent system prompt for this project. |
 | `agentModels` | *empty* | Per-agent model override, e.g. `opencode: github-copilot/gpt-5-mini`. |

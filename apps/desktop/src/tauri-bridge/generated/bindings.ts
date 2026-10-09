@@ -4592,6 +4592,8 @@ export type OxplowConfig = {
 	iconTint: string | null,
 	// How the project's tests run (the `testing:` block).
 	testing: TestingConfig,
+	// Limits on script workers (the `scripts:` block).
+	scripts: ScriptsConfig,
 	/**
 	 *  Project-declared metric SPECS (the `metrics:` block) — the author-able
 	 *  read surface (epic tsk12, E). Each entry enables a catalog metric
@@ -5352,6 +5354,24 @@ export type Scope =
  *  project that has its extension; its credentials are set once.
  */
 "global";
+
+/**
+ *  The limits on the processes that run extension and project scripts
+ *  (the `scripts:` block): how many run at once, host-wide, and how much
+ *  memory one may use before it is stopped.
+ */
+export type ScriptsConfig = {
+	/**
+	 *  Workers running at once; a run past it waits for a slot. Default
+	 *  `min(4, available parallelism)`, minimum 1.
+	 */
+	max_concurrent: number,
+	/**
+	 *  A worker's memory cap in bytes (`memoryMb` in the file). Default
+	 *  512 MiB, minimum 64 MiB.
+	 */
+	memory_bytes: number,
+};
 
 /**
  *  One ranked search result. `stream_id` is `None` for project-global

@@ -890,6 +890,7 @@ mod tests {
             inject_session_context: true,
             icon_tint: None,
             testing: Default::default(),
+            scripts: Default::default(),
             metrics: Default::default(),
             collectors: Default::default(),
             collectors_yaml: None,
