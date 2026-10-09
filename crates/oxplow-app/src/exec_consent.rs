@@ -233,6 +233,12 @@ pub enum ProgramKind {
     /// one too, so a changed script asks again.
     #[serde(rename = "ai-provider")]
     AiProvider,
+    /// An effort policy written as a script (`implementations:` with a
+    /// `.star` entry): it composes commands for core's events, as an
+    /// effect does, approved over its extension's folder (the manifest's
+    /// `needs` says what it reads).
+    #[serde(rename = "effort-policy")]
+    EffortPolicy,
 }
 
 /// A program the project's config would run.
@@ -280,6 +286,7 @@ impl ProjectProgram {
             ProgramKind::Effect => format!("effect:{}", self.name),
             ProgramKind::Component => format!("component:{}", self.name),
             ProgramKind::AiProvider => format!("ai_provider:{}", self.name),
+            ProgramKind::EffortPolicy => format!("effort_policy:{}", self.name),
         }
     }
 
@@ -344,7 +351,7 @@ impl ProjectProgram {
             // The script, and every file of its extension: the manifest
             // says when and with what it runs. A bundled extension's are
             // its embedded files, hashed alike (tsk953).
-            ProgramKind::Effect => {
+            ProgramKind::Effect | ProgramKind::EffortPolicy => {
                 h.update(self.program.as_bytes());
                 h.update([0u8]);
                 h.update(self.entry_bytes(project_dir)?);
@@ -789,6 +796,34 @@ pub fn may_run_acp(
     approved_at(store, project_dir, cwd, &acp_program(agent))
 }
 
+/// An effort policy written as a script, as a program to approve: its
+/// script (`entry`, in the extension at `tree`) over every file of the
+/// extension, and the scopes it calls (`needs`).
+pub fn effort_policy_program(
+    tree: &str,
+    extension: &str,
+    id: &str,
+    entry: &str,
+    needs: &[String],
+) -> ProjectProgram {
+    let tree = tree.trim_end_matches('/');
+    ProjectProgram {
+        kind: ProgramKind::EffortPolicy,
+        name: format!("{extension}/{id}"),
+        program: format!("{tree}/{entry}"),
+        args: Vec::new(),
+        env: Vec::new(),
+        credentials: Vec::new(),
+        network: Vec::new(),
+        commands: Vec::new(),
+        scopes: needs.to_vec(),
+        tree: Some(tree.to_string()),
+        remote: false,
+        approved: false,
+        version: None,
+    }
+}
+
 /// Why an unapproved program didn't run, for logs and errors.
 pub fn needs_approval(kind: ProgramKind, name: &str, program: &str) -> String {
     let what = match kind {
@@ -799,6 +834,7 @@ pub fn needs_approval(kind: ProgramKind, name: &str, program: &str) -> String {
         ProgramKind::Effect => "effect",
         ProgramKind::Component => "component",
         ProgramKind::AiProvider => "AI provider",
+        ProgramKind::EffortPolicy => "effort policy",
     };
     format!(
         "{what} `{name}` runs `{program}` from the project's config and needs a person's approval first \
@@ -854,14 +890,18 @@ pub fn list(
         e.implementations
             .iter()
             .filter(|d| d.script.is_some())
-            .map(move |d| {
-                ai_provider_program(
+            .filter_map(move |d| match d.capability.as_str() {
+                "ai_provider" => Some(ai_provider_program(
                     &e.path,
                     &e.name,
                     &d.id,
                     &d.entry,
                     d.config.get("baseUrl").and_then(serde_json::Value::as_str),
-                )
+                )),
+                "effort_policy" => Some(effort_policy_program(
+                    &e.path, &e.name, &d.id, &d.entry, &d.needs,
+                )),
+                _ => None,
             })
     }));
     out.extend(extensions.iter().filter(|e| e.enabled).flat_map(|e| {
@@ -1069,6 +1109,62 @@ mod tests {
         let none = |_: &Path| false;
         let hash = |b| files_hash(&crate::extensions::Embedded(b), &none).unwrap();
         assert_ne!(hash(before), hash(after));
+    }
+
+    /// An effort policy written as a script is a program a person
+    /// approves: listed with the scopes it reads, approved over its script
+    /// and every file of its extension, so an edit to any of them asks again.
+    #[test]
+    fn a_policy_script_is_approved_over_its_extensions_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let st = store(home.path(), dir.path());
+        let ext = dir.path().join("oxplow/extensions/acme");
+        std::fs::create_dir_all(ext.join("policies")).unwrap();
+        std::fs::write(
+            ext.join("extension.yaml"),
+            "manifest: 2\nname: acme\nsharing: private\nintent:\n  purpose: a policy\n  examples: [{ name: a }]\nimplementations:\n  - { capability: effort_policy, id: tidy, entry: policies/tidy.star, needs: [sql.read] }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            ext.join("policies/tidy.star"),
+            "def transform(x):\n    return {\"skip\": \"no\"}\n",
+        )
+        .unwrap();
+        let cfg = config(dir.path(), "");
+        let load = || crate::extensions::load_extensions(dir.path());
+        let program = |extensions: &[crate::extensions::Extension]| {
+            list(&st, dir.path(), &cfg, extensions)
+                .into_iter()
+                .find(|p| p.kind == ProgramKind::EffortPolicy)
+                .expect("the policy script is listed")
+        };
+        let extensions = load();
+        let listed = program(&extensions);
+        assert_eq!(listed.name, "acme/tidy");
+        assert_eq!(listed.key(), "effort_policy:acme/tidy");
+        assert_eq!(listed.scopes, vec!["sql.read".to_string()]);
+        assert!(
+            listed.program.ends_with("policies/tidy.star"),
+            "{}",
+            listed.program
+        );
+        assert!(!listed.approved);
+        approve_program(
+            &st,
+            dir.path(),
+            &cfg,
+            &extensions,
+            ProgramKind::EffortPolicy,
+            "acme/tidy",
+            listed.version.as_deref().unwrap(),
+        )
+        .unwrap();
+        assert!(program(&extensions).approved);
+        std::fs::write(ext.join("README.md"), "# Acme\n").unwrap();
+        let changed = program(&load());
+        assert_ne!(changed.version, listed.version);
+        assert!(!changed.approved);
     }
 
     /// A store outside `dir`'s project tree, with an in-memory keychain.

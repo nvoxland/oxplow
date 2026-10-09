@@ -194,6 +194,33 @@ test("programRow shows an AI provider script, what it sends to, and its script",
   expect(m.approveTitle).toContain("A new oxplow that changes it asks again");
 });
 
+// An effort policy written as a script reacts to core's events by
+// composing commands: its row says what it reads, offers the script to
+// read, and asks again when any file of its extension changes.
+test("programRow shows an effort policy script, what it reads, and its script", () => {
+  const m = programRow({
+    kind: "effort-policy",
+    name: "acme/tidy",
+    program: "oxplow/extensions/acme/policies/tidy.star",
+    args: [],
+    env: [],
+    credentials: [],
+    network: [],
+    commands: [],
+    scopes: ["sql.read"],
+    tree: "oxplow/extensions/acme",
+    remote: false,
+    approved: false,
+    version: "abc",
+  });
+  expect(m.label).toBe("Effort policy acme/tidy");
+  expect(m.showsSource).toBe(true);
+  expect(m.command).toContain("oxplow/extensions/acme/policies/tidy.star");
+  expect(m.command).toContain("reads oxplow's: sql.read");
+  expect(m.status).toBe("Not approved: choosing it opens and closes nothing");
+  expect(m.approveTitle).toContain("every file in oxplow/extensions/acme");
+});
+
 import { backfillAsk, backfillDone, backfillRunLabel, canApprove, providerImpactLines } from "./dataSectionModel.js";
 import type { ProviderImpact } from "../tauri-bridge/generated/bindings.js";
 

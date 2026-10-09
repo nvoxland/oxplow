@@ -2522,7 +2522,12 @@ implementations:
     `{ commands: [{ name, input }] } | { skip: "why" }` — takes no config,
     and names the scopes it calls in the entry's `needs:` (only what a
     script can, `scope_calls::CALLABLE`; checked at load, with the script
-    defining `transform`). `needs` is refused anywhere else.
+    defining `transform`). `needs` is refused anywhere else. It is a
+    program a person approves (`ProgramKind::EffortPolicy`, key
+    `effort_policy:<ext>/<id>`, `exec_consent::effort_policy_program`):
+    the hash covers the script and every file of its extension, as an
+    effect's does, and Settings → Data → Programs lists it with what it
+    reads and offers the script to read.
 - `oxplow-foundation` declares the agent harnesses (`oxplow:claude-code`,
   `oxplow:codex-cli`, `oxplow:opencode`, `oxplow:acp`), the ACP agents'
   programs (`oxplow:acp-adapter`, one declaration per preset) and the AI

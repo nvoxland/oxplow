@@ -4921,7 +4921,14 @@ export type ProgramKind =
  *  approved over its script and the base URL it sends to — a shipped
  *  one too, so a changed script asks again.
  */
-"ai-provider";
+"ai-provider" | 
+/**
+ *  An effort policy written as a script (`implementations:` with a
+ *  `.star` entry): it composes commands for core's events, as an
+ *  effect does, approved over its extension's folder (the manifest's
+ *  `needs` says what it reads).
+ */
+"effort-policy";
 
 // A program the project's config would run.
 export type ProjectProgram = {

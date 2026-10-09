@@ -142,6 +142,20 @@ export function programRow(p: ProjectProgram): ProgramRowModel {
       showsSource: true,
     };
   }
+  if (p.kind === "effort-policy") {
+    // It reacts to core's events by composing effort commands; its
+    // approval covers every file of its extension (the manifest's `needs`
+    // say what it reads).
+    return {
+      key: `${p.kind}:${p.name}`,
+      label: `Effort policy ${p.name}`,
+      command: [p.program, ...(p.scopes.length > 0 ? [`reads oxplow's: ${p.scopes.join(", ")}`] : [])].join("\n"),
+      status: p.approved ? "Approved on this machine" : "Not approved: choosing it opens and closes nothing",
+      approved: p.approved,
+      approveTitle: `Runs ${p.program} on the events an effort policy is offered while it's the project's effort policy, composing commands with an agent's rights (a command that asks becomes a proposal for you), approving every file in ${p.tree ?? "its extension"}. Approve only if you trust this extension; any change needs approval again.`,
+      showsSource: true,
+    };
+  }
   if (p.kind === "component") {
     // Unapproved it still renders and queries its lenses; only acting —
     // running its commands with the viewer's rights — waits (tsk960).
