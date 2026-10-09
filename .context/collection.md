@@ -150,7 +150,7 @@ hook + MCP wiring):
   testsuite (bun emits file-suite → describe-suite → testcase) doesn't
   double-count a case under both levels (tsk361); coverage
   reports into one coverage capture (line sets union, branch/function
-  counters sum, tsk160) — the effort's diff coverage is derived from it;
+  counters sum, tsk160) — the effort's diff coverage is derived from it (it reads both sides' snapshot bytes, so it is skipped, logged at info, when the active snapshot implementation keeps no `contents`: "Track changes only"; the metric file maps and the per-snapshot collectors skip the same way);
   analysis reports into one `static-analysis` observation (findings +
   per-severity counts). All `observed`, no agent step.
   **Attribution:** a run is the effort its causing tool call was in — the

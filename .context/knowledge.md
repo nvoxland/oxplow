@@ -113,7 +113,7 @@ all keep it; V125 cleared `body_hash` so the first boot's scan restated
 every page from its file. The file is still the page (and still written
 inside the run); the row now carries its text as well as its hash.
 
-`wiki_ref_drift` (MCP) shows one stale ref's diff. Bodies are searched
+`wiki_ref_drift` (MCP) shows one stale ref's diff; a pin taken by "Track changes only" (no `contents`) holds an identity and no text, so its status is `no_contents`, not an error. Bodies are searched
 with the site `search` tool: the `wiki` search kind is an asset over
 `v_search_wiki` (tsk864), restated when `wiki_page` commits — a page
 written by command or by hand alike — reading the body from the row. The old excerpt-only

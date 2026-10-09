@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { capabilitiesFromResult, chosenNote, nextChoices, offWithout } from "./capabilitiesModel.js";
+import { capabilitiesFromResult, choiceHint, chosenNote, nextChoices, offWithout } from "./capabilitiesModel.js";
 
 const COLUMNS = [
   "capability", "provider", "extension", "features", "active", "title", "source",
@@ -61,4 +61,11 @@ test("none names what needs the capability", () => {
   ] as never;
   expect(offWithout("work_items", extensions)).toEqual(["Ready Tasks", "the landed-in-progress hint"]);
   expect(offWithout("snapshots", extensions)).toEqual(["Contents"]);
+});
+
+// The two ways to keep snapshots read as what they mean for a person.
+test("a snapshot choice says what it keeps", () => {
+  expect(choiceHint("snapshots", ["contents"])).toBe("reads any file at any point; grows the blob store");
+  expect(choiceHint("snapshots", [])).toBe("what changed, never what it said; no blob store growth");
+  expect(choiceHint("work_items", [])).toBeNull();
 });

@@ -1822,7 +1822,8 @@ impl OxplowMcp {
 
     #[tool(
         description = "Read a path as it was at a snapshot (a whole capture, snapshot id) as a \
-                          (UTF-8 lossy) string. Null when the path didn't exist then."
+                          (UTF-8 lossy) string. Null when the path didn't exist then. Errors when that \
+                          snapshot was taken by 'Track changes only', which keeps no file contents."
     )]
     async fn read_file_at_snapshot(
         &self,
@@ -2241,7 +2242,8 @@ impl OxplowMcp {
                        per ref. Returns \
                        `{ slug, path, pinned_snapshot_id, status, \
                        unified_diff, truncated }`; `status` is one of \
-                       drifted | unchanged | not_a_ref | no_pin | binary.")]
+                       drifted | unchanged | not_a_ref | no_pin | binary | no_contents \
+                       (the pin was taken by 'Track changes only', which keeps no text).")]
     async fn wiki_ref_drift(
         &self,
         params: Parameters<WikiRefDriftParams>,

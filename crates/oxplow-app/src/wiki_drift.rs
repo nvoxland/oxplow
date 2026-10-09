@@ -32,7 +32,9 @@ pub struct WikiRefDrift {
     pub pinned_snapshot_id: Option<i64>,
     /// `drifted` (diff present) | `unchanged` | `not_a_ref` (the page
     /// doesn't reference this file) | `no_pin` (ref never pinned) |
-    /// `binary` (content isn't UTF-8 text, so no line diff).
+    /// `binary` (content isn't UTF-8 text, so no line diff) | `no_contents`
+    /// (the pin was taken by a snapshot implementation that keeps no file
+    /// contents, so there is no pinned text to diff).
     pub status: String,
     /// Unified diff (pinned → current). `Some` only when `drifted`.
     pub unified_diff: Option<String>,
@@ -89,9 +91,23 @@ pub async fn compute_wiki_ref_drift(
             return drifted_or_unchanged(slug, path, pin, String::new(), project_dir);
         }
     };
-    let pinned = content
-        .read_ref(&pinned)
-        .map_err(|e| DomainError::Storage(format!("snapshot read {path}@{pin}: {e}")))?;
+    let pinned = match content.read_ref(&pinned) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            // Never kept ("Track changes only") is not an error: the pin
+            // holds an identity and no text to compare with.
+            if snapshots
+                .contentless_take_for_path(pin, path)
+                .await?
+                .is_some()
+            {
+                return Ok(WikiRefDrift::bare(slug, path, Some(pin), "no_contents"));
+            }
+            return Err(DomainError::Storage(format!(
+                "snapshot read {path}@{pin}: {e}"
+            )));
+        }
+    };
     let pinned = match String::from_utf8(pinned) {
         Ok(s) => s,
         Err(_) => return Ok(WikiRefDrift::bare(slug, path, Some(pin), "binary")),
@@ -308,6 +324,72 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(nr.status, "not_a_ref");
+    }
+
+    /// A pin taken by "Track changes only" holds an identity and no text:
+    /// the drift says so, rather than failing the read.
+    #[tokio::test]
+    async fn a_pin_that_kept_no_contents_reports_no_contents() {
+        use oxplow_db::{
+            Database, FileSnapshot, PageRefEdge, SqlitePageRefStore, SqliteSnapshotStore,
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path();
+        let db = Database::in_memory();
+        seed_stream(&db, 1).await;
+        let page_refs = SqlitePageRefStore::new(db.clone());
+        let snapshots = SqliteSnapshotStore::new(db.clone());
+        let blobs = BlobStore::new(project.join(".oxplow/blobs"));
+        let snap = snapshots
+            .create_snapshot(oxplow_domain::StreamId::new(1))
+            .await
+            .unwrap();
+        // The row has an identity, and no blob behind it.
+        snapshots
+            .capture(FileSnapshot {
+                id: 0,
+                stream_id: oxplow_domain::StreamId::new(1),
+                path: "src/x.rs".into(),
+                blob_hash: Some(BlobStore::hash(b"alpha")),
+                size_bytes: 5,
+                captured_at: oxplow_domain::Timestamp::from_unix_ms(0),
+                storage: oxplow_db::SnapshotStorage::Oxplow,
+                snapshot_id: Some(snap),
+                mtime_ms: None,
+                content_hash: None,
+            })
+            .await
+            .unwrap();
+        db.transaction(move |c| {
+            c.execute(
+                "INSERT INTO snapshot_op (stream_id, snapshot_id, trigger, at, elapsed_ms, over_budget, file_count, provider, contents)
+                 VALUES (1, ?1, 'manual', '2026-01-01T00:00:00Z', 0, 0, 1, 'hashes', 0)",
+                [snap],
+            )
+            .map_err(oxplow_db::map_sql_err)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        page_refs
+            .upsert_edge(
+                PageRefEdge::new("wiki", "intro", "file", "src/x.rs", "wiki_file_ref")
+                    .with_version(snap, None, false),
+            )
+            .await
+            .unwrap();
+        let drift = compute_wiki_ref_drift(
+            &page_refs,
+            &snapshots,
+            &content(&blobs, project),
+            project,
+            "intro",
+            "src/x.rs",
+        )
+        .await
+        .unwrap();
+        assert_eq!(drift.status, "no_contents");
+        assert!(drift.unified_diff.is_none());
     }
 
     #[tokio::test]

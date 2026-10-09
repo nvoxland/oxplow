@@ -104,6 +104,12 @@ impl Indexer {
     /// row, a too-large body, or binary content is skipped; everything else is
     /// indexed as UTF-8 (lossy) text keyed by `(file, path, stream)`.
     pub async fn index_snapshot_files(&self, stream_id: &StreamId, snapshot_id: i64) {
+        // The index is built from file bytes, which "Track changes only"
+        // keeps none of.
+        if let Some(reason) = self.services.snapshot_captures.no_contents_reason() {
+            tracing::info!(snapshot_id, "indexing skipped: {reason}");
+            return;
+        }
         let Ok(files) = self
             .services
             .snapshot_store
@@ -225,6 +231,26 @@ mod tests {
         // A later capture with no blob = deletion → index row removed.
         let snap2 = capture_file(&svc, &stream.id, "src/frob.rs", None).await;
         indexer.index_snapshot_files(&stream.id, snap2).await;
+        assert!(svc
+            .search_store
+            .search("frobnicate", Some(&stream.id.to_string()), &[], 10)
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    /// Indexing reads file bytes; "Track changes only" keeps none, so the
+    /// index is left alone (and says why in the log).
+    #[tokio::test]
+    async fn nothing_is_indexed_without_contents() {
+        let (svc, _dir) = services().await;
+        let stream = svc.streams.ensure_primary().await.unwrap();
+        svc.snapshot_captures
+            .set_content_policy(crate::snapshot_capture::ContentPolicy::HashesOnly);
+        let snap = capture_file(&svc, &stream.id, "src/frob.rs", Some(b"fn frobnicate() {}")).await;
+        Indexer::new(svc.clone())
+            .index_snapshot_files(&stream.id, snap)
+            .await;
         assert!(svc
             .search_store
             .search("frobnicate", Some(&stream.id.to_string()), &[], 10)
