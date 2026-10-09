@@ -105,7 +105,10 @@ collectors:
 ```
 
 A Starlark or jaq collector runs sandboxed: no files, network,
-environment or credentials. It needs no approval, with one exception:
+environment or credentials. Every Starlark and jaq script — collectors,
+commands, effects, policies — runs in its own worker process, which is
+stopped when it runs past its time budget or its memory cap (`scripts:`
+in Settings reference). It needs no approval, with one exception:
 a Starlark script that calls a model (`ai_classify`, `ai_score`,
 `ai_summarize`, `ai_extract`) spends your AI provider's key every run,
 so you approve it in Settings → Data first, like an `exec` collector.

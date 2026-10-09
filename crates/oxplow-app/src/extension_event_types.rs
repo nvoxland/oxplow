@@ -213,19 +213,19 @@ const UPCAST_BUDGET: oxplow_script::SandboxBudget =
 
 /// The upcast of `event_type`'s newest version: the script's
 /// `transform({from_v, payload})` returns the payload at that version.
-/// It runs sandboxed, with no host (no files, no `ai_*`); the registry
-/// validates what it returns against the newest schema.
+/// It runs in a script worker, with no host (no files, no `ai_*`); the
+/// registry validates what it returns against the newest schema.
 pub fn starlark_upcast(event_type: &str, script: &str) -> Upcast {
     let (event_type, script) = (event_type.to_string(), script.to_string());
     Arc::new(move |from_v, payload| {
-        use oxplow_script::runtime::{run_sandboxed, run_starlark};
-        let script = script.clone();
-        run_sandboxed(&UPCAST_BUDGET, move || {
-            run_starlark(&script, &json!({ "from_v": from_v, "payload": payload }))
-        })
-        .map_err(|e| {
-            DomainError::Invalid(format!("the upcast of `{event_type}@{from_v}` failed: {e}"))
-        })
+        use oxplow_script::workers::{shared, ScriptRun};
+        let input = json!({ "from_v": from_v, "payload": payload });
+        shared()
+            .run(&UPCAST_BUDGET, ScriptRun::starlark(&script, input), None)
+            .map(|ran| ran.value)
+            .map_err(|e| {
+                DomainError::Invalid(format!("the upcast of `{event_type}@{from_v}` failed: {e}"))
+            })
     })
 }
 

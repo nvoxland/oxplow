@@ -361,12 +361,12 @@ mod tests {
             .into_iter()
             .find(|m| m.key == key)
             .unwrap_or_else(|| panic!("no builtin metric {key}"));
-        crate::run_fact_starlark(
+        crate::runtime::run_starlark_with_host(
             metric.script,
             &serde_json::json!({}),
-            TreeHost::new(files),
-            &crate::SandboxBudget::default(),
+            &TreeHost::new(files),
         )
+        .and_then(crate::facts_of)
         .expect("script runs")
     }
 

@@ -168,6 +168,8 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     // Config changes reach the extension catalog, the provider registry and
     // the metric catalog (P7.B6).
     crate::config_reactors::register(state);
+    // Scripts run in workers bounded by the project's `scripts:` config.
+    crate::config_reactors::apply_script_limits(&crate::config_service::read_config(&state.config));
     // A collector that registered a new entity may let a model compile.
     crate::extension_models::register(state);
     state.event_pump.clone().spawn();

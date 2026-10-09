@@ -323,3 +323,80 @@ fn a_missing_worker_is_reported() {
     assert!(matches!(err, CollectError::WorkerDied(_)), "{err:?}");
     assert_eq!(w.live(), 0);
 }
+
+/// A model that takes `delay` to answer, counting what it's asked.
+#[derive(Default)]
+struct Slow {
+    delay: Duration,
+    asked: std::sync::Mutex<Vec<String>>,
+}
+
+impl oxplow_script::AiOracle for Slow {
+    fn classify(&self, text: &str, labels: &[String]) -> Result<Value, String> {
+        self.asked
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(text.to_string());
+        std::thread::sleep(self.delay);
+        Ok(json!({ "label": labels[0] }))
+    }
+    fn score(&self, _: &str, _: &[String]) -> Result<Value, String> {
+        Err("no".into())
+    }
+    fn summarize(&self, _: &str, _: Option<&str>) -> Result<String, String> {
+        Err("no".into())
+    }
+    fn extract(&self, _: &str, _: &str, _: &Value) -> Result<Value, String> {
+        Err("no".into())
+    }
+}
+
+/// The time a model takes to answer is left out of the budget.
+#[test]
+fn model_time_is_left_out_of_the_budget() {
+    let w = workers(limits());
+    let oracle = Arc::new(Slow {
+        delay: Duration::from_millis(300),
+        ..Slow::default()
+    });
+    let ran = w
+        .run(
+            &budget(150),
+            ScriptRun::starlark(
+                "def transform(x):\n    return ai_classify('t', ['a'])\n",
+                json!({}),
+            )
+            .with_host(RunHost::Ai(oracle)),
+            None,
+        )
+        .unwrap();
+    assert_eq!(ran.value["label"], "a");
+}
+
+/// …but not out of the ceiling: a per-row loop of model calls stops at
+/// the ceiling, and the stopped worker asks nothing more.
+#[test]
+fn a_run_past_its_ceiling_stops_asking_the_model() {
+    let w = workers(limits());
+    let oracle = Arc::new(Slow {
+        delay: Duration::from_millis(50),
+        ..Slow::default()
+    });
+    let budget = SandboxBudget::with_timeout(Duration::from_secs(5))
+        .with_ceiling(Duration::from_millis(300));
+    let script = "def transform(x):\n    for i in range(100):\n        ai_classify(str(i), ['a'])\n    return {}\n";
+    let started = Instant::now();
+    let err = w
+        .run(
+            &budget,
+            ScriptRun::starlark(script, json!({})).with_host(RunHost::Ai(oracle.clone())),
+            None,
+        )
+        .unwrap_err();
+    assert!(matches!(err, CollectError::Timeout), "{err:?}");
+    assert!(started.elapsed() < Duration::from_secs(2));
+    let at_timeout = oracle.asked.lock().unwrap().len();
+    std::thread::sleep(Duration::from_millis(400));
+    assert_eq!(oracle.asked.lock().unwrap().len(), at_timeout);
+    assert!(at_timeout < 100);
+}

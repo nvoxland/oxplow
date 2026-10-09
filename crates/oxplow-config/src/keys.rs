@@ -19,7 +19,9 @@ use crate::{
 /// chooses where the project's work goes and how it is tracked
 /// (`activeProviders`: an agent moving filing to another tracker, or
 /// turning the effort policy off), decides how long its agents'
-/// activity is kept (`eventRetention`), or steers every agent (`agentPromptAppend`, `testing` — its agent hint —
+/// activity is kept (`eventRetention`), bounds the scripts extensions run
+/// (`scripts`: an agent mustn't raise its own scripts' memory or
+/// concurrency), or steers every agent (`agentPromptAppend`, `testing` — its agent hint —
 /// where an agent setting it could persist instructions into all threads): an agent asking to change one
 /// gets a proposal the person approves or declines. Everything else is the
 /// agent's to set through `oxplow.config.set`. A key whose doc says it runs
@@ -36,6 +38,7 @@ pub const HUMAN_ONLY_KEYS: &[&str] = &[
     "activeProviders",
     "replacementsOff",
     "eventRetention",
+    "scripts",
     "ai",
     "lsp",
     "testing",

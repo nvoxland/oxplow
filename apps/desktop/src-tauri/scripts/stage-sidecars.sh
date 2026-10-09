@@ -5,9 +5,11 @@
 # - `oxplow-daemon` (tsk256): the packaged shell spawns one per open
 #   project;
 # - `oxplow-provider-mcp` (P7.A6): oxplow's MCP adapter, which the daemon
-#   runs for a provider declared with `adapter:`.
+#   runs for a provider declared with `adapter:`;
+# - `oxplow-script-worker`: the process every Starlark and jaq script runs
+#   in, so a runaway one can be killed (`oxplow_script::workers`).
 #
-# Both are resolved next to the running executable — which is exactly
+# All are resolved next to the running executable — which is exactly
 # where a sidecar lands inside `Oxplow.app/Contents/MacOS/`.
 #
 # **This is not only a packaging step.** `externalBin` makes tauri-build
@@ -25,7 +27,7 @@
 # invoked from. It is invoked from `beforeBuildCommand`, whose cwd is the
 # **app dir** (`apps/desktop`) — not `src-tauri`, which cost tsk263 a
 # packaged build with no daemon in it.
-sidecars=(oxplow-daemon oxplow-provider-mcp)
+sidecars=(oxplow-daemon oxplow-provider-mcp oxplow-script-worker)
 set -euo pipefail
 
 profile="${1:-release}"
@@ -50,7 +52,7 @@ case "$triple" in
 esac
 
 # shellcheck disable=SC2086 # profile_flag is intentionally word-split (empty for debug)
-cargo build $profile_flag -p oxplow-daemon -p oxplow-provider-mcp --manifest-path "$repo_root/Cargo.toml"
+cargo build $profile_flag -p oxplow-daemon -p oxplow-provider-mcp -p oxplow-script --bins --manifest-path "$repo_root/Cargo.toml"
 
 mkdir -p binaries
 for name in "${sidecars[@]}"; do

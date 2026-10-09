@@ -38,7 +38,6 @@ use std::time::Duration;
 use oxplow_provider_protocol::codec::notify;
 use oxplow_provider_protocol::model::*;
 use oxplow_provider_protocol::{Id, Incoming, Peer, ProtocolError};
-use oxplow_script::runtime::{run_sandboxed, run_starlark};
 use oxplow_script::SandboxBudget;
 use rmcp::model::ClientJsonRpcMessage;
 use rmcp::model::{CallToolRequestParams, CallToolResult};
@@ -574,7 +573,8 @@ async fn start(adapter: &Adapter) -> Result<Arc<Client>, Unstarted> {
     Ok(Arc::new(client))
 }
 
-/// Run the mapping's `transform(x)` under the sandbox budget.
+/// Run the mapping's `transform(x)` in a script worker, within the
+/// mapping budget.
 async fn map(mapping: &str, x: Value) -> Result<Value, ProtocolError> {
     let script = mapping.to_string();
     let phase = x["phase"].as_str().unwrap_or_default().to_string();
@@ -583,7 +583,13 @@ async fn map(mapping: &str, x: Value) -> Result<Value, ProtocolError> {
             timeout: MAPPING_TIMEOUT,
             ceiling: MAPPING_TIMEOUT,
         };
-        run_sandboxed(&budget, move || run_starlark(&script, &x))
+        oxplow_script::workers::shared()
+            .run(
+                &budget,
+                oxplow_script::workers::ScriptRun::starlark(&script, x),
+                None,
+            )
+            .map(|ran| ran.value)
     })
     .await
     .map_err(|e| internal(format!("mapping: {e}")))?

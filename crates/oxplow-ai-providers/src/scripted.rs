@@ -102,8 +102,8 @@ pub fn scripted(
 }
 
 impl Scripted {
-    /// Run the script's `func` on `input`, sandboxed — once a person
-    /// approved it.
+    /// Run the script's `func` on `input` in a script worker — once a
+    /// person approved it.
     async fn call(
         &self,
         provider: &str,
@@ -117,9 +117,10 @@ impl Scripted {
         let script = self.script.clone();
         let budget = oxplow_script::SandboxBudget::with_timeout(SCRIPT_TIMEOUT);
         let ran = tokio::task::spawn_blocking(move || {
-            oxplow_script::runtime::run_sandboxed(&budget, move || {
-                oxplow_script::runtime::run_starlark_fn(&script, func, &input)
-            })
+            use oxplow_script::workers::{shared, ScriptRun};
+            shared()
+                .run(&budget, ScriptRun::starlark_fn(&script, func, input), None)
+                .map(|ran| ran.value)
         })
         .await;
         let bad = |detail: String| AiError::BadResponse {

@@ -34,7 +34,7 @@ use oxplow_db::{
 };
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::{DomainError, EffortId, StreamId, ThreadId};
-use oxplow_script::{builtin_metrics, BuiltinMetric, CollectedFact, SandboxBudget, TreeHost};
+use oxplow_script::{builtin_metrics, BuiltinMetric, CollectedFact, SandboxBudget};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
@@ -2161,9 +2161,10 @@ impl MetricsService {
             ));
         }
         let runner = self.fact_runner(&collector)?;
-        let facts = tokio::task::spawn_blocking(move || runner.run(&input, TreeHost::new(files)))
-            .await
-            .map_err(|e| format!("task failed: {e}"))??;
+        let facts =
+            tokio::task::spawn_blocking(move || runner.run(&input, std::sync::Arc::new(files)))
+                .await
+                .map_err(|e| format!("task failed: {e}"))??;
         Ok(facts
             .into_iter()
             .map(|f| {
@@ -2217,8 +2218,7 @@ impl MetricsService {
                 // silently timed out the broad-query ones on every full-tree
                 // run (tsk47). They run detached under `spawn_blocking`, so a
                 // generous ceiling costs nothing and still catches a runaway.
-                let host = TreeHost::from_shared(files);
-                tokio::task::spawn_blocking(move || runner.run(&input, host))
+                tokio::task::spawn_blocking(move || runner.run(&input, files))
                     .await
                     .unwrap_or_else(|e| Err(format!("task failed: {e}")))
             }
@@ -3152,20 +3152,24 @@ enum FactRunner {
 impl FactRunner {
     /// Run over `input` under the fact-collector budget and read its
     /// `{"facts": [...]}`. Blocking: call it from `spawn_blocking`.
-    fn run(self, input: &serde_json::Value, host: TreeHost) -> Result<Vec<CollectedFact>, String> {
-        use oxplow_script::runtime::{run_exec, run_jaq, run_sandboxed};
-        use oxplow_script::{facts_of, run_fact_starlark};
+    fn run(
+        self,
+        input: &serde_json::Value,
+        files: std::sync::Arc<std::collections::HashMap<String, String>>,
+    ) -> Result<Vec<CollectedFact>, String> {
+        use oxplow_script::facts_of;
+        use oxplow_script::runtime::run_exec;
+        use oxplow_script::workers::{shared, RunHost, ScriptRun};
         let budget = SandboxBudget::with_timeout(FACT_COLLECTOR_TIMEOUT);
+        let script = |run: ScriptRun<'_>| shared().run(&budget, run, None).map(|r| r.value);
         match self {
-            FactRunner::Starlark(script) => run_fact_starlark(&script, input, host, &budget),
-            FactRunner::Jaq(script) => {
-                let input = input.clone();
-                run_sandboxed(&budget, move || run_jaq(&script, &input)).and_then(facts_of)
+            FactRunner::Starlark(text) => {
+                script(ScriptRun::starlark(&text, input.clone()).with_host(RunHost::Tree(files)))
             }
-            FactRunner::Exec(argv) => {
-                run_exec(&budget, &argv, &input.to_string()).and_then(facts_of)
-            }
+            FactRunner::Jaq(text) => script(ScriptRun::jaq(&text, input.clone())),
+            FactRunner::Exec(argv) => run_exec(&budget, &argv, &input.to_string()),
         }
+        .and_then(facts_of)
         .map_err(|e| e.to_string())
     }
 }

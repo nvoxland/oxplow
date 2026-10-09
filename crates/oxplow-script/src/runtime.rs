@@ -7,17 +7,14 @@
 //! - [`run_exec`] — an external process (JSON on stdin, JSON on stdout). The
 //!   escape hatch; lower-trust (it can do I/O), tagged so the UI can mark it.
 //!
-//! The two in-process tiers are deterministic and do no I/O, so their output
-//! is `observed`-eligible. They are run under a [`SandboxBudget`] (a wall-clock
-//! timeout) so a malformed or runaway script is isolated and surfaced as an
-//! error rather than hanging or crashing collection.
-//!
-//! [`run_exec`] honours the SAME budget, and is the only tier where the budget
-//! actually stops the work: a child process can be killed, whereas an
-//! overrunning in-process script can only be abandoned to keep spinning (see
-//! [`run_sandboxed`]). It also drains stdout/stderr on their own threads while
-//! writing stdin, because doing those in sequence deadlocks any streaming
-//! filter once a pipe buffer fills (tsk161).
+//! The two script tiers are deterministic and do no I/O, so their output is
+//! `observed`-eligible. Their engines here run only inside a script worker
+//! process (`crate::worker`), which the host kills past its
+//! [`SandboxBudget`] or memory cap (`crate::workers`). [`run_exec`] is a
+//! child process of its own and honours the same budget. It also drains
+//! stdout/stderr on their own threads while writing stdin, because doing
+//! those in sequence deadlocks any streaming filter once a pipe buffer fills
+//! (tsk161).
 //!
 //! Every engine takes an already-parsed JSON input value (the host applied the
 //! collector's declared container parser first — see `CollectorInput`) and
@@ -26,7 +23,6 @@
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::sync::mpsc;
 use std::time::Duration;
 
 use oxplow_coverage::{
@@ -38,14 +34,7 @@ use serde_json::Value;
 
 use crate::{CollectError, CollectorKind, CollectorOutput};
 
-/// Resource limits for an in-process script run. Currently a wall-clock
-/// timeout enforced by running the engine on a worker thread; the caller
-/// returns promptly on overrun even if the worker is still unwinding.
-///
-/// ⚠️ **The timeout bounds the CALLER's wait, not the WORK** — see
-/// [`run_sandboxed`]. A too-tight budget therefore doesn't save CPU; it burns
-/// more of it, by returning "failed" while the worker plays on and letting the
-/// caller start another.
+/// A script run's time limits. Past either, its worker is killed.
 #[derive(Debug, Clone, Copy)]
 pub struct SandboxBudget {
     /// The script's own time: what it spends outside a [`RunClock`] pause.
@@ -101,54 +90,16 @@ impl SandboxBudget {
     }
 }
 
-/// Run `f` on a worker thread, returning its result or [`CollectError::Timeout`]
-/// if it does not finish within `budget.timeout`. On timeout the worker is
-/// detached (it finishes on its own); the caller is never blocked past the
-/// deadline.
-///
-/// ⚠️ **A timeout does not stop the work** (tsk88). Rust can't kill a thread, so
-/// the detached worker keeps running — and keeps burning a core — until it
-/// finishes on its own. This has two consequences worth remembering before
-/// tuning `budget`:
-///
-/// 1. **Tightening the timeout costs CPU rather than saving it.** The caller
-///    gives up, reports a failure, and is free to try again — so a retry (the
-///    coverage ride-along has one) means *two* workers on the same input, not
-///    one. That's how a 5s budget on a 4-ish-second parse produced 142 threads.
-/// 2. **It is not a defence against a hostile script.** An infinite script
-///    detaches and spins forever; the budget only hides it from the caller. Real
-///    containment needs a step-limited interpreter or a child process we can
-///    kill. Until then this is a *diagnostic* ceiling for honest-but-slow
-///    scripts, and should be set generously enough that honest ones never hit it.
-pub fn run_sandboxed<F>(budget: &SandboxBudget, f: F) -> Result<Value, CollectError>
-where
-    F: FnOnce() -> Result<Value, CollectError> + Send + 'static,
-{
-    run_sandboxed_excluding(budget, &RunClock::default(), f)
-}
-
-/// A sandboxed run as the script's host sees it: the time the script
-/// spends waiting on something outside it (a collector's `ai_*` calls —
-/// the calls it has finished, and the one in flight), and whether the
-/// sandbox has given up on it, after which the host refuses to call out
-/// (a detached worker must not keep making paid model calls).
+/// A run's time spent waiting on its host — answering a command's
+/// `scope(…)` or a collector's `ai_*` call (the calls finished and the one
+/// in flight) — which its budget's `timeout` leaves out and its `ceiling`
+/// doesn't.
 #[derive(Debug, Default)]
 pub struct RunClock {
     state: std::sync::Mutex<(Duration, Option<std::time::Instant>)>,
-    stopped: std::sync::atomic::AtomicBool,
 }
 
 impl RunClock {
-    /// The sandbox gave up on the run.
-    pub fn stop(&self) {
-        self.stopped
-            .store(true, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    pub fn stopped(&self) -> bool {
-        self.stopped.load(std::sync::atomic::Ordering::SeqCst)
-    }
-
     /// Run `f` with the clock paused.
     pub fn paused<T>(&self, f: impl FnOnce() -> T) -> T {
         self.lock().1 = Some(std::time::Instant::now());
@@ -168,40 +119,6 @@ impl RunClock {
 
     fn lock(&self) -> std::sync::MutexGuard<'_, (Duration, Option<std::time::Instant>)> {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
-    }
-}
-
-/// [`run_sandboxed`], leaving out of `budget.timeout` the time `clock`
-/// was paused, but not out of `budget.ceiling`; on giving up it stops
-/// `clock` (see [`RunClock`]).
-pub fn run_sandboxed_excluding<F>(
-    budget: &SandboxBudget,
-    clock: &RunClock,
-    f: F,
-) -> Result<Value, CollectError>
-where
-    F: FnOnce() -> Result<Value, CollectError> + Send + 'static,
-{
-    let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
-        let _ = tx.send(f());
-    });
-    let started = std::time::Instant::now();
-    loop {
-        let deadline = (started + budget.timeout + clock.total()).min(started + budget.ceiling);
-        let now = std::time::Instant::now();
-        if now >= deadline {
-            clock.stop();
-            return Err(CollectError::Timeout);
-        }
-        // Wake at least every 50ms to see more paused time.
-        match rx.recv_timeout((deadline - now).min(Duration::from_millis(50))) {
-            Ok(result) => return result,
-            Err(mpsc::RecvTimeoutError::Timeout) => continue,
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                return Err(CollectError::Runtime("the script's worker died".into()))
-            }
-        }
     }
 }
 
@@ -1189,26 +1106,6 @@ def transform(input):
             run_starlark("def transform(", &json!({})),
             Err(CollectError::Runtime(_))
         ));
-    }
-
-    #[test]
-    fn sandbox_times_out_on_slow_script() {
-        // A genuinely slow jaq run with a tiny budget must surface Timeout
-        // promptly rather than block the caller.
-        let budget = SandboxBudget::with_timeout(Duration::from_millis(5));
-        let program = "reduce range(50000000) as $x (0; . + $x)".to_string();
-        let input = json!(null);
-        let result = run_sandboxed(&budget, move || run_jaq(&program, &input));
-        assert!(matches!(result, Err(CollectError::Timeout)));
-    }
-
-    #[test]
-    fn sandbox_returns_result_when_within_budget() {
-        let budget = SandboxBudget::default();
-        let program = "{ files: {} }".to_string();
-        let input = json!(null);
-        let result = run_sandboxed(&budget, move || run_jaq(&program, &input));
-        assert!(result.is_ok());
     }
 
     #[test]

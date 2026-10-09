@@ -242,7 +242,10 @@ Contain untrusted work and enforce scoped authority regardless of who authored o
 
 #### Contain script CPU and memory and reap timed-out workers
 
-Status: planned.
+Status: in progress. Every Starlark and jaq run executes in a killable
+`oxplow-script-worker` process with a memory cap and host-wide
+concurrency bound (`scripts:`); timeout, cancel and memory overruns stop
+and reap it. The overhead measurement on realistic collectors remains.
 
 Scope: The existing timeout returns to the caller while a worker continues. Evaluate interpreter instruction/allocation limits versus a killable worker process, then implement enforceable containment for Starlark and jaq across execution hosts. Measure cold/warm overhead with realistic collectors before selecting the implementation.
 

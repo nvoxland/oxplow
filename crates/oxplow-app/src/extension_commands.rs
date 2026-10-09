@@ -697,10 +697,28 @@ pub enum Composed {
 /// How long a command's script may run. It runs inside the bus's write
 /// transaction, holding the write lock, so this is far tighter than a
 /// collector's runaway catch: composing a few commands is milliseconds.
-/// (A timeout detaches the worker rather than stopping it — see
-/// `run_sandboxed` — but the transaction is released.)
+/// A script past it has its worker stopped and the transaction released.
 pub const COMMAND_SCRIPT_BUDGET: oxplow_script::SandboxBudget =
     oxplow_script::SandboxBudget::with_timeout(std::time::Duration::from_secs(5));
+
+/// Run a command script's (or an effect's) `transform` over `input` in a
+/// script worker within [`COMMAND_SCRIPT_BUDGET`], its `scope(…)` calls
+/// answered by `serve` on this thread (the command's transaction lives
+/// here). Blocks.
+pub fn run_command_script(
+    script: &str,
+    input: Value,
+    serve: &mut oxplow_script::workers::Serve<'_>,
+) -> Result<Value, oxplow_script::CollectError> {
+    use oxplow_script::workers::{shared, RunHost, ScriptRun};
+    shared()
+        .run(
+            &COMMAND_SCRIPT_BUDGET,
+            ScriptRun::starlark(script, input).with_host(RunHost::Scope(serve)),
+            None,
+        )
+        .map(|ran| ran.value)
+}
 
 /// The most examples one command may declare: `check_extension` runs
 /// each one's script.
@@ -716,12 +734,8 @@ pub fn compose_calls(
     input: Value,
     calls: &mut crate::scope_calls::Calls<'_>,
 ) -> Result<Composed, oxplow_domain::CommandError> {
-    let out = oxplow_script::scope::run_starlark_serving(
-        &COMMAND_SCRIPT_BUDGET,
-        script,
-        &json!({ "input": input }),
-        &mut |id, args| calls.serve(id, args),
-    );
+    let mut serve = |id: &str, args: Value| calls.serve(id, args);
+    let out = run_command_script(script, json!({ "input": input }), &mut serve);
     // The database was busy answering a read: the run is retried.
     if let Some(message) = calls.take_busy() {
         return Err(oxplow_domain::CommandError::Busy { message });

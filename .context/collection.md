@@ -487,9 +487,34 @@ I/O, so it's tagged lower-trust, and **runs only once a person approved it on
 this machine** — a project collector's program (`ProgramKind::Collector`),
 approved in Settings → Data → Programs like any other; until then its run is
 recorded `needs_approval` and nothing is read (see architecture.md → "A
-repo's config never runs a program without consent"). All three tiers run under a `SandboxBudget`
-(wall-clock timeout) so a runaway/malformed script is surfaced as an error, not
-a hang.
+repo's config never runs a program without consent").
+
+**Containing scripts.** Every Starlark and jaq run — a report parser, an
+entity or fact collector, a command or effect script, an effort policy,
+an event upcast, a scripted AI provider, the MCP adapter's mappings — runs
+in its own **script worker process** (`oxplow-script-worker`, a sidecar
+beside the oxplow executable; `oxplow_script::worker` and `::workers`),
+never on a thread of the host. The host (`ScriptWorkers::run`, one per
+process: `workers::shared()`) sends the run over NDJSON, answers its
+`scope(…)` and `ai_*` calls on the calling thread (a command's transaction
+stays there), and enforces a `SandboxBudget`: the time answering is left
+out of its `timeout` and counted in its `ceiling`. Past either, or on a
+`Cancel`, the worker is **killed and reaped** (`CollectError::Timeout` /
+`Cancelled`); a run whose live allocations pass its cap is ended by the
+worker's counting allocator (`worker::MemoryCap`, exit code 3,
+`CollectError::MemoryExceeded`); a worker whose host is gone exits on its
+own. At most `scripts.maxConcurrent` run at once (default `min(4,
+available parallelism)`); one more waits for a slot (counted in its
+ceiling). `scripts.memoryMb` is the cap (default 512). Both are
+person-only keys, applied at boot and on change
+(`config_reactors::apply_script_limits`). A finished run reports its CPU
+time and peak bytes (`workers::Ran`). The engines themselves
+(`runtime::run_jaq`, `run_starlark_inner`) run only inside the worker;
+the built-in metrics' and report parsers' unit tests call them directly.
+`exec` was already a child process and keeps its own kill
+(`run_exec`, below). A missing worker binary is an error
+(`CollectError::WorkerDied`), never an in-process fallback;
+`scripts/test-prereqs.sh` builds it before every test run.
 
 **`exec` is the one tier whose budget actually STOPS the work** (tsk161): a
 child process can be killed, so `run_exec` enforces the deadline with
@@ -500,22 +525,14 @@ filter the moment a pipe buffer (~64 KB) fills: the child blocks writing
 stdout, so it stops reading stdin, so the parent blocks writing. Reproduced
 with multiple MB through `cat`, and it had no budget to break out of it.
 
-> ### ⚠️ The sandbox timeout bounds the CALLER'S WAIT, not the WORK (tsk88)
+> ### History: budgets that only bounded the caller's wait (tsk88)
 >
-> `run_sandboxed` runs the script on a worker thread and `recv_timeout`s. Rust
-> can't kill a thread, so on overrun the worker is **detached and keeps burning a
-> core** until it finishes on its own. Two consequences:
->
-> - **Tightening the budget costs CPU instead of saving it.** The caller gives up
->   and is free to retry — and the coverage ride-along *does* retry (tsk79) — so a
->   marginal parse means *two* workers on the same input, not one.
-> - **It is not containment** *for the in-process tiers*. A hostile/infinite jaq
->   or Starlark script detaches and spins forever; the budget only hides it from
->   the caller. Real containment needs a step-limited interpreter or a killable
->   child process — which is exactly what `exec` now has, so this caveat applies
->   to `jaq`/`starlark` only. Until then the number is
->   a **diagnostic ceiling for honest-but-slow scripts** (120s, matching
->   `FACT_COLLECTOR_TIMEOUT`) and must be set generously enough that honest ones never trip.
+> Until the script worker, `run_sandboxed` ran a script on a thread and
+> `recv_timeout`'d; Rust can't kill a thread, so an overrun was **detached and
+> kept burning a core**, and a retry (the coverage ride-along has one) meant
+> two on the same input — 142 threads at ~58% CPU when it was caught. A
+> timeout was a diagnostic, not a limit. Workers made it a limit; the lessons
+> below about *sizing* a budget still hold.
 >
 > **This same shape of bug has now bitten three times** — a fixed timeout sized
 > for a small input silently killing whole-workspace work, and reporting it as
@@ -536,7 +553,7 @@ with multiple MB through `cat`, and it had no budget to break out of it.
 >
 > The lesson for any new budget: **size it against a whole-workspace report in a
 > DEBUG build** (the interpreter runs ~6x slower there, and that's what developers
-> actually run), and remember that a timeout here is a diagnostic, not a limit.
+> actually run): an honest script that trips a budget now loses its run.
 >
 > **And a lesson about reading the evidence:** tsk88 was first written up as
 > "coverage never got a fact", borrowing tsk62's wording. One `GROUP BY status`

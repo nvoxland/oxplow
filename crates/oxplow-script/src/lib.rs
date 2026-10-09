@@ -120,21 +120,6 @@ pub fn facts_of(value: serde_json::Value) -> Result<Vec<CollectedFact>, CollectE
         })
 }
 
-/// Run a fact collector's Starlark `script` over `input` with `host`'s tree
-/// in scope (`files()`, `source_files()`), under `budget`, and read its facts.
-pub fn run_fact_starlark(
-    script: &str,
-    input: &serde_json::Value,
-    host: TreeHost,
-    budget: &SandboxBudget,
-) -> Result<Vec<CollectedFact>, CollectError> {
-    let (script, input) = (script.to_string(), input.clone());
-    let raw = runtime::run_sandboxed(budget, move || {
-        runtime::run_starlark_with_host(&script, &input, &host)
-    })?;
-    facts_of(raw)
-}
-
 /// The typed result of running a collector. The variant is determined by the
 /// collector's [`CollectorKind`] — a `Coverage` collector always yields
 /// [`CollectorOutput::Coverage`], a `Test` collector always
@@ -407,7 +392,7 @@ impl Collector {
         )
     }
 
-    /// Override the sandbox budget for the in-process script tiers.
+    /// Override the budget for the script tiers.
     pub fn with_budget(mut self, budget: SandboxBudget) -> Self {
         self.budget = budget;
         self
@@ -426,26 +411,22 @@ impl Collector {
     }
 
     /// Run the collector against raw report `content`, producing typed output.
-    /// In-process script tiers run under the sandbox budget; exec relies on the
-    /// child process and is tagged lower-trust by the caller.
+    /// The script tiers run in a script worker within the budget (stopped
+    /// past it); exec is its own child process and is tagged lower-trust by
+    /// the caller.
     pub fn run(&self, content: &str) -> Result<CollectorOutput, CollectError> {
+        use crate::workers::{shared, ScriptRun};
         let kind = self.kind;
         match &self.runner {
             Runner::Jaq { input, program } => {
                 let value = input.parse(content)?;
-                let program = program.clone();
-                let raw = runtime::run_sandboxed(&self.budget, move || {
-                    runtime::run_jaq(&program, &value)
-                })?;
-                runtime::value_to_output(kind, raw)
+                let raw = shared().run(&self.budget, ScriptRun::jaq(program, value), None)?;
+                runtime::value_to_output(kind, raw.value)
             }
             Runner::Starlark { input, script } => {
                 let value = input.parse(content)?;
-                let script = script.clone();
-                let raw = runtime::run_sandboxed(&self.budget, move || {
-                    runtime::run_starlark(&script, &value)
-                })?;
-                runtime::value_to_output(kind, raw)
+                let raw = shared().run(&self.budget, ScriptRun::starlark(script, value), None)?;
+                runtime::value_to_output(kind, raw.value)
             }
             Runner::Exec { argv } => {
                 let raw = runtime::run_exec(&self.budget, argv, content)?;
@@ -588,13 +569,9 @@ mod tests {
 
     /// A fact script's facts over a file map, with the default budget.
     fn facts(script: &str, map: std::collections::HashMap<String, String>) -> Vec<CollectedFact> {
-        run_fact_starlark(
-            script,
-            &serde_json::json!({}),
-            TreeHost::new(map),
-            &SandboxBudget::default(),
-        )
-        .expect("runs")
+        runtime::run_starlark_with_host(script, &serde_json::json!({}), &TreeHost::new(map))
+            .and_then(facts_of)
+            .expect("runs")
     }
 
     #[test]

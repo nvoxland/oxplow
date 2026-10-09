@@ -31,6 +31,8 @@ pub const PROVIDERS: &str = "config.providers";
 /// Any key: the metric catalog reseeds (`measures`, `metrics`,
 /// `dimensions`, `collectors`, the retention and visibility keys).
 pub const METRICS: &str = "config.metrics";
+/// `scripts` changed: the script workers take the new bounds.
+pub const SCRIPTS: &str = "config.scripts";
 
 /// How long a reactor waits for `oxplow.config.set`'s after-commit swap.
 const APPLY_WAIT: Duration = Duration::from_secs(5);
@@ -100,6 +102,15 @@ impl AsyncEventConsumer for KeyReactor {
     }
 }
 
+/// The process's script workers take `config`'s `scripts:` bounds, for the
+/// runs that start from now.
+pub fn apply_script_limits(config: &oxplow_config::OxplowConfig) {
+    oxplow_script::workers::shared().set_limits(oxplow_script::workers::Limits {
+        max_concurrent: config.scripts.max_concurrent,
+        memory_bytes: config.scripts.memory_bytes,
+    });
+}
+
 /// Register the reactors that need the whole of `Services`.
 pub fn register(state: &Arc<crate::Services>) {
     let svc = Arc::downgrade(state);
@@ -120,6 +131,15 @@ pub fn register(state: &Arc<crate::Services>) {
         PROVIDERS,
         &["extensionInstances", "activeProviders"],
         Box::new(|svc| Box::pin(async move { svc.providers.reconcile().await })),
+    ));
+    state.event_pump.register_async(reactor(
+        SCRIPTS,
+        &["scripts"],
+        Box::new(|svc| {
+            Box::pin(async move {
+                apply_script_limits(&crate::config_service::read_config(&svc.config))
+            })
+        }),
     ));
     state.event_pump.register_async(reactor(
         METRICS,

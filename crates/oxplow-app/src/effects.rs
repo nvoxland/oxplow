@@ -358,11 +358,11 @@ pub fn run_script(
     event: serde_json::Value,
     calls: &mut crate::scope_calls::Calls<'_>,
 ) -> Result<Reaction, String> {
-    let out = oxplow_script::scope::run_starlark_serving(
-        &crate::extension_commands::COMMAND_SCRIPT_BUDGET,
+    let mut serve = |id: &str, args: serde_json::Value| calls.serve(id, args);
+    let out = crate::extension_commands::run_command_script(
         script,
-        &serde_json::json!({ "event": event }),
-        &mut |id, args| calls.serve(id, args),
+        serde_json::json!({ "event": event }),
+        &mut serve,
     )
     .map_err(|e| format!("the script failed: {e}"))?;
     reaction(out)

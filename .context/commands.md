@@ -180,11 +180,13 @@ The row-only scope does not expose the gateway's model-change timestamps
 or prove that every source has been collected.
 
 A Starlark handler calls one with `scope(id, args)`
-(`oxplow_script::scope`). The script runs on the sandbox's
-worker thread; the call crosses to the thread that runs the handler
-(which owns the transaction) and is answered there while the sandbox
-waits (`run_starlark_serving`) — that time is left out of the script's
-budget, not its ceiling. `crate::scope_calls::Calls` serves it: a
+(`oxplow_script::scope`). The script runs in a script worker process
+(`extension_commands::run_command_script` → `oxplow_script::workers`,
+[collection.md](./collection.md) "Containing scripts"); the call crosses
+the worker's pipe to the thread that runs the handler (which owns the
+transaction) and is answered there — that time is left out of the
+script's budget, not its ceiling. A script past its budget has its
+worker killed and the transaction released. `crate::scope_calls::Calls` serves it: a
 scope that isn't in the command's `needs` is **refused** (the
 script fails with the reason), one that is is counted and answered; a
 busy database retries the whole run. A dry run (an extension's

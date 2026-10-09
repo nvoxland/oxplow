@@ -126,6 +126,14 @@ pub struct Ran {
     pub peak_bytes: u64,
 }
 
+/// The process's workers: the bound on concurrent runs is the host's, so
+/// every caller in a process shares one. Its limits follow the project's
+/// `scripts:` config ([`ScriptWorkers::set_limits`]).
+pub fn shared() -> &'static ScriptWorkers {
+    static SHARED: std::sync::OnceLock<ScriptWorkers> = std::sync::OnceLock::new();
+    SHARED.get_or_init(|| ScriptWorkers::beside_current_exe(Limits::default()))
+}
+
 /// Runs scripts in worker processes, a bounded number at once.
 pub struct ScriptWorkers {
     exe: PathBuf,
@@ -148,12 +156,23 @@ impl ScriptWorkers {
         }
     }
 
-    /// Workers from the binary beside this executable (the app's sidecar,
-    /// or `target/<profile>/` in development).
+    /// Workers from the binary beside this executable: the app's sidecar,
+    /// `target/<profile>/` in development, and the same directory for a
+    /// test binary in `target/<profile>/deps/`.
     pub fn beside_current_exe(limits: Limits) -> Self {
         let exe = std::env::current_exe()
             .ok()
-            .and_then(|e| e.parent().map(|d| d.join(WORKER)))
+            .and_then(|e| e.parent().map(std::path::Path::to_path_buf))
+            .map(|dir| {
+                if dir.file_name().is_some_and(|n| n == "deps") {
+                    dir.parent()
+                        .map(std::path::Path::to_path_buf)
+                        .unwrap_or(dir)
+                } else {
+                    dir
+                }
+            })
+            .map(|dir| dir.join(WORKER))
             .unwrap_or_else(|| PathBuf::from(WORKER));
         Self::new(exe, limits)
     }
@@ -212,9 +231,7 @@ impl ScriptWorkers {
         let (call_out, mut host) = match host {
             RunHost::None => (CallOut::None, Answering::None),
             RunHost::Tree(files) => {
-                worker.send(&ToWorker::Tree {
-                    files: (*files).clone(),
-                });
+                worker.send_tree(&files);
                 (CallOut::Tree, Answering::None)
             }
             RunHost::Ai(oracle) => (CallOut::Ai, Answering::Ai(oracle)),
@@ -420,8 +437,29 @@ struct Worker<'a> {
 }
 
 impl Worker<'_> {
+    /// The tree, written straight from the shared map (no copy of it).
+    fn send_tree(&mut self, files: &HashMap<String, String>) {
+        #[derive(serde::Serialize)]
+        struct Tree<'a> {
+            tree: Files<'a>,
+        }
+        #[derive(serde::Serialize)]
+        struct Files<'a> {
+            files: &'a HashMap<String, String>,
+        }
+        let text = serde_json::to_string(&Tree {
+            tree: Files { files },
+        })
+        .expect("a tree serializes");
+        self.write(&text);
+    }
+
     fn send(&mut self, msg: &ToWorker) {
         let text = serde_json::to_string(msg).expect("a host message serializes");
+        self.write(&text);
+    }
+
+    fn write(&mut self, text: &str) {
         // A worker that already died is found by its closed stdout.
         if let Some(stdin) = self.stdin.as_mut() {
             if writeln!(stdin, "{text}")

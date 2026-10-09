@@ -276,13 +276,14 @@ recorded computation (the same question on the same text is one call,
 ever). Only a script a person approved gets it: one that names an `ai_*`
 builtin runs only once approved, like an exec program
 ([semantic-layer.md](./semantic-layer.md) "Sandbox"), and every other
-derived run gets `RefusingOracle`. The time a script waits on the oracle is left out of its sandbox
-`timeout` (`RunClock`, the in-flight call included;
-`run_sandboxed_excluding`) but not out of its `ceiling` (10 min of wall
-clock, model time included), so a per-row loop of calls can't run for
-hours and hold up every scheduled source behind it. When the sandbox
-gives up it stops the `RunClock`, and the detached worker's next `ai_*`
-call is refused — no paid calls after a timeout. A run cut off keeps
+derived run gets `RefusingOracle`. The script runs in a script worker
+([collection.md](./collection.md) "Containing scripts"); each `ai_*` call
+crosses to the host, which asks the oracle. The time it waits is left out
+of the run's `timeout` (`RunClock`, the in-flight call included) but not
+out of its `ceiling` (10 min of wall clock, model time included), so a
+per-row loop of calls can't run for hours and hold up every scheduled
+source behind it. Past either the worker is killed: no paid calls after
+a timeout. A run cut off keeps
 what it recorded, so its next run gets further (tsk559). A **fact collector** (`facts:`,
 run by the fact engine with a `TreeHost`) or a report parser runs without
 an `AiHost`, and the builtins refuse: "`ai_classify` is available in

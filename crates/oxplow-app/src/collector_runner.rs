@@ -687,14 +687,14 @@ pub async fn derive_collector(
     }
     let runtime = spec.runtime;
     let value = tokio::task::spawn_blocking(move || {
-        use oxplow_script::runtime::{run_jaq, run_sandboxed_excluding, run_starlark_with_ai};
-        // The time its `ai_*` calls wait on a model isn't the script's.
-        let host = std::sync::Arc::new(oxplow_script::AiHost::new(oracle));
-        let clock = host.clock();
-        run_sandboxed_excluding(&budget, &clock, move || match runtime {
-            CollectorRuntime::Jaq => run_jaq(&script, &input),
-            _ => run_starlark_with_ai(&script, &input, &host),
-        })
+        use oxplow_script::workers::{shared, RunHost, ScriptRun};
+        // In a worker: its `ai_*` calls are answered here, and the time
+        // they wait on a model isn't the script's.
+        let run = match runtime {
+            CollectorRuntime::Jaq => ScriptRun::jaq(&script, input),
+            _ => ScriptRun::starlark(&script, input).with_host(RunHost::Ai(oracle)),
+        };
+        shared().run(&budget, run, None).map(|ran| ran.value)
     })
     .await
     .map_err(|e| format!("collector task panicked: {e}"))?
