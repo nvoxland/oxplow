@@ -354,7 +354,8 @@ export function Navigator({
           background: "var(--surface-chrome)",
           borderRightWidth: 1,
           borderRightStyle: "solid",
-          borderRightColor: "var(--border-subtle)",
+          // The same 1px line that frames the content area.
+          borderRightColor: "var(--border-strong)",
           boxSizing: "border-box",
           display: "flex",
           flexDirection: "column",

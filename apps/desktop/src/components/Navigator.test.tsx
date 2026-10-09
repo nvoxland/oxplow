@@ -463,7 +463,7 @@ test("streams are inverted tiles and threads indented tabs, tied by a guide line
   expect([strip.borderRightWidth, strip.borderRightStyle, strip.borderRightColor]).toEqual([
     "1px",
     "solid",
-    "var(--border-subtle)",
+    "var(--border-strong)",
   ]);
 
   // The panel draws the same, so its rows stay lined up with the strip's.
