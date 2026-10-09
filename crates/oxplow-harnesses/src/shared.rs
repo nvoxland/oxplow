@@ -125,10 +125,11 @@ fn event_name(kind: HookKind) -> &'static str {
 
 /// The files an `apply_patch` names (`*** Add File: a`, `*** Update File:
 /// b`, `*** Delete File: c`, `*** Move to: d`), from its patch text —
-/// Codex's `input` or `patch`, OpenCode's `patchText` — or an explicit
-/// `path`. Codex's and OpenCode's edit tools both take this format.
+/// Codex's `command` (older: `input` or `patch`), OpenCode's `patchText` —
+/// or an explicit `path`. Codex's and OpenCode's edit tools both take this
+/// format.
 pub fn patch_paths(input: &serde_json::Value) -> Vec<String> {
-    let text = ["input", "patch", "patchText"]
+    let text = ["command", "input", "patch", "patchText"]
         .iter()
         .find_map(|k| input.get(*k).and_then(|v| v.as_str()))
         .unwrap_or_default();

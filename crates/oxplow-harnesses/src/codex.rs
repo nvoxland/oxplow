@@ -249,8 +249,11 @@ fn otel_env(hook_token: &str) -> (String, String) {
 
 /// A Codex tool hook's body mapped onto oxplow's vocabulary. Codex posts
 /// its own tool names in Claude Code's hook fields: `apply_patch` edits the
-/// files its patch names, `shell` / `exec_command` run a command (a string
-/// or an argv list).
+/// files its patch names (the patch its `command`, or older Codexes'
+/// `input` / `patch`), `Bash` (older: `shell` / `exec_command`) runs a
+/// command (a string or an argv list), `…spawn_agent` starts a subagent. A
+/// result is text whose first line is `Exit code: N`, or (older) an object
+/// with an `exit_code`.
 fn codex_tool_use(body: &serde_json::Value) -> Option<ToolUse> {
     let name = body.get("tool_name")?.as_str()?.to_string();
     let input = body.get("tool_input").cloned().unwrap_or_default();
@@ -269,15 +272,23 @@ fn codex_tool_use(body: &serde_json::Value) -> Option<ToolUse> {
     };
     let (kind, paths, command) = match name.as_str() {
         "apply_patch" => (ToolKind::Edit, super::shared::patch_paths(&input), None),
-        "shell" | "exec_command" | "local_shell" => (ToolKind::Shell, Vec::new(), command()),
+        "Bash" | "shell" | "exec_command" | "local_shell" => {
+            (ToolKind::Shell, Vec::new(), command())
+        }
+        n if n.ends_with("spawn_agent") => (ToolKind::Subagent, Vec::new(), None),
         n if n.starts_with("mcp__") => (ToolKind::Mcp, Vec::new(), None),
         _ => (ToolKind::Other, Vec::new(), None),
     };
     let response = body.get("tool_response").filter(|r| !r.is_null());
-    let exit_code = response.and_then(|r| {
-        ["exit_code", "exitCode", "code"]
+    let exit_code = response.and_then(|r| match r.as_str() {
+        Some(text) => text
+            .lines()
+            .next()
+            .and_then(|l| l.strip_prefix("Exit code: "))
+            .and_then(|c| c.trim().parse().ok()),
+        None => ["exit_code", "exitCode", "code"]
             .iter()
-            .find_map(|k| r.get(*k).and_then(|x| x.as_i64()))
+            .find_map(|k| r.get(*k).and_then(|x| x.as_i64())),
     });
     Some(ToolUse {
         name,
@@ -307,6 +318,45 @@ fn hook_command(oxplow_executable: &Path, event: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// Codex 0.158's tool hooks, as recorded: its shell is `Bash`, its
+    /// patch rides `command`, a result's exit code is the first line of
+    /// its text, and a subagent is `collaborationspawn_agent`.
+    #[test]
+    fn codex_0_158_tool_hooks_map() {
+        let shell = codex_tool_use(&serde_json::json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "cat codex.txt"},
+            "tool_response": "2026-10-09 01:44:14 CDT\n"
+        }))
+        .unwrap();
+        assert_eq!(shell.kind, ToolKind::Shell);
+        assert_eq!(shell.command.as_deref(), Some("cat codex.txt"));
+        let patch = codex_tool_use(&serde_json::json!({
+            "tool_name": "apply_patch",
+            "tool_input": {"command": "*** Begin Patch\n*** Add File: /w/codex.txt\n+x\n*** End Patch"},
+            "tool_response": "Exit code: 0\nWall time: 0 seconds\nOutput:\nSuccess. Updated the following files:\nA /w/codex.txt\n"
+        }))
+        .unwrap();
+        assert_eq!(patch.kind, ToolKind::Edit);
+        assert_eq!(patch.paths, ["/w/codex.txt"]);
+        assert_eq!(patch.command, None, "a patch isn't a shell command");
+        assert_eq!((patch.exit_code, patch.ok), (Some(0), Some(true)));
+        let failed = codex_tool_use(&serde_json::json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "false"},
+            "tool_response": "Exit code: 1\nOutput:\n"
+        }))
+        .unwrap();
+        assert_eq!((failed.exit_code, failed.ok), (Some(1), Some(false)));
+        let spawn = codex_tool_use(&serde_json::json!({
+            "tool_name": "collaborationspawn_agent",
+            "tool_input": {"task_name": "count_lines"}
+        }))
+        .unwrap();
+        assert_eq!(spawn.kind, ToolKind::Subagent);
+    }
+
     use super::*;
     use crate::test_launch::{harness, launch_in};
     use std::fs;
