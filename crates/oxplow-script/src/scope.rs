@@ -32,24 +32,22 @@ enum Msg {
     Done(Result<Value, CollectError>),
 }
 
-/// The worker's side: where its `scope` calls go.
+/// How a script's `scope(id, args)` call is answered.
+pub(crate) type ScopeCall = Box<dyn Fn(&str, Value) -> Result<Value, String>>;
+
+/// The script's side: where its `scope` calls go.
 #[derive(starlark::any::ProvidesStaticType)]
 pub struct ScopeHost {
-    calls: mpsc::Sender<Msg>,
+    call: ScopeCall,
 }
 
 impl ScopeHost {
+    pub(crate) fn new(call: ScopeCall) -> Self {
+        Self { call }
+    }
+
     fn call(&self, id: &str, args: Value) -> Result<Value, String> {
-        let (reply, answer) = mpsc::channel();
-        let gone = || "the run ran out of time; no more scope calls".to_string();
-        self.calls
-            .send(Msg::Call {
-                id: id.to_string(),
-                args,
-                reply,
-            })
-            .map_err(|_| gone())?;
-        answer.recv().map_err(|_| gone())?
+        (self.call)(id, args)
     }
 }
 
@@ -63,9 +61,21 @@ pub fn run_starlark_serving(
     serve: &mut Serve<'_>,
 ) -> Result<Value, CollectError> {
     let (tx, rx) = mpsc::channel();
-    let host = ScopeHost { calls: tx.clone() };
+    let calls = tx.clone();
     let (script, input) = (script.to_string(), input.clone());
     std::thread::spawn(move || {
+        let host = ScopeHost::new(Box::new(move |id, args| {
+            let (reply, answer) = mpsc::channel();
+            let gone = || "the run ran out of time; no more scope calls".to_string();
+            calls
+                .send(Msg::Call {
+                    id: id.to_string(),
+                    args,
+                    reply,
+                })
+                .map_err(|_| gone())?;
+            answer.recv().map_err(|_| gone())?
+        }));
         let out = run_starlark_inner(&script, "transform", &input, Host::Scope(&host));
         let _ = tx.send(Msg::Done(out));
     });

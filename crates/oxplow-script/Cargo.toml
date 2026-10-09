@@ -33,6 +33,8 @@ jaq-core = { workspace = true }
 jaq-json = { workspace = true }
 jaq-std = { workspace = true }
 starlark = { workspace = true }
+# The script worker's memory cap and CPU accounting.
+libc = { workspace = true }
 
 [lints]
 workspace = true

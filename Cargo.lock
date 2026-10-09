@@ -4989,6 +4989,7 @@ dependencies = [
  "jaq-core",
  "jaq-json",
  "jaq-std",
+ "libc",
  "oxplow-code-dup",
  "oxplow-code-metrics",
  "oxplow-config",

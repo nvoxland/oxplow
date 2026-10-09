@@ -36,6 +36,8 @@ pub mod builtin_metrics;
 pub mod helpers;
 pub mod runtime;
 pub mod scope;
+pub mod worker;
+pub mod workers;
 pub use ai::{AiHost, AiOracle};
 pub use builtin_metrics::{builtin_metrics, BuiltinMetric};
 pub use helpers::HelperError;
@@ -213,9 +215,19 @@ pub enum CollectError {
     /// An `exec` collector's program failed to spawn or exited non-zero.
     #[error("exec error: {0}")]
     Exec(String),
-    /// An in-process script exceeded its sandbox time budget.
+    /// A script exceeded its time budget; its worker was stopped.
     #[error("timed out")]
     Timeout,
+    /// A script asked for more memory than its cap (bytes); its worker
+    /// was stopped.
+    #[error("ran out of memory (its cap is {} MB)", .0 / (1024 * 1024))]
+    MemoryExceeded(u64),
+    /// The run was cancelled; its worker was stopped.
+    #[error("cancelled")]
+    Cancelled,
+    /// The script's worker ended without answering.
+    #[error("the script's worker died: {0}")]
+    WorkerDied(String),
 }
 
 impl From<HelperError> for CollectError {
