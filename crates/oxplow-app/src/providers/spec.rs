@@ -759,11 +759,11 @@ pub fn check_declarations(spec: &ProviderSpec, declared: &InitializeResult) -> R
         // `work_item.<verb>` runs it, and that command's spec — not the
         // verb's — is what is confirmed and gated: a verb records an item
         // and never asks on its own.
-        for command in declared
-            .commands
-            .iter()
-            .filter(|c| oxplow_domain::work_items::VERBS.contains(&c.name.as_str()))
-        {
+        for command in declared.commands.iter().filter(|c| {
+            oxplow_domain::capability::WORK_ITEMS
+                .verb(c.name.as_str())
+                .is_some()
+        }) {
             if command.confirm != "never" || command.access != "record" {
                 return Err(format!(
                     "provider `{id}` verb `{}`: a work_items verb is `confirm: never` and \
@@ -797,7 +797,7 @@ pub fn parse_providers(
             }
         };
         let id = spec.id.clone();
-        let problem = if let Some(why) = oxplow_domain::work_items::provider_id_problem(&id) {
+        let problem = if let Some(why) = oxplow_domain::capability::instance_id_problem(&id) {
             Some(format!("provider id {why}"))
         } else if specs.iter().any(|s| s.id == id) {
             Some(format!("provider id `{id}` is declared twice"))

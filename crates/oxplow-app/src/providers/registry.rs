@@ -2064,7 +2064,11 @@ impl ProviderRegistry {
             .collect::<Result<Vec<_>, _>>()?;
         let inverse = match out.inverse {
             None => None,
-            Some(c) if oxplow_domain::work_items::VERBS.contains(&c.command.as_str()) => {
+            Some(c)
+                if oxplow_domain::capability::WORK_ITEMS
+                    .verb(c.command.as_str())
+                    .is_some() =>
+            {
                 Some(CommandCall {
                     name: format!("oxplow.work_item.{}", c.command),
                     input: c.input,

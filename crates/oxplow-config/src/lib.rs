@@ -1900,7 +1900,7 @@ fn validate_extension_instances(
                  snake_case: a provider's own, or another instance's with `provider: <id>`)"
             )));
         };
-        if let Some(why) = oxplow_domain::work_items::provider_id_problem(id) {
+        if let Some(why) = oxplow_domain::capability::instance_id_problem(id) {
             return Err(ConfigError::Invalid(format!(
                 "extensionInstances: `{key}` must be `<extension>/<instance id>`, and the \
                  instance id {why} (it is its refs' segment and its command namespace)"

@@ -1905,7 +1905,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                     .find(|p| p.id == provider)
                     .ok_or_else(|| format!("no provider `{provider}` in this extension"))?;
                 if spec.capability == crate::providers::spec::WORK_ITEMS
-                    && oxplow_domain::work_items::VERBS.contains(&op)
+                    && oxplow_domain::capability::WORK_ITEMS.verb(op).is_some()
                 {
                     return Err(format!(
                         "`{op}` is a work-item verb: it runs as `oxplow.work_item.{op}`"

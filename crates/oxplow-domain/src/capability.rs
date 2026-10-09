@@ -62,7 +62,142 @@ pub struct CapabilitySpec {
     pub default: &'static str,
     /// The features an implementation may declare.
     pub features: &'static [&'static str],
+    /// What a process implementing it over the provider protocol must
+    /// answer, and may emit and own; `None` when no process may.
+    pub provider: Option<&'static ProviderContract>,
 }
+
+/// What core asks of a provider process implementing a capability
+/// (`.context/providers.md` "What a provider may implement"): the host
+/// enforces it, whichever capability it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProviderContract {
+    /// The verbs core calls on it. A verb is `confirm: never` and `access:
+    /// record`: core's call is what a person confirms and what is gated.
+    pub verbs: &'static [Verb],
+    /// The command family a verb runs as (`oxplow.work_item` →
+    /// `oxplow.work_item.create`), so an inverse naming a verb undoes
+    /// through it; `None` when core calls the verbs itself.
+    pub dispatch: Option<&'static str>,
+    /// The event types it may emit, each `(type, v)`; the schema it
+    /// declares must be core's.
+    pub events: &'static [(&'static str, u32)],
+    /// What its collectors stream; `None` when it reads nothing in.
+    pub records: Option<Record>,
+    /// The ref kind whose ids are an instance's own
+    /// (`work_item:<instance>:…`); `None` when it owns no refs.
+    pub ref_kind: Option<&'static str>,
+    /// Whether it keeps items: a manifest's `fields` and `id_pattern` apply.
+    pub items: bool,
+}
+
+/// One verb of a [`ProviderContract`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Verb {
+    pub name: &'static str,
+    pub needs: Need,
+}
+
+/// When a declaration must carry a verb.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Need {
+    Always,
+    /// When it declares this feature.
+    Feature(&'static str),
+}
+
+/// What a provider's collectors stream: rows of `entity`, each logged as
+/// an `event` whose payload holds the row under `key`, its subject the
+/// row's own ref.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Record {
+    pub entity: &'static str,
+    pub event: (&'static str, u32),
+    pub key: &'static str,
+}
+
+impl ProviderContract {
+    /// The verb `name`, if it's one of this capability's.
+    pub fn verb(&self, name: &str) -> Option<&'static Verb> {
+        self.verbs.iter().find(|v| v.name == name)
+    }
+
+    /// The verbs a declaration with `features` (`{ "links": true }`) must
+    /// carry.
+    pub fn required(&self, features: &serde_json::Value) -> Vec<&'static str> {
+        self.verbs
+            .iter()
+            .filter(|v| match v.needs {
+                Need::Always => true,
+                Need::Feature(f) => features.get(f).and_then(|b| b.as_bool()) == Some(true),
+            })
+            .map(|v| v.name)
+            .collect()
+    }
+}
+
+/// A work list's: the `work_item.<verb>` commands dispatch to its verbs,
+/// it records its items as `work_item.recorded@2`, and owns
+/// `work_item:<instance>:…`.
+pub const WORK_ITEMS: ProviderContract = ProviderContract {
+    verbs: &[
+        Verb {
+            name: "create",
+            needs: Need::Always,
+        },
+        Verb {
+            name: "update",
+            needs: Need::Always,
+        },
+        Verb {
+            name: "transition",
+            needs: Need::Always,
+        },
+        Verb {
+            name: "link",
+            needs: Need::Feature("links"),
+        },
+        Verb {
+            name: "comment",
+            needs: Need::Feature("comments"),
+        },
+        Verb {
+            name: "delete",
+            needs: Need::Feature("delete"),
+        },
+        Verb {
+            name: "reorder",
+            needs: Need::Feature("ordering"),
+        },
+        Verb {
+            name: "move",
+            needs: Need::Feature("lists"),
+        },
+    ],
+    dispatch: Some("oxplow.work_item"),
+    events: &[("work_item.recorded", 2)],
+    records: Some(Record {
+        entity: "work_item",
+        event: ("work_item.recorded", 2),
+        key: "item",
+    }),
+    ref_kind: Some("work_item"),
+    items: true,
+};
+
+/// An effort policy's: core offers it each event a policy reacts to and
+/// runs the commands it answers with (`.context/work-tracking.md`).
+pub const EFFORT_POLICY: ProviderContract = ProviderContract {
+    verbs: &[Verb {
+        name: "react",
+        needs: Need::Always,
+    }],
+    dispatch: None,
+    events: &[],
+    records: None,
+    ref_kind: None,
+    items: false,
+};
 
 /// The implementation id of "nothing implements it", for an optional
 /// capability.
@@ -86,6 +221,7 @@ pub const CAPABILITIES: &[CapabilitySpec] = &[
             "ordering",
             "lists",
         ],
+        provider: Some(&WORK_ITEMS),
     },
     CapabilitySpec {
         id: "effort_policy",
@@ -95,6 +231,7 @@ pub const CAPABILITIES: &[CapabilitySpec] = &[
         many: false,
         default: "oxplow",
         features: &[],
+        provider: Some(&EFFORT_POLICY),
     },
     CapabilitySpec {
         id: "snapshots",
@@ -104,6 +241,7 @@ pub const CAPABILITIES: &[CapabilitySpec] = &[
         many: false,
         default: "oxplow",
         features: &["contents"],
+        provider: None,
     },
     CapabilitySpec {
         id: "vcs",
@@ -113,6 +251,7 @@ pub const CAPABILITIES: &[CapabilitySpec] = &[
         many: false,
         default: "git",
         features: &[],
+        provider: None,
     },
     CapabilitySpec {
         id: "knowledge",
@@ -122,6 +261,7 @@ pub const CAPABILITIES: &[CapabilitySpec] = &[
         many: false,
         default: "oxplow",
         features: &[],
+        provider: None,
     },
     CapabilitySpec {
         id: "agent_harness",
@@ -137,6 +277,7 @@ pub const CAPABILITIES: &[CapabilitySpec] = &[
             "resume",
             "programmatic",
         ],
+        provider: None,
     },
     CapabilitySpec {
         id: "acp_adapter",
@@ -146,6 +287,7 @@ pub const CAPABILITIES: &[CapabilitySpec] = &[
         many: true,
         default: "claude",
         features: &[],
+        provider: None,
     },
     CapabilitySpec {
         id: "ai_provider",
@@ -155,8 +297,37 @@ pub const CAPABILITIES: &[CapabilitySpec] = &[
         many: true,
         default: "anthropic",
         features: &["decide_native"],
+        provider: None,
     },
 ];
+
+/// The contract of the capability `id`, when a process may implement it.
+pub fn contract(id: &str) -> Option<&'static ProviderContract> {
+    spec(id).and_then(|c| c.provider)
+}
+
+/// Why `id` can't name a provider or one of its instances — the segment
+/// of its refs (`work_item:<id>:…`) and its command namespace — or `None`
+/// when it can: lowercase letters, digits and underscores, starting with
+/// a letter, and none of oxplow's own (`oxplow`, a core namespace). One
+/// rule for a provider's id and an instance's.
+pub fn instance_id_problem(id: &str) -> Option<String> {
+    let well_formed = id.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+        && id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+    if !well_formed {
+        Some(format!(
+            "`{id}` must be lowercase letters, digits and underscores, starting with a letter"
+        ))
+    } else if id == crate::work_items::OXPLOW
+        || crate::events::schema::CORE_NAMESPACES.contains(&id)
+    {
+        Some(format!("`{id}` is reserved for oxplow"))
+    } else {
+        None
+    }
+}
 
 /// The capability `id`, if core declares it.
 pub fn spec(id: &str) -> Option<&'static CapabilitySpec> {
@@ -278,6 +449,75 @@ mod tests {
         );
         assert_eq!(spec("snapshots").map(|c| c.optional), Some(false));
         assert!(spec("nope").is_none());
+    }
+
+    /// What a process may implement is what core gives a contract: the
+    /// work list and the effort policy. The rest are core's or built-ins'.
+    #[test]
+    fn a_process_implements_only_a_capability_with_a_contract() {
+        assert_eq!(
+            CAPABILITIES
+                .iter()
+                .filter(|c| c.provider.is_some())
+                .map(|c| c.id)
+                .collect::<Vec<_>>(),
+            ["work_items", "effort_policy"]
+        );
+        assert!(contract("snapshots").is_none() && contract("nope").is_none());
+    }
+
+    /// The verbs a declaration must carry follow its features; each verb's
+    /// feature is one the capability declares.
+    #[test]
+    fn a_contracts_verbs_follow_the_declared_features() {
+        let work = contract("work_items").unwrap();
+        assert_eq!(
+            work.required(&serde_json::json!({})),
+            ["create", "update", "transition"]
+        );
+        assert_eq!(
+            work.required(&serde_json::json!({"links": true, "lists": true, "comments": false})),
+            ["create", "update", "transition", "link", "move"]
+        );
+        assert!(work.verb("reorder").is_some() && work.verb("estimate").is_none());
+        let policy = contract("effort_policy").unwrap();
+        assert_eq!(policy.required(&serde_json::json!({})), ["react"]);
+        for c in CAPABILITIES {
+            for verb in c.provider.map(|p| p.verbs).unwrap_or_default() {
+                if let Need::Feature(f) = verb.needs {
+                    assert!(c.features.contains(&f), "{}: {}", c.id, f);
+                }
+            }
+        }
+    }
+
+    /// A work list owns its items' refs and streams them as records; an
+    /// effort policy owns nothing and emits nothing.
+    #[test]
+    fn a_contract_says_what_its_provider_owns_and_emits() {
+        let work = contract("work_items").unwrap();
+        assert_eq!(work.events, [("work_item.recorded", 2)]);
+        assert_eq!(work.ref_kind, Some("work_item"));
+        assert_eq!(
+            work.records.map(|r| (r.entity, r.event, r.key)),
+            Some(("work_item", ("work_item.recorded", 2), "item"))
+        );
+        assert_eq!(work.dispatch, Some("oxplow.work_item"));
+        assert!(work.items);
+        let policy = contract("effort_policy").unwrap();
+        assert!(policy.events.is_empty() && policy.records.is_none());
+        assert_eq!(
+            (policy.ref_kind, policy.dispatch, policy.items),
+            (None, None, false)
+        );
+    }
+
+    #[test]
+    fn an_instance_id_is_lowercase_snake_case_and_not_oxplows() {
+        assert_eq!(instance_id_problem("linear_2"), None);
+        assert!(instance_id_problem("Linear").is_some());
+        assert!(instance_id_problem("2x").is_some());
+        assert!(instance_id_problem("oxplow").unwrap().contains("reserved"));
     }
 
     #[test]

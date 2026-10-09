@@ -101,21 +101,6 @@ pub fn fields_problem(fields: &[FieldDecl]) -> Option<String> {
     })
 }
 
-/// The capability's verbs: the `work_item.<verb>` commands a work list
-/// answers — create, update and transition always; the rest as its
-/// features say (`links`, `comments`, `delete`, `ordering`: reorder,
-/// `lists`: move).
-pub const VERBS: [&str; 8] = [
-    "create",
-    "update",
-    "transition",
-    "link",
-    "comment",
-    "delete",
-    "reorder",
-    "move",
-];
-
 /// What a provider supports beyond create, update and transition.
 #[derive(
     Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, specta::Type,
@@ -297,27 +282,6 @@ impl std::fmt::Debug for WorkItemsProvider {
 
 /// oxplow's own provider name: `work_item:oxplow:tsk<n>`.
 pub const OXPLOW: &str = "oxplow";
-
-/// Why `id` can't name a provider or one of its instances — the segment
-/// of its refs (`work_item:<id>:…`) and its command namespace — or `None`
-/// when it can: lowercase letters, digits and underscores, starting with
-/// a letter, and none of oxplow's own (`oxplow`, a core namespace). One
-/// rule for a provider's id and an instance's (tsk840).
-pub fn provider_id_problem(id: &str) -> Option<String> {
-    let well_formed = id.chars().next().is_some_and(|c| c.is_ascii_lowercase())
-        && id
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
-    if !well_formed {
-        Some(format!(
-            "`{id}` must be lowercase letters, digits and underscores, starting with a letter"
-        ))
-    } else if id == OXPLOW || crate::events::schema::CORE_NAMESPACES.contains(&id) {
-        Some(format!("`{id}` is reserved for oxplow"))
-    } else {
-        None
-    }
-}
 
 #[derive(Default)]
 struct Providers {

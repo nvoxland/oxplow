@@ -35,7 +35,7 @@ use oxplow_domain::events::Envelope;
 use oxplow_domain::work_items::{
     provider_of, CanonicalState, WorkItemCommentInput, WorkItemCreateInput, WorkItemDeleteInput,
     WorkItemLinkInput, WorkItemMoveInput, WorkItemReorderInput, WorkItemTransitionInput,
-    WorkItemUpdateInput, WorkItemsProvider, WorkItemsRegistry, VERBS,
+    WorkItemUpdateInput, WorkItemsProvider, WorkItemsRegistry,
 };
 use oxplow_domain::{CommandCall, CommandError, ThreadId};
 use serde_json::{json, Value};
@@ -370,7 +370,10 @@ fn dispatching(
             let inverse = out
                 .inverse
                 .map(|c| {
-                    if !VERBS.contains(&c.name.as_str()) {
+                    if oxplow_domain::capability::WORK_ITEMS
+                        .verb(&c.name)
+                        .is_none()
+                    {
                         return Err(CommandError::Failed {
                             message: format!(
                                 "provider `{}` returned an inverse `{}`, which isn't a work-items \

@@ -50,7 +50,11 @@ impl ExternalWorkItems {
             .declared
             .commands
             .iter()
-            .filter(|c| oxplow_domain::work_items::VERBS.contains(&c.name.as_str()))
+            .filter(|c| {
+                oxplow_domain::capability::WORK_ITEMS
+                    .verb(c.name.as_str())
+                    .is_some()
+            })
             .map(|c| {
                 InputValidator::compile(&c.input_schema)
                     .map(|v| (c.name.clone(), v))
