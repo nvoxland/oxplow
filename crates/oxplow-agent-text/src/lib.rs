@@ -10,6 +10,12 @@ use oxplow_domain::agent::text::{AgentText, Text};
 /// (`assets/questions/<area>.yaml`): what an agent should be able to
 /// answer, the skill that should lead it there, and what it reaches.
 /// `oxplow_sdk::answerability` checks them.
+/// What every agent must know of oxplow, whatever project it's in: oxplow
+/// adds it to the prompt of every session it launches (terminal and ACP),
+/// so no project repeats it in its own instruction files. The detail is in
+/// the skills, which load on demand.
+pub const WORKING_IN_OXPLOW: &str = include_str!("../assets/working-in-oxplow.md");
+
 pub const ANSWERABILITY_QUESTIONS: &[(&str, &str)] = &[
     ("vcs", include_str!("../assets/questions/vcs.yaml")),
     (

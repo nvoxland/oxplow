@@ -28,16 +28,11 @@ or exact mechanics.
 - **`.context/usability.md`** — UI rules (Enter submits, Escape cancels,
   drop-target highlighting, right-click for destructive actions, etc.).
   Read before adding *any* UI.
-- **Tracking is oxplow's.** oxplow opens, links and closes efforts from
-  what it observes (`.context/work-tracking.md`); there's nothing to
-  file before editing. File a task when it helps the person follow the
-  work: a multi-step plan, or a follow-up spotted along the way (as
-  `ready`). With the work list none (the bundled extension disabled
-  locally), use `cargo run -q -p oxplow-dev -- task …` instead
-  (`.context/working-in-this-repo.md` "oxplow-dev").
-- **Asking the user a question.** When your reply needs the user's
-  answer, end it with the question itself: a final message that ends in
-  a question shows the thread as waiting on them.
+- **Tasks while the work list is none.** The bundled extension is
+  disabled locally, so file and update tasks with `cargo run -q -p
+  oxplow-dev -- task …` (`.context/working-in-this-repo.md`
+  "oxplow-dev"). How oxplow tracks work and how to ask the person a
+  question come from oxplow itself, in every session's prompt.
 - **Which tests and lint to run, and when, is your call** — run what
   the change warrants. Nothing requires a full run before a commit. The
   commands, all in the foreground (a backgrounded run's reports are

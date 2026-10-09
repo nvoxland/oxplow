@@ -240,8 +240,12 @@ missing launches fresh and is dropped (`resume_dropped`).
 **A project's instruction files are the harness's own business.** oxplow
 never reads or forwards `AGENTS.md`, `CLAUDE.md` or any other: each agent
 reads its project's files the way it does outside oxplow. What oxplow
-tells an agent (how to use oxplow) it injects itself — the session
-context, its skills — never through the project's files. The harness
+tells an agent (how to use oxplow) it injects itself — the always-on
+rules every session's prompt starts with
+(`oxplow_agent_text::WORKING_IN_OXPLOW`: tracking is automatic; end a
+reply that needs the person with the question; the `oxplow-runtime`
+skill for the rest), the session context, its skills — never through
+the project's files. The harness
 also names its **environment markers** (`env_markers()`), below. The
 harness config is a JSON value: the harness's `agentConfig.<key>` entry for the
 PTY harnesses (`{"model": …}` for opencode), `{program, args, env,

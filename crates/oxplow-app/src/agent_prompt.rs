@@ -1,10 +1,12 @@
 //! Agent system-prompt assembly.
 //!
 //! Combines (in order):
-//! 1. An Oxplow session-context note describing the active stream/thread.
-//! 2. The thread's `custom_prompt` if set.
-//! 3. The stream's `custom_prompt` if set.
-//! 4. The user's `agentPromptAppend` from `.oxplow/project.yaml`.
+//! 1. What every agent must know of oxplow
+//!    (`oxplow_agent_text::WORKING_IN_OXPLOW`).
+//! 2. An Oxplow session-context note describing the active stream/thread.
+//! 3. The thread's `custom_prompt` if set.
+//! 4. The stream's `custom_prompt` if set.
+//! 5. The user's `agentPromptAppend` from `.oxplow/project.yaml`.
 //!
 //! A project's own instruction files (`AGENTS.md`, `CLAUDE.md`) are the
 //! harness's to read: oxplow never reads or forwards them.
@@ -149,6 +151,8 @@ fn assemble(
 ) -> String {
     let session_context = skills.is_none();
     let mut out = String::new();
+    out.push_str(oxplow_agent_text::WORKING_IN_OXPLOW.trim());
+    out.push_str("\n\n");
     if session_context {
         out.push_str(&build_session_context_block(stream, thread));
         out.push_str("\n\n");
@@ -311,6 +315,28 @@ mod tests {
     fn collection_agent_hint_absent_when_unset() {
         let prompt = assemble_system_prompt(&config(), &stream(), Some(&thread()));
         assert!(!prompt.contains("# Collection"));
+    }
+
+    /// What every agent must know of oxplow rides in the prompt oxplow
+    /// adds, terminal and ACP alike: no project has to repeat it in its
+    /// own instruction files.
+    #[test]
+    fn every_prompt_carries_how_to_work_in_oxplow() {
+        let full = assemble_system_prompt(&config(), &stream(), Some(&thread()));
+        let acp = assemble_acp_system_prompt(
+            &config(),
+            &stream(),
+            Some(&thread()),
+            &oxplow_agent_text::core_text(),
+        );
+        for prompt in [&full, &acp] {
+            assert!(
+                prompt.contains(oxplow_agent_text::WORKING_IN_OXPLOW.trim()),
+                "{prompt}"
+            );
+        }
+        assert!(oxplow_agent_text::WORKING_IN_OXPLOW.contains("end it with the question"));
+        assert!(oxplow_agent_text::WORKING_IN_OXPLOW.contains("oxplow-runtime"));
     }
 
     /// A project's instruction files are its harness's to read: the
