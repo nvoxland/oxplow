@@ -25,11 +25,12 @@ implementations:
   - { capability: acp_adapter, id: claude, entry: "oxplow:acp-adapter", config: { command: claude-agent-acp, systemPrompt: meta } }
   - { capability: acp_adapter, id: gemini, entry: "oxplow:acp-adapter", config: { command: gemini, args: [--acp] } }
   - { capability: acp_adapter, id: codex, entry: "oxplow:acp-adapter", config: { command: codex-acp } }
-  - { capability: ai_provider, id: anthropic, entry: "oxplow:anthropic" }
-  - { capability: ai_provider, id: openai, entry: "oxplow:openai-compatible", title: OpenAI, config: { baseUrl: "https://api.openai.com/v1" } }
-  - { capability: ai_provider, id: openai_compatible, entry: "oxplow:openai-compatible" }
-  - { capability: ai_provider, id: openrouter, entry: "oxplow:openrouter" }
-  - { capability: ai_provider, id: typesafe, entry: "oxplow:typesafe" }
+  # AI providers are scripts a person approves (Settings → Data → Programs).
+  - { capability: ai_provider, id: anthropic, title: Anthropic, entry: providers/anthropic.star, config: { baseUrl: "https://api.anthropic.com" } }
+  - { capability: ai_provider, id: openai, title: OpenAI, entry: providers/openai_compatible.star, config: { baseUrl: "https://api.openai.com/v1" } }
+  - { capability: ai_provider, id: openai_compatible, title: An OpenAI-compatible API, entry: providers/openai_compatible.star }
+  - { capability: ai_provider, id: openrouter, title: OpenRouter, entry: providers/openrouter.star, config: { baseUrl: "https://openrouter.ai/api/v1", ops: [complete, decide] } }
+  - { capability: ai_provider, id: typesafe, title: TypeSafe, entry: providers/typesafe.star, config: { baseUrl: "https://api.typesafe.ai", ops: [decide] } }
 commands:
   # agent_input.write — the window's; a person's only (oxplow never types for the agent).
   - name: agent.draft

@@ -209,12 +209,31 @@ mod tests {
         let out = crate::dispatch("list_project_programs", serde_json::json!({}), &svc)
             .await
             .unwrap();
-        // Only what comes with oxplow: oxplow-bundled's follow-up effect,
-        // waiting for a person's approval (tsk956).
+        // Only what comes with oxplow, each waiting for a person's
+        // approval: oxplow-bundled's follow-up effect and
+        // oxplow-foundation's AI provider scripts.
         let programs = out.as_array().unwrap();
-        assert_eq!(programs.len(), 1, "{out}");
-        assert_eq!(programs[0]["name"], "oxplow-bundled/verify-unchecked");
-        assert_eq!(programs[0]["approved"], false);
+        let names: Vec<&str> = programs
+            .iter()
+            .map(|p| p["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                "oxplow-bundled/verify-unchecked",
+                "oxplow-foundation/anthropic",
+                "oxplow-foundation/openai",
+                "oxplow-foundation/openai_compatible",
+                "oxplow-foundation/openrouter",
+                "oxplow-foundation/typesafe",
+            ],
+            "{out}"
+        );
+        assert!(programs.iter().all(|p| p["approved"] == false), "{out}");
+        assert!(
+            programs[1..].iter().all(|p| p["kind"] == "ai-provider"),
+            "{out}"
+        );
         let err = crate::dispatch(
             "approve_project_program",
             serde_json::json!({ "kind": "collector", "name": "repo.nope", "version": "x" }),

@@ -1805,7 +1805,8 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             ext.errors.extend(errors);
         }
         if let Some(v) = m.implementations.as_ref() {
-            let (declared, errors) = implementations::parse_implementations(v, &file, &manifest);
+            let (declared, errors) =
+                implementations::parse_implementations(v, &file, &manifest, &|rel| files.read(rel));
             // An implementation owns the skills it lists: they must be its
             // extension's.
             for d in &declared {

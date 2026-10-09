@@ -454,6 +454,7 @@ mod tests {
             serde_json::json!({"choices": [{"message": {"content": reply.to_string()}}], "usage": {"prompt_tokens": 5, "completion_tokens": 5}}),
         )
         .await;
+        crate::test_fixtures::approve_ai_providers(&f.svc);
         f.svc
             .ai
             .save_provider(
@@ -573,6 +574,7 @@ mod tests {
             serde_json::json!({"choices": [{"message": {"content": reply.to_string()}}], "usage": {"prompt_tokens": 1, "completion_tokens": 1}}),
         )
         .await;
+        crate::test_fixtures::approve_ai_providers(&f.svc);
         f.svc
             .ai
             .save_provider(

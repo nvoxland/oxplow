@@ -67,7 +67,7 @@ intent:
 | `ui` | lenses mounted into core pages (`slots`), labels on core refs (`decorators`) | |
 | `advisories` | guidance queries for the coding agent | |
 | `skills` | skills and slash commands for the coding agent | |
-| `implementations` | built-in implementations of a capability it offers | |
+| `implementations` | implementations of a capability it offers: a built-in, or an AI provider written as a script | below |
 | `custom_components` | sandboxed HTML components for `viz: custom` lenses | |
 
 `ui.replacements` (a lens in place of a core component) is
@@ -131,6 +131,47 @@ effects:
 An effect runs as a program you approve in Settings → Data, and only
 on events logged after the approval. Any edit to the extension's files
 stops it until it's approved again.
+
+### AI providers
+
+An AI provider is a Starlark script: oxplow's own (Anthropic, OpenAI,
+OpenRouter, TypeSafe) are written this way. The script builds each request
+and reads each reply; oxplow makes the HTTP call.
+
+```yaml
+implementations:
+  - capability: ai_provider
+    id: acme                       # the `kind:` a provider in Settings → AI names
+    title: Acme
+    entry: providers/acme.star
+    config: { baseUrl: "https://api.acme.example", ops: [complete] }
+```
+
+```python
+def request(x):     # { op: "complete", model, system, prompt, json }
+    return {
+        "path": "/v1/chat",                                 # under the base URL
+        "headers": {"authorization": "Bearer {{key}}"},      # oxplow fills in the key
+        "body": {"model": x["model"], "prompt": x["prompt"]},
+    }
+
+def response(x):    # { op, model, body } — a 2xx reply
+    return {"text": x["body"]["text"], "usage": {"input": 0, "output": 0}}
+```
+
+- `path` is always under the base URL: the one the person configured,
+  else `baseUrl`.
+- `{{key}}` is the provider's key from the keychain. oxplow puts it in
+  after `request` returns, so the script never sees it.
+- oxplow reads the status itself: 401 and 403 are a key problem, 429 a
+  rate limit.
+- `ops: [complete, decide]` answers typed questions natively. Without
+  `decide`, oxplow asks them as a chat. For `decide`, `request` gets
+  `{ op: "decide", model, state, questions }` and returns `None` to ask a
+  given model as a chat instead; `response` returns
+  `{ answers: { <name>: { type: noul, probability } | { type: choice, choice, probabilities } | { type: score, score, probabilities } } }`.
+- A provider runs only once a person approves its script in Settings →
+  Data → Programs, and any change to the script asks again.
 
 ## Checking and testing
 

@@ -40,6 +40,11 @@ const SCRIPT_TIMEOUT: Duration = Duration::from_secs(5);
 /// The functions a provider script defines.
 pub const FUNCTIONS: &[&str] = &["request", "response"];
 
+/// Whether the script may run now: a person approved it as it is
+/// (`ProgramKind::AiProvider`), or why not. Asked before every call, so an
+/// approval takes effect at once and an edit stops it.
+pub type Gate = Arc<dyn Fn() -> Result<(), String> + Send + Sync>;
+
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Config {
@@ -57,6 +62,7 @@ pub struct Scripted {
     complete: bool,
     decide: bool,
     script: Arc<str>,
+    gate: Gate,
     http: Http,
 }
 
@@ -69,6 +75,7 @@ pub fn scripted(
     entry: &str,
     script: &str,
     config: &Value,
+    gate: Gate,
 ) -> Result<Arc<dyn ModelProvider>, String> {
     let c: Config = serde_json::from_value(config.clone()).map_err(|e| format!("config: {e}"))?;
     let ops = c.ops.unwrap_or_else(|| vec!["complete".into()]);
@@ -89,18 +96,24 @@ pub fn scripted(
         complete: ops.iter().any(|o| o == "complete"),
         decide: ops.iter().any(|o| o == "decide"),
         script: script.into(),
+        gate,
         http: Http::default(),
     }))
 }
 
 impl Scripted {
-    /// Run the script's `func` on `input`, sandboxed.
+    /// Run the script's `func` on `input`, sandboxed — once a person
+    /// approved it.
     async fn call(
         &self,
         provider: &str,
         func: &'static str,
         input: Value,
     ) -> Result<Value, AiError> {
+        (self.gate)().map_err(|message| AiError::Unapproved {
+            provider: provider.to_string(),
+            message,
+        })?;
         let script = self.script.clone();
         let budget = oxplow_script::SandboxBudget::with_timeout(SCRIPT_TIMEOUT);
         let ran = tokio::task::spawn_blocking(move || {
@@ -350,6 +363,10 @@ def response(x):
     return {"text": b["out"], "usage": {"input": b["in_t"], "output": b["out_t"]}}
 "#;
 
+    fn open() -> Gate {
+        Arc::new(|| Ok(()))
+    }
+
     fn at<'a>(base: &'a str, key: Option<&'a str>) -> ProviderInstance<'a> {
         ProviderInstance {
             id: "p",
@@ -372,7 +389,7 @@ def response(x):
     #[tokio::test]
     async fn a_script_shapes_the_call_and_the_host_sends_it() {
         let (base, seen) = mock("/chat", 200, json!({ "out": "hi", "in_t": 3, "out_t": 1 })).await;
-        let p = scripted("x", "X", "p.star", CHAT, &json!({})).unwrap();
+        let p = scripted("x", "X", "p.star", CHAT, &json!({}), open()).unwrap();
         let c = p.complete(&at(&base, Some("k1")), &ask()).await.unwrap();
         assert_eq!(
             c,
@@ -393,7 +410,7 @@ def response(x):
     /// A status is the host's to read; an unusable body is the script's.
     #[tokio::test]
     async fn errors_are_the_hosts_by_status_and_the_scripts_by_body() {
-        let p = scripted("x", "X", "p.star", CHAT, &json!({})).unwrap();
+        let p = scripted("x", "X", "p.star", CHAT, &json!({}), open()).unwrap();
         let (base, _) = mock("/chat", 401, json!({})).await;
         assert!(matches!(
             p.complete(&at(&base, Some("k")), &ask()).await,
@@ -426,7 +443,7 @@ def response(x):
             json!({ "out": chat_reply.to_string(), "in_t": 1, "out_t": 1 }),
         )
         .await;
-        let p = scripted("x", "X", "p.star", CHAT, &json!({})).unwrap();
+        let p = scripted("x", "X", "p.star", CHAT, &json!({}), open()).unwrap();
         let d = p.decide(&at(&base, None), &req).await.unwrap();
         assert_eq!(d.answers["risky"], Answer::Noul { probability: 0.7 });
 
@@ -438,7 +455,15 @@ def response(x):
     return {"answers": {"risky": {"type": "noul", "probability": x["body"]["p"]}}}
 "#;
         let (base, seen) = mock("/decide", 200, json!({ "p": 0.2 })).await;
-        let p = scripted("x", "X", "p.star", native, &json!({ "ops": ["decide"] })).unwrap();
+        let p = scripted(
+            "x",
+            "X",
+            "p.star",
+            native,
+            &json!({ "ops": ["decide"] }),
+            open(),
+        )
+        .unwrap();
         let d = p.decide(&at(&base, None), &req).await.unwrap();
         assert_eq!(d.answers["risky"], Answer::Noul { probability: 0.2 });
         assert_eq!(
@@ -449,6 +474,22 @@ def response(x):
             p.complete(&at(&base, None), &ask()).await.is_err(),
             "it only decides"
         );
+    }
+
+    /// A script runs only once a person approved it: until then a call
+    /// says where to approve it, and nothing is sent.
+    #[tokio::test]
+    async fn an_unapproved_script_sends_nothing() {
+        let (base, seen) = mock("/chat", 200, json!({ "out": "hi", "in_t": 1, "out_t": 1 })).await;
+        let shut: Gate = Arc::new(|| Err("needs approving".into()));
+        let p = scripted("x", "X", "p.star", CHAT, &json!({}), shut).unwrap();
+        let err = p.complete(&at(&base, Some("k")), &ask()).await.unwrap_err();
+        assert!(matches!(err, AiError::Unapproved { .. }), "{err}");
+        assert!(
+            err.to_string().contains("Settings → Data → Programs"),
+            "{err}"
+        );
+        assert!(seen.lock().unwrap().is_empty());
     }
 
     /// A path never leaves the base URL's host, and a script must define
@@ -463,7 +504,7 @@ def response(x):
     return {"text": ""}
 "#;
         let (base, seen) = mock("/x", 200, json!({})).await;
-        let p = scripted("x", "X", "p.star", away, &json!({})).unwrap();
+        let p = scripted("x", "X", "p.star", away, &json!({}), open()).unwrap();
         let err = p.complete(&at(&base, None), &ask()).await.unwrap_err();
         assert!(
             err.to_string().contains("isn't a path under the base URL"),
@@ -476,13 +517,21 @@ def response(x):
             "p.star",
             "def request(x):\n    return None\n",
             &json!({}),
+            open(),
         )
         .err()
         .unwrap();
         assert!(err.contains("`response`"), "{err}");
-        let err = scripted("x", "X", "p.star", CHAT, &json!({ "ops": ["embed"] }))
-            .err()
-            .unwrap();
+        let err = scripted(
+            "x",
+            "X",
+            "p.star",
+            CHAT,
+            &json!({ "ops": ["embed"] }),
+            open(),
+        )
+        .err()
+        .unwrap();
         assert!(err.contains("`embed`"), "{err}");
     }
 }

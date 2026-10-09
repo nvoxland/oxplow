@@ -115,16 +115,6 @@ pub const BUILT_INS: &[BuiltIn] = &[
         fields: &[],
         config_schema: Some(ACP_ADAPTER_CONFIG),
     },
-    // AI model providers: what a role's model is called through.
-    ai_provider("oxplow:anthropic", "Anthropic", &["decide_native"], None),
-    ai_provider(
-        "oxplow:openai-compatible",
-        "An OpenAI-compatible API",
-        &[],
-        Some(OPENAI_COMPATIBLE_CONFIG),
-    ),
-    ai_provider("oxplow:openrouter", "OpenRouter", &[], None),
-    ai_provider("oxplow:typesafe", "TypeSafe", &["decide_native"], None),
 ];
 
 /// An agent harness built-in.
@@ -145,25 +135,6 @@ const fn harness(
     }
 }
 
-/// An AI provider built-in.
-const fn ai_provider(
-    entry: &'static str,
-    title: &'static str,
-    features: &'static [&'static str],
-    config_schema: Option<&'static str>,
-) -> BuiltIn {
-    BuiltIn {
-        entry,
-        capability: "ai_provider",
-        provider: None,
-        title,
-        features,
-        id_pattern: None,
-        fields: &[],
-        config_schema,
-    }
-}
-
 /// An ACP adapter's declaration: the program that speaks ACP, and whether
 /// the system prompt rides `_meta.systemPrompt.append` on `session/new`
 /// (`meta`) or goes ahead of the first prompt (`prompt`).
@@ -177,14 +148,6 @@ const ACP_ADAPTER_CONFIG: &str = r#"{
     "env": { "type": "object", "additionalProperties": { "type": "string" } },
     "systemPrompt": { "enum": ["meta", "prompt"] }
   }
-}"#;
-
-/// An OpenAI-compatible provider's declaration: its API's base URL, when
-/// the declaration fixes one (else the instance in AI settings gives it).
-const OPENAI_COMPATIBLE_CONFIG: &str = r#"{
-  "type": "object",
-  "additionalProperties": false,
-  "properties": { "baseUrl": { "type": "string", "minLength": 1 } }
 }"#;
 
 /// One built-in implementation.
@@ -258,6 +221,14 @@ pub enum Source {
     Core,
     /// A built-in in core's standard library, by its entry.
     BuiltIn(&'static str),
+    /// A script in an extension (an AI provider written as one): its
+    /// entry, the extension's folder (`tree`, `bundled:<name>` for a
+    /// shipped one) and the script's text.
+    Script {
+        entry: String,
+        tree: String,
+        script: String,
+    },
     /// A provider instance's process.
     External,
     /// Nothing implements it.
@@ -269,6 +240,7 @@ impl Source {
         match self {
             Source::Core => "core",
             Source::BuiltIn(_) => "builtin",
+            Source::Script { .. } => "script",
             Source::External => "external",
             Source::None => "none",
         }
@@ -810,6 +782,9 @@ pub fn declared_by(extensions: &[crate::extensions::Extension]) -> Vec<Implement
         .filter(|e| e.enabled)
         .flat_map(|e| {
             e.implementations.iter().filter_map(|d| {
+                if let Some(script) = &d.script {
+                    return Some(scripted_implementation(e, d, script));
+                }
                 let b = built_in(&d.entry)?;
                 Some(Implementation {
                     capability: d.capability.clone(),
@@ -825,6 +800,35 @@ pub fn declared_by(extensions: &[crate::extensions::Extension]) -> Vec<Implement
             })
         })
         .collect()
+}
+
+/// An AI provider written as a script, as the registry holds it: what it
+/// answers natively (`ops`) are its features.
+fn scripted_implementation(
+    e: &crate::extensions::Extension,
+    d: &crate::extensions::implementations::ImplementationDecl,
+    script: &str,
+) -> Implementation {
+    let decides = d
+        .config
+        .get("ops")
+        .and_then(Value::as_array)
+        .is_some_and(|ops| ops.iter().any(|o| o == "decide"));
+    Implementation {
+        capability: d.capability.clone(),
+        id: d.id.clone(),
+        title: d.title.clone().unwrap_or_else(|| d.id.clone()),
+        extension: Some(e.name.clone()),
+        source: Source::Script {
+            entry: d.entry.clone(),
+            tree: e.path.clone(),
+            script: script.to_string(),
+        },
+        features: serde_json::json!({ "decide_native": decides }),
+        fields: serde_json::Value::Array(Vec::new()),
+        id_pattern: None,
+        config: d.config.clone(),
+    }
 }
 
 /// Every skill and slash command the agent gets now: core's, and each
@@ -941,7 +945,12 @@ pub async fn refresh(svc: &crate::Services) -> Result<(), DomainError> {
     crate::work_items::register_built_ins(&svc.work_items, &declared, &svc.db);
     crate::harnesses::register_built_ins(&svc.harnesses, &declared);
     crate::harnesses::register_acp_adapters(&svc.acp_adapters, &declared);
-    crate::ai_service::register_built_ins(svc.ai.providers(), &declared);
+    crate::ai_service::register_built_ins(
+        svc.ai.providers(),
+        &declared,
+        &svc.approvals,
+        &svc.layout.project_dir,
+    );
     svc.capabilities.set_declared(declared);
     let config = crate::config_service::read_config(&svc.config);
     svc.capabilities.publish(&config, &svc.db).await
