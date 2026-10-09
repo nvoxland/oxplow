@@ -207,6 +207,33 @@ pub const EFFORT_POLICY: ProviderContract = ProviderContract {
     data: None,
 };
 
+/// A snapshot implementation's (`.context/providers.md` "A snapshots
+/// provider"): core asks it to mark a stream's worktree and what changed
+/// between two of its marks, and records what it answers in its own
+/// ledger; with `contents` core pulls each new file's bytes at the mark.
+pub const SNAPSHOTS: ProviderContract = ProviderContract {
+    verbs: &[
+        Verb {
+            name: "mark",
+            needs: Need::Always,
+        },
+        Verb {
+            name: "changed",
+            needs: Need::Always,
+        },
+        Verb {
+            name: "read_at",
+            needs: Need::Feature("contents"),
+        },
+    ],
+    dispatch: None,
+    events: &[],
+    records: None,
+    ref_kind: None,
+    items: false,
+    data: None,
+};
+
 /// An agent harness's (`.context/agent-model.md`): core launches its
 /// sessions through it, has it map its tool hooks and render its answers,
 /// and — as its features say — read its transcript and telemetry and
@@ -322,7 +349,7 @@ pub const CAPABILITIES: &[CapabilitySpec] = &[
         many: false,
         default: "oxplow",
         features: &["contents"],
-        provider: None,
+        provider: Some(&SNAPSHOTS),
     },
     CapabilitySpec {
         id: "vcs",
@@ -580,9 +607,9 @@ mod tests {
                 .filter(|c| c.provider.is_some())
                 .map(|c| c.id)
                 .collect::<Vec<_>>(),
-            ["work_items", "effort_policy", "agent_harness"]
+            ["work_items", "effort_policy", "snapshots", "agent_harness"]
         );
-        assert!(contract("snapshots").is_none() && contract("nope").is_none());
+        assert!(contract("vcs").is_none() && contract("nope").is_none());
     }
 
     /// The verbs a declaration must carry follow its features; each verb's
@@ -601,6 +628,15 @@ mod tests {
         assert!(work.verb("reorder").is_some() && work.verb("estimate").is_none());
         let policy = contract("effort_policy").unwrap();
         assert_eq!(policy.required(&serde_json::json!({})), ["react"]);
+        let snapshots = contract("snapshots").unwrap();
+        assert_eq!(
+            snapshots.required(&serde_json::json!({})),
+            ["mark", "changed"]
+        );
+        assert_eq!(
+            snapshots.required(&serde_json::json!({"contents": true})),
+            ["mark", "changed", "read_at"]
+        );
         for c in CAPABILITIES {
             for verb in c.provider.map(|p| p.verbs).unwrap_or_default() {
                 if let Need::Feature(f) = verb.needs {

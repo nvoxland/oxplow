@@ -384,15 +384,15 @@ a verb runs as (so an inverse naming a verb undoes through it), the event
 types it may emit, what its collectors stream, the refs an instance owns,
 and whether it keeps items.
 
-| | `work_items` | `effort_policy` | `agent_harness` |
-|---|---|---|---|
-| verbs | `create`, `update`, `transition`; `link` ← links, `comment` ← comments, `delete` ← delete, `reorder` ← ordering, `move` ← lists | `react` | `launch`, `tool_use`, `render`; `turns` ← transcript, `token_readings` ← telemetry, `refresh_text` ← runtime_text, `prompt` and `subagent` ← subagents |
-| verbs run as | `oxplow.work_item.<verb>` | the dispatcher's call (nothing undoes it) | core's call: a session's launch, the hook route, the OTLP route, a transcript read, a text refresh |
-| declares as `data` | nothing | nothing | `instruction_files`, `env_markers`, `settings` |
-| may emit | `work_item.recorded@2` | nothing | nothing |
-| collectors stream | `work_item` rows, logged as `work_item.recorded@2` `{ item: row }` | nothing | nothing |
-| owns refs | `work_item:<instance>:…` | none | none |
-| keeps items (`fields`, `idPattern`) | yes | no | no |
+| | `work_items` | `effort_policy` | `agent_harness` | `snapshots` |
+|---|---|---|---|---|
+| verbs | `create`, `update`, `transition`; `link` ← links, `comment` ← comments, `delete` ← delete, `reorder` ← ordering, `move` ← lists | `react` | `launch`, `tool_use`, `render`; `turns` ← transcript, `token_readings` ← telemetry, `refresh_text` ← runtime_text, `prompt` and `subagent` ← subagents | `mark`, `changed`; `read_at` ← contents |
+| verbs run as | `oxplow.work_item.<verb>` | the dispatcher's call (nothing undoes it) | core's call: a session's launch, the hook route, the OTLP route, a transcript read, a text refresh | core's call: every take core makes (an effort's brackets, a turn's end, a measured run, an archive) |
+| declares as `data` | nothing | nothing | `instruction_files`, `env_markers`, `settings` | nothing |
+| may emit | `work_item.recorded@2` | nothing | nothing | nothing |
+| collectors stream | `work_item` rows, logged as `work_item.recorded@2` `{ item: row }` | nothing | nothing | nothing |
+| owns refs | `work_item:<instance>:…` | none | none | none |
+| keeps items (`fields`, `idPattern`) | yes | no | no | no |
 
 Each such capability has a **host** (`registry::CapabilityHost`): what
 turns a started instance into the capability's implementation and takes
