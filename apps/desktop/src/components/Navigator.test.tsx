@@ -427,9 +427,10 @@ test("streams are inverted tiles and threads indented tabs, tied by a guide line
   // Tabs: rounded on the left only, flush with the strip's right edge.
   const stream = glyph("navigator-strip-stream-str1");
   expect(stream.dataset.glyph).toBe("stream");
-  expect(stream.style.background).toBe("var(--surface-stream-tile)");
-  expect(stream.style.color).toBe("var(--text-on-stream-tile)");
-  expect(stream.style.borderRadius).toBe("6px 0px 0px 6px");
+  // The tab strip's header tint; rounded only at the stack's top.
+  expect(stream.style.backgroundImage).toContain("var(--panel-header-bg)");
+  expect(stream.style.color).toBe("var(--text-primary)");
+  expect(stream.style.borderRadius).toBe("6px 0px 0px");
 
   // A stream's threads are tabs butted up against each other: each fills
   // its row, and only the last closes the stack along its bottom.
@@ -440,9 +441,11 @@ test("streams are inverted tiles and threads indented tabs, tied by a guide line
     ["navigator-strip-thread-thr2", queued],
   ] as const) {
     expect(t.dataset.glyph).toBe("thread");
-    expect(t.style.borderRadius).toBe("4px 0px 0px 4px");
     expect(t.style.height).toBe(getByTestId(rowId).style.height);
   }
+  // Flat where another tab sits next to it; the last rounds the bottom.
+  expect(writer.style.borderRadius).toBe("0px");
+  expect(queued.style.borderRadius).toBe("0px 0px 0px 6px");
   expect(writer.style.borderWidth).toBe("1px 0px 0px 1px");
   expect(queued.style.borderWidth).toBe("1px 0px 1px 1px");
   expect(writer.style.borderColor).toBe("var(--accent)");
@@ -469,7 +472,7 @@ test("streams are inverted tiles and threads indented tabs, tied by a guide line
   // stream's tile colour and a thread's tab flow into the label.
   const streamTab = getByTestId("navigator-stream-row-str1").querySelector("[data-glyph]") as HTMLElement;
   expect(streamTab.textContent).toContain("Main");
-  expect(streamTab.style.background).toBe("var(--surface-stream-tile)");
+  expect(streamTab.style.backgroundImage).toContain("var(--panel-header-bg)");
   expect(streamTab.style.flexGrow).toBe("1");
   const threadTab = getByTestId("navigator-thread-row-thr2").querySelector("[data-glyph]") as HTMLElement;
   expect(threadTab.textContent).toContain("Research");

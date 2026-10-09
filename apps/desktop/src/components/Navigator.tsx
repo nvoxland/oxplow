@@ -686,6 +686,7 @@ function StripRow({
           letter={letter}
           isStream={isStream}
           isLast={guide === "last"}
+          hasThreads={guide === "stream"}
           isWriter={isWriter}
           status={status}
           question={question}
@@ -768,6 +769,7 @@ function OverlayRow({
           letter={letter}
           isStream={isStream}
           isLast={guide === "last"}
+          hasThreads={guide === "stream"}
           isWriter={isWriter}
           status={status}
           question={question}
@@ -787,7 +789,7 @@ function OverlayRow({
                   fontSize: "var(--text-sm)",
                   fontWeight: isStream ? 700 : 400,
                   color: isStream
-                    ? "var(--text-on-stream-tile)"
+                    ? "var(--text-primary)"
                     : selected
                       ? "var(--text-primary)"
                       : "var(--text-secondary)",
@@ -918,6 +920,7 @@ function IconCell({
   letter,
   isStream,
   isLast,
+  hasThreads,
   isWriter,
   status,
   question,
@@ -929,6 +932,8 @@ function IconCell({
   label?: ReactNode;
   /** The last of its stream's threads: its tab closes the stack. */
   isLast: boolean;
+  /** A stream with threads under it: its tab is the stack's top. */
+  hasThreads: boolean;
   isWriter: boolean;
   status: AgentStatusDotState | undefined;
   question?: string;
@@ -946,17 +951,23 @@ function IconCell({
     ? {
         width: glyphWidth,
         height: ICON_BOX,
-        borderRadius: "6px 0 0 6px",
-        background: "var(--surface-stream-tile)",
-        color: "var(--text-on-stream-tile)",
+        // Rounded only where no tab sits next to it: the stack's top, and
+        // its bottom when the stream has no threads.
+        borderRadius: hasThreads ? "6px 0 0 0" : "6px 0 0 6px",
+        // The tab strip's own header tint, so the rail matches the tabs.
+        backgroundImage: "linear-gradient(var(--panel-header-bg), var(--panel-header-bg))",
+        backgroundColor: "var(--surface-card)",
+        color: "var(--text-primary)",
         fontSize: LETTER_FONT,
         fontWeight: 700,
       }
     : {
         width: glyphWidth,
         height: THREAD_ROW_HEIGHT,
-        borderRadius: "4px 0 0 4px",
-        background: isWriter ? "var(--accent-soft-bg)" : "var(--surface-thread-tab)",
+        // Tabs next to each other are flat; only the stack's last is
+        // rounded at the bottom.
+        borderRadius: isLast ? "0 0 0 6px" : 0,
+        background: isWriter ? "var(--accent-soft-bg)" : "transparent",
         color: "var(--text-primary)",
         borderWidth: isLast ? "1px 0 1px 1px" : "1px 0 0 1px",
         borderStyle: "solid",
