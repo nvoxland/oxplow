@@ -270,7 +270,7 @@ pub const KINDS: &[KindSpec] = &[
         "ui.slots",
         "Slot mount",
         Stable,
-        false,
+        true,
         true,
     ),
     spec(
@@ -286,7 +286,7 @@ pub const KINDS: &[KindSpec] = &[
         "ui.replacements",
         "Replacement",
         Experimental,
-        false,
+        true,
         false,
     ),
     spec(

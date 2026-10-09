@@ -49,8 +49,12 @@ out of that extension, so nothing downstream sees two (this is what keeps
 the first extension's metric when two declare one key). `version:` is
 required for `sharing: shared` (`manifest_v2::valid_version`); a bundled
 extension's version is oxplow's own. The kinds with adapters so far:
-collectors, effects, measures, metrics, dimensions; the rest keep their
-own checks until they move (the inventory and plan are the foundation
+collectors, effects, measures, metrics, dimensions, models (global: the
+`v_<ext>_<name>` view), event types (global: the type string; one
+descriptor per type, its highest `v` the contract version), ref kinds
+(global: the kind), lenses, pages, panels, slot mounts (`<slot>-<n>`),
+decorators (`decorator-<n>`), replacements and custom components (all
+mounted, no global name); the rest keep their own checks until they move (the inventory and plan are the foundation
 roadmap's "Normalize contribution descriptors").
 
 > **Status: built (epic tsk275; host finished in tsk278).**
@@ -1824,8 +1828,11 @@ one listing that adds model and vocabulary health):
 - a schema that differs from the one `event_type_contract` recorded at
   that `type@v` — a published shape is a contract, so a new shape is a
   new version with an upcast;
-- two extensions whose names make one namespace (`acme-pr`, `acme_pr`) —
-  neither registers.
+- two extensions whose names make one namespace (`acme-pr`, `acme_pr`)
+  and declare different types — neither registers. One *type* two
+  extensions both declare is settled earlier, at load, by the
+  descriptor registry: the first keeps it and the second's declaration is
+  a load error naming both.
 
 The same pass restates `event_type_contract` (read as `v_event_type`:
 type, v, extension, summary, `registered`, `latest`, schema). A removed
@@ -1971,8 +1978,10 @@ kind's namespace is a string prefix, so one may hold another's (`acme`'s
 `acme_` holds `acme-pr`'s `acme_pr_`): a kind in both is **the more
 specific namespace's** (tsk933) — `acme-pr` keeps `acme_pr_x`, and
 `acme`'s declaration of it is an error naming whose namespace it is.
-Otherwise a kind two extensions both declare is an error on each, and
-neither registers it. A `wikilink:` that is one of the extension's own
+That, and any other kind two extensions both declare (the first keeps
+it), is settled at load by the descriptor registry
+(`descriptors::check_catalog`, which registers ref kinds most specific
+namespace first); the second's declaration is a load error naming both. A `wikilink:` that is one of the extension's own
 kinds is refused at load and costs only the sugar (both kinds load), so no name is both a
 kind and a sugar, and both resolvers read a sugar before a kind's own
 name (`canonical_wikilink`, `extensionWikilinkRef`). A **`wikilink:` prefix** another extension also uses (as

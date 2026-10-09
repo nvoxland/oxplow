@@ -13,7 +13,8 @@
 //! - a schema that differs from the one recorded at that `type@v`
 //!   (`event_type_contract`): a new shape is a new version;
 //! - two extensions whose names make one namespace (`acme-pr`,
-//!   `acme_pr`): neither registers;
+//!   `acme_pr`) that declare different types: neither registers (one
+//!   type declared twice is settled at load, the first keeping it);
 //! - a reaction (an effect's or collector's `on:`) to another extension's
 //!   type that no enabled extension registers (P9.D1) — the subscriber's
 //!   error, gone once the type's owner is installed and its declaration
@@ -308,49 +309,14 @@ fn build_tx(
 }
 
 /// Core's kinds plus every extension's. A kind two extensions both
-/// declare is an error on each, and neither registers it; a `wikilink:`
+/// declare was settled at load (`extensions::descriptors::check_catalog`:
+/// the more specific namespace's, else the first, keeps it); a `wikilink:`
 /// prefix another extension also uses (as its prefix, or as a kind) is an
 /// error on each and costs only the sugar — the namespaced kind still
 /// registers, so installing one extension never unlinks another's refs
 /// (P10, K2). A kind or prefix core holds is that extension's error.
 fn register_kinds(declared: &Declared, errors: &mut BTreeMap<String, Vec<String>>) -> KindRegistry {
     let mut kinds = core_kinds();
-    // Namespaces are string prefixes, so one may hold another (`acme_`
-    // holds `acme-pr`'s `acme_pr_`). A kind in two is the more specific
-    // one's (tsk933): the other extension's declaration of it is refused,
-    // naming whose it is, and only the owner's counts below.
-    let namespace = |e: &str| format!("{}_", oxplow_domain::events::schema::extension_namespace(e));
-    let declaring: Vec<(&str, String)> = declared
-        .iter()
-        .map(|d| (d.extension.as_str(), namespace(&d.extension)))
-        .collect();
-    let owner_of = |kind: &str, of: &str| -> Option<&str> {
-        let mine = namespace(of).len();
-        declaring
-            .iter()
-            .filter(|(e, ns)| *e != of && ns.len() > mine && kind.starts_with(ns.as_str()))
-            .max_by_key(|(_, ns)| ns.len())
-            .map(|(e, _)| *e)
-    };
-    let mut refused: BTreeSet<(&str, &str)> = BTreeSet::new();
-    for Declares {
-        extension,
-        kinds: decls,
-        ..
-    } in declared
-    {
-        for d in decls {
-            if let Some(owner) = owner_of(&d.kind, extension) {
-                refused.insert((extension, &d.kind));
-                errors.entry(extension.clone()).or_default().push(format!(
-                    "{}: ref kind `{}` is in `{owner}`'s namespace (`{}`); rename it",
-                    d.declared_at,
-                    d.kind,
-                    namespace(owner)
-                ));
-            }
-        }
-    }
     // Who declares each name as a kind, and as a prefix.
     let mut as_kind: HashMap<&str, BTreeSet<&str>> = HashMap::new();
     let mut as_prefix: HashMap<&str, BTreeSet<&str>> = HashMap::new();
@@ -361,9 +327,6 @@ fn register_kinds(declared: &Declared, errors: &mut BTreeMap<String, Vec<String>
     } in declared
     {
         for d in decls {
-            if refused.contains(&(extension.as_str(), d.kind.as_str())) {
-                continue;
-            }
             as_kind.entry(&d.kind).or_default().insert(extension);
             if let Some(w) = &d.wikilink {
                 as_prefix.entry(w).or_default().insert(extension);
@@ -393,28 +356,7 @@ fn register_kinds(declared: &Declared, errors: &mut BTreeMap<String, Vec<String>
     } in declared
     {
         for d in decls {
-            if refused.contains(&(extension.as_str(), d.kind.as_str())) {
-                continue;
-            }
             let mut problems = Vec::new();
-            let same_kind: BTreeSet<&str> = as_kind[d.kind.as_str()]
-                .iter()
-                .copied()
-                .filter(|o| o != extension)
-                .collect();
-            if !same_kind.is_empty() {
-                problems.push(format!(
-                    "{}: ref kind `{}` is also {}'s; rename one",
-                    d.declared_at,
-                    d.kind,
-                    named(&same_kind)
-                ));
-                errors
-                    .entry(extension.clone())
-                    .or_default()
-                    .extend(problems);
-                continue;
-            }
             let mut decl = d.clone();
             if let Some(w) = &d.wikilink {
                 let sharing = others(w, extension);
@@ -868,6 +810,9 @@ mod tests {
         );
     }
 
+    /// Two extensions that make one namespace and declare different types
+    /// share a retention window and a prefix no registry entry settles:
+    /// neither registers.
     #[tokio::test]
     async fn two_extensions_sharing_a_namespace_both_fail() {
         let f = crate::test_fixtures::services_with_effort().await;
@@ -882,11 +827,14 @@ mod tests {
         write(
             &root,
             "oxplow/extensions/acme_pr/extension.yaml",
-            &MANIFEST.replace("name: acme-pr", "name: acme_pr"),
+            &MANIFEST
+                .replace("name: acme-pr", "name: acme_pr")
+                .replace("acme_pr.merged", "acme_pr.closed")
+                .replace("merged.json", "closed.json"),
         );
         write(
             &root,
-            "oxplow/extensions/acme_pr/merged.json",
+            "oxplow/extensions/acme_pr/closed.json",
             &schema("number"),
         );
         svc.vocabulary_service.sync().await.unwrap();
@@ -901,6 +849,7 @@ mod tests {
             );
         }
         assert!(!svc.vocabulary.current().is_registered("acme_pr.merged", 1));
+        assert!(!svc.vocabulary.current().is_registered("acme_pr.closed", 1));
     }
 
     /// `beta`: an effect and a collector that react to `acme_pr.merged`,
