@@ -1319,9 +1319,12 @@ impl Services {
                 capabilities: capabilities.clone(),
             },
             &commands,
-            vec![Arc::new(providers::work_items::WorkItemsHost(
-                work_items.clone(),
-            ))],
+            vec![
+                Arc::new(providers::work_items::WorkItemsHost(work_items.clone())),
+                Arc::new(providers::effort_policy::EffortPolicyHost(
+                    effort_policies.clone(),
+                )),
+            ],
         );
         // An extension's provider commands run on its instances.
         commands.set_provider_router({

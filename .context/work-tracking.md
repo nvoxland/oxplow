@@ -113,6 +113,19 @@ policy's own run caused (a source starting `effect:effort_policy:`). A
 `capability.switched` of the effort policy closes every open effort
 (`switch`), as the system — core's rule, whichever policy is active after.
 
+**A provider process may be the policy** (`providers:` with `capability:
+effort_policy`, [providers.md](./providers.md) "What a provider may
+implement"). While it runs, `providers::effort_policy::EffortPolicyHost`
+registers it as an `ExternalEffortPolicy`, offered as an implementation
+like any. Each event is one `react` invoke, `{ event }` (the
+`PolicyEvent`, idempotency key `react:<event id>`), answered as an
+effect's script answers — `{ commands: [{ name, input }] }` or `{ skip }`;
+events are refused. It reads oxplow through `host/call` (`needs:
+[sql.read]`); those reads aren't audited, since `react` itself is no
+command run — what it composes is, as `effect:effort_policy:<instance>`.
+A stopped instance leaves the registry, and the choice falls back to
+none.
+
 `CommitOrSwitch` (`oxplow:commit-or-switch`) is the built-in, the rules
 above composed as calls (it reads first, then composes). Rule 1: the
 thread is the event's (the agent that moved the item), else the item's
