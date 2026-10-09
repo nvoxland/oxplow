@@ -29,6 +29,7 @@ rmcp = { version = "3.4", features = [
 ] }
 
 tokio = { workspace = true }
+reqwest = { workspace = true }
 tokio-util = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -42,7 +43,6 @@ oxplow-tasks = { workspace = true }
 oxplow-harness-fake = { workspace = true }
 oxplow-provider-fake = { workspace = true }
 tempfile = { workspace = true }
-reqwest = { workspace = true, features = ["json"] }
 opentelemetry-proto = { version = "0.33.0", default-features = false, features = ["gen-tonic-messages", "metrics"] }
 prost = "0.14"
 

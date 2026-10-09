@@ -19,6 +19,8 @@
 //! handle exposes the URLs the launch feeds into each agent's env and
 //! config files.
 
+pub mod hook_client;
+
 use std::net::SocketAddr;
 use std::sync::Arc;
 

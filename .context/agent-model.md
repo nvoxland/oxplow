@@ -444,9 +444,13 @@ depends only on the domain; core's text and the answerability questions live in
   `PreCompact`), acked unread. `OXPLOW_HOOK_DEBUG=<file>` appends every
   hook payload as sent, one JSON line each, to learn real payload shapes
   ([work-tracking.md](./work-tracking.md) "The record").
-- Codex keeps nothing under `.oxplow/runtime/`: its command hooks (`oxplow
+- Codex keeps nothing under `.oxplow/runtime/`: its command hooks (`<oxplow>
   hook <event>`, which POST its hook stdin to the hook endpoint), its MCP
-  server and its OTEL exporter ride `--config` overrides. Its skills are
+  server and its OTEL exporter ride `--config` overrides. `<oxplow>` is the
+  launch's `oxplow_executable`: the running process's own binary, which is
+  the daemon (`oxplow-daemon`) when the desktop app runs one. So both
+  binaries run `hook <event>` (`oxplow_control_plane::hook_client`);
+  `oxplow-daemon/tests/hook_command.rs` runs the daemon's as a hook. Its skills are
   the one thing on disk. Codex finds skills only beside the directory it
   runs in (`<cwd>/.agents/skills`, `.codex/skills`; `skills.config`
   entries don't add one, and a plugin must be installed into

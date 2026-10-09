@@ -4656,7 +4656,6 @@ dependencies = [
  "oxplow-sdk",
  "oxplow-tauri-ipc",
  "oxplow-workspace-hack",
- "reqwest",
  "serde",
  "serde_json",
  "tauri",

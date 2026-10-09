@@ -18,8 +18,8 @@ fn main() {
         println!("{text}");
         return;
     }
-    if let Some(event) = hook_event_arg() {
-        run_hook_command(&event);
+    if let Some(event) = oxplow_control_plane::hook_client::event_arg(std::env::args().skip(1)) {
+        oxplow_control_plane::hook_client::run_blocking(&event);
         return;
     }
     if let Some(args) = extension_args() {
@@ -51,14 +51,6 @@ fn info_arg(mut args: impl Iterator<Item = String>) -> Option<String> {
     }
 }
 
-fn hook_event_arg() -> Option<String> {
-    let mut args = std::env::args().skip(1);
-    match (args.next().as_deref(), args.next(), args.next()) {
-        (Some("hook"), Some(event), None) => Some(event),
-        _ => None,
-    }
-}
-
 /// `oxplow extension <new|check|test> …`: the SDK CLI, handled before
 /// Tauri boots (like `hook`). Everything after `extension` is the
 /// subcommand's argv.
@@ -74,59 +66,6 @@ fn extension_args() -> Option<Vec<String>> {
 /// in, instead of showing the setup-confirmation screen.
 fn init_flag() -> bool {
     std::env::args().skip(1).any(|a| a == "--init")
-}
-
-fn run_hook_command(event: &str) {
-    use std::io::{Read, Write};
-
-    let mut payload = Vec::new();
-    if let Err(err) = std::io::stdin().read_to_end(&mut payload) {
-        eprintln!("oxplow hook failed to read stdin: {err}");
-        return;
-    }
-    if payload.is_empty() {
-        payload.extend_from_slice(b"{}");
-    }
-
-    let runtime = match tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-    {
-        Ok(runtime) => runtime,
-        Err(err) => {
-            eprintln!("oxplow hook failed to start runtime: {err}");
-            return;
-        }
-    };
-
-    let result = runtime.block_on(forward_hook(event, payload));
-    match result {
-        Ok(body) if !body.is_empty() => {
-            if let Err(err) = std::io::stdout().write_all(&body) {
-                eprintln!("oxplow hook failed to write response: {err}");
-            }
-        }
-        Ok(_) => {}
-        Err(err) => eprintln!("oxplow hook forwarding failed: {err}"),
-    }
-}
-
-async fn forward_hook(event: &str, payload: Vec<u8>) -> Result<Vec<u8>, reqwest::Error> {
-    let base_url = std::env::var("OXPLOW_HOOK_BASE_URL").unwrap_or_default();
-    let url = format!("{}/{}", base_url.trim_end_matches('/'), event);
-    let token = std::env::var("OXPLOW_HOOK_TOKEN").unwrap_or_default();
-
-    let response = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()?
-        .post(url)
-        .header("Authorization", format!("Bearer {token}"))
-        .header("Content-Type", "application/json")
-        .body(payload)
-        .send()
-        .await?;
-
-    Ok(response.bytes().await?.to_vec())
 }
 
 /// What the shell shows when it starts.

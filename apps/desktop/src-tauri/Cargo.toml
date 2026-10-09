@@ -34,7 +34,6 @@ tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-reqwest = { workspace = true }
 oxplow-workspace-hack = { version = "0.1", path = "../../../crates/oxplow-workspace-hack" }
 
 # Dock-icon tinting (`icon_tint`). Same crates and versions Tauri already

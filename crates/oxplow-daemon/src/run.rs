@@ -86,6 +86,12 @@ fn parse_args(name: &str) -> Args {
 /// messages. The shipped `oxplow-daemon` passes the OS keychain, always;
 /// `oxplow-daemon-sim` (the browser suite's, dev-only) passes memory.
 pub async fn run_main(name: &str, secrets: Arc<dyn oxplow_ai::secrets::SecretStore>) {
+    // `hook <event>`: a harness's command hook (Codex's), run by the
+    // executable a launch names as oxplow's — this one.
+    if let Some(event) = oxplow_control_plane::hook_client::event_arg(std::env::args().skip(1)) {
+        oxplow_control_plane::hook_client::run(&event).await;
+        return;
+    }
     let args = parse_args(name);
     // The UI token: from the supervising shell over stdin (never an env
     // var or a file an agent could read), or fresh for a hand-started
