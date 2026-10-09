@@ -193,11 +193,17 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
     toggleCategory(section);
   }
 
+  // A fresh query each time it opens — only then: the stream finishing
+  // loading while it's open must not wipe what the person typed.
   useEffect(() => {
     if (!open) return;
     setQuery("");
     setSelectedIndex(0);
-    inputRef.current?.focus();
+  }, [open]);
+  // Its input has the focus whenever it shows: it renders only once there
+  // is a stream, which on a fresh window can be just after it opened.
+  useEffect(() => {
+    if (open && stream) inputRef.current?.focus();
   }, [open, stream?.id]);
 
   useEffect(() => {

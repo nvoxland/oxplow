@@ -8,7 +8,12 @@ test("moving a card transitions its item, and Undo moves it back", async ({ page
   await openFromLauncher(page, "Board");
   const todo = page.getByTestId("board-column-todo");
   const inProgress = page.getByTestId("board-column-in_progress");
-  await todo.getByTestId("board-card").filter({ hasText: "Card to move" }).click({ button: "right" });
+  // On the card, not its title: the title is a link, whose right-click
+  // opens the item in a new tab.
+  await todo
+    .getByTestId("board-card")
+    .filter({ hasText: "Card to move" })
+    .click({ button: "right", position: { x: 4, y: 4 } });
   await page.getByTestId("menu-item-board-move-in_progress").click();
   await expect(inProgress).toContainText("Card to move");
   await expect(todo).not.toContainText("Card to move");

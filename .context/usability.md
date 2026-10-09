@@ -139,7 +139,10 @@ Things I keep forgetting. Read this before adding any UI.
   focus: one that mounts late — the New Session page as a thread loads —
   must not take the keystrokes of a launcher the person already opened
   (`NewSessionPage`, an effect checking `document.activeElement`, not
-  `autoFocus`).
+  `autoFocus`). The launcher starts a fresh query only when it opens, and
+  takes the focus whenever it shows (on a fresh window that's once its
+  stream has loaded, just after it opened): what a person typed is never
+  wiped by data arriving.
 - **"Save and Another"** for repetitive-entry flows (see the New Work
   Item modal): saves and re-opens the form with the same
   category/priority/parent pre-filled so the user doesn't re-select
