@@ -402,11 +402,16 @@ as another, and two sessions on one thread are told apart.
 Each harness in `crates/oxplow-harnesses` writes its own runtime files under
 `.oxplow/runtime/` in its `launch`, on every spawn, from the agent text it's
 handed (`oxplow-agent-text`'s `core_text` plus what extensions offer,
-`capabilities::agent_text`). The rest of the app consumes only the returned
-`Launch` instead of branching on harness details. `refresh_text` rewrites
-the skills and commands of a runtime already on disk, creating none:
-`capabilities::refresh_agent_text` calls it on every registered harness at
-boot, on an extension change and on a `capability.switched`. The crate
+`capabilities::agent_text`), and its launch names them. A harness that
+can't be pointed at a folder for something writes it beside the directory
+the agent runs in, the stream's worktree, and nowhere else: a launch never
+writes into another stream's checkout. The rest of the app consumes only
+the returned `Launch` instead of branching on harness details.
+`refresh_text` rewrites the skills and commands of runtimes already on
+disk, creating none, given `RuntimeRoots` (the project and every local
+stream's worktree): `capabilities::refresh_agent_text` calls it on every
+registered harness at boot, on an extension change and on a
+`capability.switched`. The crate
 depends only on the domain; core's text and the answerability questions live in
 `oxplow-agent-text`, which the app and the SDK read.
 
@@ -418,15 +423,21 @@ depends only on the domain; core's text and the answerability questions live in
   `PreCompact`), acked unread. `OXPLOW_HOOK_DEBUG=<file>` appends every
   hook payload as sent, one JSON line each, to learn real payload shapes
   ([work-tracking.md](./work-tracking.md) "The record").
-- Codex writes `.oxplow/runtime/codex-plugin/`, packages the same
-  oxplow skills in Codex plugin layout, and registers command hooks
-  that POST Codex hook stdin to the same oxplow hook endpoint. Codex MCP
-  is configured with CLI `--config` overrides pointing at the
-  streamable-HTTP oxplow MCP endpoint.
+- Codex keeps nothing under `.oxplow/runtime/`: its command hooks (`oxplow
+  hook <event>`, which POST its hook stdin to the hook endpoint), its MCP
+  server and its OTEL exporter ride `--config` overrides. Its skills are
+  the one thing on disk. Codex finds skills only beside the directory it
+  runs in (`<cwd>/.agents/skills`, `.codex/skills`; `skills.config`
+  entries don't add one, and a plugin must be installed into
+  `~/.codex`), so the launch writes them into the worktree's
+  `.agents/skills/<name>/` (`shared::write_worktree_skills`), each folder
+  with a `*` `.gitignore` and the `.oxplow` marker. Another agent that
+  reads `.agents/skills` there sees them too.
 - opencode writes `.oxplow/runtime/opencode-plugin/` —
   `plugin/oxplow-hooks.js` (an opencode JS plugin loaded via the
-  `plugin` array in `OPENCODE_CONFIG_CONTENT`) plus a `prompts/` dir
-  the spawn path fills with the per-thread system prompt. The JS
+  `plugin` array in `OPENCODE_CONFIG_CONTENT`), `skills/` (named by the
+  config's `skills.paths`), and a `prompts/` dir the spawn path fills
+  with the per-session system prompt. The JS
   bridge translates opencode plugin hooks into the same Claude-shaped
   payloads the control plane parses: `chat.message` →
   `UserPromptSubmit`, `tool.execute.before` → `PreToolUse` (a deny
@@ -437,12 +448,7 @@ depends only on the domain; core's text and the answerability questions live in
   `session.idle` event → `Stop`. Subagent sessions (`parentID` set) are filtered out of
   UserPromptSubmit/Stop so child activity doesn't flip the thread's
   turn lifecycle.
-  Skills + slash commands ship too: opencode only discovers SKILL.md
-  from fixed locations (no config key), so the opencode harness's launch
-  materializes the offered skills (`capabilities::agent_text`) into
-  `<project>/.opencode/skills/<name>/` — each dir carries a `*`
-  .gitignore so the generated files never land in commits. The offered
-  commands ride `OPENCODE_CONFIG_CONTENT`'s inline `command` key
+  The offered commands ride `OPENCODE_CONFIG_CONTENT`'s inline `command` key
   (`command_definitions` in `opencode.rs`, frontmatter
   description + body template) as `/oxplow-review-comments` etc. — opencode
   has no plugin namespacing, hence the `oxplow-` prefix instead of

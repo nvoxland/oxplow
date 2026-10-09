@@ -3,7 +3,7 @@
 
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use oxplow_domain::agent::harness::HarnessError;
 use oxplow_domain::agent::observe::HookAnswer;
@@ -228,6 +228,39 @@ pub fn write_skills(skills_dir: &Path, skills: &[Text]) -> io::Result<()> {
         fs::create_dir_all(&dir)?;
         fs::write(dir.join("SKILL.md"), &skill.body)?;
         fs::write(dir.join(SKILL_MARKER), "")?;
+    }
+    Ok(())
+}
+
+/// Where a harness that finds skills only beside the directory it runs in
+/// keeps oxplow's: the worktree's `.agents/skills/`, where agents look
+/// for a repo's skills.
+pub const WORKTREE_SKILLS_REL: &str = ".agents/skills";
+
+/// [`write_skills`] into `workspace`'s [`WORKTREE_SKILLS_REL`], each
+/// folder with a `*` `.gitignore` so it never reaches the person's
+/// commits.
+pub fn write_worktree_skills(workspace: &Path, skills: &[Text]) -> io::Result<()> {
+    let skills_dir = workspace.join(WORKTREE_SKILLS_REL);
+    write_skills(&skills_dir, skills)?;
+    for skill in skills {
+        fs::write(skills_dir.join(&skill.name).join(".gitignore"), "*\n")?;
+    }
+    Ok(())
+}
+
+/// [`write_worktree_skills`] for each of `workspaces` where oxplow wrote
+/// skills before, creating none.
+pub fn refresh_worktree_skills(workspaces: &[PathBuf], skills: &[Text]) -> io::Result<()> {
+    for workspace in workspaces {
+        let ours = fs::read_dir(workspace.join(WORKTREE_SKILLS_REL)).is_ok_and(|entries| {
+            entries
+                .flatten()
+                .any(|e| e.path().join(SKILL_MARKER).is_file())
+        });
+        if ours {
+            write_worktree_skills(workspace, skills)?;
+        }
     }
     Ok(())
 }

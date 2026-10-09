@@ -1,7 +1,8 @@
 //! The `opencode` harness: opencode in a terminal. Its hooks, MCP server,
-//! slash commands and the system prompt (an instructions file per
-//! session) all ride the `OPENCODE_CONFIG_CONTENT` env var; skills land in
-//! `.opencode/skills/`, the one place it discovers them.
+//! slash commands, skills folder and the system prompt (an instructions
+//! file per session) all ride the `OPENCODE_CONFIG_CONTENT` env var; the
+//! files they name are under `.oxplow/runtime/opencode-plugin/`, so
+//! nothing lands in a checkout.
 
 use std::fs;
 use std::io;
@@ -9,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use oxplow_domain::agent::harness::{
     AgentHarness, HarnessError, HarnessSetting, Interact, Launch, LaunchInput, LaunchSpec,
-    Transcript,
+    RuntimeRoots, Transcript,
 };
 use oxplow_domain::agent::observe::HookAnswer;
 use oxplow_domain::agent::text::AgentText;
@@ -62,6 +63,7 @@ impl AgentHarness for Opencode {
                 &input.endpoints.mcp_endpoint_url,
                 &paths.hooks_plugin,
                 &instructions,
+                &paths.skills_dir,
                 input.text,
             ),
         ));
@@ -99,16 +101,16 @@ impl AgentHarness for Opencode {
     }
 
     /// Its skills are on disk; its commands ride each launch's config.
-    fn refresh_text(&self, project_dir: &Path, text: &AgentText) -> Result<(), HarnessError> {
-        if project_dir.join(RUNTIME_DIR_REL).is_dir() {
-            write_opencode_skills(project_dir, text).map_err(runtime)?;
+    fn refresh_text(&self, roots: &RuntimeRoots<'_>, text: &AgentText) -> Result<(), HarnessError> {
+        let skills_dir = roots.project_dir.join(RUNTIME_DIR_REL).join("skills");
+        if skills_dir.is_dir() {
+            write_skills(&skills_dir, &text.skills).map_err(runtime)?;
         }
         Ok(())
     }
 
-    /// As its hook bridge names them (`opencode-hooks.js` maps `patch` to
-    /// `Edit`).
-    /// Its bridge posts Claude Code's shape (`assets/opencode-hooks.js`).
+    /// Its bridge posts Claude Code's shape, `patch` as `Edit`
+    /// (`assets/opencode-hooks.js`).
     fn tool_use(&self, body: &serde_json::Value) -> Option<ToolUse> {
         claude_shaped_tool_use(body)
     }
@@ -122,44 +124,34 @@ const RUNTIME_DIR_REL: &str = ".oxplow/runtime/opencode-plugin";
 
 /// What [`write_runtime`] wrote. opencode needs no on-disk hooks or MCP
 /// config — both ride `OPENCODE_CONFIG_CONTENT` — so the runtime dir
-/// carries the JS hook-bridge plugin and a `prompts/` dir for the
-/// sessions' instruction files.
+/// carries the JS hook-bridge plugin, the skills, and a `prompts/` dir for
+/// the sessions' instruction files.
 struct RuntimePaths {
     hooks_plugin: PathBuf,
+    /// Named by the config's `skills.paths`. The skills' frontmatter (name
+    /// matching the folder, description) is already opencode's.
+    skills_dir: PathBuf,
     prompts_dir: PathBuf,
 }
 
 /// Materialize the hook-bridge plugin and the skills. Idempotent;
 /// per-session identity rides env vars (the JS reads `OXPLOW_*` from its
-/// process env), so one dir serves every session.
+/// process env), so one dir serves every session of every stream.
 fn write_runtime(project_dir: &Path, text: &AgentText) -> io::Result<RuntimePaths> {
     let runtime_dir = project_dir.join(RUNTIME_DIR_REL);
     let plugin_dir = runtime_dir.join("plugin");
+    let skills_dir = runtime_dir.join("skills");
     let prompts_dir = runtime_dir.join("prompts");
     fs::create_dir_all(&plugin_dir)?;
     fs::create_dir_all(&prompts_dir)?;
     let hooks_plugin = plugin_dir.join("oxplow-hooks.js");
     fs::write(&hooks_plugin, include_str!("../assets/opencode-hooks.js"))?;
-    write_opencode_skills(project_dir, text)?;
+    write_skills(&skills_dir, &text.skills)?;
     Ok(RuntimePaths {
         hooks_plugin,
+        skills_dir,
         prompts_dir,
     })
-}
-
-/// opencode discovers skills only from fixed project locations
-/// (`.opencode/skills/<name>/SKILL.md` et al — no config key points at the
-/// runtime dir), so they land in `<project>/.opencode/skills/`, each dir
-/// with a `*` `.gitignore` so they never reach the person's commits. The
-/// skills' frontmatter (name matching the dir, description) is already
-/// opencode-compatible.
-fn write_opencode_skills(project_dir: &Path, text: &AgentText) -> io::Result<()> {
-    let skills_dir = project_dir.join(".opencode").join("skills");
-    write_skills(&skills_dir, &text.skills)?;
-    for skill in &text.skills {
-        fs::write(skills_dir.join(&skill.name).join(".gitignore"), "*\n")?;
-    }
-    Ok(())
 }
 
 /// Slash-command definitions for opencode's inline `command` config key
@@ -219,11 +211,12 @@ fn command(cwd: &str, resume: Option<&str>, program: Option<&str>, model: &str) 
 /// The inline opencode config carried per spawn (merged on top of the
 /// person's own): the oxplow MCP server (the bearer interpolated by
 /// opencode itself from `{env:…}`), the hook-bridge plugin, the session's
-/// instructions file, and oxplow's slash commands.
+/// instructions file, oxplow's skills folder and its slash commands.
 fn config_content(
     mcp_endpoint_url: &str,
     hooks_plugin: &Path,
     instructions: &[String],
+    skills_dir: &Path,
     text: &AgentText,
 ) -> String {
     serde_json::json!({
@@ -239,6 +232,7 @@ fn config_content(
         },
         "plugin": [hooks_plugin.to_string_lossy()],
         "instructions": instructions,
+        "skills": { "paths": [skills_dir.to_string_lossy()] },
         "command": command_definitions(text),
     })
     .to_string()
@@ -247,7 +241,7 @@ fn config_content(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_launch::{harness, launch_in};
+    use crate::test_launch::{harness, launch_in, project_only};
     use tempfile::TempDir;
 
     #[test]
@@ -276,6 +270,18 @@ mod tests {
             .project
             .join(".oxplow/runtime/opencode-plugin/prompts/ses3.md")
             .is_file());
+        // Its skills are the runtime's, which the config names; nothing
+        // lands in a checkout.
+        let config: serde_json::Value =
+            serde_json::from_str(env["OPENCODE_CONFIG_CONTENT"]).unwrap();
+        let skills = l.project.join(".oxplow/runtime/opencode-plugin/skills");
+        assert_eq!(
+            config["skills"]["paths"],
+            serde_json::json!([skills.to_string_lossy()])
+        );
+        assert!(skills.join("oxplow-runtime/SKILL.md").is_file());
+        assert!(!l.project.join(".opencode").exists());
+        assert!(!l.workspace.join(".opencode").exists());
     }
 
     #[test]
@@ -291,6 +297,7 @@ mod tests {
             "http://127.0.0.1:9/mcp",
             Path::new("/proj/.oxplow/runtime/opencode-plugin/plugin/oxplow-hooks.js"),
             &["/proj/.oxplow/runtime/opencode-plugin/prompts/ses3.md".to_string()],
+            Path::new("/proj/.oxplow/runtime/opencode-plugin/skills"),
             &oxplow_agent_text::core_text(),
         );
         let v: serde_json::Value = serde_json::from_str(&content).unwrap();
@@ -312,6 +319,10 @@ mod tests {
         assert_eq!(
             v["instructions"][0],
             "/proj/.oxplow/runtime/opencode-plugin/prompts/ses3.md"
+        );
+        assert_eq!(
+            v["skills"]["paths"],
+            serde_json::json!(["/proj/.oxplow/runtime/opencode-plugin/skills"])
         );
     }
 
@@ -338,23 +349,23 @@ mod tests {
     }
 
     #[test]
-    fn write_runtime_materializes_skills_with_gitignore() {
+    fn write_runtime_materializes_the_skills() {
         let tmp = TempDir::new().unwrap();
         let text = oxplow_agent_text::core_text();
-        write_runtime(tmp.path(), &text).unwrap();
-        let skills_dir = tmp.path().join(".opencode/skills");
+        let paths = write_runtime(tmp.path(), &text).unwrap();
+        assert_eq!(
+            paths.skills_dir,
+            tmp.path().join(RUNTIME_DIR_REL).join("skills")
+        );
         for skill in &text.skills {
             let name = &skill.name;
-            let body = fs::read_to_string(skills_dir.join(name).join("SKILL.md"))
+            let body = fs::read_to_string(paths.skills_dir.join(name).join("SKILL.md"))
                 .unwrap_or_else(|_| panic!("missing {name}"));
             // opencode keys discovery on frontmatter name == dir name.
             assert!(
                 body.contains(&format!("name: {name}")),
                 "frontmatter name must match dir for {name}"
             );
-            // Generated dirs self-ignore so they never land in commits.
-            let ignore = fs::read_to_string(skills_dir.join(name).join(".gitignore")).unwrap();
-            assert_eq!(ignore.trim(), "*");
         }
     }
 
@@ -364,22 +375,19 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let h = harness("oxplow:opencode", "opencode");
         let text = oxplow_agent_text::core_text();
-        h.refresh_text(tmp.path(), &text).unwrap();
-        assert!(!tmp.path().join(".opencode").exists());
-        fs::create_dir_all(tmp.path().join(RUNTIME_DIR_REL)).unwrap();
-        h.refresh_text(tmp.path(), &text).unwrap();
+        h.refresh_text(&project_only(tmp.path()), &text).unwrap();
+        assert!(!tmp.path().join(RUNTIME_DIR_REL).exists());
+        let skills = tmp.path().join(RUNTIME_DIR_REL).join("skills");
+        fs::create_dir_all(skills.join("oxplow-extension")).unwrap();
+        fs::write(skills.join("oxplow-extension/SKILL.md"), "stale").unwrap();
+        h.refresh_text(&project_only(tmp.path()), &text).unwrap();
         for skill in &text.skills {
             assert_eq!(
-                fs::read_to_string(
-                    tmp.path()
-                        .join(".opencode/skills")
-                        .join(&skill.name)
-                        .join("SKILL.md")
-                )
-                .unwrap(),
+                fs::read_to_string(skills.join(&skill.name).join("SKILL.md")).unwrap(),
                 skill.body
             );
         }
+        assert!(!tmp.path().join(".opencode").exists());
     }
 
     #[test]

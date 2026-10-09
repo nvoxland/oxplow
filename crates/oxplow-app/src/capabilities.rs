@@ -30,6 +30,7 @@ pub use oxplow_domain::capability::ChosenBy;
 use oxplow_domain::capability::{self, NONE};
 use oxplow_domain::events::schema::{CapabilitySwitched, CapabilitySwitchedV1, EventType as _};
 use oxplow_domain::events::Envelope;
+use oxplow_domain::stores::StreamStore as _;
 use oxplow_domain::vocabulary::VocabularyHandle;
 use oxplow_domain::DomainError;
 use serde_json::Value;
@@ -846,13 +847,30 @@ pub fn agent_text(svc: &crate::Services) -> oxplow_domain::agent::text::AgentTex
 }
 
 /// Rewrite the skills and commands of the agent runtimes already on disk
-/// to what's offered now, each registered harness its own: at boot (an
-/// agent that outlived an upgrade, tsk376), when the extensions change, and
-/// on a switch.
-pub fn refresh_agent_text(svc: &crate::Services) {
+/// to what's offered now, each registered harness its own, in the project
+/// and in every stream's worktree on this machine: at boot (an agent that
+/// outlived an upgrade, tsk376), when the extensions change, and on a
+/// switch.
+pub async fn refresh_agent_text(svc: &crate::Services) {
     let text = agent_text(svc);
+    let project_dir = &svc.layout.project_dir;
+    let workspaces: Vec<std::path::PathBuf> = match svc.stream_store.list().await {
+        Ok(streams) => streams
+            .iter()
+            .filter(|s| s.host == oxplow_domain::HostId::LOCAL)
+            .map(|s| crate::worktrees::workspace_path(project_dir, &s.worktree_path))
+            .collect(),
+        Err(error) => {
+            tracing::warn!(%error, "listing the streams' worktrees for the agent's skills failed");
+            Vec::new()
+        }
+    };
+    let roots = oxplow_domain::agent::harness::RuntimeRoots {
+        project_dir,
+        workspaces: &workspaces,
+    };
     for harness in svc.harnesses.all() {
-        if let Err(error) = harness.refresh_text(&svc.layout.project_dir, &text) {
+        if let Err(error) = harness.refresh_text(&roots, &text) {
             tracing::warn!(%error, harness = harness.id(), "refreshing the agent's skills failed");
         }
     }
@@ -884,7 +902,7 @@ impl crate::event_pump::AsyncEventConsumer for AgentTextRefresh {
 
     async fn handle(&self, _event: &oxplow_domain::StoredEvent) -> Result<(), DomainError> {
         if let Some(svc) = self.services.upgrade() {
-            refresh_agent_text(&svc);
+            refresh_agent_text(&svc).await;
             // The vocabulary reads the active list's ids.
             svc.vocabulary_service.sync().await?;
         }
@@ -1451,13 +1469,27 @@ mod tests {
         std::fs::create_dir_all(skills.join("oxplow-extension")).unwrap();
         std::fs::create_dir_all(&commands).unwrap();
         std::fs::write(skills.join("oxplow-extension/SKILL.md"), "stale").unwrap();
-        refresh_agent_text(svc);
-        assert_eq!(
-            std::fs::read_to_string(skills.join("oxplow-extension/SKILL.md")).unwrap(),
-            oxplow_agent_text::core_text()
-                .skill_body("oxplow-extension")
-                .unwrap()
-        );
+        // A harness that keeps its skills beside a stream's worktree
+        // (Codex) has them refreshed there.
+        let stream = svc.stream_store.list().await.unwrap().remove(0);
+        let in_worktree =
+            crate::worktrees::workspace_path(&svc.layout.project_dir, &stream.worktree_path)
+                .join(".agents/skills/oxplow-extension");
+        std::fs::create_dir_all(&in_worktree).unwrap();
+        std::fs::write(in_worktree.join("SKILL.md"), "stale").unwrap();
+        std::fs::write(in_worktree.join(".oxplow"), "").unwrap();
+        refresh_agent_text(svc).await;
+        let current = oxplow_agent_text::core_text()
+            .skill_body("oxplow-extension")
+            .unwrap()
+            .to_string();
+        for skill in [skills.join("oxplow-extension"), in_worktree] {
+            assert_eq!(
+                std::fs::read_to_string(skill.join("SKILL.md")).unwrap(),
+                current,
+                "{skill:?}"
+            );
+        }
         assert!(skills.join("work-items/SKILL.md").is_file());
         assert!(commands.join("work-next.md").is_file());
         svc.config
@@ -1465,7 +1497,7 @@ mod tests {
             .unwrap()
             .personal_active_providers
             .insert("work_items".into(), NONE.into());
-        refresh_agent_text(svc);
+        refresh_agent_text(svc).await;
         assert!(skills.join("work-items/SKILL.md").is_file());
         assert!(!commands.join("work-next.md").exists());
         assert!(commands.join("configure.md").is_file());

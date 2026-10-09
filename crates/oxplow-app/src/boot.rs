@@ -182,7 +182,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         tracing::warn!(error = %e, "publishing the capability implementations failed");
     }
     // The agent runtimes' skills: what's offered now.
-    crate::capabilities::refresh_agent_text(state);
+    crate::capabilities::refresh_agent_text(state).await;
     {
         let state = state.clone();
         let mut changes = state.extension_catalog.changes();
@@ -193,7 +193,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
                 if let Err(e) = crate::capabilities::refresh(&state).await {
                     tracing::warn!(error = %e, "restating the capability implementations failed");
                 }
-                crate::capabilities::refresh_agent_text(&state);
+                crate::capabilities::refresh_agent_text(&state).await;
             }
         });
     }

@@ -54,13 +54,28 @@ mod test_launch {
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
-    use oxplow_domain::agent::harness::{AgentHarness, Endpoints, Launch, LaunchInput, SessionIds};
+    use oxplow_domain::agent::harness::{
+        AgentHarness, Endpoints, Launch, LaunchInput, RuntimeRoots, SessionIds,
+    };
     use oxplow_domain::{AgentSessionId, StreamId, ThreadId};
 
     pub struct Launched {
         pub launch: Launch,
         pub project: PathBuf,
+        /// The stream's worktree, apart from the project.
+        pub workspace: PathBuf,
         _dir: tempfile::TempDir,
+    }
+
+    /// Where the stream's worktree is, under the project.
+    const WORKSPACE: &str = "worktrees/s1";
+
+    /// The roots of a project with no worktrees.
+    pub fn project_only(project: &Path) -> RuntimeRoots<'_> {
+        RuntimeRoots {
+            project_dir: project,
+            workspaces: &[],
+        }
     }
 
     /// A PTY launch's command and env. Its bearer (`secret-bearer`) is in
@@ -112,7 +127,7 @@ mod test_launch {
         let home = tempfile::tempdir().unwrap();
         let launched = {
             let dir = tempfile::tempdir().unwrap();
-            let workspace = dir.path().to_string_lossy().into_owned();
+            let workspace = dir.path().join(WORKSPACE).to_string_lossy().into_owned();
             setup(home.path(), &workspace);
             run(
                 h,
@@ -153,6 +168,8 @@ mod test_launch {
         dir: tempfile::TempDir,
     ) -> Launched {
         let project = dir.path().to_path_buf();
+        let workspace = project.join(WORKSPACE);
+        std::fs::create_dir_all(&workspace).unwrap();
         let endpoints = Endpoints {
             hook_base_url: "http://127.0.0.1:9/hook".into(),
             mcp_endpoint_url: "http://127.0.0.1:9/mcp".into(),
@@ -172,7 +189,7 @@ mod test_launch {
                     thread: ThreadId::new(2),
                     session: AgentSessionId::new(3),
                 },
-                workspace: &project,
+                workspace: &workspace,
                 project_dir: &project,
                 endpoints: &endpoints,
                 identity_env: &identity,
@@ -188,6 +205,7 @@ mod test_launch {
         Launched {
             launch,
             project,
+            workspace,
             _dir: dir,
         }
     }

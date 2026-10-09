@@ -28,7 +28,8 @@ use std::path::{Path, PathBuf};
 use serde_json::json;
 
 use oxplow_domain::agent::harness::{
-    AgentHarness, Endpoints, HarnessError, Interact, Launch, LaunchInput, LaunchSpec, Transcript,
+    AgentHarness, Endpoints, HarnessError, Interact, Launch, LaunchInput, LaunchSpec, RuntimeRoots,
+    Transcript,
 };
 use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, TokenReading, Turn, UsageDelta};
 use oxplow_domain::agent::text::AgentText;
@@ -130,8 +131,8 @@ impl AgentHarness for Claude {
         MARKERS
     }
 
-    fn refresh_text(&self, project_dir: &Path, text: &AgentText) -> Result<(), HarnessError> {
-        let plugin_dir = project_dir.join(PLUGIN_DIR_REL);
+    fn refresh_text(&self, roots: &RuntimeRoots<'_>, text: &AgentText) -> Result<(), HarnessError> {
+        let plugin_dir = roots.project_dir.join(PLUGIN_DIR_REL);
         let skills_dir = plugin_dir.join("skills");
         if skills_dir.is_dir() {
             write_skills(&skills_dir, &text.skills).map_err(runtime)?;
@@ -512,7 +513,7 @@ fn resume_state(home: &Path, cwd: &str, session_id: &str) -> ResumeState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_launch::{harness, launch_in, owner_only};
+    use crate::test_launch::{harness, launch_in, owner_only, project_only};
     use oxplow_domain::agent::text::Text;
     use tempfile::TempDir;
 
@@ -732,7 +733,7 @@ mod tests {
         assert!(skills.join("work-items").join("SKILL.md").exists());
         assert!(commands.join("work-next.md").exists());
         let h = harness("oxplow:claude-code", "claude");
-        h.refresh_text(tmp.path(), &oxplow_agent_text::core_text())
+        h.refresh_text(&project_only(tmp.path()), &oxplow_agent_text::core_text())
             .unwrap();
         assert!(!skills.join("work-items").exists());
         assert!(!commands.join("work-next.md").exists());
@@ -747,12 +748,12 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let h = harness("oxplow:claude-code", "claude");
         let text = oxplow_agent_text::core_text();
-        h.refresh_text(tmp.path(), &text).unwrap();
+        h.refresh_text(&project_only(tmp.path()), &text).unwrap();
         assert!(!tmp.path().join(PLUGIN_DIR_REL).exists());
         let skills = tmp.path().join(PLUGIN_DIR_REL).join("skills");
         fs::create_dir_all(skills.join("oxplow-extension")).unwrap();
         fs::write(skills.join("oxplow-extension/SKILL.md"), "stale").unwrap();
-        h.refresh_text(tmp.path(), &text).unwrap();
+        h.refresh_text(&project_only(tmp.path()), &text).unwrap();
         for skill in &text.skills {
             assert_eq!(
                 fs::read_to_string(skills.join(&skill.name).join("SKILL.md")).unwrap(),

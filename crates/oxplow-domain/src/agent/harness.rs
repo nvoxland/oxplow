@@ -74,6 +74,16 @@ pub struct LaunchInput<'a> {
     pub resolve_program: &'a (dyn Fn(&str) -> Option<String> + Send + Sync),
 }
 
+/// Where a harness's runtimes can be on disk: the project, whose
+/// `.oxplow/runtime/` holds what it's pointed at, and every stream's
+/// worktree, for a harness that finds its skills only beside the
+/// directory it runs in.
+#[derive(Debug, Clone, Copy)]
+pub struct RuntimeRoots<'a> {
+    pub project_dir: &'a Path,
+    pub workspaces: &'a [PathBuf],
+}
+
 /// How the session's process is started.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LaunchSpec {
@@ -163,11 +173,15 @@ pub trait AgentHarness: Send + Sync {
     fn settings(&self) -> &[HarnessSetting] {
         &[]
     }
-    /// Rewrite the skills and commands of its runtime already on disk under
-    /// `project_dir` to `text`, creating none: an agent that outlives a
+    /// Rewrite the skills and commands of its runtimes already on disk
+    /// under `roots` to `text`, creating none: an agent that outlives a
     /// launch (running across an upgrade, or resumed) reads what's offered
     /// now. Nothing to do for a harness that keeps none on disk.
-    fn refresh_text(&self, _project_dir: &Path, _text: &AgentText) -> Result<(), HarnessError> {
+    fn refresh_text(
+        &self,
+        _roots: &RuntimeRoots<'_>,
+        _text: &AgentText,
+    ) -> Result<(), HarnessError> {
         Ok(())
     }
     /// The recordable turns in a chunk of its transcript; none when it

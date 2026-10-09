@@ -143,7 +143,7 @@ mod tests {
         }
         fn refresh_text(
             &self,
-            _: &std::path::Path,
+            _: &crate::agent::harness::RuntimeRoots<'_>,
             _: &crate::agent::text::AgentText,
         ) -> Result<(), HarnessError> {
             Ok(())
