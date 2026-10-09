@@ -458,13 +458,8 @@ test("streams are inverted tiles and threads indented tabs, tied by a guide line
   expect(guide("navigator-strip-thread-thr1")).toBe("mid");
   expect(guide("navigator-strip-thread-thr2")).toBe("last");
 
-  // The tabs end at the strip's own edge, not cut off against the rail.
-  const strip = getByTestId("navigator-strip").style;
-  expect([strip.borderRightWidth, strip.borderRightStyle, strip.borderRightColor]).toEqual([
-    "1px",
-    "solid",
-    "var(--border-strong)",
-  ]);
+  // No line between the strip and the HUD rail.
+  expect(getByTestId("navigator-strip").style.borderRightWidth).toBe("");
 
   // The panel draws the same, so its rows stay lined up with the strip's.
   openOverlay(getByTestId);

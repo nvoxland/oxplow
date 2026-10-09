@@ -349,14 +349,10 @@ export function Navigator({
           flexShrink: 0,
           height: "100%",
           // The panel colour that sits left of the tabs runs the rail's
-          // whole height, below the tabs too; its own edge is where the
-          // tabs end, so they don't read as cut off against the HUD rail.
+          // whole height, below the tabs too, with no line between it and
+          // the HUD rail.
           background: "var(--surface-card)",
-          borderRightWidth: 1,
-          borderRightStyle: "solid",
-          // The same 1px line that frames the content area.
-          borderRightColor: "var(--border-strong)",
-          boxSizing: "border-box",
+
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
@@ -869,9 +865,11 @@ function RenameInput({
 type Guide = "none" | "stream" | "mid" | "last";
 
 /** A row's icon column, the same in the strip and the panel so their rows
- *  line up: the glyph, a tab coming out of the column's left edge (the
- *  window's), ending short of its right so the rail shows beyond it — the
- *  stream's longest, its threads' shorter, so they read as indented. */
+ *  line up: the glyph, a tab coming out of the window's left edge, rounded
+ *  on the right — the stream's from the edge, its threads' indented — and
+ *  the grey guide line that ties a stream's threads to it, down the
+ *  column's left from under the stream's tab with a tick into each
+ *  thread's, ending at the last. */
 function IconColumn({
   guide,
   wide = false,
@@ -882,8 +880,12 @@ function IconColumn({
   wide?: boolean;
   children: ReactNode;
 }) {
+  const line = (style: CSSProperties) => (
+    <span aria-hidden style={{ position: "absolute", background: "var(--text-muted)", ...style }} />
+  );
   const isThread = guide === "mid" || guide === "last";
   const height = isThread ? THREAD_ROW_HEIGHT : ROW_HEIGHT;
+  const mid = height / 2;
   return (
     <span
       style={{
@@ -894,11 +896,20 @@ function IconColumn({
         display: "flex",
         alignItems: "center",
         justifyContent: "flex-start",
-        paddingRight: isThread ? THREAD_INSET : STREAM_INSET,
+        paddingLeft: isThread ? THREAD_LEFT : 0,
+        paddingRight: TAB_INSET,
         boxSizing: "border-box",
       }}
     >
-      {guide !== "none" ? <span data-guide={guide} /> : null}
+      {guide !== "none" ? (
+        <span data-guide={guide}>
+          {guide === "stream"
+            ? line({ left: GUIDE_X, width: 2, top: (ROW_HEIGHT + ICON_BOX) / 2, bottom: 0 })
+            : null}
+          {isThread ? line({ left: GUIDE_X, width: 2, top: 0, height: guide === "last" ? mid + 1 : height }) : null}
+          {isThread ? line({ left: GUIDE_X, height: 2, top: mid - 1, width: THREAD_LEFT - GUIDE_X }) : null}
+        </span>
+      ) : null}
       {children}
     </span>
   );
@@ -927,13 +938,13 @@ function IconCell({
   question?: string;
 }) {
   // Tabs coming out of the window's left edge: a stream's in the tab
-  // strip's header tint, its threads' shorter (indented) and butted up
+  // strip's header tint, its threads' indented along the guide line and butted up
   // against each other — each fills its row, drawing its top edge, and the
   // last one also the bottom — transparent, the writer's in the accent.
   // Rounded on the right only. In the panel a tab runs on across the row
   // carrying the title, its glyph kept at the strip's width so the two
   // line up.
-  const glyphWidth = ICON_COLUMN - (isStream ? STREAM_INSET : THREAD_INSET);
+  const glyphWidth = ICON_COLUMN - TAB_INSET - (isStream ? 0 : THREAD_LEFT);
   const shape: CSSProperties = isStream
     ? {
         width: glyphWidth,
@@ -994,9 +1005,9 @@ function IconCell({
         <span
           style={{
             position: "absolute",
-            // A node hanging off the tab's right end.
+            // On the tab's left edge, where the guide's tick meets it.
             top: "50%",
-            right: -5,
+            left: -5,
             transform: "translateY(-50%)",
             display: "flex",
           }}
@@ -1119,14 +1130,14 @@ const ICON_BOX = 30;
 const THREAD_ROW_HEIGHT = 28;
 const THREAD_LETTER_FONT = 13;
 const STRIP_WIDTH = 40;
-// The icon column: the strip's width less the selection line's 3px and the
-// strip's 1px edge.
-const ICON_COLUMN = STRIP_WIDTH - 4;
-// How far short of the column's right edge a stream's tab and a thread's
-// end: the tabs come out of the left, the threads' shorter than the
-// stream's so they read as indented (the status dot hangs off their end).
-const STREAM_INSET = 4;
-const THREAD_INSET = 12;
+// The icon column: the strip's width less the selection line's 3px.
+const ICON_COLUMN = STRIP_WIDTH - 3;
+// The tabs come out of the window's left edge and end this short of the
+// column's right; the guide line's x, and where a thread's tab starts
+// (indented off the line).
+const TAB_INSET = 4;
+const GUIDE_X = 5;
+const THREAD_LEFT = 9;
 const STRIP_PADDING_Y = 6;
 const ROW_HEIGHT = 36;
 const GAP_HEIGHT = 14;
