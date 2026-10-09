@@ -785,6 +785,12 @@ and one calling MCP read identical `file:line: what — fix` lines.
     `where: { to: done }`, whose `effects/on-done.star` composes
     `oxplow.work_item.comment`; its intent example dry-runs it on a fixture
     event;
+  - `policy` — an `implementations:` entry (`capability: effort_policy`,
+    id = the name with `_` for `-`, `needs: [sql.read]`) whose
+    `policies/<name>.star` opens an item's effort when it starts on a
+    thread and closes its open efforts (read through `scope`) when it
+    ends; its example is a checkpoint expecting `{ skip: $any }`, and it
+    passes the effort-policy suite as written;
   - `provider` — below; `extension` — the manifest only.
   It refuses an existing folder, a bad name and a non-ref origin. **What
   it writes passes `check` with no warnings and `extension test` clean**

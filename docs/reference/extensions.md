@@ -12,8 +12,8 @@ oxplow extension test my-review            # run its examples on a throwaway oxp
 ```
 
 `new` takes a kind instead of `extension` to start from that kind's
-starter: `lens`, `collector`, `command`, `effect`, `provider` or
-`component`. A provider takes `--capability` for what it implements:
+starter: `lens`, `collector`, `command`, `effect`, `provider`,
+`component` or `policy`. A provider takes `--capability` for what it implements:
 `work_items` (the default) or `effort_policy`. Each scaffold checks
 clean and passes `test` as written.
 
@@ -69,7 +69,7 @@ intent:
 | `ui` | lenses mounted into core pages (`slots`), labels on core refs (`decorators`) | |
 | `advisories` | guidance queries for the coding agent | |
 | `skills` | skills and slash commands for the coding agent | |
-| `implementations` | implementations of a capability it offers: a built-in, or an AI provider written as a script | below |
+| `implementations` | implementations of a capability it offers: a built-in, or an AI provider or effort policy written as a script | below |
 | `custom_components` | sandboxed HTML components for `viz: custom` lenses | |
 
 `ui.replacements` (a lens in place of a core component) is
@@ -175,6 +175,35 @@ def response(x):    # { op, model, body } — a 2xx reply
 - A provider runs only once a person approves its script in Settings →
   Data → Programs, and any change to the script asks again.
 
+### Effort policies
+
+An effort policy decides when a thread's effort opens, closes and links
+to a work item. oxplow's own opens one per commit or task switch; a
+script can be yours instead. `oxplow extension new policy <name>`
+writes one that opens an item's effort when an agent starts it on a
+thread and closes it when the item is done.
+
+```yaml
+implementations:
+  - capability: effort_policy
+    id: acme                       # what Settings → Capabilities offers
+    title: Acme's policy
+    entry: policies/acme.star      # transform({ event }) → { commands } | { skip: "why" }
+    needs: [sql.read]              # the scopes it calls
+```
+
+- The script gets one of core's events (`type`, `payload`, `subject`,
+  and `anchors` such as the `thread_id` an agent moved an item on) and
+  returns the commands to run, or a skip. It can't append events.
+- It reads oxplow only through `scope("sql.read", { sql, params })`,
+  and only when it `needs` it.
+- It runs once a person approves it in Settings → Data → Programs, and
+  any change to the extension's files asks again. Until then, every
+  event it hears fails, visibly.
+- An intent example dry-runs it: `input: { implementation: acme,
+  event: { type, payload, anchors? }, answers? }`, `expect: { commands:
+  [names] }` or `{ skip: $any }`.
+
 ## Checking and testing
 
 `oxplow extension check` loads the extension the way oxplow does and
@@ -184,7 +213,8 @@ tree's version changes against git `HEAD`.
 
 `oxplow extension test` runs on a throwaway oxplow: the check, then
 each intent example's fixture, then each declared provider's
-handshake, examples and conformance suite. `--bless` writes a
+handshake, examples and conformance suite, and each policy script's
+conformance suite. `--bless` writes a
 provider's golden transcript.
 
 Your coding agent has the same checks as MCP tools

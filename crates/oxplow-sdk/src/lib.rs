@@ -61,11 +61,15 @@ pub enum Kind {
     /// `viz: custom` lens renders in a sandboxed frame, talking to oxplow
     /// through the served client library.
     Component,
+    /// An effort policy written as a script: an `implementations:` entry
+    /// whose script opens an item's effort when it starts on a thread and
+    /// closes it when it ends, run once a person approves it.
+    Policy,
 }
 
 impl Kind {
     pub const NAMES: &'static str =
-        "`lens`, `extension`, `provider`, `collector`, `command`, `effect` or `component`";
+        "`lens`, `extension`, `provider`, `collector`, `command`, `effect`, `component` or `policy`";
 
     pub fn parse(s: &str) -> Option<Kind> {
         match s {
@@ -78,6 +82,7 @@ impl Kind {
             "command" => Some(Kind::Command),
             "effect" => Some(Kind::Effect),
             "component" => Some(Kind::Component),
+            "policy" => Some(Kind::Policy),
             _ => None,
         }
     }
@@ -158,6 +163,8 @@ pub fn scaffold(
     let ns = oxplow_app::extension_commands::command_namespace(name);
     // Each lens file names its schema, as the manifest does.
     let lens_modeline = extensions::schema::modeline(extensions::schema::LENS_SCHEMA_URL);
+    // An identifier from the name: a provider's or a policy's id.
+    let provider_id = name.replace('-', "_");
     // The intent example, and its fixture (what `extension test` runs).
     let (example_input, example_expect, fixture_expect) = match kind {
         Kind::Lens | Kind::Component => (
@@ -166,6 +173,13 @@ pub fn scaffold(
             Some("{ rows: $any }".to_string()),
         ),
         Kind::Extension => ("{}".to_string(), "TODO: what a run should show", None),
+        Kind::Policy => (
+            format!(
+                "{{ implementation: {provider_id}, event: {{ type: thread.checkpoint, payload: {{}} }} }}"
+            ),
+            "nothing to do: a checkpoint opens or closes no effort",
+            Some("{ skip: $any }".to_string()),
+        ),
         Kind::Provider { capability } => {
             let starter = provider_starter(capability);
             (starter.input, starter.expect, Some(starter.fixture))
@@ -188,7 +202,6 @@ pub fn scaffold(
             Some("{ commands: [oxplow.work_item.comment] }".to_string()),
         ),
     };
-    let provider_id = name.replace('-', "_");
     let mut manifest = extensions::scaffold_manifest(&extensions::ManifestScaffold {
         name,
         description: "TODO: one line on what this extension shows or does",
@@ -267,6 +280,19 @@ pub fn scaffold(
              \x20 - id: {name}\n\
              \x20   assets: []\n\
              \x20   commands: []\n"
+        )),
+        Kind::Policy => manifest.push_str(&format!(
+            "implementations:\n\
+             \x20 # The project's effort policy, once chosen in Settings → Capabilities: its\n\
+             \x20 # script hears core's events and composes the commands that open, close\n\
+             \x20 # and link efforts. It runs once a person approves it (Settings → Data →\n\
+             \x20 # Programs), and reads oxplow only through the scopes it `needs`.\n\
+             \x20 - capability: effort_policy\n\
+             \x20   id: {provider_id}\n\
+             \x20   title: {title}\n\
+             \x20   entry: policies/{name}.star\n\
+             \x20   needs: [sql.read]\n",
+            title = title_case(name)
         )),
         Kind::Lens | Kind::Extension => {}
     }
@@ -444,6 +470,32 @@ pub fn scaffold(
                     .to_string(),
             )?;
         }
+        Kind::Policy => write(
+            &format!("{rel_dir}/policies/{name}.star"),
+            r#"# Gets {"event": {id, type, v, seq, source, subject, payload, anchors}} — one of
+# core's events a policy hears — and returns the commands to run, as the
+# policy, or {"skip": "why"}. No I/O but its `needs` (`scope("sql.read", …)`).
+def transform(x):
+    e = x["event"]
+    if e["type"] != "work_item.state_changed":
+        return {"skip": "not an item's move"}
+    item = e["payload"]["work_item"]
+    to = e["payload"]["to"]
+    # The thread an agent moved it on, when one did.
+    thread = e["anchors"].get("thread_id")
+    if to == "in_progress" and thread != None:
+        return {"commands": [{"name": "oxplow.effort.open",
+                              "input": {"thread": "thread:" + thread, "work_item": item}}]}
+    if to == "done" or to == "canceled":
+        rows = scope("sql.read", {"sql": "SELECT id FROM v_effort WHERE work_item = :w AND ended_at IS NULL",
+                                  "params": {"w": item}})
+        return {"commands": [{"name": "oxplow.effort.close",
+                              "input": {"effort": "effort:eff" + str(r["id"]), "reason": "switch"}}
+                             for r in rows]}
+    return {"skip": "a move that changes no effort"}
+"#
+            .to_string(),
+        )?,
         Kind::Extension => {}
     }
     Ok(Scaffolded {
@@ -883,6 +935,7 @@ mod tests {
             Kind::Command,
             Kind::Effect,
             Kind::Component,
+            Kind::Policy,
         ] {
             let dir = tempfile::tempdir().unwrap();
             let made = scaffold(dir.path(), kind, "demo", None).unwrap();

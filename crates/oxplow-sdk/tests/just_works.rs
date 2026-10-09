@@ -444,6 +444,26 @@ async fn a_scaffolded_effort_policy_is_red_until_a_program_speaks_for_it() {
     );
 }
 
+/// A scaffolded effort policy script checks, its example dry-runs, and it
+/// passes the effort-policy suite as written.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_scaffolded_policy_checks_tests_and_passes_the_suite() {
+    let dir = project().await;
+    scaffolded(dir.path(), "policy", "tidy-up").await;
+    let ran = tested(dir.path(), "tidy-up").await;
+    for want in ["example basic", "effort_policy suite"] {
+        assert!(ran.iter().any(|r| r == want), "{want}: {ran:?}");
+    }
+    let svc = booted(dir.path()).await;
+    let ext = loaded(&svc, dir.path(), "tidy-up");
+    let decl = &ext.implementations[0];
+    assert_eq!(
+        (decl.capability.as_str(), decl.id.as_str()),
+        ("effort_policy", "tidy_up")
+    );
+    assert_eq!(decl.needs, ["sql.read"]);
+}
+
 /// The fields `scripts/record-just-works.sh` strips from a recorded
 /// `run.json`: the author's machine (denied commands carry local paths),
 /// the session and the cost.

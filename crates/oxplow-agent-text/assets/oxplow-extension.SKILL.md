@@ -28,6 +28,10 @@ failure after your edit is yours:
   (private; runs only once a person approves it);
 - `component` — a custom component (private): its `viz: custom` lens and
   a web bundle on oxplow's client library;
+- `policy` — an effort policy written as a script (`implementations:`,
+  `needs: [sql.read]`) that opens an item's effort when it starts on a
+  thread and closes it when it ends; it passes the effort-policy suite
+  as written, and runs once a person approves it;
 - `extension` — the manifest only.
 
 ## 0. Answering with a lens (`show_lens`)
