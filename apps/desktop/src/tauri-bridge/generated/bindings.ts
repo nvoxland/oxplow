@@ -5481,6 +5481,11 @@ export type SnapshotOp = {
 	provider: string | null,
 	// Whether the take kept file contents (`false`: hashes only).
 	contents: boolean,
+	/**
+	 *  The provider's name for the state it marked (V46); `None` for a take
+	 *  by core's capture pipeline.
+	 */
+	handle: string | null,
 };
 
 /**
