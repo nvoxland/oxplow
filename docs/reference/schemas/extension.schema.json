@@ -2212,6 +2212,14 @@
         "config": {
           "description": "What it configures, checked against the built-in's schema.",
           "default": null
+        },
+        "needs": {
+          "description": "The scopes a policy script calls (`sql.read`): only what a script\ncan (`scope_calls::CALLABLE`).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
         }
       },
       "additionalProperties": false,

@@ -3412,6 +3412,11 @@ export type ImplementationDecl = {
 	 *  schema; `{}` when it says nothing.
 	 */
 	config: any,
+	/**
+	 *  The scopes a policy script calls (`sql.read`); empty for anything
+	 *  else.
+	 */
+	needs: string[],
 };
 
 // An operation paused mid-way, waiting on its conflicts.

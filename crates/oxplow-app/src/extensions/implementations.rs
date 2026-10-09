@@ -47,7 +47,10 @@ pub struct ImplementationDecl {
     /// schema; `{}` when it says nothing.
     #[specta(type = specta_typescript::Any)]
     pub config: serde_json::Value,
-    /// An AI provider written as a script: its text, when `entry` names a
+    /// The scopes a policy script calls (`sql.read`); empty for anything
+    /// else.
+    pub needs: Vec<String>,
+    /// An AI provider or an effort policy written as a script: its text, when `entry` names a
     /// file of the extension rather than a built-in.
     #[serde(skip)]
     #[specta(skip)]
@@ -69,6 +72,10 @@ pub(crate) struct ImplementationFile {
     #[serde(default)]
     #[schemars(with = "Option<serde_json::Value>")]
     config: Option<Value>,
+    /// The scopes a policy script calls (`sql.read`): only what a script
+    /// can (`scope_calls::CALLABLE`).
+    #[serde(default)]
+    needs: Vec<String>,
 }
 
 /// Parse `implementations:`: the valid declarations, and what's wrong
@@ -162,6 +169,12 @@ fn decl_of(
     if !f.entry.starts_with("oxplow:") {
         return script_decl(f, read);
     }
+    if !f.needs.is_empty() {
+        return Err(format!(
+            "entry `{}` takes no `needs` (a built-in is core's code)",
+            f.entry
+        ));
+    }
     let Some(built_in) = crate::capabilities::built_in(&f.entry) else {
         return Err(format!(
             "entry `{}` isn't one of core's built-ins ({})",
@@ -204,40 +217,75 @@ fn decl_of(
         entry: f.entry,
         skills: f.skills,
         config,
+        needs: Vec::new(),
         script: None,
     })
 }
 
-/// An implementation whose entry is a script in the extension: an AI
-/// provider written as one (`oxplow_ai_providers::scripted`), checked as
-/// it will be registered — its config and its `request` / `response`.
+/// An implementation whose entry is a script in the extension, checked
+/// as it will be registered: an AI provider (`oxplow_ai_providers::scripted`:
+/// its config and its `request` / `response`), or an effort policy (an
+/// effects-shaped `transform`, the scopes it calls in `needs`).
 fn script_decl(
     f: ImplementationFile,
     read: &dyn Fn(&str) -> Option<String>,
 ) -> Result<ImplementationDecl, String> {
-    if f.capability != "ai_provider" {
-        return Err(format!(
-            "entry `{}` is a script, and only an `ai_provider` is a script (others name a \
-             built-in: `oxplow:<name>`)",
-            f.entry
-        ));
-    }
     let script =
-        read(&f.entry).ok_or_else(|| format!("entry `{}` isn't in the extension", f.entry))?;
-    let config = match f.config {
+        |entry: &str| read(entry).ok_or_else(|| format!("entry `{entry}` isn't in the extension"));
+    let config = match &f.config {
         Some(v) => serde_json::to_value(v).map_err(|e| format!("config: {e}"))?,
         None => serde_json::json!({}),
     };
-    let title = f.title.clone().unwrap_or_else(|| f.id.clone());
-    oxplow_ai_providers::scripted(
-        &f.id,
-        &title,
-        &f.entry,
-        &script,
-        &config,
-        std::sync::Arc::new(|| Ok(())),
-    )
-    .map_err(|e| format!("`ai_provider` implementation `{}`: {e}", f.id))?;
+    let script = match f.capability.as_str() {
+        "ai_provider" => {
+            if !f.needs.is_empty() {
+                return Err(format!(
+                    "`ai_provider` implementation `{}` takes no `needs` (it calls nothing of \
+                     oxplow's)",
+                    f.id
+                ));
+            }
+            let script = script(&f.entry)?;
+            let title = f.title.clone().unwrap_or_else(|| f.id.clone());
+            oxplow_ai_providers::scripted(
+                &f.id,
+                &title,
+                &f.entry,
+                &script,
+                &config,
+                std::sync::Arc::new(|| Ok(())),
+            )
+            .map_err(|e| format!("`ai_provider` implementation `{}`: {e}", f.id))?;
+            script
+        }
+        "effort_policy" => {
+            if config != serde_json::json!({}) {
+                return Err(format!(
+                    "`effort_policy` implementation `{}`: a policy script takes no config",
+                    f.id
+                ));
+            }
+            for need in &f.needs {
+                crate::scope_calls::check_callable(need).map_err(|e| {
+                    format!(
+                        "`effort_policy` implementation `{}`: needs `{need}`: {e}",
+                        f.id
+                    )
+                })?;
+            }
+            let script = script(&f.entry)?;
+            oxplow_script::runtime::check_starlark(&f.entry, &script)
+                .map_err(|e| format!("`effort_policy` implementation `{}`: {e}", f.id))?;
+            script
+        }
+        _ => {
+            return Err(format!(
+                "entry `{}` is a script, and a script implements an `ai_provider` or an \
+                 `effort_policy` (others name a built-in: `oxplow:<name>`)",
+                f.entry
+            ))
+        }
+    };
     Ok(ImplementationDecl {
         capability: f.capability,
         id: f.id,
@@ -245,6 +293,7 @@ fn script_decl(
         entry: f.entry,
         skills: f.skills,
         config,
+        needs: f.needs,
         script: Some(script),
     })
 }
@@ -285,7 +334,7 @@ mod tests {
         let errors = |yaml: &str| parse_with(yaml, &read).1.join("\n");
         assert!(
             errors("  - { capability: work_items, id: acme, entry: providers/p.star }\n")
-                .contains("only an `ai_provider` is a script")
+                .contains("a script implements an `ai_provider` or an `effort_policy`")
         );
         assert!(
             errors("  - { capability: ai_provider, id: acme, entry: providers/gone.star }\n")
@@ -307,6 +356,64 @@ mod tests {
         .contains("nope"));
     }
 
+    const POLICY: &str = "def transform(x):\n    return {\"skip\": \"nothing\"}\n";
+
+    /// An effort policy may be a script too: an effects-shaped
+    /// `transform`, with the scopes it calls in its `needs`. It takes no
+    /// config; a need a script can't call, a script without `transform`
+    /// and a missing file are refused, and so is `needs` on anything but a
+    /// policy script.
+    #[test]
+    fn an_effort_policy_may_be_a_script_with_its_needs() {
+        let read = |rel: &str| match rel {
+            "policies/p.star" => Some(POLICY.to_string()),
+            "policies/bare.star" => Some("def other(x):\n    return None\n".to_string()),
+            "providers/p.star" => Some(SCRIPT.to_string()),
+            _ => None,
+        };
+        let (decls, errors) = parse_with(
+            "  - { capability: effort_policy, id: acme, title: Acme, entry: policies/p.star, needs: [sql.read] }\n",
+            &read,
+        );
+        assert_eq!(errors, Vec::<String>::new());
+        assert_eq!(decls[0].script.as_deref(), Some(POLICY));
+        assert_eq!(decls[0].needs, vec!["sql.read".to_string()]);
+        let errors = |yaml: &str| parse_with(yaml, &read).1.join("\n");
+        for (yaml, want) in [
+            (
+                "  - { capability: effort_policy, id: acme, entry: policies/p.star, needs: [threads.write] }\n",
+                "threads.write",
+            ),
+            (
+                "  - { capability: effort_policy, id: acme, entry: policies/bare.star }\n",
+                "transform",
+            ),
+            (
+                "  - { capability: effort_policy, id: acme, entry: policies/gone.star }\n",
+                "isn't in the extension",
+            ),
+            (
+                "  - { capability: effort_policy, id: acme, entry: policies/p.star, config: { a: 1 } }\n",
+                "takes no config",
+            ),
+            (
+                "  - { capability: ai_provider, id: acme, entry: providers/p.star, needs: [sql.read] }\n",
+                "takes no `needs`",
+            ),
+            (
+                "  - { capability: effort_policy, id: tidy, entry: \"oxplow:commit-or-switch\", needs: [sql.read] }\n",
+                "takes no `needs`",
+            ),
+            (
+                "  - { capability: work_items, id: acme, entry: policies/p.star }\n",
+                "a script implements an `ai_provider` or an `effort_policy`",
+            ),
+        ] {
+            let got = errors(yaml);
+            assert!(got.contains(want), "{yaml}: {got}");
+        }
+    }
+
     #[test]
     fn a_built_in_is_declared_for_its_capability() {
         let (decls, errors) =
@@ -321,6 +428,7 @@ mod tests {
                 entry: "oxplow:tasks".into(),
                 skills: vec![],
                 config: serde_json::json!({}),
+                needs: vec![],
                 script: None,
             }]
         );

@@ -2510,13 +2510,19 @@ implementations:
   list, the effort policy) may be an external provider's instance, chosen
   by `activeProviders` like a built-in ([providers.md](./providers.md)
   "What a provider may implement").
-- **An `ai_provider` may be a script** instead: an `entry` that isn't
-  `oxplow:<name>` names a `.star` file of the extension, with `config: {
-  baseUrl?, ops? }` (`implementations::script_decl`, `Source::Script`;
-  the contract, consent and the shipped scripts are
-  [ai-providers.md](./ai-providers.md) "Scripted providers"). Only an AI
-  provider is a script; it runs once a person approves it
-  (`ProgramKind::AiProvider`).
+- **An `ai_provider` or an `effort_policy` may be a script** instead: an
+  `entry` that isn't `oxplow:<name>` names a `.star` file of the extension
+  (`implementations::script_decl`, `Source::Script`). Nothing else is a
+  script.
+  - An AI provider's takes `config: { baseUrl?, ops? }` (the contract,
+    consent and the shipped scripts are [ai-providers.md](./ai-providers.md)
+    "Scripted providers"); it runs once a person approves it
+    (`ProgramKind::AiProvider`).
+  - An effort policy's is effects-shaped — `transform({event})` →
+    `{ commands: [{ name, input }] } | { skip: "why" }` — takes no config,
+    and names the scopes it calls in the entry's `needs:` (only what a
+    script can, `scope_calls::CALLABLE`; checked at load, with the script
+    defining `transform`). `needs` is refused anywhere else.
 - `oxplow-foundation` declares the agent harnesses (`oxplow:claude-code`,
   `oxplow:codex-cli`, `oxplow:opencode`, `oxplow:acp`), the ACP agents'
   programs (`oxplow:acp-adapter`, one declaration per preset) and the AI
