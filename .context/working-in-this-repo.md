@@ -288,6 +288,18 @@ in isolation. Rules, applied in `TerminalTabStrip.test.tsx`,
   happy-dom tree into the JUnit message — that is how
   `apps/desktop/test-report.xml` once reached 1.8 GB.
 
+### Frontend module mocks are process-wide
+
+Bun's `mock.module` replaces a module for the whole `bun test` process,
+and the last mock wins. A file that mocks `api.js` as
+`{ ...await import("../api.js"), … }` spreads **whichever mock ran
+before it**, not the real module — another file's `listPersonCommands`
+or `listExtensions` included. So it passes alone and fails in the full
+run. A file that depends on a read's answer pins that read itself
+(`CapabilityUi.smoke.test.tsx` routes each one through its bindings
+mock). Reproduce one of these by running the two files together:
+`bun test <the earlier mocker> <the failing file>`.
+
 ### Coverage floors & pass-through crates
 
 Two CI gates enforce line coverage: a **workspace floor**

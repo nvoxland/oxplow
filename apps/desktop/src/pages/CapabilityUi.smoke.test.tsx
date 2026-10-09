@@ -53,9 +53,11 @@ const answers: Record<string, (...args: unknown[]) => Promise<unknown>> = {
 
 mock.module("../tauri-bridge/transport.js", () => ({ ...realTransport, listen: async () => () => {} }));
 // Other test files mock `api.js` process-wide (the last mock wins), each
-// answering these reads its own way. Restore what the real `api` does —
-// call the bindings (whichever bindings mock is current) and unwrap — so
-// this file's answers apply here and a later file's bindings apply there.
+// answering these reads its own way — `realApi` is then the earlier mock,
+// whose person commands would offer a Commands menu. Restore what the
+// real `api` does — call the bindings (whichever bindings mock is current)
+// and unwrap — so this file's answers apply here and a later file's
+// bindings apply there.
 const realApi = await import("../api.js");
 const viaBindings = (name: string) => async (...args: unknown[]) => {
   const { commands } = await import("../tauri-bridge/generated/bindings.js");
@@ -66,6 +68,7 @@ const viaBindings = (name: string) => async (...args: unknown[]) => {
 mock.module("../api.js", () => ({
   ...realApi,
   listExtensions: viaBindings("listExtensions"),
+  listPersonCommands: viaBindings("listPersonCommands"),
   querySql: (sql: string, params: unknown[] = [], limit: number | null = null, raw = false) =>
     viaBindings("querySql")(sql, params, limit, raw),
   runLens: viaBindings("runLens"),
@@ -103,11 +106,11 @@ async function expectPlain(view: ReturnType<typeof render>) {
   await waitFor(() => expect(extensionLoads).toBeGreaterThan(0));
   await act(async () => {});
   // Any slot mount, whatever its slot (`LensSlots` marks each one).
-  expect(view.container.querySelector("[data-slot]")).toBeNull();
+  expect(view.container.querySelector("[data-slot]") === null).toBe(true);
   // No core component replaced (`Replaceable` marks one that is).
-  expect(view.container.querySelector('[data-testid^="replacement-"]')).toBeNull();
-  expect(view.queryByTestId("page-nav-commands")).toBeNull();
-  expect(view.container.querySelector('[title^="from "]')).toBeNull();
+  expect(view.container.querySelector('[data-testid^="replacement-"]') === null).toBe(true);
+  expect(view.queryByTestId("page-nav-commands") === null).toBe(true);
+  expect(view.container.querySelector('[title^="from "]') === null).toBe(true);
 }
 
 test("another provider's item, with every flag off, is its core content and no more", async () => {
