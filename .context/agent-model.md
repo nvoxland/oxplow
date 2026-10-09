@@ -950,9 +950,10 @@ empty list of findings passes.
   agent's hook shapes change (Codex 0.158 renamed its shell `Bash`, moved
   its patch to `command`, answers `Exit code: N` text), record a new
   session the same way and replace its fixture: the replay is what
-  notices. Filter the recording by the session's `session_id`: an oxplow
-  started with `OXPLOW_HOOK_DEBUG` also records every hook its agent
-  terminals' own test runs post.
+  notices. Filter the recording by the session's `session_id` all the
+  same. `OXPLOW_HOOK_DEBUG` is in `agent_path::NOT_INHERITED`, so an
+  agent's terminal (and the oxplow its test runs start) doesn't inherit
+  it and append its own hooks to the person's recording.
 
 ## Agent policy (shared by every transport, tsk333)
 

@@ -142,13 +142,15 @@ pub fn augmented_path() -> Option<String> {
 /// would point its agents' hooks at the wrong oxplow. Oxplow sets its own
 /// identity for an agent after these are removed (`OXPLOW_*` ride the
 /// agent's command). Each harness adds its own session markers
-/// (`AgentHarness::env_markers`).
+/// (`AgentHarness::env_markers`). `OXPLOW_HOOK_DEBUG` is the person's hook
+/// recording: an agent's own oxplow (its test runs) would append to it.
 pub const NOT_INHERITED: &[&str] = &[
     "OXPLOW_HOOK_TOKEN",
     "OXPLOW_HOOK_BASE_URL",
     "OXPLOW_STREAM_ID",
     "OXPLOW_THREAD_ID",
     "OXPLOW_SESSION",
+    "OXPLOW_HOOK_DEBUG",
 ];
 
 /// What a spawn removes from the environment: [`NOT_INHERITED`] and every
@@ -202,6 +204,9 @@ mod tests {
             "CLAUDE_CODE_SESSION_ID",
             "OXPLOW_HOOK_TOKEN",
             "OXPLOW_THREAD_ID",
+            // The person's hook recording: an agent's own test runs would
+            // append their hooks to it.
+            "OXPLOW_HOOK_DEBUG",
         ] {
             assert!(dropped.iter().any(|d| d == marker), "{marker} is inherited");
         }
