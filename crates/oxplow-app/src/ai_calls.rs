@@ -99,6 +99,7 @@ mod tests {
             serde_json::json!({ "choices": [{ "message": { "content": "short" } }], "usage": { "prompt_tokens": 1, "completion_tokens": 1 } }),
         )
         .await;
+        crate::test_fixtures::approve_ai_providers(&fx.svc);
         fx.svc
             .ai
             .save_provider(

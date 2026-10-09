@@ -23,6 +23,21 @@ directory and apply to all your projects.
 **Test** makes one small call with the model you name, so you can check
 the key, URL and model name before using them.
 
+### Approving a provider
+
+Each provider is a small script that shapes the calls oxplow makes to
+that service, including the ones that come with oxplow. A call carries
+your key and your prompts, so a provider runs only once you've approved
+its script in **Settings → Data → Programs**. **Read the script** shows
+you what it does. Until then, calls through it fail and say where to
+approve it.
+
+An upgrade that changes a provider's script asks again: AI calls through
+it stop until you approve the new version.
+
+An extension can add a provider of its own the same way (see the
+[Extensions reference](../reference/extensions.md)).
+
 ## Roles
 
 Oxplow and extensions ask for a role, not a model:

@@ -4909,7 +4909,14 @@ export type ProgramKind =
  *  bundle and the commands it names. One that declares none only shows
  *  and queries, and needs no approval.
  */
-"component";
+"component" | 
+/**
+ *  An AI provider written as a script (`implementations:` with a
+ *  `.star` entry): its calls carry the person's key and prompts,
+ *  approved over its script and the base URL it sends to — a shipped
+ *  one too, so a changed script asks again.
+ */
+"ai-provider";
 
 // A program the project's config would run.
 export type ProjectProgram = {
