@@ -584,7 +584,7 @@ mod tests {
     }
 
     fn mint(fx: &EffortFixture, session: &AgentSession, stream: oxplow_domain::StreamId) -> String {
-        fx.svc.session_auth.mint(crate::session_auth::Principal {
+        fx.svc.session_auth.issue(crate::session_auth::Principal {
             session: session.id,
             thread: session.thread_id,
             stream,

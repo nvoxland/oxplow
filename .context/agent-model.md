@@ -365,10 +365,14 @@ header or query names the caller — an `X-Oxplow-Thread` a request carries
 is ignored — so one agent can't run commands, post hooks or export tokens
 as another, and two sessions on one thread are told apart.
 
-- **One bearer per session, for its process's life.** A relaunch mints a
-  new one and retires the old. Closing the session, its thread or its
-  stream revokes it (`SessionProcesses::kill`). Bearers live in memory and
-  end with the daemon; a session's next launch mints a fresh one.
+- **One bearer per session, for the daemon's life.** Every launch of a
+  session is handed the bearer it holds (`SessionAuth::issue`): a launch
+  can end up attaching to the process already running (its tab shown
+  again), which keeps the bearer it started with, so a new one would lock
+  it out (every hook a 401). A session that moved to another thread gets
+  a new one. Closing the session, its thread or its stream revokes it
+  (`SessionProcesses::kill`). Bearers live in memory and end with the
+  daemon; after a restart a session's first launch is issued a fresh one.
 - **Where it rides.** The agent's env (`OXPLOW_HOOK_TOKEN`, set by the
   PTY spawn from `LaunchSpec::Pty.env`, never spelled in the `sh -lc`
   command line), Claude's per-session `mcp-config.<ses>.json` (owner-only,

@@ -77,8 +77,9 @@ fn identity_env(
     ]
 }
 
-/// Where agent session `session` reaches oxplow, with a bearer minted for
-/// it now (retiring any it had: a launch is a new process).
+/// Where agent session `session` reaches oxplow, with the session's bearer
+/// (`SessionAuth::issue`: the one it holds, so a launch that attaches to
+/// the running process leaves that process's bearer working).
 pub(crate) fn session_endpoints(
     ctx: &RpcContext,
     session: &AgentSession,
@@ -89,7 +90,7 @@ pub(crate) fn session_endpoints(
     let rt = ctx.plugin_runtime.as_ref().ok_or_else(|| {
         IpcError::invalid("agent spawn unavailable: host supplied no plugin runtime")
     })?;
-    let hook_token = ctx.session_auth.mint(oxplow_app::session_auth::Principal {
+    let hook_token = ctx.session_auth.issue(oxplow_app::session_auth::Principal {
         session: session.id,
         thread: thread.id,
         stream: thread.stream_id,
@@ -404,11 +405,12 @@ mod tests {
         }
     }
 
-    /// A launch's endpoints carry a bearer minted for its session: it
-    /// authenticates as that session, thread and stream, and the next
-    /// launch's retires it.
+    /// A launch's endpoints carry its session's bearer: it authenticates
+    /// as that session, thread and stream, and a second launch (the tab
+    /// attaching again to the running process) hands back the same one, so
+    /// the process already holding it keeps working.
     #[tokio::test]
-    async fn a_launch_mints_its_sessions_bearer() {
+    async fn a_launch_carries_its_sessions_one_bearer() {
         let (mut ctx, _dir) = services();
         ctx.plugin_runtime = Some(runtime());
         let session = first_session(&ctx).await;
@@ -424,8 +426,8 @@ mod tests {
         assert_eq!(principal.stream, thread.stream_id);
         assert_eq!(principal.harness, session.harness);
         let second = session_endpoints(&ctx, &session, &thread).unwrap();
-        assert!(ctx.session_auth.authenticate(&first.hook_token).is_none());
-        assert!(ctx.session_auth.authenticate(&second.hook_token).is_some());
+        assert_eq!(second.hook_token, first.hook_token);
+        assert!(ctx.session_auth.authenticate(&first.hook_token).is_some());
     }
 
     /// An agent session opened, as a person does, on the primary stream's

@@ -480,7 +480,17 @@ async fn a_retired_or_revoked_bearer_is_unauthorized() {
     let (cp, svc, _root, _dir) = boot().await;
     let tid = seed_thread(&svc, ThreadStatus::Active).await;
     let session = session_of(&svc, tid).await;
-    let retired = common::bearer_for(&svc, session).await;
+    // Issued again for the session (a tab attaching to its process), the
+    // bearer is the same one; issued for it on another thread, the old
+    // one is retired.
+    let live = common::bearer_for(&svc, session).await;
+    assert_eq!(common::bearer_for(&svc, session).await, live);
+    let retired = svc.session_auth.issue(oxplow_app::session_auth::Principal {
+        session,
+        thread: ThreadId::new(999),
+        stream: StreamId::new(1),
+        harness: "claude".into(),
+    });
     let live = common::bearer_for(&svc, session).await;
     let ack = |token: String| {
         let cp = cp.clone();
@@ -745,7 +755,7 @@ async fn ingest_failure_still_acks_200() {
     // prints the warning line — so the handler logs server-side and
     // acks 200 {} anyway.
     let (cp, svc, _root, _dir) = boot().await;
-    let token = svc.session_auth.mint(oxplow_app::session_auth::Principal {
+    let token = svc.session_auth.issue(oxplow_app::session_auth::Principal {
         session: oxplow_domain::AgentSessionId::new(999_999),
         thread: ThreadId::new(999_999),
         stream: StreamId::new(1),

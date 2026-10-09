@@ -5,8 +5,11 @@
 //! bearer alone: nothing a request says about itself — no header, no
 //! query — names who it is, so one agent can't act as another.
 //!
-//! Tokens live in memory. A session's process ends with the daemon, and its
-//! next launch mints a new one, so nothing needs to outlive a boot.
+//! A session holds one bearer for as long as the daemon runs: every launch
+//! of it is handed the same one, because a launch can end up attaching to
+//! the process already running (a tab shown again), which keeps the bearer
+//! it started with. Closing the session revokes it. Tokens live in memory;
+//! a session's process ends with the daemon, so nothing outlives a boot.
 
 use std::collections::HashMap;
 use std::sync::RwLock;
@@ -35,12 +38,20 @@ impl SessionAuth {
         Self::default()
     }
 
-    /// A new bearer for `principal`'s session. A session holds one at a
-    /// time: minting again (a relaunch) retires the one before.
-    pub fn mint(&self, principal: Principal) -> String {
-        let token = generate_token();
+    /// `principal`'s session's bearer: the one it already holds, else a
+    /// new one. A session that moved (another thread, harness) gets a new
+    /// one, and the old one stops working.
+    pub fn issue(&self, principal: Principal) -> String {
         let mut tokens = self.by_token.write().unwrap_or_else(|p| p.into_inner());
+        if let Some(token) = tokens
+            .iter()
+            .find(|(_, p)| **p == principal)
+            .map(|(t, _)| t.clone())
+        {
+            return token;
+        }
         tokens.retain(|_, p| p.session != principal.session);
+        let token = generate_token();
         tokens.insert(token.clone(), principal);
         token
     }
@@ -84,9 +95,9 @@ mod tests {
     }
 
     #[test]
-    fn a_minted_bearer_authenticates_as_its_session() {
+    fn an_issued_bearer_authenticates_as_its_session() {
         let auth = SessionAuth::new();
-        let token = auth.mint(principal(3, 2));
+        let token = auth.issue(principal(3, 2));
         assert_eq!(token.len(), 43);
         assert_eq!(auth.authenticate(&token), Some(principal(3, 2)));
         assert_eq!(auth.authenticate("not-a-token"), None);
@@ -95,27 +106,41 @@ mod tests {
     #[test]
     fn each_session_has_its_own_bearer() {
         let auth = SessionAuth::new();
-        let a = auth.mint(principal(3, 2));
-        let b = auth.mint(principal(4, 2));
+        let a = auth.issue(principal(3, 2));
+        let b = auth.issue(principal(4, 2));
         assert_ne!(a, b);
         assert_eq!(auth.authenticate(&a).map(|p| p.session.value()), Some(3));
         assert_eq!(auth.authenticate(&b).map(|p| p.session.value()), Some(4));
     }
 
+    /// A relaunch (or a tab attaching again to the running process) gets
+    /// the bearer the session holds, so the process keeps working.
     #[test]
-    fn minting_again_retires_the_earlier_bearer() {
+    fn issuing_again_hands_back_the_sessions_bearer() {
         let auth = SessionAuth::new();
-        let first = auth.mint(principal(3, 2));
-        let second = auth.mint(principal(3, 2));
+        let first = auth.issue(principal(3, 2));
+        let second = auth.issue(principal(3, 2));
+        assert_eq!(first, second);
+        assert!(auth.authenticate(&first).is_some());
+    }
+
+    /// A session that moved to another thread holds a new bearer; the old
+    /// one names who it no longer is.
+    #[test]
+    fn a_session_that_moved_gets_a_new_bearer() {
+        let auth = SessionAuth::new();
+        let first = auth.issue(principal(3, 2));
+        let moved = auth.issue(principal(3, 9));
+        assert_ne!(first, moved);
         assert_eq!(auth.authenticate(&first), None);
-        assert!(auth.authenticate(&second).is_some());
+        assert_eq!(auth.authenticate(&moved).map(|p| p.thread.value()), Some(9));
     }
 
     #[test]
     fn a_revoked_session_authenticates_no_more() {
         let auth = SessionAuth::new();
-        let token = auth.mint(principal(3, 2));
-        let other = auth.mint(principal(4, 2));
+        let token = auth.issue(principal(3, 2));
+        let other = auth.issue(principal(4, 2));
         auth.revoke(AgentSessionId::new(3));
         assert_eq!(auth.authenticate(&token), None);
         assert!(auth.authenticate(&other).is_some());
