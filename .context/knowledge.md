@@ -1,58 +1,69 @@
 # Knowledge (the wiki)
 
-The per-project wiki: pages at `.oxplow/wiki/<slug>.md`, their row in
-`wiki_page` and their links in `page_ref` (P5.C3). Pages are agent-written writeups, diagrams and explanations; the
-file is the page, the row and edges are derived from it.
+Pages of durable understanding — agent-written writeups, diagrams and
+explanations — kept in the project's chosen **store** (oxplow's wiki,
+pages at `.oxplow/wiki/<slug>.md`; a provider's documentation system;
+or none), and **recorded by core** the same way whatever keeps them: the
+row in `wiki_page`, the links in `page_ref`, their pins, freshness and
+the events (P5.C3). The store keeps the page; the record is derived from
+what it kept.
 
 ## One write path: `oxplow.knowledge.write_page`
 
 `oxplow.knowledge.write_page { slug, title?, body, verified_refs?, removed_refs? }`
-(`crates/oxplow-app/src/knowledge.rs`, a `Tx` command) is how a page is
-written — by an agent (`run_command`), by the desktop editor, and by
-"Mark verified" on the Freshness page. In the bus's transaction it:
+(`crates/oxplow-app/src/knowledge.rs`, an `External` command: the store
+keeps the page) is how a page is written — by an agent (`run_command`),
+by the desktop editor, and by "Mark verified" on the Freshness page. It:
 
 1. validates the slug (kebab-case) and **every `[[link]]` the write
    adds** — a task, page, file, directory, finding or commit that doesn't
-   exist is refused, each named. A link the page's file already has isn't
+   exist is refused, each named. A link the page's recorded body already has isn't
    re-checked: a cited file or task that has since gone (or a hand edit's
    bad link) mustn't block verifying, rewriting or linking the page
    (tsk564) (`link_check::check_links_in`, synchronous: the database,
    the project's files and `Vcs::revision_graph` for commits; a page may
    link to itself);
-2. checks the ref declarations: `removed_refs` must be gone from the
-   body; `verified_refs` must be cited, or be a file under a
-   `[[dir:…]]` the body cites;
-3. restates the `wiki_page` row (title from the first `# `, excerpt,
+2. checks the ref declarations (`refs_borne_out`): `removed_refs` must be
+   gone from the body; `verified_refs` must be cited, or be a file under a
+   `[[dir:…]]` the body cites — both before anything reaches the store;
+3. hands the page to the **active store** (`KnowledgeProvider::
+   write_page`): the wiki writes the file (if it differs; a temp file
+   renamed into place, so a file that can't be written fails the run and
+   nothing is recorded), a provider's service keeps it, none keeps
+   nothing and the command answers `{ page, tracked: false }`;
+4. in its own transaction (`write_page_tx`), from the body the store
+   kept, restates the `wiki_page` row (title from the first `# `, excerpt,
    `body_hash`) and merges its `page_ref` edges (`wiki_edges` +
    `merge_source_tx`): edges already stored keep their pins, new file
    refs take the **pin** — the primary stream's latest snapshot, plus
    that snapshot's own revision when it has one — and each verified ref
    is re-pinned (a file verified under a cited directory becomes an edge
    of its own, kept while the directory stays cited);
-4. logs `knowledge.page.written@1 { page: "wiki:<slug>", outbound,
-   snapshot }` with the actor's anchors;
-
-5. writes the file (if it differs; a temp file renamed into place) —
-   **inside the run**: the file is the page, so a file that can't be
-   written fails the run and nothing is recorded (tsk562). Were the
-   commit to fail after it, the file is ahead of the row and the watcher
-   converges them. The search index reads the body from the row
-   (`wiki_page.body`, written in the same transaction), so it is the
-   committed one when its asset recomputes;
+5. answers `knowledge.page.written@1 { page: "wiki:<slug>", outbound,
+   snapshot }` (with the actor's anchors, after any events the store
+   reported of its own) for the bus to log after `command.executed`,
+   caused by the run. Were the record to fail after the store kept the
+   page, the wiki's file is ahead of the row and the watcher converges
+   them. The search index reads the body from the row (`wiki_page.body`),
+   so it is the recorded one when its asset recomputes;
 
 (the UI re-reads on the `modelsChanged` the row write produces; there is
 no wiki event of its own). `@version` literals in links are stripped from the
 body: a version is the edge's pin, not the prose's. `title` sets the
 body's `# ` heading.
 
-Beside it: `oxplow.knowledge.delete_page { slug }` (Destructive; row, edges and
-file — the file removed inside the run, a failure failing it;
+Beside it, dispatched the same way: `oxplow.knowledge.delete_page {
+slug }` (Destructive; refused for a page core doesn't record unless the
+store is a sink; the store deletes it — the wiki its file, a failure
+failing the run — then core drops the row and edges and answers
 `knowledge.page.deleted@1`), `oxplow.knowledge.link { page, target }`
-(adds `- [[target]]` at the end of the page's `## Related` section —
-before any section after it — or a new one at the end, validated and
-with `@version` literals stripped like any write; tsk572), and
-`oxplow.knowledge.resync { slug }` (restate from the file; the repair when a row
-and its file disagree). All are `Record`: a read-only thread captures
+(`target` a wikilink's inside; refused when the recorded page already
+links it, or when it doesn't resolve; the store adds `- [[target]]` at
+the end of the page's `## Related` section — the wiki before any section
+after it, or a new one at the end, with `@version` literals stripped;
+tsk572 — and core records the body it kept), and
+`oxplow.knowledge.resync { slug }` (the wiki's: restate from the file, a
+`Tx` command; the repair when a row and its file disagree). All are `Record`: a read-only thread captures
 what it explored too. `oxplow.knowledge.write_page` replaced MCP
 `record_wiki_page_update`, `resync_wiki_page` and `delete_wiki_page`, and
 RPCs `write_wiki_page_body`, `upsert_wiki_page`, `delete_wiki_page`,
@@ -145,20 +156,23 @@ delete and a link succeed, freshness is empty — so nothing that writes
 pages is refused while no store is active, and the record reads empty.
 Bundled disabled, knowledge is none.
 
-`oxplow_domain::knowledge::KnowledgeProvider`: `id()`,
-`write_page(actor, PageDraft)`, `delete_page`, `link`, and
-`freshness(page) -> Vec<RefFreshness>` — freshness is the provider's to
-say (a provider that can't pin to snapshots reports what it can).
-`OxplowKnowledge` (the wiki) runs the `knowledge.*` commands
-as the actor (a destructive one confirmed: the provider call is the
-caller's decision — an agent's is still left for a person, by the bus)
-and reads freshness from the pins.
+`oxplow_domain::knowledge::KnowledgeProvider` is a **store**: `id()`,
+`sink()` (none's `true`: it takes any page), and `write_page(call,
+draft)` / `link(call, slug, target)` → `Option<Kept { body, events }>`
+(the body as it now stands there, and events of its own — a provider's
+`knowledge.page.recorded`), `delete_page(call, slug)` →
+`Option<events>`; `None` is "kept nothing". A store never sees pins or
+snapshots: the record, links and **freshness are core's**
+(`knowledge::freshness(db, page)` over `v_knowledge_ref`, the one
+definition of staleness), the same for every store. `WikiKnowledge` is
+the wiki: it keeps `.oxplow/wiki/<slug>.md`.
 
-`knowledge_conformance::suite(provider, probe, actor)` is what a provider
-must do: a write lands the page, its body and its event; a pinned ref is
-fresh, goes stale when its file drifts, stays stale through an unverified
-rewrite (which still moves `updated_at`) and is fresh again once
-verified; a dangling link is refused, named; a delete takes the page and
-logs it. The `KnowledgeProbe` reads the host and moves the world (a file
-changes and is captured). oxplow's wiki passes it
-(`the_oxplow_wiki_is_a_conforming_provider`, as a person).
+`knowledge_conformance::suite(svc, actor)` is what a store must do,
+checked through the commands and core's record: a write lands the page,
+its recorded body and its event; a pinned ref is fresh, goes stale when
+its file drifts, stays stale through an unverified rewrite (which still
+moves `updated_at`) and is fresh again once verified; a dangling link is
+refused, named; a link lands in the body; a delete takes the page and
+logs it. It moves the world by recording a snapshot of a file it
+changes. oxplow's wiki passes it (`the_oxplow_wiki_is_a_conforming_store`,
+as a person).

@@ -1457,10 +1457,13 @@ impl Services {
                 },
             )))
         };
-        knowledge::register_built_ins(&knowledge, &declared, &commands, &db);
+        knowledge::register_built_ins(&knowledge, &declared, &layout.project_dir);
         for command in knowledge::ops(knowledge::KnowledgeTarget {
             project_dir: layout.project_dir.clone(),
             vcs: vcs.clone(),
+            db: db.clone(),
+            vocabulary: event_log_store.vocabulary().clone(),
+            stores: knowledge.clone(),
         }) {
             commands.add_op(command).expect("knowledge ops register");
         }
@@ -1961,6 +1964,11 @@ mod tests {
                 "oxplow.git.ignore",
                 "oxplow.git.rebase",
                 "oxplow.git.revert",
+                // The active knowledge store keeps the page (the wiki's file,
+                // a provider's service); core records what it kept.
+                "oxplow.knowledge.delete_page",
+                "oxplow.knowledge.link",
+                "oxplow.knowledge.write_page",
                 // Lens files on disk (P6 review, tsk597): a Tx handler may
                 // run twice, and a retried file write strands the first.
                 "oxplow.lens.keep",

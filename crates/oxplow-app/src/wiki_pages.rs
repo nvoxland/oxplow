@@ -168,18 +168,13 @@ pub fn sync_page_tx(
     slug: &str,
 ) -> Result<bool, DomainError> {
     if !crate::knowledge::valid_slug(slug) {
-        return crate::knowledge::delete_page_tx(conn, ev, oxplow_domain::Anchors::default(), slug);
+        return logged_delete(conn, ev, slug);
     }
     let file_path = crate::knowledge::page_path(project_dir, slug);
     let raw = match fs::read_to_string(&file_path) {
         Ok(raw) => raw,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return crate::knowledge::delete_page_tx(
-                conn,
-                ev,
-                oxplow_domain::Anchors::default(),
-                slug,
-            );
+            return logged_delete(conn, ev, slug);
         }
         Err(e) => return Err(DomainError::Storage(format!("read wiki page {slug}: {e}"))),
     };
@@ -197,7 +192,7 @@ pub fn sync_page_tx(
     if stored.is_some_and(|(_, hash)| hash == crate::knowledge::body_hash(&body)) {
         return Ok(false);
     }
-    crate::knowledge::write_page_tx(
+    let (_, env) = crate::knowledge::write_page_tx(
         conn,
         ev,
         project_dir,
@@ -210,7 +205,24 @@ pub fn sync_page_tx(
             anchors: oxplow_domain::Anchors::default(),
         },
     )?;
+    ev.append(conn, &env)?;
     Ok(true)
+}
+
+/// Delete `slug`'s record as the watcher, logging it; whether there was a
+/// page.
+fn logged_delete(
+    conn: &rusqlite::Connection,
+    ev: &oxplow_db::EventCtx<'_>,
+    slug: &str,
+) -> Result<bool, DomainError> {
+    match crate::knowledge::delete_page_tx(conn, ev, oxplow_domain::Anchors::default(), slug)? {
+        Some(env) => {
+            ev.append(conn, &env)?;
+            Ok(true)
+        }
+        None => Ok(false),
+    }
 }
 
 /// [`sync_page_tx`] in its own transaction.

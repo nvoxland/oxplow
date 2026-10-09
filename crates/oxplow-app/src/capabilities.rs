@@ -1015,7 +1015,7 @@ pub async fn refresh(svc: &crate::Services) -> Result<(), DomainError> {
         &svc.layout.project_dir,
     );
     crate::harnesses::register_acp_adapters(&svc.acp_adapters, &declared);
-    crate::knowledge::register_built_ins(&svc.knowledge, &declared, &svc.commands, &svc.db);
+    crate::knowledge::register_built_ins(&svc.knowledge, &declared, &svc.layout.project_dir);
     crate::snapshots::register_built_ins(
         &svc.snapshots,
         &declared,
