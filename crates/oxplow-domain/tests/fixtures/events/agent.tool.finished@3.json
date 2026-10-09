@@ -1,0 +1,22 @@
+{
+  "tool": "Bash",
+  "kind": "shell",
+  "paths": ["crates/oxplow-app"],
+  "detail": "wc -l src/lib.rs",
+  "command": "wc -l src/lib.rs",
+  "ok": true,
+  "exit_code": 0,
+  "input": {
+    "hash": "3f2a9c1e5b7d4680a1b2c3d4e5f60718",
+    "size": 58
+  },
+  "output": {
+    "hash": "9a8b7c6d5e4f30211f2e3d4c5b6a7980",
+    "size": 20480,
+    "truncated": true
+  },
+  "subagent": {
+    "id": "afd849d5d475e378d",
+    "kind": "general-purpose"
+  }
+}

@@ -120,6 +120,8 @@ fn event_name(kind: HookKind) -> &'static str {
         HookKind::SessionStart => "SessionStart",
         HookKind::SessionEnd => "SessionEnd",
         HookKind::Notification => "Notification",
+        HookKind::SubagentStart => "SubagentStart",
+        HookKind::SubagentStop => "SubagentStop",
     }
 }
 
@@ -151,6 +153,20 @@ pub fn patch_paths(input: &serde_json::Value) -> Vec<String> {
         paths.push(p.to_string());
     }
     paths
+}
+
+/// The subagent a hook came from, when its body names one: Claude Code's
+/// and Codex's `agent_id` / `agent_type` (and opencode's, as its bridge
+/// sends a child session's).
+pub fn subagent_of(body: &serde_json::Value) -> Option<oxplow_domain::agent::tool::Subagent> {
+    let id = body.get("agent_id")?.as_str().filter(|s| !s.is_empty())?;
+    Some(oxplow_domain::agent::tool::Subagent {
+        id: id.into(),
+        kind: body
+            .get("agent_type")
+            .and_then(|t| t.as_str())
+            .map(str::to_string),
+    })
 }
 
 /// A tool hook's body in Claude Code's shape (`tool_name`, `tool_input`,
@@ -229,6 +245,7 @@ pub fn claude_shaped_tool_use(body: &serde_json::Value) -> Option<ToolUse> {
         ok,
         exit_code,
         question,
+        subagent: subagent_of(body),
     })
 }
 

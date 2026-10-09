@@ -10,9 +10,9 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use super::observe::{HookAnswer, OtlpRecord, TokenReading, Turn};
+use super::observe::{HookAnswer, OtlpRecord, Prompt, TokenReading, Turn};
 use super::text::AgentText;
-use super::tool::ToolUse;
+use super::tool::{Subagent, ToolUse};
 use crate::ids::{AgentSessionId, StreamId, ThreadId};
 
 /// How a person interacts with a harness's session — what the UI reads,
@@ -243,6 +243,19 @@ pub trait AgentHarness: Send + Sync {
     /// recognize.
     async fn token_readings(&self, _records: &[OtlpRecord]) -> Vec<TokenReading> {
         Vec::new()
+    }
+    /// What its prompt hook's body is: a person's prompt (its `prompt`
+    /// text, the default) or a subagent's hand-back; `None` for a body
+    /// with no prompt.
+    async fn prompt(&self, body: &serde_json::Value) -> Option<Prompt> {
+        body.get("prompt")
+            .and_then(|p| p.as_str())
+            .map(|text| Prompt::Person { text: text.into() })
+    }
+    /// The subagent a `SubagentStart` / `SubagentStop` hook names; none for
+    /// a harness that reports no subagents (the default).
+    async fn subagent(&self, _body: &serde_json::Value) -> Option<Subagent> {
+        None
     }
 }
 

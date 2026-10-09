@@ -13,7 +13,11 @@
 //! - `refresh_text { roots, text }` → `{}`;
 //! - `turns { transcript }` → `{ turns }`;
 //! - `token_readings { records }` → `{ readings }`, one export's records at
-//!   once.
+//!   once;
+//! - `prompt { body }` → `{ prompt }` (`{ kind: person, text }` or
+//!   `{ kind: handback, subagent }`, `null` for none) and `subagent { body }`
+//!   → `{ subagent }` (a `SubagentStart` / `SubagentStop`'s), its
+//!   `subagents` feature.
 //!
 //! An optional verb it doesn't declare answers none without a call. It
 //! emits nothing. `tool_use` and `render` run on the hook route's path,
@@ -30,10 +34,10 @@ use oxplow_domain::agent::harness::{
     AgentHarness, HarnessData, HarnessError, HarnessSetting, Interact, Launch, LaunchInput,
     RuntimeRoots, Transcript,
 };
-use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, TokenReading, Turn};
+use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, Prompt, TokenReading, Turn};
 use oxplow_domain::agent::registry::HarnessRegistry;
 use oxplow_domain::agent::text::AgentText;
-use oxplow_domain::agent::tool::ToolUse;
+use oxplow_domain::agent::tool::{Subagent, ToolUse};
 use oxplow_domain::capability::AGENT_HARNESS;
 use oxplow_domain::InputValidator;
 use serde_json::{json, Value};
@@ -274,6 +278,24 @@ impl AgentHarness for ExternalHarness {
             .await
             .and_then(|a| a.map(|a| field(a, "turns")).transpose());
         self.logged("turns", answer)
+    }
+
+    /// A harness without `subagents` reads a prompt as a person's (the
+    /// default); one with it says, on the hook path.
+    async fn prompt(&self, body: &Value) -> Option<Prompt> {
+        if !self.verbs.contains_key("prompt") {
+            return body
+                .get("prompt")
+                .and_then(|p| p.as_str())
+                .map(|text| Prompt::Person { text: text.into() });
+        }
+        let answer = self.hook_call("prompt", json!({ "body": body })).await?;
+        field::<Option<Prompt>>(answer, "prompt").ok().flatten()
+    }
+
+    async fn subagent(&self, body: &Value) -> Option<Subagent> {
+        let answer = self.hook_call("subagent", json!({ "body": body })).await?;
+        field::<Option<Subagent>>(answer, "subagent").ok().flatten()
     }
 
     async fn token_readings(&self, records: &[OtlpRecord]) -> Vec<TokenReading> {

@@ -304,6 +304,7 @@ fn codex_tool_use(body: &serde_json::Value) -> Option<ToolUse> {
         ok: exit_code.map(|c| c == 0),
         exit_code,
         question: None,
+        subagent: super::shared::subagent_of(body),
     })
 }
 
@@ -318,6 +319,24 @@ fn hook_command(oxplow_executable: &Path, event: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// A Codex spawned agent's own tool calls carry its `agent_id` /
+    /// `agent_type` (the recorded `codex/hooks.jsonl`).
+    #[test]
+    fn a_spawned_agents_calls_name_it() {
+        let call = codex_tool_use(&serde_json::json!({
+            "agent_id": "01a11f68-9625-7523-8ead-501bb708eb7d", "agent_type": "default",
+            "tool_name": "Bash", "tool_input": {"command": "wc -l codex.txt"}
+        }))
+        .unwrap();
+        assert_eq!(
+            call.subagent,
+            Some(oxplow_domain::agent::tool::Subagent {
+                id: "01a11f68-9625-7523-8ead-501bb708eb7d".into(),
+                kind: Some("default".into())
+            })
+        );
+    }
 
     /// Codex 0.158's tool hooks, as recorded: its shell is `Bash`, its
     /// patch rides `command`, a result's exit code is the first line of

@@ -300,6 +300,7 @@ mod tests {
                 prompt: Some("go".into()),
                 decision: None,
                 tool: None,
+                subagent: None,
             })
             .await
             .unwrap();
@@ -327,6 +328,7 @@ mod tests {
             prompt: Some("go".into()),
             decision: None,
             tool: None,
+            subagent: None,
         };
         f.svc
             .hook_ingest

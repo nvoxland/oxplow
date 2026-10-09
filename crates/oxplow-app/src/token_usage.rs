@@ -757,6 +757,7 @@ mod tests {
             prompt: None,
             decision: None,
             tool: None,
+            subagent: None,
         }
     }
 
@@ -772,6 +773,7 @@ mod tests {
                 prompt: Some("count me".into()),
                 decision: None,
                 tool: None,
+                subagent: None,
             })
             .await
             .unwrap();

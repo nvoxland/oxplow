@@ -1,0 +1,174 @@
+{
+  "$defs": {
+    "ContentRef": {
+      "additionalProperties": false,
+      "description": "Where a large or sensitive body lives: `event_content.hash` (xxh3-128\nhex) and its length. Retention may delete the body; the ref stays.",
+      "properties": {
+        "hash": {
+          "type": "string"
+        },
+        "size": {
+          "description": "The whole body's length, stored or not.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "truncated": {
+          "description": "Only the first part was stored (bodies are capped).",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "hash",
+        "size"
+      ],
+      "type": "object"
+    },
+    "SubagentRef": {
+      "additionalProperties": false,
+      "description": "A subagent inside an agent session, as a tool event or a subagent\nevent names it: not a session of its own, but who in the session acted.",
+      "properties": {
+        "id": {
+          "description": "The harness's id for the subagent, or the id of the call that\nstarted it when the harness gives none.",
+          "type": "string"
+        },
+        "kind": {
+          "description": "What kind of subagent the harness says it is, when it says.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "ToolDecision": {
+      "description": "What oxplow's agent policy said about a tool call.",
+      "enum": [
+        "allowed",
+        "denied"
+      ],
+      "type": "string"
+    },
+    "ToolKind": {
+      "description": "What a tool call does, as oxplow reads it.",
+      "oneOf": [
+        {
+          "const": "read",
+          "description": "Reads a file.",
+          "type": "string"
+        },
+        {
+          "const": "edit",
+          "description": "Writes, edits, deletes or moves files — the call names them.",
+          "type": "string"
+        },
+        {
+          "const": "shell",
+          "description": "Runs a shell command.",
+          "type": "string"
+        },
+        {
+          "const": "subagent",
+          "description": "Starts a subagent, which runs tools of its own.",
+          "type": "string"
+        },
+        {
+          "const": "ask",
+          "description": "Asks the person a question and waits for the answer.",
+          "type": "string"
+        },
+        {
+          "const": "plan",
+          "description": "Puts a plan to the person and waits for approval.",
+          "type": "string"
+        },
+        {
+          "const": "search",
+          "description": "Searches files (names or contents).",
+          "type": "string"
+        },
+        {
+          "const": "fetch",
+          "description": "Fetches or searches the web.",
+          "type": "string"
+        },
+        {
+          "const": "mcp",
+          "description": "Calls an MCP server's tool.",
+          "type": "string"
+        },
+        {
+          "const": "other",
+          "description": "Anything else (a to-do list, a mode switch, thinking).",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`agent.tool.requested@3`: the agent asked to run a tool (PreToolUse),\nand whether the policy let it. As `agent.tool.requested@2`, plus the\nsubagent that asked, when it wasn't the session's own agent. v2 upcasts\nas is (no subagent).",
+  "properties": {
+    "decision": {
+      "$ref": "#/$defs/ToolDecision"
+    },
+    "detail": {
+      "description": "A short summary (a truncated command, a search pattern).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "input": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ContentRef"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "kind": {
+      "$ref": "#/$defs/ToolKind"
+    },
+    "paths": {
+      "description": "The files it names, repo-relative inside the worktree.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "subagent": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SubagentRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The subagent that asked, when it wasn't the session's own agent."
+    },
+    "tool": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "tool",
+    "kind",
+    "decision"
+  ],
+  "title": "AgentToolRequestedV3",
+  "type": "object"
+}

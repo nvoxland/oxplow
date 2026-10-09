@@ -23,6 +23,22 @@ pub enum HookAnswer {
     Context { event: HookKind, text: String },
 }
 
+/// What a prompt hook (`UserPromptSubmit`) is, as its harness reads it.
+/// On the wire, `{ "kind": "person", "text" }` or `{ "kind": "handback",
+/// "subagent" }`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Prompt {
+    /// A person's prompt: it opens a turn.
+    Person { text: String },
+    /// A background subagent handing its report back to its session
+    /// (Claude Code posts it as a prompt): the subagent finished, and the
+    /// agent goes on working — not a person's words.
+    Handback {
+        subagent: crate::agent::tool::Subagent,
+    },
+}
+
 /// Summed usage across a chunk of transcript.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -63,13 +79,36 @@ impl Turn {
 }
 
 /// An OTLP attribute's value: on the wire, the JSON value itself.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum AttrValue {
     Str(String),
     Int(i64),
     Double(f64),
     Bool(bool),
+}
+
+/// Read through a JSON value, not an untagged enum: inside a record (an
+/// internally tagged enum, which buffers its content) an untagged number
+/// doesn't read back when serde_json keeps arbitrary-precision numbers,
+/// which a workspace build turns on.
+impl<'de> Deserialize<'de> for AttrValue {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error as _;
+        match serde_json::Value::deserialize(deserializer)? {
+            serde_json::Value::String(s) => Ok(AttrValue::Str(s)),
+            serde_json::Value::Bool(b) => Ok(AttrValue::Bool(b)),
+            serde_json::Value::Number(n) => match n.as_i64() {
+                Some(i) => Ok(AttrValue::Int(i)),
+                None => n.as_f64().map(AttrValue::Double).ok_or_else(|| {
+                    D::Error::custom(format!("an attribute number out of range: {n}"))
+                }),
+            },
+            other => Err(D::Error::custom(format!(
+                "an attribute is a string, number or boolean, not {other}"
+            ))),
+        }
+    }
 }
 
 /// An OTLP record's attributes, in order. On the wire, an object.
@@ -260,7 +299,10 @@ mod tests {
             wire["attributes"],
             serde_json::json!({"type": "input", "n": 2, "x": 1.5, "b": true})
         );
-        assert_eq!(serde_json::from_value::<OtlpRecord>(wire).unwrap(), record);
+        // Through text, which keeps the attributes' order whatever
+        // serde_json's map is built with.
+        let text = serde_json::to_string(&record).unwrap();
+        assert_eq!(serde_json::from_str::<OtlpRecord>(&text).unwrap(), record);
         let deny = HookAnswer::Deny {
             reason: "no".into(),
         };

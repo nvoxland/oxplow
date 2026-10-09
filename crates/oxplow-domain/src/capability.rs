@@ -239,6 +239,14 @@ pub const AGENT_HARNESS: ProviderContract = ProviderContract {
             name: "token_readings",
             needs: Need::Feature("telemetry"),
         },
+        Verb {
+            name: "prompt",
+            needs: Need::Feature("subagents"),
+        },
+        Verb {
+            name: "subagent",
+            needs: Need::Feature("subagents"),
+        },
     ],
     dispatch: None,
     events: &[],
@@ -352,6 +360,7 @@ pub const CAPABILITIES: &[CapabilitySpec] = &[
             "transcript",
             "telemetry",
             "runtime_text",
+            "subagents",
         ],
         provider: Some(&AGENT_HARNESS),
     },

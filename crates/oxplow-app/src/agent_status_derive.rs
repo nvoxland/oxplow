@@ -51,6 +51,10 @@ pub enum ActivityKind {
     AwaitingUser,
     /// A status that ends such a wait (`agent.status.changed`, other states).
     StatusOther,
+    /// A subagent of the session started (`agent.subagent.started`).
+    SubagentStarted,
+    /// A subagent of the session finished (`agent.subagent.finished`).
+    SubagentFinished,
 }
 
 /// The reducer's view of a logged event; `None` for events it ignores.
@@ -72,6 +76,8 @@ pub fn activity_of(event: &StoredEvent) -> Option<Activity> {
         "agent.session.started" => ActivityKind::SessionStarted,
         "agent.status.changed" if p["state"] == "awaiting_user" => ActivityKind::AwaitingUser,
         "agent.status.changed" => ActivityKind::StatusOther,
+        "agent.subagent.started" => ActivityKind::SubagentStarted,
+        "agent.subagent.finished" => ActivityKind::SubagentFinished,
         _ => return None,
     };
     Some(Activity {
@@ -183,6 +189,11 @@ pub fn derive_session_status_with_activity(
     // flip status back to waiting — the parent is genuinely still
     // working. Mirrors main's `pendingTasks`.
     let mut pending_tasks: i32 = 0;
+    // Subagents the harness says are running (`agent.subagent.started`
+    // without its `finished`): a background subagent outlives the call
+    // that started it, and the parent's turn, so a person's prompt
+    // doesn't end it either.
+    let mut running_subagents: i32 = 0;
     // User-input tools: PreToolUse fires when the agent asks the user
     // something; the matching PostToolUse only arrives once the user
     // answers. While that gap is open the agent is genuinely waiting on
@@ -246,7 +257,7 @@ pub fn derive_session_status_with_activity(
                 }
             }
             ActivityKind::TurnCompleted => {
-                state = if pending_tasks > 0 {
+                state = if pending_tasks > 0 || running_subagents > 0 {
                     AgentStatusState::Running
                 } else {
                     AgentStatusState::Idle
@@ -255,11 +266,19 @@ pub fn derive_session_status_with_activity(
             ActivityKind::TurnInterrupted | ActivityKind::SessionStarted => {
                 state = AgentStatusState::Idle;
                 pending_tasks = 0;
+                running_subagents = 0;
                 pending_user_input = 0;
                 open_tools = 0;
             }
             ActivityKind::AwaitingUser => awaiting = true,
             ActivityKind::StatusOther => awaiting = false,
+            ActivityKind::SubagentStarted => {
+                state = AgentStatusState::Running;
+                running_subagents += 1;
+            }
+            ActivityKind::SubagentFinished => {
+                running_subagents = (running_subagents - 1).max(0);
+            }
         }
     }
 
@@ -711,6 +730,37 @@ mod tests {
             at: at(ms),
             tool: None,
         }
+    }
+
+    /// A background subagent outlives the call that started it and the
+    /// parent's turn: the session works until it finishes, and a person's
+    /// prompt meanwhile doesn't end it.
+    #[test]
+    fn a_background_subagent_keeps_the_session_working() {
+        let mut events = vec![
+            ev(HookKind::UserPromptSubmit, 1, "{}"),
+            ev(HookKind::PreToolUse, 2, r#"{"kind":"subagent"}"#),
+            activity(ActivityKind::SubagentStarted, 3),
+            ev(HookKind::PostToolUse, 4, r#"{"kind":"subagent"}"#),
+            ev(HookKind::Stop, 5, "{}"),
+        ];
+        assert_eq!(
+            derive_session_status(&events, at(6)),
+            AgentStatusState::Running
+        );
+        events.push(ev(HookKind::UserPromptSubmit, 7, "{}"));
+        events.push(ev(HookKind::Stop, 8, "{}"));
+        assert_eq!(
+            derive_session_status(&events, at(9)),
+            AgentStatusState::Running,
+            "a prompt doesn't end it"
+        );
+        events.push(activity(ActivityKind::SubagentFinished, 10));
+        events.push(ev(HookKind::Stop, 11, "{}"));
+        assert_eq!(
+            derive_session_status(&events, at(12)),
+            AgentStatusState::Idle
+        );
     }
 
     /// A logged `awaiting_user` parks the thread on the person through the

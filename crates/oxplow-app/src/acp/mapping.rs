@@ -79,6 +79,7 @@ pub fn tool_use(t: &ToolCall) -> Option<ToolUse> {
         ok,
         exit_code,
         question: None,
+        subagent: None,
     })
 }
 

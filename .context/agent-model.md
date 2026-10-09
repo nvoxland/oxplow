@@ -191,6 +191,30 @@ reads), `token_readings` (telemetry core reads). So a harness implements
 only what it uses; adding a harness-specific feature is a defaulted method,
 not a requirement on every harness.
 
+**Who in a session acted.** A subagent (Claude Code's `Agent`/`Task`, a
+Codex spawned agent, an opencode child session) is not a session: it has
+no bearer and no process oxplow knows. It is who made a call inside its
+parent's session: `ToolUse.subagent { id, kind? }`, carried on
+`agent.tool.requested@3` / `agent.tool.finished@3` (and
+`v_tool_call.subagent_id`). The harness fills it when it can (Claude's and
+Codex's `agent_id` / `agent_type`, `shared::subagent_of`); else the ingest
+**brackets** it: a call landing while the session's open turn has a
+`subagent`-kind call requested and not finished is that call's subagent,
+named by its call id. `SubagentStart` / `SubagentStop` log
+`agent.subagent.started@1` / `.finished@1` (one each per subagent:
+dedupe `subagent:<session>:<id>:<phase>`), as the harness reads them
+(`AgentHarness::subagent`). A Claude Code **background** subagent outlives
+its parent's turn — its calls arrive after the parent's Stop — and hands
+its report back as a prompt (`<agent-message from="<id>">…`).
+`AgentHarness::prompt` says which a prompt is (`Prompt::Person` or
+`Prompt::Handback`): a hand-back logs no `agent.prompt.submitted`, opens
+a turn with no prompt if none is open (the agent works on the report), and
+finishes the subagent. Status keeps a session working while a subagent it
+started runs (the Stop's own status, and the reducer's `running_subagents`).
+A provider harness answers both as the `prompt` and `subagent` verbs, its
+`subagents` feature; recorded in `fixtures/claude/subagent.jsonl` and
+replayed (`a_recorded_claude_code_subagent_is_attributed`).
+
 The operations are async and their data owned — `launch`, `tool_use`,
 `render`, `refresh_text`, `turns`, `token_readings` await; the launch's
 input, `LaunchInput`, and every answer are serde shapes
@@ -441,9 +465,9 @@ depends only on the domain; core's text and the answerability questions live in
 - Claude writes `.oxplow/runtime/claude-plugin/`, passes it with
   `--plugin-dir`, and registers HTTP hooks for `PreToolUse`,
   `PostToolUse`, `UserPromptSubmit`, `SessionStart`, `SessionEnd`,
-  `Stop`, and `Notification`, plus events it only observes
-  (`SubagentStart`, `SubagentStop`, `TaskCreated`, `TaskCompleted`,
-  `PreCompact`), acked unread. `OXPLOW_HOOK_DEBUG=<file>` appends every
+  `Stop`, `Notification`, `SubagentStart` and `SubagentStop`, plus events
+  it only observes (`TaskCreated`, `TaskCompleted`, `PreCompact`), acked
+  unread. `OXPLOW_HOOK_DEBUG=<file>` appends every
   hook payload as sent, one JSON line each, to learn real payload shapes
   ([work-tracking.md](./work-tracking.md) "The record").
 - Codex keeps nothing under `.oxplow/runtime/`: its command hooks (`<oxplow>
@@ -595,11 +619,13 @@ one, and one that posts none (Codex) still ends.
      emit, so announcements reach the UI in commit order. What the rail
      *shows* is still derived from activity (`list_agent_statuses`), so a
      dead agent reads as stalled rather than its last announced status.
-   **Session tracking is part of it.** A session id seen for the first time
-   on a thread (on any hook — Claude posts no HTTP SessionStart) logs
+   **Session tracking is part of it.** A session id a prompt or a
+   `SessionStart` names for the first time on a thread (Claude posts no
+   HTTP SessionStart, so its first prompt does) logs
    `agent.session.started` once (dedupe key `session:<id>:started`) and
    becomes its agent session's `resume_session_id`, so a later restart relaunches with
-   `--resume <id>`. **A `SessionStart` is a process start** (tsk500):
+   `--resume <id>`. A tool hook's id never does: opencode's subagent posts
+   its calls under its child session's id, which is not the one to resume. **A `SessionStart` is a process start** (tsk500):
    every one except `source: "compact"` (a compaction inside a running
    turn) closes the turns the previous process left open as interrupted,
    logs `agent.session.started` again (`resumed: true` for the resume id)

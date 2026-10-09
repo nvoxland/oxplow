@@ -1,0 +1,49 @@
+{
+  "$defs": {
+    "SubagentRef": {
+      "additionalProperties": false,
+      "description": "A subagent inside an agent session, as a tool event or a subagent\nevent names it: not a session of its own, but who in the session acted.",
+      "properties": {
+        "id": {
+          "description": "The harness's id for the subagent, or the id of the call that\nstarted it when the harness gives none.",
+          "type": "string"
+        },
+        "kind": {
+          "description": "What kind of subagent the harness says it is, when it says.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`agent.subagent.finished@1`: a subagent of the session finished — it\nstopped, or handed its report back. One per subagent.",
+  "properties": {
+    "subagent": {
+      "$ref": "#/$defs/SubagentRef"
+    },
+    "thread": {
+      "type": "string"
+    },
+    "turn": {
+      "description": "The session's turn open when it finished, when one was.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "thread",
+    "subagent"
+  ],
+  "title": "AgentSubagentFinishedV1",
+  "type": "object"
+}

@@ -41,7 +41,7 @@ use tracing::{info, warn};
 
 use oxplow_app::session_auth::Principal;
 use oxplow_app::{HookEnvelope, Services, ToolDecision};
-use oxplow_domain::agent::observe::HookAnswer;
+use oxplow_domain::agent::observe::{HookAnswer, Prompt};
 use oxplow_domain::agent::registry::HarnessRegistry;
 use oxplow_domain::agent::tool::ToolUse;
 use oxplow_domain::{HookKind, ThreadId};
@@ -390,8 +390,13 @@ async fn handle_hook_inner(
     // also gives the agent a fresh system prompt, so discard the context
     // baselines and let the next prompt inject one fresh block.
     // Notification: a permission prompt waits on the person (the ingest
-    // records it as the thread's status). None of these carry policy.
-    if event == "SessionStart" || event == "SessionEnd" || event == "Notification" {
+    // records it as the thread's status). SubagentStart / SubagentStop:
+    // the subagent the bearer's harness reads in the body. None of these
+    // carry policy.
+    if matches!(
+        event.as_str(),
+        "SessionStart" | "SessionEnd" | "Notification" | "SubagentStart" | "SubagentStop"
+    ) {
         if event == "SessionStart" {
             ctx.services
                 .agent_context
@@ -400,7 +405,18 @@ async fn handle_hook_inner(
         let kind = match event.as_str() {
             "SessionStart" => HookKind::SessionStart,
             "SessionEnd" => HookKind::SessionEnd,
+            "SubagentStart" => HookKind::SubagentStart,
+            "SubagentStop" => HookKind::SubagentStop,
             _ => HookKind::Notification,
+        };
+        let subagent = match (kind, body_value.as_ref()) {
+            (HookKind::SubagentStart | HookKind::SubagentStop, Some(body)) => {
+                match ctx.services.harnesses.get(&principal.harness) {
+                    Ok(h) => h.subagent(body).await,
+                    Err(_) => None,
+                }
+            }
+            _ => None,
         };
         let envelope = HookEnvelope {
             kind,
@@ -412,6 +428,7 @@ async fn handle_hook_inner(
             prompt: None,
             decision: None,
             tool: None,
+            subagent,
         };
         let harness = match ctx.services.hook_ingest.ingest(envelope).await {
             Ok(outcome) => outcome.harness,
@@ -437,14 +454,21 @@ async fn handle_hook_inner(
         }
     };
 
-    let prompt = if kind == HookKind::UserPromptSubmit {
-        body_value
-            .as_ref()
-            .and_then(|v| v.get("prompt"))
-            .and_then(|s| s.as_str())
-            .map(|s| s.to_string())
-    } else {
-        None
+    // What a prompt hook is, as the bearer's harness reads it: a person's
+    // prompt, or a subagent handing its report back (no prompt; the
+    // subagent).
+    let (prompt, handback) = match (kind, body_value.as_ref()) {
+        (HookKind::UserPromptSubmit, Some(body)) => {
+            match ctx.services.harnesses.get(&principal.harness) {
+                Ok(h) => match h.prompt(body).await {
+                    Some(Prompt::Person { text }) => (Some(text), None),
+                    Some(Prompt::Handback { subagent }) => (None, Some(subagent)),
+                    None => (None, None),
+                },
+                Err(_) => (None, None),
+            }
+        }
+        _ => (None, None),
     };
 
     // A tool hook's call in oxplow's vocabulary, as the bearer's harness
@@ -478,6 +502,7 @@ async fn handle_hook_inner(
                     reason: Some(reason.clone()),
                 }),
                 tool: tool.clone(),
+                subagent: None,
             };
             let harness = match ctx.services.hook_ingest.ingest(envelope).await {
                 Ok(outcome) => outcome.harness,
@@ -508,6 +533,7 @@ async fn handle_hook_inner(
             reason: None,
         }),
         tool: tool.clone(),
+        subagent: handback.clone(),
     };
 
     let envelope_for_resume = envelope.clone();
@@ -557,7 +583,7 @@ async fn handle_hook_inner(
 
     // UserPromptSubmit: session context (when it changed), prompt
     // advisories and the effort's decisions ride additionalContext.
-    if kind == HookKind::UserPromptSubmit {
+    if kind == HookKind::UserPromptSubmit && handback.is_none() {
         if let Some(thread_id) = envelope_for_resume.thread_id.as_ref() {
             if let Some(combined) = ctx
                 .services

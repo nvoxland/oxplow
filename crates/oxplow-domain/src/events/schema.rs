@@ -165,11 +165,19 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<AgentToolRequestedAtV1>()
             .expect("core type registers");
+        r.register::<AgentToolRequestedAtV2>()
+            .expect("core type registers");
         r.register::<AgentToolRequested>()
             .expect("core type registers");
         r.register::<AgentToolFinishedAtV1>()
             .expect("core type registers");
+        r.register::<AgentToolFinishedAtV2>()
+            .expect("core type registers");
         r.register::<AgentToolFinished>()
+            .expect("core type registers");
+        r.register::<AgentSubagentStarted>()
+            .expect("core type registers");
+        r.register::<AgentSubagentFinished>()
             .expect("core type registers");
         r.register::<AgentStatusChanged>()
             .expect("core type registers");
@@ -1476,14 +1484,69 @@ pub struct AgentToolRequestedV2 {
     pub reason: Option<String>,
 }
 
-pub struct AgentToolRequested;
-impl EventType for AgentToolRequested {
+/// The v2 shape of `agent.tool.requested`, as a registry entry.
+pub struct AgentToolRequestedAtV2;
+impl EventType for AgentToolRequestedAtV2 {
     const TYPE: &'static str = "agent.tool.requested";
     const V: u32 = 2;
     type Payload = AgentToolRequestedV2;
     fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
         match from_v {
             1 => Ok(tool_v1_to_v2(payload)),
+            _ => Err(DomainError::Invalid(format!(
+                "no upcast of agent.tool.requested from v{from_v}"
+            ))),
+        }
+    }
+}
+
+/// A subagent inside an agent session, as a tool event or a subagent
+/// event names it: not a session of its own, but who in the session acted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SubagentRef {
+    /// The harness's id for the subagent, or the id of the call that
+    /// started it when the harness gives none.
+    pub id: String,
+    /// What kind of subagent the harness says it is, when it says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+}
+
+/// `agent.tool.requested@3`: the agent asked to run a tool (PreToolUse),
+/// and whether the policy let it. As `agent.tool.requested@2`, plus the
+/// subagent that asked, when it wasn't the session's own agent. v2 upcasts
+/// as is (no subagent).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AgentToolRequestedV3 {
+    pub tool: String,
+    pub kind: crate::agent::tool::ToolKind,
+    /// The files it names, repo-relative inside the worktree.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paths: Vec<String>,
+    /// A short summary (a truncated command, a search pattern).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<ContentRef>,
+    pub decision: ToolDecision,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// The subagent that asked, when it wasn't the session's own agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subagent: Option<SubagentRef>,
+}
+
+pub struct AgentToolRequested;
+impl EventType for AgentToolRequested {
+    const TYPE: &'static str = "agent.tool.requested";
+    const V: u32 = 3;
+    type Payload = AgentToolRequestedV3;
+    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
+        match from_v {
+            1 => Ok(tool_v1_to_v2(payload)),
+            2 => Ok(payload),
             _ => Err(DomainError::Invalid(format!(
                 "no upcast of agent.tool.requested from v{from_v}"
             ))),
@@ -1549,8 +1612,9 @@ pub struct AgentToolFinishedV2 {
     pub output: Option<ContentRef>,
 }
 
-pub struct AgentToolFinished;
-impl EventType for AgentToolFinished {
+/// The v2 shape of `agent.tool.finished`, as a registry entry.
+pub struct AgentToolFinishedAtV2;
+impl EventType for AgentToolFinishedAtV2 {
     const TYPE: &'static str = "agent.tool.finished";
     const V: u32 = 2;
     type Payload = AgentToolFinishedV2;
@@ -1562,6 +1626,90 @@ impl EventType for AgentToolFinished {
             ))),
         }
     }
+}
+
+/// `agent.tool.finished@3`: a tool call returned (PostToolUse). As
+/// `agent.tool.finished@2`, plus the subagent that made the call, when it
+/// wasn't the session's own agent. v2 upcasts as is (no subagent).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AgentToolFinishedV3 {
+    pub tool: String,
+    pub kind: crate::agent::tool::ToolKind,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paths: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    /// A shell call's command line, whole.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    /// Whether it succeeded, when the harness said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ok: Option<bool>,
+    /// A shell command's exit code.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<ContentRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<ContentRef>,
+    /// The subagent that made the call, when it wasn't the session's own
+    /// agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subagent: Option<SubagentRef>,
+}
+
+pub struct AgentToolFinished;
+impl EventType for AgentToolFinished {
+    const TYPE: &'static str = "agent.tool.finished";
+    const V: u32 = 3;
+    type Payload = AgentToolFinishedV3;
+    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
+        match from_v {
+            1 => Ok(tool_v1_to_v2(payload)),
+            2 => Ok(payload),
+            _ => Err(DomainError::Invalid(format!(
+                "no upcast of agent.tool.finished from v{from_v}"
+            ))),
+        }
+    }
+}
+
+/// `agent.subagent.started@1`: a subagent of the session started.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AgentSubagentStartedV1 {
+    pub thread: String,
+    /// The session's turn it started in, when one was open.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn: Option<String>,
+    pub subagent: SubagentRef,
+}
+
+pub struct AgentSubagentStarted;
+impl EventType for AgentSubagentStarted {
+    const TYPE: &'static str = "agent.subagent.started";
+    const V: u32 = 1;
+    type Payload = AgentSubagentStartedV1;
+}
+
+/// `agent.subagent.finished@1`: a subagent of the session finished — it
+/// stopped, or handed its report back. One per subagent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AgentSubagentFinishedV1 {
+    pub thread: String,
+    /// The session's turn open when it finished, when one was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn: Option<String>,
+    pub subagent: SubagentRef,
+}
+
+pub struct AgentSubagentFinished;
+impl EventType for AgentSubagentFinished {
+    const TYPE: &'static str = "agent.subagent.finished";
+    const V: u32 = 1;
+    type Payload = AgentSubagentFinishedV1;
 }
 
 /// A v1 tool event at v2: its one `path` as `paths`, and its kind read
@@ -2367,11 +2515,15 @@ mod tests {
                 ("agent.session.started", 1),
                 ("agent.session.started", 2),
                 ("agent.status.changed", 1),
+                ("agent.subagent.finished", 1),
+                ("agent.subagent.started", 1),
                 ("agent.tokens.reported", 1),
                 ("agent.tool.finished", 1),
                 ("agent.tool.finished", 2),
+                ("agent.tool.finished", 3),
                 ("agent.tool.requested", 1),
                 ("agent.tool.requested", 2),
+                ("agent.tool.requested", 3),
                 ("agent.turn.ended", 1),
                 ("agent.turn.ended", 2),
                 ("agent.turn.started", 1),
@@ -2714,8 +2866,9 @@ mod tests {
         assert!(WorkItemStateChanged::upcast(0, json!({})).is_err());
     }
 
-    /// A v1 tool event reads at v2 with its kind (from the Claude Code
-    /// name v1 carried) and its one path as `paths`.
+    /// A v1 tool event reads at the newest version with its kind (from
+    /// the Claude Code name v1 carried) and its one path as `paths`; a v2
+    /// one reads as it is, with no subagent.
     #[test]
     fn a_v1_tool_event_upcasts_with_its_kind_and_paths() {
         let r = EventSchemaRegistry::core();
@@ -2726,8 +2879,13 @@ mod tests {
                 json!({"tool": "Bash", "detail": "cargo test", "exit_code": 0, "ok": true}),
             )
             .unwrap();
-        assert_eq!(v, 2);
+        assert_eq!(v, 3);
         assert_eq!(up["kind"], "shell");
+        let v2 = json!({"tool": "Bash", "kind": "shell", "command": "ls", "ok": true});
+        let (v, up) = r
+            .upcast_to_latest("agent.tool.finished", 2, v2.clone())
+            .unwrap();
+        assert_eq!((v, up), (3, v2));
         let (_, up) = r
             .upcast_to_latest(
                 "agent.tool.requested",

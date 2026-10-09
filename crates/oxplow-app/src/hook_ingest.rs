@@ -50,11 +50,12 @@ use oxplow_db::agent_stores::{
 };
 use oxplow_db::event_log_store::{append_unique_tx, EventCtx};
 use oxplow_db::{event_content_store, Database};
-use oxplow_domain::agent::tool::{ToolKind, ToolUse};
+use oxplow_domain::agent::tool::{Subagent, ToolKind, ToolUse};
 use oxplow_domain::events::schema::{
     AgentPromptSubmitted, AgentPromptSubmittedV1, AgentSessionEnded, AgentSessionEndedV1,
-    AgentSessionStarted, AgentSessionStartedV2, AgentToolFinished, AgentToolFinishedV2,
-    AgentToolRequested, AgentToolRequestedV2, ContentRef, ToolDecision as Decision,
+    AgentSessionStarted, AgentSessionStartedV2, AgentSubagentFinished, AgentSubagentFinishedV1,
+    AgentSubagentStarted, AgentSubagentStartedV1, AgentToolFinished, AgentToolFinishedV3,
+    AgentToolRequested, AgentToolRequestedV3, ContentRef, SubagentRef, ToolDecision as Decision,
 };
 use oxplow_domain::refs::build::{thread_ref, turn_ref};
 use oxplow_domain::{
@@ -114,6 +115,13 @@ pub struct HookEnvelope {
     #[serde(skip)]
     #[specta(skip)]
     pub tool: Option<ToolUse>,
+    /// The subagent the hook is about, as its harness read it: a
+    /// `SubagentStart` / `SubagentStop`'s, or — on a `UserPromptSubmit`
+    /// with no `prompt` — the subagent handing its report back. In-process
+    /// only, as `tool` is.
+    #[serde(skip)]
+    #[specta(skip)]
+    pub subagent: Option<Subagent>,
 }
 
 #[derive(Debug, Error)]
@@ -469,13 +477,39 @@ fn record_tx(
         }
         status = Some((AgentStatusState::Idle, None));
     }
-    if env.kind != HookKind::SessionEnd {
+    // The harness session a session runs is the one its own prompts and
+    // starts name: a tool hook may come from a child session (opencode's
+    // subagent posts its calls under its own id), which is not the one to
+    // resume.
+    if matches!(
+        env.kind,
+        HookKind::UserPromptSubmit | HookKind::SessionStart
+    ) {
         if let Some(sid) = session {
             track_session_tx(conn, ev, thread, &row, sid, starts, now)?;
         }
     }
     applied.turn = open_turn_ids_in_tx(conn, thread, slot)?.first().copied();
     match env.kind {
+        // A subagent handing its report back: the agent goes on working on
+        // it — a turn, if none is open, with no person's prompt — and the
+        // subagent has finished.
+        HookKind::UserPromptSubmit if env.prompt.is_none() && env.subagent.is_some() => {
+            if applied.turn.is_none() {
+                applied.turn = Some(open_turn_tx(conn, ev, thread, slot, "", session, now)?);
+                applied.opened_turn = true;
+            }
+            if let Some(subagent) = &env.subagent {
+                log_subagent_tx(conn, ev, thread, slot, session, subagent, false)?;
+            }
+            status = Some((AgentStatusState::Running, None));
+        }
+        HookKind::SubagentStart | HookKind::SubagentStop => {
+            if let Some(subagent) = &env.subagent {
+                let started = env.kind == HookKind::SubagentStart;
+                log_subagent_tx(conn, ev, thread, slot, session, subagent, started)?;
+            }
+        }
         HookKind::UserPromptSubmit => {
             let reprompt = applied.turn.is_some();
             if !reprompt {
@@ -569,6 +603,10 @@ fn record_tx(
             applied.turn = None;
             status = Some(if env.kind == HookKind::Interrupt {
                 (AgentStatusState::Stopped, Some("interrupt".to_string()))
+            } else if subagents_running_tx(conn, thread, slot)? {
+                // Its turn ended with a background subagent still at
+                // work: the session is still working.
+                (AgentStatusState::Running, None)
             } else {
                 stop_status(answer)
             });
@@ -780,6 +818,122 @@ fn end_session_tx(
 
 /// `agent.tool.requested` / `agent.tool.finished` for a tool hook, with
 /// the input (and output) stored by hash.
+/// `agent.subagent.started` / `.finished` for `subagent` of the session:
+/// one each per subagent (a hand-back and its `SubagentStop` are one
+/// finish).
+fn log_subagent_tx(
+    conn: &rusqlite::Connection,
+    ev: &EventCtx<'_>,
+    thread: ThreadId,
+    slot: Option<oxplow_domain::AgentSessionId>,
+    session: Option<&str>,
+    subagent: &Subagent,
+    started: bool,
+) -> Result<(), DomainError> {
+    let anchors = activity_anchors_tx(conn, thread, slot)?;
+    let turn = anchors.turn_id.map(|t| turn_ref(AgentTurnId::new(t)));
+    let subagent_ref = subagent_ref(subagent);
+    let phase = if started { "started" } else { "finished" };
+    let envelope = if started {
+        ev.typed::<AgentSubagentStarted>(&AgentSubagentStartedV1 {
+            thread: thread_ref(thread),
+            turn: turn.clone(),
+            subagent: subagent_ref,
+        })
+    } else {
+        ev.typed::<AgentSubagentFinished>(&AgentSubagentFinishedV1 {
+            thread: thread_ref(thread),
+            turn: turn.clone(),
+            subagent: subagent_ref,
+        })
+    };
+    let envelope = envelope
+        .with_dedupe_key(subagent_key(slot, session, &subagent.id, phase))
+        .with_anchors(anchors)
+        .with_subject([turn.unwrap_or_else(|| thread_ref(thread))]);
+    append_unique_tx(conn, ev.vocabulary, &envelope)?;
+    Ok(())
+}
+
+/// The dedupe key of a subagent's `phase` event in the session.
+fn subagent_key(
+    slot: Option<oxplow_domain::AgentSessionId>,
+    session: Option<&str>,
+    id: &str,
+    phase: &str,
+) -> String {
+    let who = slot
+        .map(|s| s.to_string())
+        .or_else(|| session.map(str::to_string))
+        .unwrap_or_else(|| "-".into());
+    format!("subagent:{who}:{id}:{phase}")
+}
+
+fn subagent_ref(s: &Subagent) -> SubagentRef {
+    SubagentRef {
+        id: s.id.clone(),
+        kind: s.kind.clone(),
+    }
+}
+
+/// Whether a subagent of the session started and hasn't finished.
+fn subagents_running_tx(
+    conn: &rusqlite::Connection,
+    thread: ThreadId,
+    slot: Option<oxplow_domain::AgentSessionId>,
+) -> Result<bool, DomainError> {
+    conn.query_row(
+        "SELECT EXISTS (
+           SELECT 1 FROM event_log s
+            WHERE s.type = 'agent.subagent.started' AND s.thread_id = ?1
+              AND s.agent_session_id IS ?2 AND s.dedupe_key IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM event_log f
+                               WHERE f.dedupe_key = substr(s.dedupe_key, 1,
+                                     length(s.dedupe_key) - length('started')) || 'finished'))",
+        rusqlite::params![thread.value(), slot.map(|s| s.value())],
+        |r| r.get::<_, bool>(0),
+    )
+    .map_err(|e| DomainError::Storage(e.to_string()))
+}
+
+/// The subagent a call the harness didn't attribute belongs to: while the
+/// session's open turn has a subagent call (`Task`, opencode's child)
+/// requested and not finished, a call inside it is the subagent's — the
+/// bracket. The subagent is named by that call's id.
+fn bracketing_subagent_tx(
+    conn: &rusqlite::Connection,
+    turn: Option<i64>,
+) -> Result<Option<Subagent>, DomainError> {
+    use rusqlite::OptionalExtension as _;
+    let Some(turn) = turn else {
+        return Ok(None);
+    };
+    let key: Option<String> = conn
+        .query_row(
+            "SELECT r.dedupe_key FROM event_log r
+              WHERE r.turn_id = ?1 AND r.type = 'agent.tool.requested'
+                AND json_extract(r.payload, '$.kind') = 'subagent'
+                AND r.dedupe_key LIKE '%:requested'
+                AND NOT EXISTS (SELECT 1 FROM event_log f
+                                 WHERE f.dedupe_key = substr(r.dedupe_key, 1,
+                                       length(r.dedupe_key) - length('requested')) || 'finished')
+              ORDER BY r.seq DESC LIMIT 1",
+            [turn],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| DomainError::Storage(e.to_string()))?;
+    // `<harness session>:<call id>:requested`.
+    Ok(key.and_then(|k| {
+        let call = k.strip_suffix(":requested")?;
+        let (_, id) = call.split_once(':')?;
+        Some(Subagent {
+            id: id.to_string(),
+            kind: None,
+        })
+    }))
+}
+
 #[allow(
     clippy::too_many_arguments,
     reason = "the hook, its call and where it lands, read by one writer"
@@ -807,6 +961,16 @@ fn log_tool_tx(
             .map(|id| format!("{}:{id}:{phase}", session.unwrap_or("-")))
     };
     let anchors = activity_anchors_tx(conn, thread, row.session)?;
+    // Who in the session made the call: the harness's word, else the
+    // subagent call it falls inside. A subagent call itself is the
+    // session's own.
+    let subagent = match &tool.subagent {
+        Some(s) => Some(s.clone()),
+        None if tool.kind == ToolKind::Subagent => None,
+        None => bracketing_subagent_tx(conn, anchors.turn_id)?,
+    }
+    .as_ref()
+    .map(subagent_ref);
     let subject = anchors
         .turn_id
         .map(|t| turn_ref(AgentTurnId::new(t)))
@@ -816,7 +980,7 @@ fn log_tool_tx(
             allowed: true,
             reason: None,
         });
-        ev.typed::<AgentToolRequested>(&AgentToolRequestedV2 {
+        ev.typed::<AgentToolRequested>(&AgentToolRequestedV3 {
             tool: tool.name.clone(),
             kind: tool.kind,
             paths: recorded.paths,
@@ -828,11 +992,12 @@ fn log_tool_tx(
                 Decision::Denied
             },
             reason: decision.reason,
+            subagent: subagent.clone(),
         })
         .with_dedupe_key_opt(dedupe("requested"))
     } else {
         let finished = ev
-            .typed::<AgentToolFinished>(&AgentToolFinishedV2 {
+            .typed::<AgentToolFinished>(&AgentToolFinishedV3 {
                 tool: tool.name.clone(),
                 kind: tool.kind,
                 paths: recorded.paths,
@@ -842,6 +1007,7 @@ fn log_tool_tx(
                 exit_code: tool.exit_code,
                 input: content("tool_input")?,
                 output: content("tool_response")?,
+                subagent,
             })
             .with_dedupe_key_opt(dedupe("finished"));
         // Caused by the call's start, so what reads the run knows when it
@@ -1005,6 +1171,7 @@ mod tests {
                 .map(str::to_string),
             decision: None,
             tool: crate::test_fixtures::claude_tool(kind, &body),
+            subagent: None,
         }
     }
 
@@ -1069,6 +1236,161 @@ mod tests {
             .collect();
         open.sort_by_key(|s| s.map(|s| s.value()));
         open
+    }
+
+    /// A subagent hook from `sid`: a start or stop naming `id`, or (with
+    /// `UserPromptSubmit`) its hand-back.
+    fn subagent_hook(kind: HookKind, tid: ThreadId, sid: &str, id: &str) -> HookEnvelope {
+        HookEnvelope {
+            prompt: None,
+            subagent: Some(Subagent {
+                id: id.into(),
+                kind: Some("general-purpose".into()),
+            }),
+            ..hook(kind, tid, Some(sid), json!({}))
+        }
+    }
+
+    /// The subagent each finished tool call names.
+    async fn finished_subagents(svc: &HookIngestService) -> Vec<(String, Option<String>)> {
+        of_type(&logged(svc).await, "agent.tool.finished")
+            .iter()
+            .map(|e| {
+                (
+                    e.envelope.payload["tool"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string(),
+                    e.envelope.payload["subagent"]["id"]
+                        .as_str()
+                        .map(str::to_string),
+                )
+            })
+            .collect()
+    }
+
+    /// A call the harness doesn't attribute, inside a subagent call
+    /// (requested, not finished) of the session's open turn, is that
+    /// subagent's, named by the call's id; the subagent call itself and a
+    /// call after it are the session's own.
+    #[tokio::test]
+    async fn a_call_inside_a_subagent_call_is_the_subagents() {
+        let (svc, tid) = fixture().await;
+        let task = json!({"tool_name": "Task", "tool_input": {"description": "count"}, "tool_use_id": "toolu_t"});
+        let read = json!({"tool_name": "Read", "tool_input": {"file_path": "/p/a.txt"}, "tool_use_id": "toolu_r"});
+        let ls =
+            json!({"tool_name": "Bash", "tool_input": {"command": "ls"}, "tool_use_id": "toolu_b"});
+        for (kind, body) in [
+            (HookKind::UserPromptSubmit, json!({"prompt": "go"})),
+            (HookKind::PreToolUse, task.clone()),
+            (HookKind::PreToolUse, read.clone()),
+            (HookKind::PostToolUse, read),
+            (HookKind::PostToolUse, task),
+            (HookKind::PreToolUse, ls.clone()),
+            (HookKind::PostToolUse, ls),
+        ] {
+            svc.ingest(hook(kind, tid, Some("h1"), body)).await.unwrap();
+        }
+        assert_eq!(
+            finished_subagents(&svc).await,
+            vec![
+                ("Read".into(), Some("toolu_t".into())),
+                ("Task".into(), None),
+                ("Bash".into(), None)
+            ]
+        );
+    }
+
+    /// The harness session a session resumes is the one its own prompts
+    /// name: a tool hook from a child session (opencode's subagent) logs
+    /// no session start and leaves the resume pointer alone.
+    #[tokio::test]
+    async fn a_child_sessions_tool_hook_leaves_the_resume_pointer() {
+        let (svc, tid) = fixture().await;
+        svc.ingest(hook(
+            HookKind::UserPromptSubmit,
+            tid,
+            Some("ses_parent"),
+            json!({"prompt": "go"}),
+        ))
+        .await
+        .unwrap();
+        let read = json!({"tool_name": "Read", "tool_input": {"file_path": "/p/a.txt"}, "tool_use_id": "c1"});
+        svc.ingest(hook(HookKind::PreToolUse, tid, Some("ses_child"), read))
+            .await
+            .unwrap();
+        let resume = svc
+            .db
+            .read(|c| {
+                Ok(oxplow_db::agent_session_store::get_tx(c, first_session())?
+                    .map(|s| s.resume_session_id))
+            })
+            .await
+            .unwrap();
+        assert_eq!(resume.as_deref(), Some("ses_parent"));
+        assert_eq!(
+            of_type(&logged(&svc).await, "agent.session.started").len(),
+            1
+        );
+    }
+
+    /// A background subagent outlives its parent's turn: the Stop leaves
+    /// the session working; its hand-back is no person's prompt — the work
+    /// on it is a turn with none — and the subagent finishes once, though
+    /// its `SubagentStop` follows the hand-back.
+    #[tokio::test]
+    async fn a_background_subagent_hands_back_without_a_prompt() {
+        let (svc, tid) = fixture().await;
+        svc.ingest(hook(
+            HookKind::UserPromptSubmit,
+            tid,
+            Some("h1"),
+            json!({"prompt": "go"}),
+        ))
+        .await
+        .unwrap();
+        svc.ingest(subagent_hook(HookKind::SubagentStart, tid, "h1", "afd"))
+            .await
+            .unwrap();
+        svc.ingest(hook(
+            HookKind::Stop,
+            tid,
+            Some("h1"),
+            json!({"last_assistant_message": "started it"}),
+        ))
+        .await
+        .unwrap();
+        assert_eq!(
+            status(&svc, tid).await.map(|s| s.state),
+            Some(AgentStatusState::Running),
+            "a subagent is still at work"
+        );
+        svc.ingest(subagent_hook(HookKind::UserPromptSubmit, tid, "h1", "afd"))
+            .await
+            .unwrap();
+        svc.ingest(subagent_hook(HookKind::SubagentStop, tid, "h1", "afd"))
+            .await
+            .unwrap();
+        svc.ingest(hook(
+            HookKind::Stop,
+            tid,
+            Some("h1"),
+            json!({"last_assistant_message": "4 lines"}),
+        ))
+        .await
+        .unwrap();
+        let events = logged(&svc).await;
+        assert_eq!(of_type(&events, "agent.prompt.submitted").len(), 1);
+        assert_eq!(of_type(&events, "agent.subagent.started").len(), 1);
+        assert_eq!(of_type(&events, "agent.subagent.finished").len(), 1);
+        let all = turns(&svc).list_for_thread(&tid, 10).await.unwrap();
+        let mut prompts: Vec<String> = all.iter().map(|t| t.prompt.clone()).collect();
+        prompts.sort();
+        assert_eq!(prompts, ["", "go"]);
+        assert_eq!(
+            status(&svc, tid).await.map(|s| s.state),
+            Some(AgentStatusState::Idle)
+        );
     }
 
     /// Two sessions in one thread run their own turns: a Stop in one
@@ -1657,6 +1979,7 @@ mod tests {
             prompt: prompt.map(str::to_string),
             decision: None,
             tool: None,
+            subagent: None,
         };
         svc.ingest(envelope(HookKind::UserPromptSubmit, Some("p")))
             .await
@@ -1683,6 +2006,7 @@ mod tests {
             prompt: Some("do the thing".into()),
             decision: None,
             tool: None,
+            subagent: None,
         };
         svc.ingest(env).await.unwrap();
         // Spot-check via stores.
@@ -1706,6 +2030,7 @@ mod tests {
             prompt: Some("do".into()),
             decision: None,
             tool: None,
+            subagent: None,
         };
         svc.ingest(prompt_env).await.unwrap();
         let stop = HookEnvelope {
@@ -1718,6 +2043,7 @@ mod tests {
             prompt: None,
             decision: None,
             tool: None,
+            subagent: None,
         };
         svc.ingest(stop).await.unwrap();
         assert!(turns(&svc).list_open(&tid).await.unwrap().is_empty());
@@ -1738,6 +2064,7 @@ mod tests {
             prompt: Some("p".into()),
             decision: None,
             tool: None,
+            subagent: None,
         })
         .await
         .unwrap();
@@ -1751,6 +2078,7 @@ mod tests {
             prompt: None,
             decision: None,
             tool: None,
+            subagent: None,
         })
         .await
         .unwrap();
@@ -1789,6 +2117,7 @@ mod tests {
             prompt: Some("p".into()),
             decision: None,
             tool: None,
+            subagent: None,
         })
         .await
         .unwrap();
@@ -1802,6 +2131,7 @@ mod tests {
             prompt: None,
             decision: None,
             tool: None,
+            subagent: None,
         });
         // The caller gives up while the take is under way: the ingest's
         // future is dropped.
@@ -1831,6 +2161,7 @@ mod tests {
             prompt: prompt.map(str::to_string),
             decision: None,
             tool: None,
+            subagent: None,
         };
         svc.ingest(hook(HookKind::UserPromptSubmit, Some("p"), json!({})))
             .await
@@ -1879,6 +2210,7 @@ mod tests {
             prompt: None,
             decision: None,
             tool: None,
+            subagent: None,
         })
         .await
         .unwrap();
@@ -1900,6 +2232,7 @@ mod tests {
             prompt: Some("orphan".into()),
             decision: None,
             tool: None,
+            subagent: None,
         })
         .await
         .unwrap();
@@ -1923,6 +2256,7 @@ mod tests {
                 prompt: Some(prompt.into()),
                 decision: None,
                 tool: None,
+                subagent: None,
             })
             .await
             .unwrap();

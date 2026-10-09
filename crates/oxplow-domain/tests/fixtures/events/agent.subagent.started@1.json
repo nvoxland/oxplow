@@ -1,0 +1,8 @@
+{
+  "thread": "thread:thr2",
+  "turn": "turn:trn7",
+  "subagent": {
+    "id": "afd849d5d475e378d",
+    "kind": "general-purpose"
+  }
+}

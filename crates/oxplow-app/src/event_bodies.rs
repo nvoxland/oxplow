@@ -117,6 +117,7 @@ mod tests {
                 prompt: None,
                 decision: None::<ToolDecision>,
                 tool: crate::test_fixtures::claude_tool(HookKind::PostToolUse, &body),
+                subagent: None,
             })
             .await
             .unwrap();
@@ -174,6 +175,7 @@ mod tests {
                     prompt: Some(text.into()),
                     decision: None,
                     tool: None,
+                    subagent: None,
                 })
                 .await
                 .unwrap();

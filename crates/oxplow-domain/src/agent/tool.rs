@@ -66,6 +66,21 @@ impl ToolKind {
     }
 }
 
+/// A subagent an agent session started (Claude Code's `Agent`/`Task`, a
+/// Codex spawned agent, an opencode child session): not a session of its
+/// own — it has no bearer and no process oxplow knows — but who a tool
+/// call or a hand-back came from inside its parent session.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+pub struct Subagent {
+    /// The harness's id for it (Claude's `agent_id`, opencode's child
+    /// session id), or the starting call's id when the harness gives none.
+    pub id: String,
+    /// What kind of subagent the harness says it is (`general-purpose`,
+    /// `explore`), when it says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+}
+
 /// One tool call, as its harness maps it: the harness's own name for the
 /// tool, and what oxplow reads of it. On the wire, these fields; one left
 /// out is empty.
@@ -92,6 +107,11 @@ pub struct ToolUse {
     pub exit_code: Option<i64>,
     /// What an `Ask` asks: its first question.
     pub question: Option<String>,
+    /// The subagent that made the call, when it wasn't the session's own
+    /// agent (the harness says, or core brackets it by the open subagent
+    /// call).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subagent: Option<Subagent>,
 }
 
 #[cfg(test)]

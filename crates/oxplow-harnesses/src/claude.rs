@@ -31,9 +31,11 @@ use oxplow_domain::agent::harness::{
     AgentHarness, Endpoints, HarnessError, Interact, Launch, LaunchInput, LaunchSpec, RuntimeRoots,
     Transcript,
 };
-use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, TokenReading, Turn, UsageDelta};
+use oxplow_domain::agent::observe::{
+    HookAnswer, OtlpRecord, Prompt, TokenReading, Turn, UsageDelta,
+};
 use oxplow_domain::agent::text::AgentText;
-use oxplow_domain::agent::tool::ToolUse;
+use oxplow_domain::agent::tool::{Subagent, ToolUse};
 use oxplow_domain::events::schema::TokenKind;
 
 use super::shared::{
@@ -168,9 +170,37 @@ impl AgentHarness for Claude {
         records.iter().flat_map(token_reading).collect()
     }
 
+    /// A background subagent hands its report back as a prompt starting
+    /// `<agent-message from="<agent_id>">`: not a person's words.
+    async fn prompt(&self, body: &serde_json::Value) -> Option<Prompt> {
+        let text = body.get("prompt")?.as_str()?;
+        Some(match handback_from(text) {
+            Some(id) => Prompt::Handback {
+                subagent: Subagent {
+                    id: id.into(),
+                    kind: None,
+                },
+            },
+            None => Prompt::Person { text: text.into() },
+        })
+    }
+
+    /// `SubagentStart` / `SubagentStop` name it by `agent_id` / `agent_type`.
+    async fn subagent(&self, body: &serde_json::Value) -> Option<Subagent> {
+        super::shared::subagent_of(body)
+    }
+
     async fn render(&self, answer: &HookAnswer) -> serde_json::Value {
         super::shared::render(answer)
     }
+}
+
+/// The subagent id a hand-back prompt names (`<agent-message from="…">`).
+fn handback_from(text: &str) -> Option<&str> {
+    let rest = text.strip_prefix("<agent-message from=\"")?;
+    rest.split_once('"')
+        .map(|(id, _)| id)
+        .filter(|id| !id.is_empty())
 }
 
 /// Its `claude_code.token.usage` counter (delta temporality): the `type`
@@ -529,6 +559,59 @@ fn resume_state(home: &Path, cwd: &str, session_id: &str) -> ResumeState {
 
 #[cfg(test)]
 mod tests {
+
+    /// A background subagent, as Claude Code 2026-10 posts it (the
+    /// recorded `claude/subagent.jsonl`): its tool calls carry its
+    /// `agent_id` / `agent_type`; `SubagentStart` / `SubagentStop` name it;
+    /// its hand-back is a prompt starting `<agent-message from="…">`; a
+    /// person's prompt stays a person's.
+    #[test]
+    fn its_subagents_are_read_from_their_hooks() {
+        use oxplow_domain::agent::observe::Prompt;
+        use oxplow_domain::agent::tool::Subagent;
+        let h = harness("oxplow:claude-code", "claude");
+        let sub = Subagent {
+            id: "afd849d5d475e378d".into(),
+            kind: Some("general-purpose".into()),
+        };
+        let call = crate::test_launch::block(h.tool_use(&serde_json::json!({
+            "session_id": "56cf", "agent_id": "afd849d5d475e378d", "agent_type": "general-purpose",
+            "tool_name": "Bash", "tool_input": {"command": "wc -l claude.txt"}, "tool_use_id": "toolu_1"
+        })))
+        .unwrap();
+        assert_eq!(call.subagent, Some(sub.clone()));
+        let own = crate::test_launch::block(h.tool_use(&serde_json::json!({
+            "tool_name": "Bash", "tool_input": {"command": "ls"}
+        })))
+        .unwrap();
+        assert_eq!(own.subagent, None);
+        let start = serde_json::json!({
+            "hook_event_name": "SubagentStart", "agent_id": "afd849d5d475e378d", "agent_type": "general-purpose"
+        });
+        assert_eq!(
+            crate::test_launch::block(h.subagent(&start)),
+            Some(sub.clone())
+        );
+        let handback = serde_json::json!({
+            "prompt": "<agent-message from=\"afd849d5d475e378d\">\n[Subagent hand-back] The text below is the final report"
+        });
+        assert_eq!(
+            crate::test_launch::block(h.prompt(&handback)),
+            Some(Prompt::Handback {
+                subagent: Subagent {
+                    id: "afd849d5d475e378d".into(),
+                    kind: None
+                }
+            })
+        );
+        assert_eq!(
+            crate::test_launch::block(h.prompt(&serde_json::json!({"prompt": "write claude.txt"}))),
+            Some(Prompt::Person {
+                text: "write claude.txt".into()
+            })
+        );
+    }
+
     use super::*;
     use crate::test_launch::{harness, launch_in, owner_only, project_only};
     use oxplow_domain::agent::text::Text;

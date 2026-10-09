@@ -3358,7 +3358,14 @@ export type HookKind =
  *  The harness told the person something (Claude's `Notification`):
  *  a permission prompt waits on them.
  */
-"notification";
+"notification" | 
+// A subagent of the session started (Claude's `SubagentStart`).
+"subagent_start" | 
+/**
+ *  A subagent of the session finished (Claude's `SubagentStop`, or a
+ *  hand-back).
+ */
+"subagent_stop";
 
 /**
  *  The host a stream's worktree is on. Every stream is on the local machine

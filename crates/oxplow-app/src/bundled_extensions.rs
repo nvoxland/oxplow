@@ -500,6 +500,7 @@ mod tests {
             prompt: Some("go".into()),
             decision: None,
             tool: None,
+            subagent: None,
         };
         use oxplow_domain::hook::HookKind;
         f.svc
@@ -1121,6 +1122,7 @@ mod tests {
                             prompt: Some(prompt.into()),
                             decision: None,
                             tool: None,
+                            subagent: None,
                         })
                         .await
                         .unwrap();

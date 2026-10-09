@@ -31,6 +31,11 @@ pub enum HookKind {
     /// The harness told the person something (Claude's `Notification`):
     /// a permission prompt waits on them.
     Notification,
+    /// A subagent of the session started (Claude's `SubagentStart`).
+    SubagentStart,
+    /// A subagent of the session finished (Claude's `SubagentStop`, or a
+    /// hand-back).
+    SubagentStop,
 }
 
 #[derive(

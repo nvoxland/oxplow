@@ -386,7 +386,7 @@ and whether it keeps items.
 
 | | `work_items` | `effort_policy` | `agent_harness` |
 |---|---|---|---|
-| verbs | `create`, `update`, `transition`; `link` ← links, `comment` ← comments, `delete` ← delete, `reorder` ← ordering, `move` ← lists | `react` | `launch`, `tool_use`, `render`; `turns` ← transcript, `token_readings` ← telemetry, `refresh_text` ← runtime_text |
+| verbs | `create`, `update`, `transition`; `link` ← links, `comment` ← comments, `delete` ← delete, `reorder` ← ordering, `move` ← lists | `react` | `launch`, `tool_use`, `render`; `turns` ← transcript, `token_readings` ← telemetry, `refresh_text` ← runtime_text, `prompt` and `subagent` ← subagents |
 | verbs run as | `oxplow.work_item.<verb>` | the dispatcher's call (nothing undoes it) | core's call: a session's launch, the hook route, the OTLP route, a transcript read, a text refresh |
 | declares as `data` | nothing | nothing | `instruction_files`, `env_markers`, `settings` |
 | may emit | `work_item.recorded@2` | nothing | nothing |
@@ -420,7 +420,10 @@ and answers a `Launch` (`{ spec: { kind: pty, command, env } | { kind:
 acp, program, args, env, system_prompt_via_meta }, resume_dropped? }`);
 `tool_use { body }` → `{ tool }`; `render { answer }` (`{ kind: ack |
 deny | context, … }`) → `{ body }`; `refresh_text { roots, text }` → `{}`;
-`turns { transcript }` → `{ turns }`; `token_readings { records }` (one
+`turns { transcript }` → `{ turns }`; `prompt { body }` → `{ prompt: { kind:
+person, text } | { kind: handback, subagent } | null }` and `subagent {
+body }` → `{ subagent }` (a `SubagentStart`/`SubagentStop`'s), both its
+`subagents` feature (without it a prompt is a person's); `token_readings { records }` (one
 export's) → `{ readings }`. An optional verb it doesn't declare answers
 none, uncalled. `tool_use` and `render` are on the hook route's path:
 each is bounded at 1 s (`HOOK_VERB_TIMEOUT`, inside the route's 5 s), and

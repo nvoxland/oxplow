@@ -37,9 +37,11 @@ thread per stream.
 it, to that file, one JSON line each (`event`, `thread`, `at`, `payload`).
 Use it to learn a harness's real payload shapes before depending on them.
 Besides the hooks oxplow acts on, the Claude Code plugin registers events it
-only observes — `SubagentStart`, `SubagentStop`, `TaskCreated`,
-`TaskCompleted`, `PreCompact` — which are acked unread until something
-needs them (`crates/oxplow-harnesses/src/claude.rs` `HOOK_EVENTS`).
+only observes — `TaskCreated`, `TaskCompleted`, `PreCompact` — which are
+acked unread until something needs them
+(`crates/oxplow-harnesses/src/claude.rs` `HOOK_EVENTS`). `SubagentStart`
+and `SubagentStop` are read: see "Who in a session acted" in
+[agent-model.md](./agent-model.md).
 
 ## Efforts: a core bucket, a pluggable policy
 

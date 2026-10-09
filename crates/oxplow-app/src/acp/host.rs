@@ -105,6 +105,7 @@ impl ServicesAcpHost {
             prompt,
             decision: None,
             tool: None,
+            subagent: None,
         }
     }
 
@@ -308,6 +309,7 @@ impl AcpHost for ServicesAcpHost {
             prompt: None,
             decision: None,
             tool: None,
+            subagent: None,
         };
         // Its open turn ends interrupted; the agent is gone either way, so
         // the session reads stopped even when no turn was running.
