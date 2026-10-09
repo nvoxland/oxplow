@@ -12,6 +12,7 @@ pub mod code_intel;
 pub mod commands;
 pub mod comment;
 pub mod effort_impact;
+pub mod effort_policy;
 pub mod error;
 pub mod events;
 pub mod hook;

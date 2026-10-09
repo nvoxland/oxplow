@@ -1,8 +1,19 @@
-//! The default effort policy (`.context/work-tracking.md`): when a
-//! thread's effort opens, closes and links, as a reaction to core's events.
-//! It uses only what any policy could: the public `effort.*` and
-//! `work_item.*` commands, run as its own effect actor, and the `v_*`
-//! models.
+//! The effort policy (`.context/work-tracking.md`): when a thread's effort
+//! opens, closes and links, as a reaction to core's events. A policy is an
+//! [`EffortPolicy`] — it composes commands and core runs them — and the
+//! project chooses one like a work list (`activeProviders.effort_policy`:
+//! `oxplow`, the default; `none`, which leaves efforts to people and
+//! agents; or a provider instance's id).
+//!
+//! [`EffortPolicyConsumer`] is the dispatcher: it offers the active policy
+//! each of [`EVENTS`] and runs what it composes, in order, as the effect
+//! `effort_policy:<id>` — the public `effort.*` and `work_item.*` commands,
+//! with every gate they meet — stopping at the first that fails. Switching
+//! the effort policy (`capability.switched`) closes every open effort
+//! (`switch`): that is core's rule, whichever policy is active after.
+//!
+//! [`CommitOrSwitch`] is the built-in (`oxplow:commit-or-switch`). It uses
+//! only what any policy could: the `v_*` models and those commands.
 //!
 //! Rule 1, linking and task switch:
 //! - an item moved to `in_progress` links the thread's open effort, opening
@@ -25,11 +36,6 @@
 //! commit. A partial landing leaves it open; a reset or a branch switch
 //! lands nothing, so it closes nothing. Work after the commit is the next
 //! effort's (rule 2 opens it, adopting no further back than the close).
-//!
-//! The project chooses it like a work list: `activeProviders.effort_policy`
-//! is `oxplow` (the default) or `none`, which leaves efforts to people and
-//! agents. Switching it (`capability.switched`) closes the open efforts
-//! (`switch`): the policy they were opened under is no longer the one.
 
 use oxplow_domain::refs::build::{effort_ref, thread_ref};
 use std::sync::{Arc, RwLock, Weak};
@@ -37,13 +43,14 @@ use std::sync::{Arc, RwLock, Weak};
 use async_trait::async_trait;
 use oxplow_config::OxplowConfig;
 use oxplow_db::SqlCell;
+use oxplow_domain::effort_policy::{EffortPolicy, EffortPolicyRegistry, PolicyEvent, EVENTS};
 use oxplow_domain::events::schema::{
     CapabilitySwitched, CapabilitySwitchedV1, EffortLanded, EffortLandedV1, EffortLinked,
-    EffortLinkedV1, EffortOpened, EffortOpenedV2, EventType as _, ThreadCheckpoint,
-    ThreadCheckpointV1, WorkItemStateChanged, WorkItemStateChangedV1,
+    EffortLinkedV1, EffortOpenedV2, EventType as _, ThreadCheckpoint, ThreadCheckpointV1,
+    WorkItemStateChanged, WorkItemStateChangedV1,
 };
 use oxplow_domain::work_items::CanonicalState;
-use oxplow_domain::{Actor, DomainError, EffortId, StoredEvent, ThreadId};
+use oxplow_domain::{Actor, CommandCall, DomainError, EffortId, StoredEvent, ThreadId};
 use serde_json::{json, Value};
 
 use crate::commands::CommandBus;
@@ -56,32 +63,51 @@ pub const NAME: &str = "effort.policy";
 pub const CAPABILITY: &str = "effort_policy";
 /// The choice that turns the policy off.
 pub const NONE: &str = "none";
-/// The effect the policy's commands run as.
-pub const EFFECT: &str = "oxplow:effort-policy";
 
 /// How deep a parent chain is followed before giving up (a cycle).
 const MAX_DEPTH: usize = 32;
 
-/// This policy's built-in entry (`capabilities::BUILT_INS`).
+/// The built-in policy's entry (`capabilities::BUILT_INS`).
 pub const BUILT_IN: &str = "oxplow:commit-or-switch";
 
-pub struct EffortPolicyConsumer {
-    pub bus: Weak<CommandBus>,
-    pub sql: SqlGateway,
-    pub config: Arc<RwLock<OxplowConfig>>,
-    pub capabilities: Arc<crate::capabilities::CapabilityRegistry>,
-}
-
-fn actor() -> Actor {
+/// The effect policy `id`'s commands run as: `effect:effort_policy:<id>`.
+pub fn actor(id: &str) -> Actor {
     Actor::Effect {
-        effect: EFFECT.into(),
+        effect: format!("{CAPABILITY}:{id}"),
         thread_id: None,
         stream_id: None,
     }
 }
 
+/// Whether `source` is a policy's own run: reacting to it would loop.
+fn is_a_policys(source: &str) -> bool {
+    source.starts_with(&format!("effect:{CAPABILITY}:"))
+}
+
 fn storage(e: impl std::fmt::Display) -> DomainError {
     DomainError::Storage(e.to_string())
+}
+
+fn call(name: &str, input: Value) -> CommandCall {
+    CommandCall {
+        name: name.to_string(),
+        input,
+    }
+}
+
+/// What a policy is offered of `event`.
+pub fn policy_event(event: &StoredEvent) -> PolicyEvent {
+    let env = &event.envelope;
+    PolicyEvent {
+        id: env.id.to_string(),
+        event_type: env.event_type.clone(),
+        v: env.v,
+        seq: event.seq,
+        source: env.source.clone(),
+        subject: env.subject.clone(),
+        payload: env.payload.clone(),
+        anchors: env.anchors.clone(),
+    }
 }
 
 /// A thread's open effort, as `v_effort` has it.
@@ -90,28 +116,16 @@ struct Open {
     work_item: Option<String>,
 }
 
-impl EffortPolicyConsumer {
-    /// Whether this policy is the effort policy the person and project
-    /// chose (or the default): the `oxplow:commit-or-switch` built-in.
-    fn active(&self) -> bool {
-        let config = crate::config_service::read_config(&self.config);
-        let id = self.capabilities.active(&config, CAPABILITY);
-        self.capabilities
-            .get(CAPABILITY, &id)
-            .is_some_and(|i| i.source == crate::capabilities::Source::BuiltIn(BUILT_IN))
-    }
+/// The built-in effort policy (`oxplow:commit-or-switch`): rules 1–3,
+/// reading through the `v_*` models and composing `effort.*` /
+/// `work_item.*` calls.
+pub struct CommitOrSwitch {
+    /// The id it's declared under.
+    pub id: String,
+    pub sql: SqlGateway,
+}
 
-    async fn run(&self, name: &str, input: Value) -> Result<(), DomainError> {
-        let bus = self
-            .bus
-            .upgrade()
-            .ok_or_else(|| DomainError::Invariant("the command bus is gone".into()))?;
-        bus.run(&actor(), name, input, false)
-            .await
-            .map(|_| ())
-            .map_err(|e| storage(format!("{name}: {e}")))
-    }
-
+impl CommitOrSwitch {
     async fn rows(
         &self,
         sql: &str,
@@ -189,75 +203,58 @@ impl EffortPolicyConsumer {
         Ok(false)
     }
 
-    async fn started(&self, event: &StoredEvent, item_ref: &str) -> Result<(), DomainError> {
-        let thread = match event.envelope.anchors.thread_id {
+    async fn started(
+        &self,
+        event: &PolicyEvent,
+        item_ref: &str,
+    ) -> Result<Vec<CommandCall>, DomainError> {
+        let thread = match event.anchors.thread_id {
             Some(t) => Some(t),
             None => self.item(item_ref).await?.and_then(|(_, t)| t),
         };
         let Some(thread) = thread else {
-            return Ok(());
+            return Ok(Vec::new());
         };
-        let open = self.open_on(thread).await?;
-        let Some(open) = open else {
-            return self
-                .run(
-                    crate::commands::effort::OPEN,
-                    json!({ "thread": thread_ref(thread), "work_item": item_ref }),
-                )
-                .await;
+        let open_new = || {
+            call(
+                crate::commands::effort::OPEN,
+                json!({ "thread": thread_ref(thread), "work_item": item_ref }),
+            )
         };
-        match open.work_item.as_deref() {
-            Some(linked) if linked == item_ref => Ok(()),
-            Some(linked) if self.is_under(linked, item_ref).await? => Ok(()),
-            Some(linked) if !self.is_under(item_ref, linked).await? => {
-                self.run(
+        let Some(open) = self.open_on(thread).await? else {
+            return Ok(vec![open_new()]);
+        };
+        Ok(match open.work_item.as_deref() {
+            Some(linked) if linked == item_ref => Vec::new(),
+            Some(linked) if self.is_under(linked, item_ref).await? => Vec::new(),
+            Some(linked) if !self.is_under(item_ref, linked).await? => vec![
+                call(
                     crate::commands::effort::CLOSE,
                     json!({ "effort": effort_ref(open.id), "reason": "switch" }),
-                )
-                .await?;
-                self.run(
-                    crate::commands::effort::OPEN,
-                    json!({ "thread": thread_ref(thread), "work_item": item_ref }),
-                )
-                .await
-            }
-            _ => {
-                self.run(
-                    crate::commands::effort::LINK,
-                    json!({ "effort": effort_ref(open.id), "work_item": item_ref }),
-                )
-                .await
-            }
-        }
+                ),
+                open_new(),
+            ],
+            _ => vec![call(
+                crate::commands::effort::LINK,
+                json!({ "effort": effort_ref(open.id), "work_item": item_ref }),
+            )],
+        })
     }
 
-    async fn finished(&self, item_ref: &str) -> Result<(), DomainError> {
-        self.close_open(
+    async fn finished(&self, item_ref: &str) -> Result<Vec<CommandCall>, DomainError> {
+        close_open(
+            &self.sql,
             "SELECT id FROM v_effort WHERE work_item = ?1 AND ended_at IS NULL",
             vec![SqlCell::Text(item_ref.into())],
         )
         .await
     }
 
-    /// Close the open efforts `sql` selects the ids of (`switch`).
-    async fn close_open(&self, sql: &str, params: Vec<SqlCell>) -> Result<(), DomainError> {
-        for row in self.rows(sql, params).await? {
-            if let Some(SqlCell::Int(id)) = row.first() {
-                self.run(
-                    crate::commands::effort::CLOSE,
-                    json!({ "effort": effort_ref(EffortId::new(*id)), "reason": "switch" }),
-                )
-                .await?;
-            }
-        }
-        Ok(())
-    }
-
     /// A turn changed `thread`'s worktree: open an effort adopting the turn,
     /// unless one is open.
-    async fn changed(&self, thread: ThreadId, turn: i64) -> Result<(), DomainError> {
+    async fn changed(&self, thread: ThreadId, turn: i64) -> Result<Vec<CommandCall>, DomainError> {
         if self.open_on(thread).await?.is_some() {
-            return Ok(());
+            return Ok(Vec::new());
         }
         let rows = self
             .rows(
@@ -266,32 +263,166 @@ impl EffortPolicyConsumer {
             )
             .await?;
         let Some(started) = rows.first().and_then(|r| r.first()).and_then(text) else {
-            return Ok(());
+            return Ok(Vec::new());
         };
-        self.run(
+        Ok(vec![call(
             crate::commands::effort::OPEN,
             json!({ "thread": thread_ref(thread), "adopt_since": started }),
-        )
-        .await
+        )])
     }
 
     /// Work was linked to `item_ref`: a `todo` item moves to in progress.
-    async fn linked(&self, item_ref: &str) -> Result<(), DomainError> {
-        if let Some((Some(CanonicalState::Todo), _)) = self.item(item_ref).await? {
-            self.run(
+    async fn linked(&self, item_ref: &str) -> Result<Vec<CommandCall>, DomainError> {
+        Ok(match self.item(item_ref).await? {
+            Some((Some(CanonicalState::Todo), _)) => vec![call(
                 crate::commands::work_item::NAME,
                 json!({ "ref": item_ref, "to": "in_progress" }),
-            )
-            .await?;
-        }
-        Ok(())
+            )],
+            _ => Vec::new(),
+        })
     }
+}
+
+#[async_trait]
+impl EffortPolicy for CommitOrSwitch {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    async fn react(&self, event: &PolicyEvent) -> Result<Vec<CommandCall>, DomainError> {
+        let payload = event.payload.clone();
+        match event.event_type.as_str() {
+            t if t == WorkItemStateChanged::TYPE => {
+                let changed: WorkItemStateChangedV1 =
+                    serde_json::from_value(payload).map_err(storage)?;
+                match changed.to {
+                    CanonicalState::InProgress => self.started(event, &changed.work_item).await,
+                    CanonicalState::Done | CanonicalState::Canceled => {
+                        self.finished(&changed.work_item).await
+                    }
+                    CanonicalState::Todo | CanonicalState::Blocked => Ok(Vec::new()),
+                }
+            }
+            t if t == EffortLinked::TYPE => {
+                let linked: EffortLinkedV1 = serde_json::from_value(payload).map_err(storage)?;
+                match linked.work_item {
+                    Some(item) => self.linked(&item).await,
+                    None => Ok(Vec::new()),
+                }
+            }
+            t if t == EffortLanded::TYPE => {
+                let landed: EffortLandedV1 = serde_json::from_value(payload).map_err(storage)?;
+                if !landed.complete {
+                    return Ok(Vec::new());
+                }
+                match event.anchors.effort_id {
+                    Some(effort) if self.is_open(effort).await? => Ok(vec![call(
+                        crate::commands::effort::CLOSE,
+                        json!({ "effort": effort_ref(effort), "reason": "commit" }),
+                    )]),
+                    _ => Ok(Vec::new()),
+                }
+            }
+            t if t == ThreadCheckpoint::TYPE => {
+                let checkpoint: ThreadCheckpointV1 =
+                    serde_json::from_value(payload).map_err(storage)?;
+                if !checkpoint.changed || checkpoint.writing_tools == 0 {
+                    return Ok(Vec::new());
+                }
+                match (event.anchors.thread_id, event.anchors.turn_id) {
+                    (Some(thread), Some(turn)) => self.changed(thread, turn).await,
+                    _ => Ok(Vec::new()),
+                }
+            }
+            _ => {
+                let opened: EffortOpenedV2 = serde_json::from_value(payload).map_err(storage)?;
+                match opened.work_item {
+                    Some(item) => self.linked(&item).await,
+                    None => Ok(Vec::new()),
+                }
+            }
+        }
+    }
+}
+
+/// Close calls (`switch`) for the open efforts `sql` selects the ids of.
+async fn close_open(
+    gateway: &SqlGateway,
+    sql: &str,
+    params: Vec<SqlCell>,
+) -> Result<Vec<CommandCall>, DomainError> {
+    Ok(gateway
+        .query_sql(sql, params, None)
+        .await?
+        .rows
+        .into_iter()
+        .filter_map(|row| match row.first() {
+            Some(SqlCell::Int(id)) => Some(call(
+                crate::commands::effort::CLOSE,
+                json!({ "effort": effort_ref(EffortId::new(*id)), "reason": "switch" }),
+            )),
+            _ => None,
+        })
+        .collect())
 }
 
 fn text(cell: &SqlCell) -> Option<String> {
     match cell {
         SqlCell::Text(s) => Some(s.clone()),
         _ => None,
+    }
+}
+
+/// Register the built-in policies the extensions declare (`implementations:`
+/// naming [`BUILT_IN`]) under their declared ids, replacing the ones
+/// declared before; a running provider instance stays registered.
+pub fn register_built_ins(
+    registry: &EffortPolicyRegistry,
+    declared: &[crate::capabilities::Implementation],
+    sql: &SqlGateway,
+) {
+    let built: Vec<Arc<dyn EffortPolicy>> = declared
+        .iter()
+        .filter(|i| i.capability == CAPABILITY)
+        .filter(|i| i.source == crate::capabilities::Source::BuiltIn(BUILT_IN))
+        .map(|i| {
+            let policy: Arc<dyn EffortPolicy> = Arc::new(CommitOrSwitch {
+                id: i.id.clone(),
+                sql: sql.clone(),
+            });
+            policy
+        })
+        .collect();
+    registry.set_declared(built);
+}
+
+/// The dispatcher: offers the active effort policy each of [`EVENTS`] and
+/// runs what it composes; closes every open effort when the effort policy
+/// is switched.
+pub struct EffortPolicyConsumer {
+    pub bus: Weak<CommandBus>,
+    pub sql: SqlGateway,
+    pub config: Arc<RwLock<OxplowConfig>>,
+    pub capabilities: Arc<crate::capabilities::CapabilityRegistry>,
+    pub policies: Arc<EffortPolicyRegistry>,
+}
+
+impl EffortPolicyConsumer {
+    fn bus(&self) -> Result<Arc<CommandBus>, DomainError> {
+        self.bus
+            .upgrade()
+            .ok_or_else(|| DomainError::Invariant("the command bus is gone".into()))
+    }
+
+    /// Run `calls`, in order, as `actor`, stopping at the first that fails.
+    async fn run(&self, actor: &Actor, calls: Vec<CommandCall>) -> Result<(), DomainError> {
+        let bus = self.bus()?;
+        for c in calls {
+            bus.run(actor, &c.name, c.input, false)
+                .await
+                .map_err(|e| storage(format!("{}: {e}", c.name)))?;
+        }
+        Ok(())
     }
 }
 
@@ -302,90 +433,46 @@ impl AsyncEventConsumer for EffortPolicyConsumer {
     }
 
     fn handles(&self, event_type: &str) -> bool {
-        event_type == WorkItemStateChanged::TYPE
-            || event_type == CapabilitySwitched::TYPE
-            || event_type == EffortLinked::TYPE
-            || event_type == EffortOpened::TYPE
-            || event_type == ThreadCheckpoint::TYPE
-            || event_type == EffortLanded::TYPE
+        event_type == CapabilitySwitched::TYPE || EVENTS.iter().any(|(t, _)| *t == event_type)
     }
 
     async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError> {
-        // A switch of the effort policy, to or from this one, closes what
-        // the policy before it opened — whichever is active now.
+        // A switch of the effort policy closes what the policy before it
+        // opened — core's rule, whichever is active now.
         if event.envelope.event_type == CapabilitySwitched::TYPE {
             let switched: CapabilitySwitchedV1 =
                 serde_json::from_value(event.envelope.payload.clone()).map_err(storage)?;
-            return match switched.capability.as_str() {
-                CAPABILITY => {
-                    self.close_open("SELECT id FROM v_effort WHERE ended_at IS NULL", vec![])
-                        .await
-                }
-                _ => Ok(()),
-            };
+            if switched.capability != CAPABILITY {
+                return Ok(());
+            }
+            let calls = close_open(
+                &self.sql,
+                "SELECT id FROM v_effort WHERE ended_at IS NULL",
+                vec![],
+            )
+            .await?;
+            return self.run(&Actor::System, calls).await;
         }
-        // Its own runs are its own doing: reacting to them would loop.
-        if !self.active() || event.envelope.source == actor().source() {
+        // A policy's own runs are its own doing: reacting to them would loop.
+        if is_a_policys(&event.envelope.source) {
             return Ok(());
         }
-        let payload = event.envelope.payload.clone();
-        match event.envelope.event_type.as_str() {
-            t if t == WorkItemStateChanged::TYPE => {
-                let changed: WorkItemStateChangedV1 =
-                    serde_json::from_value(payload).map_err(storage)?;
-                match changed.to {
-                    CanonicalState::InProgress => self.started(event, &changed.work_item).await,
-                    CanonicalState::Done | CanonicalState::Canceled => {
-                        self.finished(&changed.work_item).await
-                    }
-                    CanonicalState::Todo | CanonicalState::Blocked => Ok(()),
-                }
-            }
-            t if t == EffortLinked::TYPE => {
-                let linked: EffortLinkedV1 = serde_json::from_value(payload).map_err(storage)?;
-                match linked.work_item {
-                    Some(item) => self.linked(&item).await,
-                    None => Ok(()),
-                }
-            }
-            t if t == EffortLanded::TYPE => {
-                let landed: EffortLandedV1 = serde_json::from_value(payload).map_err(storage)?;
-                if !landed.complete {
-                    return Ok(());
-                }
-                match event.envelope.anchors.effort_id {
-                    Some(effort) if self.is_open(effort).await? => {
-                        self.run(
-                            crate::commands::effort::CLOSE,
-                            json!({ "effort": effort_ref(effort), "reason": "commit" }),
-                        )
-                        .await
-                    }
-                    _ => Ok(()),
-                }
-            }
-            t if t == ThreadCheckpoint::TYPE => {
-                let checkpoint: ThreadCheckpointV1 =
-                    serde_json::from_value(payload).map_err(storage)?;
-                if !checkpoint.changed || checkpoint.writing_tools == 0 {
-                    return Ok(());
-                }
-                match (
-                    event.envelope.anchors.thread_id,
-                    event.envelope.anchors.turn_id,
-                ) {
-                    (Some(thread), Some(turn)) => self.changed(thread, turn).await,
-                    _ => Ok(()),
-                }
-            }
-            _ => {
-                let opened: EffortOpenedV2 = serde_json::from_value(payload).map_err(storage)?;
-                match opened.work_item {
-                    Some(item) => self.linked(&item).await,
-                    None => Ok(()),
-                }
-            }
+        let config = crate::config_service::read_config(&self.config);
+        let id = self.capabilities.active(&config, CAPABILITY);
+        if id == NONE {
+            return Ok(());
         }
+        let Some(policy) = self.policies.get(&id) else {
+            return Ok(());
+        };
+        let calls = policy.react(&policy_event(event)).await?;
+        if calls.is_empty() {
+            return Ok(());
+        }
+        let bus = self.bus()?;
+        crate::extension_commands::check_calls(&*bus, &calls)
+            .map_err(|e| storage(format!("effort policy `{id}`: {e}")))?;
+        self.run(&actor(&id), calls).await
     }
 }
 
@@ -586,6 +673,156 @@ mod tests {
             efforts(&fx).await,
             vec![(fx.effort.value(), Some(todo.clone()), Some("open".into()))]
         );
+    }
+
+    /// A policy that records what it was offered and composes `calls`
+    /// for an item started — a provider instance's stand-in.
+    struct Recorder {
+        id: &'static str,
+        seen: std::sync::Mutex<Vec<String>>,
+        calls: Vec<CommandCall>,
+    }
+
+    #[async_trait]
+    impl EffortPolicy for Recorder {
+        fn id(&self) -> &str {
+            self.id
+        }
+        async fn react(&self, event: &PolicyEvent) -> Result<Vec<CommandCall>, DomainError> {
+            self.seen.lock().unwrap().push(event.event_type.clone());
+            Ok(if event.payload["to"] == "in_progress" {
+                self.calls.clone()
+            } else {
+                Vec::new()
+            })
+        }
+    }
+
+    /// Make `id` an effort policy implementation that runs, and the
+    /// project's choice.
+    fn choose(fx: &EffortFixture, id: &str) {
+        fx.svc.capabilities.set_external(
+            crate::capabilities::Implementation {
+                capability: CAPABILITY.into(),
+                id: id.into(),
+                title: id.into(),
+                extension: Some("x".into()),
+                source: crate::capabilities::Source::External,
+                features: Value::Null,
+                fields: Value::Array(Vec::new()),
+                id_pattern: None,
+                config: json!({}),
+            },
+            true,
+        );
+        fx.svc
+            .config
+            .write()
+            .unwrap()
+            .active_providers
+            .insert(CAPABILITY.into(), id.into());
+    }
+
+    /// What the built-in composes runs as its own effect,
+    /// `effect:effort_policy:<id>` — what it logs says which policy did it.
+    #[tokio::test]
+    async fn a_policys_commands_run_as_its_own_effect() {
+        let fx = services_with_effort().await;
+        close_fixture_effort(&fx).await;
+        let filed = item(&fx, "filed here", None, true).await;
+        transition(&fx, &Actor::Human, &filed, "in_progress").await;
+        let actors: Vec<String> = fx
+            .svc
+            .db
+            .read(|c| {
+                let mut st = c
+                    .prepare("SELECT source FROM event_log WHERE type = 'effort.opened'")
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = st
+                    .query_map([], |r| r.get(0))
+                    .map_err(oxplow_db::map_sql_err)?;
+                rows.collect::<rusqlite::Result<_>>()
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        // The fixture's own effort was a person's; the next, the policy's.
+        assert_eq!(actors.last().unwrap(), "effect:effort_policy:oxplow");
+    }
+
+    /// The dispatcher offers events to the active policy only — a
+    /// registered one that isn't chosen hears nothing — and runs what it
+    /// composes as its effect. A catalog reload restates the declared
+    /// built-ins and keeps it registered.
+    #[tokio::test]
+    async fn only_the_active_policy_is_offered_events_and_a_reload_keeps_an_instance() {
+        let fx = services_with_effort().await;
+        close_fixture_effort(&fx).await;
+        let rec = Arc::new(Recorder {
+            id: "rec",
+            seen: std::sync::Mutex::default(),
+            calls: vec![call(
+                crate::commands::effort::OPEN,
+                json!({ "thread": thread_ref(fx.thread) }),
+            )],
+        });
+        fx.svc.effort_policies.register(rec.clone());
+        let first = item(&fx, "first", None, true).await;
+        transition(&fx, &Actor::Human, &first, "in_progress").await;
+        assert!(
+            rec.seen.lock().unwrap().is_empty(),
+            "oxplow is the active one"
+        );
+        transition(&fx, &Actor::Human, &first, "done").await;
+
+        choose(&fx, "rec");
+        crate::capabilities::refresh(&fx.svc).await.unwrap();
+        assert!(
+            fx.svc.effort_policies.has("rec"),
+            "a reload keeps an instance"
+        );
+        assert!(fx.svc.effort_policies.has("oxplow"));
+        let second = item(&fx, "second", None, true).await;
+        transition(&fx, &Actor::Human, &second, "in_progress").await;
+        // Filing the item and starting it.
+        assert_eq!(
+            *rec.seen.lock().unwrap(),
+            vec!["work_item.state_changed", "work_item.state_changed"]
+        );
+        let open: Vec<_> = efforts(&fx)
+            .await
+            .into_iter()
+            .filter(|e| e.2.as_deref() == Some("open"))
+            .collect();
+        assert_eq!(open.len(), 1, "rec opened one, unlinked");
+        assert_eq!(open[0].1, None);
+    }
+
+    /// A composed call that isn't a command fails the run before anything
+    /// runs: the item's state stands and no effort opens.
+    #[tokio::test]
+    async fn a_call_that_isnt_a_command_runs_nothing() {
+        let fx = services_with_effort().await;
+        close_fixture_effort(&fx).await;
+        fx.svc.effort_policies.register(Arc::new(Recorder {
+            id: "rec",
+            seen: std::sync::Mutex::default(),
+            calls: vec![
+                call(
+                    crate::commands::effort::OPEN,
+                    json!({ "thread": thread_ref(fx.thread) }),
+                ),
+                call("nope.no.cmd", json!({})),
+            ],
+        }));
+        choose(&fx, "rec");
+        let filed = item(&fx, "filed", None, true).await;
+        transition(&fx, &Actor::Human, &filed, "in_progress").await;
+        assert_eq!(state(&fx, &filed).await, "in_progress");
+        assert!(efforts(&fx)
+            .await
+            .iter()
+            .all(|e| e.2.as_deref() != Some("open")));
     }
 
     /// With the policy `none`, starting and finishing items leaves efforts
