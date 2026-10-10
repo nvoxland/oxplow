@@ -30,6 +30,7 @@ import {
 import type { DataEntity, ProjectProgram } from "../tauri-bridge/generated/bindings.js";
 import { indexRef } from "../tabs/pageRefs.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
+import { enableAgain, type ContributionHealth } from "../contributionHealth.js";
 import { useContextMenu } from "./useRowContextMenu.js";
 import {
   backfillAsk, backfillRunLabel,
@@ -184,7 +185,10 @@ export function DataSection() {
     setRevoking(null);
     setBusy(key);
     try {
-      await revokeCollector(l.owner, l.spec.id);
+      // The project's own collectors are approved as Programs (by name);
+      // an extension's by `owner/id`.
+      if (l.owner === "project") await revokeProjectProgram("collector", l.spec.id);
+      else await revokeCollector(l.owner, l.spec.id);
       showToast({ message: `Revoked ${key}. It won't run until you approve it again.` });
     } catch (e) {
       recordOpError({ label: `Revoke ${key}`, message: String(e) });
@@ -279,16 +283,32 @@ export function DataSection() {
                   {s.lastRunAt ? ` · last run ${new Date(s.lastRunAt).toLocaleString()}` : ""}
                 </span>
                 <span style={{ flex: 1 }} />
+                {s.canEnableAgain ? (
+                  <button
+                    type="button"
+                    data-testid={`collector-enable-${key}`}
+                    title="Turn it back on on this machine"
+                    disabled={busy !== null}
+                    onClick={() =>
+                      void enableAgain({ extension: l.owner, kind: "collector", contribution: s.id } as ContributionHealth).then(() =>
+                        refresh(),
+                      )
+                    }
+                  >
+                    Enable Again
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   data-testid={`collector-run-${key}`}
                   title={s.actionTitle}
-                  disabled={busy !== null}
+                  disabled={busy !== null || s.action === "approve-in-programs"}
                   onClick={() => void run(l)}
                 >
                   {busy === key ? "Running…" : s.actionLabel}
                 </button>
               </div>
+              {s.disabled ? <div style={errorStyle}>{s.disabled}</div> : null}
               {s.error ? <div style={errorStyle}>{s.error}</div> : null}
               {s.missingCredentials ? <div style={mutedStyle}>{s.missingCredentials}</div> : null}
               {revoke && revoking === key ? (

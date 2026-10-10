@@ -9,11 +9,16 @@ use oxplow_app::Services;
 
 use crate::error::IpcError;
 
-/// Every declared collector with its last run and whether this machine
-/// has approved its current entry script.
+/// Every declared collector — extensions', then the project's own — with
+/// its last run and whether this machine has approved its current entry
+/// script.
 pub async fn list_collectors(svc: &Services) -> Result<Vec<CollectorListing>, IpcError> {
     let root = svc.worktrees.resolve(None).await.into_local_path();
-    Ok(collector_runner::list_collectors(&Collectors::of(svc, &root)).await?)
+    let mut listed = collector_runner::list_collectors(&Collectors::of(svc, &root)).await?;
+    // The project's own (its report collectors among them), after the
+    // extensions'.
+    listed.extend(oxplow_app::project_collectors::listings(svc).await?);
+    Ok(listed)
 }
 
 /// A person approves an exec collector at the listing's `version` they
@@ -312,6 +317,32 @@ mod tests {
             heard |= matches!(e, oxplow_app::events::OxplowEvent::ApprovalsChanged);
         }
         assert!(heard, "approving announced nothing");
+    }
+
+    /// Settings → Data lists the project's own collectors (its report
+    /// collectors included) beside the extensions'.
+    #[tokio::test]
+    async fn list_collectors_includes_the_projects_own() {
+        let (svc, dir) = crate::test_support::services();
+        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
+        std::fs::write(
+            dir.path().join(".oxplow/project.yaml"),
+            "collectors:\n  - { id: tests.cov, records: coverage, entry: \"oxplow:lcov\", report: { path: target/lcov.info } }\n",
+        )
+        .unwrap();
+        svc.reload_config_from_disk().unwrap();
+        let list = crate::dispatch("list_collectors", json!({}), &svc)
+            .await
+            .unwrap();
+        let project: Vec<_> = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|l| l["owner"] == "project")
+            .collect();
+        assert_eq!(project.len(), 1, "{list}");
+        assert_eq!(project[0]["spec"]["id"], "tests.cov");
+        assert_eq!(project[0]["approved"], true);
     }
 
     #[tokio::test]

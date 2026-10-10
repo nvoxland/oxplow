@@ -53,8 +53,10 @@ export interface CollectorRowModel {
   status: string;
   lastRunAt: string | null;
   error: string | null;
-  /** Unapproved collectors need a person to approve the script first. */
-  action: "approve" | "sync";
+  /** Unapproved collectors need a person to approve the script first; the
+   *  project's own are approved under Programs (they have their own row
+   *  there), not by this button. */
+  action: "approve" | "approve-in-programs" | "sync";
   actionLabel: string;
   /** Hover text saying exactly what running it does. */
   actionTitle: string;
@@ -62,6 +64,10 @@ export interface CollectorRowModel {
   credentials: { name: string; set: boolean }[];
   /** "Needs X, Y (set it below)." when some are unset, else null. */
   missingCredentials: string | null;
+  /** Why failures turned it off on this machine, else null. */
+  disabled: string | null;
+  /** A disabled collector can be turned back on. */
+  canEnableAgain: boolean;
 }
 
 /** A collector ran — by hand, on its schedule or for an event: each run
@@ -79,6 +85,8 @@ export function triggerLabel(t: Trigger): string {
       return `every ${t.minutes}m`;
     case "on":
       return `on ${t.events.join(", ")}`;
+    case "onRun":
+      return t.run === "test" ? "after a test run" : "after an analysis run";
   }
 }
 
@@ -120,13 +128,17 @@ export function collectorRowModel(l: CollectorListing): CollectorRowModel {
     status,
     lastRunAt: st?.lastRunAt ?? null,
     error: st?.status === "error" ? (st.error ?? "Unknown error") : null,
-    action: l.approved ? "sync" : "approve",
-    actionLabel: l.approved ? "Sync Now" : "Approve & Run",
+    action: l.approved ? "sync" : l.owner === "project" ? "approve-in-programs" : "approve",
+    actionLabel: l.approved ? "Sync Now" : l.owner === "project" ? "Approve under Programs" : "Approve & Run",
     actionTitle: l.approved
       ? `Run ${l.spec.entry ?? l.spec.id} now`
-      : `${consent} Approve only if you trust this extension; a changed script or host list needs approval again.`,
+      : l.owner === "project"
+        ? `${l.spec.entry ?? l.spec.id} runs a program from this project's config. Approve it in its row under Programs below, then sync it here.`
+        : `${consent} Approve only if you trust this extension; a changed script or host list needs approval again.`,
     credentials: l.credentials,
     missingCredentials: missing.length > 0 ? `Needs ${missing.join(", ")} (set it under Extensions).` : null,
+    disabled: l.disabled ? `Off on this machine: ${l.disabled}` : null,
+    canEnableAgain: !!l.disabled,
   };
 }
 
