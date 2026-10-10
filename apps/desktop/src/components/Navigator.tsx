@@ -673,13 +673,13 @@ function StripRow({
         // rows are transparent. Selection is marked by the accent left
         // line only — no background fill.
         background: isStream ? "var(--panel-header-bg)" : "transparent",
-        borderLeft: selected ? "3px solid var(--accent)" : "3px solid transparent",
         position: "relative",
         transition: "background 120ms ease",
       }}
     >
       <IconColumn guide={guide}>
         <IconCell
+          selected={selected}
           letter={letter}
           isStream={isStream}
           isLast={guide === "last"}
@@ -758,12 +758,12 @@ function OverlayRow({
         // fill, so the stream tab's rounded corner shows). Selection is the
         // accent left line.
         background: "transparent",
-        borderLeft: selected ? "3px solid var(--accent)" : "3px solid transparent",
         transition: "background 120ms ease",
       }}
     >
       <IconColumn guide={guide} wide>
         <IconCell
+          selected={selected}
           letter={letter}
           isStream={isStream}
           isLast={guide === "last"}
@@ -904,7 +904,7 @@ function IconColumn({
       {guide !== "none" ? (
         <span data-guide={guide}>
           {guide === "stream"
-            ? line({ right: GUIDE_RIGHT, width: 2, top: (ROW_HEIGHT + ICON_BOX) / 2, bottom: 0 })
+            ? line({ right: GUIDE_RIGHT, width: 2, top: ROW_HEIGHT, bottom: 0 })
             : null}
           {isThread ? line({ right: GUIDE_RIGHT, width: 2, top: 0, height: guide === "last" ? mid + 1 : height }) : null}
           {isThread ? line({ right: GUIDE_RIGHT + 2, height: 2, top: mid - 1, width: THREAD_RIGHT - GUIDE_RIGHT - 2 }) : null}
@@ -921,6 +921,7 @@ function IconCell({
   isLast,
   hasThreads,
   isWriter,
+  selected,
   status,
   question,
   label,
@@ -934,6 +935,8 @@ function IconCell({
   /** A stream with threads under it: its tab is the stack's top. */
   hasThreads: boolean;
   isWriter: boolean;
+  /** The selected thread: its tab carries the accent bar down its left. */
+  selected: boolean;
   status: AgentStatusDotState | undefined;
   question?: string;
 }) {
@@ -949,7 +952,7 @@ function IconCell({
   const shape: CSSProperties = isStream
     ? {
         width: glyphWidth,
-        height: ICON_BOX,
+        height: ROW_HEIGHT,
         // Rounded only where no tab sits next to it: the stack's top, and
         // its bottom when the stream has no threads.
         borderRadius: hasThreads ? "0 6px 0 0" : "0 6px 6px 0",
@@ -965,7 +968,14 @@ function IconCell({
         // Tabs next to each other are flat; only the stack's last is
         // rounded at the bottom.
         borderRadius: isLast ? "0 0 6px 0" : 0,
-        background: isWriter ? "var(--accent-soft-bg)" : "transparent",
+        // The regular tab's tint (the centre tab strip's header), the
+        // writer's in the accent.
+        ...(isWriter
+          ? { background: "var(--accent-soft-bg)" }
+          : {
+              backgroundImage: "linear-gradient(var(--panel-header-bg), var(--panel-header-bg))",
+              backgroundColor: "var(--surface-card)",
+            }),
         color: "var(--text-primary)",
         // The writer's accent outline is whole; the rest draw their top
         // edge, and the last also its bottom.
@@ -986,6 +996,10 @@ function IconCell({
         boxSizing: "border-box",
         lineHeight: 1,
         ...shape,
+        // The selection bar is inside the tab, so every tab is flush with
+        // the window's edge; the letters sit clear of it.
+        boxShadow: selected ? "inset 3px 0 0 var(--accent)" : undefined,
+        paddingLeft: SELECTION_BAR,
         ...(label !== undefined ? { width: undefined, flex: 1, minWidth: 0, justifyContent: "flex-start" } : {}),
       }}
     >
@@ -996,7 +1010,7 @@ function IconCell({
           <span
             data-testid="navigator-glyph-divider"
             style={{
-              width: glyphWidth - (isStream ? 0 : 1),
+              width: glyphWidth - SELECTION_BAR - (isStream ? 0 : 1),
               flexShrink: 0,
               alignSelf: "stretch",
               display: "flex",
@@ -1142,14 +1156,15 @@ function InlineNewThread({
 // indicator. Strip width and row height stay proportional so the icon
 // cell sits comfortably with breathing room on both sides.
 const LETTER_FONT = 15;
-const ICON_BOX = 30;
 // A thread's row is its tab: the tabs of a stream's threads touch, a touch
 // shorter than the stream's tile so the two read as parent and child.
 const THREAD_ROW_HEIGHT = 28;
 const THREAD_LETTER_FONT = 13;
 const STRIP_WIDTH = 40;
-// The icon column: the strip's width less the selection line's 3px.
-const ICON_COLUMN = STRIP_WIDTH - 3;
+// The icon column is the strip's width; a tab's selection bar sits inside
+// it, at its left.
+const ICON_COLUMN = STRIP_WIDTH;
+const SELECTION_BAR = 3;
 // The tabs come out of the window's left edge. The guide line runs down the
 // column's right, this far from it; the stream's tab reaches over it and a
 // thread's ends short of it (a tick joins them).
