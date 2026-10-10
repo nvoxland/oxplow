@@ -157,6 +157,26 @@ mod tests {
             .any(|p| p.area == "vcs" && p.prompt == "Who has changed this file the most?"));
     }
 
+    /// "Can you see that error?": an operation that failed in front of the
+    /// person is recorded (`v_op_error`, its output `read_event_content`),
+    /// and the agent is told so — in the always-on text, and in the skill
+    /// that loads when the person asks about an error.
+    #[test]
+    fn the_agent_is_told_it_can_read_the_errors_a_person_saw() {
+        assert!(WORKING_IN_OXPLOW.contains("v_op_error"), "{WORKING_IN_OXPLOW}");
+        let text = core_text();
+        let skill = text
+            .skills
+            .iter()
+            .find(|s| s.name == "oxplow-codebase")
+            .expect("the codebase skill");
+        for needle in ["v_op_error", "read_event_content", "output_size", "red"] {
+            assert!(skill.body.contains(needle), "the skill never says `{needle}`");
+        }
+        let description = skill.body.lines().nth(2).unwrap_or_default();
+        assert!(description.contains("v_op_error"), "{description}");
+    }
+
     /// Agents that can't discover skill files get an index instead
     /// (tsk376): every skill, with its frontmatter description.
     #[test]

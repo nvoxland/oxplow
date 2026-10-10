@@ -1,6 +1,6 @@
 ---
 name: oxplow-codebase
-description: Answering questions about the project's history and code from oxplow's own data — who changed what and when, which branches exist, where a symbol is defined, what a file declares, which files have errors. Loads on v_commit, v_commit_file, v_branch, v_tag, v_symbol, v_diagnostic, code_definition, code_references, code_symbols, and when the user asks "who changed X", "when did X change", "history of X", "what branches", "where is X defined", "what's in this file", "what calls X", or "what's broken".
+description: Answering questions about the project's history and code from oxplow's own data — who changed what and when, which branches exist, where a symbol is defined, what a file declares, which files have errors, and the errors the person saw in the app. Loads on v_op_error, v_commit, v_commit_file, v_branch, v_tag, v_symbol, v_diagnostic, code_definition, code_references, code_symbols, and when the user asks "who changed X", "when did X change", "history of X", "what branches", "where is X defined", "what's in this file", "what calls X", "what's broken", or "can you see that error" / "the red error toast".
 ---
 
 # The project's history and code
@@ -53,3 +53,25 @@ terminal.
   `code_call_hierarchy` (who calls / what it calls) and
   `code_diagnostics`. Use them for "what calls X" and anything the
   stored snapshot view can't know.
+
+## Errors the person saw (`v_op_error`)
+
+When an operation fails in front of the person — a merge, a push, a save, a
+query in the app — they get a red toast and an entry in the Op Errors list.
+Each one is also recorded, so "can you see that error?" is answerable
+without a screenshot:
+
+- **`v_op_error`** — one row per failure (`at`, `label` — what they were
+  doing — `command`, `message`, `exit_code`, `signal`, `duration_ms`,
+  `thread`, `stream_id`, and `output_size`, the length of the captured
+  stderr / stdout), newest last. The latest few:
+  `SELECT event_id, at, label, command, message FROM v_op_error ORDER BY
+  at DESC LIMIT 5`.
+- **The output itself** is the event's `output` body: call
+  `read_event_content` with the row's `event_id` and `output`. A row with
+  `output_size` NULL had nothing captured; its `message` is all there is.
+- Rows are kept 30 days and their output 14; an older row keeps its label
+  with the details NULL.
+- Failed *commands you ran* come back to you as the command's own error
+  (`run_command`); this is the person's side.
+

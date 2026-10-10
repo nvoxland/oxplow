@@ -106,7 +106,9 @@ Things I keep forgetting. Read this before adding any UI.
   the person lands where it's shown. The store stays in memory (gone on reload),
   but each record is also reported to the daemon, fire-and-forget, as
   the person-only `oxplow.ui.report_error` (tsk1072), so the agent reads what
-  the person saw in `v_op_error`. A report that fails is logged with
+  the person saw in `v_op_error` (the always-on agent text and the
+  `oxplow-codebase` skill say so, so "can you see that error?" needs no
+  screenshot). A report that fails is logged with
   `logUi`, never recorded as another op error (it would loop).
 - **Every `<button>` needs an explicit `type`.** HTML defaults
   `<button>` to `type="submit"`, which silently submits any enclosing
