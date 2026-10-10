@@ -1824,7 +1824,10 @@ reaches the extension:
 
 An event that can't be carried to its type's newest version (its
 upcast fails) is a failed run, with the reason — on a review, that
-input's error.
+input's error (`Composes.error` / `Ran.error`, starting "its event: …"),
+which the review lists on the input's line even when both versions fail
+the same way (`Effect <id> on fixture <name>: fails (its event: …)`), so
+the Review page (`ImpactReportView`) never drops it.
 
 ## Event types
 

@@ -1022,28 +1022,48 @@ pub fn summary(report: &ImpactReport) -> Vec<String> {
             (Change::Changed, _, _) => out.push(format!("Effect {}: its script changed", e.id)),
             _ => {}
         }
-        for o in e.outputs.iter().filter(|o| o.change != Change::Unchanged) {
-            out.push(format!(
-                "Effect {} on {}: {} → {}",
-                e.id,
-                o.input,
-                composes_text(o.before.as_ref()),
-                composes_text(o.after.as_ref())
-            ));
+        for o in &e.outputs {
+            if o.change != Change::Unchanged {
+                out.push(format!(
+                    "Effect {} on {}: {} → {}",
+                    e.id,
+                    o.input,
+                    composes_text(o.before.as_ref()),
+                    composes_text(o.after.as_ref())
+                ));
+            } else if o.after.as_ref().is_some_and(|c| c.error.is_some()) {
+                // Failing the same on both versions is still failing: an
+                // input whose event couldn't be made says why.
+                out.push(format!(
+                    "Effect {} on {}: {}",
+                    e.id,
+                    o.input,
+                    composes_text(o.after.as_ref())
+                ));
+            }
         }
     }
     for c in &report.collectors {
         if let Some(why) = &c.not_run {
             out.push(format!("Collector {}: not run — {why}", c.id));
         }
-        for o in c.outputs.iter().filter(|o| o.change != Change::Unchanged) {
-            out.push(format!(
-                "Collector {} on {}: {} → {}",
-                c.id,
-                o.input,
-                ran_text(o.before.as_ref()),
-                ran_text(o.after.as_ref())
-            ));
+        for o in &c.outputs {
+            if o.change != Change::Unchanged {
+                out.push(format!(
+                    "Collector {} on {}: {} → {}",
+                    c.id,
+                    o.input,
+                    ran_text(o.before.as_ref()),
+                    ran_text(o.after.as_ref())
+                ));
+            } else if o.after.as_ref().is_some_and(|r| r.error.is_some()) {
+                out.push(format!(
+                    "Collector {} on {}: {}",
+                    c.id,
+                    o.input,
+                    ran_text(o.after.as_ref())
+                ));
+            }
         }
     }
     for m in report
@@ -3191,6 +3211,64 @@ mod tests {
                 "Lens shared/bad: added; its query fails: no such table",
                 "Metric acme.todos: changed (global, needs)",
             ]
+        );
+    }
+
+    /// An input whose event couldn't be made fails the same on both
+    /// versions — unchanged, but not nothing: the review says why on that
+    /// input's line instead of dropping it.
+    #[test]
+    fn an_input_whose_event_couldnt_be_made_is_listed_with_why_even_when_unchanged() {
+        let failed = |why: &str| Composes {
+            commands: vec![],
+            skip: None,
+            error: Some(why.into()),
+        };
+        let ran_failed = |why: &str| Ran {
+            counts: BTreeMap::new(),
+            rows: json!({}),
+            events: BTreeMap::new(),
+            error: Some(why.into()),
+        };
+        let why = "its event: `anchors.turn_id`: not a turn id";
+        let report = ImpactReport {
+            effects: vec![EffectImpact {
+                id: "on-done".into(),
+                change: Change::Unchanged,
+                before: None,
+                after: None,
+                outputs: vec![EffectOutput {
+                    input: "fixture basic".into(),
+                    change: Change::Unchanged,
+                    before: Some(failed(why)),
+                    after: Some(failed(why)),
+                }],
+            }],
+            collectors: vec![CollectorImpact {
+                id: "gh".into(),
+                change: Change::Unchanged,
+                outputs: vec![CollectorOutput {
+                    input: "fixture basic".into(),
+                    change: Change::Unchanged,
+                    before: Some(ran_failed(why)),
+                    after: Some(ran_failed(why)),
+                }],
+                before: None,
+                after: None,
+                entities: vec![],
+                not_run: None,
+                script_changed: false,
+            }],
+            ..ImpactReport::default()
+        };
+        let lines = summary(&report);
+        assert!(
+            lines.contains(&format!("Effect on-done on fixture basic: fails ({why})")),
+            "{lines:?}"
+        );
+        assert!(
+            lines.contains(&format!("Collector gh on fixture basic: fails ({why})")),
+            "{lines:?}"
         );
     }
 
