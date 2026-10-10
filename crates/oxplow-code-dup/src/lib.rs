@@ -33,7 +33,7 @@
 //!    function clone subsumes any internal sub-block matches).
 //! 5. Sort findings deterministically.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use oxplow_code_metrics::{is_function_node, language_for_path, Language};
@@ -107,35 +107,55 @@ where
     let _running = Running::start();
     let mut subtrees: Vec<SubtreeRef> = Vec::new();
     for (path, source) in files {
-        let path: String = path.into();
-        let Some(lang) = language_for_path(&path) else {
-            continue;
-        };
-        let source = source.as_ref();
-        let mut parser = Parser::new();
-        if parser.set_language(&lang.tree_sitter_language()).is_err() {
-            continue;
-        }
-        let Some(tree) = parser.parse(source, None) else {
-            continue;
-        };
-        let path: Arc<str> = Arc::from(path);
-        collect_function_subtrees(
-            &path,
-            lang,
-            tree.root_node(),
-            source.as_bytes(),
-            opts,
-            &mut subtrees,
-        );
+        scan_file(&path.into(), source.as_ref(), opts, None, &mut subtrees);
     }
     pair_up(subtrees, opts)
+}
+
+/// Parse one file and keep its subtrees that are eligible for matching —
+/// all of them, or with `wanted`, only those whose hash is in it.
+fn scan_file(
+    path: &str,
+    source: &str,
+    opts: DupOptions,
+    wanted: Option<&HashSet<u64>>,
+    out: &mut Vec<SubtreeRef>,
+) {
+    let Some(lang) = language_for_path(path) else {
+        return;
+    };
+    let mut parser = Parser::new();
+    if parser.set_language(&lang.tree_sitter_language()).is_err() {
+        return;
+    }
+    let Some(tree) = parser.parse(source, None) else {
+        return;
+    };
+    let path: Arc<str> = Arc::from(path);
+    collect_function_subtrees(
+        &path,
+        lang,
+        tree.root_node(),
+        source.as_bytes(),
+        opts,
+        wanted,
+        out,
+    );
 }
 
 #[cfg(test)]
 static RUNNING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 #[cfg(test)]
 static PEAK: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// How many subtree records the last detection held at pairing (tests).
+#[cfg(test)]
+static LAST_RECORDS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+#[cfg(test)]
+pub(crate) fn last_scan_records() -> usize {
+    LAST_RECORDS.load(std::sync::atomic::Ordering::SeqCst)
+}
 
 /// The most detections that ran at once (tests).
 #[cfg(test)]
@@ -195,7 +215,24 @@ where
     P: Into<String>,
     S: AsRef<str>,
 {
-    let raw = detect_duplicates(files, opts);
+    let _running = Running::start();
+    // The scope's subtrees first; then every other file is parsed one at a
+    // time and keeps only the subtrees whose hash one of the scope's has
+    // (nothing else in it can be a finding), so a one-file change doesn't
+    // hold — or pair — every subtree in the tree.
+    let (in_scope, rest): (Vec<_>, Vec<_>) = files
+        .into_iter()
+        .map(|(p, s)| (p.into(), s))
+        .partition(|(p, _): &(String, S)| scope_paths.contains(p));
+    let mut subtrees: Vec<SubtreeRef> = Vec::new();
+    for (path, source) in &in_scope {
+        scan_file(path, source.as_ref(), opts, None, &mut subtrees);
+    }
+    let wanted: HashSet<u64> = subtrees.iter().map(|s| s.hash).collect();
+    for (path, source) in &rest {
+        scan_file(path, source.as_ref(), opts, Some(&wanted), &mut subtrees);
+    }
+    let raw = pair_up(subtrees, opts);
     let mut out = Vec::with_capacity(raw.len());
     for block in raw {
         if block.a_path == block.b_path {
@@ -253,9 +290,10 @@ fn collect_function_subtrees(
     root: tree_sitter::Node<'_>,
     src: &[u8],
     opts: DupOptions,
+    wanted: Option<&HashSet<u64>>,
     out: &mut Vec<SubtreeRef>,
 ) {
-    walk_for_functions(path, lang, root, src, opts, out);
+    walk_for_functions(path, lang, root, src, opts, wanted, out);
 }
 
 fn walk_for_functions(
@@ -264,18 +302,19 @@ fn walk_for_functions(
     node: tree_sitter::Node<'_>,
     src: &[u8],
     opts: DupOptions,
+    wanted: Option<&HashSet<u64>>,
     out: &mut Vec<SubtreeRef>,
 ) {
     let spec = lang.spec();
     if is_function_node(node, src, spec) {
-        record_function(path, lang, node, src, opts, out);
+        record_function(path, lang, node, src, opts, wanted, out);
         // Continue walking children — there may be nested functions
         // (closures, inner functions). They'll get their own records.
     }
     let mut cursor = node.walk();
     if cursor.goto_first_child() {
         loop {
-            walk_for_functions(path, lang, cursor.node(), src, opts, out);
+            walk_for_functions(path, lang, cursor.node(), src, opts, wanted, out);
             if !cursor.goto_next_sibling() {
                 break;
             }
@@ -291,6 +330,7 @@ fn record_function(
     fn_node: tree_sitter::Node<'_>,
     src: &[u8],
     opts: DupOptions,
+    wanted: Option<&HashSet<u64>>,
     out: &mut Vec<SubtreeRef>,
 ) {
     let fn_byte_start = fn_node.start_byte();
@@ -303,6 +343,7 @@ fn record_function(
         fn_byte_start,
         fn_byte_end,
         opts,
+        wanted,
         out,
         /* is_root */ true,
     );
@@ -317,6 +358,7 @@ fn collect_subtrees_recursive(
     fn_byte_start: usize,
     fn_byte_end: usize,
     opts: DupOptions,
+    wanted: Option<&HashSet<u64>>,
     out: &mut Vec<SubtreeRef>,
     is_root: bool,
 ) {
@@ -334,7 +376,10 @@ fn collect_subtrees_recursive(
     }
     let h = hash_subtree(node, src, lang);
     let line_span = h.end_line.saturating_sub(h.start_line) + 1;
-    if h.node_count >= opts.min_nodes && line_span >= opts.min_lines {
+    if h.node_count >= opts.min_nodes
+        && line_span >= opts.min_lines
+        && wanted.is_none_or(|w| w.contains(&h.hash))
+    {
         out.push(SubtreeRef {
             path: Arc::clone(path),
             fn_byte_start,
@@ -359,6 +404,7 @@ fn collect_subtrees_recursive(
                     fn_byte_start,
                     fn_byte_end,
                     opts,
+                    wanted,
                     out,
                     /* is_root */ false,
                 );
@@ -379,6 +425,8 @@ fn collect_subtrees_recursive(
 /// duplicates inside one function, that's a refactor concern but
 /// not what the change-analysis flow surfaces).
 fn pair_up(subtrees: Vec<SubtreeRef>, _opts: DupOptions) -> Vec<DuplicateBlock> {
+    #[cfg(test)]
+    LAST_RECORDS.store(subtrees.len(), std::sync::atomic::Ordering::SeqCst);
     let mut by_hash: HashMap<u64, Vec<usize>> = HashMap::new();
     for (i, s) in subtrees.iter().enumerate() {
         by_hash.entry(s.hash).or_default().push(i);

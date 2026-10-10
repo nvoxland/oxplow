@@ -103,6 +103,15 @@ loader. Files in unsupported languages are silently skipped.
    boilerplate and trivial expression subtrees, so the line floor
    doesn't have to do that work too.
 
+A **scoped** scan (a change's: `detect_duplicates_scoped`) parses the
+files in scope first and keeps all their subtrees, then parses every other
+file one at a time and keeps only the subtrees whose hash one of the
+scope's has — nothing else in it can be a finding. The rest of the tree
+still gets parsed (and its text held by the caller), but a one-file change
+no longer holds or pairs every subtree in the repo. Caching a file's
+subtree hashes by blob id, so unchanged files aren't re-parsed between
+scans, is not done.
+
 Output is two `duplicate-block` findings per pair (one per side)
 with `extra.peerPath` / `extra.peerStartLine` / `extra.peerEndLine`
 so the panel can render the cross-reference inline.

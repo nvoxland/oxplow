@@ -912,3 +912,72 @@ fn single(items: Vec<i32>) -> i32 {
         .iter()
         .any(|b| b.a_path == "src/a.rs" && b.b_path == "src/b.rs"));
 }
+
+/// A function nothing else in the corpus resembles: its body is shaped by
+/// `salt` (loops nested `salt` deep), so no two share a hash.
+fn unique_file(salt: usize) -> (String, String) {
+    let mut body = String::from("fn f(items: &[i32]) -> i32 {\n    let mut t = 0;\n");
+    for d in 0..=salt {
+        body.push_str(&format!("{}for x{d} in items {{\n", "    ".repeat(d + 1)));
+    }
+    body.push_str(&format!("{}t += 1;\n", "    ".repeat(salt + 2)));
+    for d in (0..=salt).rev() {
+        body.push_str(&format!("{}}}\n", "    ".repeat(d + 1)));
+    }
+    body.push_str("    if t > 0 { t } else { -t }\n}\n");
+    (format!("src/u{salt:03}.rs"), body)
+}
+
+/// A scoped scan keeps the subtrees of the files in scope and, of the rest,
+/// only those that match one of theirs — not every subtree in the tree
+/// (what a one-file change paid for in memory and in pairing).
+#[test]
+fn a_scoped_scan_keeps_only_subtrees_that_could_match_the_scope() {
+    let clone = dense(1).remove(0).1;
+    let mut files: Vec<(String, String)> = (0..40).map(unique_file).collect();
+    files.push(("src/scope.rs".into(), clone.clone()));
+    files.push(("src/twin.rs".into(), clone));
+    let scope: BTreeSet<String> = ["src/scope.rs".to_string()].into();
+    let blocks = detect_duplicates_scoped(files.clone(), &scope, detect_opts());
+    assert!(
+        blocks
+            .iter()
+            .any(|b| b.a_path == "src/scope.rs" && b.b_path == "src/twin.rs"),
+        "{blocks:?}"
+    );
+    let kept = last_scan_records();
+    let whole = {
+        detect_duplicates(files, detect_opts());
+        last_scan_records()
+    };
+    assert!(kept * 4 < whole, "kept {kept} of {whole} subtrees");
+}
+
+/// What it reports is what a whole-tree scan filtered to the scope reports.
+#[test]
+fn a_scoped_scan_reports_what_the_whole_tree_scan_would_for_the_scope() {
+    let mut files = dense(6);
+    files.extend((0..10).map(unique_file));
+    let scope: BTreeSet<String> = ["src/m002.rs".to_string(), "src/u003.rs".to_string()].into();
+    let scoped = detect_duplicates_scoped(files.clone(), &scope, detect_opts());
+    assert!(scoped.iter().any(|b| b.a_path == "src/m002.rs"));
+    assert!(scoped.iter().all(|b| scope.contains(&b.a_path)));
+    // Whole tree, then filtered to the scope: the same regions.
+    let regions = |blocks: &[DuplicateBlock]| -> BTreeSet<(String, u32, u32)> {
+        blocks
+            .iter()
+            .flat_map(|b| {
+                [
+                    (b.a_path.clone(), b.a_start_line, b.a_end_line),
+                    (b.b_path.clone(), b.b_start_line, b.b_end_line),
+                ]
+            })
+            .filter(|(p, _, _)| scope.contains(p))
+            .collect()
+    };
+    let whole: Vec<DuplicateBlock> = detect_duplicates(files, detect_opts())
+        .into_iter()
+        .filter(|b| b.a_path != b.b_path)
+        .collect();
+    assert_eq!(regions(&scoped), regions(&whole));
+}
