@@ -803,3 +803,112 @@ fn detections_run_one_at_a_time() {
     }
     assert_eq!(peak_running(), 1);
 }
+
+/// `n` files each holding the same function: a duplicate-dense corpus.
+fn dense(n: usize) -> Vec<(String, String)> {
+    let body = r#"
+fn helper(items: Vec<i32>) -> Vec<i32> {
+    let mut out = Vec::new();
+    for item in items {
+        if item > 0 {
+            out.push(item * 2);
+        } else if item < 0 {
+            out.push(item * -1);
+        } else {
+            out.push(0);
+        }
+    }
+    out
+}
+"#;
+    (0..n)
+        .map(|i| (format!("src/m{i:03}.rs"), body.to_string()))
+        .collect()
+}
+
+/// What a detection reports grows with the corpus, not with its square: n
+/// identical functions are n regions, each linked to a peer, not the
+/// n(n-1)/2 pairs of them. (A dense corpus made the pair list the largest
+/// thing in memory.)
+#[test]
+fn a_dense_clone_family_reports_a_pair_per_member_not_per_pair_of_members() {
+    let n = 60;
+    let blocks = detect_duplicates(dense(n), detect_opts());
+    assert!(
+        blocks.len() < 2 * n,
+        "{} blocks for {n} identical functions",
+        blocks.len()
+    );
+    // Every member is still reported, on one side or the other.
+    for i in 0..n {
+        let path = format!("src/m{i:03}.rs");
+        assert!(
+            blocks.iter().any(|b| b.a_path == path || b.b_path == path),
+            "{path} is not in any block"
+        );
+    }
+}
+
+/// A changed file in a big family still sees its clone.
+#[test]
+fn a_dense_family_member_in_scope_still_has_a_finding() {
+    let scope: BTreeSet<String> = ["src/m037.rs".to_string()].into();
+    let blocks = detect_duplicates_scoped(dense(60), &scope, detect_opts());
+    assert!(!blocks.is_empty());
+    assert!(blocks.iter().all(|b| b.a_path == "src/m037.rs"));
+}
+
+/// Two identical blocks in one function and a third elsewhere: each
+/// function is paired, whichever the group's first member is in.
+#[test]
+fn members_in_the_firsts_own_function_are_paired_with_another_function() {
+    let twice = r#"
+fn both(items: Vec<i32>) -> i32 {
+    let mut total = 0;
+    for item in &items {
+        if *item > 0 {
+            total += item * 2;
+        } else if *item < 0 {
+            total -= item * 3;
+        } else {
+            total += 1;
+        }
+    }
+    for item in &items {
+        if *item > 0 {
+            total += item * 2;
+        } else if *item < 0 {
+            total -= item * 3;
+        } else {
+            total += 1;
+        }
+    }
+    total
+}
+"#;
+    let once = r#"
+fn single(items: Vec<i32>) -> i32 {
+    let mut total = 0;
+    for item in &items {
+        if *item > 0 {
+            total += item * 2;
+        } else if *item < 0 {
+            total -= item * 3;
+        } else {
+            total += 1;
+        }
+    }
+    total
+}
+"#;
+    let blocks = detect_duplicates(
+        vec![
+            ("src/a.rs".to_string(), twice.to_string()),
+            ("src/b.rs".to_string(), once.to_string()),
+        ],
+        detect_opts(),
+    );
+    assert!(blocks
+        .iter()
+        .any(|b| b.a_path == "src/a.rs" && b.b_path == "src/b.rs"));
+}

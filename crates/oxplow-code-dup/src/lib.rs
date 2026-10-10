@@ -34,6 +34,7 @@
 //! 5. Sort findings deterministically.
 
 use std::collections::{BTreeSet, HashMap};
+use std::sync::Arc;
 
 use oxplow_code_metrics::{is_function_node, language_for_path, Language};
 use tree_sitter::Parser;
@@ -106,7 +107,7 @@ where
     let _running = Running::start();
     let mut subtrees: Vec<SubtreeRef> = Vec::new();
     for (path, source) in files {
-        let path = path.into();
+        let path: String = path.into();
         let Some(lang) = language_for_path(&path) else {
             continue;
         };
@@ -118,6 +119,7 @@ where
         let Some(tree) = parser.parse(source, None) else {
             continue;
         };
+        let path: Arc<str> = Arc::from(path);
         collect_function_subtrees(
             &path,
             lang,
@@ -227,7 +229,8 @@ where
 /// inside a larger one" via byte offsets within the parent function.
 #[derive(Debug, Clone)]
 struct SubtreeRef {
-    path: String,
+    /// Shared by every record of one file.
+    path: Arc<str>,
     /// Byte range of the enclosing function body. Used to detect
     /// whether two SubtreeRefs come from the same source function,
     /// so we can collapse "whole function" + "loop inside that
@@ -245,7 +248,7 @@ struct SubtreeRef {
 /// to match. Recurse into nested functions (closures inside
 /// methods, etc.) so they get their own records.
 fn collect_function_subtrees(
-    path: &str,
+    path: &Arc<str>,
     lang: Language,
     root: tree_sitter::Node<'_>,
     src: &[u8],
@@ -256,7 +259,7 @@ fn collect_function_subtrees(
 }
 
 fn walk_for_functions(
-    path: &str,
+    path: &Arc<str>,
     lang: Language,
     node: tree_sitter::Node<'_>,
     src: &[u8],
@@ -283,7 +286,7 @@ fn walk_for_functions(
 /// Hash this function's body and every internal subtree that's big
 /// enough to seed a meaningful match.
 fn record_function(
-    path: &str,
+    path: &Arc<str>,
     lang: Language,
     fn_node: tree_sitter::Node<'_>,
     src: &[u8],
@@ -307,7 +310,7 @@ fn record_function(
 
 #[allow(clippy::too_many_arguments)]
 fn collect_subtrees_recursive(
-    path: &str,
+    path: &Arc<str>,
     lang: Language,
     node: tree_sitter::Node<'_>,
     src: &[u8],
@@ -333,7 +336,7 @@ fn collect_subtrees_recursive(
     let line_span = h.end_line.saturating_sub(h.start_line) + 1;
     if h.node_count >= opts.min_nodes && line_span >= opts.min_lines {
         out.push(SubtreeRef {
-            path: path.to_string(),
+            path: Arc::clone(path),
             fn_byte_start,
             fn_byte_end,
             start_line: h.start_line,
@@ -382,32 +385,46 @@ fn pair_up(subtrees: Vec<SubtreeRef>, _opts: DupOptions) -> Vec<DuplicateBlock> 
     }
     // Best (largest by node_count) match per ordered (a_fn, b_fn) pair.
     type FnId<'a> = (&'a str, usize, usize); // (path, fn_byte_start, fn_byte_end)
+    fn fn_of(s: &SubtreeRef) -> FnId<'_> {
+        (s.path.as_ref(), s.fn_byte_start, s.fn_byte_end)
+    }
     let mut best: HashMap<(FnId, FnId), (u32, usize, usize)> = HashMap::new();
-    for idxs in by_hash.values() {
+    for idxs in by_hash.values_mut() {
         if idxs.len() < 2 {
             continue;
         }
-        for i in 0..idxs.len() {
-            for j in (i + 1)..idxs.len() {
-                let a = &subtrees[idxs[i]];
-                let b = &subtrees[idxs[j]];
-                // Same source function — not a cross-function clone.
-                if a.path == b.path
-                    && a.fn_byte_start == b.fn_byte_start
-                    && a.fn_byte_end == b.fn_byte_end
-                {
-                    continue;
-                }
-                let (lo, hi) = order(a, b, idxs[i], idxs[j]);
-                let key = (
-                    (lo.0.path.as_str(), lo.0.fn_byte_start, lo.0.fn_byte_end),
-                    (hi.0.path.as_str(), hi.0.fn_byte_start, hi.0.fn_byte_end),
-                );
-                let candidate_size = lo.0.node_count.min(hi.0.node_count);
-                let entry = best.entry(key).or_insert((0, lo.1, hi.1));
-                if candidate_size > entry.0 {
-                    *entry = (candidate_size, lo.1, hi.1);
-                }
+        // A family of n clones is n regions, each linked to ONE peer — not
+        // the n(n-1)/2 pairs of them, which is what a corpus dense with
+        // duplication would otherwise hold in memory (and hand to every
+        // caller). The peer is the family's first member (in a fixed
+        // order), or, for a member in the first's own function, the first
+        // member of another function; a family inside one function pairs
+        // with nothing.
+        idxs.sort_by_key(|&i| {
+            let s = &subtrees[i];
+            (fn_of(s), s.start_line)
+        });
+        let first = idxs[0];
+        let Some(other) = idxs
+            .iter()
+            .copied()
+            .find(|&i| fn_of(&subtrees[i]) != fn_of(&subtrees[first]))
+        else {
+            continue;
+        };
+        for &m in idxs.iter() {
+            let peer = if fn_of(&subtrees[m]) == fn_of(&subtrees[first]) {
+                other
+            } else {
+                first
+            };
+            let (a, b) = (&subtrees[m], &subtrees[peer]);
+            let (lo, hi) = order(a, b, m, peer);
+            let key = (fn_of(lo.0), fn_of(hi.0));
+            let candidate_size = lo.0.node_count.min(hi.0.node_count);
+            let entry = best.entry(key).or_insert((0, lo.1, hi.1));
+            if candidate_size > entry.0 {
+                *entry = (candidate_size, lo.1, hi.1);
             }
         }
     }
@@ -420,10 +437,10 @@ fn pair_up(subtrees: Vec<SubtreeRef>, _opts: DupOptions) -> Vec<DuplicateBlock> 
             let span_a = a.end_line.saturating_sub(a.start_line) + 1;
             let span_b = b.end_line.saturating_sub(b.start_line) + 1;
             DuplicateBlock {
-                a_path: a.path.clone(),
+                a_path: a.path.to_string(),
                 a_start_line: a.start_line,
                 a_end_line: a.end_line,
-                b_path: b.path.clone(),
+                b_path: b.path.to_string(),
                 b_start_line: b.start_line,
                 b_end_line: b.end_line,
                 line_count: span_a.max(span_b),
