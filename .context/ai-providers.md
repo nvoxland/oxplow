@@ -193,8 +193,12 @@ saying so (`oxplow_ai::config::DROPPED_ROLES`; project.yaml's
 - **No budgets or cost tracking**, by the owner's decision (2026-09-26).
   Don't add them back without asking. Tokens are recorded.
 - Every call, including failures, is a row in `ai_call` / `v_ai_call`
-  (role, provider, model, caller, tokens, latency, ok, error), so AI
-  usage is itself queryable in the [semantic layer](./semantic-layer.md).
+  (role, provider, model, caller, tokens, latency, ok, error, and
+  `run_id` — the extension run that made it, V48), so AI usage is itself
+  queryable in the [semantic layer](./semantic-layer.md). An `AiCompute`
+  computation takes a `Caller { name, run }` (a bare name converts to
+  one with no run); a collector's `CollectorOracle` names its run and
+  counts each call on it (`extension_run.ai_calls`).
 - **Every call keeps what it was asked and answered** (V41): the request
   as `AiService` hands it to the provider — `ModelRequest::Complete {
   system, prompt, json }` or `Decide { state, questions }`, its `body()`

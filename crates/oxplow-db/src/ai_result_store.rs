@@ -168,6 +168,7 @@ mod tests {
                     input_hash: Some("h".into()),
                     request: serde_json::json!({}),
                     response: None,
+                    run_id: None,
                 })
                 .await
                 .unwrap();

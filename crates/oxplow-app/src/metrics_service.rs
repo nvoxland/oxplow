@@ -18,7 +18,7 @@
 //! loop (`models_changed.rs`, the one maker of `MetricSamplesChanged`), not
 //! here.
 
-use oxplow_domain::run::{Cancel, Mode, RunContext};
+use oxplow_domain::run::{Mode, RunContext};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
@@ -1963,8 +1963,16 @@ impl MetricsService {
         let runner = match self.fact_runner(&metric) {
             Ok(r) => r,
             Err(e) => {
-                self.log_run(&metric, &ctx, &FactRun::Failed(e.clone()), 0, None)
-                    .await;
+                let this_run = self.collector_run(&metric, &ctx.run);
+                self.log_run(
+                    &metric,
+                    &ctx,
+                    &this_run,
+                    &FactRun::Failed(e.clone()),
+                    0,
+                    None,
+                )
+                .await;
                 return Err(e);
             }
         };
@@ -2165,7 +2173,11 @@ impl MetricsService {
         }
         let runner = self.fact_runner(&collector)?;
         let facts = tokio::task::spawn_blocking(move || {
-            runner.run(&input, std::sync::Arc::new(files), &Cancel::default())
+            runner.run(
+                &input,
+                std::sync::Arc::new(files),
+                &RunContext::core(Actor::System, Mode::Pure),
+            )
         })
         .await
         .map_err(|e| format!("task failed: {e}"))??;
@@ -2216,7 +2228,8 @@ impl MetricsService {
             Ok(runner) => self.run_fact_runner(gauge, runner, ctx, files).await,
             Err(e) => {
                 tracing::warn!(key = %gauge.key, error = %e, "fact collector: not run");
-                self.log_run(gauge, ctx, &FactRun::Failed(e.clone()), 0, None)
+                let this_run = self.collector_run(gauge, &ctx.run);
+                self.log_run(gauge, ctx, &this_run, &FactRun::Failed(e.clone()), 0, None)
                     .await;
                 FactRun::Failed(e)
             }
@@ -2235,18 +2248,18 @@ impl MetricsService {
         files: Arc<HashMap<String, String>>,
     ) -> FactRun {
         let source = collector_source(gauge);
-        let run = self.collector_run(gauge, &ctx.run);
+        let this_run = self.collector_run(gauge, &ctx.run);
         let started = std::time::Instant::now();
         let outcome = match self.fact_input(gauge, ctx).await {
             Err(e) => Err(e),
             Ok(input) => {
-                let cancel = run.cancel().clone();
+                let run = this_run.clone();
                 // A tree collector scans the WHOLE tree (hundreds of files,
                 // tree-sitter each): the 5 s default sized for report parsers
                 // silently timed out the broad-query ones on every full-tree
                 // run (tsk47). They run detached under `spawn_blocking`, so a
                 // generous ceiling costs nothing and still catches a runaway.
-                tokio::task::spawn_blocking(move || runner.run(&input, files, &cancel))
+                tokio::task::spawn_blocking(move || runner.run(&input, files, &run))
                     .await
                     .unwrap_or_else(|e| Err(format!("task failed: {e}")))
             }
@@ -2289,7 +2302,8 @@ impl MetricsService {
             }
         };
         let elapsed = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
-        self.log_run(gauge, ctx, &run, elapsed, capture).await;
+        self.log_run(gauge, ctx, &this_run, &run, elapsed, capture)
+            .await;
         run
     }
 
@@ -2356,6 +2370,7 @@ impl MetricsService {
         &self,
         c: &FactCollector,
         ctx: &CollectorRunContext,
+        this_run: &RunContext,
         run: &FactRun,
         elapsed_ms: i64,
         capture: Option<(oxplow_db::NewMetricCapture, Vec<oxplow_db::NewFact>)>,
@@ -2412,6 +2427,7 @@ impl MetricsService {
                     facts,
                     elapsed_ms,
                     error,
+                    run: Some(this_run),
                 },
                 capture,
             )
@@ -3197,13 +3213,20 @@ impl FactRunner {
         self,
         input: &serde_json::Value,
         files: std::sync::Arc<std::collections::HashMap<String, String>>,
-        cancel: &Cancel,
+        run: &RunContext,
     ) -> Result<Vec<CollectedFact>, String> {
         use oxplow_script::facts_of;
         use oxplow_script::runtime::run_exec;
         use oxplow_script::workers::{shared, RunHost, ScriptRun};
         let budget = Budget::with_timeout(FACT_COLLECTOR_TIMEOUT);
-        let script = |run: ScriptRun<'_>| shared().run(&budget, run, Some(cancel)).map(|r| r.value);
+        let script = |script_run: ScriptRun<'_>| {
+            shared()
+                .run(&budget, script_run, Some(run.cancel()))
+                .map(|r| {
+                    run.used_cpu(r.cpu_ms, r.peak_bytes);
+                    r.value
+                })
+        };
         match self {
             FactRunner::Starlark(text) => {
                 script(ScriptRun::starlark(&text, input.clone()).with_host(RunHost::Tree(files)))

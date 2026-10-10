@@ -239,8 +239,16 @@ impl AsyncEventConsumer for EffectTriggers {
             let program = effects::effect_program(&ext, &decl);
             let hash = self.folder_hash(&load, &svc.layout.project_dir, &program);
             let approved = effects::is_approved(&svc.approvals, &program, hash.as_deref());
-            let reacted =
-                run_reaction(&svc, &ext, &decl, approved, event, ReactionOrigin::Live).await;
+            let reacted = run_reaction(
+                &svc,
+                &ext,
+                &decl,
+                approved,
+                event,
+                ReactionOrigin::Live,
+                None,
+            )
+            .await;
             match reacted {
                 Ok(reacted) => count(&health, &decl, &reacted, started.elapsed()).await,
                 Err(error) if matches!(error, DomainError::Busy(_)) => return Err(error),
@@ -487,6 +495,7 @@ pub(crate) async fn run_reaction(
     approved: bool,
     event: &StoredEvent,
     origin: ReactionOrigin,
+    under: Option<&RunContext>,
 ) -> Result<Reacted, DomainError> {
     let (effect, event_id) = (decl.name(), event.envelope.id.to_string());
     let latest = {
@@ -509,6 +518,7 @@ pub(crate) async fn run_reaction(
                 event_seq: event.seq,
                 attempt,
                 origin,
+                run_id: None,
             };
             return cut_off(svc, &key).await;
         }
@@ -531,12 +541,27 @@ pub(crate) async fn run_reaction(
             )))
         }
     };
+    // The reaction's run: the effect, caused by the event, where it
+    // happened. Its attempt's row names it.
+    let run = crate::run_context::for_effect(
+        &svc.extension_catalog,
+        &svc.layout.project_dir,
+        ext,
+        decl,
+        event,
+    );
+    // A person's retry or backfill started it: linked to their run.
+    let run = match under {
+        Some(parent) => run.under(parent),
+        None => run,
+    };
     let key = EffectRunKey {
         effect,
         event_id,
         event_seq: event.seq,
         attempt,
         origin,
+        run_id: Some(run.run().to_string()),
     };
     // The live consumer never reacts to the past; a person's retry or
     // backfill names what to react to, and needs only the approval.
@@ -558,23 +583,22 @@ pub(crate) async fn run_reaction(
     }
     let skipped = |why: String| async {
         finish(svc, &key, ended(RunState::Skipped, why.clone())).await?;
+        record_run(svc, &run, oxplow_domain::run::Outcome::Skipped, Some(&why)).await;
         Ok(Reacted::Skipped(why))
     };
     if let Some(why) = lineage.refusal() {
         return skipped(why).await;
     }
-    // The reaction's run: the effect, caused by the event, where it
-    // happened.
-    let run = crate::run_context::for_effect(
-        &svc.extension_catalog,
-        &svc.layout.project_dir,
-        ext,
-        decl,
-        event,
-    );
     // A failure counts once: not when the attempt was already recorded
     // (its run lost a race to another delivery, or finished it failed).
     let failed = |reason: String| async {
+        record_run(
+            svc,
+            &run,
+            oxplow_domain::run::Outcome::Failed,
+            Some(&reason),
+        )
+        .await;
         Ok(
             if finish(svc, &key, ended(RunState::Failed, reason.clone())).await? {
                 Reacted::Failed(reason)
@@ -833,7 +857,7 @@ async fn retry_one(
         return Ok(false);
     };
     let started = std::time::Instant::now();
-    let reacted = run_reaction(svc, &ext, &decl, true, &event, ReactionOrigin::Auto).await?;
+    let reacted = run_reaction(svc, &ext, &decl, true, &event, ReactionOrigin::Auto, None).await?;
     count(health, &decl, &reacted, started.elapsed()).await;
     Ok(!matches!(reacted, Reacted::Nothing | Reacted::NotResent(_)))
 }
@@ -880,6 +904,32 @@ pub(crate) fn approved_now(svc: &Services, program: &crate::exec_consent::Projec
 /// its extension.
 pub(crate) fn find_effect(svc: &Services, name: &str) -> Option<(Extension, EffectDecl)> {
     effects(svc).into_iter().find(|(_, d)| d.name() == name)
+}
+
+/// Record `run`'s end when it never reached the bus (its script skipped
+/// or failed). Best effort: the reaction's own record is what decides.
+async fn record_run(
+    svc: &Services,
+    run: &RunContext,
+    outcome: oxplow_domain::run::Outcome,
+    error: Option<&str>,
+) {
+    let (run, error) = (run.clone(), error.map(str::to_string));
+    if let Err(e) = svc
+        .db
+        .transaction(move |tx| {
+            oxplow_db::extension_run_store::record_tx(
+                tx,
+                &run,
+                outcome,
+                error.as_deref(),
+                &serde_json::json!([]),
+            )
+        })
+        .await
+    {
+        tracing::warn!(error = %e, "recording an effect's run failed");
+    }
 }
 
 /// The run of an effect's reaction: the registered `oxplow.command.sequence` —
@@ -2234,11 +2284,11 @@ mod tests {
 
         // Two a run: the third waits for the next.
         let (ext, decl) = find_effect(svc, "acme/mark-done").unwrap();
-        let first = backfill(svc, &ext, &decl, &Range::default(), 2)
+        let first = backfill(svc, &ext, &decl, &Range::default(), 2, None)
             .await
             .unwrap();
         assert_eq!((first.planned, first.ran, first.remaining), (3, 2, 1));
-        let second = backfill(svc, &ext, &decl, &Range::default(), 2)
+        let second = backfill(svc, &ext, &decl, &Range::default(), 2, None)
             .await
             .unwrap();
         assert_eq!((second.planned, second.ran, second.remaining), (1, 1, 0));
@@ -2274,6 +2324,7 @@ mod tests {
             &decl,
             &crate::commands::effect::Range::default(),
             50,
+            None,
         )
         .await
         .unwrap();

@@ -702,16 +702,19 @@ pub fn run_command_script(
     script: &str,
     input: Value,
     serve: &mut oxplow_script::workers::Serve<'_>,
-    cancel: &oxplow_domain::run::Cancel,
+    run: &oxplow_domain::run::RunContext,
 ) -> Result<Value, oxplow_script::CollectError> {
     use oxplow_script::workers::{shared, RunHost, ScriptRun};
     shared()
         .run(
             &COMMAND_SCRIPT_BUDGET,
             ScriptRun::starlark(script, input).with_host(RunHost::Scope(serve)),
-            Some(cancel),
+            Some(run.cancel()),
         )
-        .map(|ran| ran.value)
+        .map(|ran| {
+            run.used_cpu(ran.cpu_ms, ran.peak_bytes);
+            ran.value
+        })
 }
 
 /// The most examples one command may declare: `check_extension` runs
@@ -728,9 +731,9 @@ pub fn compose_calls(
     input: Value,
     calls: &mut crate::scope_calls::Calls<'_>,
 ) -> Result<Composed, oxplow_domain::CommandError> {
-    let cancel = calls.run().cancel().clone();
+    let run = calls.run().clone();
     let mut serve = |id: &str, args: Value| calls.serve(id, args);
-    let out = run_command_script(script, json!({ "input": input }), &mut serve, &cancel);
+    let out = run_command_script(script, json!({ "input": input }), &mut serve, &run);
     // The database was busy answering a read: the run is retried.
     if let Some(message) = calls.take_busy() {
         return Err(oxplow_domain::CommandError::Busy { message });
@@ -1060,7 +1063,33 @@ impl ExtensionCommands {
         let built = commands
             .iter()
             .map(|decl| {
+                let (catalog, root) = (self.catalog.clone(), self.root.clone());
+                // Its local id, as its descriptor has it: the bus id
+                // without the namespace (`<area>.<verb>`).
+                let name = decl
+                    .name
+                    .strip_prefix(&format!("{ns}."))
+                    .unwrap_or(&decl.name)
+                    .to_string();
+                let ext = extension.to_string();
+                // Its runs are the command's, named as the catalog has it
+                // when each runs.
+                let named: std::sync::Arc<crate::commands::ContributionOf> =
+                    std::sync::Arc::new(move || oxplow_domain::run::ContributionRef {
+                        id: oxplow_domain::contribution::ContributionId::new(
+                            &ext,
+                            oxplow_domain::contribution::ContributionKind::Command,
+                            &name,
+                        ),
+                        version: catalog
+                            .get(&root)
+                            .iter()
+                            .find(|e| e.name == ext)
+                            .and_then(|e| e.version.clone()),
+                        generation: Some(catalog.generation(&root)),
+                    });
                 extension_command(&self.bus, extension, decl)
+                    .map(|c| c.of_contribution(named))
                     .map_err(|e| format!("`{}`: {e}", decl.name))
             })
             .collect::<Result<Vec<_>, _>>()?;

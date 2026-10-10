@@ -116,12 +116,26 @@ pub struct AiCompute {
     results: SqliteAiResultStore,
 }
 
+/// Who asks for a computation: what (`collector:<owner>/<id>`,
+/// `thread:<id>`, …) and, for an extension's, its run.
+#[derive(Debug, Clone, Copy)]
+pub struct Caller<'a> {
+    pub name: &'a str,
+    pub run: Option<&'a str>,
+}
+
+impl<'a> From<&'a str> for Caller<'a> {
+    fn from(name: &'a str) -> Self {
+        Caller { name, run: None }
+    }
+}
+
 /// One computation, before it runs: what it is (`name`, `args`), the
 /// request it sends, on which role, for whom.
 struct Op<'a> {
     name: &'static str,
     role: Role,
-    caller: &'a str,
+    caller: Caller<'a>,
     args: Value,
     request: ModelRequest<'a>,
 }
@@ -174,7 +188,7 @@ impl AiCompute {
                 request_hash,
                 op: op.name.into(),
                 role: crate::ai_service::role_name(op.role),
-                caller: op.caller.into(),
+                caller: op.caller.name.into(),
                 output: serde_json::to_value(&value).expect("result serializes"),
                 input_tokens,
                 output_tokens,
@@ -195,10 +209,11 @@ impl AiCompute {
     /// Which of `labels` fits `text` (the `decide` role).
     pub async fn classify(
         &self,
-        caller: &str,
+        caller: impl Into<Caller<'_>>,
         text: &str,
         labels: &[String],
     ) -> Result<Recorded<Classification>, AiComputeError> {
+        let caller = caller.into();
         let questions = BTreeMap::from([(
             "label".to_string(),
             Question::Choice {
@@ -246,10 +261,11 @@ impl AiCompute {
     /// Where `text` sits on `levels`, lowest first (the `decide` role).
     pub async fn score(
         &self,
-        caller: &str,
+        caller: impl Into<Caller<'_>>,
         text: &str,
         levels: &[String],
     ) -> Result<Recorded<Scored>, AiComputeError> {
+        let caller = caller.into();
         let questions = BTreeMap::from([(
             "score".to_string(),
             Question::Score {
@@ -302,10 +318,11 @@ impl AiCompute {
     /// question name. A reply missing an answer is refused.
     pub async fn decide(
         &self,
-        caller: &str,
+        caller: impl Into<Caller<'_>>,
         state: &str,
         questions: &BTreeMap<String, Question>,
     ) -> Result<Recorded<BTreeMap<String, Answer>>, AiComputeError> {
+        let caller = caller.into();
         let op = Op {
             name: "decide",
             role: Role::Decide,
@@ -339,10 +356,11 @@ impl AiCompute {
     /// A summary of `text` (the `summarize` role), focused on `focus`.
     pub async fn summarize(
         &self,
-        caller: &str,
+        caller: impl Into<Caller<'_>>,
         text: &str,
         focus: Option<&str>,
     ) -> Result<Recorded<String>, AiComputeError> {
+        let caller = caller.into();
         let system = crate::ai_service::summarize_system(focus);
         let op = Op {
             name: "summarize",
@@ -382,11 +400,12 @@ impl AiCompute {
     /// match, is refused and not recorded.
     pub async fn extract(
         &self,
-        caller: &str,
+        caller: impl Into<Caller<'_>>,
         instructions: &str,
         text: &str,
         schema: &Value,
     ) -> Result<Recorded<Value>, AiComputeError> {
+        let caller = caller.into();
         let system =
             format!("{instructions}\n\nReply with JSON only, matching this JSON Schema:\n{schema}");
         let op = Op {
@@ -431,16 +450,30 @@ impl AiCompute {
 pub struct CollectorOracle {
     compute: Arc<AiCompute>,
     caller: String,
+    /// The collector's run: each call is counted on it and names it.
+    run: oxplow_domain::run::RunContext,
     runtime: tokio::runtime::Handle,
 }
 
 impl CollectorOracle {
-    /// Made inside the runtime its calls run on.
-    pub fn new(compute: Arc<AiCompute>, caller: String) -> Self {
+    /// Made inside the runtime its calls run on, for `run`.
+    pub fn new(
+        compute: Arc<AiCompute>,
+        caller: String,
+        run: oxplow_domain::run::RunContext,
+    ) -> Self {
         Self {
             compute,
             caller,
+            run,
             runtime: tokio::runtime::Handle::current(),
+        }
+    }
+
+    fn caller(&self) -> Caller<'_> {
+        Caller {
+            name: &self.caller,
+            run: Some(self.run.run().as_str()),
         }
     }
 
@@ -448,6 +481,7 @@ impl CollectorOracle {
         &self,
         f: impl std::future::Future<Output = Result<Recorded<T>, AiComputeError>>,
     ) -> Result<Value, String> {
+        self.run.used_ai();
         self.runtime
             .block_on(f)
             .map(|r| serde_json::to_value(r.value).expect("result serializes"))
@@ -457,30 +491,31 @@ impl CollectorOracle {
 
 impl oxplow_script::AiOracle for CollectorOracle {
     fn classify(&self, text: &str, labels: &[String]) -> Result<Value, String> {
-        self.run(self.compute.classify(&self.caller, text, labels))
+        self.run(self.compute.classify(self.caller(), text, labels))
     }
 
     fn score(&self, text: &str, levels: &[String]) -> Result<Value, String> {
-        self.run(self.compute.score(&self.caller, text, levels))
+        self.run(self.compute.score(self.caller(), text, levels))
     }
 
     fn summarize(&self, text: &str, focus: Option<&str>) -> Result<String, String> {
-        self.run(self.compute.summarize(&self.caller, text, focus))
+        self.run(self.compute.summarize(self.caller(), text, focus))
             .map(|v| v.as_str().unwrap_or_default().to_string())
     }
 
     fn extract(&self, instructions: &str, text: &str, schema: &Value) -> Result<Value, String> {
         self.run(
             self.compute
-                .extract(&self.caller, instructions, text, schema),
+                .extract(self.caller(), instructions, text, schema),
         )
     }
 }
 
-fn site<'a>(caller: &'a str, hash: &'a str) -> CallSite<'a> {
+fn site<'a>(caller: Caller<'a>, hash: &'a str) -> CallSite<'a> {
     CallSite {
-        caller,
+        caller: caller.name,
         input_hash: Some(hash),
+        run: caller.run,
     }
 }
 

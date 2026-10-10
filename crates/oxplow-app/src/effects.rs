@@ -344,13 +344,13 @@ pub fn run_script(
     event: serde_json::Value,
     calls: &mut crate::scope_calls::Calls<'_>,
 ) -> Result<Reaction, String> {
-    let cancel = calls.run().cancel().clone();
+    let run = calls.run().clone();
     let mut serve = |id: &str, args: serde_json::Value| calls.serve(id, args);
     let out = crate::extension_commands::run_command_script(
         script,
         serde_json::json!({ "event": event }),
         &mut serve,
-        &cancel,
+        &run,
     )
     .map_err(|e| format!("the script failed: {e}"))?;
     reaction(out)

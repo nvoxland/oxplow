@@ -506,7 +506,7 @@ impl CommandBus {
             match check_tree(&self.policy, actor, gates.may_write, &plan.calls) {
                 Ok(answer) => answer,
                 Err(err) => {
-                    self.audit_only(actor, spec, input, Outcome::Denied, Some(err.to_string()))
+                    self.audit_only(run, spec, input, Outcome::Denied, Some(err.to_string()))
                         .await;
                     return Err(err);
                 }
@@ -600,7 +600,7 @@ impl CommandBus {
                         CommandError::Denied { .. } => Outcome::Denied,
                         _ => Outcome::Error,
                     };
-                    self.audit_only(actor, spec, input, recorded, Some(err.to_string()))
+                    self.audit_only(run, spec, input, recorded, Some(err.to_string()))
                         .await;
                 }
                 return Err(err);
@@ -639,7 +639,6 @@ impl CommandBus {
                 let recorded = record_tx(
                     tx,
                     &vocabulary.current(),
-                    &actor_c,
                     &spec_c,
                     &input_c,
                     &out,
@@ -647,6 +646,7 @@ impl CommandBus {
                         id: executed_id.clone(),
                         failed: failed_c.clone(),
                         cause: origin.cause(&run_c),
+                        run: run_c.clone(),
                         scopes: scopes.clone(),
                     },
                 )?;

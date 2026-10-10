@@ -710,7 +710,7 @@ pub async fn derive_collector(
     }
     let input = serde_json::Value::Object(input);
     let runtime = spec.runtime;
-    let (budget, cancel) = (run.budget(), run.cancel().clone());
+    let (budget, cancel, cost) = (run.budget(), run.cancel().clone(), run.clone());
     let value = tokio::task::spawn_blocking(move || {
         use oxplow_script::workers::{shared, RunHost, ScriptRun};
         // In a worker: its `ai_*` calls are answered here, and the time
@@ -719,9 +719,10 @@ pub async fn derive_collector(
             CollectorRuntime::Jaq => ScriptRun::jaq(&script, input),
             _ => ScriptRun::starlark(&script, input).with_host(RunHost::Ai(oracle)),
         };
-        shared()
-            .run(&budget, script_run, Some(&cancel))
-            .map(|ran| ran.value)
+        shared().run(&budget, script_run, Some(&cancel)).map(|ran| {
+            cost.used_cpu(ran.cpu_ms, ran.peak_bytes);
+            ran.value
+        })
     })
     .await
     .map_err(|e| format!("collector task panicked: {e}"))?
@@ -1070,6 +1071,7 @@ async fn run_collector_once(
         row_counts: BTreeMap::new(),
         cursor: None,
         last_event_id,
+        run_id: Some(run.run().to_string()),
     };
     let collector = oxplow_domain::refs::build::collector_ref(owner, id);
     let event = Synced {
@@ -1085,6 +1087,7 @@ async fn run_collector_once(
             let vocabulary = ctx.vocabulary.clone();
             let event = event.clone();
             let elapsed = elapsed_ms(started);
+            let this_run = run.clone();
             let committed = ctx
                 .db
                 .transaction(move |tx| {
@@ -1099,6 +1102,13 @@ async fn run_collector_once(
                     };
                     oxplow_db::collector_store::record_run_in(tx, &run)
                         .map_err(oxplow_db::map_sql_err)?;
+                    oxplow_db::extension_run_store::record_tx(
+                        tx,
+                        &this_run,
+                        oxplow_domain::run::Outcome::Ok,
+                        None,
+                        &serde_json::json!([]),
+                    )?;
                     let vocabulary = vocabulary.current();
                     let synced = event.envelope("ok", counts.clone(), 0, elapsed, None);
                     oxplow_db::event_log_store::append_tx(tx, &vocabulary, &synced)?;
@@ -1137,10 +1147,22 @@ async fn run_collector_once(
         Some(error.clone()),
     );
     let vocabulary = ctx.vocabulary.clone();
+    let (this_run, why) = (run.clone(), error.clone());
     ctx.db
         .transaction(move |tx| {
             oxplow_db::collector_store::record_run_in(tx, &failed)
                 .map_err(oxplow_db::map_sql_err)?;
+            oxplow_db::extension_run_store::record_tx(
+                tx,
+                &this_run,
+                if this_run.cancel().is_cancelled() {
+                    oxplow_domain::run::Outcome::Cancelled
+                } else {
+                    oxplow_domain::run::Outcome::Failed
+                },
+                Some(&why),
+                &serde_json::json!([]),
+            )?;
             oxplow_db::event_log_store::append_tx(tx, &vocabulary.current(), &envelope).map(|_| ())
         })
         .await
@@ -1283,6 +1305,8 @@ pub struct RunRecord<'a> {
     pub facts: i64,
     pub elapsed_ms: i64,
     pub error: Option<String>,
+    /// The run, when it was an extension's: recorded with it.
+    pub run: Option<&'a RunContext>,
 }
 
 impl RunLog {
@@ -1342,7 +1366,16 @@ impl RunLog {
             row_counts: r.entities.clone(),
             cursor: None,
             last_event_id: r.cause.as_ref().map(|(_, seq)| *seq),
+            run_id: r.run.map(|run| run.run().to_string()),
         };
+        let ended = r.run.map(|run| {
+            let outcome = match (r.status, run.cancel().is_cancelled()) {
+                ("ok", _) => oxplow_domain::run::Outcome::Ok,
+                (_, true) => oxplow_domain::run::Outcome::Cancelled,
+                _ => oxplow_domain::run::Outcome::Failed,
+            };
+            (run.clone(), outcome, r.error.clone())
+        });
         let synced = Synced {
             source: r.source.to_string(),
             collector: oxplow_domain::refs::build::collector_ref(r.owner, r.id),
@@ -1365,6 +1398,15 @@ impl RunLog {
                 }
                 oxplow_db::collector_store::record_run_in(tx, &run)
                     .map_err(oxplow_db::map_sql_err)?;
+                if let Some((run, outcome, error)) = &ended {
+                    oxplow_db::extension_run_store::record_tx(
+                        tx,
+                        run,
+                        *outcome,
+                        error.as_deref(),
+                        &serde_json::json!([]),
+                    )?;
+                }
                 Ok(true)
             })
             .await
@@ -1392,6 +1434,7 @@ impl RunLog {
             row_counts: BTreeMap::new(),
             cursor: None,
             last_event_id,
+            run_id: None,
         };
         self.db
             .transaction(move |tx| {
@@ -1452,6 +1495,7 @@ pub async fn run_for_event(
                 row_counts: BTreeMap::new(),
                 cursor: None,
                 last_event_id: Some(seq),
+                run_id: None,
             })
             .await?;
         return Ok(EventRun::Guarded);
@@ -1476,6 +1520,7 @@ pub async fn run_for_event(
                     row_counts: BTreeMap::new(),
                     cursor: None,
                     last_event_id: Some(seq),
+                    run_id: None,
                 })
                 .await?;
             Ok(EventRun::NeedsApproval)
@@ -1717,6 +1762,7 @@ async fn produce(
                 std::sync::Arc::new(crate::ai_compute::CollectorOracle::new(
                     ctx.ai.clone(),
                     format!("collector:{}/{}", ext.name, spec.id),
+                    run.clone(),
                 ))
             } else {
                 std::sync::Arc::new(RefusingOracle)
@@ -2453,6 +2499,7 @@ pub(crate) mod tests {
                     row_counts: BTreeMap::new(),
                     cursor: None,
                     last_event_id: None,
+                    run_id: None,
                 }),
             }
         };

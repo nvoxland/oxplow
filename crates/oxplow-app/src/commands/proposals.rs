@@ -15,7 +15,7 @@ impl CommandBus {
     /// like one. No audit row for a proposal: nothing ran.
     pub(super) async fn unconfirmed(
         &self,
-        actor: &Actor,
+        run_ctx: &RunContext,
         origin: RunOrigin,
         run: Prepared<'_>,
         input: Value,
@@ -23,6 +23,7 @@ impl CommandBus {
         gates: Gates,
     ) -> CommandError {
         let Prepared { command, resolved } = run;
+        let actor = run_ctx.actor();
         if !actor.proposes() {
             return CommandError::NeedsConfirmation {
                 preview: Box::new(preview),
@@ -49,7 +50,7 @@ impl CommandBus {
                             CommandError::Denied { .. } => Outcome::Denied,
                             _ => Outcome::Error,
                         };
-                        self.audit_only(actor, spec, &input, recorded, Some(err.to_string()))
+                        self.audit_only(run_ctx, spec, &input, recorded, Some(err.to_string()))
                             .await;
                         return err;
                     }

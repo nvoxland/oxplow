@@ -462,6 +462,7 @@ mod tests {
                         result: None,
                         inverse: None,
                         scopes: Default::default(),
+                        run_id: None,
                     },
                 )
             })
@@ -514,6 +515,7 @@ mod tests {
                         result: None,
                         inverse: None,
                         scopes: Default::default(),
+                        run_id: None,
                     },
                 )
             })

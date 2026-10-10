@@ -121,6 +121,54 @@ pub enum Mode {
     External,
 }
 
+/// What a run used, as it went: the scopes it called, what its scripts
+/// cost, the model calls it made. Nested work of the same contribution
+/// adds to it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Usage {
+    pub scopes: std::collections::BTreeMap<String, u32>,
+    /// Its scripts' CPU time, summed.
+    pub cpu_ms: u64,
+    /// The most any one of its scripts held live at once.
+    pub peak_bytes: u64,
+    pub ai_calls: u32,
+}
+
+/// How a run ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Outcome {
+    Ok,
+    Skipped,
+    Failed,
+    Denied,
+    Cancelled,
+    Stale,
+}
+
+impl Outcome {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Outcome::Ok => "ok",
+            Outcome::Skipped => "skipped",
+            Outcome::Failed => "failed",
+            Outcome::Denied => "denied",
+            Outcome::Cancelled => "cancelled",
+            Outcome::Stale => "stale",
+        }
+    }
+}
+
+impl Mode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Mode::Pure => "pure",
+            Mode::Transactional => "transactional",
+            Mode::External => "external",
+        }
+    }
+}
+
 /// Which contribution a run belongs to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContributionRef {
@@ -183,8 +231,11 @@ pub struct RunContext {
     mode: Mode,
     budget: Budget,
     started: Instant,
+    /// When it began, as a timestamp (the record's `started_at`).
+    began: crate::time::Timestamp,
     cancel: Cancel,
     trace: Arc<ScopeTrace>,
+    usage: Arc<std::sync::Mutex<Usage>>,
 }
 
 impl RunContext {
@@ -200,8 +251,10 @@ impl RunContext {
             mode,
             budget: Budget::default(),
             started: Instant::now(),
+            began: crate::time::Timestamp::now(),
             cancel: Cancel::default(),
             trace: Arc::new(ScopeTrace::default()),
+            usage: Arc::default(),
         }
     }
 
@@ -245,6 +298,15 @@ impl RunContext {
         self
     }
 
+    /// This run, started by `parent`'s (a person's `oxplow.effect.retry`
+    /// of an effect's reaction): linked to it as its parent and stopped
+    /// with it, still run as its own actor.
+    pub fn under(mut self, parent: &RunContext) -> Self {
+        self.parent = Some(parent.run.clone());
+        self.cancel = parent.cancel.clone();
+        self
+    }
+
     /// This run with its agent placed in `stream` (its transport carried
     /// the thread but not the stream): the same actor, its stream filled.
     pub fn placed_in(mut self, stream: crate::ids::StreamId) -> Self {
@@ -256,9 +318,14 @@ impl RunContext {
     /// Nested work of this run: a new run id whose parent is this one,
     /// the same actor, cancel flag and generation, `contribution` when it
     /// is another one's (an effect's reaction a person's retry started),
-    /// and a budget no larger than what this run has left.
+    /// and a budget no larger than what this run has left. Work of the
+    /// same contribution adds to this run's usage; another's keeps its own.
     pub fn child(&self, contribution: Option<ContributionRef>, mode: Mode) -> Self {
         let left = self.budget.ceiling.saturating_sub(self.started.elapsed());
+        let usage = match &contribution {
+            None => self.usage.clone(),
+            Some(_) => Arc::default(),
+        };
         RunContext {
             run: RunId::generate(),
             parent: Some(self.run.clone()),
@@ -273,8 +340,10 @@ impl RunContext {
                 ceiling: left,
             }),
             started: Instant::now(),
+            began: crate::time::Timestamp::now(),
             cancel: self.cancel.clone(),
             trace: Arc::new(ScopeTrace::default()),
+            usage,
         }
     }
 
@@ -331,6 +400,37 @@ impl RunContext {
     /// How long it has run.
     pub fn elapsed(&self) -> Duration {
         self.started.elapsed()
+    }
+
+    /// When it began.
+    pub fn began(&self) -> crate::time::Timestamp {
+        self.began
+    }
+
+    /// It called scope `id`.
+    pub fn used_scope(&self, id: &str) {
+        *self.usage_lock().scopes.entry(id.to_string()).or_insert(0) += 1;
+    }
+
+    /// One of its scripts ran, costing `cpu_ms` and holding `peak_bytes`.
+    pub fn used_cpu(&self, cpu_ms: u64, peak_bytes: u64) {
+        let mut u = self.usage_lock();
+        u.cpu_ms += cpu_ms;
+        u.peak_bytes = u.peak_bytes.max(peak_bytes);
+    }
+
+    /// It called a model.
+    pub fn used_ai(&self) {
+        self.usage_lock().ai_calls += 1;
+    }
+
+    /// What it has used so far.
+    pub fn usage(&self) -> Usage {
+        self.usage_lock().clone()
+    }
+
+    fn usage_lock(&self) -> std::sync::MutexGuard<'_, Usage> {
+        self.usage.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// Refuse to go on if cancelled, or if it was built against a catalog
@@ -428,6 +528,22 @@ mod tests {
         assert_eq!(child.extension(), Some("acme"));
         parent.cancel().cancel();
         assert_eq!(child.check(None), Err(RunError::Cancelled));
+    }
+
+    /// Same-contribution nested work adds to the run's usage; another
+    /// contribution's keeps its own.
+    #[test]
+    fn usage_follows_the_contribution() {
+        let run = RunContext::contribution(effect("g1"), Actor::System, Mode::External);
+        run.child(None, Mode::Pure).used_scope("sql.read");
+        run.used_cpu(5, 100);
+        run.child(None, Mode::Pure).used_cpu(3, 50);
+        let other = run.child(Some(effect("g1")), Mode::External);
+        other.used_ai();
+        let u = run.usage();
+        assert_eq!(u.scopes.get("sql.read"), Some(&1));
+        assert_eq!((u.cpu_ms, u.peak_bytes, u.ai_calls), (8, 100, 0));
+        assert_eq!(other.usage().ai_calls, 1);
     }
 
     /// A run built against another generation than the one served stops.

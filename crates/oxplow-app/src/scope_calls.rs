@@ -90,6 +90,7 @@ impl<'a> Calls<'a> {
             ));
         }
         self.run.trace().count(id);
+        self.run.used_scope(id);
         if let Some(answers) = self.answers.get_mut(id) {
             return answers
                 .pop_front()

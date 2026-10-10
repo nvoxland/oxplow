@@ -1953,6 +1953,38 @@ bus writes an attempt's row in its run's transaction, or claims it
 `started` first when a step runs outside it (`claim_tx` / `finish_tx`).
 See [extensions.md](./extensions.md) "Effects".
 
+### `extension_run` — `crates/oxplow-db/src/extension_run_store.rs`
+
+V48. One row per finished run of extension code (`oxplow_domain::run`,
+[extensions.md](./extensions.md) "The run context"): `run_id` (a
+UUIDv7), `parent_run_id`, `extension`, `contribution`
+(`<ext>/<kind>/<local>`), `kind`, `version`, `generation`, `actor_kind` /
+`actor`, the anchors (`stream_id`, `thread_id`, `effort_id`, `turn_id`,
+`agent_session_id`, `snapshot_id`, as integers), `cause_event_id`,
+`mode`, `started_at` / `finished_at`, `outcome` (`ok` / `skipped` /
+`failed` / `denied` / `cancelled` / `stale`), `error`, `wall_ms`,
+`cpu_ms` (its scripts' CPU, summed), `peak_bytes` (the most one of its
+scripts held), `ai_calls`, `scopes_json`, `decisions_json`. STRICT.
+
+- **Written once, by the host that ran it**, in the transaction its own
+  record lands in: a collector's with its `collector_run` row, a fact
+  collector's with its capture, a command's (an extension's `commands:`
+  entry, or a policy's call) with its audit row (`record_tx` /
+  `audit_only`); an effect's by the bus with its run, or by the effect
+  host when its script skipped or failed before the bus. `INSERT OR
+  REPLACE`: a host that learns the final outcome later rewrites it.
+- **Core's own work writes nothing**: `record_tx` is a no-op for a run
+  with no contribution.
+- **What it never holds:** an input, a result, a credential's value, a
+  prompt. What a run read or was answered stays where it already is
+  (`command_audit`, `event_content`).
+- **Linked from the records that already existed:** `command_audit`,
+  `effect_run`, `collector_run` and `ai_call` each gained `run_id`
+  (V48). A person's `oxplow.collector.sync` run is the collector run's
+  `parent_run_id`.
+- **Swept** on the collector window (`EXTENSION_RUN_DAYS`, 90 days) by
+  `event_retention::sweep`, in its 5,000-row batches.
+
 ### `contribution_health` — `SqliteContributionHealthStore` (`crates/oxplow-db/src/contribution_health_store.rs`)
 
 V135 (P7.C1). Each extension contribution's health on this machine, keyed

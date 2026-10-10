@@ -1052,7 +1052,7 @@ impl OxplowMcp {
         let decision = self
             .services
             .ai_compute
-            .decide(&caller, &p.state, &questions)
+            .decide(caller.as_str(), &p.state, &questions)
             .await
             .map_err(compute_error)?;
         json_result(&serde_json::json!({
@@ -1078,7 +1078,7 @@ impl OxplowMcp {
         let summary = self
             .services
             .ai_compute
-            .summarize(&caller, &p.text, p.focus.as_deref())
+            .summarize(caller.as_str(), &p.text, p.focus.as_deref())
             .await
             .map_err(compute_error)?;
         Ok(CallToolResult::success(vec![ContentBlock::text(

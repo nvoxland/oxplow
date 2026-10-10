@@ -5284,6 +5284,7 @@ async fn a_backfill_stops_after_three_failures_even_while_they_retry() {
             to_seq: None,
         },
         50,
+        None,
     )
     .await
     .unwrap();
@@ -5324,6 +5325,7 @@ async fn a_backfill_attempt_whose_reply_was_lost_is_sent_again() {
             to_seq: None,
         },
         50,
+        None,
     )
     .await
     .unwrap();
@@ -5480,7 +5482,7 @@ async fn a_cut_off_backfill_is_sent_again_at_start() {
             since: None,
             to_seq: None,
         };
-        let _ = crate::commands::effect::backfill(&svc, &ext, &decl, &range, 50).await;
+        let _ = crate::commands::effect::backfill(&svc, &ext, &decl, &range, 50, None).await;
     })
     .await;
     assert_eq!(
@@ -5634,7 +5636,7 @@ async fn a_cut_off_found_at_start_counts_toward_health() {
             since: None,
             to_seq: None,
         };
-        let _ = crate::commands::effect::backfill(&svc, &ext, &decl, &range, 50).await;
+        let _ = crate::commands::effect::backfill(&svc, &ext, &decl, &range, 50, None).await;
     })
     .await;
     assert_eq!(

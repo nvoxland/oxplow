@@ -30,6 +30,9 @@ pub struct NewAiCall {
     /// What it answered (`{ text }` or `{ answers }`); `None` when the
     /// call failed.
     pub response: Option<serde_json::Value>,
+    /// The extension run that made it (`extension_run.run_id`); `None` for
+    /// oxplow's own.
+    pub run_id: Option<String>,
 }
 
 /// A body's bytes: its JSON serialized canonically (object keys sorted at
@@ -72,8 +75,8 @@ impl SqliteAiCallStore {
                 c.execute(
                     "INSERT INTO ai_call (role, provider, model, caller, input_tokens, output_tokens,
                                           latency_ms, ok, error, at, input_hash, request_hash,
-                                          response_hash)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                                          response_hash, run_id)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
                     rusqlite::params![
                         call.role,
                         call.provider,
@@ -87,7 +90,8 @@ impl SqliteAiCallStore {
                         at,
                         call.input_hash,
                         request,
-                        response
+                        response,
+                        call.run_id
                     ],
                 )
                 .map_err(crate::map_sql_err)?;
@@ -116,6 +120,7 @@ mod tests {
             input_hash: None,
             request: serde_json::json!({ "system": null, "prompt": "hi", "json": false }),
             response: Some(serde_json::json!({ "text": "hello" })),
+            run_id: None,
         }
     }
 
@@ -131,6 +136,7 @@ mod tests {
                 ok: false,
                 error: Some("rate limited".into()),
                 response: None,
+                run_id: None,
                 ..call("main")
             })
             .await

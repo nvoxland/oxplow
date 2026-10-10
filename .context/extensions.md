@@ -1815,6 +1815,16 @@ its scope trace.
   run that ran them, named for the collector), provider invokes (on the
   wire as `InvokeParams.context`; `host/call`s are answered only inside
   a registered run) and knowledge, snapshot and harness verbs.
+- **Every contribution's run is recorded once** (`extension_run`,
+  `v_extension_run`; [data-model.md](./data-model.md) "extension_run"):
+  its identity, actor, anchors, cause, outcome, cost (`cpu_ms`,
+  `peak_bytes`, from each script's `Ran`), the scopes it called and its
+  model calls — never what it read or wrote. Nested work of the same
+  contribution adds to its parent's usage (`child()` shares it); another
+  contribution's child is its own row, its `parent_run_id` the run that
+  started it. A person's `oxplow.effect.retry` / `backfill` links the
+  reaction's run to theirs (`under`) without making it theirs: the
+  effect still runs as itself.
 - **Cancel reaches the worker.** Every script a collector, command,
   effect, policy or fact collector runs is passed its run's cancel flag;
   an exec collector's program is killed when it's set. Upcasts, report

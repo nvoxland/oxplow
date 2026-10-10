@@ -11,12 +11,13 @@ impl CommandBus {
     /// error being reported.
     pub(super) async fn audit_only(
         &self,
-        actor: &Actor,
+        run: &RunContext,
         spec: &CommandSpec,
         input: &Value,
         outcome: Outcome,
         error: Option<String>,
     ) {
+        let actor = run.actor();
         let row = NewCommandAudit {
             command: spec.id.clone(),
             actor_kind: actor.kind(),
@@ -29,10 +30,26 @@ impl CommandBus {
             result: None,
             inverse: None,
             scopes: Default::default(),
+            run_id: Some(run.run().to_string()),
         };
+        // An extension's run that was refused or failed is its run's end.
+        let ended = match outcome {
+            Outcome::Denied => oxplow_domain::run::Outcome::Denied,
+            _ => oxplow_domain::run::Outcome::Failed,
+        };
+        let (run_c, error_c) = (run.clone(), row.error.clone());
         if let Err(e) = self
             .db
-            .transaction(move |tx| insert_tx(tx, &row).map(|_| ()))
+            .transaction(move |tx| {
+                insert_tx(tx, &row)?;
+                oxplow_db::extension_run_store::record_tx(
+                    tx,
+                    &run_c,
+                    ended,
+                    error_c.as_deref(),
+                    &serde_json::json!([]),
+                )
+            })
             .await
         {
             tracing::warn!(error = %e, command = %spec.id, "command audit write failed");
@@ -69,7 +86,6 @@ impl CommandBus {
                 let recorded = record_tx(
                     tx,
                     &vocabulary.current(),
-                    &actor_c,
                     &spec_c,
                     &input_c,
                     &shadow,
@@ -190,6 +206,8 @@ pub(super) struct Executed {
     pub failed: Option<String>,
     /// What caused the run: the event an effect reacted to.
     pub cause: Option<oxplow_domain::EventId>,
+    /// The run it was.
+    pub run: RunContext,
     /// Its trace's summary ("Scopes").
     pub scopes: std::collections::BTreeMap<String, u32>,
 }
@@ -200,6 +218,7 @@ impl Executed {
             id,
             failed: None,
             cause: origin.cause(run),
+            run: run.clone(),
             scopes: Default::default(),
         }
     }
@@ -210,7 +229,6 @@ impl Executed {
 pub(super) fn record_tx(
     tx: &rusqlite::Connection,
     vocabulary: &oxplow_domain::vocabulary::Vocabulary,
-    actor: &Actor,
     spec: &CommandSpec,
     input: &Value,
     out: &HandlerOutput,
@@ -220,8 +238,10 @@ pub(super) fn record_tx(
         id: executed_id,
         failed,
         cause,
+        run,
         scopes,
     } = executed;
+    let actor = run.actor();
     // A run that failed partway (a composite's steps, some landed) is
     // recorded with what landed, as an error.
     let outcome = if failed.is_some() {
@@ -244,11 +264,23 @@ pub(super) fn record_tx(
             session_id: actor.session_id(),
             input: spec.recorded_input(input),
             outcome,
-            error: failed,
+            error: failed.clone(),
             result: Some(out.result.clone()),
             inverse: inverse.clone(),
             scopes,
+            run_id: Some(run.run().to_string()),
         },
+    )?;
+    // An extension's run (its command's, a policy's call) ends with it.
+    oxplow_db::extension_run_store::record_tx(
+        tx,
+        &run,
+        match failed {
+            Some(_) => oxplow_domain::run::Outcome::Failed,
+            None => oxplow_domain::run::Outcome::Ok,
+        },
+        failed.as_deref(),
+        &serde_json::json!([]),
     )?;
     let mut executed = Envelope::typed::<CommandExecuted>(
         actor.source(),

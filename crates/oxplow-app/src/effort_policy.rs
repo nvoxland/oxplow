@@ -38,7 +38,7 @@
 //! effort's (rule 2 opens it, adopting no further back than the close).
 
 use oxplow_domain::refs::build::{effort_ref, thread_ref};
-use oxplow_domain::run::{Mode, RunContext};
+use oxplow_domain::run::{Mode, Outcome as RunOutcome, RunContext};
 use std::sync::{Arc, RwLock, Weak};
 
 use async_trait::async_trait;
@@ -433,16 +433,36 @@ impl EffortPolicyConsumer {
             .ok_or_else(|| DomainError::Invariant("the command bus is gone".into()))
     }
 
-    /// Run `calls`, in order, as part of `run`, stopping at the first that
-    /// fails.
+    /// Run `calls`, in order, each a child of `run`, stopping at the first
+    /// that fails.
     async fn run(&self, run: &RunContext, calls: Vec<CommandCall>) -> Result<(), DomainError> {
         let bus = self.bus()?;
         for c in calls {
-            bus.run_in(run, &c.name, c.input, false)
+            bus.run_in(&run.child(None, Mode::External), &c.name, c.input, false)
                 .await
                 .map_err(|e| storage(format!("{}: {e}", c.name)))?;
         }
         Ok(())
+    }
+
+    /// Record the policy's run, ended `outcome`.
+    async fn ended(&self, run: &RunContext, outcome: RunOutcome, error: Option<String>) {
+        let run = run.clone();
+        if let Err(e) = self
+            .db
+            .transaction(move |tx| {
+                oxplow_db::extension_run_store::record_tx(
+                    tx,
+                    &run,
+                    outcome,
+                    error.as_deref(),
+                    &serde_json::json!([]),
+                )
+            })
+            .await
+        {
+            tracing::warn!(error = %e, "recording the effort policy's run failed");
+        }
     }
 }
 
@@ -509,16 +529,28 @@ impl AsyncEventConsumer for EffortPolicyConsumer {
         if lineage.refusal().is_some() {
             return Ok(());
         }
-        let calls = policy
-            .react(&run, &EventView::of(event, &self.vocabulary.current())?)
-            .await?;
-        if calls.is_empty() {
-            return Ok(());
+        let reacted = async {
+            let calls = policy
+                .react(&run, &EventView::of(event, &self.vocabulary.current())?)
+                .await?;
+            if calls.is_empty() {
+                return Ok(false);
+            }
+            let bus = self.bus()?;
+            crate::extension_commands::check_calls(&*bus, &calls)
+                .map_err(|e| storage(format!("effort policy `{id}`: {e}")))?;
+            self.run(&run, calls).await.map(|()| true)
         }
-        let bus = self.bus()?;
-        crate::extension_commands::check_calls(&*bus, &calls)
-            .map_err(|e| storage(format!("effort policy `{id}`: {e}")))?;
-        self.run(&run, calls).await
+        .await;
+        match &reacted {
+            Ok(true) => self.ended(&run, RunOutcome::Ok, None).await,
+            Ok(false) => self.ended(&run, RunOutcome::Skipped, None).await,
+            Err(e) => {
+                self.ended(&run, RunOutcome::Failed, Some(e.to_string()))
+                    .await
+            }
+        }
+        reacted.map(|_| ())
     }
 }
 

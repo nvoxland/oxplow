@@ -287,7 +287,15 @@ pub struct Command {
     confirm_for: Option<Arc<ConfirmFor>>,
     /// Its check before the transaction, if it has one ([`Precheck`]).
     precheck: Option<Arc<Precheck>>,
+    /// The extension contribution it is (an extension's `commands:`
+    /// entry), named when it runs (its version and the catalog generation
+    /// are the ones then): its runs are that contribution's, recorded as
+    /// its.
+    contribution: Option<Arc<ContributionOf>>,
 }
+
+/// Names the contribution a command is, as of now.
+pub type ContributionOf = dyn Fn() -> oxplow_domain::run::ContributionRef + Send + Sync;
 
 impl Command {
     /// This command, offered to a person as `ui` says (label, group, …).
@@ -306,6 +314,7 @@ impl Command {
             validator: self.validator.clone(),
             confirm_for: self.confirm_for.clone(),
             precheck: self.precheck.clone(),
+            contribution: self.contribution.clone(),
         };
         copy.check_atomicity()?;
         Ok(copy)
@@ -340,6 +349,7 @@ impl Command {
             validator,
             confirm_for: None,
             precheck: None,
+            contribution: None,
         };
         command.check_atomicity()?;
         Ok(command)
@@ -366,6 +376,13 @@ impl Command {
 
     /// Its confirmation decided per input. A command that only reads may not have
     /// one (see [`Self::may_ask`]).
+    /// This command as `contribution`'s: its runs are recorded as that
+    /// contribution's.
+    pub fn of_contribution(mut self, contribution: Arc<ContributionOf>) -> Self {
+        self.contribution = Some(contribution);
+        self
+    }
+
     /// This command with its check before the transaction ([`Precheck`]).
     pub fn with_precheck(mut self, f: Arc<Precheck>) -> Self {
         self.precheck = Some(f);
@@ -970,16 +987,16 @@ impl CommandBus {
         let run = &match self.resolved(run).await {
             Ok(run) => run,
             Err(err) => {
-                self.audit_only(
-                    run.actor(),
-                    spec,
-                    &input,
-                    Outcome::Denied,
-                    Some(err.to_string()),
-                )
-                .await;
+                self.audit_only(run, spec, &input, Outcome::Denied, Some(err.to_string()))
+                    .await;
                 return Err(err);
             }
+        };
+        // An extension's command runs as that contribution: a child of the
+        // run that called it.
+        let run = &match &command.contribution {
+            Some(named) => run.child(Some(named()), Mode::External),
+            None => run.clone(),
         };
         let actor = run.actor();
 
@@ -990,7 +1007,7 @@ impl CommandBus {
                 field: None,
                 message,
             };
-            self.audit_only(actor, spec, &input, Outcome::Invalid, Some(err.to_string()))
+            self.audit_only(run, spec, &input, Outcome::Invalid, Some(err.to_string()))
                 .await;
             return Err(err);
         }
@@ -999,7 +1016,7 @@ impl CommandBus {
         let routing = match command.validator.check(&input).map(|()| command.resolve()) {
             Ok(routing) => routing,
             Err(err) => {
-                self.audit_only(actor, spec, &input, Outcome::Invalid, Some(err.to_string()))
+                self.audit_only(run, spec, &input, Outcome::Invalid, Some(err.to_string()))
                     .await;
                 return Err(err);
             }
@@ -1009,7 +1026,7 @@ impl CommandBus {
             let err = CommandError::Denied {
                 reason: format!("`{}` is not open to {:?} callers", spec.id, actor.invoker()),
             };
-            self.audit_only(actor, spec, &input, Outcome::Denied, Some(err.to_string()))
+            self.audit_only(run, spec, &input, Outcome::Denied, Some(err.to_string()))
                 .await;
             return Err(err);
         }
@@ -1029,7 +1046,7 @@ impl CommandBus {
                 self.policy.check_command(thread_id.as_ref(), spec, gated)
             {
                 let err = CommandError::Denied { reason };
-                self.audit_only(actor, spec, &input, Outcome::Denied, Some(err.to_string()))
+                self.audit_only(run, spec, &input, Outcome::Denied, Some(err.to_string()))
                     .await;
                 return Err(err);
             }
@@ -1058,7 +1075,7 @@ impl CommandBus {
                             CommandError::Denied { .. } => Outcome::Denied,
                             _ => Outcome::Error,
                         };
-                        self.audit_only(actor, spec, &input, recorded, Some(err.to_string()))
+                        self.audit_only(run, spec, &input, recorded, Some(err.to_string()))
                             .await;
                         return Err(err);
                     }
@@ -1069,7 +1086,7 @@ impl CommandBus {
         // (tsk1010): the command's own, or each composed call's.
         for pending in prechecks {
             if let Err(err) = pending.run().await {
-                self.audit_only(actor, spec, &input, Outcome::Invalid, Some(err.to_string()))
+                self.audit_only(run, spec, &input, Outcome::Invalid, Some(err.to_string()))
                     .await;
                 return Err(err);
             }
@@ -1086,12 +1103,12 @@ impl CommandBus {
                 input: input.clone(),
                 destructive: matches!(confirm, oxplow_domain::Confirm::Destructive),
             };
-            let run = Prepared {
+            let prepared = Prepared {
                 command: &command,
                 resolved: &resolved,
             };
             return Err(self
-                .unconfirmed(actor, origin, run, input, preview, gates)
+                .unconfirmed(run, origin, prepared, input, preview, gates)
                 .await);
         }
         // 5a. A read runs without a record: no audit row, no event.
@@ -1112,12 +1129,12 @@ impl CommandBus {
                 .await
             {
                 Err(CommandError::NeedsConfirmation { preview }) => {
-                    let run = Prepared {
+                    let prepared = Prepared {
                         command: &command,
                         resolved: &resolved,
                     };
                     Err(self
-                        .unconfirmed(actor, origin, run, input, *preview, gates)
+                        .unconfirmed(run, origin, prepared, input, *preview, gates)
                         .await)
                 }
                 Ok(done) => {
@@ -1186,7 +1203,6 @@ impl CommandBus {
                         let recorded = record_tx(
                             tx,
                             &vocabulary.current(),
-                            &actor_c,
                             &spec_c,
                             &input_c,
                             &out,
@@ -1243,7 +1259,12 @@ impl CommandBus {
             Resolved::Steps(_) => unreachable!("composite steps ran above"),
             Resolved::External(handler) => {
                 self.claim(&origin).await?;
-                let invocation = origin.invocation(run, 0, &spec.id, &input);
+                // The command's own run: what it starts (a collector run,
+                // a provider's `host/call`s) is part of the run audited.
+                let invocation = Invocation {
+                    run: run.clone(),
+                    ..origin.invocation(run, 0, &spec.id, &input)
+                };
                 let called = invocation.run.clone();
                 match handler(invocation, input.clone()).await {
                     Ok(out) => Ok(self
@@ -1272,12 +1293,12 @@ impl CommandBus {
             // whose child asks) is step 4's answer, late: rolled back,
             // nothing audited — a person is asked, an agent's run proposed.
             Err(CommandError::NeedsConfirmation { preview }) => {
-                let run = Prepared {
+                let prepared = Prepared {
                     command: &command,
                     resolved: &resolved,
                 };
                 Err(self
-                    .unconfirmed(actor, origin, run, input, *preview, gates)
+                    .unconfirmed(run, origin, prepared, input, *preview, gates)
                     .await)
             }
             Err(err) => {
@@ -1287,7 +1308,7 @@ impl CommandBus {
                     CommandError::Denied { .. } => Outcome::Denied,
                     _ => Outcome::Error,
                 };
-                self.audit_only(actor, spec, &input, recorded, Some(err.to_string()))
+                self.audit_only(run, spec, &input, recorded, Some(err.to_string()))
                     .await;
                 Err(err)
             }

@@ -1759,6 +1759,11 @@ export type CollectorRun = {
 	cursor: unknown | null,
 	// The seq of the last trigger event it ran for.
 	lastEventId: number | null,
+	/**
+	 *  The last run (`extension_run.run_id`); `None` for one before runs
+	 *  were recorded.
+	 */
+	runId?: string | null,
 };
 
 // Outcome of one run, as reported to the UI / agent.
