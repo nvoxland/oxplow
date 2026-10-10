@@ -31,6 +31,7 @@
 //! this is the pump's). The loop also runs on boot and on a slow timer,
 //! so a producer without a wake still delivers.
 
+use oxplow_domain::events::at_latest;
 use oxplow_domain::vocabulary::{Vocabulary, VocabularyHandle};
 use std::sync::Arc;
 use std::time::Duration;
@@ -623,30 +624,8 @@ enum Delivery {
 }
 
 /// An async handler on its own task, so a panic is a failure the pump
-/// parks rather than one that takes the loop down.
-/// The event as a consumer reads it: carried to the newest registered
-/// version of its type (P3.1), so a consumer is written against one shape
-/// and rows logged at an older version still reach it. A row that can't
-/// be upcast fails the delivery, which parks it as a dead letter. A type
-/// the running vocabulary doesn't know (its extension was removed) passes
-/// through as logged: there is no newer shape to carry it to.
-pub(crate) fn at_latest(
-    vocabulary: &Vocabulary,
-    event: &StoredEvent,
-) -> Result<StoredEvent, DomainError> {
-    let env = &event.envelope;
-    match vocabulary.latest(&env.event_type) {
-        None => return Ok(event.clone()),
-        Some(latest) if latest == env.v => return Ok(event.clone()),
-        Some(_) => {}
-    }
-    let (v, payload) = vocabulary.upcast_to_latest(&env.event_type, env.v, env.payload.clone())?;
-    let mut out = event.clone();
-    out.envelope.v = v;
-    out.envelope.payload = payload;
-    Ok(out)
-}
-
+/// parks rather than one that takes the loop down. It gets the event
+/// carried to its type's newest version ([`at_latest`]).
 pub(crate) async fn run_async_handler(
     vocabulary: VocabularyHandle,
     consumer: Arc<dyn AsyncEventConsumer>,

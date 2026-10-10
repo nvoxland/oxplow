@@ -106,7 +106,7 @@ pub async fn recent_activity(
         .recent_in_session("agent", thread, session, RECENT_ACTIVITY)
         .await?
         .iter()
-        .filter_map(|e| crate::event_pump::at_latest(&vocabulary, e).ok())
+        .filter_map(|e| oxplow_domain::events::at_latest(&vocabulary, e).ok())
         .filter_map(|e| activity_of(&e))
         .collect())
 }

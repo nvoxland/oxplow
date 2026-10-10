@@ -68,6 +68,8 @@ pub mod entity_metrics;
 pub mod event_bodies;
 pub mod event_lineage;
 pub mod event_pump;
+#[cfg(test)]
+mod event_view_tests;
 pub mod events;
 pub mod exec_consent;
 pub mod extension_catalog;
@@ -810,7 +812,7 @@ impl Services {
         let thread_note_store = Arc::new(SqliteThreadNoteStore::new(db.clone()));
         let task_link_store = Arc::new(SqliteTaskLinkStore::new(db.clone()));
         let event_log_store = Arc::new(SqliteEventLogStore::new(db.clone(), vocabulary.clone()));
-        let sql = sql_gateway::SqlGateway::new(db.clone());
+        let sql = sql_gateway::SqlGateway::new(db.clone()).with_vocabulary(vocabulary.clone());
         let event_bus = EventBus::new();
         let ref_moves = ref_moves::RefMoves::new(event_bus.clone());
         let event_pump = Arc::new(event_pump::EventPump::new(
@@ -1280,6 +1282,7 @@ impl Services {
             config: config_arc.clone(),
             capabilities: capabilities.clone(),
             policies: effort_policies.clone(),
+            vocabulary: vocabulary.clone(),
         }));
         for command in commands::vcs::ops(commands::vcs::VcsTarget {
             vcs: vcs.clone(),

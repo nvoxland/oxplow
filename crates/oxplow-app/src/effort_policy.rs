@@ -43,12 +43,13 @@ use std::sync::{Arc, RwLock, Weak};
 use async_trait::async_trait;
 use oxplow_config::OxplowConfig;
 use oxplow_db::SqlCell;
-use oxplow_domain::effort_policy::{EffortPolicy, EffortPolicyRegistry, PolicyEvent, EVENTS};
+use oxplow_domain::effort_policy::{EffortPolicy, EffortPolicyRegistry, EVENTS};
 use oxplow_domain::events::schema::{
     CapabilitySwitched, CapabilitySwitchedV1, EffortLanded, EffortLandedV1, EffortLinked,
     EffortLinkedV1, EffortOpenedV2, EventType as _, ThreadCheckpoint, ThreadCheckpointV1,
     WorkItemStateChanged, WorkItemStateChangedV1,
 };
+use oxplow_domain::events::EventView;
 use oxplow_domain::work_items::CanonicalState;
 use oxplow_domain::{Actor, CommandCall, DomainError, EffortId, StoredEvent, ThreadId};
 use serde_json::{json, Value};
@@ -92,21 +93,6 @@ fn call(name: &str, input: Value) -> CommandCall {
     CommandCall {
         name: name.to_string(),
         input,
-    }
-}
-
-/// What a policy is offered of `event`.
-pub fn policy_event(event: &StoredEvent) -> PolicyEvent {
-    let env = &event.envelope;
-    PolicyEvent {
-        id: env.id.to_string(),
-        event_type: env.event_type.clone(),
-        v: env.v,
-        seq: event.seq,
-        source: env.source.clone(),
-        subject: env.subject.clone(),
-        payload: env.payload.clone(),
-        anchors: env.anchors.clone(),
     }
 }
 
@@ -205,7 +191,7 @@ impl CommitOrSwitch {
 
     async fn started(
         &self,
-        event: &PolicyEvent,
+        event: &EventView,
         item_ref: &str,
     ) -> Result<Vec<CommandCall>, DomainError> {
         let thread = match event.anchors.thread_id {
@@ -289,7 +275,7 @@ impl EffortPolicy for CommitOrSwitch {
         &self.id
     }
 
-    async fn react(&self, event: &PolicyEvent) -> Result<Vec<CommandCall>, DomainError> {
+    async fn react(&self, event: &EventView) -> Result<Vec<CommandCall>, DomainError> {
         let payload = event.payload.clone();
         match event.event_type.as_str() {
             t if t == WorkItemStateChanged::TYPE => {
@@ -436,6 +422,7 @@ pub struct EffortPolicyConsumer {
     pub config: Arc<RwLock<OxplowConfig>>,
     pub capabilities: Arc<crate::capabilities::CapabilityRegistry>,
     pub policies: Arc<EffortPolicyRegistry>,
+    pub vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
 }
 
 impl EffortPolicyConsumer {
@@ -496,7 +483,9 @@ impl AsyncEventConsumer for EffortPolicyConsumer {
         let Some(policy) = self.policies.get(&id) else {
             return Ok(());
         };
-        let calls = policy.react(&policy_event(event)).await?;
+        let calls = policy
+            .react(&EventView::of(event, &self.vocabulary.current())?)
+            .await?;
         if calls.is_empty() {
             return Ok(());
         }
@@ -719,7 +708,7 @@ mod tests {
         fn id(&self) -> &str {
             self.id
         }
-        async fn react(&self, event: &PolicyEvent) -> Result<Vec<CommandCall>, DomainError> {
+        async fn react(&self, event: &EventView) -> Result<Vec<CommandCall>, DomainError> {
             self.seen.lock().unwrap().push(event.event_type.clone());
             Ok(if event.payload["to"] == "in_progress" {
                 self.calls.clone()

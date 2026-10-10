@@ -25,6 +25,9 @@ pub struct SqlGateway {
     overlay: std::sync::Arc<Vec<TempView>>,
     /// What a result's `coverage` and `generation` come from.
     collection: Option<std::sync::Arc<Collection>>,
+    /// The event types the log speaks: what [`Self::recent_events`]
+    /// carries each event to the newest version of. Core's unless set.
+    vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
 }
 
 /// What a query result says about the data behind it: which collectors
@@ -37,6 +40,13 @@ pub struct Collection {
     pub root: std::path::PathBuf,
 }
 
+/// A logged event as an extension would get it (the event envelope), or
+/// why it can't be carried to its type's newest version.
+pub struct RecentEvent {
+    pub seq: i64,
+    pub view: Result<oxplow_domain::events::EventView, String>,
+}
+
 impl SqlGateway {
     pub fn new(db: Database) -> Self {
         Self {
@@ -45,7 +55,17 @@ impl SqlGateway {
             watermarks: None,
             overlay: std::sync::Arc::new(Vec::new()),
             collection: None,
+            vocabulary: oxplow_domain::vocabulary::VocabularyHandle::core(),
         }
+    }
+
+    /// Carry [`Self::recent_events`] through `vocabulary` (the app's).
+    pub fn with_vocabulary(
+        mut self,
+        vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
+    ) -> Self {
+        self.vocabulary = vocabulary;
+        self
     }
 
     /// Say how current the collected data behind a query is, and which
@@ -188,8 +208,19 @@ impl SqlGateway {
         &self,
         types: Vec<String>,
         limit: usize,
-    ) -> Result<Vec<oxplow_domain::StoredEvent>, DomainError> {
-        self.layer.recent_events(types, limit).await
+    ) -> Result<Vec<RecentEvent>, DomainError> {
+        let vocabulary = self.vocabulary.current();
+        Ok(self
+            .layer
+            .recent_events(types, limit)
+            .await?
+            .into_iter()
+            .map(|e| RecentEvent {
+                seq: e.seq,
+                view: oxplow_domain::events::EventView::of(&e, &vocabulary)
+                    .map_err(|err| err.to_string()),
+            })
+            .collect())
     }
 
     /// The name of every view in the database.

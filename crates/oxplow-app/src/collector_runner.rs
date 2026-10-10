@@ -23,6 +23,7 @@
 //! the failure the same way. See `.context/semantic-layer.md` →
 //! "Collectors".
 
+use oxplow_domain::events::EventView;
 use oxplow_domain::vocabulary::VocabularyHandle;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -474,8 +475,9 @@ pub fn exec_collector(
     credentials: &BTreeMap<String, String>,
     timeout: Duration,
     egress: &Egress,
+    input: &serde_json::Value,
 ) -> Result<ScriptOutput, String> {
-    use std::io::Read;
+    use std::io::{Read, Write};
     use std::process::{Command, Stdio};
 
     let entry = ext_dir.join(entry_of(spec));
@@ -495,7 +497,7 @@ pub fn exec_collector(
     };
     cmd.current_dir(ext_dir)
         .env_clear()
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .env("OXPLOW_EXTENSION_DIR", ext_dir)
@@ -522,6 +524,13 @@ pub fn exec_collector(
         .spawn()
         .map_err(|e| format!("couldn't start `{}`: {e}", entry_of(spec)))?;
 
+    // Its input on stdin, written on a thread and closed: a program that
+    // never reads it can't block the run (a broken pipe is its choice).
+    let mut in_pipe = child.stdin.take().ok_or("no stdin")?;
+    let bytes = serde_json::to_vec(input).map_err(|e| e.to_string())?;
+    std::thread::spawn(move || {
+        let _ = in_pipe.write_all(&bytes);
+    });
     // Drain both pipes on threads so a chatty program can't deadlock.
     let mut out_pipe = child.stdout.take().ok_or("no stdout")?;
     let mut err_pipe = child.stderr.take().ok_or("no stderr")?;
@@ -626,7 +635,7 @@ pub async fn dry_run_collector(
     layer: &crate::sql_gateway::SqlGateway,
     spec: &CollectorSpec,
     script: Option<String>,
-    event: Option<&StoredEvent>,
+    event: Option<&EventView>,
     rows: Option<Vec<serde_json::Value>>,
 ) -> DryRun {
     if !spec.runtime.is_derived() {
@@ -664,7 +673,7 @@ pub async fn derive_collector(
     script: String,
     spec: &CollectorSpec,
     oracle: std::sync::Arc<dyn oxplow_script::AiOracle>,
-    event: Option<&StoredEvent>,
+    event: Option<&EventView>,
     rows: Option<Vec<serde_json::Value>>,
     budget: oxplow_script::SandboxBudget,
 ) -> Result<ScriptOutput, String> {
@@ -690,7 +699,7 @@ pub async fn derive_collector(
     let mut input = serde_json::Map::new();
     read.into_input(&mut input);
     if let Some(e) = event {
-        input.insert("event".into(), event_input(e));
+        input.insert("event".into(), e.to_json());
     }
     let input = serde_json::Value::Object(input);
     let runtime = spec.runtime;
@@ -829,10 +838,10 @@ pub struct Anchored {
 /// The named parameters a collector's `input` may use: the trigger
 /// event's anchors (`:stream_id`, `:snapshot_id`, `:effort_id`,
 /// `:thread_id`, `:turn_id`), else what the run `known`, and the event
-/// itself — `:event_id` its id, `:event_seq` its seq, as an effect's
-/// `input` binds them (tsk1002); NULL when neither has one.
-pub fn anchor_params(event: Option<&StoredEvent>, known: Anchored) -> Vec<(String, SqlCell)> {
-    let a = event.map(|e| &e.envelope.anchors);
+/// itself — `:event_id` its id, `:event_seq` its seq; NULL when neither
+/// has one. Ids bind as integers: they're join keys.
+pub fn anchor_params(event: Option<&EventView>, known: Anchored) -> Vec<(String, SqlCell)> {
+    let a = event.map(|e| &e.anchors);
     let int = |v: Option<i64>| v.map_or(SqlCell::Null(()), SqlCell::Int);
     vec![
         (
@@ -863,11 +872,11 @@ pub fn anchor_params(event: Option<&StoredEvent>, known: Anchored) -> Vec<(Strin
         ("turn_id".into(), int(a.and_then(|a| a.turn_id))),
         (
             "event_id".into(),
-            event.map_or(SqlCell::Null(()), |e| {
-                SqlCell::Text(e.envelope.id.to_string())
-            }),
+            event
+                .and_then(|e| e.id.clone())
+                .map_or(SqlCell::Null(()), SqlCell::Text),
         ),
-        ("event_seq".into(), int(event.map(|e| e.seq))),
+        ("event_seq".into(), int(event.and_then(|e| e.seq))),
     ]
 }
 
@@ -937,17 +946,13 @@ impl InputRows {
     }
 }
 
-/// The trigger event as a script sees it (`input.event`).
-pub fn event_input(e: &StoredEvent) -> serde_json::Value {
-    serde_json::json!({
-        "type": e.envelope.event_type,
-        "seq": e.seq,
-        "id": e.envelope.id.to_string(),
-        "at": e.envelope.at,
-        "subject": e.envelope.subject,
-        "payload": e.envelope.payload,
-        "anchors": e.envelope.anchors,
-    })
+/// An exec collector's stdin: `{ "event": … }` (the event envelope) when
+/// an event triggered it, `{}` otherwise.
+fn exec_input(event: Option<&EventView>) -> serde_json::Value {
+    match event {
+        Some(e) => serde_json::json!({ "event": e.to_json() }),
+        None => serde_json::json!({}),
+    }
 }
 
 /// A collector's `contribution_health` key: owner / id, kind `collector`.
@@ -1009,7 +1014,19 @@ async fn run_collector_once(
     source: &str,
 ) -> Result<CollectorRunReport, RunCollectorError> {
     let started = std::time::Instant::now();
-    let (spec, output) = produce(ctx, owner, id, trigger.event(), None).await?;
+    // The event as the collector sees it: carried to its type's newest
+    // version. One that can't be carried is a failed run, recorded.
+    let view = trigger
+        .event()
+        .map(|e| EventView::of(e, &ctx.vocabulary.current()))
+        .transpose();
+    let (spec, output) = match view {
+        Ok(view) => produce(ctx, owner, id, view.as_ref(), None).await?,
+        Err(e) => (
+            find_collector(ctx, owner, id)?.1,
+            Err(format!("collector `{id}`: its event: {e}")),
+        ),
+    };
     // What it may not emit fails the run whole: nothing is stored.
     let writes = output.and_then(|mut o| {
         let events = plan_events(
@@ -1627,7 +1644,7 @@ async fn produce(
     ctx: &Collectors<'_>,
     owner: &str,
     id: &str,
-    event: Option<&StoredEvent>,
+    event: Option<&EventView>,
     rows: Option<Vec<serde_json::Value>>,
 ) -> Result<(CollectorSpec, Result<ScriptOutput, String>), RunCollectorError> {
     let (root, approvals) = (ctx.root, ctx.approvals);
@@ -1706,7 +1723,7 @@ async fn produce(
     }
     let output = match missing {
         Some(e) => Err(e),
-        None => exec_approved(&ext_dir, &spec, credentials).await,
+        None => exec_approved(&ext_dir, &spec, credentials, &exec_input(event)).await,
     };
     Ok((spec, output))
 }
@@ -1910,8 +1927,10 @@ async fn exec_approved(
     ext_dir: &Path,
     spec: &CollectorSpec,
     credentials: BTreeMap<String, String>,
+    input: &serde_json::Value,
 ) -> Result<ScriptOutput, String> {
     let dir = ext_dir.to_path_buf();
+    let input = input.clone();
     let spec_owned = spec.clone();
     // Where it's enforced, the program's only way out is a proxy that goes
     // just to its declared hosts; the proxy stops when this run ends.
@@ -1936,6 +1955,7 @@ async fn exec_approved(
             &credentials,
             COLLECTOR_TIMEOUT,
             &egress,
+            &input,
         )
     })
     .await
@@ -2160,6 +2180,7 @@ pub(crate) mod tests {
             &BTreeMap::new(),
             Duration::from_secs(10),
             &Egress::Open,
+            &serde_json::json!({}),
         )
         .unwrap();
         assert_eq!(out.entities["pr"][0]["title"], json!("tok|"));
@@ -2177,6 +2198,7 @@ pub(crate) mod tests {
             &BTreeMap::new(),
             Duration::from_secs(10),
             &Egress::Open,
+            &serde_json::json!({}),
         )
         .unwrap_err();
         assert!(e.contains("exit") && e.contains("boom"), "{e}");
@@ -2189,6 +2211,7 @@ pub(crate) mod tests {
             &BTreeMap::new(),
             Duration::from_millis(300),
             &Egress::Open,
+            &serde_json::json!({}),
         )
         .unwrap_err();
         assert!(e.contains("timed out"), "{e}");
@@ -2201,6 +2224,7 @@ pub(crate) mod tests {
             &BTreeMap::new(),
             Duration::from_secs(10),
             &Egress::Open,
+            &serde_json::json!({}),
         )
         .unwrap_err();
         assert!(e.contains("JSON"), "{e}");
@@ -2217,6 +2241,7 @@ pub(crate) mod tests {
             &BTreeMap::new(),
             Duration::from_secs(10),
             &Egress::Open,
+            &serde_json::json!({}),
         )
         .unwrap_err();
         assert!(e.contains("issue"), "{e}");
@@ -2228,6 +2253,7 @@ pub(crate) mod tests {
             &BTreeMap::new(),
             Duration::from_secs(10),
             &Egress::Open,
+            &serde_json::json!({}),
         )
         .unwrap_err();
         assert!(e.contains("missing.sh"), "{e}");
@@ -2425,6 +2451,7 @@ pub(crate) mod tests {
             &creds,
             Duration::from_secs(10),
             &Egress::Open,
+            &serde_json::json!({}),
         )
         .unwrap();
         assert_eq!(out.entities["pr"][0]["title"], json!("pat-1"));

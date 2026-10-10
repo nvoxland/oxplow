@@ -1901,7 +1901,8 @@ metrics:                              # the read SPEC (the chartable metric)
   the source measure's `temporalSemantics` governs the cross-time collapse. A
   `use:` may only re-target thresholds; the structural fields are inherent.
 - The **fact collector**'s script gets `input = {report?, rows?, event?}` (the
-  parsed `report:`, the `input:` query's rows, the trigger event) and the
+  parsed `report:`, the `input:` query's rows, the trigger event as the
+  event envelope — extensions.md "The event envelope") and the
   snapshot tree through the `TreeHost` builtins `files(glob)` /
   `source_files()` / `ast_query(text, language, sexpr)` /
   `duplicate_blocks(min_lines)` (see

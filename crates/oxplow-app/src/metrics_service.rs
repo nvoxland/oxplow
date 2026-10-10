@@ -2284,12 +2284,24 @@ impl MetricsService {
                     .map_err(|e| format!("collector `{}` report: {e}", c.key))?,
             );
         }
+        // The event as the script sees it: carried to its type's newest
+        // version (the run's vocabulary; core's without a run log).
+        let vocabulary = match &self.run_log {
+            Some(log) => log.vocabulary.current(),
+            None => oxplow_domain::vocabulary::VocabularyHandle::core().current(),
+        };
+        let event = ctx
+            .event
+            .as_deref()
+            .map(|e| oxplow_domain::events::EventView::of(e, &vocabulary))
+            .transpose()
+            .map_err(|e| format!("collector `{}`: its event: {e}", c.key))?;
         if let Some(sql) = &c.input {
             let log = self.run_log.as_ref().ok_or_else(|| {
                 format!("collector `{}`: no database to read `input` from", c.key)
             })?;
             let params = crate::collector_runner::anchor_params(
-                ctx.event.as_deref(),
+                event.as_ref(),
                 crate::collector_runner::Anchored {
                     stream_id: Some(ctx.stream_val),
                     snapshot_id: ctx.snapshot_id,
@@ -2301,8 +2313,8 @@ impl MetricsService {
                 .await?
                 .into_input(&mut input);
         }
-        if let Some(e) = &ctx.event {
-            input.insert("event".into(), crate::collector_runner::event_input(e));
+        if let Some(e) = &event {
+            input.insert("event".into(), e.to_json());
         }
         Ok(serde_json::Value::Object(input))
     }
@@ -3462,6 +3474,55 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(counts, (1, 1), "one capture and one run for one snapshot");
+    }
+
+    /// A fact collector's `input.event` is the event envelope: every field
+    /// of the event that triggered it, as an effect or entity collector
+    /// gets it.
+    #[tokio::test]
+    async fn a_fact_collector_gets_the_event_envelope() {
+        let (svc, dir) = fixture().await;
+        std::fs::write(
+            dir.path().join("seen.star"),
+            "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 1, \"rule\": json.encode(input[\"event\"]), \"subject\": \"tree:.\"}]}\n",
+        )
+        .unwrap();
+        let (specs, errors) = oxplow_config::collectors::parse_collectors(
+            oxplow_config::collectors::PROJECT,
+            &serde_yaml::from_str(
+                "- { id: repo.seen, runtime: starlark, entry: seen.star, trigger: { on: [snapshot.taken] }, facts: [oxplow.ast_hit] }",
+            )
+            .unwrap(),
+            &|_| true,
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        svc.config.write().unwrap().collectors = specs;
+        let snap =
+            snapshot_with_files(&svc, &[("src/a.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
+        let event = log_take(&svc, snap, SnapshotTrigger::TurnEnd, false, 1).await;
+        let consumer = crate::collector_triggers::CollectorTriggers::new(Arc::downgrade(&svc));
+        use crate::event_pump::AsyncEventConsumer as _;
+        consumer.handle(&event).await.unwrap();
+        let rule: String = svc
+            .db
+            .read(|c| {
+                c.query_row(
+                    "SELECT f.rule FROM fact f JOIN metric_capture c ON c.id = f.capture_id
+                      WHERE c.producer = 'repo.seen'",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let expected = oxplow_domain::events::EventView::of(&event, &svc.vocabulary.current())
+            .unwrap()
+            .to_json();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&rule).unwrap(),
+            expected
+        );
     }
 
     /// A paced snapshot collector's one deferred run covers every

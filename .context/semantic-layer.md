@@ -870,9 +870,8 @@ type without a `trigger` field:
 - **Input.** The `input` SQL binds the event's anchors by name
   (`:stream_id`, `:snapshot_id`, `:effort_id`, `:thread_id`, `:turn_id`,
   integers, and the event itself — `:event_id` its id, `:event_seq` its
-  seq, as an effect's `input` binds them (tsk1002); NULL when absent), and the script
-  gets the event as `input.event` (`type`, `seq`, `id`, `at`, `subject`,
-  `payload`, `anchors`).
+  seq; NULL when absent), and the script gets the event envelope as
+  `input.event` ([extensions.md](./extensions.md) "The event envelope").
 - **Once per event.** The run's `collector_run.last_event_id` is the
   event's seq, and its `collector.synced@1` is caused by the event with a
   per-event dedupe key. They commit with what the run wrote — an entity
@@ -992,9 +991,11 @@ entities from data already in the semantic layer:
     a person's behalf. The approval key stays `<owner>/<id>`.
 - **Environment.** The entry gets `PATH`, `HOME`, its declared `env`
   names, its declared `credentials`, `OXPLOW_EXTENSION_DIR` and
-  `OXPLOW_COLLECTOR_ID`. It runs with a
-  120 s timeout and a 64 MB stdout cap, and both pipes are drained so it
-  can't deadlock.
+  `OXPLOW_COLLECTOR_ID`. Its stdin is `{ "event": … }` (the event
+  envelope) when an event triggered it, `{}` otherwise, written on its
+  own thread and closed, so a program that never reads it can't block.
+  It runs with a 120 s timeout and a 64 MB stdout cap, and both output
+  pipes are drained so it can't deadlock.
 - **Network** (tsk324, `net_sandbox.rs`). `network: [api.github.com,
   "*.githubusercontent.com"]` lists the hosts an exec collector may reach:
   - **Pattern syntax.** Lowercase names; `*.` means subdomains only, not

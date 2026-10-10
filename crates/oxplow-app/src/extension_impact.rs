@@ -466,10 +466,12 @@ async fn effect_outputs(
             .cloned()
     };
     let (db, da) = (before.and_then(decl_of), decl_of(after));
-    let mut inputs: BTreeMap<String, (Value, Answers)> = BTreeMap::new();
+    // Each input is the event envelope, or why it couldn't be made (a
+    // fixture that couldn't happen, a row that can't be carried).
+    let mut inputs: BTreeMap<String, (Result<Value, String>, Answers)> = BTreeMap::new();
     for v in before.into_iter().chain(std::iter::once(after)) {
         for (name, event, answers) in effect_fixtures(v, &effect.id) {
-            inputs.insert(format!("fixture {name}"), (event, answers));
+            inputs.insert(format!("fixture {name}"), (Ok(event), answers));
         }
     }
     let types: Vec<String> = da
@@ -484,7 +486,7 @@ async fn effect_outputs(
     {
         inputs.insert(
             format!("event #{}", e.seq),
-            (crate::effects::event_json(&e), Answers::new()),
+            (e.view.map(|v| v.to_json()), Answers::new()),
         );
     }
     // Each side reads through its own models (its `sql.read` may read them).
@@ -503,6 +505,16 @@ async fn effect_outputs(
             async move {
                 let layer = &layer;
                 let decl = decl?;
+                let event = match event {
+                    Ok(event) => event,
+                    Err(e) => {
+                        return Some(Composes {
+                            commands: Vec::new(),
+                            skip: None,
+                            error: Some(format!("its event: {e}")),
+                        })
+                    }
+                };
                 let event_type = event["type"].as_str().unwrap_or_default().to_string();
                 if !crate::effects::reacts_to(&decl, &event_type, &event["payload"]) {
                     return None;
@@ -1236,6 +1248,9 @@ enum DryRuns {
     OutOfTime,
 }
 
+/// A review input's event: the envelope, or why it couldn't be made.
+type EventInput = Result<oxplow_domain::events::EventView, String>;
+
 /// Fill a collector's outputs: each input — both versions' fixtures for it,
 /// the latest events it'd run on — run on each version.
 async fn collector_outputs(
@@ -1294,17 +1309,13 @@ async fn collector_outputs(
             .unwrap_or_default(),
         _ => Vec::new(),
     };
-    let mut inputs: Vec<(
-        String,
-        Option<oxplow_domain::StoredEvent>,
-        Option<Vec<Value>>,
-    )> = fixtures
+    let mut inputs: Vec<(String, Option<EventInput>, Option<Vec<Value>>)> = fixtures
         .into_iter()
         .map(|(name, rows)| (format!("fixture {name}"), None, rows))
         .chain(
             events
                 .into_iter()
-                .map(|e| (format!("event #{}", e.seq), Some(e), None)),
+                .map(|e| (format!("event #{}", e.seq), Some(e.view), None)),
         )
         .collect();
     if inputs.is_empty() && spec.input.is_some() {
@@ -1331,7 +1342,16 @@ async fn collector_outputs(
             );
             async move {
                 let spec = spec?;
-                ran(dry_run_collector(&layer, &spec, script, event.as_ref(), rows).await).ok()
+                let run = match event {
+                    Some(Err(e)) => {
+                        crate::collector_runner::DryRun::Failed(format!("its event: {e}"))
+                    }
+                    Some(Ok(view)) => {
+                        dry_run_collector(&layer, &spec, script, Some(&view), rows).await
+                    }
+                    None => dry_run_collector(&layer, &spec, script, None, rows).await,
+                };
+                ran(run).ok()
             }
         };
         let (b, a) = (

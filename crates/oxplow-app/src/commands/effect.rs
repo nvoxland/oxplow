@@ -253,7 +253,7 @@ pub(crate) fn unreacted_tx(
                 continue;
             };
             // One that can't be carried to today's shape isn't reacted to.
-            let Ok(event) = crate::event_pump::at_latest(vocabulary, &stored) else {
+            let Ok(event) = oxplow_domain::events::at_latest(vocabulary, &stored) else {
                 continue;
             };
             if !crate::effects::reacts_to(decl, &event.envelope.event_type, &event.envelope.payload)
@@ -495,7 +495,7 @@ pub fn retry_op(services: ServicesSlot) -> Op {
                     .await?
                     .ok_or_else(|| invalid("/event", format!("no event `{event}` in the log")))?;
                 // As the pump would hand it over: at its type's newest version.
-                let stored = crate::event_pump::at_latest(&svc.vocabulary.current(), &stored)?;
+                let stored = oxplow_domain::events::at_latest(&svc.vocabulary.current(), &stored)?;
                 let started = std::time::Instant::now();
                 let reacted = run_reaction(&svc, &ext, &decl, true, &stored, ReactionOrigin::Retry)
                     .await
