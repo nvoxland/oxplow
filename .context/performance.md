@@ -655,3 +655,40 @@ The generated corpus (shared blocks spliced into a fifth of its files)
 needs 527 MB; this repo needs 67. A heavily copy-pasted repo can hit the
 cap, and `duplicate_lines` then fails with "ran out of memory" rather
 than taking the app's memory with it.
+
+## Duplicate detection on clone-dense trees (measured 2026-10-09)
+
+The detector once paired every member of a clone family with every other,
+so a tree dense with duplication held n(n-1)/2 pairs per family, and the
+`duplicate_lines` collector turned each into a JSON and a Starlark value
+(about 512 MB on a generated dense corpus, against about 67 MB on the real
+repo). Each member is now linked to one peer (`.context/code-quality.md`).
+
+Measured on an Apple M4 Max with `crates/oxplow-code-dup/examples/dense_rss.rs`:
+`detect_duplicates` over D directories of F files, every file holding the
+same 13-line function, then a `serde_json` object per block as the
+`duplicate_blocks` builtin builds them. Peak RSS is `/usr/bin/time -l`'s
+"maximum resident set size" of a release build, before (the parent
+commit, built in a scratch worktree) and after:
+
+| Corpus | Blocks before → after | Peak RSS before → after | Time before → after |
+|---|---|---|---|
+| 1 × 60 files | 1,770 → 59 | 5.3 MB → 3.4 MB | 7 ms → 8 ms |
+| 12 × 60 files | 258,840 → 719 | 314 MB → 5.3 MB | 297 ms → 72 ms |
+| 24 × 60 files | 1,036,080 → 1,439 | 1,244 MB → 6.9 MB | 1,542 ms → 131 ms |
+
+The worker-cost sweep's 120-file tree above is that shape: with the fix its
+whole 16-metric sweep takes about 7.2 s of worker CPU (7.9 s wall), where
+`oxplow.duplicate_lines` alone took 11 s and 527 MB before. (`worker_cost`
+prints the sweep's total, not each metric's peak, so the per-metric figure
+isn't re-measured here.)
+
+Before, memory grew with the square of the family (the number of blocks
+quadrupled when the files doubled); after, with the file count. The same
+shape on the real repo's own duplication is unchanged in kind: its families
+are small, so the saving there is small.
+
+```sh
+cargo build --release -p oxplow-code-dup --example dense_rss
+/usr/bin/time -l target/release/examples/dense_rss 12 60
+```
