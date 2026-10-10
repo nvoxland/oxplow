@@ -235,6 +235,28 @@ Of the 25 filtered specs in this project, 22 land on the cheap branch (all the
 `dim_eq` ones — `oxplow.rule` is a column and the rest are `dims_json` keys) and
 3 on the expensive one (`min_value`/`max_value`).
 
+**A write extends the slice memos instead of dropping them** (measured
+2026-10-09). `distinct_slice_keys` and `representative_facts_by_slice` are
+memoized per measure, but every write of the measure used to discard them,
+so the next read paid the whole `GROUP BY` again — at boot and through agent
+activity. Facts are append-only between prunes, so a write can only *add*
+slices, and a slice's representative (its lowest-id fact) can't be displaced
+by a later one. Each memo now records the highest capture id it covers; a
+write keeps it, and the next read looks only at the facts of captures after
+that id (`idx_fact_measure_capture` seeks the range) and merges them. A prune
+still forgets everything (`invalidate_all`). A read that raced a write
+declines to store its result, as before, and the memo it extended stays
+valid. 200,000 facts over 400 captures and ~300 slices, a one-fact write then
+both reads (`fact_store::tests::slice_read_after_write_cost`, release):
+
+| | Median |
+|---|---|
+| Before (rescan after a write) | 6,552 µs |
+| After (extend from the new capture) | 125 µs |
+
+`an_extended_slice_memo_equals_a_fresh_scan` holds the extended memo to a
+fresh scan after every write of a sequence.
+
 Still on the table: a covering index on `fact(measure_id, rule, severity,
 dims_json, capture_id)` takes the slice-key scan 0.41 s → 0.11 s, but costs
 **146 MB against a 323 MB `fact` table** plus write amplification. Filed, not

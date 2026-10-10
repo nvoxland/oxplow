@@ -44,11 +44,19 @@ struct MeasureMemo {
     epoch: u64,
     /// The producers that have emitted facts for it (tsk130).
     producers: Option<Vec<String>>,
-    /// Its distinct `(producer, rule, severity, dims_json)` slices.
-    slice_keys: Option<Vec<crate::fact_store::FactSliceKey>>,
-    /// One representative fact per slice.
-    representatives: Option<Vec<crate::fact_store::FactRow>>,
+    /// Its distinct `(producer, rule, severity, dims_json)` slices, and the
+    /// highest capture id they cover. A write can only add slices (facts are
+    /// append-only between prunes), so a write keeps this and a read extends
+    /// it from the captures after that id ([`SliceMemo`]).
+    slice_keys: Option<SliceMemo<crate::fact_store::FactSliceKey>>,
+    /// One representative fact per slice (the slice's lowest-id fact, which
+    /// later facts can't displace), and the capture id they cover.
+    representatives: Option<SliceMemo<crate::fact_store::FactRow>>,
 }
+
+/// A slice read and the highest capture id of the measure it covers; the
+/// facts of later captures are the ones a read still has to look at.
+pub(crate) type SliceMemo<T> = (Vec<T>, i64);
 
 /// The generation a memoized read was taken under: the epoch and the
 /// measure's write generation.
@@ -130,7 +138,10 @@ impl QueryMemo {
     pub(crate) fn slice_keys_get(
         &self,
         measure_id: i64,
-    ) -> (MemoGeneration, Option<Vec<crate::fact_store::FactSliceKey>>) {
+    ) -> (
+        MemoGeneration,
+        Option<SliceMemo<crate::fact_store::FactSliceKey>>,
+    ) {
         self.get(measure_id, |e| &e.slice_keys)
     }
 
@@ -138,7 +149,7 @@ impl QueryMemo {
         &self,
         measure_id: i64,
         generation: MemoGeneration,
-        value: Vec<crate::fact_store::FactSliceKey>,
+        value: SliceMemo<crate::fact_store::FactSliceKey>,
     ) {
         self.put(measure_id, generation, value, |e| &mut e.slice_keys)
     }
@@ -146,7 +157,10 @@ impl QueryMemo {
     pub(crate) fn representatives_get(
         &self,
         measure_id: i64,
-    ) -> (MemoGeneration, Option<Vec<crate::fact_store::FactRow>>) {
+    ) -> (
+        MemoGeneration,
+        Option<SliceMemo<crate::fact_store::FactRow>>,
+    ) {
         self.get(measure_id, |e| &e.representatives)
     }
 
@@ -154,14 +168,16 @@ impl QueryMemo {
         &self,
         measure_id: i64,
         generation: MemoGeneration,
-        value: Vec<crate::fact_store::FactRow>,
+        value: SliceMemo<crate::fact_store::FactRow>,
     ) {
         self.put(measure_id, generation, value, |e| &mut e.representatives)
     }
 
     /// Called after facts for `measures` are committed: bump those measures'
     /// generations (so an in-flight read of one declines to cache) and drop
-    /// what's memoized for them. Other measures keep theirs.
+    /// what's memoized for them — except the slice reads, which a write can
+    /// only add to and which are extended from the captures after what they
+    /// cover. Other measures keep theirs.
     pub(crate) fn invalidate_measures(&self, measures: impl IntoIterator<Item = i64>) {
         let mut memo = self.measures();
         for m in measures {
@@ -169,6 +185,8 @@ impl QueryMemo {
             *entry = MeasureMemo {
                 generation: entry.generation + 1,
                 epoch: entry.epoch,
+                slice_keys: entry.slice_keys.take(),
+                representatives: entry.representatives.take(),
                 ..MeasureMemo::default()
             };
         }
