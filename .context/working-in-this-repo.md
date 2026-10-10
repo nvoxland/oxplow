@@ -265,6 +265,11 @@ only ever ADDS time, so a spike ruins one attempt while a real regression
 ruins every one — the guard stays exactly as strict, the false positives go
 to ~0.
 
+Waiting for a row to appear is not waiting for its work to finish: an
+attempt's `effect_run` row exists from the moment it starts, so
+`the_retry_loop_sends_a_due_retry` first asserted on a `started` row about
+one run in five under load. Wait for the terminal state, then assert on it.
+
 `cargo cov` passes nextest `--no-fail-fast` so a flake **names itself** the
 first time instead of the run cancelling before it prints which test failed.
 Don't remove that flag.

@@ -5704,7 +5704,12 @@ async fn the_retry_loop_sends_a_due_retry() {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     loop {
         let runs = effect_runs(&fx).await;
-        if runs.as_array().is_some_and(|r| r.len() == 2) {
+        // The attempt's row exists from the moment it starts; what this
+        // asserts is how it ended.
+        if runs
+            .as_array()
+            .is_some_and(|r| r.len() == 2 && r[1][2] != "started")
+        {
             assert_eq!(runs[1], json!([2, "auto", "ok", 0]));
             break;
         }
