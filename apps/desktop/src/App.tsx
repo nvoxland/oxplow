@@ -7,6 +7,8 @@ import {
   openAgentSession,
   closeAgentSession,
   renameAgentSession,
+  startAgentSession,
+  stopAgentSession,
   getThreadState,
   getConfig,
   createWorkspaceDirectory,
@@ -2503,6 +2505,25 @@ export function App() {
               enabled: !!session,
               run: () => setRenamingSessionId(sessionId),
             },
+            // A terminal agent's process: stopping keeps the slot and the
+            // saved conversation, and it stays stopped until started.
+            ...(session?.kind === "terminal"
+              ? [
+                  session.stoppedByUser
+                    ? {
+                        id: "agent-session.start",
+                        label: "Start Agent",
+                        enabled: true,
+                        run: () => void startAgentSession(sessionId).catch(() => undefined),
+                      }
+                    : {
+                        id: "agent-session.stop",
+                        label: "Stop Agent",
+                        enabled: true,
+                        run: () => void stopAgentSession(sessionId).catch(() => undefined),
+                      },
+                ]
+              : []),
           ],
           render: () => (
             <AgentSessionPage

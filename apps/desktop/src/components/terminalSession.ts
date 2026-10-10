@@ -51,6 +51,11 @@ export const RESTARTED_NOTICE = "\x1b[2m— the previous session ended; this one
  *  activation (an agent session's tab) waits until its tab is shown: a
  *  restored tab nobody looked at starts nothing. Other panes (a shell)
  *  open at once. */
-export function mayStartNow(startOnActivate: boolean, visible: boolean): boolean {
-  return !startOnActivate || visible;
+export function mayStartNow(startOnActivate: boolean, visible: boolean, stopped = false): boolean {
+  return !stopped && (!startOnActivate || visible);
+}
+
+/** Whether an open failure means the person stopped the session. */
+export function isStopped(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === "STOPPED";
 }

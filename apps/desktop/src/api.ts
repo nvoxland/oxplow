@@ -1382,6 +1382,23 @@ export async function closeAgentSession(sessionId: string, confirmed: boolean): 
   await runCommand("oxplow.agent_session.close", { session: sessionRef(sessionId) }, confirmed);
 }
 
+/** The person stops an agent: its process ends, the slot and saved
+ *  conversation stay, and nothing spawns it again until `startAgentSession`. */
+export async function stopAgentSession(sessionId: string): Promise<void> {
+  await runCommand("oxplow.agent_session.stop", { session: sessionRef(sessionId) });
+}
+
+/** The person starts a stopped agent again (its tab then spawns it). */
+export async function startAgentSession(sessionId: string): Promise<void> {
+  await runCommand("oxplow.agent_session.start", { session: sessionRef(sessionId) });
+}
+
+/** The person gives an agent a new conversation, dropping the saved one.
+ *  Destructive: the caller confirms first. */
+export async function startAgentSessionFresh(sessionId: string, confirmed: boolean): Promise<void> {
+  await runCommand("oxplow.agent_session.start_fresh", { session: sessionRef(sessionId) }, confirmed);
+}
+
 export async function renameAgentSession(sessionId: string, title: string): Promise<void> {
   await runCommand("oxplow.agent_session.rename", { session: sessionRef(sessionId), title });
 }

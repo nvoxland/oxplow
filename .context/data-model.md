@@ -366,7 +366,10 @@ One agent slot a person opened on a thread (V32; `ses<n>`, ref
   harness's own session id: `claude --resume`, ACP `session/load`), `host`
   (reserved; NULL is the local machine), `opened_at`, `closed_at`,
   `closed_reason` (`closed`, `thread_closed`, `stream_archived`),
-  `updated_at`, `pid` and `last_seen_at` (V49).
+  `updated_at`, `pid` and `last_seen_at` (V49) and `stopped_by_user_at`
+  (V50: when the person deliberately stopped it — set by
+  `oxplow.agent_session.stop`, cleared by `start` / `start_fresh`; a
+  crash or restart leaves it NULL; while set, no terminal is spawned).
 - **Live identity:** `pid` is the OS pid of the process the daemon
   spawned for the session (`HookIngestService::record_agent_pid`, called
   at every spawn, so a restart overwrites it; also stamps `last_seen_at`).

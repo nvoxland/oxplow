@@ -17,14 +17,16 @@ use crate::commands::ops::Op;
 use std::sync::{Arc, RwLock};
 
 use oxplow_config::OxplowConfig;
-use oxplow_db::agent_session_store::{get_tx, insert_tx, set_title_tx};
+use oxplow_db::agent_session_store::{
+    get_tx, insert_tx, set_resume_tx, set_stopped_tx, set_title_tx,
+};
 use oxplow_domain::agent::registry::{AcpAdapterRegistry, HarnessRegistry};
 use oxplow_domain::agent_session::{
     AgentSession, NewAgentSession, SessionCloseReason, SessionKind,
 };
 use oxplow_domain::refs::build::{agent_session_ref, stream_ref, thread_ref};
 use oxplow_domain::{
-    AgentSessionId, CommandCall, CommandError, Confirm, ThreadId, ThreadStatus, Timestamp,
+    AgentSessionId, CommandCall, CommandError, Confirm, Invokers, ThreadId, ThreadStatus, Timestamp,
 };
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -36,6 +38,9 @@ use super::{Handler, HandlerOutput, TxCtx};
 pub const OPEN: &str = "oxplow.agent_session.open";
 pub const RENAME: &str = "oxplow.agent_session.rename";
 pub const CLOSE: &str = "oxplow.agent_session.close";
+pub const STOP: &str = "oxplow.agent_session.stop";
+pub const START: &str = "oxplow.agent_session.start";
+pub const START_FRESH: &str = "oxplow.agent_session.start_fresh";
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -288,6 +293,105 @@ pub fn close_op(processes: crate::agent_sessions::SessionProcesses) -> Op {
     .confirm_at_least(Confirm::Destructive)
 }
 
+/// `agent_session.stop { session }`: the person stopped the agent. The
+/// slot stays open and keeps its conversation, `stopped_by_user_at` is
+/// set — so the process is not spawned again until a person starts it —
+/// and the process stops after commit. Undone by `start`. A person's only:
+/// a crash or restart is not a stop and leaves the column alone.
+pub fn stop_op(processes: crate::agent_sessions::SessionProcesses) -> Op {
+    Op::new(
+        "agent_sessions.write",
+        "stop",
+        schema::<SessionInput>(),
+        true,
+        Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
+            let input: SessionInput = parse(input)?;
+            let session = load(ctx, &input.session)?;
+            in_own_stream(ctx, session.thread_id)?;
+            if !session.is_open() {
+                return Err(invalid("/session", "the session is closed"));
+            }
+            let now = Timestamp::now();
+            set_stopped_tx(ctx.conn, session.id, Some(now), now)?;
+            let after = get_tx(ctx.conn, session.id)?
+                .ok_or_else(|| invalid("/session", "the session vanished"))?;
+            let processes = processes.clone();
+            let id = session.id;
+            Ok(HandlerOutput {
+                inverse: (session.stopped_by_user_at.is_none())
+                    .then(|| call(START, json!({ "session": input.session })))
+                    .flatten(),
+                after_commit: Some(Box::new(move || processes.kill(id))),
+                ..result(&after)
+            })
+        })),
+    )
+    .open_to(Invokers::HUMAN_ONLY)
+}
+
+/// `agent_session.start { session }`: a person starts a stopped agent
+/// again. It clears the mark only — the UI spawns the process, as it does
+/// for any session (`open_terminal_session`), resuming the saved
+/// conversation. Undone by `stop`.
+pub fn start_op() -> Op {
+    Op::new(
+        "agent_sessions.write",
+        "start",
+        schema::<SessionInput>(),
+        true,
+        Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
+            let input: SessionInput = parse(input)?;
+            let session = load(ctx, &input.session)?;
+            in_own_stream(ctx, session.thread_id)?;
+            if !session.is_open() {
+                return Err(invalid("/session", "the session is closed"));
+            }
+            set_stopped_tx(ctx.conn, session.id, None, Timestamp::now())?;
+            let after = get_tx(ctx.conn, session.id)?
+                .ok_or_else(|| invalid("/session", "the session vanished"))?;
+            Ok(HandlerOutput {
+                inverse: session
+                    .stopped_by_user_at
+                    .is_some()
+                    .then(|| call(STOP, json!({ "session": input.session })))
+                    .flatten(),
+                ..result(&after)
+            })
+        })),
+    )
+    .open_to(Invokers::HUMAN_ONLY)
+}
+
+/// `agent_session.start_fresh { session }`: the one way a session gets a
+/// new conversation. It forgets the saved harness conversation and clears
+/// the stop mark; the UI then spawns the process. Destructive (the link
+/// to the saved conversation is dropped) so it confirms, and not undoable.
+/// A person's only.
+pub fn start_fresh_op() -> Op {
+    Op::new(
+        "agent_sessions.write",
+        "start_fresh",
+        schema::<SessionInput>(),
+        false,
+        Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
+            let input: SessionInput = parse(input)?;
+            let session = load(ctx, &input.session)?;
+            in_own_stream(ctx, session.thread_id)?;
+            if !session.is_open() {
+                return Err(invalid("/session", "the session is closed"));
+            }
+            let now = Timestamp::now();
+            set_resume_tx(ctx.conn, session.id, "", now)?;
+            set_stopped_tx(ctx.conn, session.id, None, now)?;
+            let after = get_tx(ctx.conn, session.id)?
+                .ok_or_else(|| invalid("/session", "the session vanished"))?;
+            Ok(result(&after))
+        })),
+    )
+    .open_to(Invokers::HUMAN_ONLY)
+    .confirm_at_least(Confirm::Destructive)
+}
+
 /// The agent-session commands, for the bus.
 pub fn ops(
     config: Arc<RwLock<OxplowConfig>>,
@@ -298,7 +402,10 @@ pub fn ops(
     vec![
         open_op(config, harnesses, adapters),
         rename_op(),
-        close_op(processes),
+        close_op(processes.clone()),
+        stop_op(processes),
+        start_op(),
+        start_fresh_op(),
     ]
 }
 
@@ -368,6 +475,67 @@ mod tests {
             .await
             .unwrap();
         assert!(!get(&fx, s.id).await.is_open());
+    }
+
+    /// A person's stop marks the session and keeps the slot; start clears
+    /// it; start_fresh also forgets the saved conversation. An agent may
+    /// do none of them.
+    #[tokio::test]
+    async fn stopping_marks_the_session_and_starting_clears_it() {
+        let fx = services_with_effort().await;
+        let me = serde_json::json!({ "session": agent_session_ref(fx.session) });
+        let stopped = run(&fx, &Actor::Human, STOP, me.clone(), false)
+            .await
+            .unwrap();
+        let s = get(&fx, fx.session).await;
+        assert!(s.is_open() && s.stopped_by_user_at.is_some());
+        // Undo of the stop is a start.
+        fx.svc
+            .commands
+            .undo(&Actor::Human, stopped.audit_id.unwrap(), true)
+            .await
+            .unwrap();
+        assert!(get(&fx, fx.session).await.stopped_by_user_at.is_none());
+
+        run(&fx, &Actor::Human, STOP, me.clone(), false)
+            .await
+            .unwrap();
+        run(&fx, &Actor::Human, START, me.clone(), false)
+            .await
+            .unwrap();
+        assert!(get(&fx, fx.session).await.stopped_by_user_at.is_none());
+
+        for name in [STOP, START, START_FRESH] {
+            let err = run(&fx, &agent(&fx), name, me.clone(), true)
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, CommandError::Denied { .. }),
+                "{name}: {err:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn starting_fresh_forgets_the_conversation_and_the_stop() {
+        let fx = services_with_effort().await;
+        let me = serde_json::json!({ "session": agent_session_ref(fx.session) });
+        let session = fx.session;
+        fx.svc
+            .db
+            .transaction(move |tx| {
+                set_resume_tx(tx, session, "conv-1", Timestamp::now())?;
+                set_stopped_tx(tx, session, Some(Timestamp::now()), Timestamp::now())?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        run(&fx, &Actor::Human, START_FRESH, me, true)
+            .await
+            .unwrap();
+        let s = get(&fx, fx.session).await;
+        assert_eq!(s.resume_session_id, "");
+        assert!(s.stopped_by_user_at.is_none());
     }
 
     /// The input is checked: an unknown field and a bad value name their

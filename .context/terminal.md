@@ -99,6 +99,18 @@ session (resuming its saved conversation). Leaving the tab never stops the
 process, and nothing is typed on restore. Shell terminals open at once.
 The deciding rule is `mayStartNow` in `terminalSession.ts`.
 
+**Stopped stays stopped.** `oxplow.agent_session.stop` (a person's only)
+sets `agent_session.stopped_by_user_at` and stops the process; the slot
+and its saved conversation stay. While it is set `open_terminal_session`
+refuses to spawn and answers the `STOPPED` code, the pane (given
+`stopped` from the session row, or finding out from that code) shows
+"Stopped" with **Start**, and `agent_session.start` clears it — the row
+change then opens the session, resuming the conversation. A crash or
+backend restart never sets it, so those resume when the tab is shown.
+Only the person stopping sets it: we do not infer a stop from an exit,
+because no harness tells us the person typed `/exit`. The agent-tab
+context menu has **Stop Agent** / **Start Agent**.
+
 **Read-only session lookup (tsk139).** `lookup_terminal_session({ sessionId })`
 (core in `crates/oxplow-rpc/src/commands/terminal.rs`; Tauri shim +
 `bindings.ts` `lookupTerminalSession`) returns the live PTY `sessionId` of

@@ -5,7 +5,7 @@ import type { TerminalEvent } from "../editor-session.js";
 import { desktopBridge, onRemoteReconnect } from "../api.js";
 import { logUi } from "../logger.js";
 import { terminalSender, type TerminalMessage, type TerminalSender } from "./terminalInput.js";
-import { isSessionGone, mayStartNow, readSessionMessage, reopened, RESTARTED_NOTICE } from "./terminalSession.js";
+import { isSessionGone, isStopped, mayStartNow, readSessionMessage, reopened, RESTARTED_NOTICE } from "./terminalSession.js";
 import { WORK_ITEM_DRAG_MIME } from "../dragMimes.js";
 import { shouldHandleTerminalPageKey } from "../terminal-scroll.js";
 import { subscribeAgentInput } from "../agent-input-bus.js";
@@ -120,6 +120,8 @@ export function TerminalPane({
   comments,
   terminateOnUnmount,
   startOnActivate,
+  stopped,
+  onStart,
 }: {
   paneTarget: string;
   visible: boolean;
@@ -127,6 +129,11 @@ export function TerminalPane({
   /// (or its agent is already running, which it attaches to without
   /// spawning). Leaving the tab never stops the process.
   startOnActivate?: boolean;
+  /// The person stopped this agent: the pane spawns nothing and offers
+  /// Start, which runs `onStart` (the start command); the host's row
+  /// then reads `stopped` false and the pane opens the session.
+  stopped?: boolean;
+  onStart?(): void;
   /// Fires when the user presses Escape in live mode (i.e. signals
   /// Claude Code to cancel the in-flight turn). Lets the host
   /// synthesize an Interrupt hook so the working-dot flips to idle
@@ -180,8 +187,23 @@ export function TerminalPane({
   startOnActivateRef.current = !!startOnActivate;
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
+  // A stop the open itself found out (another window stopped it).
+  const [stoppedHere, setStoppedHere] = useState(false);
+  const isStoppedNow = !!stopped || stoppedHere;
+  const stoppedRef = useRef(false);
+  stoppedRef.current = isStoppedNow;
   useEffect(() => {
-    if (visible) activateRef.current?.();
+    if (!stopped) setStoppedHere(false);
+  }, [stopped]);
+  useEffect(() => {
+    // Started again: open it now (or again, if its process had ended).
+    if (isStoppedNow) return;
+    if (!visibleRef.current && startOnActivateRef.current) return;
+    if (!activatedRef.current) activateRef.current?.();
+    else if (endedRef.current) reopenRef.current?.();
+  }, [isStoppedNow]);
+  useEffect(() => {
+    if (visible && !stoppedRef.current) activateRef.current?.();
   }, [visible]);
   useEffect(() => {
     const sender = terminalSender(
@@ -509,6 +531,10 @@ export function TerminalPane({
           term.focus();
           logUi("info", "terminal session opened", { paneTarget, sessionId, again });
         }).catch((error) => {
+          if (isStopped(error)) {
+            setStoppedHere(true);
+            return;
+          }
           logUi("error", "terminal session open failed", { paneTarget, error: String(error) });
         }).finally(() => {
           opening = false;
@@ -521,7 +547,7 @@ export function TerminalPane({
         openSession(false);
       };
       activateRef.current = activate;
-      if (mayStartNow(!!startOnActivateRef.current, visibleRef.current)) {
+      if (mayStartNow(!!startOnActivateRef.current, visibleRef.current, stoppedRef.current)) {
         activate();
       } else {
         // Hidden and not started: attach to an agent that already runs
@@ -643,7 +669,33 @@ export function TerminalPane({
           targetId={comments.targetId}
         />
       ) : null}
-      {ended ? (
+      {isStoppedNow ? (
+        <div
+          data-testid="terminal-stopped"
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            bottom: 0,
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "8px 12px",
+            background: "var(--surface-card)",
+            borderTop: "1px solid var(--border-subtle)",
+            color: "var(--text-primary)",
+            fontSize: 13,
+            zIndex: 4,
+          }}
+        >
+          <span>Stopped. The saved conversation is kept.</span>
+          {onStart ? (
+            <button type="button" data-testid="terminal-start" onClick={onStart}>
+              Start
+            </button>
+          ) : null}
+        </div>
+      ) : ended ? (
         <div
           data-testid="terminal-ended"
           style={{
