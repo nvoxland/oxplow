@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { isSessionGone, readSessionMessage, reopened } from "./terminalSession.js";
+import { isSessionGone, mayStartNow, readSessionMessage, reopened } from "./terminalSession.js";
 
 // tsk1026: after the daemon restarted, the agent pane kept the dead session's
 // screen and swallowed keystrokes; an agent that exited said nothing.
@@ -28,4 +28,13 @@ test("opening again keeps a session that survived and replaces one that didn't",
   expect(reopened("term-1", "term-1")).toBe("same");
   expect(reopened("term-1", "term-2")).toBe("new");
   expect(reopened(null, "term-2")).toBe("new");
+});
+
+test("a pane that starts on activation waits for its tab to be shown", () => {
+  expect(mayStartNow(true, false)).toBe(false);
+  expect(mayStartNow(true, true)).toBe(true);
+});
+
+test("any other pane opens at once", () => {
+  expect(mayStartNow(false, false)).toBe(true);
 });

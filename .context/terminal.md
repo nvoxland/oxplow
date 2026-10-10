@@ -90,6 +90,15 @@ under `.oxplow/runtime/` by the session's harness (`oxplow-harnesses`: the Claud
 opencode prompt file per session); shell terminals skip that path
 entirely.
 
+**Restoring tabs starts nothing.** Every tab body stays mounted
+(`display:none`), so an agent session's `TerminalPane` is given
+`startOnActivate`: until its tab is shown it opens no session — except
+that it attaches, through the spawn-free `lookup_terminal_session`, to an
+agent that already runs. The first time the tab is shown it opens the
+session (resuming its saved conversation). Leaving the tab never stops the
+process, and nothing is typed on restore. Shell terminals open at once.
+The deciding rule is `mayStartNow` in `terminalSession.ts`.
+
 **Read-only session lookup (tsk139).** `lookup_terminal_session({ sessionId })`
 (core in `crates/oxplow-rpc/src/commands/terminal.rs`; Tauri shim +
 `bindings.ts` `lookupTerminalSession`) returns the live PTY `sessionId` of

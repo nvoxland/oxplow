@@ -5,7 +5,7 @@ import type { TerminalEvent } from "../editor-session.js";
 import { desktopBridge, onRemoteReconnect } from "../api.js";
 import { logUi } from "../logger.js";
 import { terminalSender, type TerminalMessage, type TerminalSender } from "./terminalInput.js";
-import { isSessionGone, readSessionMessage, reopened, RESTARTED_NOTICE } from "./terminalSession.js";
+import { isSessionGone, mayStartNow, readSessionMessage, reopened, RESTARTED_NOTICE } from "./terminalSession.js";
 import { WORK_ITEM_DRAG_MIME } from "../dragMimes.js";
 import { shouldHandleTerminalPageKey } from "../terminal-scroll.js";
 import { subscribeAgentInput } from "../agent-input-bus.js";
@@ -119,9 +119,14 @@ export function TerminalPane({
   isLinkablePath,
   comments,
   terminateOnUnmount,
+  startOnActivate,
 }: {
   paneTarget: string;
   visible: boolean;
+  /// Agent session tabs: a restored tab spawns nothing until it is shown
+  /// (or its agent is already running, which it attaches to without
+  /// spawning). Leaving the tab never stops the process.
+  startOnActivate?: boolean;
   /// Fires when the user presses Escape in live mode (i.e. signals
   /// Claude Code to cancel the in-flight turn). Lets the host
   /// synthesize an Interrupt hook so the working-dot flips to idle
@@ -168,6 +173,16 @@ export function TerminalPane({
   // The session's process exited: the pane says so and offers Start Again.
   const [ended, setEnded] = useState<{ exitCode: number | null } | null>(null);
   const endedRef = useRef(false);
+  // Opening the session is deferred for a pane that starts on activation.
+  const activatedRef = useRef(false);
+  const activateRef = useRef<(() => void) | null>(null);
+  const startOnActivateRef = useRef(!!startOnActivate);
+  startOnActivateRef.current = !!startOnActivate;
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
+  useEffect(() => {
+    if (visible) activateRef.current?.();
+  }, [visible]);
   useEffect(() => {
     const sender = terminalSender(
       (sessionId, message) => desktopBridge().forwardTerminalInput(sessionId, message),
@@ -499,7 +514,25 @@ export function TerminalPane({
           opening = false;
         });
       };
-      openSession(false);
+      activatedRef.current = false;
+      const activate = () => {
+        if (activatedRef.current) return;
+        activatedRef.current = true;
+        openSession(false);
+      };
+      activateRef.current = activate;
+      if (mayStartNow(!!startOnActivateRef.current, visibleRef.current)) {
+        activate();
+      } else {
+        // Hidden and not started: attach to an agent that already runs
+        // (a lookup spawns nothing); otherwise wait to be shown.
+        void desktopBridge()
+          .lookupTerminalSession(paneTarget)
+          .then((live) => {
+            if (live && !disposed) activate();
+          })
+          .catch(() => {});
+      }
       reopenRef.current = () => openSession(true);
       // The daemon came back: the session may be gone with it. Opening it
       // again keeps a live one and replaces a dead one.
@@ -536,6 +569,7 @@ export function TerminalPane({
         unsubscribe();
         offReconnect();
         reopenRef.current = null;
+        activateRef.current = null;
         prevCleanup?.();
       };
     };

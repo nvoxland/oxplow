@@ -94,6 +94,7 @@ export function AgentSessionPage({
             key={session.id}
             paneTarget={session.id}
             visible={visible}
+            startOnActivate
             worktreePath={stream?.worktree_path}
             onOpenFile={onOpenFile}
             isLinkablePath={isLinkablePath}

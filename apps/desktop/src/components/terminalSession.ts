@@ -46,3 +46,11 @@ export function reopened(current: string | null, opened: string): "same" | "new"
 
 /** The line written above a session that replaced one which ended. */
 export const RESTARTED_NOTICE = "\x1b[2m— the previous session ended; this one was started again —\x1b[0m\r\n";
+
+/** Whether a pane may spawn its process now. A pane that starts on
+ *  activation (an agent session's tab) waits until its tab is shown: a
+ *  restored tab nobody looked at starts nothing. Other panes (a shell)
+ *  open at once. */
+export function mayStartNow(startOnActivate: boolean, visible: boolean): boolean {
+  return !startOnActivate || visible;
+}

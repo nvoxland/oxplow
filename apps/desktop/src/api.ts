@@ -204,6 +204,10 @@ function buildBridge() {
       const result = unwrap(await commands.openTerminalSession(paneTarget, cols, rows));
       return { sessionId: result.sessionId, replayB64: result.replayB64 };
     },
+    /// The live terminal of an agent session, without starting one: `null`
+    /// when none runs.
+    lookupTerminalSession: async (agentSessionId: string): Promise<string | null> =>
+      unwrap(await commands.lookupTerminalSession(agentSessionId)),
     closeTerminalSession: async (sessionId: string): Promise<void> => {
       try {
         unwrap(await commands.closeTerminalSession(sessionId));
