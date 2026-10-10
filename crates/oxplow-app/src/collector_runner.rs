@@ -726,12 +726,12 @@ pub async fn derive_collector(
     let runtime = spec.runtime;
     let (budget, cancel, cost) = (run.budget(), run.cancel().clone(), run.clone());
     let value = tokio::task::spawn_blocking(move || {
-        use oxplow_script::workers::{shared, RunHost, ScriptRun};
+        use oxplow_script::workers::{shared, ScriptRun};
         // In a worker: its `ai_*` calls are answered here, and the time
         // they wait on a model isn't the script's.
         let script_run = match runtime {
             CollectorRuntime::Jaq => ScriptRun::jaq(&script, input),
-            _ => ScriptRun::starlark(&script, input).with_host(RunHost::Ai(oracle)),
+            _ => ScriptRun::starlark(&script, input).with_ai(oracle),
         };
         shared().run(&budget, script_run, Some(&cancel)).map(|ran| {
             cost.used_cpu(ran.cpu_ms, ran.peak_bytes);

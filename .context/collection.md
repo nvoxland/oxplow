@@ -499,7 +499,12 @@ an event upcast, a scripted AI provider, the MCP adapter's mappings — runs
 in its own **script worker process** (`oxplow-script-worker`, a sidecar
 beside the oxplow executable; `oxplow_script::worker` and `::workers`),
 never on a thread of the host. The host (`ScriptWorkers::run`, one per
-process: `workers::shared()`) sends the run over NDJSON, answers its
+process: `workers::shared()`) sends the run over NDJSON with the
+**services it was given** — any of the tree, a model and the scopes
+(`workers::Hosts`, `ScriptRun::with_tree` / `with_ai` / `with_scope`;
+the worker's `worker::Given` flags; one `runtime::Hosts` in the
+evaluator, each builtin taking its own and one whose service is missing
+naming the need, `oxplow_domain::service::undeclared`) — answers its
 `scope(…)` and `ai_*` calls on the calling thread (a command's transaction
 stays there), and enforces a `Budget` (`oxplow_domain::run`): the time answering is left
 out of its `timeout` and counted in its `ceiling`. Past either, or when
@@ -598,11 +603,13 @@ the `ai_*` builtins, and an entity collector has no `files()`:
   deterministic → `observed`); backed by `oxplow-code-metrics` (`ast`/`parse`/
   `query`). Flat by design so no Starlark recursion is needed.
 - `files(glob)` → `[{path, text}]` of the **snapshot** files matching `glob`,
-  from an in-memory map the host injects per run via `Evaluator::extra` (a
-  `TreeHost`). Empty when no file matches. The snapshot is
-  content-addressed/immutable → determinism + `observed` trust hold. A fact
-  collector's script runs with a host via `run_fact_starlark(script, input,
-  TreeHost::new(map), …)`; its `report:` is pre-parsed by `parse_report`.
+  from the run's `TreeHost` (the `tree.read` service: the host ships the
+  map to the worker before the run, `ScriptRun::with_tree`). Empty when no
+  file matches; a run not given the tree is refused ("`files()` needs
+  `tree.read` in this script's `needs`"), never answered `[]`, as are
+  `source_files()` and `duplicate_blocks()`. The snapshot is
+  content-addressed/immutable → determinism + `observed` trust hold. A
+  fact collector's `report:` is pre-parsed by `parse_report`.
 - `code_metrics(text, language)` → per-function `[{name, complexity, length,
   parameter_count, start_line, end_line, visibility, has_doc}]` via
   `oxplow-code-metrics`. `has_doc` (tsk125) is per-language doc detection

@@ -1,7 +1,7 @@
-//! The `scope(id, args)` Starlark builtin for **command handlers**
-//! (`.context/commands.md` "Scopes"): a script asks its host
-//! to do something — read the semantic layer (`sql.read`), and in time
-//! write oxplow's records, run git, open a page — by the scope's id.
+//! The `scope(id, args)` Starlark builtin (`.context/commands.md`
+//! "Scopes"): a script asks its host to do something — read the semantic
+//! layer (`sql.read`), and in time write oxplow's records, run git, open a
+//! page — by the scope's id.
 //!
 //! The script runs in a script worker ([`crate::workers`]); each call
 //! crosses to the host, which answers on the caller's thread (it owns what
@@ -13,7 +13,6 @@ use serde_json::Value;
 pub(crate) type ScopeCall = Box<dyn Fn(&str, Value) -> Result<Value, String>>;
 
 /// The script's side: where its `scope` calls go.
-#[derive(starlark::any::ProvidesStaticType)]
 pub struct ScopeHost {
     call: ScopeCall,
 }
@@ -30,8 +29,8 @@ impl ScopeHost {
 
 #[starlark::starlark_module]
 pub(crate) fn scope_builtins(builder: &mut starlark::environment::GlobalsBuilder) {
-    /// What the scope `id` answers for `args` (a dict): only in a
-    /// command's handler, and only a scope the command `needs`.
+    /// What the scope `id` answers for `args` (a dict): only a scope the
+    /// script `needs`.
     fn scope<'v>(
         id: &str,
         #[starlark(default = starlark::values::none::NoneOr::None)]
@@ -42,10 +41,7 @@ pub(crate) fn scope_builtins(builder: &mut starlark::environment::GlobalsBuilder
             Some(v) => v.to_json_value()?,
             None => Value::Object(Default::default()),
         };
-        let host = eval
-            .extra
-            .and_then(|e| e.downcast_ref::<ScopeHost>())
-            .ok_or_else(|| anyhow::anyhow!("scope() is available in command handlers only"))?;
+        let host = crate::runtime::Hosts::get(eval, "scope", |h| h.scope.as_ref())?;
         let out = host.call(id, args).map_err(anyhow::Error::msg)?;
         Ok(eval.heap().alloc(out))
     }
@@ -56,10 +52,10 @@ mod tests {
     use crate::runtime::run_starlark;
     use serde_json::json;
 
-    /// `scope()` is a command handler's: a script run without a scope
-    /// host can't reach one.
+    /// `scope()` is the `sql.read` service's: a script run without it is
+    /// told the need.
     #[test]
-    fn only_a_command_handler_has_scopes() {
+    fn a_script_not_given_scopes_is_told_its_need() {
         let err = run_starlark(
             "def transform(x):\n    return scope('sql.read', {'sql': 'SELECT 1'})\n",
             &json!({}),
@@ -67,7 +63,7 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(
-            err.contains("scope() is available in command handlers only"),
+            err.contains("`scope()` needs `sql.read` in this script's `needs`"),
             "{err}"
         );
     }

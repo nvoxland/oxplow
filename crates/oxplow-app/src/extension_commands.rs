@@ -704,11 +704,11 @@ pub fn run_command_script(
     serve: &mut oxplow_script::workers::Serve<'_>,
     run: &oxplow_domain::run::RunContext,
 ) -> Result<Value, oxplow_script::CollectError> {
-    use oxplow_script::workers::{shared, RunHost, ScriptRun};
+    use oxplow_script::workers::{shared, ScriptRun};
     shared()
         .run(
             &COMMAND_SCRIPT_BUDGET,
-            ScriptRun::starlark(script, input).with_host(RunHost::Scope(serve)),
+            ScriptRun::starlark(script, input).with_scope(serve),
             Some(run.cancel()),
         )
         .map(|ran| {

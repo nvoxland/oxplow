@@ -22,7 +22,7 @@ use serde_json::Value;
 
 use crate::ai::AiOracle;
 use crate::runtime::RunClock;
-use crate::worker::{CallKind, CallOut, Engine, FromWorker, ToWorker, EXIT_MEMORY, MEMORY_ARG};
+use crate::worker::{CallKind, Engine, FromWorker, Given, ToWorker, EXIT_MEMORY, MEMORY_ARG};
 use crate::CollectError;
 pub use oxplow_domain::run::{Budget, Cancel};
 
@@ -55,15 +55,16 @@ impl Default for Limits {
 /// Answers a command script's `scope(id, args)` call.
 pub type Serve<'a> = dyn FnMut(&str, Value) -> Result<Value, String> + 'a;
 
-/// What a run's builtins may call out to (at most one).
-pub enum RunHost<'a> {
-    None,
-    /// A fact collector's snapshot: shipped to the worker before the run.
-    Tree(Arc<HashMap<String, String>>),
-    /// A collector's model.
-    Ai(Arc<dyn AiOracle>),
-    /// A command script's scopes, answered on this thread.
-    Scope(&'a mut Serve<'a>),
+/// The services a run is given (`.context/extensions.md` "Services"):
+/// any of them, each answered by what the caller passes.
+#[derive(Default)]
+pub struct Hosts<'a> {
+    /// `tree.read`: the snapshot, shipped to the worker before the run.
+    pub tree: Option<Arc<HashMap<String, String>>>,
+    /// `ai.compute`: the model, answered on this thread.
+    pub ai: Option<Arc<dyn AiOracle>>,
+    /// The scopes (`sql.read`), answered on this thread.
+    pub scope: Option<&'a mut Serve<'a>>,
 }
 
 /// One script run.
@@ -71,7 +72,7 @@ pub struct ScriptRun<'a> {
     pub engine: Engine,
     pub script: String,
     pub input: Value,
-    pub host: RunHost<'a>,
+    pub hosts: Hosts<'a>,
 }
 
 impl<'a> ScriptRun<'a> {
@@ -86,7 +87,7 @@ impl<'a> ScriptRun<'a> {
             engine: Engine::Starlark { func: func.into() },
             script: script.into(),
             input,
-            host: RunHost::None,
+            hosts: Hosts::default(),
         }
     }
 
@@ -96,12 +97,31 @@ impl<'a> ScriptRun<'a> {
             engine: Engine::Jaq,
             script: program.into(),
             input,
-            host: RunHost::None,
+            hosts: Hosts::default(),
         }
     }
 
-    pub fn with_host(self, host: RunHost<'a>) -> Self {
-        ScriptRun { host, ..self }
+    /// Given the tree (`tree.read`).
+    pub fn with_tree(mut self, files: Arc<HashMap<String, String>>) -> Self {
+        self.hosts.tree = Some(files);
+        self
+    }
+
+    /// Given a model (`ai.compute`).
+    pub fn with_ai(mut self, oracle: Arc<dyn AiOracle>) -> Self {
+        self.hosts.ai = Some(oracle);
+        self
+    }
+
+    /// Given the scopes, answered by `serve`.
+    pub fn with_scope(mut self, serve: &'a mut Serve<'a>) -> Self {
+        self.hosts.scope = Some(serve);
+        self
+    }
+
+    /// Given `hosts`.
+    pub fn with_hosts(self, hosts: Hosts<'a>) -> Self {
+        ScriptRun { hosts, ..self }
     }
 }
 
@@ -213,22 +233,25 @@ impl ScriptWorkers {
             engine,
             script,
             input,
-            host,
+            hosts,
         } = run;
-        let (call_out, mut host) = match host {
-            RunHost::None => (CallOut::None, Answering::None),
-            RunHost::Tree(files) => {
-                worker.send_tree(&files);
-                (CallOut::Tree, Answering::None)
-            }
-            RunHost::Ai(oracle) => (CallOut::Ai, Answering::Ai(oracle)),
-            RunHost::Scope(serve) => (CallOut::Scope, Answering::Scope(serve)),
+        let given = Given {
+            tree: hosts.tree.is_some(),
+            ai: hosts.ai.is_some(),
+            scope: hosts.scope.is_some(),
+        };
+        if let Some(files) = &hosts.tree {
+            worker.send_tree(files);
+        }
+        let mut host = Answering {
+            ai: hosts.ai,
+            scope: hosts.scope,
         };
         worker.send(&ToWorker::Run {
             engine,
             script,
             input,
-            host: call_out,
+            given,
         });
         let clock = RunClock::default();
         let started = Instant::now();
@@ -373,23 +396,24 @@ impl Drop for Slot<'_> {
     }
 }
 
-/// Who answers a run's calls.
-enum Answering<'a> {
-    None,
-    Ai(Arc<dyn AiOracle>),
-    Scope(&'a mut Serve<'a>),
+/// Who answers a run's calls: the worker only calls out to what it was
+/// given, so a call to anything else is refused as the worker would.
+struct Answering<'a> {
+    ai: Option<Arc<dyn AiOracle>>,
+    scope: Option<&'a mut Serve<'a>>,
 }
 
 impl Answering<'_> {
     fn answer(&mut self, kind: CallKind, id: &str, args: Value) -> Result<Value, String> {
-        match (kind, self) {
-            (CallKind::Scope, Answering::Scope(serve)) => serve(id, args),
-            (CallKind::Ai, Answering::Ai(oracle)) => ask(&**oracle, id, &args),
-            (CallKind::Scope, _) => Err("scope() is available in command handlers only".into()),
-            (CallKind::Ai, _) => Err(format!(
-                "ai_{id} is available in entity collectors only: a fact collector or a \
-                 report parser can't call a model"
-            )),
+        match kind {
+            CallKind::Scope => match &mut self.scope {
+                Some(serve) => serve(id, args),
+                None => Err(oxplow_domain::service::undeclared("scope")),
+            },
+            CallKind::Ai => match &self.ai {
+                Some(oracle) => ask(&**oracle, id, &args),
+                None => Err(oxplow_domain::service::undeclared(&format!("ai_{id}"))),
+            },
         }
     }
 }

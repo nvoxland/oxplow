@@ -665,7 +665,11 @@ mod tests {
 
     /// A fact script's facts over a file map, with the default budget.
     fn facts(script: &str, map: std::collections::HashMap<String, String>) -> Vec<CollectedFact> {
-        runtime::run_starlark_with_host(script, &serde_json::json!({}), &TreeHost::new(map))
+        let hosts = runtime::Hosts {
+            tree: Some(TreeHost::new(map)),
+            ..runtime::Hosts::default()
+        };
+        runtime::run_starlark_hosted(script, &serde_json::json!({}), &hosts)
             .and_then(facts_of)
             .expect("runs")
     }
@@ -793,15 +797,20 @@ def transform(input):
         );
     }
 
+    /// A run not given the tree is told so, never handed an empty one
+    /// that would read as "no files".
     #[test]
-    fn files_builtin_is_empty_without_a_host() {
-        // No host → files() sees no snapshot map and yields nothing.
-        let raw = runtime::run_starlark(
+    fn files_without_the_tree_is_refused_not_empty() {
+        let err = runtime::run_starlark(
             "def transform(input):\n    return {\"facts\": [{\"measure\": \"acme.n\", \"value\": len(files(\"**/*\"))}]}\n",
             &serde_json::json!({}),
         )
-        .expect("runs");
-        assert_eq!(facts_of(raw).unwrap()[0].value, 0.0);
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("`files()` needs `tree.read` in this script's `needs`"),
+            "{err}"
+        );
     }
 
     #[test]

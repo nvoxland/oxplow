@@ -2650,7 +2650,7 @@ sandbox under `COMMAND_SCRIPT_BUDGET` (5 s of the script's own time, not
 the collectors' 120 s runaway catch: the bus composes it once, on a read
 snapshot it holds while the script runs; no files, no `ai_*`), its `scope`
 calls served on the calling thread (`run_command_script` with
-`workers::RunHost::Scope`, through `scope_calls::Calls`; a busy database
+`ScriptRun::with_scope`, through `scope_calls::Calls`; a busy database
 retries the run), then the
 `{ commands, result? }` shape (`composed`; any other key is `Invalid`).
 

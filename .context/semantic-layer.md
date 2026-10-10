@@ -906,7 +906,7 @@ entities from data already in the semantic layer:
   set. The script gets `{"rows": [{col: value, …}]}` and returns the exec
   shape.
 - **Sandbox.** It runs in the collector sandbox
-  (`run_sandboxed_excluding` + `run_starlark_with_ai` / `run_jaq`), with
+  (a script worker given a model, `ScriptRun::with_ai`, or `run_jaq`), with
   no files, network, env or secrets. Its one way out is oxplow's own: the
   `ai_*` builtins (`ai_classify` / `ai_score` / `ai_summarize` /
   `ai_extract`), recorded computations on the project's AI roles as caller
@@ -950,7 +950,7 @@ entities from data already in the semantic layer:
 |---|---|
 | Parse/validate declarations (`CollectorSpec`, `Trigger`) | `crates/oxplow-config/src/collectors.rs` |
 | Fact collectors: `FactCollector`, `fact_collectors()`, `run_collector_by_key`, `run_snapshot_collectors` / `run_effort_collectors` / `run_event_collectors` | `crates/oxplow-app/src/metrics_service.rs` |
-| Fact-collector script host (`TreeHost`, `run_fact_starlark`, `facts_of`, `parse_report`) | `crates/oxplow-script/src/lib.rs`, `runtime.rs` |
+| Script services (`runtime::Hosts`, `TreeHost`), `facts_of`, `parse_report` | `crates/oxplow-script/src/lib.rs`, `runtime.rs` |
 | Consent (`approve_reviewed`), exec, coercion, `run_collector` / `run_for_event`, `CollectorRunner` + the `oxplow.collector.sync` command, scheduler | `crates/oxplow-app/src/collector_runner.rs` |
 | The `collector.triggers` consumer (`on:` / `where` / `after`) | `crates/oxplow-app/src/collector_triggers.rs` |
 | Entity tables + views, run state (V133 `collector_run`) | `crates/oxplow-db/src/collector_store.rs` |

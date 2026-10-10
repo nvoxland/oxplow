@@ -1,11 +1,11 @@
-//! The `ai_*` Starlark builtins for **collectors** (P5.E2,
-//! `.context/ai-providers.md` "`ai_*` functions for sources"):
+//! The `ai_*` Starlark builtins, the `ai.compute` service
+//! (`.context/ai-providers.md` "`ai_*` functions for sources"):
 //! `ai_classify`, `ai_score`, `ai_summarize` and `ai_extract`, answered by
-//! the [`AiOracle`] of the run's [`AiHost`] (in `Evaluator::extra`, the
-//! `TreeHost` pattern). The oracle is oxplow's recorded computations, so
-//! the same question on the same text is one model call, ever. A gauge or
-//! a report parser has no host and gets a refusal: a model call in a
-//! gauge would make a metric neither cheap nor reproducible.
+//! the [`AiOracle`] of the run's [`AiHost`] (one of its
+//! [`crate::runtime::Hosts`]). The oracle is oxplow's recorded
+//! computations, so the same question on the same text is one model call,
+//! ever. A run not given a model — one that didn't declare `ai.compute`,
+//! or whose mode can't call out — is told the need it lacks.
 //!
 //! The script runs on a worker thread; the oracle is synchronous (the app
 //! blocks on its async computation there). The time a script waits on the
@@ -28,8 +28,8 @@ pub trait AiOracle: Send + Sync {
     fn extract(&self, instructions: &str, text: &str, schema: &Value) -> Result<Value, String>;
 }
 
-/// Per-run host for a collector's `ai_*` builtins.
-#[derive(starlark::any::ProvidesStaticType)]
+/// The model a run asks (`ai.compute`): what the `ai_*` builtins answer
+/// from.
 pub struct AiHost {
     oracle: Arc<dyn AiOracle>,
 }
@@ -59,14 +59,7 @@ fn host<'a>(
     eval: &starlark::eval::Evaluator<'_, 'a, '_>,
     builtin: &str,
 ) -> anyhow::Result<&'a AiHost> {
-    eval.extra
-        .and_then(|e| e.downcast_ref::<AiHost>())
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "{builtin} is available in entity collectors only: a fact collector or a \
-                 report parser can't call a model"
-            )
-        })
+    crate::runtime::Hosts::get(eval, builtin, |h| h.ai.as_ref())
 }
 
 fn strings(v: starlark::values::Value<'_>, what: &str) -> anyhow::Result<Vec<String>> {
@@ -135,7 +128,7 @@ pub(crate) fn ai_builtins(builder: &mut starlark::environment::GlobalsBuilder) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::{run_starlark, run_starlark_with_ai, run_starlark_with_host};
+    use crate::runtime::{run_starlark, run_starlark_hosted, Hosts};
     use crate::TreeHost;
     use serde_json::json;
     use std::sync::Mutex;
@@ -191,8 +184,11 @@ def transform(input):
     #[test]
     fn a_collector_asks_its_oracle() {
         let oracle = Arc::new(Scripted::default());
-        let host = AiHost::new(oracle.clone());
-        let out = run_starlark_with_ai(SCRIPT, &json!({}), &host).unwrap();
+        let hosts = Hosts {
+            ai: Some(AiHost::new(oracle.clone())),
+            ..Hosts::default()
+        };
+        let out = run_starlark_hosted(SCRIPT, &json!({}), &hosts).unwrap();
         assert_eq!(
             out,
             json!({ "label": "bug", "level": "large", "summary": "short", "plain": "short", "n": 3 })
@@ -209,8 +205,6 @@ def transform(input):
         );
     }
 
-    /// P5.E2's red (the refusal half): no host — a gauge, a parser — and
-    /// the builtin says where it works.
     /// A script that names an `ai_*` builtin anywhere — a call, an alias,
     /// inside a def or a lambda — can spend a model call; a mention in a
     /// string or comment can't, and neither can a script that doesn't parse.
@@ -233,15 +227,21 @@ def transform(input):
         }
     }
 
+    /// A run not given a model — a gauge, a parser, a script that didn't
+    /// declare `ai.compute` — is told the need, whatever else it has.
     #[test]
-    fn a_fact_collector_or_a_parser_cant_call_a_model() {
+    fn a_run_not_given_a_model_is_told_its_need() {
+        let tree = Hosts {
+            tree: Some(TreeHost::default()),
+            ..Hosts::default()
+        };
         for run in [
             run_starlark(SCRIPT, &json!({})),
-            run_starlark_with_host(SCRIPT, &json!({}), &TreeHost::default()),
+            run_starlark_hosted(SCRIPT, &json!({}), &tree),
         ] {
             let err = run.unwrap_err().to_string();
             assert!(
-                err.contains("ai_classify is available in entity collectors only"),
+                err.contains("`ai_classify()` needs `ai.compute` in this script's `needs`"),
                 "{err}"
             );
         }

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use oxplow_domain::run::Budget;
-use oxplow_script::workers::{Cancel, Limits, RunHost, ScriptRun, ScriptWorkers};
+use oxplow_script::workers::{Cancel, Limits, ScriptRun, ScriptWorkers};
 use oxplow_script::CollectError;
 use serde_json::{json, Value};
 
@@ -207,8 +207,7 @@ fn scope_calls_are_answered_by_the_host_outside_the_budget() {
     let ran = w
         .run(
             &budget(200),
-            ScriptRun::starlark(script, json!({ "ref": "effort:eff1" }))
-                .with_host(RunHost::Scope(&mut serve)),
+            ScriptRun::starlark(script, json!({ "ref": "effort:eff1" })).with_scope(&mut serve),
             None,
         )
         .unwrap();
@@ -222,8 +221,7 @@ fn scope_calls_are_answered_by_the_host_outside_the_budget() {
     let err = w
         .run(
             &budget(5_000),
-            ScriptRun::starlark(script, json!({ "ref": "x" }))
-                .with_host(RunHost::Scope(&mut refuse)),
+            ScriptRun::starlark(script, json!({ "ref": "x" })).with_scope(&mut refuse),
             None,
         )
         .unwrap_err()
@@ -258,7 +256,7 @@ fn model_calls_are_answered_by_the_hosts_oracle() {
     let ran = w
         .run(
             &budget(5_000),
-            ScriptRun::starlark(script, json!({})).with_host(RunHost::Ai(Arc::new(Oracle))),
+            ScriptRun::starlark(script, json!({})).with_ai(Arc::new(Oracle)),
             None,
         )
         .unwrap();
@@ -273,7 +271,7 @@ fn model_calls_are_answered_by_the_hosts_oracle() {
                 "def transform(x):\n    return ai_score('x', ['l'])\n",
                 json!({}),
             )
-            .with_host(RunHost::Ai(Arc::new(Oracle))),
+            .with_ai(Arc::new(Oracle)),
             None,
         )
         .unwrap_err()
@@ -291,7 +289,10 @@ fn model_calls_are_answered_by_the_hosts_oracle() {
         )
         .unwrap_err()
         .to_string();
-    assert!(err.contains("entity collectors only"), "{err}");
+    assert!(
+        err.contains("`ai_summarize()` needs `ai.compute` in this script's `needs`"),
+        "{err}"
+    );
 }
 
 #[test]
@@ -307,11 +308,73 @@ fn a_fact_collector_reads_the_tree_it_was_shipped() {
     let ran = w
         .run(
             &budget(5_000),
-            ScriptRun::starlark(script, json!({})).with_host(RunHost::Tree(Arc::new(files))),
+            ScriptRun::starlark(script, json!({})).with_tree(Arc::new(files)),
             None,
         )
         .unwrap();
     assert_eq!(ran.value, json!(["src/a.rs"]));
+}
+
+/// One run may read the tree, ask a model and call a scope: the hosts
+/// are a set, each answered by what the caller gave.
+#[test]
+fn one_run_reads_the_tree_asks_a_model_and_calls_a_scope() {
+    let w = workers(limits());
+    let files: HashMap<String, String> = [("src/a.rs".to_string(), "fn a() {}\n".to_string())]
+        .into_iter()
+        .collect();
+    let mut serve = |id: &str, _: Value| Ok(json!([{ "scope": id }]));
+    let script = "def transform(x):\n    return {\n        'files': [f['path'] for f in files('**')],\n        'label': ai_classify('hi', ['a'])['label'],\n        'rows': scope('sql.read', {'sql': 'SELECT 1'}),\n    }\n";
+    let ran = w
+        .run(
+            &budget(5_000),
+            ScriptRun::starlark(script, json!({}))
+                .with_tree(Arc::new(files))
+                .with_ai(Arc::new(Oracle))
+                .with_scope(&mut serve),
+            None,
+        )
+        .unwrap();
+    assert_eq!(
+        ran.value,
+        json!({ "files": ["src/a.rs"], "label": "a", "rows": [{ "scope": "sql.read" }] })
+    );
+}
+
+/// A run given no tree can't read one: `files()` says which need it
+/// wants rather than answering an empty tree.
+#[test]
+fn a_run_without_the_tree_is_told_its_need() {
+    let w = workers(limits());
+    for (call, builtin, need) in [
+        ("files('**')", "files", "tree.read"),
+        ("source_files()", "source_files", "tree.read"),
+        ("duplicate_blocks(3)", "duplicate_blocks", "tree.read"),
+        (
+            "scope('sql.read', {'sql': 'SELECT 1'})",
+            "scope",
+            "sql.read",
+        ),
+    ] {
+        let err = w
+            .run(
+                &budget(5_000),
+                ScriptRun::starlark(
+                    &format!("def transform(x):\n    return {call}\n"),
+                    json!({}),
+                )
+                .with_ai(Arc::new(Oracle)),
+                None,
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains(&format!(
+                "`{builtin}()` needs `{need}` in this script's `needs`"
+            )),
+            "{err}"
+        );
+    }
 }
 
 /// A missing worker binary is an error the caller sees, not a hang.
@@ -367,7 +430,7 @@ fn model_time_is_left_out_of_the_budget() {
                 "def transform(x):\n    return ai_classify('t', ['a'])\n",
                 json!({}),
             )
-            .with_host(RunHost::Ai(oracle)),
+            .with_ai(oracle),
             None,
         )
         .unwrap();
@@ -390,7 +453,7 @@ fn a_run_past_its_ceiling_stops_asking_the_model() {
     let err = w
         .run(
             &budget,
-            ScriptRun::starlark(script, json!({})).with_host(RunHost::Ai(oracle.clone())),
+            ScriptRun::starlark(script, json!({})).with_ai(oracle.clone()),
             None,
         )
         .unwrap_err();

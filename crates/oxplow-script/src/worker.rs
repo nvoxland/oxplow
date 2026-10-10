@@ -7,8 +7,9 @@
 //! oxplow executable as a sidecar. It speaks NDJSON on stdin/stdout, one
 //! run per process:
 //!
-//! - host → worker: an optional `{"tree": {files}}` (a fact collector's
-//!   snapshot), then `{"run": {runtime, func, script, input, host}}`;
+//! - host → worker: an optional `{"tree": {files}}` (the run's
+//!   snapshot, when it was given `tree.read`), then `{"run": {runtime,
+//!   func, script, input, given}}`;
 //! - worker → host: `{"call": {seq, kind, id, args}}` for each `scope(…)`
 //!   or `ai_*` call, answered by host → worker `{"answer": {seq, ok | err}}`;
 //!   finally `{"done": {ok | err, cpu_ms, peak_bytes}}`.
@@ -47,17 +48,18 @@ pub enum Engine {
     },
 }
 
-/// What the script's builtins may call out to. At most one per run, as
-/// the in-process tiers had: a collector's model calls, a command's
-/// scopes, or a fact collector's snapshot (shipped as `tree` first).
+/// The services a run was given (`.context/extensions.md` "Services"):
+/// the tree (shipped as `tree` before the run), a model and the scopes,
+/// any of them. A builtin whose service wasn't given says which need it
+/// wants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CallOut {
-    #[default]
-    None,
-    Tree,
-    Ai,
-    Scope,
+pub struct Given {
+    #[serde(default)]
+    pub tree: bool,
+    #[serde(default)]
+    pub ai: bool,
+    #[serde(default)]
+    pub scope: bool,
 }
 
 /// What the host sends.
@@ -73,7 +75,7 @@ pub enum ToWorker {
         script: String,
         input: Value,
         #[serde(default)]
-        host: CallOut,
+        given: Given,
     },
     Answer {
         seq: u64,
@@ -346,7 +348,7 @@ pub fn main() -> ! {
         seq: 0,
     }));
     let mut tree = None;
-    let (engine, script, input, host) = loop {
+    let (engine, script, input, given) = loop {
         let msg = line.lock().unwrap_or_else(|e| e.into_inner()).read();
         match msg {
             ToWorker::Tree { files } => tree = Some(crate::runtime::TreeHost::new(files)),
@@ -354,12 +356,12 @@ pub fn main() -> ! {
                 engine,
                 script,
                 input,
-                host,
-            } => break (engine, script, input, host),
+                given,
+            } => break (engine, script, input, given),
             ToWorker::Answer { .. } => fail_hard("an answer before any call"),
         }
     };
-    let out = run(&line, engine, &script, &input, host, tree.as_ref());
+    let out = run(&line, engine, &script, &input, given, tree);
     let (ok, err) = match out {
         Ok(v) => (Some(v), None),
         Err(e) => (None, Some(Failure::of(&e))),
@@ -379,34 +381,29 @@ fn run(
     engine: Engine,
     script: &str,
     input: &Value,
-    host: CallOut,
-    tree: Option<&crate::runtime::TreeHost>,
+    given: Given,
+    tree: Option<crate::runtime::TreeHost>,
 ) -> Result<Value, CollectError> {
-    use crate::runtime::{run_jaq, run_starlark_inner, Host};
+    use crate::runtime::{run_jaq, run_starlark_inner, Hosts};
     let func = match engine {
         Engine::Jaq => return run_jaq(script, input),
         Engine::Starlark { func } => func,
     };
-    match host {
-        CallOut::None => run_starlark_inner(script, &func, input, Host::None),
-        CallOut::Tree => {
-            let empty = crate::runtime::TreeHost::default();
-            run_starlark_inner(script, &func, input, Host::Tree(tree.unwrap_or(&empty)))
-        }
-        CallOut::Ai => {
-            let ai = crate::ai::AiHost::new(Arc::new(RemoteOracle(line.clone())));
-            run_starlark_inner(script, &func, input, Host::Ai(&ai))
-        }
-        CallOut::Scope => {
+    let hosts = Hosts {
+        tree: given.tree.then(|| tree.unwrap_or_default()),
+        ai: given
+            .ai
+            .then(|| crate::ai::AiHost::new(Arc::new(RemoteOracle(line.clone())))),
+        scope: given.scope.then(|| {
             let line = line.clone();
-            let scope = crate::scope::ScopeHost::new(Box::new(move |id, args| {
+            crate::scope::ScopeHost::new(Box::new(move |id, args| {
                 line.lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .call(CallKind::Scope, id, args)
-            }));
-            run_starlark_inner(script, &func, input, Host::Scope(&scope))
-        }
-    }
+            }))
+        }),
+    };
+    run_starlark_inner(script, &func, input, &hosts)
 }
 
 /// The process's CPU time (user + system) so far, in milliseconds.

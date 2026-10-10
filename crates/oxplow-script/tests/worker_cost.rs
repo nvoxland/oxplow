@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use oxplow_domain::run::Budget;
-use oxplow_script::workers::{Limits, RunHost, ScriptRun, ScriptWorkers};
+use oxplow_script::workers::{Limits, ScriptRun, ScriptWorkers};
 use serde_json::json;
 
 /// Workers with room enough that the measurement measures cost, not the
@@ -48,7 +48,7 @@ fn builtin_metric_peaks() {
         let ran = w
             .run(
                 &Budget::default(),
-                ScriptRun::starlark(m.script, json!({})).with_host(RunHost::Tree(tree.clone())),
+                ScriptRun::starlark(m.script, json!({})).with_tree(tree.clone()),
                 None,
             )
             .unwrap_or_else(|e| panic!("{}: {e}", m.key));
@@ -106,7 +106,7 @@ fn worker_cost() {
         let ran = w
             .run(
                 &budget,
-                ScriptRun::starlark(m.script, json!({})).with_host(RunHost::Tree(tree.clone())),
+                ScriptRun::starlark(m.script, json!({})).with_tree(tree.clone()),
                 None,
             )
             .unwrap_or_else(|e| panic!("{}: {e}", m.key));
@@ -178,8 +178,7 @@ fn duplicate_lines_on_this_repo() {
     let ran = w
         .run(
             &Budget::default(),
-            ScriptRun::starlark(metric.script, json!({}))
-                .with_host(RunHost::Tree(Arc::new(files.clone()))),
+            ScriptRun::starlark(metric.script, json!({})).with_tree(Arc::new(files.clone())),
             None,
         )
         .unwrap();

@@ -3217,7 +3217,7 @@ impl FactRunner {
     ) -> Result<Vec<CollectedFact>, String> {
         use oxplow_script::facts_of;
         use oxplow_script::runtime::run_exec;
-        use oxplow_script::workers::{shared, RunHost, ScriptRun};
+        use oxplow_script::workers::{shared, ScriptRun};
         let budget = Budget::with_timeout(FACT_COLLECTOR_TIMEOUT);
         let script = |script_run: ScriptRun<'_>| {
             shared()
@@ -3229,7 +3229,7 @@ impl FactRunner {
         };
         match self {
             FactRunner::Starlark(text) => {
-                script(ScriptRun::starlark(&text, input.clone()).with_host(RunHost::Tree(files)))
+                script(ScriptRun::starlark(&text, input.clone()).with_tree(files))
             }
             FactRunner::Jaq(text) => script(ScriptRun::jaq(&text, input.clone())),
             FactRunner::Exec(argv) => run_exec(&budget, &argv, &input.to_string()),

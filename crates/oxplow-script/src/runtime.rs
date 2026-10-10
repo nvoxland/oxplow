@@ -246,9 +246,8 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
         Ok(heap.alloc(serde_json::Value::Array(arr)))
     }
     /// Return the snapshot files matching `glob` as `[{path, text}]`, read from
-    /// the per-run [`TreeHost`] injected via `Evaluator::extra`. When no host is
-    /// present (e.g. a report-derived run) or the host has no files, returns an
-    /// empty list. A malformed glob is an error.
+    /// the run's [`TreeHost`]. A run given no tree (one that didn't declare
+    /// `tree.read`) is told so; a malformed glob is an error.
     fn files<'v>(
         glob: &str,
         eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
@@ -256,23 +255,18 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
         let matcher = globset::Glob::new(glob)
             .map_err(|e| anyhow::anyhow!("bad glob \"{glob}\": {e}"))?
             .compile_matcher();
-        let arr: Vec<serde_json::Value> =
-            match eval.extra.and_then(|e| e.downcast_ref::<TreeHost>()) {
-                Some(host) => {
-                    let mut entries: Vec<(&String, &String)> = host
-                        .files
-                        .iter()
-                        .filter(|(path, _)| matcher.is_match(path.as_str()))
-                        .collect();
-                    // Deterministic order so a gauge's output is reproducible.
-                    entries.sort_by(|a, b| a.0.cmp(b.0));
-                    entries
-                        .into_iter()
-                        .map(|(path, text)| serde_json::json!({ "path": path, "text": text }))
-                        .collect()
-                }
-                None => Vec::new(),
-            };
+        let host = Hosts::tree(eval, "files")?;
+        let mut entries: Vec<(&String, &String)> = host
+            .files
+            .iter()
+            .filter(|(path, _)| matcher.is_match(path.as_str()))
+            .collect();
+        // Deterministic order so a gauge's output is reproducible.
+        entries.sort_by(|a, b| a.0.cmp(b.0));
+        let arr: Vec<serde_json::Value> = entries
+            .into_iter()
+            .map(|(path, text)| serde_json::json!({ "path": path, "text": text }))
+            .collect();
         Ok(eval.heap().alloc(serde_json::Value::Array(arr)))
     }
 
@@ -284,35 +278,26 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
     fn source_files<'v>(
         eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<starlark::values::Value<'v>> {
-        let arr: Vec<serde_json::Value> = match eval
-            .extra
-            .and_then(|e| e.downcast_ref::<TreeHost>())
-        {
-            Some(host) => {
-                let mut entries: Vec<(&String, &String)> = host
-                    .files
-                    .iter()
-                    .filter(|(path, _)| oxplow_code_metrics::is_supported_path(path.as_str()))
-                    // Codegen output (generated/ path, do-not-edit header) is
-                    // not hand-written code — keep it out of the code-shape
-                    // corpus so a 3k-line bindings file can't dominate the
-                    // fn_length/complexity tails (tsk68).
-                    .filter(|(path, text)| {
-                        !oxplow_code_metrics::is_generated_source(path.as_str(), text)
-                    })
-                    .collect();
-                entries.sort_by(|a, b| a.0.cmp(b.0));
-                entries
-                        .into_iter()
-                        .filter_map(|(path, text)| {
-                            oxplow_code_metrics::language_for_path(path).map(|lang| {
-                                serde_json::json!({ "path": path, "text": text, "language": lang.name() })
-                            })
-                        })
-                        .collect()
-            }
-            None => Vec::new(),
-        };
+        let host = Hosts::tree(eval, "source_files")?;
+        let mut entries: Vec<(&String, &String)> = host
+            .files
+            .iter()
+            .filter(|(path, _)| oxplow_code_metrics::is_supported_path(path.as_str()))
+            // Codegen output (generated/ path, do-not-edit header) is
+            // not hand-written code — keep it out of the code-shape
+            // corpus so a 3k-line bindings file can't dominate the
+            // fn_length/complexity tails (tsk68).
+            .filter(|(path, text)| !oxplow_code_metrics::is_generated_source(path.as_str(), text))
+            .collect();
+        entries.sort_by(|a, b| a.0.cmp(b.0));
+        let arr: Vec<serde_json::Value> = entries
+            .into_iter()
+            .filter_map(|(path, text)| {
+                oxplow_code_metrics::language_for_path(path).map(|lang| {
+                    serde_json::json!({ "path": path, "text": text, "language": lang.name() })
+                })
+            })
+            .collect();
         Ok(eval.heap().alloc(serde_json::Value::Array(arr)))
     }
 
@@ -320,40 +305,35 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
     /// at least `min_lines` lines among the host's files —
     /// `[{a_path, a_start_line, a_end_line, b_path, b_start_line,
     /// b_end_line, line_count}]`, from `oxplow_code_dup::detect_duplicates`.
-    /// Files in no supported language are skipped; no host, no blocks.
+    /// Files in no supported language are skipped.
     fn duplicate_blocks<'v>(
         min_lines: u32,
         eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<starlark::values::Value<'v>> {
-        let arr: Vec<serde_json::Value> =
-            match eval.extra.and_then(|e| e.downcast_ref::<TreeHost>()) {
-                Some(host) => {
-                    let mut files: Vec<(&String, &String)> = host.files.iter().collect();
-                    files.sort_by(|a, b| a.0.cmp(b.0));
-                    let opts = oxplow_code_dup::DupOptions {
-                        min_lines,
-                        ..Default::default()
-                    };
-                    oxplow_code_dup::detect_duplicates(
-                        files.into_iter().map(|(p, t)| (p.clone(), t)),
-                        opts,
-                    )
-                    .into_iter()
-                    .map(|b| {
-                        serde_json::json!({
-                            "a_path": b.a_path,
-                            "a_start_line": b.a_start_line,
-                            "a_end_line": b.a_end_line,
-                            "b_path": b.b_path,
-                            "b_start_line": b.b_start_line,
-                            "b_end_line": b.b_end_line,
-                            "line_count": b.line_count,
-                        })
-                    })
-                    .collect()
-                }
-                None => Vec::new(),
-            };
+        let host = Hosts::tree(eval, "duplicate_blocks")?;
+        let mut files: Vec<(&String, &String)> = host.files.iter().collect();
+        files.sort_by(|a, b| a.0.cmp(b.0));
+        let opts = oxplow_code_dup::DupOptions {
+            min_lines,
+            ..Default::default()
+        };
+        let arr: Vec<serde_json::Value> = oxplow_code_dup::detect_duplicates(
+            files.into_iter().map(|(p, t)| (p.clone(), t)),
+            opts,
+        )
+        .into_iter()
+        .map(|b| {
+            serde_json::json!({
+                "a_path": b.a_path,
+                "a_start_line": b.a_start_line,
+                "a_end_line": b.a_end_line,
+                "b_path": b.b_path,
+                "b_start_line": b.b_start_line,
+                "b_end_line": b.b_end_line,
+                "line_count": b.line_count,
+            })
+        })
+        .collect();
         Ok(eval.heap().alloc(serde_json::Value::Array(arr)))
     }
 
@@ -375,14 +355,14 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
     }
 }
 
-/// Per-run host state for a Starlark **fact collector**, injected via
-/// `Evaluator::extra` and read by the `files(glob)` builtin. The file map
+/// The captured tree a run reads (`tree.read`): what `files(glob)`,
+/// `source_files()` and `duplicate_blocks()` answer from. The file map
 /// (path → content) is held behind an `Arc` so the *same* captured snapshot
 /// can be shared across every collector of a run without cloning the whole
 /// map per collector (a real cost when many run on one snapshot). It carries no borrow lifetime across the
 /// Starlark boundary and stays `Send + 'static` (it can move into the sandbox
 /// worker thread).
-#[derive(Debug, Default, starlark::any::ProvidesStaticType)]
+#[derive(Debug, Default)]
 pub struct TreeHost {
     files: std::sync::Arc<std::collections::HashMap<String, String>>,
 }
@@ -445,51 +425,66 @@ pub fn check_starlark_defines(path: &str, script: &str, functions: &[&str]) -> R
 /// JSON-encodes the result, so the return value crosses back as JSON. The
 /// `json` stdlib extension and the container-parse helpers
 /// (`parse_xml`/`parse_json`/`lcov_records`/`lines`/`regex_find`/`xpath`) are
-/// available to the script.
+/// available to the script. It has no services: a builtin that needs one
+/// says so.
 pub fn run_starlark(script: &str, input: &Value) -> Result<Value, CollectError> {
-    run_starlark_inner(script, "transform", input, Host::None)
+    run_starlark_inner(script, "transform", input, &Hosts::default())
 }
 
 /// [`run_starlark`], calling the script's function `func` instead of
-/// `transform`, with no host.
+/// `transform`, with no services.
 pub fn run_starlark_fn(script: &str, func: &str, input: &Value) -> Result<Value, CollectError> {
-    run_starlark_inner(script, func, input, Host::None)
+    run_starlark_inner(script, func, input, &Hosts::default())
 }
 
-/// [`run_starlark`] for a collector: the `ai_*` builtins answer through
-/// `host`.
-pub fn run_starlark_with_ai(
+/// [`run_starlark`] with the services `hosts` gives it.
+pub fn run_starlark_hosted(
     script: &str,
     input: &Value,
-    host: &crate::ai::AiHost,
+    hosts: &Hosts,
 ) -> Result<Value, CollectError> {
-    run_starlark_inner(script, "transform", input, Host::Ai(host))
+    run_starlark_inner(script, "transform", input, hosts)
 }
 
-/// What a run's `Evaluator::extra` holds.
-pub(crate) enum Host<'a> {
-    None,
-    Tree(&'a TreeHost),
-    Ai(&'a crate::ai::AiHost),
-    Scope(&'a crate::scope::ScopeHost),
+/// The services a run was given (`.context/extensions.md` "Services"),
+/// the one thing in its `Evaluator::extra`: each builtin takes its own,
+/// and one whose service wasn't given says which need would give it.
+#[derive(Default, starlark::any::ProvidesStaticType)]
+pub struct Hosts {
+    pub tree: Option<TreeHost>,
+    pub ai: Option<crate::ai::AiHost>,
+    pub scope: Option<crate::scope::ScopeHost>,
 }
 
-/// Like [`run_starlark`] but with a [`TreeHost`] in scope, so the script's
-/// `files(glob)` builtin can read the snapshot file map. Used by fact
-/// collectors; the host moves in by value so this stays `Send` for the sandbox.
-pub fn run_starlark_with_host(
-    script: &str,
-    input: &Value,
-    host: &TreeHost,
-) -> Result<Value, CollectError> {
-    run_starlark_inner(script, "transform", input, Host::Tree(host))
+impl Hosts {
+    fn of<'a>(eval: &starlark::eval::Evaluator<'_, 'a, '_>) -> Option<&'a Hosts> {
+        eval.extra.and_then(|e| e.downcast_ref::<Hosts>())
+    }
+
+    /// `pick`'s host for `builtin`, or the need it wants.
+    pub(crate) fn get<'a, T>(
+        eval: &starlark::eval::Evaluator<'_, 'a, '_>,
+        builtin: &str,
+        pick: impl FnOnce(&'a Hosts) -> Option<&'a T>,
+    ) -> anyhow::Result<&'a T> {
+        Self::of(eval)
+            .and_then(pick)
+            .ok_or_else(|| anyhow::anyhow!(oxplow_domain::service::undeclared(builtin)))
+    }
+
+    fn tree<'a>(
+        eval: &starlark::eval::Evaluator<'_, 'a, '_>,
+        builtin: &str,
+    ) -> anyhow::Result<&'a TreeHost> {
+        Self::get(eval, builtin, |h| h.tree.as_ref())
+    }
 }
 
 pub(crate) fn run_starlark_inner(
     script: &str,
     func: &str,
     input: &Value,
-    host: Host<'_>,
+    hosts: &Hosts,
 ) -> Result<Value, CollectError> {
     use starlark::environment::{GlobalsBuilder, LibraryExtension, Module};
     use starlark::eval::Evaluator;
@@ -514,12 +509,7 @@ pub(crate) fn run_starlark_inner(
 
     Module::with_temp_heap(|module| {
         let mut eval = Evaluator::new(&module);
-        match host {
-            Host::None => {}
-            Host::Tree(h) => eval.extra = Some(h),
-            Host::Ai(h) => eval.extra = Some(h),
-            Host::Scope(h) => eval.extra = Some(h),
-        }
+        eval.extra = Some(hosts);
         let result = eval
             .eval_module(ast, &globals)
             .map_err(|e| CollectError::Runtime(format!("starlark run: {e}")))?;

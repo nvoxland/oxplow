@@ -361,13 +361,13 @@ mod tests {
             .into_iter()
             .find(|m| m.key == key)
             .unwrap_or_else(|| panic!("no builtin metric {key}"));
-        crate::runtime::run_starlark_with_host(
-            metric.script,
-            &serde_json::json!({}),
-            &TreeHost::new(files),
-        )
-        .and_then(crate::facts_of)
-        .expect("script runs")
+        let hosts = crate::runtime::Hosts {
+            tree: Some(TreeHost::new(files)),
+            ..crate::runtime::Hosts::default()
+        };
+        crate::runtime::run_starlark_hosted(metric.script, &serde_json::json!({}), &hosts)
+            .and_then(crate::facts_of)
+            .expect("script runs")
     }
 
     /// Run a built-in idiom metric and return its repo total — the sum of its
