@@ -973,3 +973,22 @@ async fn a_scaffolded_panel_checks_tests_and_shows_its_lens() {
     assert_eq!(ext.panels.len(), 1);
     assert_eq!(ext.panels[0].body, "open-work/open-work");
 }
+
+/// A bundled extension's examples run too, from the fixtures embedded with
+/// it: `extension test oxplow-bundled` runs the `runs` lens over a throwaway
+/// oxplow and passes.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_bundled_extensions_runs_lens_example_runs_and_passes() {
+    let dir = project().await;
+    let report = test_extension(dir.path(), "oxplow-bundled", false)
+        .await
+        .unwrap();
+    assert_eq!(report.errors, Vec::<String>::new());
+    assert!(
+        report
+            .ran
+            .contains(&"example extension runs over the last week".to_string()),
+        "ran: {:?}",
+        report.ran
+    );
+}

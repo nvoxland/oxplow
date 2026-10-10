@@ -1,0 +1,23 @@
+title: Extension runs
+description: What each extension did in the last 7 days — its runs, how many failed or were denied by their grant, the CPU they took on average, and the model calls they made. The ones needing attention come first.
+query: |
+  SELECT extension,
+         count(*) AS runs,
+         sum(outcome = 'failed') AS failures,
+         sum(outcome = 'denied') AS denials,
+         round(avg(cpu_ms), 1) AS mean_cpu_ms,
+         sum(ai_calls) AS ai_calls
+  FROM v_extension_run
+  WHERE started_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-7 days')
+  GROUP BY extension
+  ORDER BY failures DESC, denials DESC, runs DESC, extension
+viz: table
+columns:
+  - { key: extension, label: Extension }
+  - { key: runs, label: Runs }
+  - { key: failures, label: Failed }
+  - { key: denials, label: Denied }
+  - { key: mean_cpu_ms, label: Mean CPU (ms) }
+  - { key: ai_calls, label: Model calls }
+empty: No extension has run in the last 7 days.
+launcher: { category: Activity }

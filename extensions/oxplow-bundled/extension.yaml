@@ -24,6 +24,9 @@ intent:
     - name: an effort whose changed lines are under-covered
       input: { lens: effort-tests, params: { effort_id: 1 } }
       expect: the effort's test runs, its diff coverage and the uncovered changed lines
+    - name: extension runs over the last week
+      input: { lens: runs, params: {} }
+      expect: each extension's runs, failures, denials, mean CPU and model calls, the ones needing attention first
     - name: a metric pushed past its warn threshold during an effort
       input: { advisory: threshold-crossed, effort_id: 1 }
       expect: one "⚠ <metric> crossed its warn threshold" line, once per metric

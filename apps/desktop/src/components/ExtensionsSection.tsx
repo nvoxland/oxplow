@@ -31,13 +31,16 @@ import {
   type Extension,
   type ExtensionReview,
   type CollectorListing,
+  querySql,
 } from "../api.js";
 import { NEW_LENS_COMMAND } from "../lens/lensModel.js";
 import { useCommandDraft } from "../commandDraft.js";
 import { enableAgain, healthLine, healthOf, repairWithAgent, useContributionHealth, type ContributionHealth } from "../contributionHealth.js";
-import { collectorRan, extensionCredentials, extensionRowModel, reviewModel } from "./extensionRowModel.js";
+import { collectorRan, extensionCredentials, extensionRowModel, LATEST_RUNS_SQL, lastRuns, type LastRun, type RunRow, reviewModel } from "./extensionRowModel.js";
 import { extensionsChanged } from "../lens/lensRerun.js";
 import { ImpactReportView } from "./ImpactReportView.js";
+import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
+import type { Reads } from "../tauri-bridge/generated/bindings.js";
 import { InlineConfirm } from "./InlineConfirm.js";
 import { recordOpError } from "./opErrorsStore.js";
 import { showToast } from "./toastStore.js";
@@ -50,6 +53,9 @@ export function ExtensionsSection() {
    *  where they're built). */
   const [checked, setChecked] = useState<Record<string, string[]>>({});
   const [collectors, setCollectors] = useState<CollectorListing[]>([]);
+  /** Each extension's last run (`v_extension_run`, latest per contribution). */
+  const [runs, setRuns] = useState<Record<string, LastRun>>({});
+  const [runReads, setRunReads] = useState<Reads>(NO_READS);
   const health = useContributionHealth();
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -63,6 +69,20 @@ export function ExtensionsSection() {
       const listed = await listExtensions();
       setExts(listed);
       setCollectors(await listCollectors());
+      // A read that fails costs the line, not the list.
+      void querySql(LATEST_RUNS_SQL, [], null)
+        .then((r) => {
+          setRunReads(r.reads);
+          setRuns(
+            lastRuns(
+              r.rows.map(
+                ([extension, contribution, outcome, error, finished_at, decisions]) =>
+                  ({ extension, contribution, outcome, error, finished_at, decisions }) as RunRow,
+              ),
+            ),
+          );
+        })
+        .catch(() => setRuns({}));
       const reports = await Promise.all(
         listed
           .filter((e) => e.origin !== "bundled" && e.enabled)
@@ -81,6 +101,8 @@ export function ExtensionsSection() {
     }
   }, []);
 
+  // A run commits a `v_extension_run` row: the line follows it.
+  useRerunOnChange(runReads, () => void refresh());
   useEffect(() => {
     void refresh();
     // Scheduled and agent-triggered runs land here too.
@@ -192,6 +214,16 @@ export function ExtensionsSection() {
                 </div>
                 {m.description ? <div style={mutedStyle}>{m.description}</div> : null}
                 {m.disabledNote ? <div style={mutedStyle}>{m.disabledNote}</div> : null}
+                {runs[m.name] ? (
+                  <div
+                    data-testid={`extension-last-run-${m.name}`}
+                    data-warn={runs[m.name]!.warn ? "true" : "false"}
+                    style={runs[m.name]!.warn ? { ...mutedStyle, color: "var(--severity-medium)" } : mutedStyle}
+                  >
+                    {runs[m.name]!.text}
+                    {runs[m.name]!.reason ? ` — ${runs[m.name]!.reason}` : ""}
+                  </div>
+                ) : null}
                 {m.errors.map((err, i) => (
                   <div key={i} style={errorStyle}>
                     {err}

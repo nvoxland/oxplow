@@ -206,3 +206,76 @@ export function reviewModel(review: ExtensionReview): ReviewModel {
     canInstall: ext.errors.length === 0,
   };
 }
+
+/** The latest run of each contribution — the rows Settings → Extensions
+ *  reads (`v_extension_run`, `latest = 1`). */
+export const LATEST_RUNS_SQL =
+  "SELECT extension, contribution, outcome, error, finished_at, decisions FROM v_extension_run WHERE latest = 1";
+
+export interface RunRow {
+  extension: string;
+  /** `<extension>/<kind>/<local>`. */
+  contribution: string;
+  outcome: string;
+  error: string | null;
+  finished_at: string;
+  /** JSON: what its grant decided, `[{ need, name?, decision, reason? }]`. */
+  decisions: string | null;
+}
+
+/** An extension's last run as its row shows it. */
+export interface LastRun {
+  text: string;
+  /** Why, for a run that failed, was denied or went stale. */
+  reason: string | null;
+  /** Failed, denied and stale are shown in the warning color. */
+  warn: boolean;
+}
+
+const localWhen = (iso: string) => new Date(iso).toLocaleString();
+
+/** The decision that refused a run, as a person reads it: `host evil.example:
+ *  it isn't in the grant`. */
+function deniedReason(decisions: string | null): string | null {
+  if (!decisions) return null;
+  try {
+    const list = JSON.parse(decisions) as Array<{ need?: string; name?: string; decision?: string; reason?: string }>;
+    const d = list.find((x) => x.decision === "denied");
+    if (!d) return null;
+    const what = [d.need, d.name].filter(Boolean).join(" ");
+    return d.reason ? (what ? `${what}: ${d.reason}` : d.reason) : what || null;
+  } catch {
+    return null;
+  }
+}
+
+/** How bad a warning is: a refusal or a change under the run says more
+ *  than a failure. `0` for a run that is no warning. */
+const SEVERITY: Record<string, number> = { denied: 3, stale: 2, failed: 1 };
+
+/** Each extension's run to show, from the latest run of each of its
+ *  contributions: the worst current warning (denied, then stale, then
+ *  failed; the newest of equals), so a failing contribution isn't hidden
+ *  behind another's later ok run — else the most recent run. */
+export function lastRuns(rows: readonly RunRow[], when: (iso: string) => string = localWhen): Record<string, LastRun> {
+  const shown = new Map<string, RunRow>();
+  const outranks = (a: RunRow, b: RunRow) => {
+    const [sa, sb] = [SEVERITY[a.outcome] ?? 0, SEVERITY[b.outcome] ?? 0];
+    return sa !== sb ? sa > sb : a.finished_at > b.finished_at;
+  };
+  for (const r of rows) {
+    const seen = shown.get(r.extension);
+    if (!seen || outranks(r, seen)) shown.set(r.extension, r);
+  }
+  return Object.fromEntries(
+    [...shown].map(([extension, r]) => {
+      const [, kind = "", ...local] = r.contribution.split("/");
+      const warn = (SEVERITY[r.outcome] ?? 0) > 0;
+      const reason = !warn ? null : r.outcome === "denied" ? (deniedReason(r.decisions) ?? r.error) : r.error;
+      return [
+        extension,
+        { text: `Last run: ${r.outcome} · ${kind} ${local.join("/")} · ${when(r.finished_at)}`, reason, warn },
+      ];
+    }),
+  );
+}

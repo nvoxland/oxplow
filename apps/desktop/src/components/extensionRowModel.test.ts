@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import type { CollectorListing, Extension } from "../tauri-bridge/generated/bindings.js";
-import { collectorRan, collectorRowModel, extensionCredentials, extensionRowModel, reviewModel } from "./extensionRowModel.js";
+import {
+  collectorRan,
+  collectorRowModel,
+  extensionCredentials,
+  extensionRowModel,
+  lastRuns,
+  reviewModel,
+  type RunRow,
+} from "./extensionRowModel.js";
 
 const ext = (over: Partial<Extension> = {}): Extension => ({
   name: "review",
@@ -270,4 +278,87 @@ describe("reviewModel", () => {
     expect(m.problems).toHaveLength(1);
   });
 
+});
+
+// Settings → Extensions shows each extension's last run (`v_extension_run`,
+// `latest = 1` per contribution): how it ended and when; failed, denied and
+// stale in the warning color, with why.
+describe("lastRuns", () => {
+  const when = (iso: string) => `<${iso}>`;
+  const run = (over: Partial<RunRow> = {}): RunRow => ({
+    extension: "acme",
+    contribution: "acme/collector/pull",
+    outcome: "ok",
+    error: null,
+    finished_at: "2026-10-10T09:00:00Z",
+    decisions: null,
+    ...over,
+  });
+
+  test("a failing contribution isn't hidden behind another's later ok run", () => {
+    const got = lastRuns(
+      [
+        run({ contribution: "acme/collector/pull", outcome: "failed", error: "rate limited", finished_at: "2026-10-10T07:00:00Z" }),
+        run({ contribution: "acme/effect/note", outcome: "ok", finished_at: "2026-10-10T09:00:00Z" }),
+      ],
+      when,
+    );
+    expect(got.acme).toEqual({
+      text: "Last run: failed · collector pull · <2026-10-10T07:00:00Z>",
+      reason: "rate limited",
+      warn: true,
+    });
+  });
+
+  test("of several warnings, denied beats stale beats failed, then the newest", () => {
+    const at = (c: string, outcome: string, h: number) =>
+      run({ contribution: `acme/${c}`, outcome, error: outcome, finished_at: `2026-10-10T0${h}:00:00Z` });
+    const worst = (rows: RunRow[]) => lastRuns(rows, when).acme!.text;
+    expect(worst([at("collector/a", "failed", 9), at("effect/b", "stale", 5), at("command/c", "denied", 1)])).toContain("denied · command c");
+    expect(worst([at("collector/a", "failed", 9), at("effect/b", "stale", 5)])).toContain("stale · effect b");
+    expect(worst([at("collector/a", "failed", 3), at("effect/b", "failed", 8)])).toContain("failed · effect b");
+  });
+
+  test("an extension's most recent run, named by its contribution", () => {
+    const got = lastRuns(
+      [
+        run({ contribution: "acme/effect/note", finished_at: "2026-10-10T08:00:00Z" }),
+        run({ contribution: "acme/collector/pull", finished_at: "2026-10-10T09:00:00Z" }),
+        run({ extension: "beta", contribution: "beta/command/ship.it", finished_at: "2026-10-09T09:00:00Z" }),
+      ],
+      when,
+    );
+    expect(got.acme).toEqual({
+      text: "Last run: ok · collector pull · <2026-10-10T09:00:00Z>",
+      reason: null,
+      warn: false,
+    });
+    expect(got.beta!.text).toBe("Last run: ok · command ship.it · <2026-10-09T09:00:00Z>");
+  });
+
+  test("failed, denied and stale are warnings, and say why", () => {
+    const one = (r: Partial<RunRow>) => lastRuns([run(r)], when).acme!;
+    expect(one({ outcome: "failed", error: "rate limited" })).toMatchObject({ warn: true, reason: "rate limited" });
+    expect(one({ outcome: "stale", error: "the extension changed under it" })).toMatchObject({
+      warn: true,
+      reason: "the extension changed under it",
+    });
+    for (const quiet of ["ok", "skipped", "cancelled"]) {
+      expect(one({ outcome: quiet }).warn).toBe(false);
+    }
+  });
+
+  test("a denied run's reason comes from the decision that refused", () => {
+    const decisions = JSON.stringify([
+      { need: "scope", name: "sql.read", decision: "allowed" },
+      { need: "host", name: "evil.example", decision: "denied", reason: "it isn't in the grant" },
+      { need: "files", decision: "unenforced", reason: "a program reads files as you" },
+    ]);
+    const got = lastRuns([run({ outcome: "denied", error: "denied", decisions })], when).acme!;
+    expect(got.warn).toBe(true);
+    expect(got.reason).toBe("host evil.example: it isn't in the grant");
+    // With no decision recorded, the run's own error stands.
+    expect(lastRuns([run({ outcome: "denied", error: "no grant", decisions: "[]" })], when).acme!.reason).toBe("no grant");
+    expect(lastRuns([run({ outcome: "denied", error: null, decisions: "not json" })], when).acme!.reason).toBeNull();
+  });
 });
