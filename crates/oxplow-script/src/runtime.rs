@@ -10,7 +10,7 @@
 //! The two script tiers are deterministic and do no I/O, so their output is
 //! `observed`-eligible. Their engines here run only inside a script worker
 //! process (`crate::worker`), which the host kills past its
-//! [`SandboxBudget`] or memory cap (`crate::workers`). [`run_exec`] is a
+//! [`Budget`](oxplow_domain::run::Budget) or memory cap (`crate::workers`). [`run_exec`] is a
 //! child process of its own and honours the same budget. It also drains
 //! stdout/stderr on their own threads while writing stdin, because doing
 //! those in sequence deadlocks any streaming filter once a pipe buffer fills
@@ -33,62 +33,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::{CollectError, CollectorKind, CollectorOutput};
-
-/// A script run's time limits. Past either, its worker is killed.
-#[derive(Debug, Clone, Copy)]
-pub struct SandboxBudget {
-    /// The script's own time: what it spends outside a [`RunClock`] pause.
-    pub timeout: Duration,
-    /// Wall-clock time, paused time (a collector's model calls) included:
-    /// the budget that stops a per-row loop of `ai_*` calls from running
-    /// for hours and holding up every scheduled source behind it.
-    pub ceiling: Duration,
-}
-
-/// The default [`SandboxBudget::ceiling`]. A run past it keeps the model
-/// answers it recorded (`ai_result`), so its next run gets further.
-const CEILING: Duration = Duration::from_secs(600);
-
-impl Default for SandboxBudget {
-    fn default() -> Self {
-        SandboxBudget {
-            // A **runaway catch**, not a latency SLO (tsk88). The old 5s was
-            // sized for "a report parser over one file" and was wrong the same
-            // way the gauge budget was wrong in tsk47: a real whole-workspace
-            // report is ~5MB / 100k lines, and the interpreter runs ~6x slower
-            // in the debug build the app actually ships to developers. That put
-            // the real lcov parse right at the 5s line, so it timed out
-            // *intermittently under load* — coverage was silently never ingested
-            // here, and each overrun detached a jq thread that kept burning a
-            // core (142 threads / ~58% CPU by the time it was caught).
-            //
-            // Nothing waits on this: the collection ride-along is a background
-            // PostToolUse hook, and the control plane already caps its own hook
-            // handling so the agent is never stalled. So the only job left for
-            // this number is to stop a genuinely infinite script — 120s, same
-            // ceiling gauges got.
-            timeout: Duration::from_secs(120),
-            ceiling: CEILING,
-        }
-    }
-}
-
-impl SandboxBudget {
-    /// A budget with a custom timeout.
-    pub const fn with_timeout(timeout: Duration) -> Self {
-        let ceiling = if timeout.as_nanos() > CEILING.as_nanos() {
-            timeout
-        } else {
-            CEILING
-        };
-        SandboxBudget { timeout, ceiling }
-    }
-
-    /// This budget with a custom ceiling.
-    pub fn with_ceiling(self, ceiling: Duration) -> Self {
-        SandboxBudget { ceiling, ..self }
-    }
-}
+use oxplow_domain::run::Budget;
 
 /// A run's time spent waiting on its host — answering a command's
 /// `scope(…)` or a collector's `ai_*` call (the calls finished and the one
@@ -589,11 +534,7 @@ pub(crate) fn run_starlark_inner(
 /// raw report `content` is written to its stdin and its stdout is parsed as the
 /// kind's JSON output. Unlike the in-process tiers this can do I/O, so callers
 /// tag it lower-trust.
-pub fn run_exec(
-    budget: &SandboxBudget,
-    argv: &[String],
-    content: &str,
-) -> Result<Value, CollectError> {
+pub fn run_exec(budget: &Budget, argv: &[String], content: &str) -> Result<Value, CollectError> {
     use std::io::{Read, Write};
     use std::process::{Command, Stdio};
 
@@ -922,7 +863,7 @@ mod tests {
     /// tripping a short timeout, which would pass for the wrong reason.
     #[test]
     fn exec_streams_a_payload_larger_than_the_pipe_buffer() {
-        let budget = SandboxBudget::with_timeout(std::time::Duration::from_secs(60));
+        let budget = Budget::with_timeout(std::time::Duration::from_secs(60));
         // Multiple MB of JSON — ~50x the ~64 KB pipe buffer, in both directions.
         let big: Vec<i64> = (0..500_000).collect();
         let payload = serde_json::to_string(&json!({ "files": {}, "pad": big })).unwrap();
@@ -941,7 +882,7 @@ mod tests {
     fn exec_kills_a_child_that_exceeds_its_budget() {
         // Unlike the in-process tiers, which can only abandon an overrunning
         // script, a child process can be killed — so exec gets a real ceiling.
-        let budget = SandboxBudget::with_timeout(std::time::Duration::from_millis(200));
+        let budget = Budget::with_timeout(std::time::Duration::from_millis(200));
         let argv = vec!["sleep".to_string(), "30".to_string()];
         let started = std::time::Instant::now();
         let err = run_exec(&budget, &argv, "{}").expect_err("must not wait for the sleep");
@@ -958,7 +899,7 @@ mod tests {
 
     #[test]
     fn exec_surfaces_a_failing_child_with_its_stderr() {
-        let budget = SandboxBudget::with_timeout(std::time::Duration::from_secs(10));
+        let budget = Budget::with_timeout(std::time::Duration::from_secs(10));
         let argv = vec![
             "sh".to_string(),
             "-c".to_string(),

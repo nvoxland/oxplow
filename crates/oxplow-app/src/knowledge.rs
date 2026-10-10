@@ -958,7 +958,7 @@ fn untracked(slug: &str) -> HandlerOutput {
 
 fn call(invocation: &Invocation) -> PageCall<'_> {
     PageCall {
-        actor: &invocation.actor,
+        run: &invocation.run,
         idempotency_key: invocation.idempotency_key.clone(),
     }
 }
@@ -1000,7 +1000,7 @@ pub fn ops(target: KnowledgeTarget) -> Vec<Op> {
                 Some(kept) => {
                     record(
                         &t,
-                        &invocation.actor,
+                        invocation.actor(),
                         &slug,
                         kept,
                         input.verified_refs,
@@ -1033,8 +1033,8 @@ pub fn ops(target: KnowledgeTarget) -> Vec<Op> {
             };
             let (vocabulary, source, anchors) = (
                 t.vocabulary.clone(),
-                invocation.actor.source(),
-                invocation.actor.anchors(),
+                invocation.actor().source(),
+                invocation.actor().anchors(),
             );
             let deleted = {
                 let slug = slug.clone();
@@ -1086,7 +1086,7 @@ pub fn ops(target: KnowledgeTarget) -> Vec<Op> {
             match store.link(&call(&invocation), &slug, &input.target).await? {
                 None => Ok(untracked(&slug)),
                 Some(kept) => {
-                    record(&t, &invocation.actor, &slug, kept, Vec::new(), Vec::new()).await
+                    record(&t, invocation.actor(), &slug, kept, Vec::new(), Vec::new()).await
                 }
             }
         }) as crate::commands::ExternalFuture
@@ -1104,7 +1104,7 @@ pub fn ops(target: KnowledgeTarget) -> Vec<Op> {
         }
         let (result, events) = match std::fs::read_to_string(page_path(&t.project_dir, slug)) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                let env = delete_page_tx(ctx.conn, &ctx.events, ctx.actor.anchors(), slug)
+                let env = delete_page_tx(ctx.conn, &ctx.events, ctx.actor().anchors(), slug)
                     .map_err(domain)?;
                 (
                     json!({ "page": page_ref(slug), "deleted": true }),
@@ -1129,7 +1129,7 @@ pub fn ops(target: KnowledgeTarget) -> Vec<Op> {
                         removed: &[],
                         updated_at: Timestamp::now(),
                         stated: None,
-                        anchors: ctx.actor.anchors(),
+                        anchors: ctx.actor().anchors(),
                     },
                 )
                 .map_err(domain)?;
@@ -1829,7 +1829,7 @@ mod tests {
                 "write {} {:?} by {}",
                 draft.slug,
                 draft.verified_refs,
-                call.actor.source()
+                call.actor().source()
             ));
             Ok(Some(Kept {
                 body: draft.body.clone(),

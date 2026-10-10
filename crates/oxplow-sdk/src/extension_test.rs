@@ -491,18 +491,26 @@ async fn policy_example(
     let Some(answers) = answers(ex, &format!("effort policy `{id}`"), report) else {
         return;
     };
-    let decided = run_over(&host.svc.sql, &decl.needs, script, event, Some(&answers))
-        .await
-        .and_then(|reaction| match &reaction {
-            Reaction::Run { events, .. } if !events.is_empty() => {
-                Err("it appends events, and a policy emits nothing".to_string())
-            }
-            Reaction::Run { calls, .. } => {
-                oxplow_app::extension_commands::check_calls(host.svc.commands.as_ref(), calls)
-                    .map(|()| reaction)
-            }
-            Reaction::Skip(_) => Ok(reaction),
-        });
+    let run = oxplow_app::run_context::for_dry_run();
+    let decided = run_over(
+        &host.svc.sql,
+        &run,
+        &decl.needs,
+        script,
+        event,
+        Some(&answers),
+    )
+    .await
+    .and_then(|reaction| match &reaction {
+        Reaction::Run { events, .. } if !events.is_empty() => {
+            Err("it appends events, and a policy emits nothing".to_string())
+        }
+        Reaction::Run { calls, .. } => {
+            oxplow_app::extension_commands::check_calls(host.svc.commands.as_ref(), calls)
+                .map(|()| reaction)
+        }
+        Reaction::Skip(_) => Ok(reaction),
+    });
     if let Some(p) = reaction_problem(&ex.expect, decided) {
         report.errors.push(format!(
             "{shown}:1: effort policy `{id}` {p} — fix: its script, or the example's `expect` \
@@ -1156,6 +1164,7 @@ async fn session(
                     command: command.into(),
                     input: input.clone(),
                     idempotency_key: None,
+                    context: None,
                 },
             )
             .await

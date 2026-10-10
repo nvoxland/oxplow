@@ -691,8 +691,8 @@ pub enum Composed {
 /// transaction, holding the write lock, so this is far tighter than a
 /// collector's runaway catch: composing a few commands is milliseconds.
 /// A script past it has its worker stopped and the transaction released.
-pub const COMMAND_SCRIPT_BUDGET: oxplow_script::SandboxBudget =
-    oxplow_script::SandboxBudget::with_timeout(std::time::Duration::from_secs(5));
+pub const COMMAND_SCRIPT_BUDGET: oxplow_domain::run::Budget =
+    oxplow_domain::run::Budget::with_timeout(std::time::Duration::from_secs(5));
 
 /// Run a command script's (or an effect's) `transform` over `input` in a
 /// script worker within [`COMMAND_SCRIPT_BUDGET`], its `scope(…)` calls
@@ -702,13 +702,14 @@ pub fn run_command_script(
     script: &str,
     input: Value,
     serve: &mut oxplow_script::workers::Serve<'_>,
+    cancel: &oxplow_domain::run::Cancel,
 ) -> Result<Value, oxplow_script::CollectError> {
     use oxplow_script::workers::{shared, RunHost, ScriptRun};
     shared()
         .run(
             &COMMAND_SCRIPT_BUDGET,
             ScriptRun::starlark(script, input).with_host(RunHost::Scope(serve)),
-            None,
+            Some(cancel),
         )
         .map(|ran| ran.value)
 }
@@ -727,8 +728,9 @@ pub fn compose_calls(
     input: Value,
     calls: &mut crate::scope_calls::Calls<'_>,
 ) -> Result<Composed, oxplow_domain::CommandError> {
+    let cancel = calls.run().cancel().clone();
     let mut serve = |id: &str, args: Value| calls.serve(id, args);
-    let out = run_command_script(script, json!({ "input": input }), &mut serve);
+    let out = run_command_script(script, json!({ "input": input }), &mut serve, &cancel);
     // The database was busy answering a read: the run is retried.
     if let Some(message) = calls.take_busy() {
         return Err(oxplow_domain::CommandError::Busy { message });
@@ -803,12 +805,10 @@ pub fn extension_command(
     let (vocabulary, extension) = (bus.vocabulary().clone(), extension.to_string());
     let source = format!("extension:{extension}/{}", decl.name);
     let compose: std::sync::Arc<Composer> = std::sync::Arc::new(
-        move |conn: &rusqlite::Connection,
-              trace: &oxplow_domain::scope::ScopeTrace,
-              input: &Value| {
+        move |conn: &rusqlite::Connection, run: &oxplow_domain::run::RunContext, input: &Value| {
             let read =
                 Box::new(|q: oxplow_db::SqlQuery| oxplow_db::semantic_layer::read_on(conn, &q));
-            let mut calls = crate::scope_calls::Calls::new(&needs, trace, read);
+            let mut calls = crate::scope_calls::Calls::new(run, &needs, read);
             match compose_calls(&script, input.clone(), &mut calls)? {
                 Composed::Run { calls, events, .. }
                     if reads && !(calls.is_empty() && events.is_empty()) =>
@@ -1208,9 +1208,9 @@ pub async fn dry_run(
     let (layer, answers) = (layer.clone(), answers.clone());
     let runtime = tokio::runtime::Handle::current();
     let decided = tokio::task::spawn_blocking(move || {
-        let trace = oxplow_domain::scope::ScopeTrace::default();
+        let run = crate::run_context::for_dry_run();
         let read = Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(layer.run(q)));
-        let mut calls = crate::scope_calls::Calls::new(&needs, &trace, read).with_answers(&answers);
+        let mut calls = crate::scope_calls::Calls::new(&run, &needs, read).with_answers(&answers);
         compose_calls(&script, input, &mut calls)
     })
     .await

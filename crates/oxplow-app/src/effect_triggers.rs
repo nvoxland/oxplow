@@ -47,6 +47,7 @@
 //! (`.context/providers.md` "Idempotency").
 
 use oxplow_domain::events::EventView;
+use oxplow_domain::run::{Mode, RunContext};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Weak};
 
@@ -562,6 +563,15 @@ pub(crate) async fn run_reaction(
     if let Some(why) = lineage.refusal() {
         return skipped(why).await;
     }
+    // The reaction's run: the effect, caused by the event, where it
+    // happened.
+    let run = crate::run_context::for_effect(
+        &svc.extension_catalog,
+        &svc.layout.project_dir,
+        ext,
+        decl,
+        event,
+    );
     // A failure counts once: not when the attempt was already recorded
     // (its run lost a race to another delivery, or finished it failed).
     let failed = |reason: String| async {
@@ -594,7 +604,7 @@ pub(crate) async fn run_reaction(
         };
         (calls, events)
     } else {
-        let (composed, used) = match run_script(svc, decl, event).await {
+        let (composed, used) = match run_script(svc, &run, decl, event).await {
             Ok(c) => c,
             Err(reason) => return failed(reason).await,
         };
@@ -627,7 +637,7 @@ pub(crate) async fn run_reaction(
     let kept = safe.then(|| resend.clone());
     match svc
         .commands
-        .run_effect(key.clone(), kept, command, input, &event.envelope.anchors)
+        .run_effect(&run, key.clone(), kept, command, input)
         .await
     {
         Ok(_) => Ok(Reacted::Ran),
@@ -886,8 +896,8 @@ fn effect_command(
     let sequence = bus.command(SEQUENCE).ok_or_else(|| CommandError::Failed {
         message: format!("`{SEQUENCE}` isn't registered"),
     })?;
-    let composer: Arc<Composer> = Arc::new(move |_conn, trace, _input| {
-        trace.add(&scopes);
+    let composer: Arc<Composer> = Arc::new(move |_conn, run, _input| {
+        run.trace().add(&scopes);
         Ok(Composition {
             calls: calls.clone(),
             result: None,
@@ -910,6 +920,7 @@ fn effect_command(
 /// it called; `Err` is why it failed.
 pub(crate) async fn run_script(
     svc: &Services,
+    run: &RunContext,
     decl: &EffectDecl,
     event: &StoredEvent,
 ) -> Result<(Reaction, BTreeMap<String, u32>), String> {
@@ -917,13 +928,15 @@ pub(crate) async fn run_script(
         .map_err(|e| format!("its event: {e}"))?
         .to_json();
     let (script, needs, layer) = (decl.script.clone(), decl.needs.clone(), svc.sql.clone());
+    // The script is the run's pure part: what it calls is counted apart,
+    // then added to the run it composes.
+    let composing = run.child(None, Mode::Pure);
     let runtime = tokio::runtime::Handle::current();
     tokio::task::spawn_blocking(move || {
-        let trace = oxplow_domain::scope::ScopeTrace::default();
         let read = Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(layer.run(q)));
-        let mut calls = crate::scope_calls::Calls::new(&needs, &trace, read);
+        let mut calls = crate::scope_calls::Calls::new(&composing, &needs, read);
         let reaction = effects::run_script(&script, event, &mut calls)?;
-        Ok((reaction, trace.summary()))
+        Ok((reaction, composing.trace().summary()))
     })
     .await
     .map_err(|e| format!("the script panicked: {e}"))?

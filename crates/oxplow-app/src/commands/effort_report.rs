@@ -170,7 +170,8 @@ pub fn report_op(deps: EffortDeps) -> Op {
         "report",
         schema::<ReportInput>(),
         false,
-        Handler::External(Arc::new(move |Invocation { actor, .. }, input| {
+        Handler::External(Arc::new(move |invocation: Invocation, input| {
+            let actor = invocation.actor().clone();
             let deps = deps.clone();
             Box::pin(async move {
                 let input: ReportInput = parse(input)?;

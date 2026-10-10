@@ -45,7 +45,8 @@ pub fn record_run_op(collection: CollectionService) -> Op {
         "record_run",
         schema::<RecordRunInput>(),
         false,
-        Handler::External(Arc::new(move |Invocation { actor, .. }, input| {
+        Handler::External(Arc::new(move |invocation: Invocation, input| {
+            let actor = invocation.actor().clone();
             let collection = collection.clone();
             Box::pin(async move {
                 let input: RecordRunInput = parse(input)?;

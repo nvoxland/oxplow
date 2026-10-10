@@ -118,6 +118,7 @@ async fn invoke(
             command: command.into(),
             input,
             idempotency_key: None,
+            context: None,
         },
     )
     .await

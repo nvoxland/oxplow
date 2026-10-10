@@ -77,11 +77,11 @@ impl WorkItemVerbs for OxplowTasks {
     /// keeps no idempotency keys (it declares no `idempotent_writes`).
     async fn invoke(
         &self,
-        call: VerbCall<'_>,
+        call: VerbCall,
         verb: &str,
         input: Value,
     ) -> Result<VerbOutcome, CommandError> {
-        let (actor, verb) = (call.actor.clone(), verb.to_string());
+        let (actor, verb) = (call.actor().clone(), verb.to_string());
         // A refusal rolls the transaction back: it's kept here and the
         // transaction is failed.
         let refused: Arc<Mutex<Option<CommandError>>> = Arc::default();

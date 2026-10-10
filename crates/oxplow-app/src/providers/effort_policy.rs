@@ -78,7 +78,11 @@ impl EffortPolicy for ExternalEffortPolicy {
         &self.instance.id
     }
 
-    async fn react(&self, event: &EventView) -> Result<Vec<CommandCall>, DomainError> {
+    async fn react(
+        &self,
+        run: &oxplow_domain::run::RunContext,
+        event: &EventView,
+    ) -> Result<Vec<CommandCall>, DomainError> {
         let failed = |message: String| {
             DomainError::Invariant(format!("effort policy `{}`: {message}", self.instance.name))
         };
@@ -88,13 +92,13 @@ impl EffortPolicy for ExternalEffortPolicy {
             .map_err(|e| failed(format!("its `react` schema refuses the event: {e}")))?;
         // One key per event: a redelivered event is the same call, which a
         // provider keeping `idempotent_writes` answers once.
+        let key = match &event.id {
+            Some(id) => format!("react:{id}"),
+            None => format!("react:{}", run.run()),
+        };
         let out = self
             .instance
-            .invoke(
-                REACT,
-                input,
-                event.id.as_deref().map(|id| format!("react:{id}")),
-            )
+            .invoke(run, REACT, input, Some(key))
             .await
             .map_err(|e| failed(e.to_string()))?;
         if !out.events.is_empty() {

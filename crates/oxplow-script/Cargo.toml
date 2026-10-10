@@ -12,6 +12,7 @@ oxplow-coverage = { workspace = true }
 # The bundled parsers' table (name, what each records, its report format
 # and program) is the config's: one table for the check and the runtime.
 oxplow-config = { workspace = true }
+oxplow-domain = { workspace = true }
 # Tree-sitter AST engine behind the `ast_query` gauge builtin.
 oxplow-code-metrics = { workspace = true }
 # The duplicate-block detector behind the `duplicate_blocks` builtin.

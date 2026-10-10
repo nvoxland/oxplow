@@ -7,8 +7,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use oxplow_domain::run::Budget;
 use oxplow_script::workers::{Cancel, Limits, RunHost, ScriptRun, ScriptWorkers};
-use oxplow_script::{CollectError, SandboxBudget};
+use oxplow_script::CollectError;
 use serde_json::{json, Value};
 
 fn workers(limits: Limits) -> ScriptWorkers {
@@ -22,8 +23,8 @@ fn limits() -> Limits {
     }
 }
 
-fn budget(ms: u64) -> SandboxBudget {
-    SandboxBudget::with_timeout(Duration::from_millis(ms)).with_ceiling(Duration::from_secs(30))
+fn budget(ms: u64) -> Budget {
+    Budget::with_timeout(Duration::from_millis(ms)).with_ceiling(Duration::from_secs(30))
 }
 
 /// No process with `pid` is left (it was reaped, not just signalled).
@@ -382,8 +383,8 @@ fn a_run_past_its_ceiling_stops_asking_the_model() {
         delay: Duration::from_millis(50),
         ..Slow::default()
     });
-    let budget = SandboxBudget::with_timeout(Duration::from_secs(5))
-        .with_ceiling(Duration::from_millis(300));
+    let budget =
+        Budget::with_timeout(Duration::from_secs(5)).with_ceiling(Duration::from_millis(300));
     let script = "def transform(x):\n    for i in range(100):\n        ai_classify(str(i), ['a'])\n    return {}\n";
     let started = Instant::now();
     let err = w

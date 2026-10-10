@@ -463,6 +463,9 @@ struct World {
     /// How many `mark`s it answered (a snapshots provider's), kept with
     /// its state; what it marked stays in memory.
     marks: u64,
+    /// The run the last `invoke` said it was part of, kept with its state
+    /// so a test can see what the host sent.
+    last_context: Option<Value>,
     snapshot_marks: snapshots::Marks,
     /// A knowledge provider's pages, by slug.
     pages: knowledge::Pages,
@@ -493,6 +496,8 @@ struct Saved {
     marks: u64,
     #[serde(default)]
     pages: knowledge::Pages,
+    #[serde(default)]
+    last_context: Option<Value>,
 }
 
 impl World {
@@ -509,6 +514,7 @@ impl World {
             reacts: self.reacts,
             marks: self.marks,
             pages: self.pages.clone(),
+            last_context: self.last_context.clone(),
         };
         let kept = path
             .parent()
@@ -536,6 +542,7 @@ impl World {
         self.reacts = saved.reacts;
         self.marks = saved.marks;
         self.pages = saved.pages;
+        self.last_context = saved.last_context;
     }
 }
 
@@ -811,6 +818,10 @@ async fn handle(
             refuse_auth(world).await?;
             let p: InvokeParams = parse(params)?;
             require_handle(&p.handle)?;
+            world.lock().await.last_context = p
+                .context
+                .as_ref()
+                .map(|c| serde_json::to_value(c).unwrap_or_default());
             if let Some(path) = world.lock().await.hooks.started_file.clone() {
                 let _ = std::fs::write(path, p.command.as_bytes());
             }

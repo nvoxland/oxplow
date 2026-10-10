@@ -35,10 +35,10 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use oxplow_domain::run::Budget;
 use oxplow_provider_protocol::codec::notify;
 use oxplow_provider_protocol::model::*;
 use oxplow_provider_protocol::{Id, Incoming, Peer, ProtocolError};
-use oxplow_script::SandboxBudget;
 use rmcp::model::ClientJsonRpcMessage;
 use rmcp::model::{CallToolRequestParams, CallToolResult};
 use rmcp::service::RunningService;
@@ -579,7 +579,7 @@ async fn map(mapping: &str, x: Value) -> Result<Value, ProtocolError> {
     let script = mapping.to_string();
     let phase = x["phase"].as_str().unwrap_or_default().to_string();
     tokio::task::spawn_blocking(move || {
-        let budget = SandboxBudget {
+        let budget = Budget {
             timeout: MAPPING_TIMEOUT,
             ceiling: MAPPING_TIMEOUT,
         };

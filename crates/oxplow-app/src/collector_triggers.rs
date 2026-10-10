@@ -648,10 +648,13 @@ mod tests {
         let root = svc.layout.project_dir.clone();
         collector_runner::run_collector(
             &Collectors::of(svc, &root),
+            &oxplow_domain::run::RunContext::core(
+                oxplow_domain::Actor::Human,
+                oxplow_domain::run::Mode::External,
+            ),
             "acme-pr",
             id,
             collector_runner::RunTrigger::Manual,
-            "human",
         )
         .await
         .map_err(|e| match e {

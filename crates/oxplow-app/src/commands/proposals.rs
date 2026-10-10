@@ -3,6 +3,7 @@
 //! then approved (run as the person) or declined.
 
 use super::*;
+use oxplow_domain::run::{Mode, RunContext};
 
 impl CommandBus {
     /// A run that needs a confirmation it doesn't have. A person (or the
@@ -140,16 +141,19 @@ impl CommandBus {
         input: &Value,
         gates: Gates,
     ) -> Result<Value, CommandError> {
-        let (actor, input) = (actor.clone(), input.clone());
+        let (run, input) = (
+            RunContext::core(actor.clone(), Mode::Transactional),
+            input.clone(),
+        );
         let vocabulary = self.log.vocabulary().clone();
         self.db
             .rehearse_or(move |tx| {
                 let ctx = TxCtx {
                     conn: tx,
-                    actor: &actor,
+                    run: &run,
                     events: oxplow_db::EventCtx {
                         vocabulary: &vocabulary.current(),
-                        source: actor.source(),
+                        source: run.actor().source(),
                         cause: None,
                     },
                     confirmed: true,
@@ -177,7 +181,7 @@ impl CommandBus {
     pub async fn approve(&self, actor: &Actor, id: i64) -> Result<CommandOutcome, CommandError> {
         let proposal = self.pending_proposal(actor, id).await?;
         self.run_inner(
-            actor,
+            &RunContext::core(actor.clone(), Mode::External),
             &proposal.command,
             proposal.input,
             true,

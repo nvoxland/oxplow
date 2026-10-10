@@ -118,7 +118,7 @@ struct Sink;
 impl WorkItemVerbs for Sink {
     async fn invoke(
         &self,
-        _call: oxplow_domain::work_items::VerbCall<'_>,
+        _call: oxplow_domain::work_items::VerbCall,
         _verb: &str,
         _input: serde_json::Value,
     ) -> Result<oxplow_domain::work_items::VerbOutcome, oxplow_domain::CommandError> {

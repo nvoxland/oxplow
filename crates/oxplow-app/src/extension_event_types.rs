@@ -208,8 +208,7 @@ fn decl_of(
 /// How long an upcast may run. It runs where an older row is read — a
 /// consumer's delivery inside the pump's transaction — so it is as tight
 /// as a command's script.
-const UPCAST_BUDGET: oxplow_script::SandboxBudget =
-    crate::extension_commands::COMMAND_SCRIPT_BUDGET;
+const UPCAST_BUDGET: oxplow_domain::run::Budget = crate::extension_commands::COMMAND_SCRIPT_BUDGET;
 
 /// The upcast of `event_type`'s newest version: the script's
 /// `transform({from_v, payload})` returns the payload at that version.

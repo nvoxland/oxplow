@@ -279,19 +279,21 @@ everyone unconfirmed; `CommandBus::open_ops` lists those, pinned by
 choice. A manifest command's `invokers` is **required** (an omitted one
 once meant everyone, agents included).
 
-**The per-run trace.** Each run has a `ScopeTrace`
-(`oxplow_domain::scope`; `TxCtx::trace`): fresh per transaction attempt,
-shared by the runs nested in it; steps add each step's to the composing
-pass's. An `External` run's is its `Invocation::trace`: a provider's
+**The per-run trace.** Every run carries a `RunContext`
+([extensions.md](./extensions.md) "The run context") whose trace counts
+its scope calls. A `Tx` run's attempt keeps its own (`TxCtx::trace`,
+fresh per attempt, shared by the runs nested in it). The routing pass
+composes a composite once on a read snapshot as a pure child of the run,
+and what that child called becomes the plan's scopes, which the run
+records; steps add each step's. An `External` call's is its
+`Invocation::run`, a child of the command's run: a provider's
 `host/call`s during it count there — its own command's (`run_op`) and a
 capability verb's, which the `work_item.<verb>` run hands its verbs in
-`VerbCall::trace` ([providers.md](./providers.md) "The protocol"). Its summary — per scope,
-how many calls (`{"sql.read": 2}`) — is written on the run's audit row
-(`command_audit.scopes_json`, V27, named so in V34; NULL when it used
-none). The
-routing pass (a composite composed on a read snapshot to decide where
-its calls run) counts nothing. Later: each call's detail (what it
-touched), sampled or on by setting, and approvals by scope.
+`VerbCall::run` ([providers.md](./providers.md) "The protocol"). Its
+summary — per scope, how many calls (`{"sql.read": 2}`) — is written on
+the run's audit row (`command_audit.scopes_json`, V27, named so in V34;
+NULL when it used none). Later: each call's detail (what it touched),
+sampled or on by setting, and approvals by scope.
 
 ## The pipeline (`crates/oxplow-app/src/commands/mod.rs`)
 
@@ -709,7 +711,8 @@ a VCS, an external provider's process, a collector script, the lens files on dis
 whose state can't join the bus's transaction; the bus audits it after it returns (a failure to
 record is logged, never reported as the run failing); its audit row
 holds the handler's `result` like a `Tx` run's. It is
-`Fn(Invocation, Value)`: `Invocation { actor, idempotency_key }`, the key
+`Fn(Invocation, Value)`: `Invocation { run, idempotency_key }` (its
+actor is `run.actor()`; the run is a child of the command's), the key
 set for a step of an effect's reaction (`effect_step_key`:
 `effect:<effect>:<event id>:<index>:<hash of the call>`, the same on
 every attempt at it — P10) and `None` otherwise; an external provider's

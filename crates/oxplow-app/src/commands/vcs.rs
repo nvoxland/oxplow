@@ -105,8 +105,8 @@ where
                 let stream: StreamId = ref_id(input.stream(), "stream", "/stream")?;
                 // Isolation: an agent, or an effect in its event's stream,
                 // works in its own stream's worktree only.
-                if invocation.actor.confined_to_own_stream()
-                    && invocation.actor.stream_id() != Some(stream)
+                if invocation.actor().confined_to_own_stream()
+                    && invocation.actor().stream_id() != Some(stream)
                 {
                     return Err(CommandError::Denied {
                         reason: format!(

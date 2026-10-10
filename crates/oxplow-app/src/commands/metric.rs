@@ -142,7 +142,7 @@ fn record_tx(
     input: &RecordInput,
     primary: StreamId,
 ) -> Result<(i64, i64), CommandError> {
-    let stream = stream_for(ctx.actor, input.stream.as_deref(), primary)?;
+    let stream = stream_for(ctx.actor(), input.stream.as_deref(), primary)?;
     let spec = get_spec_tx(ctx.conn, &input.key)
         .map_err(sql)?
         .ok_or_else(|| invalid("/key", crate::metric_engine::missing_metric(&input.key)))?;
@@ -211,7 +211,7 @@ fn record_tx(
     if let Actor::Agent {
         thread_id: Some(thread),
         ..
-    } = ctx.actor
+    } = ctx.actor()
     {
         capture.thread_id = Some(thread.value());
         capture.turn_id = oxplow_db::agent_stores::open_turn_ids_tx(ctx.conn, *thread)
@@ -346,7 +346,7 @@ pub fn ops(target: MetricTarget) -> Vec<Op> {
             })?;
             change(
                 &target,
-                ctx.actor,
+                ctx.actor(),
                 "metrics",
                 Some(value),
                 super::config_commands::Layer::Project,

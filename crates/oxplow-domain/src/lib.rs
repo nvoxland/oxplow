@@ -22,6 +22,7 @@ pub mod json;
 pub mod knowledge;
 pub mod refs;
 pub mod replaceable;
+pub mod run;
 pub mod scope;
 pub mod snapshot;
 pub mod stores;

@@ -10,8 +10,8 @@ mod fixtures;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use oxplow_domain::run::Budget;
 use oxplow_script::workers::{Limits, RunHost, ScriptRun, ScriptWorkers};
-use oxplow_script::SandboxBudget;
 use serde_json::json;
 
 /// Workers with room enough that the measurement measures cost, not the
@@ -47,7 +47,7 @@ fn builtin_metric_peaks() {
         let started = Instant::now();
         let ran = w
             .run(
-                &SandboxBudget::default(),
+                &Budget::default(),
                 ScriptRun::starlark(m.script, json!({})).with_host(RunHost::Tree(tree.clone())),
                 None,
             )
@@ -66,7 +66,7 @@ fn builtin_metric_peaks() {
 #[ignore = "a measurement: run it on demand"]
 fn worker_cost() {
     let w = workers();
-    let budget = SandboxBudget::default();
+    let budget = Budget::default();
 
     // Cold start: a trivial run, each its own process.
     let mut cold = Vec::new();
@@ -177,7 +177,7 @@ fn duplicate_lines_on_this_repo() {
     let started = Instant::now();
     let ran = w
         .run(
-            &SandboxBudget::default(),
+            &Budget::default(),
             ScriptRun::starlark(metric.script, json!({}))
                 .with_host(RunHost::Tree(Arc::new(files.clone()))),
             None,

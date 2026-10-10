@@ -3,6 +3,7 @@
 //! run that wrote nothing — its audit row alone.
 
 use super::*;
+use oxplow_domain::run::RunContext;
 
 impl CommandBus {
     /// Audit a run that wrote nothing (invalid input, a denied invoker, a
@@ -45,14 +46,15 @@ impl CommandBus {
     /// as an error, which would tell the caller the change didn't happen.
     pub(super) async fn record_external(
         &self,
-        actor: &Actor,
+        run: &RunContext,
         spec: &CommandSpec,
         input: &Value,
         mut out: HandlerOutput,
         origin: RunOrigin,
         scopes: std::collections::BTreeMap<String, u32>,
     ) -> CommandOutcome {
-        let (actor_c, spec_c, input_c) = (actor.clone(), spec.clone(), input.clone());
+        let (actor_c, spec_c, input_c) = (run.actor().clone(), spec.clone(), input.clone());
+        let run_c = run.clone();
         let vocabulary = self.log.vocabulary().clone();
         let shadow = HandlerOutput {
             result: out.result.clone(),
@@ -73,7 +75,7 @@ impl CommandBus {
                     &shadow,
                     Executed {
                         scopes: scopes.clone(),
-                        ..Executed::ok(oxplow_domain::EventId::generate(), &origin)
+                        ..Executed::ok(oxplow_domain::EventId::generate(), &origin, &run_c)
                     },
                 )?;
                 match &origin {
@@ -193,11 +195,11 @@ pub(super) struct Executed {
 }
 
 impl Executed {
-    pub(super) fn ok(id: oxplow_domain::EventId, origin: &RunOrigin) -> Self {
+    pub(super) fn ok(id: oxplow_domain::EventId, origin: &RunOrigin, run: &RunContext) -> Self {
         Self {
             id,
             failed: None,
-            cause: origin.cause(),
+            cause: origin.cause(run),
             scopes: Default::default(),
         }
     }

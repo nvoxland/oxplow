@@ -19,6 +19,7 @@
 //! `contribution.disabled@1`, and it stays off — across restarts, since
 //! `contribution_health` says so — until a person runs `oxplow.contribution.enable`.
 
+use oxplow_domain::run::RunContext;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock, Weak};
@@ -907,12 +908,29 @@ impl Instance {
     /// promise.
     pub async fn invoke(
         &self,
+        run: &RunContext,
         command: &str,
         input: Value,
         idempotency_key: Option<String>,
     ) -> Result<InvokeResult, CommandError> {
         let key =
             idempotency_key.unwrap_or_else(|| format!("call:{}", uuid::Uuid::new_v4().simple()));
+        // What it calls of oxplow while it serves this (`host/call`, naming
+        // the key) is part of `run`.
+        self.host_calls.begin(&key, run.clone());
+        let out = self.invoke_keyed(run, command, input, key.clone()).await;
+        self.host_calls.finish(&key);
+        out
+    }
+
+    async fn invoke_keyed(
+        &self,
+        run: &RunContext,
+        command: &str,
+        input: Value,
+        key: String,
+    ) -> Result<InvokeResult, CommandError> {
+        let context = invoke_context(run);
         let mut retried = false;
         let mut reauthorized = false;
         loop {
@@ -926,6 +944,7 @@ impl Instance {
                     command: command.into(),
                     input: input.clone(),
                     idempotency_key: Some(key.clone()),
+                    context: Some(context.clone()),
                 },
                 self.deps.call_timeout,
             )
@@ -2087,19 +2106,18 @@ impl ProviderRegistry {
                 message: format!("`{extension}/{provider}` has no running instance `{id}`"),
                 retry_after_ms: None,
             })?;
-        // Its `host/call`s name this key: they're recorded with the run.
-        let key = invocation
-            .idempotency_key
-            .clone()
-            .unwrap_or_else(|| format!("call:{}", uuid::Uuid::new_v4().simple()));
-        instance.host_calls.begin(&key, invocation.trace.clone());
-        let out = instance.invoke(&op, input, Some(key.clone())).await;
-        instance.host_calls.finish(&key);
-        let out = out?;
+        let out = instance
+            .invoke(
+                &invocation.run,
+                &op,
+                input,
+                invocation.idempotency_key.clone(),
+            )
+            .await?;
         let events = out
             .events
             .into_iter()
-            .map(|d| instance.envelope(&invocation.actor, None, d))
+            .map(|d| instance.envelope(invocation.actor(), None, d))
             .collect::<Result<Vec<_>, _>>()?;
         let inverse = match out.inverse {
             None => None,
@@ -3374,4 +3392,14 @@ pub fn spawn_reconciler(state: Arc<crate::Services>) {
             state.providers.reconcile().await;
         }
     });
+}
+
+/// What a provider is told of the run an `invoke` is part of.
+fn invoke_context(run: &RunContext) -> oxplow_provider_protocol::model::InvokeContext {
+    oxplow_provider_protocol::model::InvokeContext {
+        run: run.run().to_string(),
+        actor: run.actor().source(),
+        cause: run.cause().map(|c| c.to_string()),
+        anchors: serde_json::to_value(run.anchors()).unwrap_or_default(),
+    }
 }

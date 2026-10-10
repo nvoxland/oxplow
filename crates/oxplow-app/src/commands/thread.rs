@@ -100,13 +100,13 @@ fn save(ctx: &TxCtx<'_>, thread: &Thread) -> Result<ThreadId, CommandError> {
 
 /// The agent's own thread and stream, when the run is an agent's.
 pub(super) fn agent_scope(ctx: &TxCtx<'_>) -> Result<Option<(ThreadId, StreamId)>, CommandError> {
-    match ctx.actor.agent_thread() {
+    match ctx.actor().agent_thread() {
         None => Ok(None),
         Some(None) => Err(CommandError::Denied {
             reason: "an agent without a thread can't change threads".into(),
         }),
         // The bus resolved the agent's stream from its thread.
-        Some(Some(own)) => match ctx.actor.stream_id() {
+        Some(Some(own)) => match ctx.actor().stream_id() {
             Some(stream) => Ok(Some((own, stream))),
             None => Err(CommandError::Denied {
                 reason: format!("the agent's thread `{}` has no stream", thread_ref(own)),

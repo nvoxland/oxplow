@@ -239,7 +239,7 @@ pub struct VerbOutcome {
 pub trait WorkItemVerbs: Send + Sync {
     async fn invoke(
         &self,
-        call: VerbCall<'_>,
+        call: VerbCall,
         verb: &str,
         input: Value,
     ) -> Result<VerbOutcome, CommandError>;
@@ -250,26 +250,28 @@ pub trait WorkItemVerbs: Send + Sync {
     async fn restart(&self);
 }
 
-/// Who calls a verb, and for which run.
-pub struct VerbCall<'a> {
-    pub actor: &'a Actor,
+/// Who calls a verb, and for which run: what the provider calls of
+/// oxplow while it serves the verb (`host/call`) is counted on the run's
+/// trace, with the `work_item.<verb>` run that called it.
+pub struct VerbCall {
+    pub run: crate::run::RunContext,
     /// The write's key when the caller has one (an effect's step: the same
     /// on every attempt); without one the provider's host mints one.
     pub idempotency_key: Option<String>,
-    /// The run's scope calls: what the provider calls of oxplow while it
-    /// serves the verb (`host/call`) is counted with the
-    /// `work_item.<verb>` run that called it.
-    pub trace: Arc<crate::scope::ScopeTrace>,
 }
 
-impl<'a> VerbCall<'a> {
-    /// A call by `actor` outside any command run: its scope calls are
-    /// counted nowhere (the conformance kit's direct re-send).
-    pub fn bare(actor: &'a Actor, idempotency_key: Option<String>) -> Self {
+impl VerbCall {
+    /// Who calls it.
+    pub fn actor(&self) -> &Actor {
+        self.run.actor()
+    }
+
+    /// A call by `actor` outside any command run, its own run (the
+    /// conformance kit's direct re-send).
+    pub fn bare(actor: &Actor, idempotency_key: Option<String>) -> Self {
         Self {
-            actor,
+            run: crate::run::RunContext::core(actor.clone(), crate::run::Mode::External),
             idempotency_key,
-            trace: Arc::default(),
         }
     }
 }
@@ -460,7 +462,7 @@ mod tests {
     impl WorkItemVerbs for Nothing {
         async fn invoke(
             &self,
-            _call: VerbCall<'_>,
+            _call: VerbCall,
             _verb: &str,
             _input: Value,
         ) -> Result<VerbOutcome, CommandError> {

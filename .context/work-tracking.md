@@ -115,10 +115,14 @@ themselves and a reload never touches.
 or a provider instance; all rows in `v_capability_provider`), and for any
 but `none` offers the event to that policy only, checks what it composed
 (`extension_commands::check_calls`: a call that isn't a command, or whose
-input doesn't fit, runs nothing) and runs the calls in order as the effect
-`effort_policy:<id>` (source `effect:effort_policy:<id>`), stopping at the
-first that fails — the pump dead-letters it. It never offers an event a
-policy's own run caused (a source starting `effect:effort_policy:`). A
+input doesn't fit, runs nothing) and runs the calls in order inside the
+policy's run (`run_context::for_policy`): as the effect
+`effort_policy:<id>` (source `effect:effort_policy:<id>`) on the event's
+thread and stream, each `command.executed` caused by the event, stopping
+at the first that fails — the pump dead-letters it. It never offers an
+event a policy's own run caused (a source starting
+`effect:effort_policy:`), nor one the effects' loop guard refuses
+(`event_lineage::lineage`). A
 `capability.switched` of the effort policy closes every open effort
 (`switch`), as the system — core's rule, whichever policy is active after.
 
@@ -133,8 +137,8 @@ under the effects' sandbox, its `scope("sql.read", …)` limited to its
 `needs`. It runs only while a person has approved it as it is
 (`ProgramKind::EffortPolicy`, `exec_consent::script_gate`, asked before
 each event): unapproved, each event it's offered fails saying so and the
-pump dead-letters it — nothing falls back. Its reads aren't audited, as
-an external policy's aren't. `examples/extensions/prompt-efforts` is one:
+pump dead-letters it — nothing falls back. Its reads are counted on a
+pure child of the policy's run. `examples/extensions/prompt-efforts` is one:
 an effort per prompt that changes files (checked by `oxplow extension
 test` and run over real turns in `effort_policy_script`'s tests).
 
@@ -146,8 +150,9 @@ like any. Each event is one `react` invoke, `{ event }` (the
 event envelope, idempotency key `react:<event id>`), answered as an
 effect's script answers — `{ commands: [{ name, input }] }` or `{ skip }`;
 events are refused. It reads oxplow through `host/call` (`needs:
-[sql.read]`); those reads aren't audited, since `react` itself is no
-command run — what it composes is, as `effect:effort_policy:<instance>`.
+[sql.read]`), counted on the policy's run; `react` is told that run on
+the wire (`InvokeParams.context`). What it composes runs, audited, as
+`effect:effort_policy:<instance>`.
 A stopped instance leaves the registry, and the choice falls back to
 none.
 

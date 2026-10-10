@@ -95,7 +95,7 @@ Host → provider:
 | `initialize` | `{ protocol_version, host }` → its declarations: `{ protocol_version, provider, capabilities, commands, event_types, collectors, config_schema }` |
 | `check` | `{ config, credentials }` → `{ problems, handle? }`. A clean check returns a `handle` the other calls carry. `credentials` are names only; the values are in its environment |
 | `discover` | `{ handle }` → `{ entities }` |
-| `invoke` | `{ handle, command, input, idempotency_key? }` → `{ result, events, inverse? }` |
+| `invoke` | `{ handle, command, input, idempotency_key?, context? }` → `{ result, events, inverse? }`. `context` is the run the call is part of — `{ run, actor, cause?, anchors }` — for you to log or forward. It changes nothing about the call |
 | `read` | `{ handle, collector, state? }` → `{ records }`, after streaming the records |
 | `shutdown` | → `null`. Finish what's in flight, persist, answer, and exit |
 

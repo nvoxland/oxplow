@@ -38,6 +38,7 @@
 //! effort's (rule 2 opens it, adopting no further back than the close).
 
 use oxplow_domain::refs::build::{effort_ref, thread_ref};
+use oxplow_domain::run::{Mode, RunContext};
 use std::sync::{Arc, RwLock, Weak};
 
 use async_trait::async_trait;
@@ -70,15 +71,6 @@ const MAX_DEPTH: usize = 32;
 
 /// The built-in policy's entry (`capabilities::BUILT_INS`).
 pub const BUILT_IN: &str = "oxplow:commit-or-switch";
-
-/// The effect policy `id`'s commands run as: `effect:effort_policy:<id>`.
-pub fn actor(id: &str) -> Actor {
-    Actor::Effect {
-        effect: format!("{CAPABILITY}:{id}"),
-        thread_id: None,
-        stream_id: None,
-    }
-}
 
 /// Whether `source` is a policy's own run: reacting to it would loop.
 fn is_a_policys(source: &str) -> bool {
@@ -275,7 +267,11 @@ impl EffortPolicy for CommitOrSwitch {
         &self.id
     }
 
-    async fn react(&self, event: &EventView) -> Result<Vec<CommandCall>, DomainError> {
+    async fn react(
+        &self,
+        _run: &oxplow_domain::run::RunContext,
+        event: &EventView,
+    ) -> Result<Vec<CommandCall>, DomainError> {
         let payload = event.payload.clone();
         match event.event_type.as_str() {
             t if t == WorkItemStateChanged::TYPE => {
@@ -423,6 +419,11 @@ pub struct EffortPolicyConsumer {
     pub capabilities: Arc<crate::capabilities::CapabilityRegistry>,
     pub policies: Arc<EffortPolicyRegistry>,
     pub vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
+    pub db: oxplow_db::Database,
+    /// What names the extension implementing a policy (its run's
+    /// contribution and generation).
+    pub catalog: Arc<crate::extension_catalog::ExtensionCatalog>,
+    pub root: std::path::PathBuf,
 }
 
 impl EffortPolicyConsumer {
@@ -432,11 +433,12 @@ impl EffortPolicyConsumer {
             .ok_or_else(|| DomainError::Invariant("the command bus is gone".into()))
     }
 
-    /// Run `calls`, in order, as `actor`, stopping at the first that fails.
-    async fn run(&self, actor: &Actor, calls: Vec<CommandCall>) -> Result<(), DomainError> {
+    /// Run `calls`, in order, as part of `run`, stopping at the first that
+    /// fails.
+    async fn run(&self, run: &RunContext, calls: Vec<CommandCall>) -> Result<(), DomainError> {
         let bus = self.bus()?;
         for c in calls {
-            bus.run(actor, &c.name, c.input, false)
+            bus.run_in(run, &c.name, c.input, false)
                 .await
                 .map_err(|e| storage(format!("{}: {e}", c.name)))?;
         }
@@ -469,7 +471,9 @@ impl AsyncEventConsumer for EffortPolicyConsumer {
                 vec![],
             )
             .await?;
-            return self.run(&Actor::System, calls).await;
+            let run = RunContext::core(Actor::System, Mode::External)
+                .caused_by(event.envelope.id.clone());
+            return self.run(&run, calls).await;
         }
         // A policy's own runs are its own doing: reacting to them would loop.
         if is_a_policys(&event.envelope.source) {
@@ -483,8 +487,30 @@ impl AsyncEventConsumer for EffortPolicyConsumer {
         let Some(policy) = self.policies.get(&id) else {
             return Ok(());
         };
+        // The policy's run: as its effect actor, for the event's thread and
+        // stream, caused by the event. An event its own runs led to, or one
+        // a chain of reactions at the limit led to, isn't reacted to.
+        let owner = self
+            .capabilities
+            .get(CAPABILITY, &id)
+            .and_then(|i| i.extension)
+            .and_then(|name| {
+                self.catalog
+                    .get(&self.root)
+                    .iter()
+                    .find(|e| e.name == name)
+                    .cloned()
+            });
+        let run =
+            crate::run_context::for_policy(&self.catalog, &self.root, &id, owner.as_ref(), event);
+        let lineage =
+            crate::event_lineage::lineage(&self.db, event, &format!("effect:{CAPABILITY}:{id}"))
+                .await?;
+        if lineage.refusal().is_some() {
+            return Ok(());
+        }
         let calls = policy
-            .react(&EventView::of(event, &self.vocabulary.current())?)
+            .react(&run, &EventView::of(event, &self.vocabulary.current())?)
             .await?;
         if calls.is_empty() {
             return Ok(());
@@ -492,7 +518,7 @@ impl AsyncEventConsumer for EffortPolicyConsumer {
         let bus = self.bus()?;
         crate::extension_commands::check_calls(&*bus, &calls)
             .map_err(|e| storage(format!("effort policy `{id}`: {e}")))?;
-        self.run(&actor(&id), calls).await
+        self.run(&run, calls).await
     }
 }
 
@@ -708,7 +734,11 @@ mod tests {
         fn id(&self) -> &str {
             self.id
         }
-        async fn react(&self, event: &EventView) -> Result<Vec<CommandCall>, DomainError> {
+        async fn react(
+            &self,
+            _run: &oxplow_domain::run::RunContext,
+            event: &EventView,
+        ) -> Result<Vec<CommandCall>, DomainError> {
             self.seen.lock().unwrap().push(event.event_type.clone());
             Ok(if event.payload["to"] == "in_progress" {
                 self.calls.clone()

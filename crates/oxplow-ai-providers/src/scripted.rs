@@ -115,7 +115,7 @@ impl Scripted {
             message,
         })?;
         let script = self.script.clone();
-        let budget = oxplow_script::SandboxBudget::with_timeout(SCRIPT_TIMEOUT);
+        let budget = oxplow_domain::run::Budget::with_timeout(SCRIPT_TIMEOUT);
         let ran = tokio::task::spawn_blocking(move || {
             use oxplow_script::workers::{shared, ScriptRun};
             shared()

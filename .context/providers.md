@@ -44,7 +44,7 @@ schemars), host → provider:
 | `initialize` | `InitializeParams { protocol_version, host }` → `InitializeResult { protocol_version, provider, capabilities, commands, event_types, collectors, config_schema }` | what the provider is and declares: `CapabilityDecl { capability, features }`, `CommandDecl { name, summary, input_schema, confirm, access, undoable }`, `EventTypeDecl { type, v, schema }`, `CollectorDecl { name, entity, description }` |
 | `check` | `CheckParams { config, credentials }` → `CheckResult { problems, handle? }` | validate an instance's config (credentials by name — the values stay in the keychain and reach the provider through its environment); `Problem { path, message }`; a clean check returns the opaque `Handle` the other calls carry |
 | `discover` | `{ handle }` → `DiscoverResult { entities }` | the entities the instance can read (`EntityDecl { name, description, schema }`) |
-| `invoke` | `InvokeParams { handle, command, input, idempotency_key? }` → `InvokeResult { result, events, inverse? }` | run a declared command; the host logs its `EventDraft { type, v, payload, subject }`s ("Idempotency" for the key) |
+| `invoke` | `InvokeParams { handle, command, input, idempotency_key?, context? }` → `InvokeResult { result, events, inverse? }` | run a declared command; the host logs its `EventDraft { type, v, payload, subject }`s ("Idempotency" for the key). `context` is the run it's part of — `InvokeContext { run, actor, cause?, anchors }` — for the provider to log or forward; it changes nothing about the call |
 | `read` | `ReadParams { handle, collector, state? }` → `ReadResult { records }` | run a collector, streaming `$/record` and `$/state` first |
 | `shutdown` | → `null` | finish what's in flight, persist, answer, exit; the host kills it after its grace |
 
@@ -52,8 +52,12 @@ Provider → host (protocol 3): `host/call` — `HostCallParams { key?,
 scope, op?, args }` → the scope's answer: a scope the provider's
 manifest `needs` (`sql.read`: `args` `{ sql, params? }` →
 rows), `key` naming the idempotency key of the `invoke` it serves so the
-call is recorded with that run. Refused (`InvalidInput` at `/scope`)
-for one it doesn't need or that isn't there.
+call is recorded with that run. `Instance::invoke(run, …)` registers the
+run under the key for the call's length (`HostCalls::begin`), whichever
+verb it is — a command, a work-item, knowledge, snapshot or harness
+verb, an effort policy's `react`. Refused (`InvalidInput` at `/scope`)
+for one it doesn't need or that isn't there, and for one naming no
+`invoke` under way: nothing a provider does of oxplow is outside a run.
 
 Provider → host (protocol 4), a notification: `host/changed` —
 `HostChangedParams { collectors? }`: something it reads changed at its

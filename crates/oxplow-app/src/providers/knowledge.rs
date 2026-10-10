@@ -117,11 +117,14 @@ impl ExternalKnowledge {
             .idempotency_key
             .clone()
             .unwrap_or_else(|| format!("{verb}:{}", uuid::Uuid::new_v4().simple()));
-        let out = self.instance.invoke(verb, input, Some(key)).await?;
+        let out = self
+            .instance
+            .invoke(call.run, verb, input, Some(key))
+            .await?;
         let events = out
             .events
             .into_iter()
-            .map(|d| self.instance.envelope(call.actor, None, d))
+            .map(|d| self.instance.envelope(call.actor(), None, d))
             .collect::<Result<Vec<_>, _>>()?;
         Ok((out.result, events))
     }

@@ -257,7 +257,7 @@ welded to collection.
 > ~0.5–0.7 s each, are what's left (tsk1019).
 >
 > **Fact collectors must be able to FINISH a whole-tree scan, and a failure must be seen.**
-> The `SandboxBudget` default (5s) is sized for a report parser over one file. A tree
+> The script `Budget` (`oxplow_domain::run`) default (5s) is sized for a report parser over one file. A tree
 > collector tree-sitter-parses the *whole tree* per run, so fact-collector runs get their own
 > ceiling (`FACT_COLLECTOR_TIMEOUT`, 120s). Under the old 5s budget the broad-query collectors
 > timed out on every full-tree run and wrote **nothing** — `oxplow.ts.console_calls`

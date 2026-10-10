@@ -344,11 +344,13 @@ pub fn run_script(
     event: serde_json::Value,
     calls: &mut crate::scope_calls::Calls<'_>,
 ) -> Result<Reaction, String> {
+    let cancel = calls.run().cancel().clone();
     let mut serve = |id: &str, args: serde_json::Value| calls.serve(id, args);
     let out = crate::extension_commands::run_command_script(
         script,
         serde_json::json!({ "event": event }),
         &mut serve,
+        &cancel,
     )
     .map_err(|e| format!("the script failed: {e}"))?;
     reaction(out)
@@ -367,7 +369,11 @@ pub async fn dry_run(
     answers: &BTreeMap<String, Vec<serde_json::Value>>,
     registry: Option<crate::extensions::CommandSchemas<'_>>,
 ) -> Result<Reaction, String> {
-    let reaction = run_over(layer, &decl.needs, script, event, Some(answers)).await?;
+    let run = oxplow_domain::run::RunContext::core(
+        oxplow_domain::Actor::System,
+        oxplow_domain::run::Mode::Pure,
+    );
+    let reaction = run_over(layer, &run, &decl.needs, script, event, Some(answers)).await?;
     if let (Some(registry), Reaction::Run { calls, .. }) = (registry, &reaction) {
         crate::extension_commands::check_calls(registry, calls)?;
     }
@@ -381,18 +387,18 @@ pub async fn dry_run(
 /// run and an effort policy written as a script both run through it.
 pub async fn run_over(
     layer: &crate::sql_gateway::SqlGateway,
+    run: &oxplow_domain::run::RunContext,
     needs: &[String],
     script: &str,
     event: serde_json::Value,
     answers: Option<&BTreeMap<String, Vec<serde_json::Value>>>,
 ) -> Result<Reaction, String> {
     let (script, needs) = (script.to_string(), needs.to_vec());
-    let (layer, answers) = (layer.clone(), answers.cloned());
+    let (layer, answers, run) = (layer.clone(), answers.cloned(), run.clone());
     let runtime = tokio::runtime::Handle::current();
     tokio::task::spawn_blocking(move || {
-        let trace = oxplow_domain::scope::ScopeTrace::default();
         let read = Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(layer.run(q)));
-        let calls = crate::scope_calls::Calls::new(&needs, &trace, read);
+        let calls = crate::scope_calls::Calls::new(&run, &needs, read);
         let mut calls = match &answers {
             Some(answers) => calls.with_answers(answers),
             None => calls,

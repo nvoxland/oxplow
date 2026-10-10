@@ -41,7 +41,8 @@ pub mod workers;
 pub use ai::{AiHost, AiOracle};
 pub use builtin_metrics::{builtin_metrics, BuiltinMetric};
 pub use helpers::HelperError;
-pub use runtime::{SandboxBudget, TreeHost};
+use oxplow_domain::run::Budget;
+pub use runtime::TreeHost;
 
 /// The *type* of thing a collector observes. Each kind has a fixed,
 /// host-side typed output contract (see [`CollectorOutput`]).
@@ -303,7 +304,7 @@ pub struct Collector {
     kind: CollectorKind,
     runtime: CollectorRuntime,
     runner: Runner,
-    budget: SandboxBudget,
+    budget: Budget,
 }
 
 impl Collector {
@@ -318,7 +319,7 @@ impl Collector {
             kind,
             runtime,
             runner,
-            budget: SandboxBudget::default(),
+            budget: Budget::default(),
         }
     }
 
@@ -409,7 +410,7 @@ impl Collector {
     }
 
     /// Override the budget for the script tiers.
-    pub fn with_budget(mut self, budget: SandboxBudget) -> Self {
+    pub fn with_budget(mut self, budget: Budget) -> Self {
         self.budget = budget;
         self
     }
@@ -908,7 +909,7 @@ def transform(input):
     #[test]
     fn lcov_parser_parses_a_whole_workspace_report_without_timing_out() {
         // tsk88: the real report here is 5.1MB / 196 files / 64k DA lines, and the
-        // lcov parse landed right at the 5s SandboxBudget — so it timed out
+        // lcov parse landed right at the 5s Budget — so it timed out
         // intermittently under load and coverage was silently NEVER ingested for
         // this project. Every overrun also detached a jq worker that kept burning
         // a core (Rust can't kill a thread), and the ride-along's retry spawned a

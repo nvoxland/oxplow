@@ -79,6 +79,7 @@ async fn keyed(
             command: command.into(),
             input,
             idempotency_key: key.map(str::to_string),
+            context: None,
         },
     )
     .await

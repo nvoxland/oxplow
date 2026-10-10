@@ -1,15 +1,15 @@
 //! Serving the scopes (`oxplow_domain::scope`) to a command's handler
 //! (`.context/commands.md` "Scopes"): each call checked against the
 //! command's `needs` — one it didn't declare is refused — counted in
-//! the run's `ScopeTrace` (`oxplow_domain::scope`), and answered.
+//! the run's trace (`RunContext::trace`), and answered.
 //!
 //! The same [`Calls`] serves a run inside the bus's transaction (reading
 //! on its connection) and a dry run of an example (reading through the
 //! SQL gateway, or answered from the example's `answers`).
 
+use oxplow_domain::run::RunContext;
 use std::collections::{BTreeMap, VecDeque};
 
-use oxplow_domain::scope::ScopeTrace;
 use oxplow_domain::DomainError;
 use serde::Deserialize;
 use serde_json::Value;
@@ -47,10 +47,10 @@ pub const SQL_READ_ROW_CAP: usize = 1_000;
 pub type Reader<'a> =
     dyn FnMut(oxplow_db::SqlQuery) -> Result<oxplow_db::SqlQueryResult, DomainError> + 'a;
 
-/// One handler run's scope calls.
+/// One run's scope calls, counted on its context's trace.
 pub struct Calls<'a> {
     needs: &'a [String],
-    trace: &'a ScopeTrace,
+    run: &'a RunContext,
     read: Box<Reader<'a>>,
     /// Answers standing in for a scope's own, in call order (an
     /// example's); a scope without any is served for real.
@@ -60,10 +60,10 @@ pub struct Calls<'a> {
 }
 
 impl<'a> Calls<'a> {
-    pub fn new(needs: &'a [String], trace: &'a ScopeTrace, read: Box<Reader<'a>>) -> Self {
+    pub fn new(run: &'a RunContext, needs: &'a [String], read: Box<Reader<'a>>) -> Self {
         Self {
             needs,
-            trace,
+            run,
             read,
             answers: BTreeMap::new(),
             busy: None,
@@ -89,7 +89,7 @@ impl<'a> Calls<'a> {
                 "`{id}` isn't in the command's `needs` — declare it to call it"
             ));
         }
-        self.trace.count(id);
+        self.run.trace().count(id);
         if let Some(answers) = self.answers.get_mut(id) {
             return answers
                 .pop_front()
@@ -99,6 +99,11 @@ impl<'a> Calls<'a> {
             "sql.read" => self.sql_read(args),
             other => Err(check_callable(other).err().unwrap_or_default()),
         }
+    }
+
+    /// The run these calls are part of.
+    pub fn run(&self) -> &RunContext {
+        self.run
     }
 
     /// Whether answering found the database busy (the run is retried).
@@ -243,8 +248,12 @@ mod tests {
 
     #[test]
     fn a_call_is_checked_against_needs_counted_and_answered() {
-        let (needs, trace, mut asked) = (needs(&["sql.read"]), ScopeTrace::default(), vec![]);
-        let mut calls = Calls::new(&needs, &trace, reader(&mut asked));
+        let (needs, run, mut asked) = (
+            needs(&["sql.read"]),
+            crate::run_context::for_dry_run(),
+            vec![],
+        );
+        let mut calls = Calls::new(&run, &needs, reader(&mut asked));
         let rows = calls
             .serve(
                 "sql.read",
@@ -264,13 +273,17 @@ mod tests {
         );
         drop(calls);
         assert_eq!(asked, vec!["SELECT 1 AS n", "SELECT 2"]);
-        assert_eq!(trace.summary(), [("sql.read".to_string(), 3)].into());
+        assert_eq!(run.trace().summary(), [("sql.read".to_string(), 3)].into());
     }
 
     #[test]
     fn a_scope_not_declared_or_not_known_is_refused_uncounted() {
-        let (none, trace, mut asked) = (needs(&["work_items"]), ScopeTrace::default(), vec![]);
-        let mut calls = Calls::new(&none, &trace, reader(&mut asked));
+        let (none, run, mut asked) = (
+            needs(&["work_items"]),
+            crate::run_context::for_dry_run(),
+            vec![],
+        );
+        let mut calls = Calls::new(&run, &none, reader(&mut asked));
         let err = calls
             .serve("sql.read", json!({ "sql": "SELECT 1" }))
             .unwrap_err();
@@ -282,14 +295,18 @@ mod tests {
         assert!(err.contains("no scope `fs.erase`"), "{err}");
         drop(calls);
         assert!(asked.is_empty());
-        assert!(trace.summary().is_empty());
+        assert!(run.trace().summary().is_empty());
     }
 
     #[test]
     fn an_examples_answers_stand_in_until_they_run_out() {
-        let (needs, trace, mut asked) = (needs(&["sql.read"]), ScopeTrace::default(), vec![]);
+        let (needs, run, mut asked) = (
+            needs(&["sql.read"]),
+            crate::run_context::for_dry_run(),
+            vec![],
+        );
         let answers = [("sql.read".to_string(), vec![json!([{ "a": 1 }])])].into();
-        let mut calls = Calls::new(&needs, &trace, reader(&mut asked)).with_answers(&answers);
+        let mut calls = Calls::new(&run, &needs, reader(&mut asked)).with_answers(&answers);
         assert_eq!(
             calls.serve("sql.read", json!({ "sql": "x" })).unwrap(),
             json!([{ "a": 1 }])
@@ -302,10 +319,10 @@ mod tests {
 
     #[test]
     fn a_busy_database_is_kept_for_a_retry() {
-        let (needs, trace) = (needs(&["sql.read"]), ScopeTrace::default());
+        let (needs, run) = (needs(&["sql.read"]), crate::run_context::for_dry_run());
         let mut calls = Calls::new(
+            &run,
             &needs,
-            &trace,
             Box::new(|_| Err(DomainError::Busy("locked".into()))),
         );
         assert!(calls.serve("sql.read", json!({ "sql": "x" })).is_err());
@@ -330,6 +347,7 @@ mod tests {
         ] {
             let result = crate::effects::run_over(
                 &layer,
+                &crate::run_context::for_dry_run(),
                 &needs(&["sql.read"]),
                 &format!(
                     r#"def transform(x):
@@ -380,9 +398,16 @@ mod tests {
 "#,
             sql = NUMBER_ROWS,
         );
-        let out = crate::effects::run_over(&layer, &needs(&["sql.read"]), &script, json!({}), None)
-            .await
-            .unwrap();
+        let out = crate::effects::run_over(
+            &layer,
+            &crate::run_context::for_dry_run(),
+            &needs(&["sql.read"]),
+            &script,
+            json!({}),
+            None,
+        )
+        .await
+        .unwrap();
         assert_eq!(
             out,
             crate::effects::Reaction::Skip("2500 rows in 3 pages, last 2500".into())
@@ -391,10 +416,16 @@ mod tests {
     page = scope("sql.read", {"sql": "SELECT 1 AS n", "page": {"limit": 10}})
     return {"skip": page.get("warning", "")}
 "#;
-        let out =
-            crate::effects::run_over(&layer, &needs(&["sql.read"]), unordered, json!({}), None)
-                .await
-                .unwrap();
+        let out = crate::effects::run_over(
+            &layer,
+            &crate::run_context::for_dry_run(),
+            &needs(&["sql.read"]),
+            unordered,
+            json!({}),
+            None,
+        )
+        .await
+        .unwrap();
         assert!(
             matches!(&out, crate::effects::Reaction::Skip(w) if w.contains("ORDER BY")),
             "{out:?}"
@@ -403,9 +434,16 @@ mod tests {
         let big = r#"def transform(x):
     return scope("sql.read", {"sql": "SELECT 1 ORDER BY 1", "page": {"limit": 5000}})
 "#;
-        let err = crate::effects::run_over(&layer, &needs(&["sql.read"]), big, json!({}), None)
-            .await
-            .unwrap_err();
+        let err = crate::effects::run_over(
+            &layer,
+            &crate::run_context::for_dry_run(),
+            &needs(&["sql.read"]),
+            big,
+            json!({}),
+            None,
+        )
+        .await
+        .unwrap_err();
         assert!(err.contains("at most 1000"), "{err}");
     }
 
@@ -415,10 +453,10 @@ mod tests {
     async fn sql_read_aggregates_all_rows_before_applying_the_cap() {
         let db = oxplow_db::Database::in_memory();
         db.read(|conn| {
-            let (needs, trace) = (needs(&["sql.read"]), ScopeTrace::default());
+            let (needs, run) = (needs(&["sql.read"]), crate::run_context::for_dry_run());
             let mut calls = Calls::new(
+                &run,
                 &needs,
-                &trace,
                 Box::new(|q| oxplow_db::semantic_layer::read_on(conn, &q)),
             );
             let sql = format!("SELECT count(*) AS n, sum(n) AS total FROM ({NUMBER_ROWS})");

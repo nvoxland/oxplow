@@ -366,15 +366,14 @@ pub fn serve_incoming(
 
 /// What a provider may call of the host over the protocol (`host/call`):
 /// the scopes its manifest `needs`, through the gate a
-/// command's handler meets (`scope_calls::Calls`), each call counted
-/// with the `invoke` it serves — named by that call's idempotency key — so
-/// the run's audit row records it.
+/// command's handler meets (`scope_calls::Calls`), each call part of the
+/// run of the `invoke` it serves — named by that call's idempotency key —
+/// so the run's audit row records it. A call naming no invoke under way
+/// is refused: nothing a provider does of oxplow is outside a run.
 pub struct HostCalls {
     needs: Vec<String>,
     db: oxplow_db::Database,
-    traces: parking_lot::Mutex<
-        std::collections::HashMap<String, Arc<oxplow_domain::scope::ScopeTrace>>,
-    >,
+    runs: parking_lot::Mutex<std::collections::HashMap<String, oxplow_domain::run::RunContext>>,
 }
 
 impl HostCalls {
@@ -382,17 +381,17 @@ impl HostCalls {
         Arc::new(Self {
             needs,
             db,
-            traces: parking_lot::Mutex::default(),
+            runs: parking_lot::Mutex::default(),
         })
     }
 
-    /// Count the calls naming `key` into `trace` until [`Self::finish`].
-    pub fn begin(&self, key: &str, trace: Arc<oxplow_domain::scope::ScopeTrace>) {
-        self.traces.lock().insert(key.to_string(), trace);
+    /// The calls naming `key` are part of `run` until [`Self::finish`].
+    pub fn begin(&self, key: &str, run: oxplow_domain::run::RunContext) {
+        self.runs.lock().insert(key.to_string(), run);
     }
 
     pub fn finish(&self, key: &str) {
-        self.traces.lock().remove(key);
+        self.runs.lock().remove(key);
     }
 
     /// Answer one `host/call`.
@@ -413,18 +412,25 @@ impl HostCalls {
                 params.scope
             )));
         }
-        let trace = params
+        let Some(run) = params
             .key
             .as_ref()
-            .and_then(|k| self.traces.lock().get(k).cloned())
-            .unwrap_or_default();
+            .and_then(|k| self.runs.lock().get(k).cloned())
+        else {
+            return Err(refused(match &params.key {
+                Some(key) => format!(
+                    "no call under way is keyed `{key}`: a `host/call` names the invoke it serves"
+                ),
+                None => "a `host/call` names the invoke it serves (`key`)".to_string(),
+            }));
+        };
         let (needs, db) = (self.needs.clone(), self.db.clone());
         let runtime = tokio::runtime::Handle::current();
         tokio::task::spawn_blocking(move || {
             let read = Box::new(|q: oxplow_db::SqlQuery| {
                 runtime.block_on(db.read(move |tx| oxplow_db::semantic_layer::read_on(tx, &q)))
             });
-            let mut calls = crate::scope_calls::Calls::new(&needs, &trace, read);
+            let mut calls = crate::scope_calls::Calls::new(&run, &needs, read);
             calls.serve(&params.scope, params.args)
         })
         .await

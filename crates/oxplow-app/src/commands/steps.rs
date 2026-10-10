@@ -23,6 +23,7 @@
 //! composition beside it, so the calls prechecked are the calls run and a
 //! nested composite's confirmations are known before anything lands.
 
+use oxplow_domain::run::RunContext;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -133,6 +134,8 @@ pub(super) struct Router<'a> {
     /// What's active: each call needs what a direct one would (step 0).
     pub active: Option<&'a crate::capabilities::Active>,
     pub prechecks: Vec<Pending>,
+    /// The run being routed: each composer runs as a pure child of it.
+    pub run: &'a RunContext,
 }
 
 impl Router<'_> {
@@ -157,15 +160,15 @@ impl Router<'_> {
                 ),
             });
         }
-        let trace = oxplow_domain::scope::ScopeTrace::default();
-        let composition = (compose.compose)(self.conn, &trace, input)?;
+        let composing = self.run.child(None, oxplow_domain::run::Mode::Pure);
+        let composition = (compose.compose)(self.conn, &composing, input)?;
         let (calls, outside) = self.route_calls(composition.calls, depth, at)?;
         Ok(Routed {
             composed: Composed {
                 calls,
                 result: composition.result,
                 events: composition.events,
-                scopes: trace.summary(),
+                scopes: composing.trace().summary(),
             },
             outside,
         })
@@ -307,7 +310,7 @@ pub(super) fn run_composed(
     parent: &CommandSpec,
     composed: &Composed,
 ) -> Result<HandlerOutput, CommandError> {
-    let (asks, destructive) = check_tree(policy, ctx.actor, ctx.may_write, &composed.calls)?;
+    let (asks, destructive) = check_tree(policy, ctx.actor(), ctx.may_write, &composed.calls)?;
     if asks && !ctx.confirmed {
         return Err(CommandError::NeedsConfirmation {
             preview: Box::new(Preview {
@@ -334,7 +337,7 @@ fn run_tree(ctx: &TxCtx<'_>, composed: &Composed) -> Result<HandlerOutput, Comma
     ctx.trace.add(&composed.scopes);
     let inner = TxCtx {
         conn: ctx.conn,
-        actor: ctx.actor,
+        run: ctx.run,
         events: ctx.events.clone(),
         confirmed: ctx.confirmed,
         may_write: ctx.may_write,
@@ -442,13 +445,14 @@ impl CommandBus {
     /// the transaction (tsk1010).
     pub(super) async fn route_composite(
         &self,
+        run: &RunContext,
         spec: &CommandSpec,
         compose: &Arc<Compose>,
         input: &Value,
     ) -> Result<(Resolved, Vec<Pending>), CommandError> {
         let registry = self.commands.read().commands.clone();
         let active = self.active();
-        let (c, input) = (compose.clone(), input.clone());
+        let (c, input, run) = (compose.clone(), input.clone(), run.clone());
         let routed = self
             .db
             .read_or(move |conn| {
@@ -457,6 +461,7 @@ impl CommandBus {
                     conn,
                     active: active.as_ref(),
                     prechecks: Vec::new(),
+                    run: &run,
                 };
                 router
                     .route(&c, &input, "", 0, "")
@@ -483,7 +488,7 @@ impl CommandBus {
     /// Run `plan`'s calls as steps, as `actor` (see the module doc).
     pub(super) async fn run_steps(
         &self,
-        actor: &Actor,
+        run: &RunContext,
         spec: &CommandSpec,
         input: &Value,
         plan: Arc<Composed>,
@@ -494,6 +499,7 @@ impl CommandBus {
             gates,
             origin,
         } = admitted;
+        let actor = run.actor();
         // 1. Every step's — and every composite step's calls' — own
         // invokers, policy and confirmation, before any runs.
         let (asks, destructive) =
@@ -537,7 +543,7 @@ impl CommandBus {
                 (Some(handler), _) => {
                     self.run_step_tx(
                         handler,
-                        actor,
+                        run,
                         &step.call.input,
                         &executed_id,
                         confirmed,
@@ -547,12 +553,17 @@ impl CommandBus {
                 }
                 (None, Handler::External(handler)) => {
                     let invocation =
-                        origin.invocation(actor, index, &step.call.name, &step.call.input);
+                        origin.invocation(run, index, &step.call.name, &step.call.input);
                     let key = invocation.idempotency_key.clone();
-                    let trace = invocation.trace.clone();
+                    let called = invocation.run.clone();
                     handler(invocation, step.call.input.clone())
                         .await
-                        .map(|out| (same_events_once(out, key.as_deref()), trace.summary()))
+                        .map(|out| {
+                            (
+                                same_events_once(out, key.as_deref()),
+                                called.trace().summary(),
+                            )
+                        })
                 }
                 (None, _) => Err(CommandError::Failed {
                     message: format!("`{}` has no handler to run", step.call.name),
@@ -619,6 +630,7 @@ impl CommandBus {
             unchanged: false,
         };
         let (actor_c, spec_c, input_c) = (actor.clone(), spec.clone(), input.clone());
+        let run_c = run.clone();
         let vocabulary = self.log.vocabulary().clone();
         let failed_c = failed.clone();
         let recorded = self
@@ -634,7 +646,7 @@ impl CommandBus {
                     Executed {
                         id: executed_id.clone(),
                         failed: failed_c.clone(),
-                        cause: origin.cause(),
+                        cause: origin.cause(&run_c),
                         scopes: scopes.clone(),
                     },
                 )?;
@@ -695,23 +707,23 @@ impl CommandBus {
     async fn run_step_tx(
         &self,
         handler: Arc<TxHandler>,
-        actor: &Actor,
+        run: &RunContext,
         input: &Value,
         cause: &oxplow_domain::EventId,
         confirmed: bool,
         gates: Gates,
     ) -> Result<(HandlerOutput, BTreeMap<String, u32>), CommandError> {
-        let (actor, input, cause) = (actor.clone(), input.clone(), cause.clone());
+        let (run, input, cause) = (run.clone(), input.clone(), cause.clone());
         let vocabulary = self.log.vocabulary().clone();
         self.db
             .transaction_or(move |tx| {
                 let trace = oxplow_domain::scope::ScopeTrace::default();
                 let ctx = TxCtx {
                     conn: tx,
-                    actor: &actor,
+                    run: &run,
                     events: oxplow_db::EventCtx {
                         vocabulary: &vocabulary.current(),
-                        source: actor.source(),
+                        source: run.actor().source(),
                         cause: Some(cause.clone()),
                     },
                     confirmed,

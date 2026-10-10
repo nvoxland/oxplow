@@ -501,9 +501,10 @@ beside the oxplow executable; `oxplow_script::worker` and `::workers`),
 never on a thread of the host. The host (`ScriptWorkers::run`, one per
 process: `workers::shared()`) sends the run over NDJSON, answers its
 `scope(…)` and `ai_*` calls on the calling thread (a command's transaction
-stays there), and enforces a `SandboxBudget`: the time answering is left
-out of its `timeout` and counted in its `ceiling`. Past either, or on a
-`Cancel`, the worker is **killed and reaped** (`CollectError::Timeout` /
+stays there), and enforces a `Budget` (`oxplow_domain::run`): the time answering is left
+out of its `timeout` and counted in its `ceiling`. Past either, or when
+its run's `Cancel` is set (every collector, command, effect, policy and
+fact-collector script is passed its run's), the worker is **killed and reaped** (`CollectError::Timeout` /
 `Cancelled`); a run whose live allocations pass its cap is ended by the
 worker's counting allocator (`worker::MemoryCap`, exit code 3,
 `CollectError::MemoryExceeded`); a worker whose host is gone exits on its

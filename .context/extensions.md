@@ -1779,6 +1779,48 @@ payload. It shows; it never acts.
 `STABLE_KINDS` lists `ui.decorators`; a shared extension may declare
 them.
 
+## The run context
+
+Every run of extension code — and every bus run — carries one
+`RunContext` (`oxplow_domain::run`; the app's constructors are
+`run_context.rs`): its run id (a UUIDv7), its parent run, the
+contribution it belongs to (`<ext>/<kind>/<local>`, the extension's
+`version`, the catalog generation it was built against), its actor,
+anchors, subject and cause, its mode, its budget, its cancel flag and
+its scope trace.
+
+- **Built by a named constructor, never assembled.** `for_effect`,
+  `for_policy`, `for_collector`, `for_command`, `for_dry_run` and
+  `RunContext::core` fill what that run has and leave the rest `None`.
+  Nested work is `child()`: a new run id with this one as parent, the
+  same actor, cancel flag and generation, the budget no larger than
+  what's left. A child can be another contribution's (a collector a
+  person's `oxplow.collector.sync` ran) but never another actor's —
+  `placed_in(stream)` only fills an agent's stream its transport left
+  out.
+- **Modes are explicit.** `Pure` (a composer, an effect's or policy's
+  script: it may be run again, no I/O but scope reads), `Transactional`
+  (a `Tx` handler), `External` (may call a program, a provider, a
+  model). `may_call_out` refuses the first two.
+- **Stale is checkable.** `check(current_generation)` refuses a run
+  built against a catalog generation no longer served, or cancelled.
+- **Who carries it:** the bus (`run_in`, `TxCtx::run`, `Invocation::run`
+  — an `External` call's run is a child of the command's), scope calls
+  (`scope_calls::Calls::new(run, needs, read)`, counted on its trace),
+  a composer (`Composer` gets a pure child; what it calls becomes the
+  run's scopes), effects (`for_effect`: the effect actor on the event's
+  thread and stream, caused by the event), the effort policy
+  (`for_policy`, its composed calls `run_in` it so `command.executed`
+  is caused by the event), entity and fact collectors (a child of the
+  run that ran them, named for the collector), provider invokes (on the
+  wire as `InvokeParams.context`; `host/call`s are answered only inside
+  a registered run) and knowledge, snapshot and harness verbs.
+- **Cancel reaches the worker.** Every script a collector, command,
+  effect, policy or fact collector runs is passed its run's cancel flag;
+  an exec collector's program is killed when it's set. Upcasts, report
+  parsers, scripted AI mappings and the MCP adapter's mappings still run
+  under their own fixed budgets without one.
+
 ## The event envelope
 
 An extension sees an event as one shape, `EventView`
