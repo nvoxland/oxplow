@@ -1101,7 +1101,7 @@ mod tests {
             "passed": 1, "failed": 1, "skipped": 1, "total": 3,
             "suites": [{"name": "app", "cases": [
                 {"classname": "a::tests", "name": "ok", "status": "passed", "timeMs": 12},
-                {"classname": "a::tests", "name": "bad", "status": "failed"},
+                {"classname": "a::tests", "name": "bad", "status": "failed", "message": "assertion failed\nat src/a.rs:3"},
                 {"classname": "b", "name": "later", "status": "skipped"}
             ]}]
         }})
@@ -1141,11 +1141,11 @@ mod tests {
             ])
         );
         assert_eq!(
-            rows("SELECT run_id, suite, classname, name, status, time_ms FROM v_test_case ORDER BY name").await,
+            rows("SELECT run_id, suite, classname, name, status, time_ms, message FROM v_test_case ORDER BY name").await,
             json!([
-                [41, "app", "a::tests", "bad", "failed", null],
-                [41, "app", "b", "later", "skipped", null],
-                [41, "app", "a::tests", "ok", "passed", 12]
+                [41, "app", "a::tests", "bad", "failed", null, "assertion failed\nat src/a.rs:3"],
+                [41, "app", "b", "later", "skipped", null, null],
+                [41, "app", "a::tests", "ok", "passed", 12, null]
             ])
         );
     }

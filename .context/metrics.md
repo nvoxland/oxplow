@@ -424,7 +424,8 @@ welded to collection.
   **Stored as ids into dictionaries (V38):** `subject_id` → `fact_subject
   (kind, ref)`, `path_id` → `fact_path`, `dims_id` → `fact_dims (json)`;
   the one writer (`insert_fact`) interns, and `FactRow` still carries the
-  text. A fact repeated its subject, path and dims text on every row —
+  text — except `detail`, which bulk reads leave out (`None`; a finding's
+  message is fetched by id with `SqliteFactStore::fact_details`). A fact repeated its subject, path and dims text on every row —
   ~290 bytes a fact with indexes, 3.1 GB of a 4 GB database — while the
   distinct values were ~58k subjects, 1.7k paths and 730 dims sets; the
   fact data went 1.83 GB → 0.52 GB. Reads select the ids and
@@ -512,9 +513,25 @@ welded to collection.
 > **The cube is a LOSSY projection, and that lossiness IS the speedup.** It drops
 > the **subject axis** and nothing else. So these reads stay on the raw facts
 > *permanently and by design* — this is not a temporary fallback to be removed:
-> - **value-threshold specs** — `oxplow.high_complexity_fns` (`min_value: 11`),
->   `oxplow.long_functions` (`min_value: 61`). The cube summed those values away;
->   answering them would need a bucket per distinct value — the fact table again.
+> - **a value threshold no spec of the measure uses** — `min_value` /
+>   `max_value` (`oxplow.high_complexity_fns` 11, `oxplow.long_functions` 61,
+>   `oxplow.coverage.untested_files` 0) filter on a fact's OWN value, which
+>   the cube summed away. The bounds the measure's specs use ARE in the grain
+>   (below), so those specs are served; any other bound is read from facts.
+> **Value bounds are part of the grain (tsk1019).** A bucket is the facts that
+> agree on the promoted dims *and on whether they pass each bound a spec of the
+> measure uses*: `dims_key` carries `"value>=11":"1"` / `"0"` per bound
+> (`ValueBound`, `metric_cube.rs`), computed with the test `FactFilter::matches`
+> makes. A threshold count is then a sum over the buckets that pass — bucketing
+> is bounded by the bounds specs declare, never by distinct values (the "fact
+> table again" objection). The fold stays filter-agnostic, so a subject
+> crossing the bound in either direction is restated exactly as before. The
+> builder derives the bounds from the measure's `metric_spec` filters on every
+> pass; a cube whose rows carry a different bound set is dropped and folded
+> again (`reset_cube`), and the read declines a bound its rows lack. Reads of
+> the three declined specs: ~230 ms from facts → ~1 ms
+> ([performance.md](./performance.md) "Threshold counts from the cube").
+>
 > - **findings / drill-in** — "which test, which file, which line" *is* the
 >   subject axis.
 > - **`group_by` on an unpromoted dim** — caller-supplied at runtime;

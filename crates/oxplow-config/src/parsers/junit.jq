@@ -26,7 +26,17 @@
                 else "passed"
                 end
               ),
-              timeMs: (if .attrs.time != null then ((.attrs.time | tonumber) * 1000 | round) else null end)
+              timeMs: (if .attrs.time != null then ((.attrs.time | tonumber) * 1000 | round) else null end),
+              # A failed case's failure/error: its `message` attribute, then its
+              # body (the assertion and where it happened); null when it has
+              # neither. The host bounds the length.
+              message: (
+                ([.. | select((type == "object") and ((.tag == "failure") or (.tag == "error")))][0]) as $f
+                | if $f == null then null
+                  else ([($f.attrs.message // ""), ($f.text // "")] | map(select(. != "")) | join("\n"))
+                       | if . == "" then null else . end
+                  end
+              )
             }
         ]
       }

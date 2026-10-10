@@ -4952,6 +4952,46 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "run_id",
+          "type": "INTEGER",
+          "doc": "The run (v_test_run.id)."
+        },
+        {
+          "name": "suite",
+          "type": "",
+          "doc": "Report suite name."
+        },
+        {
+          "name": "classname",
+          "type": "",
+          "doc": "Grouping path (module path, file·class, describe path)."
+        },
+        {
+          "name": "name",
+          "type": "",
+          "doc": "Test name."
+        },
+        {
+          "name": "status",
+          "type": "",
+          "doc": "`passed`, `failed` or `skipped`."
+        },
+        {
+          "name": "time_ms",
+          "type": "",
+          "doc": "Its duration, when the report gave one."
+        },
+        {
+          "name": "message",
+          "type": "",
+          "doc": "What a failed case's report said went wrong: its failure message, then its body (the assertion and where it happened). NULL for a case that didn't fail, one whose report said nothing, and a failure past the per-run cap (64 KB of messages per run, 4 KB each, a cut one ending in `…`)."
+        }
+      ],
+      "key": []
     }
   },
   "test_run": {

@@ -925,14 +925,33 @@ pub struct FactSliceKey {
 /// A fact's subject ref, from the dictionary it points into (V38).
 const SUBJECT_REF: &str = "(SELECT ref FROM fact_subject WHERE id = f.subject_id)";
 
+/// The [`FactRow`] column list, with `$detail` as the `detail` column's
+/// expression: one list for the full and the slim form, so they can't drift.
+macro_rules! fact_row_cols {
+    ($detail:literal) => {
+        concat!(
+            "f.id, c.id, f.measure_id, f.value, f.numerator, f.denominator, f.subject_id, \
+             f.path_id, f.line, f.severity, f.rule, ",
+            $detail,
+            ", f.dims_id, c.captured_at, c.branch, c.closest_vcs_rev, c.vcs_rev_exact, \
+             c.basis_ref, c.snapshot_id, c.stream_id, c.thread_id, c.effort_id, \
+             c.provenance, c.source, c.producer"
+        )
+    };
+}
+
 /// A [`FactRow`]'s columns, for fact `f` as held by capture `c`. The
 /// subject, path and dims come as the ids of the dictionaries the fact
 /// points into (V38); [`fact_row_mapper`] resolves each id once per read.
-pub(crate) const FACT_ROW_COLS: &str = "f.id, c.id, f.measure_id, f.value, f.numerator, \
-     f.denominator, f.subject_id, f.path_id, f.line, f.severity, f.rule, \
-     f.detail, f.dims_id, c.captured_at, c.branch, c.closest_vcs_rev, \
-     c.vcs_rev_exact, c.basis_ref, c.snapshot_id, c.stream_id, c.thread_id, \
-     c.effort_id, c.provenance, c.source, c.producer";
+pub(crate) const FACT_ROW_COLS: &str = fact_row_cols!("f.detail");
+
+/// [`FACT_ROW_COLS`] without the fact's `detail`: what a bulk read selects.
+/// `detail` is the one large text a fact can carry (an analysis finding's
+/// message), and the paths that fold, filter or bucket facts never look at
+/// it, so a history load shouldn't pull it for every row. The column is
+/// there, `NULL`, so the mapper's positions don't move; the few facts
+/// something shows are asked for by id ([`SqliteFactStore::fact_details`]).
+pub(crate) const FACT_ROW_COLS_SLIM: &str = fact_row_cols!("NULL");
 
 /// A [`FactRow`] mapper that decodes each capture's `captured_at` **once**
 /// (tsk215).
@@ -1818,6 +1837,30 @@ impl SqliteFactStore {
             .await
     }
 
+    /// The `detail` of those of `fact_ids` that have one: a finding's
+    /// message. Bulk reads leave it out ([`FACT_ROW_COLS_SLIM`]); this is how
+    /// the few facts something displays get theirs.
+    pub async fn fact_details(
+        &self,
+        fact_ids: Vec<i64>,
+    ) -> Result<std::collections::HashMap<i64, String>, DomainError> {
+        if fact_ids.is_empty() {
+            return Ok(Default::default());
+        }
+        let ids =
+            serde_json::to_string(&fact_ids).map_err(|e| DomainError::Invariant(e.to_string()))?;
+        self.db
+            .call(move |conn| {
+                let mut stmt = conn.prepare_cached(
+                    "SELECT id, detail FROM fact
+                      WHERE id IN (SELECT value FROM json_each(?1)) AND detail IS NOT NULL",
+                )?;
+                let rows = stmt.query_map([ids], |r| Ok((r.get(0)?, r.get(1)?)))?;
+                rows.collect::<rusqlite::Result<_>>()
+            })
+            .await
+    }
+
     /// All facts of a measure, joined to their capture for the spine, oldest
     /// capture first.
     pub async fn facts_for_measure(&self, measure_id: i64) -> Result<Vec<FactRow>, DomainError> {
@@ -1906,6 +1949,43 @@ impl SqliteFactStore {
             .memo()
             .producers_put(measure_id, generation, producers.clone());
         Ok(producers)
+    }
+
+    /// One bucket's `dims_key` of `measure_id`'s cube, or `None` when it has
+    /// none: every bucket of a measure is built to one grain, so one tells it.
+    pub async fn cube_sample_dims_key(
+        &self,
+        measure_id: i64,
+    ) -> Result<Option<String>, DomainError> {
+        self.db
+            .call(move |conn| {
+                conn.prepare_cached(
+                    "SELECT dims_key FROM metric_cube WHERE measure_id = ?1 LIMIT 1",
+                )?
+                .query_row(params![measure_id], |r| r.get(0))
+                .optional()
+            })
+            .await
+    }
+
+    /// Drop `measure_id`'s cube, its live state and watermarks, and fence any
+    /// build in flight: the cube is disposable, and a different grain is
+    /// folded again from the facts.
+    pub async fn reset_cube(&self, measure_id: i64) -> Result<(), DomainError> {
+        self.db
+            .transaction(move |tx| {
+                for sql in [
+                    "DELETE FROM metric_cube WHERE measure_id = ?1",
+                    "DELETE FROM metric_live_fact WHERE measure_id = ?1",
+                    "DELETE FROM metric_cube_state WHERE measure_id = ?1",
+                ] {
+                    tx.execute(sql, params![measure_id]).map_err(map_sql_err)?;
+                }
+                tx.execute("UPDATE metric_cube_epoch SET epoch = epoch + 1", [])
+                    .map_err(map_sql_err)?;
+                Ok(())
+            })
+            .await
     }
 
     /// How far the cube is built for `(measure, stream)` — the newest capture
@@ -2137,7 +2217,7 @@ impl SqliteFactStore {
         self.db
             .call(move |conn| {
                 let sql = format!(
-                    "SELECT {FACT_ROW_COLS} FROM metric_live_fact lf
+                    "SELECT {FACT_ROW_COLS_SLIM} FROM metric_live_fact lf
                        JOIN fact f ON f.id = lf.fact_id
                        JOIN metric_capture c ON c.id = f.capture_id
                       WHERE lf.measure_id = ?1 AND lf.stream_id = ?2 AND lf.branch = ?3
@@ -2426,7 +2506,7 @@ impl SqliteFactStore {
         self.db
             .call(move |conn| {
                 let sql = format!(
-                    "SELECT {FACT_ROW_COLS} FROM fact f
+                    "SELECT {FACT_ROW_COLS_SLIM} FROM fact f
                        JOIN metric_capture c ON c.id = f.capture_id
                       WHERE f.measure_id = ?1
                         AND f.path_id IS NULL AND {SUBJECT_REF} IS NULL
@@ -2582,20 +2662,26 @@ impl SqliteFactStore {
         measure_id: i64,
     ) -> Result<Vec<FactSliceKey>, DomainError> {
         let (generation, hit) = self.db.memo().slice_keys_get(measure_id);
-        if let Some(hit) = hit {
-            return Ok(hit);
-        }
-        let keys = self
+        let (mut keys, since) = hit.unwrap_or_default();
+        let (fresh, through) = self
             .db
             .call(move |conn| {
+                // What this read covers is fixed first, so a capture landing
+                // during it is read by the next one, not half-counted.
+                let through: i64 = conn.query_row(
+                    "SELECT COALESCE(MAX(capture_id), 0) FROM fact WHERE measure_id = ?1",
+                    params![measure_id],
+                    |r| r.get(0),
+                )?;
                 let mut stmt = conn.prepare_cached(
                     "SELECT k.producer, k.rule, k.severity,
                             (SELECT json FROM fact_dims WHERE id = k.dims_id)
                        FROM (SELECT DISTINCT c.producer, f.rule, f.severity, f.dims_id
                                FROM fact f JOIN metric_capture c ON c.id = f.capture_id
-                              WHERE f.measure_id = ?1) k",
+                              WHERE f.measure_id = ?1
+                                AND f.capture_id > ?2 AND f.capture_id <= ?3) k",
                 )?;
-                let rows = stmt.query_map(params![measure_id], |r| {
+                let rows = stmt.query_map(params![measure_id, since, through], |r| {
                     Ok(FactSliceKey {
                         producer: r.get(0)?,
                         rule: r.get(1)?,
@@ -2603,12 +2689,18 @@ impl SqliteFactStore {
                         dims_json: r.get(3)?,
                     })
                 })?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
+                let fresh = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok((fresh, through))
             })
             .await?;
+        for key in fresh {
+            if !keys.contains(&key) {
+                keys.push(key);
+            }
+        }
         self.db
             .memo()
-            .slice_keys_put(measure_id, generation, keys.clone());
+            .slice_keys_put(measure_id, generation, (keys.clone(), through.max(since)));
         Ok(keys)
     }
 
@@ -2637,32 +2729,56 @@ impl SqliteFactStore {
         measure_id: i64,
     ) -> Result<Vec<FactRow>, DomainError> {
         let (generation, hit) = self.db.memo().representatives_get(measure_id);
-        if let Some(hit) = hit {
-            return Ok(hit);
-        }
-        let rows = self
+        let (mut reps, since) = hit.unwrap_or_default();
+        let (fresh, through) = self
             .db
             .call(move |conn| {
+                let through: i64 = conn.query_row(
+                    "SELECT COALESCE(MAX(capture_id), 0) FROM fact WHERE measure_id = ?1",
+                    params![measure_id],
+                    |r| r.get(0),
+                )?;
                 let sql = format!(
-                    "SELECT {FACT_ROW_COLS} FROM fact f
+                    "SELECT {FACT_ROW_COLS_SLIM} FROM fact f
                        JOIN metric_capture c ON c.id = f.capture_id
                       WHERE f.id IN (
                         SELECT MIN(f2.id) FROM fact f2
                           JOIN metric_capture c2 ON c2.id = f2.capture_id
                          WHERE f2.measure_id = ?1
+                           AND f2.capture_id > ?2 AND f2.capture_id <= ?3
                          GROUP BY c2.producer, f2.rule, f2.severity, f2.dims_id
                       )
                       ORDER BY c.captured_at ASC, f.id ASC"
                 );
                 let mut stmt = conn.prepare_cached(&sql)?;
-                let rows = stmt.query_map(params![measure_id], fact_row_mapper(conn)?)?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
+                let rows =
+                    stmt.query_map(params![measure_id, since, through], fact_row_mapper(conn)?)?;
+                Ok((rows.collect::<rusqlite::Result<Vec<_>>>()?, through))
             })
             .await?;
-        self.db
-            .memo()
-            .representatives_put(measure_id, generation, rows.clone());
-        Ok(rows)
+        // A slice already represented keeps its lowest-id fact: facts only
+        // get higher ids, so a later capture's fact of it never displaces it.
+        let slice = |f: &FactRow| {
+            (
+                f.producer.clone(),
+                f.rule.clone(),
+                f.severity.clone(),
+                f.dims_json.clone(),
+            )
+        };
+        let known: std::collections::HashSet<_> = reps.iter().map(slice).collect();
+        let added = fresh.into_iter().filter(|f| !known.contains(&slice(f)));
+        let grew = reps.len();
+        reps.extend(added);
+        if reps.len() != grew {
+            reps.sort_by(|a, b| a.captured_at.cmp(&b.captured_at).then(a.id.cmp(&b.id)));
+        }
+        self.db.memo().representatives_put(
+            measure_id,
+            generation,
+            (reps.clone(), through.max(since)),
+        );
+        Ok(reps)
     }
 
     /// Facts of a measure belonging to the given captures (the attribution-by-claim
@@ -2827,7 +2943,7 @@ impl SqliteFactStore {
                      )
                      -- …and the facts it holds for that path: its own rows, or
                      -- through its hold (V43), at the lines it saw.
-                     SELECT {FACT_ROW_COLS} FROM winners w
+                     SELECT {FACT_ROW_COLS_SLIM} FROM winners w
                        CROSS JOIN fact f ON f.capture_id = w.capture_id AND f.path_id = w.path_id
                        CROSS JOIN metric_capture c ON c.id = f.capture_id
                       WHERE f.measure_id = ?1 AND {not_held}
@@ -2838,7 +2954,7 @@ impl SqliteFactStore {
                         AND ph.measure_id = ?1
                       ORDER BY 14, 1",
                     not_held = crate::fact_chain::NOT_PATH_HELD,
-                    path_cols = crate::fact_chain::path_held_cols(),
+                    path_cols = crate::fact_chain::path_held_cols_slim(),
                     path_held = crate::fact_chain::PATH_HELD,
                 );
                 let mut stmt = conn.prepare(&sql)?;
@@ -3399,7 +3515,7 @@ impl SqliteFactStore {
                           AND c.status = 'done'
                           AND (?2 IS NULL OR c.stream_id = ?2)
                      )
-                     SELECT {FACT_ROW_COLS} FROM fact f
+                     SELECT {FACT_ROW_COLS_SLIM} FROM fact f
                        JOIN metric_capture c ON c.id = f.capture_id
                        JOIN ranked r ON r.fact_id = f.id
                       WHERE r.rn = 1
@@ -5816,6 +5932,140 @@ mod tests {
         assert_eq!(store.facts_for_measure(m).await.unwrap().len(), 40 * 200);
     }
 
+    /// A bulk read leaves `detail` out — a finding's message is the one
+    /// large text a fact can carry, and the read paths that fold or filter
+    /// never look at it — and `fact_details` fetches it for the few facts
+    /// something does show.
+    #[tokio::test]
+    async fn bulk_reads_leave_detail_out_and_fact_details_fetches_it() {
+        let store = fixture().await;
+        let m = measure(&store, "acme.findings").await;
+        let mut with = NewFact::new(m, 1.0);
+        with.path = Some("src/a.rs".into());
+        with.detail = Some("assertion failed at a.rs:3".into());
+        let mut without = NewFact::new(m, 1.0);
+        without.path = Some("src/b.rs".into());
+        let cap = NewMetricCapture::done(1, "analysis", "s");
+        store.record_facts(cap, vec![with, without]).await.unwrap();
+
+        let rows = store.facts_for_measure(m).await.unwrap();
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|r| r.detail.is_none()), "{rows:?}");
+        let in_stream = store.facts_for_measure_in_stream(m, 1).await.unwrap();
+        assert!(in_stream.iter().all(|r| r.detail.is_none()));
+        let captured = store
+            .facts_for_captures(m, vec![rows[0].capture_id])
+            .await
+            .unwrap();
+        assert!(captured.iter().all(|r| r.detail.is_none()));
+
+        let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
+        let details = store.fact_details(ids).await.unwrap();
+        assert_eq!(details.len(), 1, "only a fact with one has an entry");
+        let with_id = rows
+            .iter()
+            .find(|r| r.path.as_deref() == Some("src/a.rs"))
+            .unwrap()
+            .id;
+        assert_eq!(details[&with_id], "assertion failed at a.rs:3");
+        assert!(store.fact_details(vec![]).await.unwrap().is_empty());
+    }
+
+    /// What a write then a slice read costs on a big measure: ignored; prints.
+    /// `cargo nextest run -p oxplow-db --release --run-ignored only --no-capture slice_read_after_write_cost`
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "a measurement"]
+    async fn slice_read_after_write_cost() {
+        let store = fixture().await;
+        let m = measure(&store, "acme.findings").await;
+        // 200,000 facts over 400 captures, ~300 distinct slices.
+        for h in 0..400 {
+            let mut cap = NewMetricCapture::done(1, if h % 2 == 0 { "alpha" } else { "beta" }, "s");
+            cap.captured_at = Some(at(&format!(
+                "2026-06-{:02}T10:{:02}:00.000000Z",
+                1 + h % 28,
+                h % 60
+            )));
+            let facts: Vec<NewFact> = (0..500)
+                .map(|i| {
+                    let mut f = NewFact::new(m, 1.0);
+                    f.path = Some(format!("src/m{}/f{i}.rs", i % 40));
+                    f.rule = Some(format!("rule{}", i % 150));
+                    f.severity = Some(if i % 2 == 0 { "error" } else { "warning" }.into());
+                    f
+                })
+                .collect();
+            store.record_facts(cap, facts).await.unwrap();
+        }
+        store.distinct_slice_keys(m).await.unwrap();
+        store.representative_facts_by_slice(m).await.unwrap();
+        let mut times = Vec::new();
+        for h in 0..15 {
+            let cap = NewMetricCapture::done(1, "alpha", "s");
+            let facts = vec![NewFact {
+                rule: Some(format!("new{}", h % 3)),
+                ..NewFact::new(m, 1.0)
+            }];
+            store.record_facts(cap, facts).await.unwrap();
+            let t = std::time::Instant::now();
+            store.distinct_slice_keys(m).await.unwrap();
+            store.representative_facts_by_slice(m).await.unwrap();
+            times.push(t.elapsed().as_micros());
+        }
+        times.sort();
+        println!(
+            "after a write: distinct_slice_keys + representative_facts_by_slice: median {} us of {times:?}",
+            times[7]
+        );
+    }
+
+    /// How long a bulk read of a measure's facts takes when the facts carry
+    /// a message each (an analysis finding's `detail`): ignored; prints.
+    /// `cargo nextest run -p oxplow-db --release --run-ignored only --no-capture fact_read_cost`
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "a measurement"]
+    async fn fact_read_cost() {
+        let store = fixture().await;
+        let m = measure(&store, "acme.findings").await;
+        let message = "this value is used here but was moved on a previous line; consider cloning it or borrowing instead of moving it ".repeat(2);
+        for h in 0..200 {
+            let mut cap = NewMetricCapture::done(1, "analysis", "s");
+            cap.captured_at = Some(at(&format!(
+                "2026-06-{:02}T10:{:02}:00.000000Z",
+                1 + h % 28,
+                h % 60
+            )));
+            let facts: Vec<NewFact> = (0..500)
+                .map(|i| {
+                    let mut f = NewFact::new(m, 1.0);
+                    f.path = Some(format!("src/m{}/f{i}.rs", i % 40));
+                    f.line = Some(i);
+                    f.rule = Some("clippy::needless_borrow".into());
+                    f.detail = Some(format!("{message}{i}"));
+                    f
+                })
+                .collect();
+            store.record_facts(cap, facts).await.unwrap();
+        }
+        // Warm, then the median of 5 reads.
+        store.facts_for_measure(m).await.unwrap();
+        let mut times = Vec::new();
+        let mut n = 0;
+        let mut with_detail = 0;
+        for _ in 0..5 {
+            let t = std::time::Instant::now();
+            let rows = store.facts_for_measure(m).await.unwrap();
+            times.push(t.elapsed().as_millis());
+            n = rows.len();
+            with_detail = rows.iter().filter(|r| r.detail.is_some()).count();
+        }
+        times.sort();
+        println!(
+            "facts_for_measure: {n} facts ({with_detail} with a detail): median {} ms of {times:?}",
+            times[2]
+        );
+    }
+
     /// tsk211: compaction must bound `detail_json` growth WITHOUT touching a
     /// single metric value — that property is what lets it default to ON.
     #[tokio::test]
@@ -6823,9 +7073,9 @@ mod tests {
         assert_eq!(got, vec!["alpha", "beta"]);
     }
 
-    /// A measure's slice keys and representative rows are memoized like its
-    /// producers: kept across other measures' writes, forgotten by its own,
-    /// and by a prune that deleted facts.
+    /// A measure's slice keys and representative rows are memoized: kept
+    /// across other measures' writes, extended (not dropped) by its own, and
+    /// forgotten by a prune that deleted facts.
     #[tokio::test]
     async fn slice_reads_are_memoized_per_measure() {
         let store = fixture().await;
@@ -6865,10 +7115,101 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(memoized(a), (false, false), "its own write");
+        // Its own write extends the slice memos from the new capture's
+        // facts instead of dropping them (a write can only add slices).
+        assert_eq!(memoized(a), (true, true), "its own write");
         assert_eq!(store.distinct_slice_keys(a).await.unwrap().len(), 2);
         store.db.memo().invalidate_all();
         assert_eq!(memoized(a), (false, false), "a deletion forgets everything");
+    }
+
+    /// The slice memos a write extends are the slices a rescan finds: after
+    /// every write of a sequence that adds slices, repeats some and re-uses
+    /// others under a later capture, the extended memo equals a fresh scan —
+    /// and a slice keeps its LOWEST-id fact as its representative.
+    #[tokio::test]
+    async fn an_extended_slice_memo_equals_a_fresh_scan() {
+        let store = fixture().await;
+        let m = measure(&store, "acme.findings").await;
+        let fact =
+            |rule: Option<&str>, severity: Option<&str>, dims: Option<&str>, value: f64| NewFact {
+                rule: rule.map(Into::into),
+                severity: severity.map(Into::into),
+                dims_json: dims.map(Into::into),
+                path: Some(format!("src/{value}.rs")),
+                ..NewFact::new(m, value)
+            };
+        let sorted_keys = |mut v: Vec<FactSliceKey>| {
+            v.sort_by(|a, b| {
+                (&a.producer, &a.rule, &a.severity, &a.dims_json).cmp(&(
+                    &b.producer,
+                    &b.rule,
+                    &b.severity,
+                    &b.dims_json,
+                ))
+            });
+            v
+        };
+        let writes: Vec<(&str, Vec<NewFact>)> = vec![
+            ("alpha", vec![fact(Some("E1"), Some("error"), None, 1.0)]),
+            ("beta", vec![fact(Some("E1"), Some("error"), None, 2.0)]),
+            (
+                "alpha",
+                vec![
+                    fact(Some("E1"), Some("error"), None, 3.0),
+                    fact(
+                        Some("W1"),
+                        Some("warning"),
+                        Some(r#"{"oxplow.language":"rust"}"#),
+                        4.0,
+                    ),
+                ],
+            ),
+            (
+                "alpha",
+                vec![fact(
+                    Some("W1"),
+                    Some("warning"),
+                    Some(r#"{"oxplow.language":"ts"}"#),
+                    5.0,
+                )],
+            ),
+            (
+                "gamma",
+                vec![fact(None, None, None, 6.0), fact(None, None, None, 7.0)],
+            ),
+        ];
+        for (producer, facts) in writes {
+            // Read first, so every write lands on a memo.
+            store.distinct_slice_keys(m).await.unwrap();
+            store.representative_facts_by_slice(m).await.unwrap();
+            store
+                .record_facts(NewMetricCapture::done(1, producer, "s"), facts)
+                .await
+                .unwrap();
+            let extended_keys = sorted_keys(store.distinct_slice_keys(m).await.unwrap());
+            let mut extended_reps: Vec<i64> = store
+                .representative_facts_by_slice(m)
+                .await
+                .unwrap()
+                .iter()
+                .map(|f| f.id)
+                .collect();
+            extended_reps.sort();
+
+            store.db.memo().invalidate_all();
+            let fresh_keys = sorted_keys(store.distinct_slice_keys(m).await.unwrap());
+            let mut fresh_reps: Vec<i64> = store
+                .representative_facts_by_slice(m)
+                .await
+                .unwrap()
+                .iter()
+                .map(|f| f.id)
+                .collect();
+            fresh_reps.sort();
+            assert_eq!(extended_keys, fresh_keys, "after a write by {producer}");
+            assert_eq!(extended_reps, fresh_reps, "after a write by {producer}");
+        }
     }
 
     #[tokio::test]

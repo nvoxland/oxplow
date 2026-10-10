@@ -153,7 +153,8 @@ cube rows) is ~10 ms in SQLite. **Pushing the window into the cube's SQL
 isn't worth doing**: it would save at most that. More than half of what's
 left is three per-path *threshold counts* the cube declines; a time window
 can't cut them — an in-window point still folds per-path state from before
-it. They need per-capture counts built with the cube (tsk1019).
+it. They get per-capture counts built with the cube ("Threshold counts from
+the cube" below).
 
 ## The cube as an asset: what a burst costs (P7.B1, 2026-10-01; corrected 2026-10-02)
 
@@ -234,6 +235,28 @@ together. Add a pseudo-dimension there, classify it here.
 Of the 25 filtered specs in this project, 22 land on the cheap branch (all the
 `dim_eq` ones — `oxplow.rule` is a column and the rest are `dims_json` keys) and
 3 on the expensive one (`min_value`/`max_value`).
+
+**A write extends the slice memos instead of dropping them** (measured
+2026-10-09). `distinct_slice_keys` and `representative_facts_by_slice` are
+memoized per measure, but every write of the measure used to discard them,
+so the next read paid the whole `GROUP BY` again — at boot and through agent
+activity. Facts are append-only between prunes, so a write can only *add*
+slices, and a slice's representative (its lowest-id fact) can't be displaced
+by a later one. Each memo now records the highest capture id it covers; a
+write keeps it, and the next read looks only at the facts of captures after
+that id (`idx_fact_measure_capture` seeks the range) and merges them. A prune
+still forgets everything (`invalidate_all`). A read that raced a write
+declines to store its result, as before, and the memo it extended stays
+valid. 200,000 facts over 400 captures and ~300 slices, a one-fact write then
+both reads (`fact_store::tests::slice_read_after_write_cost`, release):
+
+| | Median |
+|---|---|
+| Before (rescan after a write) | 6,552 µs |
+| After (extend from the new capture) | 125 µs |
+
+`an_extended_slice_memo_equals_a_fresh_scan` holds the extended memo to a
+fresh scan after every write of a sequence.
 
 Still on the table: a covering index on `fact(measure_id, rule, severity,
 dims_json, capture_id)` takes the slice-key scan 0.41 s → 0.11 s, but costs
@@ -763,4 +786,58 @@ number (`2.5`, `-1`) is skipped, where the program passed it on and the
 typed coercion then failed the whole report. The other bundled parsers
 (junit, cobertura, jacoco, clippy, eslint) read XML or JSON and were not
 measured as costly.
+
+## Bulk fact reads leave `detail` out (measured 2026-10-09)
+
+A `fact`'s `detail` is the one large text it can carry (an analysis finding's
+message). Every history load (`facts_for_measure`, the stream and live
+reads, the held-facts read) selected it and allocated a `String` for each
+row that had one, though the paths that fold, filter or bucket facts never
+look at it. Bulk reads now select `NULL` in its place
+(`FACT_ROW_COLS_SLIM`, the same column list as `FACT_ROW_COLS` from one
+macro, so the mapper's positions don't move), and the findings read, the
+only reader that shows a message, asks for those of the facts it returns
+by id (`SqliteFactStore::fact_details`). The chain write path keeps the
+full list: it compares a held fact with a new one by `detail`.
+
+Measured on 100,000 facts of one measure, each carrying a 230-byte message
+(the worst case; most facts carry none and read the same before and
+after), release build, median of five `facts_for_measure` reads
+(`fact_store::tests::fact_read_cost`, ignored):
+
+| | Median read |
+|---|---|
+| `detail` selected | 144 ms |
+| Left out (`NULL`) | 96 ms |
+
+A third of the read, in the case where it can matter; nothing where facts
+have no message.
+
+## Threshold counts from the cube (measured 2026-10-09)
+
+The three specs the cube declined (`oxplow.long_functions` and
+`oxplow.high_complexity_fns` `min_value` counts, `oxplow.coverage.untested_files`
+a `max_value` count) folded per-path state from raw facts on the first read of
+each generation — 698, 685 and 544 ms on the 6 M-fact copy. A cube bucket now
+also records whether its facts pass each value bound the measure's specs use,
+so these are sums over the passing buckets (`.context/metrics.md` "Value bounds
+are part of the grain").
+
+On a synthetic per-subject measure (600 captures of 3,000 functions, a tenth
+re-measured each capture, release; `metric_cube::tests::threshold_read_cost`,
+ignored), one `min_value` count:
+
+| | ms |
+|---|---|
+| Read from the facts | 227 |
+| Cube build (once; incremental after) | 994 |
+| Read from the cube | 1 |
+
+The build is the one-time fold every cube-served measure pays at write time,
+and a changed bound set re-folds that measure once. Equality with the facts is
+held by `threshold_specs_are_cube_served_and_equal_the_facts` (counts and a
+sum, min and max bounds, a value on the bound, restated subjects crossing it
+both ways) and `a_per_path_max_value_count_is_cube_served_and_equals_the_facts`;
+the real-data gate (`cube_equivalence` on a copy of the live database) has not
+been run on this change.
 

@@ -142,7 +142,14 @@ Things I keep forgetting. Read this before adding any UI.
   `autoFocus`). The launcher starts a fresh query only when it opens, and
   takes the focus whenever it shows (on a fresh window that's once its
   stream has loaded, just after it opened): what a person typed is never
-  wiped by data arriving.
+  wiped by data arriving. And it keeps the focus while it is open: when
+  something else takes it from outside (a restored tab or terminal mounting
+  as a reloaded window settles), the input gets it back on the next frame
+  (`QuickOpenOverlay`'s `onBlur`); focus moving inside the launcher is left
+  alone, and a click outside closes it first. If keystrokes are lost again
+  after a reload, log `document.activeElement` in that `onBlur` to name the
+  element that took focus; the fix was made without seeing it in a failing
+  `settings/pages.spec.ts` run.
 - **"Save and Another"** for repetitive-entry flows (see the New Work
   Item modal): saves and re-opens the form with the same
   category/priority/parent pre-filled so the user doesn't re-select

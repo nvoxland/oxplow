@@ -59,6 +59,12 @@ pub struct TestCase {
     pub status: TestStatus,
     #[serde(rename = "timeMs", skip_serializing_if = "Option::is_none")]
     pub time_ms: Option<u64>,
+    /// What the report said went wrong, on a failed case only: its
+    /// failure's `message` and body (the assertion and where it happened),
+    /// bounded by the parser (`MAX_MESSAGE_BYTES` per message and
+    /// `MAX_MESSAGE_BYTES_PER_RUN` per run in `oxplow-script`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -246,12 +252,21 @@ mod tests {
                         name: "a".into(),
                         status: TestStatus::Passed,
                         time_ms: Some(12),
+                        message: None,
                     },
                     TestCase {
                         classname: "m".into(),
                         name: "b".into(),
                         status: TestStatus::Skipped,
                         time_ms: None,
+                        message: None,
+                    },
+                    TestCase {
+                        classname: "m".into(),
+                        name: "c".into(),
+                        status: TestStatus::Failed,
+                        time_ms: None,
+                        message: Some("boom\nat a.rs:1".into()),
                     },
                 ],
             }],
@@ -261,6 +276,10 @@ mod tests {
         assert_eq!(json["suites"][0]["cases"][0]["timeMs"], 12);
         // `time_ms` is omitted when absent.
         assert!(json["suites"][0]["cases"][1].get("timeMs").is_none());
+        // A message is carried on the case that has one (the capture's
+        // `detail_json`, `v_test_case.message`), and only there.
+        assert_eq!(json["suites"][0]["cases"][2]["message"], "boom\nat a.rs:1");
+        assert!(json["suites"][0]["cases"][0].get("message").is_none());
     }
 
     #[test]

@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import type { Stream } from "../api.js";
 import { QuickOpenOverlay } from "./QuickOpenOverlay.js";
@@ -62,4 +62,51 @@ test("the launcher focuses when its stream arrives and keeps what was typed", ()
   fireEvent.change(input, { target: { value: "Settings" } });
   view.rerender(<QuickOpenOverlay {...props} stream={{ ...stream } as Stream} />);
   expect(input.value).toBe("Settings");
+});
+
+// After a reload, the window settles under an open launcher: a restored tab
+// or terminal mounting takes focus, and the keys that follow went to neither
+// (tsk1055). The launcher keeps focus while it is open.
+test("something else taking focus doesn't cost the launcher its keystrokes", async () => {
+  const view = renderOverlay();
+  const input = view.getByPlaceholderText(/Search everything/) as HTMLInputElement;
+  expect(document.activeElement).toBe(input);
+  const other = document.createElement("textarea");
+  document.body.appendChild(other);
+  other.focus();
+  expect(document.activeElement).toBe(other);
+  await waitFor(() => expect(document.activeElement).toBe(input));
+  other.remove();
+});
+
+test("focus moving inside the launcher stays there", async () => {
+  const view = renderOverlay();
+  const input = view.getByPlaceholderText(/Search everything/) as HTMLInputElement;
+  const inside = document.createElement("button");
+  input.parentElement!.appendChild(inside);
+  inside.focus();
+  await new Promise((r) => setTimeout(r, 50));
+  expect(document.activeElement).toBe(inside);
+});
+
+test("a closed launcher gives focus back to whatever has it", async () => {
+  const props = {
+    stream,
+    threadId: "thr1",
+    selectedFilePath: null,
+    pages,
+    offers: [],
+    onClose: () => {},
+    onOpenFile: () => {},
+    onOpenPage: () => {},
+    onOpenSearchHit: () => {},
+  };
+  const view = render(<QuickOpenOverlay {...props} open />);
+  const other = document.createElement("textarea");
+  document.body.appendChild(other);
+  view.rerender(<QuickOpenOverlay {...props} open={false} />);
+  other.focus();
+  await new Promise((r) => setTimeout(r, 50));
+  expect(document.activeElement).toBe(other);
+  other.remove();
 });

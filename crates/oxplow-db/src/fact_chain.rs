@@ -41,7 +41,9 @@ use std::collections::{BTreeMap, HashMap};
 
 use rusqlite::{params, OptionalExtension};
 
-use crate::fact_store::{fact_row_mapper, insert_fact, FactRow, NewFact, FACT_ROW_COLS};
+use crate::fact_store::{
+    fact_row_mapper, insert_fact, FactRow, NewFact, FACT_ROW_COLS, FACT_ROW_COLS_SLIM,
+};
 
 /// The most captures a chain (or a file's holds) runs before one is stored
 /// whole.
@@ -88,6 +90,11 @@ pub(crate) fn path_held_cols() -> String {
     FACT_ROW_COLS.replace("f.line", LINE_AT_HOLD)
 }
 
+/// [`path_held_cols`] without the fact's `detail` (a bulk read's).
+pub(crate) fn path_held_cols_slim() -> String {
+    FACT_ROW_COLS_SLIM.replace("f.line", LINE_AT_HOLD)
+}
+
 /// A capture's own rows of `f`'s file and measure aren't its whole set
 /// when it holds that file (its own rows come through the hold).
 pub(crate) const NOT_PATH_HELD: &str = "NOT EXISTS (SELECT 1 FROM fact_path_hold y
@@ -120,15 +127,15 @@ pub(crate) fn held_facts_sql(measure: &str, holders: Holders) -> String {
             format!("ph.capture_id IN (SELECT value FROM json_each({p}))"),
         ),
     };
-    let path_cols = path_held_cols();
+    let path_cols = path_held_cols_slim();
     format!(
-        "SELECT {FACT_ROW_COLS} FROM fact f JOIN metric_capture c ON c.id = f.capture_id
+        "SELECT {FACT_ROW_COLS_SLIM} FROM fact f JOIN metric_capture c ON c.id = f.capture_id
           WHERE f.measure_id = {measure} AND {own}
             AND NOT EXISTS (SELECT 1 FROM fact_chain x
                              WHERE x.capture_id = c.id AND x.measure_id = f.measure_id)
             AND {NOT_PATH_HELD}
          UNION ALL
-         SELECT {FACT_ROW_COLS} FROM {CHAIN_HELD}
+         SELECT {FACT_ROW_COLS_SLIM} FROM {CHAIN_HELD}
           WHERE ch.measure_id = {measure} AND {chained}
          UNION ALL
          SELECT {path_cols} FROM {PATH_HELD}

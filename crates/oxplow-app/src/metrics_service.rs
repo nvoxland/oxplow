@@ -6045,6 +6045,24 @@ def transform(input):
         assert_eq!(count, 0, "empty snapshot → no facts, runs without error");
     }
 
+    /// Every `use:` in this repo's own `.oxplow/project.yaml` names a metric
+    /// the catalog has — a producer's included, whose target the `use:`
+    /// sets — so loading it warns about none.
+    #[test]
+    fn this_repos_config_uses_only_metrics_the_catalog_has() {
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let config = oxplow_config::load_project_config(&repo).expect("the repo's config loads");
+        let unknown =
+            oxplow_config::unknown_uses(&builtin_spec_entries(), &[], &[], &config.metrics);
+        assert_eq!(unknown, Vec::<String>::new());
+        let resolved = resolve_metrics(&builtin_spec_entries(), &[], &[], &config.metrics);
+        let failed = resolved
+            .iter()
+            .find(|s| s.key == "oxplow.tests.failed")
+            .expect("a producer metric resolves");
+        assert_eq!(failed.target, Some(0.0), "the use: target reaches it");
+    }
+
     #[tokio::test]
     async fn an_extension_contributes_measures_metrics_and_gauges() {
         let (svc, dir) = fixture().await;
