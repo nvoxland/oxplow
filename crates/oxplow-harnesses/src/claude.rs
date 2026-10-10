@@ -96,24 +96,18 @@ impl AgentHarness for Claude {
         let mut env = input.identity_env.to_vec();
         env.extend(otel_env(ep));
         let cwd = input.workspace.to_string_lossy();
-        // A resume id whose transcript is gone launches fresh, with no raw
-        // "No conversation found" error, and core forgets the id.
-        let (resume, resume_dropped) = match (
-            input.resume.as_deref().filter(|r| !r.is_empty()),
-            input.home.as_deref(),
-        ) {
-            (None, _) => (Resume::Fresh, false),
-            (Some(id), home) => match home.map(|h| resume_state(h, &cwd, id)) {
-                Some(ResumeState::Missing) => (Resume::Fresh, true),
-                Some(ResumeState::Present) => (Resume::Known(resume_args(id)), false),
-                _ => (
-                    Resume::Unchecked {
-                        args: resume_args(id),
-                        harness: "Claude",
-                    },
-                    false,
-                ),
-            },
+        // A saved conversation is always resumed, never replaced by a fresh
+        // one. Looking for its transcript only classifies, so a resume that
+        // fails can say the transcript wasn't found.
+        let (resume, transcript_missing) = match input.resume.as_deref().filter(|r| !r.is_empty()) {
+            None => (Resume::Fresh, false),
+            Some(id) => {
+                let missing = input.home.as_deref().is_some_and(|home| {
+                    let dir = config_dir(home, std::env::var_os("CLAUDE_CONFIG_DIR"));
+                    resume_state(&dir, &cwd, id) == ResumeState::Missing
+                });
+                (Resume::Saved(resume_args(id)), missing)
+            }
         };
         let program = input
             .resolve_program("claude")
@@ -130,7 +124,7 @@ impl AgentHarness for Claude {
                 }),
                 env,
             },
-            resume_dropped,
+            transcript_missing,
         })
     }
 
@@ -462,7 +456,7 @@ fn local_install(home: &Path) -> Option<String> {
 /// What the `claude` command line is built from.
 struct Command<'a> {
     cwd: &'a str,
-    resume: Resume<'a>,
+    resume: Resume,
     program: Option<&'a str>,
     plugin_dir: Option<&'a str>,
     system_prompt: Option<&'a str>,
@@ -526,8 +520,8 @@ enum ResumeState {
     Present,
     /// The project dir exists but the session `.jsonl` is gone: stale.
     Missing,
-    /// Can't tell (no `~/.claude/projects/<cwd>` dir): leave the id alone;
-    /// the shell `||` net still protects the launch.
+    /// Can't tell (no `projects/<cwd>` dir under the config dir, or the
+    /// agent runs on another host).
     Unknown,
 }
 
@@ -540,13 +534,22 @@ fn encode_cwd(cwd: &str) -> String {
         .collect()
 }
 
+/// Claude's config directory: `CLAUDE_CONFIG_DIR` when set (the child
+/// inherits it, so it is where Claude looks), else `<home>/.claude`.
+fn config_dir(home: &Path, env: Option<std::ffi::OsString>) -> PathBuf {
+    match env.filter(|v| !v.is_empty()) {
+        Some(dir) => PathBuf::from(dir),
+        None => home.join(".claude"),
+    }
+}
+
 /// Whether the transcript of `session_id` (launched in `cwd`) is under
-/// `<home>/.claude/projects/`.
-fn resume_state(home: &Path, cwd: &str, session_id: &str) -> ResumeState {
+/// `<config_dir>/projects/`.
+fn resume_state(config_dir: &Path, cwd: &str, session_id: &str) -> ResumeState {
     if session_id.is_empty() {
         return ResumeState::Unknown;
     }
-    let project_dir = home.join(".claude").join("projects").join(encode_cwd(cwd));
+    let project_dir = config_dir.join("projects").join(encode_cwd(cwd));
     if !project_dir.is_dir() {
         return ResumeState::Unknown;
     }
@@ -633,7 +636,7 @@ mod tests {
             Some("be terse"),
             &serde_json::json!({}),
         );
-        assert!(!l.launch.resume_dropped);
+        assert!(!l.launch.transcript_missing);
         let (cmd, env) = crate::test_launch::pty(&l.launch);
         assert_eq!(env["OXPLOW_HOOK_TOKEN"], "secret-bearer");
         assert_eq!(env["OXPLOW_SESSION"], "ses3");
@@ -666,20 +669,45 @@ mod tests {
         );
     }
 
-    /// A resume id whose transcript is gone launches fresh and is dropped.
+    /// A resume id whose transcript is gone is still resumed — never
+    /// replaced by a fresh conversation — and flagged, so a failed resume
+    /// can say why.
     #[test]
-    fn a_missing_transcript_drops_the_resume_id() {
+    fn a_missing_transcript_is_still_resumed_and_flagged() {
         let h = harness("oxplow:claude-code", "claude");
         let l = launch_in(h.as_ref(), Some("gone"), None, &serde_json::json!({}));
-        assert!(
-            !l.launch.resume_dropped,
-            "no projects dir: can't tell, kept"
-        );
+        assert!(!l.launch.transcript_missing, "no projects dir: can't tell");
+        assert!(pty(&l.launch).contains("--resume"));
         let l = crate::test_launch::launch_with_home(h.as_ref(), "gone", |home, cwd| {
             fs::create_dir_all(home.join(".claude/projects").join(encode_cwd(cwd))).unwrap();
         });
-        assert!(l.launch.resume_dropped);
-        assert!(!pty(&l.launch).contains("--resume"));
+        assert!(l.launch.transcript_missing);
+        let cmd = pty(&l.launch);
+        assert!(cmd.contains("--resume") && !cmd.contains("||"), "{cmd}");
+    }
+
+    /// The transcript is looked for where Claude keeps it: under
+    /// `CLAUDE_CONFIG_DIR` when that is set, so a conversation outside the
+    /// default directory isn't classified as missing.
+    #[test]
+    fn the_transcript_is_looked_for_in_the_effective_config_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let custom = tmp.path().join("custom");
+        let cwd = "/repo/wt";
+        let dir = custom.join("projects").join(encode_cwd(cwd));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("here.jsonl"), "{}").unwrap();
+        assert_eq!(config_dir(&home, None), home.join(".claude"));
+        assert_eq!(config_dir(&home, Some("".into())), home.join(".claude"));
+        let effective = config_dir(&home, Some(custom.clone().into_os_string()));
+        assert_eq!(effective, custom);
+        assert_eq!(resume_state(&effective, cwd, "here"), ResumeState::Present);
+        // The default dir doesn't have it, and isn't consulted.
+        assert_eq!(
+            resume_state(&config_dir(&home, None), cwd, "here"),
+            ResumeState::Unknown
+        );
     }
 
     #[test]
@@ -701,7 +729,7 @@ mod tests {
         assert_eq!(env["OTEL_METRIC_EXPORT_INTERVAL"], "10000");
     }
 
-    fn run(resume: Resume<'_>) -> String {
+    fn run(resume: Resume) -> String {
         command(Command {
             cwd: "/repo",
             resume,
@@ -721,24 +749,15 @@ mod tests {
         assert!(cmd.contains("command -v claude"));
     }
 
-    /// A session found on disk is resumed by exec, with no second process
-    /// on a failure; only one that couldn't be checked falls back to a
-    /// fresh session.
+    /// A saved session is resumed by exec, with no fallback: a failure
+    /// ends the PTY and is reported, never answered with a fresh session.
     #[test]
-    fn a_known_resume_is_execd_and_only_an_unchecked_one_falls_back() {
-        let known = run(Resume::Known(resume_args("sess-1")));
-        let (_, resumed) = known.split_once("exit 127; }; ").unwrap();
-        assert!(resumed.starts_with("exec claude --resume"), "{known}");
-        assert!(!resumed.contains("||"), "{known}");
-        let unchecked = run(Resume::Unchecked {
-            args: resume_args("sess-1"),
-            harness: "Claude",
-        });
-        assert!(
-            unchecked.contains("--resume") && unchecked.contains("||"),
-            "{unchecked}"
-        );
-        assert!(unchecked.contains("starting a fresh one"), "{unchecked}");
+    fn a_saved_resume_is_execd_with_no_fallback() {
+        let saved = run(Resume::Saved(resume_args("sess-1")));
+        let (_, resumed) = saved.split_once("exit 127; }; ").unwrap();
+        assert!(resumed.starts_with("exec claude --resume"), "{saved}");
+        assert!(!saved.contains("||") || !resumed.contains("||"), "{saved}");
+        assert!(!saved.contains("starting a fresh one"), "{saved}");
     }
 
     /// The launch resumes by exec when Claude's transcript is there.
@@ -750,7 +769,7 @@ mod tests {
             fs::create_dir_all(&dir).unwrap();
             fs::write(dir.join("here.jsonl"), "{}").unwrap();
         });
-        assert!(!l.launch.resume_dropped);
+        assert!(!l.launch.transcript_missing);
         let cmd = pty(&l.launch);
         assert!(cmd.contains("exec '") && cmd.contains("--resume"), "{cmd}");
         assert!(!cmd.contains("||"), "{cmd}");
@@ -770,15 +789,13 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let cwd = "/repo/wt";
         let dir = tmp.path().join(".claude/projects").join(encode_cwd(cwd));
-        assert_eq!(resume_state(tmp.path(), cwd, "x"), ResumeState::Unknown);
+        let config = tmp.path().join(".claude");
+        assert_eq!(resume_state(&config, cwd, "x"), ResumeState::Unknown);
         fs::create_dir_all(&dir).unwrap();
-        assert_eq!(resume_state(tmp.path(), cwd, "gone"), ResumeState::Missing);
+        assert_eq!(resume_state(&config, cwd, "gone"), ResumeState::Missing);
         fs::write(dir.join("sess-123.jsonl"), "{}").unwrap();
-        assert_eq!(
-            resume_state(tmp.path(), cwd, "sess-123"),
-            ResumeState::Present
-        );
-        assert_eq!(resume_state(tmp.path(), cwd, ""), ResumeState::Unknown);
+        assert_eq!(resume_state(&config, cwd, "sess-123"), ResumeState::Present);
+        assert_eq!(resume_state(&config, cwd, ""), ResumeState::Unknown);
     }
 
     fn plugin(project: &Path, text: &AgentText) -> PathBuf {

@@ -268,6 +268,29 @@ impl HookIngestService {
         Ok(outcome)
     }
 
+    /// How agent session `session`'s process ending with `exit_code` is to
+    /// be told to the person (`session_outcome`); a database that can't
+    /// answer reads as an ordinary end.
+    pub async fn exit_outcome(
+        &self,
+        session: oxplow_domain::AgentSessionId,
+        launch: crate::session_outcome::LaunchInfo,
+        launched_at: Timestamp,
+        exit_code: Option<i32>,
+    ) -> crate::session_outcome::ExitOutcome {
+        match self
+            .db
+            .read(move |c| crate::session_outcome::exit_facts(c, session, launched_at))
+            .await
+        {
+            Ok(facts) => crate::session_outcome::classify_exit(launch, exit_code, facts),
+            Err(err) => {
+                tracing::warn!(?err, "reading how an agent's session ended failed");
+                crate::session_outcome::ExitOutcome::Ended
+            }
+        }
+    }
+
     /// Record the OS pid of the process just spawned for agent session
     /// `session` (every spawn, so a restarted agent's new pid replaces
     /// the old).

@@ -54,7 +54,7 @@ impl AgentHarness for Acp {
                 env: p.env,
                 system_prompt_via_meta: p.system_prompt_via_meta,
             },
-            resume_dropped: false,
+            transcript_missing: false,
         })
     }
 

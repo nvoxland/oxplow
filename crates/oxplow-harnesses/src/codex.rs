@@ -68,7 +68,7 @@ impl AgentHarness for Codex {
                     .chain([otel_env(&ep.hook_token)])
                     .collect(),
             },
-            resume_dropped: false,
+            transcript_missing: false,
         })
     }
 

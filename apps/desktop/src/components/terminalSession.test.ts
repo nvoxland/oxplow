@@ -1,13 +1,21 @@
 import { expect, test } from "bun:test";
 
-import { isSessionGone, isStopped, mayStartNow, readSessionMessage, reopened } from "./terminalSession.js";
+import { exitBanner, isSessionGone, isStopped, mayStartNow, readSessionMessage, reopened } from "./terminalSession.js";
 
 // tsk1026: after the daemon restarted, the agent pane kept the dead session's
 // screen and swallowed keystrokes; an agent that exited said nothing.
 
 test("an exit message is read, with its code", () => {
-  expect(readSessionMessage(JSON.stringify({ type: "exit", exitCode: 0 }))).toEqual({ kind: "exit", exitCode: 0 });
-  expect(readSessionMessage(JSON.stringify({ type: "exit" }))).toEqual({ kind: "exit", exitCode: null });
+  expect(readSessionMessage(JSON.stringify({ type: "exit", exitCode: 0 }))).toEqual({
+    kind: "exit",
+    exitCode: 0,
+    outcome: { kind: "ended" },
+  });
+  expect(readSessionMessage(JSON.stringify({ type: "exit" }))).toEqual({
+    kind: "exit",
+    exitCode: null,
+    outcome: { kind: "ended" },
+  });
 });
 
 test("a data message is read as bytes; anything else is nothing", () => {
@@ -48,4 +56,43 @@ test("a STOPPED open failure is read as a stop", () => {
   expect(isStopped({ code: "STOPPED", message: "x" })).toBe(true);
   expect(isStopped(new Error("terminal session not found"))).toBe(false);
   expect(isStopped(null)).toBe(false);
+});
+
+test("an exit message carries what the exit meant", () => {
+  const unable = readSessionMessage(
+    JSON.stringify({ type: "exit", exitCode: 1, outcome: { kind: "unable_to_resume", reason: "exited_early", exitCode: 1 } }),
+  );
+  expect(unable).toEqual({
+    kind: "exit",
+    exitCode: 1,
+    outcome: { kind: "unable_to_resume", reason: "exited_early", exitCode: 1 },
+  });
+  const plain = readSessionMessage(JSON.stringify({ type: "exit", exitCode: 0, outcome: { kind: "ended" } }));
+  expect(plain).toEqual({ kind: "exit", exitCode: 0, outcome: { kind: "ended" } });
+  // An exit without an outcome (an older daemon) is an ordinary end.
+  expect(readSessionMessage(JSON.stringify({ type: "exit", exitCode: 2 }))).toEqual({
+    kind: "exit",
+    exitCode: 2,
+    outcome: { kind: "ended" },
+  });
+});
+
+test("the ended banner says what happened and offers the right actions", () => {
+  expect(exitBanner({ exitCode: 0, outcome: { kind: "ended" } })).toEqual({
+    text: "Session ended.",
+    actions: ["start-again"],
+  });
+  expect(exitBanner({ exitCode: 3, outcome: { kind: "ended" } }).text).toBe("Session ended (exit 3).");
+  const early = exitBanner({
+    exitCode: 1,
+    outcome: { kind: "unable_to_resume", reason: "exited_early", exitCode: 1 },
+  });
+  expect(early.text).toContain("Couldn't resume the saved conversation (exit 1)");
+  expect(early.actions).toEqual(["retry", "start-fresh"]);
+  const missing = exitBanner({
+    exitCode: 1,
+    outcome: { kind: "unable_to_resume", reason: "transcript_missing", exitCode: 1 },
+  });
+  expect(missing.text).toContain("transcript wasn't found");
+  expect(missing.actions).toEqual(["retry", "start-fresh"]);
 });

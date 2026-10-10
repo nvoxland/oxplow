@@ -96,7 +96,7 @@ pub fn launch(input: &LaunchInput) -> Result<Launch, HarnessError> {
             ),
             env,
         },
-        resume_dropped: false,
+        transcript_missing: false,
     })
 }
 

@@ -1,7 +1,7 @@
 import { Page } from "../tabs/Page.js";
 import { TerminalPane } from "../components/TerminalPane.js";
 import type { Stream, Thread } from "../api.js";
-import { recordUserInterrupt, startAgentSession } from "../api.js";
+import { recordUserInterrupt, startAgentSession, startAgentSessionFresh } from "../api.js";
 import { useWorkspaceLinkIndex } from "../useWorkspaceLinkIndex.js";
 import { AcpAgentView } from "../components/acp/AcpAgentView.js";
 import { AnswersStrip } from "../components/Answers/AnswersStrip.js";
@@ -96,6 +96,7 @@ export function AgentSessionPage({
             visible={visible}
             startOnActivate
             stopped={session.stoppedByUser}
+            onStartFresh={() => startAgentSessionFresh(session.id, true)}
             onStart={() => {
               void startAgentSession(session.id).catch(() => undefined);
             }}

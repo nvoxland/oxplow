@@ -247,7 +247,7 @@ mod tests {
                         command: format!("agent --token {}", input.endpoints.hook_token),
                         env: Vec::new(),
                     },
-                    resume_dropped: false,
+                    transcript_missing: false,
                 })
             }
             async fn tool_use(&self, _: &serde_json::Value) -> Option<ToolUse> {

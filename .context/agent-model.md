@@ -164,7 +164,7 @@ oxplow agent:
 
 Each harness launches its own sessions: `AgentHarness::launch(&LaunchInput)`
 (`crates/oxplow-domain/src/agent/harness.rs`) writes whatever runtime files
-the agent needs and returns a `Launch { spec, resume_dropped }`. The spec is
+the agent needs and returns a `Launch { spec, transcript_missing }`. The spec is
 `LaunchSpec::Pty { command, env }` (a shell command for the PTY and the
 env the spawn sets — anything secret goes in `env`, never in `command`) or
 `LaunchSpec::Acp { program, args, env, system_prompt_via_meta }` (a process
@@ -177,8 +177,8 @@ input — the session/thread/stream ids, the workspace and project dir, the
 control-plane endpoints, the identity env, the assembled system prompt, the
 session's resume id, the agent text, the harness config, oxplow's own
 executable, `HOME`, and a program resolver — and, when the harness reports
-`resume_dropped`, blanks the session's resume pointer. A harness never
-touches the database.
+`transcript_missing`, passes that on to the pane (below) — nothing is
+forgotten. A harness never touches the database.
 
 **What a harness implements.** `AgentHarness` requires only what every
 harness answers: `id`, `title`, `interact` (what the UI shows: its own
@@ -231,11 +231,9 @@ A built-in's declaration names the optional verbs it has as features —
 four, Codex all but `transcript`, opencode `runtime_text`.
 
 **Resuming.** `shared::resume_or_fresh` builds the resume: a session the
-harness found on disk (Claude's transcript, `resume_state`) is `exec`'d
-directly, so its process is the agent's and its exit ends the PTY; one it
-couldn't check (opencode, or Claude with no projects dir) falls back to a
-fresh session only when it fails to start, and says so. A session found
-missing launches fresh and is dropped (`resume_dropped`).
+harness resumes is `exec`'d directly (`Resume::Saved`), so its process is the agent's and its exit ends the PTY. There is no
+fallback: a resume that fails never starts a fresh conversation — only
+`agent_session.start_fresh` does.
 
 **A project's instruction files are the harness's own business.** oxplow
 never reads or forwards `AGENTS.md`, `CLAUDE.md` or any other: each agent
@@ -659,21 +657,18 @@ one, and one that posts none (Codex) still ends.
    normal restarts still resume, and a clear of a stale session never wipes
    a newer token. (The in-memory resume cache is gone: the ingest reads
    the thread row in its transaction anyway.)
-   A second cleanup runs at **launch** for a token that's stale for any
-   other reason (transcript pruned, machine moved, id rotted). Before
-   passing `--resume`, the Claude harness's `launch` probes the
-   session file (`resume_state` in `crates/oxplow-harnesses/src/claude.rs`)
-   and reports `resume_dropped`, which `launch_session` turns into
-   `resume_check::forget_missing`: it maps the cwd to Claude's
-   `$HOME/.claude/projects/<cwd-with-non-alnum→'-'>/<id>.jsonl` and, if
-   the project dir exists but the `.jsonl` is gone (`Missing`), blanks the
-   thread's pointer and launches fresh — so `claude --resume <stale>`
-   never runs and its raw "No conversation found" error never reaches the
-   terminal. Conservative by design: an absent project dir reads as
-   `Unknown` (never clears), so an encoding drift can't wrongly wipe a
-   valid pointer, and the shell `||` net in the harness's command still
-   covers the file-vanishes-between-check-and-exec race. Claude-only;
-   codex/opencode keep just the shell net.
+   At **launch** nothing is forgotten (see "Resume outcomes" in
+   `terminal.md`). The Claude harness only *classifies*: it looks for
+   the session file under the **effective config directory** —
+   `$CLAUDE_CONFIG_DIR` when set (the child inherits it, so it is where
+   Claude looks), else `$HOME/.claude` — at
+   `projects/<cwd-with-non-alnum→'-'>/<id>.jsonl` (`resume_state` in
+   `crates/oxplow-harnesses/src/claude.rs`), and reports
+   `transcript_missing` when the project dir exists but the file is gone.
+   An absent project dir, or an agent on another host (no `HOME` is passed
+   for a non-local stream), reads as `Unknown`. The launch resumes in every
+   case; the flag only lets a failed resume say the transcript wasn't
+   found.
 3. Opens and closes `agent_turn` rows (UserPromptSubmit / Stop /
    interrupt, logging `agent.turn.*`), and a closed turn ends at a
    `turn_end` snapshot (see "Snapshot tracking" below). Per-effort

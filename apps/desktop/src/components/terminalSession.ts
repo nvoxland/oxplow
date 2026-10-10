@@ -4,9 +4,25 @@
 /// instead of showing a dead screen that swallows keystrokes.
 
 /** One message from the daemon about a pane's session. */
+export type ExitOutcome =
+  | { kind: "ended" }
+  | { kind: "unable_to_resume"; reason: "exited_early" | "transcript_missing"; exitCode: number };
+
 export type SessionMessage =
   | { kind: "data"; bytes: Uint8Array }
-  | { kind: "exit"; exitCode: number | null };
+  | { kind: "exit"; exitCode: number | null; outcome: ExitOutcome };
+
+function readOutcome(value: unknown): ExitOutcome {
+  const o = value as { kind?: unknown; reason?: unknown; exitCode?: unknown } | null;
+  if (o && o.kind === "unable_to_resume" && typeof o.exitCode === "number") {
+    return {
+      kind: "unable_to_resume",
+      reason: o.reason === "transcript_missing" ? "transcript_missing" : "exited_early",
+      exitCode: o.exitCode,
+    };
+  }
+  return { kind: "ended" };
+}
 
 /** The session message in a terminal event's JSON, or `null` for anything
  *  else. */
@@ -26,7 +42,11 @@ export function readSessionMessage(message: string): SessionMessage | null {
     return { kind: "data", bytes };
   }
   if (m.type === "exit") {
-    return { kind: "exit", exitCode: typeof m.exitCode === "number" ? m.exitCode : null };
+    return {
+      kind: "exit",
+      exitCode: typeof m.exitCode === "number" ? m.exitCode : null,
+      outcome: readOutcome((m as { outcome?: unknown }).outcome),
+    };
   }
   return null;
 }
@@ -58,4 +78,29 @@ export function mayStartNow(startOnActivate: boolean, visible: boolean, stopped 
 /** Whether an open failure means the person stopped the session. */
 export function isStopped(error: unknown): boolean {
   return (error as { code?: unknown } | null)?.code === "STOPPED";
+}
+
+/** What the ended banner says and offers. A resume that failed before a
+ *  turn ran keeps the saved conversation: Retry resumes it again, Start
+ *  fresh deliberately begins a new one. Any other end offers Start Again,
+ *  which resumes the saved conversation as well. */
+export function exitBanner(ended: { exitCode: number | null; outcome: ExitOutcome }): {
+  text: string;
+  actions: Array<"start-again" | "retry" | "start-fresh">;
+} {
+  const o = ended.outcome;
+  if (o.kind === "unable_to_resume") {
+    const why =
+      o.reason === "transcript_missing"
+        ? "the saved conversation's transcript wasn't found"
+        : "it exited before the conversation started";
+    return {
+      text: `Couldn't resume the saved conversation (exit ${o.exitCode}): ${why}. It is kept — retry, or start a fresh one.`,
+      actions: ["retry", "start-fresh"],
+    };
+  }
+  return {
+    text: `Session ended${ended.exitCode === null ? "" : ended.exitCode === 0 ? "" : ` (exit ${ended.exitCode})`}.`,
+    actions: ["start-again"],
+  };
 }

@@ -111,6 +111,28 @@ Only the person stopping sets it: we do not infer a stop from an exit,
 because no harness tells us the person typed `/exit`. The agent-tab
 context menu has **Stop Agent** / **Start Agent**.
 
+**Resume outcomes.** A launch that resumes a saved conversation never
+falls back to a fresh one (`Resume::Saved` is `exec <agent> <resume args>`,
+no `||`). The pane is told what happened:
+
+- `open_terminal_session` answers `launch`: `reattached` (a live process
+  was joined), `started`, or `resumed` (the saved conversation); the pane
+  shows a faint "Reattached…" / "Resumed…" note.
+- The `exit` message carries an `outcome` (`session_outcome.rs`): a
+  resume that exited nonzero **before the session recorded a turn**
+  (`turn_since`: no `agent_turn` at or after the launch) is
+  `unable_to_resume` — `transcript_missing` when the harness flagged it,
+  else `exited_early`, with the exit code. A nonzero exit after a turn, a
+  clean exit and a stop by the person are an ordinary `ended`. We don't
+  parse the output for auth versus config versus transport; the terminal
+  shows it.
+- The ended banner for `unable_to_resume` keeps the saved conversation and
+  offers **Retry** (resume the same id) and **Start Fresh** (a second click
+  confirms; runs `agent_session.start_fresh`, the only way to a new
+  conversation). Another end offers **Start Again**, which also resumes.
+  Choosing another native conversation is not built (no harness lists
+  them yet).
+
 **Read-only session lookup (tsk139).** `lookup_terminal_session({ sessionId })`
 (core in `crates/oxplow-rpc/src/commands/terminal.rs`; Tauri shim +
 `bindings.ts` `lookupTerminalSession`) returns the live PTY `sessionId` of

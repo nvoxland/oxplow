@@ -513,7 +513,7 @@ its worktree and project, the endpoints and the session's bearer, the
 identity env, the system prompt, the resume id, the agent text, its
 `agentConfig`, oxplow's executable, home, and the program `search_path`)
 and answers a `Launch` (`{ spec: { kind: pty, command, env } | { kind:
-acp, program, args, env, system_prompt_via_meta }, resume_dropped? }`);
+acp, program, args, env, system_prompt_via_meta }, transcript_missing? }`);
 `tool_use { body }` → `{ tool }`; `render { answer }` (`{ kind: ack |
 deny | context, … }`) → `{ body }`; `refresh_text { roots, text }` → `{}`;
 `turns { transcript }` → `{ turns }`; `prompt { body }` → `{ prompt: { kind:

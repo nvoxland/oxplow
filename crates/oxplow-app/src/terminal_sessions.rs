@@ -139,6 +139,8 @@ pub fn agent_pane_key(session: oxplow_domain::AgentSessionId) -> SessionKey {
 pub struct AgentPane {
     pub thread: ThreadId,
     pub session: Option<oxplow_domain::AgentSessionId>,
+    /// How its process was launched, to say what an exit meant.
+    pub launch: crate::session_outcome::LaunchInfo,
 }
 
 #[derive(Clone)]
@@ -195,10 +197,15 @@ impl TerminalSessionRegistry {
     /// plus a base64-encoded snapshot of the replay buffer that the
     /// renderer should write into a fresh xterm before it starts
     /// consuming live events.
-    pub fn build_attach_result(session_id: String, replay: Vec<u8>) -> AttachResult {
+    pub fn build_attach_result(
+        session_id: String,
+        replay: Vec<u8>,
+        launch: LaunchKind,
+    ) -> AttachResult {
         AttachResult {
             session_id,
             replay_b64: B64.encode(&replay[..]),
+            launch,
         }
     }
 
@@ -234,14 +241,22 @@ impl TerminalSessionRegistry {
             let map = self.inner.lock().await;
             if let Some(entry) = map.get(&existing_id) {
                 let replay = entry.ring.lock().await.snapshot();
-                return Ok(Self::build_attach_result(existing_id, replay));
+                return Ok(Self::build_attach_result(
+                    existing_id,
+                    replay,
+                    LaunchKind::Reattached,
+                ));
             }
             // Stale by_key entry (entry was killed); fall through and
             // create a fresh session.
         }
         let req = make_request(cols, rows);
+        let launch = match agent {
+            Some(pane) if pane.launch.resumed => LaunchKind::Resumed,
+            _ => LaunchKind::Started,
+        };
         let session_id = self.spawn_with(req, key.clone(), agent).await?;
-        Ok(Self::build_attach_result(session_id, Vec::new()))
+        Ok(Self::build_attach_result(session_id, Vec::new(), launch))
     }
 
     /// Read-only: the live session id indexed under external `key`, or
@@ -271,6 +286,7 @@ impl TerminalSessionRegistry {
         let pane_id = handle.id.clone();
         let pid = handle.pid;
         let session_id = format!("term-{}", uuid::Uuid::new_v4().simple());
+        let launched_at = Timestamp::now();
         if let (Some(agent_session), Some(pid), Some(ingest)) =
             (agent.and_then(|pane| pane.session), pid, self.exits.get())
         {
@@ -318,9 +334,21 @@ impl TerminalSessionRegistry {
                         });
                     }
                     Ok(PaneEvent::Exit { exit_code }) => {
+                        let outcome = match (agent, exits.get()) {
+                            (
+                                Some(AgentPane {
+                                    session: Some(s),
+                                    launch,
+                                    ..
+                                }),
+                                Some(ingest),
+                            ) => ingest.exit_outcome(s, launch, launched_at, exit_code).await,
+                            _ => crate::session_outcome::ExitOutcome::Ended,
+                        };
                         let msg = serde_json::json!({
                             "type": "exit",
                             "exitCode": exit_code,
+                            "outcome": outcome,
                         })
                         .to_string();
                         let _ = events.send(TerminalBridgeEvent {
@@ -490,6 +518,21 @@ pub struct AttachResult {
     pub session_id: String,
     #[serde(rename = "replayB64")]
     pub replay_b64: String,
+    /// What this attach did: joined a live process, started a fresh
+    /// conversation, or resumed a saved one.
+    pub launch: LaunchKind,
+}
+
+/// What an attach did about the process behind the pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum LaunchKind {
+    /// A live process was already running; the pane joined it.
+    Reattached,
+    /// A process was started for a conversation with nothing saved.
+    Started,
+    /// A process was started resuming the saved conversation.
+    Resumed,
 }
 
 /// Read a process's current working directory by pid. Linux reads the
@@ -646,6 +689,7 @@ mod tests {
                 Some(AgentPane {
                     thread: fx.thread,
                     session: Some(session),
+                    launch: Default::default(),
                 }),
                 80,
                 24,
@@ -700,6 +744,7 @@ mod tests {
                 Some(AgentPane {
                     thread: fx.thread,
                     session: Some(session),
+                    launch: Default::default(),
                 }),
                 80,
                 24,

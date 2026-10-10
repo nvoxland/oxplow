@@ -136,13 +136,16 @@ pub enum LaunchSpec {
     },
 }
 
-/// A launch: how to start the process, and whether the resume id was
-/// found stale (core then forgets it, `resume_check::forget_missing`).
+/// A launch: how to start the process, and whether the harness found the
+/// saved conversation it resumes gone (its transcript is not where it
+/// looked). The launch resumes regardless — the harness has the final say
+/// — and the flag only lets a failed resume say why. Nothing forgets the
+/// id; only `agent_session.start_fresh` does.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Launch {
     pub spec: LaunchSpec,
     #[serde(default)]
-    pub resume_dropped: bool,
+    pub transcript_missing: bool,
 }
 
 /// One project setting a harness reads (`agentConfig.<harness>.<key>`), as
@@ -302,7 +305,7 @@ mod tests {
                     command: "agent".into(),
                     env: vec![("K".into(), "v".into())]
                 },
-                resume_dropped: false
+                transcript_missing: false
             }
         );
     }

@@ -388,9 +388,9 @@ One agent slot a person opened on a thread (V32; `ses<n>`, ref
   ended notice and the resume id.
 - **Resume id:** the hook ingest records the harness's session id on its
   first sighting (`set_resume_tx`) and forgets it on a `/clear` of exactly
-  that session; a launch that finds the transcript gone forgets it too
-  (`resume_check::forget_missing`). Forgetting is conditional
-  (`forget_resume_tx`): a newer id that replaced it stays.
+  that session; a launch never forgets it (only
+  `oxplow.agent_session.start_fresh` does). Forgetting on `/clear` is
+  conditional (`forget_resume_tx`): a newer id that replaced it stays.
 - **Turns and events carry it.** `agent_turn.agent_session_id` (nullable:
   a hook from an agent oxplow didn't start claims none) and the
   `event_log.agent_session_id` anchor (`Anchors.agent_session_id`, named

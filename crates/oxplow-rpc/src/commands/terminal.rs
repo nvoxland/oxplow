@@ -229,6 +229,10 @@ pub async fn open_terminal_session(
             Some(oxplow_app::terminal_sessions::AgentPane {
                 thread: thread.id,
                 session: Some(session.id),
+                launch: oxplow_app::session_outcome::LaunchInfo {
+                    resumed: !session.resume_session_id.is_empty(),
+                    transcript_missing: launch.transcript_missing,
+                },
             }),
             cols.max(20),
             rows.max(5),
@@ -271,7 +275,11 @@ pub(crate) async fn launch_session(
     let text = oxplow_app::capabilities::agent_text(ctx);
     let executable = std::env::current_exe()
         .map_err(|e| IpcError::internal(format!("the oxplow binary: {e}")))?;
-    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    // The harness looks for its saved conversations under the home of the
+    // machine the agent runs on: this one's only when the stream is local.
+    let home = (stream.host == oxplow_domain::HostId::LOCAL)
+        .then(|| std::env::var_os("HOME").map(std::path::PathBuf::from))
+        .flatten();
     let launch = harness
         .launch(&LaunchInput {
             session: SessionIds {
@@ -293,17 +301,6 @@ pub(crate) async fn launch_session(
         })
         .await
         .map_err(|e| IpcError::internal(e.to_string()))?;
-    if launch.resume_dropped {
-        if let Err(err) = oxplow_app::resume_check::forget_missing(
-            &ctx.db,
-            session.id,
-            &session.resume_session_id,
-        )
-        .await
-        {
-            tracing::warn!(?err, "resume-check: clearing stale resume pointer failed");
-        }
-    }
     Ok(launch)
 }
 
