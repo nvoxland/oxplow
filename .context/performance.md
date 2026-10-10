@@ -677,6 +677,12 @@ commit, built in a scratch worktree) and after:
 | 12 × 60 files | 258,840 → 719 | 314 MB → 5.3 MB | 297 ms → 72 ms |
 | 24 × 60 files | 1,036,080 → 1,439 | 1,244 MB → 6.9 MB | 1,542 ms → 131 ms |
 
+The worker-cost sweep's 120-file tree above is that shape: with the fix its
+whole 16-metric sweep takes about 7.2 s of worker CPU (7.9 s wall), where
+`oxplow.duplicate_lines` alone took 11 s and 527 MB before. (`worker_cost`
+prints the sweep's total, not each metric's peak, so the per-metric figure
+isn't re-measured here.)
+
 Before, memory grew with the square of the family (the number of blocks
 quadrupled when the files doubled); after, with the file count. The same
 shape on the real repo's own duplication is unchanged in kind: its families
