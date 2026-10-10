@@ -83,11 +83,20 @@ loader. Files in unsupported languages are silently skipped.
    `STR`); imports / use / include / package declarations are
    skipped whole-subtree; comments are skipped; cross-language
    collisions are prevented by salting with `Language::tag()`.
-3. Group records by hash. For each (function-A, function-B) pair
-   that shares any matching subtree, emit ONE finding for the
+3. Group records by hash. A family of n records sharing a hash is n
+   regions, each linked to ONE peer (the family's first member in
+   path/offset order, or for a member in the first's own function the
+   first member of another function) — never the n(n-1)/2 pairs of
+   them, so a corpus dense with duplication grows the result with its
+   size, not its square (a generated dense corpus once took ~512 MB of
+   pair findings against ~67 MB for the real repo). For each
+   (function-A, function-B) pair so linked, emit ONE finding for the
    largest matching subtree between them — so a whole-function
    clone subsumes the inner-loop and inner-branch matches that
-   would otherwise pile up.
+   would otherwise pile up. Every member still appears in a finding
+   (so `oxplow.duplicate_lines` and a changed file's scoped scan lose
+   no region); records share their file's path (`Arc<str>`) rather
+   than each holding a copy.
 4. Filter by `min_lines` (default 5) and `min_nodes` (default 30
    AST nodes). The line floor is aggressive on purpose — function-
    anchoring + the node-count floor already filter top-level
