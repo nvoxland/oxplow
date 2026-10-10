@@ -55,6 +55,10 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-bundled", "event_types/changes_requested.v1.json"),
             ext_file!("oxplow-bundled", "event_types/finished_cleared.v1.json"),
             ext_file!("oxplow-bundled", "extension.yaml"),
+            ext_file!(
+                "oxplow-bundled",
+                "fixtures/extension runs over the last week.yaml"
+            ),
             ext_file!("oxplow-bundled", "handlers/accept.star"),
             ext_file!("oxplow-bundled", "handlers/clear_finished.star"),
             ext_file!("oxplow-bundled", "handlers/request_changes.star"),
@@ -94,6 +98,7 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-bundled", "lenses/recent-snapshots.yaml"),
             ext_file!("oxplow-bundled", "lenses/review-prompt.yaml"),
             ext_file!("oxplow-bundled", "lenses/review.yaml"),
+            ext_file!("oxplow-bundled", "lenses/runs.yaml"),
             ext_file!("oxplow-bundled", "lenses/session-files.yaml"),
             ext_file!("oxplow-bundled", "lenses/struggled.yaml"),
             ext_file!("oxplow-bundled", "lenses/task-token-summary.yaml"),
@@ -378,6 +383,56 @@ mod tests {
         .await
         .unwrap();
         serde_json::to_value(&run.result.rows).unwrap()
+    }
+
+    /// The `runs` lens: per extension, the last week's runs, failures,
+    /// denials, mean CPU and model calls, the ones needing attention first.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_runs_lens_counts_each_extensions_week() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        // (extension, outcome, days ago, cpu ms, model calls)
+        let runs: [(&str, &str, i64, i64, i64); 6] = [
+            ("acme", "ok", 1, 10, 0),
+            ("acme", "failed", 2, 30, 2),
+            ("acme", "denied", 3, 20, 0),
+            ("acme", "ok", 8, 999, 9), // a week and a day ago: out
+            ("beta", "ok", 0, 5, 0),
+            ("beta", "ok", 4, 7, 0),
+        ];
+        f.svc
+            .db
+            .transaction(move |tx| {
+                for (i, (ext, outcome, days, cpu, ai)) in runs.iter().enumerate() {
+                    tx.execute(
+                        "INSERT INTO extension_run
+                           (run_id, extension, contribution, kind, actor_kind, actor, mode,
+                            started_at, finished_at, outcome, wall_ms, cpu_ms, peak_bytes,
+                            ai_calls, scopes_json, decisions_json)
+                         VALUES (?1, ?2, ?3, 'collector', 'system', 'system', 'external',
+                            strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-' || ?4 || ' days'),
+                            strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-' || ?4 || ' days'),
+                            ?5, 1, ?6, 0, ?7, '{}', '[]')",
+                        rusqlite::params![
+                            format!("run{i}"),
+                            ext,
+                            format!("{ext}/collector/pull"),
+                            days,
+                            outcome,
+                            cpu,
+                            ai
+                        ],
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let rows = run_bundled_lens(&f, "oxplow-bundled/runs", &[]).await;
+        assert_eq!(
+            rows,
+            serde_json::json!([["acme", 3, 1, 1, 20.0, 2], ["beta", 2, 0, 0, 6.0, 0]])
+        );
     }
 
     /// Token usage moved from the task/thread widgets to slot lenses.

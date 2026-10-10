@@ -1,0 +1,5 @@
+# The `runs` lens over a throwaway oxplow with no runs recorded: it runs and
+# says so. (Rows over recorded runs are pinned by `the_runs_lens_counts_each_extensions_week`.)
+name: extension runs over the last week
+input: { lens: runs, params: {} }
+expect: { rows: 0 }

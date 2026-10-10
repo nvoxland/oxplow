@@ -129,13 +129,13 @@ pub async fn test_extension_in(
 /// An intent example's fixture (`fixtures/<name>.yaml`): `None` when it
 /// has none; the parsed document, or why it isn't one.
 fn example_fixture(
-    dir: &Path,
+    read: &dyn Fn(&str) -> Option<String>,
     rel: &str,
     example: &str,
 ) -> Option<(String, Result<Value, String>)> {
     let file = format!("fixtures/{example}.yaml");
     let shown = format!("{rel}/{file}");
-    let text = std::fs::read_to_string(dir.join(&file)).ok()?;
+    let text = read(&file)?;
     let doc = serde_yaml::from_str::<Value>(&text)
         .map_err(|e| format!("{shown}:1: not YAML: {e} — fix: correct it"));
     Some((shown, doc))
@@ -146,14 +146,17 @@ fn example_fixture(
 /// session.
 async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
     let rel = ext.path.trim_end_matches('/').to_string();
-    let dir = host.root.join(&rel);
+    // Read as the extension's files are everywhere: a bundled extension's
+    // fixtures are embedded with it, not on disk.
+    let read =
+        |file: &str| oxplow_app::extensions::read_extension_file(&host.root, &ext.name, file);
     let examples = ext
         .intent
         .as_ref()
         .map(|i| i.examples.clone())
         .unwrap_or_default();
     for example in examples {
-        let Some((shown, doc)) = example_fixture(&dir, &rel, &example.name) else {
+        let Some((shown, doc)) = example_fixture(&read, &rel, &example.name) else {
             report.warnings.push(format!(
                 "{rel}/fixtures/{}.yaml:1: example `{}` has no fixture, so it isn't run — fix: \
                  write its `input` (`{{ lens, params? }}`, `{{ collector, rows? }}`, a fact \
@@ -1141,7 +1144,8 @@ async fn session(
     // The examples that invoke a command; the rest (and a missing or
     // broken fixture) are `examples`'.
     for example in examples {
-        let Some((shown, Ok(doc))) = example_fixture(dir, rel, &example.name) else {
+        let read = |file: &str| std::fs::read_to_string(dir.join(file)).ok();
+        let Some((shown, Ok(doc))) = example_fixture(&read, rel, &example.name) else {
             continue;
         };
         let Some(command) = doc.pointer("/input/command").and_then(Value::as_str) else {

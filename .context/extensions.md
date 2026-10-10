@@ -1825,6 +1825,11 @@ its scope trace.
   started it. A person's `oxplow.effect.retry` / `backfill` links the
   reaction's run to theirs (`under`) without making it theirs: the
   effect still runs as itself.
+  **Reading it:** the bundled `runs` lens (`oxplow-bundled/runs`, in the
+  launcher under Activity) lists, per extension and for the last 7 days, its
+  runs, failures, denials, mean `cpu_ms` and model calls, the ones needing
+  attention first. Settings → Extensions shows each extension's worst current
+  run (`v_extension_run`, `latest = 1`).
 - **Cancel reaches the worker.** Every script a collector, command,
   effect, policy or fact collector runs is passed its run's cancel flag;
   an exec collector's program is killed when it's set. Upcasts, report
