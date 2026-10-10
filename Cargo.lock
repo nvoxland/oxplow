@@ -4698,6 +4698,7 @@ dependencies = [
  "schemars 1.2.2",
  "serde",
  "serde_json",
+ "serde_path_to_error",
  "specta",
  "specta-typescript",
  "tempfile",

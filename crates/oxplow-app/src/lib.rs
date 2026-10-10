@@ -1277,6 +1277,7 @@ impl Services {
             config: config_arc.clone(),
             capabilities: capabilities.clone(),
             policies: effort_policies.clone(),
+            vocabulary: vocabulary.clone(),
         }));
         for command in commands::vcs::ops(commands::vcs::VcsTarget {
             vcs: vcs.clone(),

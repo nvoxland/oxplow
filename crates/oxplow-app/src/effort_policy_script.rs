@@ -13,7 +13,8 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use oxplow_domain::effort_policy::{EffortPolicy, PolicyEvent};
+use oxplow_domain::effort_policy::EffortPolicy;
+use oxplow_domain::events::EventView;
 use oxplow_domain::{CommandCall, DomainError};
 
 use crate::effects::Reaction;
@@ -36,7 +37,7 @@ impl EffortPolicy for ScriptedPolicy {
         &self.id
     }
 
-    async fn react(&self, event: &PolicyEvent) -> Result<Vec<CommandCall>, DomainError> {
+    async fn react(&self, event: &EventView) -> Result<Vec<CommandCall>, DomainError> {
         let failed = |message: String| {
             DomainError::Invariant(format!("effort policy `{}`: {message}", self.id))
         };

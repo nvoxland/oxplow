@@ -72,6 +72,7 @@ async-trait = "0.1"
 # Serialization & types
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+serde_path_to_error = "0.1"
 serde_yaml = "0.9"
 # HELD at rc.24 (tsk274). The three specta crates are version-locked to each
 # other, and specta-typescript 0.0.12 forbids exporting BigInt-style ints

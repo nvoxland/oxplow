@@ -97,10 +97,10 @@ effort afterwards. A policy may be **none**: no efforts, and the record is
 per turn.
 
 **The effort policy is an interface** (`oxplow_domain::effort_policy`):
-`EffortPolicy { id, react(PolicyEvent) → Vec<CommandCall> }`. A policy
-only composes; core runs. `PolicyEvent` is an effect's event shape (`id`,
-`type`, `v`, `seq`, `source`, `subject`, `payload`) plus its `anchors`
-(the mover's thread, a checkpoint's turn, a landing's effort), and it is
+`EffortPolicy { id, react(EventView) → Vec<CommandCall> }`. A policy
+only composes; core runs. It gets the event envelope
+([extensions.md](./extensions.md) "The event envelope"), whose `anchors`
+say the mover's thread, a checkpoint's turn, a landing's effort; it is
 offered each of `EVENTS`: `work_item.state_changed` (core's, logged for
 every provider), `effort.linked`, `effort.opened`, `thread.checkpoint`,
 `effort.landed`. `EffortPolicyRegistry` (`Services.effort_policies`) holds
@@ -125,7 +125,7 @@ policy's own run caused (a source starting `effect:effort_policy:`). A
 **A script may be the policy** (`implementations:` with `capability:
 effort_policy` and a `.star` entry, its `needs:` the scopes it reads —
 [extensions.md](./extensions.md) "Implementations"). It's an effect's
-shape: `transform({event})` gets the `PolicyEvent` and answers `{
+shape: `transform({event})` gets the event envelope and answers `{
 commands: [{ name, input }] }` or `{ skip }` (events are refused).
 `effort_policy::register_built_ins` registers it as an
 `effort_policy_script::ScriptedPolicy`, which `effects::run_over` runs
@@ -143,7 +143,7 @@ effort_policy`, [providers.md](./providers.md) "What a provider may
 implement"). While it runs, `providers::effort_policy::EffortPolicyHost`
 registers it as an `ExternalEffortPolicy`, offered as an implementation
 like any. Each event is one `react` invoke, `{ event }` (the
-`PolicyEvent`, idempotency key `react:<event id>`), answered as an
+event envelope, idempotency key `react:<event id>`), answered as an
 effect's script answers — `{ commands: [{ name, input }] }` or `{ skip }`;
 events are refused. It reads oxplow through `host/call` (`needs:
 [sql.read]`); those reads aren't audited, since `react` itself is no

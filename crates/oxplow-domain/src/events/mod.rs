@@ -9,6 +9,9 @@
 
 pub mod retention;
 pub mod schema;
+pub mod view;
+
+pub use view::{at_latest, EventView};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

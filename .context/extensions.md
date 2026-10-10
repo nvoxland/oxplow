@@ -1769,6 +1769,48 @@ payload. It shows; it never acts.
 `STABLE_KINDS` lists `ui.decorators`; a shared extension may declare
 them.
 
+## The event envelope
+
+An extension sees an event as one shape, `EventView`
+(`oxplow_domain::events::view`), whichever path hands it over:
+
+| Field | What it is |
+|---|---|
+| `id` | the event's id (a UUIDv7) |
+| `type` | its type name |
+| `v` | the newest registered version of `type`, which `payload` is at |
+| `seq` | its place in the log, the delivery order |
+| `at` | when it happened (RFC 3339) |
+| `source` | what emitted it: `human`, `agent:thr3`, `system:<c>`, `collector:<ext>/<id>`, `effect:<ext>/<id>`, `provider:<id>` |
+| `subject` | the canonical refs it's about |
+| `anchors` | `stream_id`, `thread_id`, `effort_id`, `turn_id`, `agent_session_id`, `snapshot_id` |
+| `payload` | its payload, carried to `v` |
+| `cause` | the id of the event that caused it |
+
+- **Every key is always there.** What an event doesn't have is `null`,
+  never made up: a stream-level event's `thread_id`, an event nothing
+  caused's `cause`.
+- **Always at the newest version.** `EventView::of` carries a logged
+  event through its type's upcasts first (`events::at_latest`, the one
+  routine the pump uses too), so a script is written against one shape
+  and older rows still reach it. A type the running vocabulary doesn't
+  know (its extension is gone) passes as logged.
+- **Anchors in JSON are typed ids:** `"thr3"`, `"str1"`, `"eff9"`,
+  `"ses2"`; `turn_id` and `snapshot_id` are integers. A SQL input binds
+  them as integers (`:thread_id`), because they're join keys.
+- **A fixture's event is built the same way** (`EventView::fixture`):
+  `{ type, v?, payload?, subject?, anchors?, id?, seq?, at?, source?,
+  cause? }`, no other key. Its `type` must be registered; its payload
+  must be valid at the `v` it gives (the newest when it gives none) and
+  is carried to the newest from there, so a fixture replays an older
+  version exactly as the runtime would; its subjects must be canonical
+  refs and its anchors typed ids. What it doesn't give is `null`, except
+  `source`, which is `fixture`. A fixture that couldn't happen is an
+  error naming the field (``event: `anchors.turn_id`: …``).
+
+The effort policy is offered an `EventView`; a provider's `react` gets
+`{ event }`, keyed `react:<id>`.
+
 ## Event types
 
 `event_types:` (P8.D3; **stable since P9.D6**, so a shared or bundled

@@ -8,28 +8,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
-use crate::events::Anchors;
+use crate::events::EventView;
 use crate::{CommandCall, DomainError};
-
-/// What a policy sees of an event: an effect's shape (`id`, `type`, `v`,
-/// `seq`, `source`, `subject`, `payload`) plus its anchors — the thread an
-/// agent moved an item on, the turn a checkpoint is of, the effort a
-/// landing is of.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PolicyEvent {
-    pub id: String,
-    #[serde(rename = "type")]
-    pub event_type: String,
-    pub v: u32,
-    pub seq: i64,
-    pub source: String,
-    pub subject: Vec<String>,
-    pub payload: Value,
-    pub anchors: Anchors,
-}
 
 /// The event types a policy is offered. (`capability.switched` for the
 /// effort policy is core's to handle: it closes every open effort,
@@ -48,7 +29,7 @@ pub trait EffortPolicy: Send + Sync {
     /// The implementation's id (what `activeProviders.effort_policy` names).
     fn id(&self) -> &str;
     /// The commands to run for `event`, in order; none to do nothing.
-    async fn react(&self, event: &PolicyEvent) -> Result<Vec<CommandCall>, DomainError>;
+    async fn react(&self, event: &EventView) -> Result<Vec<CommandCall>, DomainError>;
 }
 
 /// The registered policies, by id: the ones the extensions declare and the
@@ -137,7 +118,7 @@ mod tests {
         fn id(&self) -> &str {
             self.0
         }
-        async fn react(&self, _: &PolicyEvent) -> Result<Vec<CommandCall>, DomainError> {
+        async fn react(&self, _: &EventView) -> Result<Vec<CommandCall>, DomainError> {
             Ok(Vec::new())
         }
     }
@@ -157,28 +138,5 @@ mod tests {
         assert!(r.has("fake"));
         r.unregister("fake");
         assert!(r.ids().is_empty());
-    }
-
-    /// The event a policy gets carries its anchors (an external policy
-    /// reads them too).
-    #[test]
-    fn a_policy_event_carries_its_anchors() {
-        let event = PolicyEvent {
-            id: "e1".into(),
-            event_type: "thread.checkpoint".into(),
-            v: 1,
-            seq: 3,
-            source: "system:x".into(),
-            subject: vec!["thread:thr1".into()],
-            payload: serde_json::json!({}),
-            anchors: Anchors {
-                thread_id: Some(crate::ThreadId::new(1)),
-                turn_id: Some(9),
-                ..Anchors::default()
-            },
-        };
-        let json = serde_json::to_value(&event).unwrap();
-        assert_eq!(json["type"], "thread.checkpoint");
-        assert_eq!(json["anchors"]["turn_id"], 9);
     }
 }

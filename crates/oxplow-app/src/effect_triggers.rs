@@ -785,7 +785,7 @@ async fn retry_one(
     {
         // One that no longer upcasts can't be reacted to: its retry is
         // dropped below, a person's.
-        Some(stored) => crate::event_pump::at_latest(&svc.vocabulary.current(), &stored).ok(),
+        Some(stored) => oxplow_domain::events::at_latest(&svc.vocabulary.current(), &stored).ok(),
         None => None,
     };
     let effect = find_effect(svc, &key.effect);

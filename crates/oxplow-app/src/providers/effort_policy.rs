@@ -11,7 +11,8 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use oxplow_domain::effort_policy::{EffortPolicy, EffortPolicyRegistry, PolicyEvent};
+use oxplow_domain::effort_policy::{EffortPolicy, EffortPolicyRegistry};
+use oxplow_domain::events::EventView;
 use oxplow_domain::{CommandCall, DomainError, InputValidator};
 use serde_json::{json, Value};
 
@@ -77,7 +78,7 @@ impl EffortPolicy for ExternalEffortPolicy {
         &self.instance.id
     }
 
-    async fn react(&self, event: &PolicyEvent) -> Result<Vec<CommandCall>, DomainError> {
+    async fn react(&self, event: &EventView) -> Result<Vec<CommandCall>, DomainError> {
         let failed = |message: String| {
             DomainError::Invariant(format!("effort policy `{}`: {message}", self.instance.name))
         };
@@ -89,7 +90,11 @@ impl EffortPolicy for ExternalEffortPolicy {
         // provider keeping `idempotent_writes` answers once.
         let out = self
             .instance
-            .invoke(REACT, input, Some(format!("react:{}", event.id)))
+            .invoke(
+                REACT,
+                input,
+                event.id.as_deref().map(|id| format!("react:{id}")),
+            )
             .await
             .map_err(|e| failed(e.to_string()))?;
         if !out.events.is_empty() {
