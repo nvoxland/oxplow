@@ -109,6 +109,13 @@ pub struct AgentSession {
     pub closed_at: Option<Timestamp>,
     pub closed_reason: Option<SessionCloseReason>,
     pub updated_at: Timestamp,
+    /// The OS pid of the process the daemon spawned for it, rewritten on
+    /// every spawn; `None` for a session with no process of its own (a
+    /// chat) or one not yet spawned. A pid alone may be dead or reused:
+    /// read it with `last_seen_at`.
+    pub pid: Option<u32>,
+    /// The newest hook seen from the session.
+    pub last_seen_at: Option<Timestamp>,
 }
 
 impl AgentSession {

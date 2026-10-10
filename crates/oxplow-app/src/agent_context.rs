@@ -19,7 +19,8 @@ use oxplow_domain::ThreadId;
 use parking_lot::Mutex;
 use tracing::warn;
 
-use crate::{build_session_context_block_with_role, role_change_banner, RoleMode, Services};
+use crate::agent_prompt::{build_session_context_block_full, WriterAgent};
+use crate::{role_change_banner, RoleMode, Services};
 
 /// The launch role and the last context block per agent session.
 #[derive(Default)]
@@ -172,7 +173,13 @@ impl AgentContext {
         let initial = self
             .capture_or_get_initial_role(svc, thread_id, session_id)
             .await;
-        let block = build_session_context_block_with_role(&stream, Some(&thread), initial);
+        let writer = if RoleMode::from_thread(&thread) == RoleMode::ReadOnly {
+            live_writer_agent(svc, &thread).await
+        } else {
+            None
+        };
+        let block =
+            build_session_context_block_full(&stream, Some(&thread), initial, writer.as_ref());
         self.should_emit(session_id, &block).then_some(block)
     }
 
@@ -259,9 +266,93 @@ async fn undelivered(svc: &Services, thread_id: &ThreadId) -> Option<String> {
     (!text.is_empty()).then(|| text.join("\n\n"))
 }
 
+/// The live agent on the writer thread of `thread`'s stream: its newest
+/// open session whose process still exists. `None` with no writer thread
+/// or no live agent on it.
+async fn live_writer_agent(svc: &Services, thread: &oxplow_domain::Thread) -> Option<WriterAgent> {
+    use oxplow_domain::stores::AgentSessionStore as _;
+    let writer = svc
+        .thread_store
+        .list_for_stream(&thread.stream_id)
+        .await
+        .ok()?
+        .into_iter()
+        .find(|t| t.id != thread.id && t.status.is_writer())?;
+    let sessions = svc
+        .agent_session_store
+        .list_open_for_thread(&writer.id)
+        .await
+        .ok()?;
+    let (session, pid) = sessions
+        .into_iter()
+        .rev()
+        .filter_map(|s| s.pid.map(|pid| (s, pid)))
+        .find(|(_, pid)| crate::daemon_supervisor::process_alive(*pid))?;
+    Some(WriterAgent {
+        thread_title: writer.title,
+        thread_id: writer.id,
+        harness: session.harness,
+        pid: Some(pid),
+        session: session.resume_session_id,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A read-only thread's context names the writer thread's live agent;
+    /// a writer's own does not, and a dead pid names nothing.
+    #[tokio::test]
+    async fn a_read_only_thread_is_told_the_writer_threads_live_agent() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &*fx.svc;
+        let stream = svc
+            .thread_store
+            .get(&fx.thread)
+            .await
+            .unwrap()
+            .unwrap()
+            .stream_id;
+        let other = crate::test_fixtures::new_thread(svc, stream, "other").await;
+        assert!(!other.status.is_writer());
+
+        // No pid yet: nothing to name.
+        let ctx = AgentContext::default();
+        let none = ctx
+            .refreshed_session_context(svc, &other.id, Some("s1"))
+            .await
+            .unwrap();
+        assert!(!none.contains("Writer thread"), "{none}");
+
+        // This test process stands in for the agent.
+        let me = std::process::id();
+        svc.db
+            .transaction(move |tx| {
+                oxplow_db::agent_session_store::set_pid_tx(
+                    tx,
+                    fx.session,
+                    me,
+                    oxplow_domain::Timestamp::now(),
+                )
+            })
+            .await
+            .unwrap();
+        let ctx = AgentContext::default();
+        let named = ctx
+            .refreshed_session_context(svc, &other.id, Some("s2"))
+            .await
+            .unwrap();
+        assert!(
+            named.contains(&format!("agent `claude`, pid {me}")),
+            "{named}"
+        );
+        let own = AgentContext::default()
+            .refreshed_session_context(svc, &fx.thread, Some("s3"))
+            .await
+            .unwrap();
+        assert!(!own.contains("Writer thread"), "{own}");
+    }
 
     #[test]
     fn session_context_emits_initial_and_changed_blocks_only() {

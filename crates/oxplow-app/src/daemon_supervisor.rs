@@ -119,14 +119,14 @@ fn signal_tree(_pid: u32, _sig: i32) {}
 
 /// True when `pid` names a live process.
 #[cfg(unix)]
-fn process_alive(pid: u32) -> bool {
+pub(crate) fn process_alive(pid: u32) -> bool {
     // Signal 0 performs the permission/existence checks without sending
     // anything — the standard liveness probe.
     unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
 }
 
 #[cfg(not(unix))]
-fn process_alive(_pid: u32) -> bool {
+pub(crate) fn process_alive(_pid: u32) -> bool {
     false
 }
 

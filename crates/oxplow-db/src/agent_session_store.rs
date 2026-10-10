@@ -14,7 +14,7 @@ use crate::database::{map_sql_err, string_to_ts, ts_to_string, Database};
 use oxplow_domain::vocabulary::VocabularyHandle;
 
 const COLUMNS: &str = "id, thread_id, kind, harness, acp_agent, title, resume_session_id, host,
-                       opened_at, closed_at, closed_reason, updated_at";
+                       opened_at, closed_at, closed_reason, updated_at, pid, last_seen_at";
 
 fn conv(e: DomainError) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
@@ -33,6 +33,7 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentSession> {
     let closed_at: Option<String> = row.get("closed_at")?;
     let closed_reason: Option<String> = row.get("closed_reason")?;
     let updated_at: String = row.get("updated_at")?;
+    let last_seen_at: Option<String> = row.get("last_seen_at")?;
     Ok(AgentSession {
         id: AgentSessionId::new(row.get("id")?),
         thread_id: ThreadId::new(row.get("thread_id")?),
@@ -51,6 +52,11 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentSession> {
             .map(|r| SessionCloseReason::parse(&r).ok_or_else(|| invalid("closed_reason", &r)))
             .transpose()?,
         updated_at: string_to_ts(&updated_at).map_err(conv)?,
+        pid: row.get("pid")?,
+        last_seen_at: last_seen_at
+            .map(|s| string_to_ts(&s))
+            .transpose()
+            .map_err(conv)?,
     })
 }
 
@@ -217,6 +223,48 @@ pub fn set_resume_tx(
     )
     .map_err(map_sql_err)?;
     Ok(())
+}
+
+/// Record the OS pid of the process running the session; every spawn
+/// rewrites it.
+pub fn set_pid_tx(
+    conn: &Connection,
+    id: AgentSessionId,
+    pid: u32,
+    now: Timestamp,
+) -> Result<(), DomainError> {
+    conn.execute(
+        "UPDATE agent_session SET pid = ?2, last_seen_at = ?3, updated_at = ?3 WHERE id = ?1",
+        params![id.value(), pid, ts_to_string(now)],
+    )
+    .map_err(map_sql_err)?;
+    Ok(())
+}
+
+/// How stale `last_seen_at` may get before a hook rewrites it: a hook per
+/// tool call must not become a write per tool call.
+const SEEN_GRANULARITY_MS: i64 = 30_000;
+
+/// Note a hook from the session at `now`, at most once per
+/// [`SEEN_GRANULARITY_MS`]. Whether it wrote.
+pub fn touch_seen_tx(
+    conn: &Connection,
+    id: AgentSessionId,
+    now: Timestamp,
+) -> Result<bool, DomainError> {
+    let n = conn
+        .execute(
+            "UPDATE agent_session SET last_seen_at = ?2
+              WHERE id = ?1
+                AND (last_seen_at IS NULL OR last_seen_at < ?3)",
+            params![
+                id.value(),
+                ts_to_string(now),
+                ts_to_string(Timestamp::from_unix_ms(now.unix_ms() - SEEN_GRANULARITY_MS))
+            ],
+        )
+        .map_err(map_sql_err)?;
+    Ok(n == 1)
 }
 
 /// Forget the session's resume id when it is still `resume_session_id` —
@@ -394,6 +442,38 @@ mod tests {
         assert_eq!(back.closed_at, Some(at(4)));
         assert_eq!(back.closed_reason, Some(SessionCloseReason::Closed));
         assert_eq!(back.updated_at, at(4));
+    }
+
+    #[test]
+    fn a_session_records_its_pid_and_when_it_was_last_seen() {
+        let conn = fixture();
+        let s = insert_tx(
+            &conn,
+            &NewAgentSession::chat(ThreadId::new(1), "acp", "gemini"),
+            at(0),
+        )
+        .unwrap();
+        assert_eq!((s.pid, s.last_seen_at), (None, None));
+
+        set_pid_tx(&conn, s.id, 4242, at(1_000)).unwrap();
+        let back = get_tx(&conn, s.id).unwrap().unwrap();
+        assert_eq!((back.pid, back.last_seen_at), (Some(4242), Some(at(1_000))));
+
+        // Within the granularity a hook writes nothing; past it, it does.
+        assert!(!touch_seen_tx(&conn, s.id, at(20_000)).unwrap());
+        assert_eq!(
+            get_tx(&conn, s.id).unwrap().unwrap().last_seen_at,
+            Some(at(1_000))
+        );
+        assert!(touch_seen_tx(&conn, s.id, at(40_000)).unwrap());
+        assert_eq!(
+            get_tx(&conn, s.id).unwrap().unwrap().last_seen_at,
+            Some(at(40_000))
+        );
+
+        // A respawn rewrites the pid.
+        set_pid_tx(&conn, s.id, 7, at(50_000)).unwrap();
+        assert_eq!(get_tx(&conn, s.id).unwrap().unwrap().pid, Some(7));
     }
 
     #[test]
