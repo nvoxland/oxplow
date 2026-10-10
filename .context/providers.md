@@ -160,7 +160,8 @@ notifications against the goldens.
 `policy_declarations()` — the `effort_policy` capability, its one verb
 `react` (`confirm: never`, `access: record`), no event types or
 collectors, the same `team` config — and keeps no items (`discover` is
-empty, any other verb `InvalidInput`). `react { event }` answers as an
+empty, any other verb `InvalidInput`). `react { event }` (the event
+envelope, extensions.md "The event envelope") answers as an
 effect's script does: an item moved to `in_progress` with a thread in
 its anchors opens an effort on that thread linked to the item
 (`oxplow.effort.open`); one moved to `done` or `canceled` reads its open

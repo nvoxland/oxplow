@@ -1808,8 +1808,23 @@ An extension sees an event as one shape, `EventView`
   `source`, which is `fixture`. A fixture that couldn't happen is an
   error naming the field (``event: `anchors.turn_id`: …``).
 
-The effort policy is offered an `EventView`; a provider's `react` gets
-`{ event }`, keyed `react:<id>`.
+Every path hands over the same envelope, built once where the event
+reaches the extension:
+
+- a derived (Starlark/jaq) collector's `input.event` and a fact
+  collector's (`collector_runner::produce`, `MetricsService::fact_input`)
+  — on its trigger, on a paced run that re-reads the event later, and in
+  a review's dry run alike;
+- an `on:` exec collector's stdin, `{ "event": … }` (`{}` when nothing
+  triggered it);
+- an effect's `{ event }` (`effect_triggers::run_script`), a review's
+  effect dry run included;
+- the effort policy's event, and a provider's `react { event }`, keyed
+  `react:<id>`.
+
+An event that can't be carried to its type's newest version (its
+upcast fails) is a failed run, with the reason — on a review, that
+input's error.
 
 ## Event types
 
@@ -2227,8 +2242,8 @@ once**, keyed by `effect_run (effect, event_id)` (V149, `v_effect_run`):
    event its own run caused (source `effect:<extension>/<id>`) never
    triggers it; one that `MAX_CHAIN` (4) effect runs already led to is
    `skipped`;
-4. the script runs sandboxed over `{ event: { id, type, v, seq, source,
-   subject, payload } }`, reading with the scopes its `needs`
+4. the script runs sandboxed over `{ event }`, the event envelope ("The
+   event envelope" above), reading with the scopes its `needs`
    lists — `scope("sql.read", { sql, params })`, binding what it
    wants (the payload's fields, the event's `id` / `seq` to read its own
    `v_event` row, its subject or cause) — served through the SQL gateway,

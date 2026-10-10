@@ -46,6 +46,7 @@
 //! another provider — waits for a person's retry, asked first
 //! (`.context/providers.md` "Idempotency").
 
+use oxplow_domain::events::EventView;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Weak};
 
@@ -141,7 +142,7 @@ pub fn register(svc: &Arc<Services>) {
 
 /// The enabled extensions' effects, in the primary worktree (where, like
 /// providers and commands, they run from).
-fn effects(svc: &Services) -> Vec<(Extension, EffectDecl)> {
+pub(crate) fn effects(svc: &Services) -> Vec<(Extension, EffectDecl)> {
     effects_of(&svc.extension_catalog.get(&svc.layout.project_dir))
 }
 
@@ -907,12 +908,14 @@ fn effect_command(
 /// calls answered through the SQL gateway (each its own read, so the
 /// script never holds a connection). The reaction, and the scopes
 /// it called; `Err` is why it failed.
-async fn run_script(
+pub(crate) async fn run_script(
     svc: &Services,
     decl: &EffectDecl,
     event: &StoredEvent,
 ) -> Result<(Reaction, BTreeMap<String, u32>), String> {
-    let event = effects::event_json(event);
+    let event = EventView::of(event, &svc.vocabulary.current())
+        .map_err(|e| format!("its event: {e}"))?
+        .to_json();
     let (script, needs, layer) = (decl.script.clone(), decl.needs.clone(), svc.sql.clone());
     let runtime = tokio::runtime::Handle::current();
     tokio::task::spawn_blocking(move || {
@@ -1069,7 +1072,9 @@ mod tests {
             &svc.sql,
             &decl,
             &decl.script,
-            effects::event_json(&ev),
+            EventView::of(&ev, &svc.vocabulary.current())
+                .unwrap()
+                .to_json(),
             &BTreeMap::new(),
             None,
         )

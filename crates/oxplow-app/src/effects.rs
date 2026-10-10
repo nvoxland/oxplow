@@ -329,20 +329,6 @@ pub fn reaction(value: serde_json::Value) -> Result<Reaction, String> {
     }
 }
 
-/// An event as an effect's script sees it.
-pub fn event_json(event: &oxplow_domain::StoredEvent) -> serde_json::Value {
-    let env = &event.envelope;
-    serde_json::json!({
-        "id": env.id.to_string(),
-        "type": env.event_type,
-        "v": env.v,
-        "seq": event.seq,
-        "source": env.source,
-        "subject": env.subject,
-        "payload": env.payload,
-    })
-}
-
 /// Whether `decl` reacts to an event of `event_type` with `payload`: its
 /// `on` names the type and its `where` matches.
 pub fn reacts_to(decl: &EffectDecl, event_type: &str, payload: &serde_json::Value) -> bool {
