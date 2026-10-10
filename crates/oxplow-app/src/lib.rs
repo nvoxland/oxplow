@@ -680,6 +680,9 @@ pub struct Services {
     /// Every version of a workspace's tree — working, snapshot, VCS
     /// revision — read and diffed through one interface.
     pub trees: Arc<trees::Trees>,
+    /// Per-file subtree records the change-scoped duplicate scan reuses
+    /// between scans (`oxplow_code_dup::DupCache`, bounded in bytes).
+    pub dup_cache: Arc<oxplow_code_dup::DupCache>,
     /// A stream's files: list, read, write.
     pub workspace_files: Arc<workspace_files::WorkspaceFiles>,
     /// Keeps `stream.branch` equal to the checked-out branch; spawned at
@@ -1725,6 +1728,7 @@ impl Services {
             branch_reconciler,
             ref_moves,
             trees,
+            dup_cache: Arc::new(oxplow_code_dup::DupCache::default()),
         })
     }
 

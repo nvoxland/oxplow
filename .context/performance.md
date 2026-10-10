@@ -692,3 +692,33 @@ are small, so the saving there is small.
 cargo build --release -p oxplow-code-dup --example dense_rss
 /usr/bin/time -l target/release/examples/dense_rss 12 60
 ```
+
+## Duplicate detection cache (measured 2026-10-09)
+
+The change-scoped duplicate scan keeps each file's eligible subtrees
+("records", 32 bytes each) in memory between scans, keyed by content id
+(`.context/code-quality.md`), so an unchanged file is neither read nor
+parsed again. The budget, `CACHE_BUDGET_BYTES` in
+`crates/oxplow-code-dup/src/cache.rs`, is 32 MB (about a million records)
+and is a constant, not a setting, until someone needs one.
+
+How it was sized, with `crates/oxplow-code-dup/examples/cache_size.rs`
+(release build, Apple M4 Max, `DupOptions::default()`):
+
+| Tree | Source files | Records | Cache | Cold scan |
+|---|---|---|---|---|
+| this repo's `crates/` | 548 | 85,655 (156 per file) | 2.6 MB | 2.3 s |
+| this repo's `apps/desktop/src` | 589 | 26,858 (46 per file) | 0.8 MB | 0.9 s |
+
+Together about 3.4 MB for 1,137 files, so 32 MB holds roughly ten times
+that, around 11,000 source files of this shape: room for a large
+monorepo, and small enough to forget about. A repo that doesn't fit isn't
+wrong, only slower: the least recently used files are evicted whole and
+re-parsed when next scanned. A single file with more than the whole
+budget's records is never kept.
+
+A warm scan parses nothing and reads nothing: its time is the pairing
+over the records. Each scan's log line (`duplicate scan`) carries
+`cache_hits`, `cache_misses` and `elapsed_ms`, so a cold scan after a
+restart is visible.
+

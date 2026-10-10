@@ -912,3 +912,226 @@ fn single(items: Vec<i32>) -> i32 {
         .iter()
         .any(|b| b.a_path == "src/a.rs" && b.b_path == "src/b.rs"));
 }
+
+/// A function nothing else in the corpus resembles: its body is shaped by
+/// `salt` (loops nested `salt` deep), so no two share a hash.
+fn unique_file(salt: usize) -> (String, String) {
+    let mut body = String::from("fn f(items: &[i32]) -> i32 {\n    let mut t = 0;\n");
+    for d in 0..=salt {
+        body.push_str(&format!("{}for x{d} in items {{\n", "    ".repeat(d + 1)));
+    }
+    body.push_str(&format!("{}t += 1;\n", "    ".repeat(salt + 2)));
+    for d in (0..=salt).rev() {
+        body.push_str(&format!("{}}}\n", "    ".repeat(d + 1)));
+    }
+    body.push_str("    if t > 0 { t } else { -t }\n}\n");
+    (format!("src/u{salt:03}.rs"), body)
+}
+
+/// A scoped scan keeps the subtrees of the files in scope and, of the rest,
+/// only those that match one of theirs — not every subtree in the tree
+/// (what a one-file change paid for in memory and in pairing).
+#[test]
+fn a_scoped_scan_keeps_only_subtrees_that_could_match_the_scope() {
+    let clone = dense(1).remove(0).1;
+    let mut files: Vec<(String, String)> = (0..40).map(unique_file).collect();
+    files.push(("src/scope.rs".into(), clone.clone()));
+    files.push(("src/twin.rs".into(), clone));
+    let scope: BTreeSet<String> = ["src/scope.rs".to_string()].into();
+    let blocks = detect_duplicates_scoped(files.clone(), &scope, detect_opts());
+    assert!(
+        blocks
+            .iter()
+            .any(|b| b.a_path == "src/scope.rs" && b.b_path == "src/twin.rs"),
+        "{blocks:?}"
+    );
+    let kept = last_scan_records();
+    let whole = {
+        detect_duplicates(files, detect_opts());
+        last_scan_records()
+    };
+    assert!(kept * 4 < whole, "kept {kept} of {whole} subtrees");
+}
+
+/// What it reports is what a whole-tree scan filtered to the scope reports.
+#[test]
+fn a_scoped_scan_reports_what_the_whole_tree_scan_would_for_the_scope() {
+    let mut files = dense(6);
+    files.extend((0..10).map(unique_file));
+    let scope: BTreeSet<String> = ["src/m002.rs".to_string(), "src/u003.rs".to_string()].into();
+    let scoped = detect_duplicates_scoped(files.clone(), &scope, detect_opts());
+    assert!(scoped.iter().any(|b| b.a_path == "src/m002.rs"));
+    assert!(scoped.iter().all(|b| scope.contains(&b.a_path)));
+    // Whole tree, then filtered to the scope: the same regions.
+    let regions = |blocks: &[DuplicateBlock]| -> BTreeSet<(String, u32, u32)> {
+        blocks
+            .iter()
+            .flat_map(|b| {
+                [
+                    (b.a_path.clone(), b.a_start_line, b.a_end_line),
+                    (b.b_path.clone(), b.b_start_line, b.b_end_line),
+                ]
+            })
+            .filter(|(p, _, _)| scope.contains(p))
+            .collect()
+    };
+    let whole: Vec<DuplicateBlock> = detect_duplicates(files, detect_opts())
+        .into_iter()
+        .filter(|b| b.a_path != b.b_path)
+        .collect();
+    assert_eq!(regions(&scoped), regions(&whole));
+}
+
+fn cached(files: &[(String, String)], with_keys: bool) -> Vec<CachedFile> {
+    files
+        .iter()
+        .map(|(p, t)| {
+            let text = t.clone();
+            CachedFile {
+                path: p.clone(),
+                key: with_keys.then(|| FileKey {
+                    space: "test".into(),
+                    id: format!("{p}:{}", text.len()),
+                }),
+                text: Box::new(move || Some(text)),
+            }
+        })
+        .collect()
+}
+
+fn family() -> (Vec<(String, String)>, BTreeSet<String>) {
+    let clone = dense(1).remove(0).1;
+    let mut files: Vec<(String, String)> = (0..12).map(unique_file).collect();
+    files.push(("src/scope.rs".into(), clone.clone()));
+    files.push(("src/twin.rs".into(), clone));
+    (files, ["src/scope.rs".to_string()].into())
+}
+
+/// A second scan of the same tree parses nothing and says so; the answer
+/// is the uncached scoped scan's.
+#[test]
+fn a_second_scan_of_an_unchanged_tree_parses_nothing() {
+    let (files, scope) = family();
+    let cache = DupCache::default();
+    let (first, cold) =
+        detect_duplicates_scoped_cached(cached(&files, true), &scope, detect_opts(), &cache);
+    assert_eq!(cold.hits, 0);
+    assert_eq!(cold.misses, files.len());
+    let parsed = parses();
+    let (second, warm) =
+        detect_duplicates_scoped_cached(cached(&files, true), &scope, detect_opts(), &cache);
+    assert_eq!(parses(), parsed, "the warm scan parsed");
+    assert_eq!((warm.hits, warm.misses), (files.len(), 0));
+    assert_eq!(first, second);
+    assert_eq!(
+        first,
+        detect_duplicates_scoped(files.clone(), &scope, detect_opts())
+    );
+}
+
+/// A cached file's text is never loaded.
+#[test]
+fn a_cached_file_is_not_read() {
+    let (files, scope) = family();
+    let cache = DupCache::default();
+    detect_duplicates_scoped_cached(cached(&files, true), &scope, detect_opts(), &cache);
+    let unread: Vec<CachedFile> = files
+        .iter()
+        .map(|(p, t)| CachedFile {
+            path: p.clone(),
+            key: Some(FileKey {
+                space: "test".into(),
+                id: format!("{p}:{}", t.len()),
+            }),
+            text: Box::new(|| panic!("read a cached file")),
+        })
+        .collect();
+    detect_duplicates_scoped_cached(unread, &scope, detect_opts(), &cache);
+}
+
+/// An edit is a new content id: that file alone is parsed again.
+#[test]
+fn an_edited_file_is_parsed_again_and_no_other() {
+    let (mut files, scope) = family();
+    let cache = DupCache::default();
+    detect_duplicates_scoped_cached(cached(&files, true), &scope, detect_opts(), &cache);
+    files[3].1.push_str("\n// edited\n");
+    let (_, stats) =
+        detect_duplicates_scoped_cached(cached(&files, true), &scope, detect_opts(), &cache);
+    assert_eq!((stats.hits, stats.misses), (files.len() - 1, 1));
+}
+
+/// Different floors are different records.
+#[test]
+fn the_size_floors_are_part_of_the_key() {
+    let (files, scope) = family();
+    let cache = DupCache::default();
+    detect_duplicates_scoped_cached(cached(&files, true), &scope, detect_opts(), &cache);
+    let other = DupOptions {
+        min_nodes: 60,
+        ..detect_opts()
+    };
+    let (_, stats) = detect_duplicates_scoped_cached(cached(&files, true), &scope, other, &cache);
+    assert_eq!(stats.hits, 0);
+}
+
+/// Files without a content id are parsed every time and never cached.
+#[test]
+fn a_file_with_no_key_bypasses_the_cache() {
+    let (files, scope) = family();
+    let cache = DupCache::default();
+    let (_, stats) =
+        detect_duplicates_scoped_cached(cached(&files, false), &scope, detect_opts(), &cache);
+    assert_eq!((stats.hits, stats.misses), (0, files.len()));
+    assert_eq!(cache.held(), (0, 0));
+}
+
+/// The cache stays inside its byte budget, dropping whole files, oldest
+/// first.
+#[test]
+fn the_cache_evicts_the_least_recently_used_file_to_stay_in_budget() {
+    let (files, scope) = family();
+    let whole = DupCache::default();
+    detect_duplicates_scoped_cached(cached(&files, true), &scope, detect_opts(), &whole);
+    let (records, bytes) = whole.held();
+    assert!(records > 0 && bytes == records * RECORD_BYTES);
+
+    let small = DupCache::with_budget(bytes / 3);
+    detect_duplicates_scoped_cached(cached(&files, true), &scope, detect_opts(), &small);
+    let (_, held) = small.held();
+    assert!(held <= bytes / 3, "{held} > {}", bytes / 3);
+    assert!(held > 0);
+    // A budget below one file's records holds nothing.
+    let tiny = DupCache::with_budget(RECORD_BYTES);
+    detect_duplicates_scoped_cached(cached(&files, true), &scope, detect_opts(), &tiny);
+    assert_eq!(tiny.held().1, 0);
+}
+
+/// The records a fixed source produces, pinned to `DETECTOR_VERSION`:
+/// changing how subtrees are hashed or chosen fails this until the version
+/// is bumped and the expectation re-pinned, so a cache can't serve records
+/// the current detector wouldn't make.
+#[test]
+fn the_records_are_pinned_to_the_detector_version() {
+    let body = dense(1).remove(0).1;
+    let mut out = Vec::new();
+    scan_file("src/pin.rs", &body, detect_opts(), None, &mut out);
+    let hashes: Vec<(u64, u32, u32, u32)> = out
+        .iter()
+        .map(|s| (s.hash, s.node_count, s.start_line, s.end_line))
+        .collect();
+    assert_eq!(DETECTOR_VERSION, 1, "re-pin the hashes below, then bump");
+    assert_eq!(hashes, PINNED_V1);
+}
+
+const PINNED_V1: &[(u64, u32, u32, u32)] = &[
+    (3679152524243699532, 116, 2, 14),
+    (13672393085675031171, 94, 2, 14),
+    (3199666752499502949, 76, 4, 12),
+    (362106070147055594, 75, 4, 12),
+    (7382068709588596213, 70, 4, 12),
+    (16313548889648378043, 67, 5, 11),
+    (3996386052852592696, 66, 5, 11),
+    (12028981030681832557, 43, 7, 11),
+    (378789080419906373, 41, 7, 11),
+];

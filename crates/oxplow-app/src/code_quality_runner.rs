@@ -14,6 +14,7 @@
 
 use std::collections::BTreeSet;
 use std::path::Path;
+use std::sync::Arc;
 
 use oxplow_code_dup::{detect_duplicates_scoped, DupOptions};
 use serde::{Deserialize, Serialize};
@@ -42,7 +43,7 @@ pub enum CodeQualityError {
 const DEFAULT_SCAN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
 /// One finding the renderer surfaces in the duplication card.
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct CodeQualityFinding {
     pub path: String,
     pub start_line: u32,
@@ -93,6 +94,35 @@ pub async fn scan_duplicates(
     });
     match tokio::time::timeout(timeout, task).await {
         Ok(Ok(findings)) => Ok(findings),
+        Ok(Err(join_err)) => Err(CodeQualityError::Task(format!(
+            "duplication task: {join_err}"
+        ))),
+        Err(_) => Err(CodeQualityError::Timeout(timeout)),
+    }
+}
+
+/// [`scan_duplicates`] over files that may be in `cache` already: a file
+/// whose content id it knows is neither read nor parsed. Returns the
+/// findings and how many files hit and missed.
+pub async fn scan_duplicates_cached(
+    files: Vec<oxplow_code_dup::CachedFile>,
+    scope: BTreeSet<String>,
+    opts: RunOptions,
+    cache: Arc<oxplow_code_dup::DupCache>,
+) -> Result<(Vec<CodeQualityFinding>, oxplow_code_dup::ScanStats), CodeQualityError> {
+    let timeout = opts.timeout.unwrap_or(DEFAULT_SCAN_TIMEOUT);
+    let dup_opts = opts.dup_options.unwrap_or_default();
+    let task = tokio::task::spawn_blocking(move || {
+        let files: Vec<_> = files
+            .into_iter()
+            .filter(|f| oxplow_code_metrics::is_supported_path(Path::new(&f.path)))
+            .collect();
+        let (blocks, stats) =
+            oxplow_code_dup::detect_duplicates_scoped_cached(files, &scope, dup_opts, &cache);
+        (blocks_to_findings(blocks), stats)
+    });
+    match tokio::time::timeout(timeout, task).await {
+        Ok(Ok(done)) => Ok(done),
         Ok(Err(join_err)) => Err(CodeQualityError::Task(format!(
             "duplication task: {join_err}"
         ))),
