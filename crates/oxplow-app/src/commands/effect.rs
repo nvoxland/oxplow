@@ -307,6 +307,7 @@ pub async fn backfill(
     decl: &EffectDecl,
     range: &Range,
     batch: usize,
+    under: Option<&oxplow_domain::run::RunContext>,
 ) -> Result<Backfilled, CommandError> {
     let health = ContributionHealth::new(svc.db.clone(), svc.vocabulary.clone());
     let key = effect_triggers::contribution_key(decl);
@@ -344,7 +345,8 @@ pub async fn backfill(
             break;
         }
         let started = std::time::Instant::now();
-        let reacted = run_reaction(svc, ext, decl, true, event, ReactionOrigin::Backfill).await?;
+        let reacted =
+            run_reaction(svc, ext, decl, true, event, ReactionOrigin::Backfill, under).await?;
         effect_triggers::count(&health, decl, &reacted, started.elapsed()).await;
         attempted += 1;
         match reacted {
@@ -397,7 +399,7 @@ pub fn backfill_op(services: ServicesSlot) -> Op {
         "backfill",
         schema::<BackfillInput>(),
         false,
-        Handler::External(Arc::new(move |_: Invocation, input| {
+        Handler::External(Arc::new(move |invocation: Invocation, input| {
             let services = services.clone();
             Box::pin(async move {
                 let input: BackfillInput = parse(input)?;
@@ -406,7 +408,15 @@ pub fn backfill_op(services: ServicesSlot) -> Op {
                     message: "oxplow is shutting down".into(),
                 })?;
                 let (ext, decl, _) = ready(&svc, &input.effect).await?;
-                let done = backfill(&svc, &ext, &decl, &range, BACKFILL_BATCH).await?;
+                let done = backfill(
+                    &svc,
+                    &ext,
+                    &decl,
+                    &range,
+                    BACKFILL_BATCH,
+                    Some(&invocation.run),
+                )
+                .await?;
                 let mut result = json!({
                     "effect": input.effect,
                     "planned": done.planned,
@@ -475,7 +485,7 @@ pub fn retry_op(services: ServicesSlot) -> Op {
         "retry",
         schema::<RetryInput>(),
         false,
-        Handler::External(Arc::new(move |_: Invocation, input| {
+        Handler::External(Arc::new(move |invocation: Invocation, input| {
             let services = services.clone();
             Box::pin(async move {
                 let RetryInput { effect, event } = parse(input)?;
@@ -497,12 +507,20 @@ pub fn retry_op(services: ServicesSlot) -> Op {
                 // As the pump would hand it over: at its type's newest version.
                 let stored = oxplow_domain::events::at_latest(&svc.vocabulary.current(), &stored)?;
                 let started = std::time::Instant::now();
-                let reacted = run_reaction(&svc, &ext, &decl, true, &stored, ReactionOrigin::Retry)
-                    .await
-                    .map_err(|e| match e {
-                        DomainError::Invalid(message) => invalid("/event", message),
-                        other => CommandError::from(other),
-                    })?;
+                let reacted = run_reaction(
+                    &svc,
+                    &ext,
+                    &decl,
+                    true,
+                    &stored,
+                    ReactionOrigin::Retry,
+                    Some(&invocation.run),
+                )
+                .await
+                .map_err(|e| match e {
+                    DomainError::Invalid(message) => invalid("/event", message),
+                    other => CommandError::from(other),
+                })?;
                 effect_triggers::count(&health, &decl, &reacted, started.elapsed()).await;
                 let attempt = {
                     let (effect, id) = (effect.clone(), id.to_string());

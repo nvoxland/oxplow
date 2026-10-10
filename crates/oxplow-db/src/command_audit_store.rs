@@ -97,6 +97,8 @@ pub struct NewCommandAudit {
     pub inverse: Option<CommandCall>,
     /// The scopes the run called, and how often.
     pub scopes: BTreeMap<String, u32>,
+    /// The run it was (`extension_run.run_id` when an extension's).
+    pub run_id: Option<String>,
 }
 
 /// Insert one audit row; returns its id.
@@ -108,8 +110,8 @@ pub fn insert_tx(conn: &Connection, row: &NewCommandAudit) -> Result<i64, Domain
     conn.execute(
         "INSERT INTO command_audit
            (at, command, actor_kind, actor_id, thread_id, input_json, outcome, error, inverse_json,
-            result_json, scopes_json, session_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            result_json, scopes_json, session_id, run_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         params![
             ts_to_string(Timestamp::now()),
             row.command,
@@ -126,6 +128,7 @@ pub fn insert_tx(conn: &Connection, row: &NewCommandAudit) -> Result<i64, Domain
             (!row.scopes.is_empty())
                 .then(|| { serde_json::to_string(&row.scopes).expect("scopes serialize") }),
             row.session_id.map(|s| s.value()),
+            row.run_id,
         ],
     )
     .map_err(map_sql_err)?;
@@ -277,6 +280,7 @@ mod tests {
                                 input: json!({"id": "tsk1", "to": "ready"}),
                             }),
                             scopes: [("sql.read".to_string(), 2)].into(),
+                            run_id: None,
                         },
                     )?;
                     set_event_id_tx(tx, id, &event)?;
@@ -294,6 +298,7 @@ mod tests {
                             result: None,
                             inverse: None,
                             scopes: BTreeMap::new(),
+                            run_id: None,
                         },
                     )?;
                     mark_undone_tx(tx, id, undo_id)?;
@@ -342,6 +347,7 @@ mod tests {
                     result: None,
                     inverse: None,
                     scopes: BTreeMap::new(),
+                    run_id: None,
                 },
             )
         })

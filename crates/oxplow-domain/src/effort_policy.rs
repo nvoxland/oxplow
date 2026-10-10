@@ -29,7 +29,13 @@ pub trait EffortPolicy: Send + Sync {
     /// The implementation's id (what `activeProviders.effort_policy` names).
     fn id(&self) -> &str;
     /// The commands to run for `event`, in order; none to do nothing.
-    async fn react(&self, event: &EventView) -> Result<Vec<CommandCall>, DomainError>;
+    /// `run` is the policy's run reacting to it (caused by the event):
+    /// what it reads is counted there.
+    async fn react(
+        &self,
+        run: &crate::run::RunContext,
+        event: &EventView,
+    ) -> Result<Vec<CommandCall>, DomainError>;
 }
 
 /// The registered policies, by id: the ones the extensions declare and the
@@ -118,7 +124,11 @@ mod tests {
         fn id(&self) -> &str {
             self.0
         }
-        async fn react(&self, _: &EventView) -> Result<Vec<CommandCall>, DomainError> {
+        async fn react(
+            &self,
+            _: &crate::run::RunContext,
+            _: &EventView,
+        ) -> Result<Vec<CommandCall>, DomainError> {
             Ok(Vec::new())
         }
     }

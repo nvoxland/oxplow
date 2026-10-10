@@ -27,6 +27,7 @@
 //!
 //! Every finding is a `file:line: what — fix` line.
 
+use oxplow_domain::events::EventView;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -201,9 +202,9 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
             report.errors.push(format!(
                 "{shown}:1: example `{}`'s `input` names no lens, collector, command, effect, \
                  effort policy, event type, wikilink or provider command — fix: `{{ lens: <slug>, \
-                 params? }}`, `{{ collector: <id>, rows? }}`, `{{ command: <name>, input }}`, \
-                 `{{ effect: <id>, event: {{ type, payload }} }}`, `{{ implementation: <id>, \
-                 event: {{ type, payload, anchors? }} }}`, `{{ event_type, v?, payload }}`, \
+                 params? }}`, `{{ collector: <id>, rows?, event? }}`, `{{ command: <name>, \
+                 input }}`, `{{ effect: <id>, event: {{ type, payload }} }}`, `{{ implementation: \
+                 <id>, event: {{ type, payload, anchors? }} }}`, `{{ event_type, v?, payload }}`, \
                  `{{ wikilink }}`, or (with a provider) `{{ command, input }}`",
                 example.name
             ));
@@ -363,13 +364,11 @@ async fn effect_example(
         return;
     };
     report.ran.push(format!("example {example}"));
-    let event = ex.input.get("event").cloned().unwrap_or_default();
-    let event_type = event
-        .get("type")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let payload = event.get("payload").cloned().unwrap_or_else(|| json!({}));
-    let reacts = reacts_to(decl, event_type, &payload);
+    let Some(event) = example_event(host, ex, report) else {
+        return;
+    };
+    let event_type = event.event_type.as_str();
+    let reacts = reacts_to(decl, event_type, &event.payload);
     let want_reacts = ex
         .expect
         .get("reacts")
@@ -391,15 +390,7 @@ async fn effect_example(
     if !reacts {
         return;
     }
-    let event = json!({
-        "id": "fixture",
-        "type": event_type,
-        "v": 1,
-        "seq": 0,
-        "source": "fixture",
-        "subject": event.get("subject").cloned().unwrap_or_else(|| json!([])),
-        "payload": payload,
-    });
+    let event = event.to_json();
     let Some(answers) = answers(ex, &format!("effect `{id}`"), report) else {
         return;
     };
@@ -444,6 +435,26 @@ fn reaction_problem(
     }
 }
 
+/// The example's `event:` as the event envelope the runtime would hand
+/// over (`EventView::fixture`, through the throwaway's vocabulary); one
+/// that couldn't happen is a finding at the fixture.
+fn example_event(host: &Host, ex: &Example<'_>, report: &mut TestReport) -> Option<EventView> {
+    let given = ex.input.get("event").cloned().unwrap_or_else(|| json!({}));
+    match EventView::fixture(&given, &host.svc.vocabulary.current()) {
+        Ok(view) => Some(view),
+        Err(e) => {
+            report.errors.push(format!(
+                "{}:1: example `{}`: {} — fix: the fixture's `event` \
+                 (extensions reference: the event envelope)",
+                ex.shown,
+                ex.name,
+                e.message()
+            ));
+            None
+        }
+    }
+}
+
 /// Dry-run the extension's effort policy script `id` on the fixture's
 /// event (`input: { implementation, event: { type, payload, subject?,
 /// anchors? }, answers? }`, the answers standing in for its scope calls'):
@@ -473,32 +484,33 @@ async fn policy_example(
         return;
     };
     report.ran.push(format!("example {example}"));
-    let given = ex.input.get("event").cloned().unwrap_or_default();
-    let event = json!({
-        "id": "fixture",
-        "type": given.get("type").cloned().unwrap_or_else(|| json!("")),
-        "v": given.get("v").cloned().unwrap_or_else(|| json!(1)),
-        "seq": 0,
-        "source": "fixture",
-        "subject": given.get("subject").cloned().unwrap_or_else(|| json!([])),
-        "payload": given.get("payload").cloned().unwrap_or_else(|| json!({})),
-        "anchors": given.get("anchors").cloned().unwrap_or_else(|| json!({})),
-    });
+    let Some(event) = example_event(host, ex, report) else {
+        return;
+    };
+    let event = event.to_json();
     let Some(answers) = answers(ex, &format!("effort policy `{id}`"), report) else {
         return;
     };
-    let decided = run_over(&host.svc.sql, &decl.needs, script, event, Some(&answers))
-        .await
-        .and_then(|reaction| match &reaction {
-            Reaction::Run { events, .. } if !events.is_empty() => {
-                Err("it appends events, and a policy emits nothing".to_string())
-            }
-            Reaction::Run { calls, .. } => {
-                oxplow_app::extension_commands::check_calls(host.svc.commands.as_ref(), calls)
-                    .map(|()| reaction)
-            }
-            Reaction::Skip(_) => Ok(reaction),
-        });
+    let run = oxplow_app::run_context::for_dry_run();
+    let decided = run_over(
+        &host.svc.sql,
+        &run,
+        &decl.needs,
+        script,
+        event,
+        Some(&answers),
+    )
+    .await
+    .and_then(|reaction| match &reaction {
+        Reaction::Run { events, .. } if !events.is_empty() => {
+            Err("it appends events, and a policy emits nothing".to_string())
+        }
+        Reaction::Run { calls, .. } => {
+            oxplow_app::extension_commands::check_calls(host.svc.commands.as_ref(), calls)
+                .map(|()| reaction)
+        }
+        Reaction::Skip(_) => Ok(reaction),
+    });
     if let Some(p) = reaction_problem(&ex.expect, decided) {
         report.errors.push(format!(
             "{shown}:1: effort policy `{id}` {p} — fix: its script, or the example's `expect` \
@@ -619,7 +631,7 @@ async fn fact_collector_example(
                 .collect()
         })
         .unwrap_or_default();
-    let input: serde_json::Map<String, Value> = ex
+    let mut input: serde_json::Map<String, Value> = ex
         .input
         .as_object()
         .map(|m| {
@@ -629,6 +641,13 @@ async fn fact_collector_example(
                 .collect()
         })
         .unwrap_or_default();
+    // Its `event`, as the runtime would hand it over.
+    if input.contains_key("event") {
+        let Some(event) = example_event(host, ex, report) else {
+            return;
+        };
+        input.insert("event".into(), event.to_json());
+    }
     let facts = match host
         .svc
         .metrics
@@ -713,6 +732,7 @@ async fn collector_example(
         &oxplow_app::collector_runner::Collectors::of(&host.svc, &host.root),
         &ext.name,
         id,
+        ex.input.get("event"),
         rows,
     )
     .await;
@@ -1144,6 +1164,7 @@ async fn session(
                     command: command.into(),
                     input: input.clone(),
                     idempotency_key: None,
+                    context: None,
                 },
             )
             .await
@@ -2048,7 +2069,7 @@ implementations:
             root,
             "oxplow/extensions/acme/fixtures/basic.yaml",
             &format!(
-                "input: {{ implementation: tidy, event: {{ type: thread.checkpoint, payload: {{}} }} }}\nexpect: {basic_expect}\n"
+                "input: {{ implementation: tidy, event: {{ type: thread.checkpoint, payload: {{ thread: \"thread:thr1\", turn: \"turn:trn1\", reason: turn_end, snapshot: \"snapshot:1\", changed: false, writing_tools: 0 }} }} }}\nexpect: {basic_expect}\n"
             ),
         );
         write(
@@ -2113,6 +2134,130 @@ implementations:
                 "acme/fixtures/finish.yaml:1: example `finish` names effort policy `nope`"
             ),
             "{errors}"
+        );
+    }
+
+    /// An example's event is the event envelope the runtime would hand
+    /// over: what the fixture doesn't give is `null` (no made-up id or
+    /// seq), `source` is `fixture`; and a fixture that couldn't happen —
+    /// an unknown type, a version newer than registered, a malformed
+    /// anchor, a key the envelope doesn't have — is a finding at it.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_example_event_is_the_envelope_and_one_that_couldnt_happen_says_why() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let shape = "def transform(x):\n    e = x[\"event\"]\n    return {\"skip\": \"%s %s %s %s %s\" % (e[\"v\"], e[\"source\"], e[\"id\"], e[\"seq\"], e[\"anchors\"][\"turn_id\"])}\n";
+        policy(root, shape, "{ skip: \"1 fixture None None None\" }");
+        // `start` and `finish` aren't this script's; only `basic` stays.
+        for gone in ["start", "finish"] {
+            std::fs::remove_file(root.join(format!("oxplow/extensions/acme/fixtures/{gone}.yaml")))
+                .unwrap();
+        }
+        let manifest = root.join("oxplow/extensions/acme/extension.yaml");
+        let text = std::fs::read_to_string(&manifest).unwrap();
+        std::fs::write(
+            &manifest,
+            text.replace(
+                "    - { name: start, expect: its effort opens }\n    - { name: finish, expect: its effort closes }\n",
+                "",
+            ),
+        )
+        .unwrap();
+        let report = test_extension(root, "acme", false).await.unwrap();
+        let errors = report.errors.join("\n");
+        assert!(!errors.contains("fixtures/basic.yaml"), "{errors}");
+
+        for (event, needle) in [
+            (
+                "{ type: acme.nope }",
+                "`acme.nope` is not a registered event type",
+            ),
+            (
+                "{ type: thread.checkpoint, v: 9, payload: {} }",
+                "newer than the registered v1",
+            ),
+            (
+                "{ type: thread.checkpoint, payload: {}, anchors: { turn_id: seven } }",
+                "`anchors.turn_id`",
+            ),
+            (
+                "{ type: thread.checkpoint, payload: {}, subjects: [] }",
+                "unknown field `subjects`",
+            ),
+        ] {
+            write(
+                root,
+                "oxplow/extensions/acme/fixtures/basic.yaml",
+                &format!(
+                    "input: {{ implementation: tidy, event: {event} }}\nexpect: {{ skip: $any }}\n"
+                ),
+            );
+            let report = test_extension(root, "acme", false).await.unwrap();
+            let errors = report.errors.join("\n");
+            assert!(
+                errors.contains("acme/fixtures/basic.yaml:1: example `basic`: event: ")
+                    && errors.contains(needle),
+                "{event}: {errors}"
+            );
+        }
+    }
+
+    /// An effect example's event at an older version of the extension's
+    /// own type is carried to the newest through its upcast, as a logged
+    /// one would be.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_effect_example_at_an_older_version_is_upcast() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write(
+            root,
+            "oxplow/extensions/acme/extension.yaml",
+            "manifest: 2
+name: acme
+sharing: private
+intent:
+  purpose: Note merges.
+  examples:
+    - { name: old, expect: an old merge is read at v2 }
+event_types:
+  types:
+    - { type: acme.merged, v: 1, schema: merged.v1.json, summary: A merge. }
+    - { type: acme.merged, v: 2, schema: merged.v2.json, summary: A merge by someone., upcast: merged.star }
+effects:
+  - { id: note, summary: Note a merge., on: [acme.merged], entry: note.star }
+",
+        );
+        write(
+            root,
+            "oxplow/extensions/acme/merged.v1.json",
+            r#"{"type": "object", "required": ["number"], "properties": {"number": {"type": "integer"}}}"#,
+        );
+        write(
+            root,
+            "oxplow/extensions/acme/merged.v2.json",
+            r#"{"type": "object", "required": ["number", "by"], "properties": {"number": {"type": "integer"}, "by": {"type": "string"}}}"#,
+        );
+        write(
+            root,
+            "oxplow/extensions/acme/merged.star",
+            "def transform(x):\n    p = dict(x[\"payload\"])\n    p[\"by\"] = \"unknown\"\n    return p\n",
+        );
+        write(
+            root,
+            "oxplow/extensions/acme/note.star",
+            "def transform(x):\n    e = x[\"event\"]\n    return {\"skip\": \"v%d by %s\" % (e[\"v\"], e[\"payload\"][\"by\"])}\n",
+        );
+        write(
+            root,
+            "oxplow/extensions/acme/fixtures/old.yaml",
+            "input: { effect: note, event: { type: acme.merged, v: 1, payload: { number: 3 } } }\nexpect: { skip: v2 by unknown }\n",
+        );
+        let report = test_extension(root, "acme", false).await.unwrap();
+        assert!(report.ok, "{:?}", report.errors);
+        assert!(
+            report.ran.iter().any(|r| r == "example old"),
+            "{:?}",
+            report.ran
         );
     }
 

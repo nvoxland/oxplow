@@ -186,7 +186,7 @@ pub fn add_op() -> Op {
                     context_chain: input.context_chain,
                     referenced_refs: input.referenced_refs,
                     intent: input.intent.unwrap_or(CommentIntent::Note),
-                    author: author_of(ctx.actor).into(),
+                    author: author_of(ctx.actor()).into(),
                     body: input.body,
                 },
             )?;
@@ -211,7 +211,7 @@ pub fn reply_op() -> Op {
             let id = ref_id::<CommentId>(&input.comment, "comment", "/comment")?;
             on_own_stream(ctx, load(ctx, id)?.comment.stream_id)?;
             let (message, events) =
-                add_message_tx(ctx.conn, id, author_of(ctx.actor), &input.body)?;
+                add_message_tx(ctx.conn, id, author_of(ctx.actor()), &input.body)?;
             Ok(HandlerOutput {
                 result: serde_json::to_value(message).expect("a message serializes"),
                 events,

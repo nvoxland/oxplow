@@ -37,15 +37,28 @@ impl EffortPolicy for ScriptedPolicy {
         &self.id
     }
 
-    async fn react(&self, event: &EventView) -> Result<Vec<CommandCall>, DomainError> {
+    async fn react(
+        &self,
+        run: &oxplow_domain::run::RunContext,
+        event: &EventView,
+    ) -> Result<Vec<CommandCall>, DomainError> {
         let failed = |message: String| {
             DomainError::Invariant(format!("effort policy `{}`: {message}", self.id))
         };
         (self.gate)().map_err(&failed)?;
         let event = serde_json::to_value(event).map_err(|e| failed(e.to_string()))?;
-        match crate::effects::run_over(&self.sql, &self.needs, &self.script, event, None)
-            .await
-            .map_err(&failed)?
+        // The script is the run's pure part; what it reads is counted on it.
+        let composing = run.child(None, oxplow_domain::run::Mode::Pure);
+        match crate::effects::run_over(
+            &self.sql,
+            &composing,
+            &self.needs,
+            &self.script,
+            event,
+            None,
+        )
+        .await
+        .map_err(&failed)?
         {
             Reaction::Skip(_) => Ok(Vec::new()),
             Reaction::Run { events, .. } if !events.is_empty() => Err(failed(

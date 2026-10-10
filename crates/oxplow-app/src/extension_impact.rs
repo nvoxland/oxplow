@@ -48,6 +48,19 @@ pub struct Grants {
     pub env: Vec<String>,
     /// The scopes it may call (a provider's `needs`).
     pub scopes: Vec<String>,
+    /// What approving it grants that this machine can't hold it to
+    /// (`grants::gaps`).
+    pub unenforced: Vec<String>,
+}
+
+/// What granting `g` leaves unenforced here: a program's files, and
+/// network where egress isn't confined.
+fn gaps_of(runs_program: bool, hosts: &[String]) -> Vec<String> {
+    crate::grants::gaps(&oxplow_domain::grant::GrantRequest {
+        program: runs_program.then(String::new),
+        hosts: hosts.iter().cloned().collect(),
+        ..oxplow_domain::grant::GrantRequest::default()
+    })
 }
 
 /// A lens, by its rendered text before and after.
@@ -405,8 +418,8 @@ pub fn effects_diff(
 }
 
 /// The fixtures of `v`'s intent examples that run effect `id`: the
-/// example's name, its event and its `answers` (standing in for its
-/// scope calls').
+/// example's name, its `event:` as written and its `answers` (standing in
+/// for its scope calls').
 fn effect_fixtures(v: &Version<'_>, id: &str) -> Vec<(String, Value, Answers)> {
     let examples = v
         .extension
@@ -427,19 +440,7 @@ fn effect_fixtures(v: &Version<'_>, id: &str) -> Vec<(String, Value, Answers)> {
                     .cloned()
                     .and_then(|a| serde_json::from_value(a).ok())
                     .unwrap_or_default();
-                (
-                    ex.name.clone(),
-                    serde_json::json!({
-                        "id": "fixture",
-                        "type": event.get("type").cloned().unwrap_or_default(),
-                        "v": 1,
-                        "seq": 0,
-                        "source": "fixture",
-                        "subject": event.get("subject").cloned().unwrap_or_else(|| serde_json::json!([])),
-                        "payload": event.get("payload").cloned().unwrap_or_else(|| serde_json::json!({})),
-                    }),
-                    answers,
-                )
+                (ex.name.clone(), event, answers)
             })
         })
         .collect()
@@ -466,12 +467,13 @@ async fn effect_outputs(
             .cloned()
     };
     let (db, da) = (before.and_then(decl_of), decl_of(after));
-    // Each input is the event envelope, or why it couldn't be made (a
-    // fixture that couldn't happen, a row that can't be carried).
-    let mut inputs: BTreeMap<String, (Result<Value, String>, Answers)> = BTreeMap::new();
+    let mut inputs: BTreeMap<String, (ReviewEvent, Answers)> = BTreeMap::new();
     for v in before.into_iter().chain(std::iter::once(after)) {
         for (name, event, answers) in effect_fixtures(v, &effect.id) {
-            inputs.insert(format!("fixture {name}"), (Ok(event), answers));
+            inputs.insert(
+                format!("fixture {name}"),
+                (ReviewEvent::Fixture(event), answers),
+            );
         }
     }
     let types: Vec<String> = da
@@ -486,22 +488,32 @@ async fn effect_outputs(
     {
         inputs.insert(
             format!("event #{}", e.seq),
-            (e.view.map(|v| v.to_json()), Answers::new()),
+            (ReviewEvent::Logged(Box::new(e)), Answers::new()),
         );
     }
-    // Each side reads through its own models (its `sql.read` may read them).
+    // Each side reads through its own models (its `sql.read` may read them)
+    // and its own event types.
     let (layer_b, layer_a) = (
         layer.with_overlay(before.map(|v| v.overlay.to_vec()).unwrap_or_default()),
         layer.with_overlay(after.overlay.to_vec()),
+    );
+    let (vocab_b, vocab_a) = (
+        side_vocabulary(layer, before.unwrap_or(after)),
+        side_vocabulary(layer, after),
     );
     for (label, (event, answers)) in inputs {
         if std::time::Instant::now() >= deadline {
             return DryRuns::OutOfTime;
         }
         let run = |layer: &crate::sql_gateway::SqlGateway,
-                   decl: &Option<crate::effects::EffectDecl>| {
-            let (layer, decl, event, answers) =
-                (layer.clone(), decl.clone(), event.clone(), answers.clone());
+                   decl: &Option<crate::effects::EffectDecl>,
+                   vocabulary: &oxplow_domain::vocabulary::Vocabulary| {
+            let (layer, decl, event, answers) = (
+                layer.clone(),
+                decl.clone(),
+                event.view(vocabulary).map(|v| v.to_json()),
+                answers.clone(),
+            );
             async move {
                 let layer = &layer;
                 let decl = decl?;
@@ -542,7 +554,10 @@ async fn effect_outputs(
                 )
             }
         };
-        let (b, a) = (run(&layer_b, &db).await, run(&layer_a, &da).await);
+        let (b, a) = (
+            run(&layer_b, &db, &vocab_b).await,
+            run(&layer_a, &da, &vocab_a).await,
+        );
         if b.is_none() && a.is_none() {
             continue;
         }
@@ -817,8 +832,18 @@ pub fn grants_line(g: &Grants) -> String {
     } else {
         format!(" · calls {}", g.scopes.join(", "))
     };
+    let env = if g.env.is_empty() {
+        String::new()
+    } else {
+        format!(" · reads env {}", g.env.join(", "))
+    };
+    let unenforced = if g.unenforced.is_empty() {
+        String::new()
+    } else {
+        format!(" · not held here: {}", g.unenforced.join("; "))
+    };
     format!(
-        "runs {} · reaches {} · reads {}{calls}",
+        "runs {} · reaches {} · reads {}{env}{calls}{unenforced}",
         run_line(g),
         listed_or_none(&g.hosts),
         listed_or_none(&g.credentials)
@@ -1214,6 +1239,7 @@ fn collector_grants(s: &CollectorSpec) -> Grants {
         credentials: s.credentials.clone(),
         env: s.env.clone(),
         scopes: Vec::new(),
+        unenforced: gaps_of(s.runtime == CollectorRuntime::Exec, &s.network),
     }
 }
 
@@ -1268,8 +1294,41 @@ enum DryRuns {
     OutOfTime,
 }
 
-/// A review input's event: the envelope, or why it couldn't be made.
-type EventInput = Result<oxplow_domain::events::EventView, String>;
+/// A review input's event, before one version's event types make it the
+/// event envelope: a fixture's `event:` as written, or a logged row.
+#[derive(Clone)]
+enum ReviewEvent {
+    Fixture(Value),
+    Logged(Box<oxplow_domain::StoredEvent>),
+}
+
+impl ReviewEvent {
+    /// The envelope this version would hand over, or why it can't (a
+    /// fixture that couldn't happen, a row that can't be carried).
+    fn view(
+        &self,
+        vocabulary: &oxplow_domain::vocabulary::Vocabulary,
+    ) -> Result<oxplow_domain::events::EventView, String> {
+        use oxplow_domain::events::EventView;
+        match self {
+            ReviewEvent::Fixture(given) => EventView::fixture(given, vocabulary),
+            ReviewEvent::Logged(e) => EventView::of(e, vocabulary),
+        }
+        .map_err(|e| e.message())
+    }
+}
+
+/// The app's event types plus what version `v` declares: what that
+/// version would read events as.
+fn side_vocabulary(
+    layer: &crate::sql_gateway::SqlGateway,
+    v: &Version<'_>,
+) -> oxplow_domain::vocabulary::Vocabulary {
+    layer.vocabulary().with_declared(
+        &v.extension.name,
+        v.extension.event_types.types.iter().map(|d| d.declared()),
+    )
+}
 
 /// Fill a collector's outputs: each input — both versions' fixtures for it,
 /// the latest events it'd run on — run on each version.
@@ -1329,22 +1388,29 @@ async fn collector_outputs(
             .unwrap_or_default(),
         _ => Vec::new(),
     };
-    let mut inputs: Vec<(String, Option<EventInput>, Option<Vec<Value>>)> = fixtures
+    let mut inputs: Vec<(String, Option<ReviewEvent>, Option<Vec<Value>>)> = fixtures
         .into_iter()
         .map(|(name, rows)| (format!("fixture {name}"), None, rows))
-        .chain(
-            events
-                .into_iter()
-                .map(|e| (format!("event #{}", e.seq), Some(e.view), None)),
-        )
+        .chain(events.into_iter().map(|e| {
+            (
+                format!("event #{}", e.seq),
+                Some(ReviewEvent::Logged(Box::new(e))),
+                None,
+            )
+        }))
         .collect();
     if inputs.is_empty() && spec.input.is_some() {
         inputs.push(("input query".into(), None, None));
     }
-    // Each side reads through its own models (its `input:` may read them).
+    // Each side reads through its own models (its `input:` may read them)
+    // and its own event types.
     let (layer_b, layer_a) = (
         layer.with_overlay(before.map(|v| v.overlay.to_vec()).unwrap_or_default()),
         layer.with_overlay(after.overlay.to_vec()),
+    );
+    let (vocab_b, vocab_a) = (
+        side_vocabulary(layer, before.unwrap_or(after)),
+        side_vocabulary(layer, after),
     );
     for (label, event, rows) in inputs {
         if std::time::Instant::now() >= deadline {
@@ -1352,13 +1418,14 @@ async fn collector_outputs(
         }
         let run = |layer: &crate::sql_gateway::SqlGateway,
                    spec: &Option<CollectorSpec>,
-                   script: &Option<String>| {
+                   script: &Option<String>,
+                   vocabulary: &oxplow_domain::vocabulary::Vocabulary| {
             let (layer, spec, script, rows, event) = (
                 layer.clone(),
                 spec.clone(),
                 script.clone(),
                 rows.clone(),
-                event.clone(),
+                event.as_ref().map(|e| e.view(vocabulary)),
             );
             async move {
                 let spec = spec?;
@@ -1375,8 +1442,8 @@ async fn collector_outputs(
             }
         };
         let (b, a) = (
-            run(&layer_b, &spec_b, &script_b).await,
-            run(&layer_a, &spec_a, &script_a).await,
+            run(&layer_b, &spec_b, &script_b, &vocab_b).await,
+            run(&layer_a, &spec_a, &script_a, &vocab_a).await,
         );
         impact.outputs.push(CollectorOutput {
             input: label,
@@ -1404,6 +1471,7 @@ fn provider_grants(p: &ProviderSpec) -> Grants {
         credentials: p.credential_grants(),
         env: p.env.clone(),
         scopes: p.needs.clone(),
+        unenforced: gaps_of(!p.is_remote(), &p.network),
     }
 }
 
@@ -2814,6 +2882,82 @@ mod tests {
         );
     }
 
+    /// A review reads a fixture's event as each version would hand it
+    /// over: through that version's own event types, so a fixture at v1
+    /// of a type the version carries to v2 composes from the v2 payload;
+    /// a fixture that couldn't happen says why on that input.
+    #[tokio::test]
+    async fn a_review_reads_each_fixture_event_through_its_versions_types() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("oxplow/extensions/acme");
+        std::fs::create_dir_all(dir.join("fixtures")).unwrap();
+        std::fs::write(
+            dir.join("extension.yaml"),
+            "manifest: 2\nname: acme\nsharing: private\nintent:\n  purpose: p\n  examples:\n    - { name: old, input: x, expect: y }\n    - { name: bad, input: x, expect: y }\nevent_types:\n  types:\n    - { type: acme.merged, v: 1, schema: m1.json, summary: A merge. }\n    - { type: acme.merged, v: 2, schema: m2.json, summary: A merge by someone., upcast: m.star }\neffects:\n  - { id: note, summary: s, on: [acme.merged], entry: e.star }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("m1.json"),
+            r#"{"type": "object", "required": ["number"], "properties": {"number": {"type": "integer"}}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("m2.json"),
+            r#"{"type": "object", "required": ["number", "by"], "properties": {"number": {"type": "integer"}, "by": {"type": "string"}}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("m.star"),
+            "def transform(x):\n    p = dict(x[\"payload\"])\n    p[\"by\"] = \"unknown\"\n    return p\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("e.star"),
+            "def transform(x):\n    return {\"skip\": \"v%d by %s\" % (x[\"event\"][\"v\"], x[\"event\"][\"payload\"][\"by\"])}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("fixtures/old.yaml"),
+            "input: { effect: note, event: { type: acme.merged, v: 1, payload: { number: 3 } } }\nexpect: { skip: $any }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("fixtures/bad.yaml"),
+            "input: { effect: note, event: { type: acme.merged, v: 7, payload: { number: 3 } } }\nexpect: { skip: $any }\n",
+        )
+        .unwrap();
+        let ext = crate::extensions::load_project_extension(root.path(), "acme");
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        let read = |rel: &str| std::fs::read_to_string(dir.join(rel)).ok();
+        let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
+        let runs = crate::extensions::LensRuns::new();
+        let report = impact(
+            &layer,
+            None,
+            Version {
+                extension: &ext,
+                read: &read,
+                lenses: &runs,
+                overlay: &[],
+            },
+        )
+        .await;
+        let outputs = &report.effects[0].outputs;
+        let of = |input: &str| {
+            outputs
+                .iter()
+                .find(|o| o.input == input)
+                .and_then(|o| o.after.clone())
+                .unwrap_or_else(|| panic!("{input}: {outputs:?}"))
+        };
+        assert_eq!(of("fixture old").skip.as_deref(), Some("v2 by unknown"));
+        let bad = of("fixture bad").error.unwrap_or_default();
+        assert!(
+            bad.contains("its event: event: `acme.merged@7` is newer than the registered v2"),
+            "{bad}"
+        );
+    }
+
     /// A review runs each changed derived collector on the same
     /// inputs in both versions — here its fixture — and shows how the
     /// output differs; it never runs an exec collector's program (approved
@@ -2908,7 +3052,23 @@ mod tests {
             credentials: credentials.iter().map(|c| c.to_string()).collect(),
             env: vec![],
             scopes: Vec::new(),
+            unenforced: Vec::new(),
         }
+    }
+
+    /// A grant line says what isn't held here, and the env it reads; an
+    /// exec collector's grants name the files it can touch as one.
+    #[test]
+    fn a_grant_line_names_what_isnt_held_here() {
+        let mut g = grants(&["api.github.com"], &["GH_TOKEN"]);
+        g.env = vec!["HOME".into()];
+        g.unenforced = vec!["a program reads and writes files as you".into()];
+        assert_eq!(
+            grants_line(&g),
+            "runs bin/p · reaches api.github.com · reads GH_TOKEN · reads env HOME · not held here: a program reads and writes files as you"
+        );
+        assert!(gaps_of(true, &[]).iter().any(|g| g.contains("files")));
+        assert!(gaps_of(false, &[]).is_empty());
     }
 
     fn command(name: &str, change: Change, after: Option<Value>) -> CommandChange {

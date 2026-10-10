@@ -195,7 +195,18 @@ async fn every_path_hands_over_the_same_envelope() {
         .into_iter()
         .find(|(e, d)| e.name == "acme" && d.id == "note")
         .unwrap();
-    let (reaction, _) = crate::effect_triggers::run_script(svc, &decl, &event)
+    let (ext, _) = crate::effect_triggers::effects(svc)
+        .into_iter()
+        .find(|(e, d)| e.name == "acme" && d.id == "note")
+        .unwrap();
+    let run = crate::run_context::for_effect(
+        &svc.extension_catalog,
+        &svc.layout.project_dir,
+        &ext,
+        &decl,
+        &event,
+    );
+    let (reaction, _) = crate::effect_triggers::run_script(svc, &run, &decl, &event)
         .await
         .unwrap();
     let crate::effects::Reaction::Run { calls, .. } = reaction else {

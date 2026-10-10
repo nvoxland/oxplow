@@ -131,14 +131,14 @@ fn reachable_thread(ctx: &TxCtx<'_>, thread: ThreadId, field: &str) -> Result<()
         .optional()
         .map_err(sql)?
         .ok_or_else(|| invalid(field, format!("unknown thread `{thread}`")))?;
-    match ctx.actor.stream_id() {
+    match ctx.actor().stream_id() {
         Some(own) if own != StreamId::new(stream) => Err(invalid(
             field,
             format!("thread `{thread}` is in stream `str{stream}`, not the caller's `{own}`"),
         )),
         // The bus gives an agent with a thread its stream: one without
         // either reaches no thread.
-        None if ctx.actor.is_agent_driven() => Err(invalid(
+        None if ctx.actor().is_agent_driven() => Err(invalid(
             field,
             "an agent with no thread reaches no thread's effort",
         )),
@@ -205,7 +205,7 @@ pub fn open_op(work_items: WorkItemsRegistry) -> Op {
         let thread = match input.thread.as_deref() {
             Some(raw) => ref_id(raw, "thread", "/thread")?,
             None => ctx
-                .actor
+                .actor()
                 .thread_id()
                 .ok_or_else(|| invalid("/thread", "no thread given and the caller has none"))?,
         };
@@ -268,7 +268,7 @@ pub fn close_op() -> Op {
                 format!("effort `{id}` started after `{at}`"),
             ));
         }
-        let closed_by = match (input.reason, ctx.actor) {
+        let closed_by = match (input.reason, ctx.actor()) {
             (Some(CloseReason::Commit), _) => ClosedBy::Commit,
             (Some(CloseReason::Switch), _) => ClosedBy::Switch,
             (None, Actor::Agent { .. }) => ClosedBy::Agent,

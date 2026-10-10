@@ -58,6 +58,8 @@ pub struct EffectRunKey {
     /// From 1.
     pub attempt: u32,
     pub origin: ReactionOrigin,
+    /// The attempt's run (`extension_run.run_id`), recorded on its row.
+    pub run_id: Option<String>,
 }
 
 impl EffectRunKey {
@@ -74,6 +76,7 @@ impl EffectRunKey {
             event_seq,
             attempt: 1,
             origin,
+            run_id: None,
         }
     }
 }
@@ -270,6 +273,7 @@ pub fn due_retries_tx(
                     event_seq,
                     attempt,
                     origin: ReactionOrigin::parse(&origin)?,
+                    run_id: None,
                 },
                 retry_at,
             ))
@@ -301,6 +305,7 @@ pub fn person_started_tx(conn: &Connection) -> Result<Vec<EffectRunKey>, DomainE
                 event_seq,
                 attempt,
                 origin: ReactionOrigin::parse(&origin)?,
+                run_id: None,
             })
         })
         .collect()
@@ -340,8 +345,9 @@ pub fn claim_tx(
     let inserted = conn
         .execute(
             "INSERT INTO effect_run
-                 (effect, event_id, event_seq, attempt, origin, state, started_at, resend_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, 'started', ?6, ?7)
+                 (effect, event_id, event_seq, attempt, origin, state, started_at, resend_json,
+                  run_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, 'started', ?6, ?7, ?8)
              ON CONFLICT (effect, event_id, attempt) DO NOTHING",
             params![
                 key.effect,
@@ -350,7 +356,8 @@ pub fn claim_tx(
                 key.attempt,
                 key.origin.as_str(),
                 now,
-                resend
+                resend,
+                key.run_id
             ],
         )
         .map_err(map_sql_err)?;
@@ -411,7 +418,7 @@ pub fn finish_tx(
             conn.execute(
                 "UPDATE effect_run
                     SET state = ?4, reason = ?5, audit_id = ?6, proposal_id = ?7, finished_at = ?8,
-                        resend_json = NULL
+                        resend_json = NULL, run_id = coalesce(?9, run_id)
                   WHERE effect = ?1 AND event_id = ?2 AND attempt = ?3",
                 params![
                     key.effect,
@@ -421,7 +428,8 @@ pub fn finish_tx(
                     done.reason,
                     done.audit_id,
                     done.proposal_id,
-                    now
+                    now,
+                    key.run_id
                 ],
             )
             .map_err(map_sql_err)?;
@@ -431,8 +439,8 @@ pub fn finish_tx(
             conn.execute(
                 "INSERT INTO effect_run
                      (effect, event_id, event_seq, attempt, origin, state, reason, audit_id,
-                      proposal_id, started_at, finished_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
+                      proposal_id, started_at, finished_at, run_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10, ?11)",
                 params![
                     key.effect,
                     key.event_id,
@@ -443,7 +451,8 @@ pub fn finish_tx(
                     done.reason,
                     done.audit_id,
                     done.proposal_id,
-                    now
+                    now,
+                    key.run_id
                 ],
             )
             .map_err(map_sql_err)?;

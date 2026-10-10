@@ -14,16 +14,17 @@ use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
 use crate::ai::AiOracle;
-use crate::runtime::{RunClock, SandboxBudget};
+use crate::runtime::RunClock;
 use crate::worker::{CallKind, CallOut, Engine, FromWorker, ToWorker, EXIT_MEMORY, MEMORY_ARG};
 use crate::CollectError;
+pub use oxplow_domain::run::{Budget, Cancel};
 
 /// The worker binary's name, beside the oxplow executable.
 pub const WORKER: &str = "oxplow-script-worker";
@@ -48,20 +49,6 @@ impl Default for Limits {
                 .unwrap_or(2),
             memory_bytes: 512 * 1024 * 1024,
         }
-    }
-}
-
-/// Asks a run to stop: the worker is killed at the next tick.
-#[derive(Debug, Clone, Default)]
-pub struct Cancel(Arc<AtomicBool>);
-
-impl Cancel {
-    pub fn cancel(&self) {
-        self.0.store(true, Ordering::SeqCst);
-    }
-
-    pub fn is_cancelled(&self) -> bool {
-        self.0.load(Ordering::SeqCst)
     }
 }
 
@@ -213,7 +200,7 @@ impl ScriptWorkers {
     /// ([`CollectError::MemoryExceeded`]). Blocks.
     pub fn run(
         &self,
-        budget: &SandboxBudget,
+        budget: &Budget,
         run: ScriptRun<'_>,
         cancel: Option<&Cancel>,
     ) -> Result<Ran, CollectError> {

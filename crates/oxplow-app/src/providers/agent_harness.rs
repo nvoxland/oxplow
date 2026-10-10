@@ -138,9 +138,13 @@ impl ExternalHarness {
         schema
             .check(&input)
             .map_err(|e| format!("its `{verb}` schema refuses the input: {e}"))?;
+        let run = oxplow_domain::run::RunContext::core(
+            oxplow_domain::Actor::System,
+            oxplow_domain::run::Mode::External,
+        );
         let out = self
             .instance
-            .invoke(verb, input, key)
+            .invoke(&run, verb, input, key)
             .await
             .map_err(|e| e.to_string())?;
         if !out.events.is_empty() {

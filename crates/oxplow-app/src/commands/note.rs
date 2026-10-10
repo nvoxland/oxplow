@@ -74,7 +74,7 @@ pub fn add_op(deps: LinkDeps) -> Op {
                 &ctx.events.vocabulary.kinds,
                 thread,
                 &input.body,
-                author_of(ctx.actor),
+                author_of(ctx.actor()),
             )?;
             let note = serde_json::to_value(note).expect("a note serializes");
             Ok(HandlerOutput {

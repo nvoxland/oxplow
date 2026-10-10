@@ -18,6 +18,7 @@
 //! loop (`models_changed.rs`, the one maker of `MetricSamplesChanged`), not
 //! here.
 
+use oxplow_domain::run::{Mode, RunContext};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
@@ -32,9 +33,10 @@ use oxplow_db::{
     EffortStore, NewDimension, NewMeasure, NewMetricSpec, SnapshotStorage, SqliteEffortStore,
     SqliteFactStore, SqliteSnapshotStore, SqliteThreadStore,
 };
+use oxplow_domain::run::Budget;
 use oxplow_domain::stores::ThreadStore;
-use oxplow_domain::{DomainError, EffortId, StreamId, ThreadId};
-use oxplow_script::{builtin_metrics, BuiltinMetric, CollectedFact, SandboxBudget};
+use oxplow_domain::{Actor, DomainError, EffortId, StreamId, ThreadId};
+use oxplow_script::{builtin_metrics, BuiltinMetric, CollectedFact};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
@@ -45,7 +47,7 @@ const DEFAULT_MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
 
 /// Wall-clock ceiling for ONE gauge run (tsk47).
 ///
-/// The `SandboxBudget` default is 5s, which suits a report parser reading a single
+/// The `Budget` default is 5s, which suits a report parser reading a single
 /// file. A tree gauge is a different animal: it tree-sitter-parses the WHOLE tree
 /// (873 files here) on a full-tree baseline, and 5s was nowhere near enough — the
 /// broad-query gauges silently timed out on every full run, so `oxplow.ts.console_calls`
@@ -318,9 +320,10 @@ struct CollectorRunContext {
     /// `input.event`, its anchors' `input` parameters, and the cause of the
     /// run's `collector.synced@1`.
     event: Option<Arc<oxplow_domain::StoredEvent>>,
-    /// Who ran it, as an event source (`collector.synced@1`'s): the
-    /// system, unless someone ran it by hand.
-    source: String,
+    /// The run it's part of: the system's, unless someone ran it by hand
+    /// (`collector.synced@1`'s source is its actor). Each collector runs
+    /// as a child of it.
+    run: RunContext,
 }
 
 /// Measures, metrics, fact collectors and dimensions from enabled
@@ -1909,7 +1912,7 @@ impl MetricsService {
         owner: &str,
         key: &str,
         stream: Option<StreamId>,
-        source: &str,
+        run: &RunContext,
     ) -> Result<usize, String> {
         let metric = self
             .fact_collectors()
@@ -1956,12 +1959,20 @@ impl MetricsService {
         let mut ctx = self
             .snapshot_context(stream_val, None, "manual", snapshot_id.unwrap_or(0))
             .await;
-        ctx.source = source.to_string();
+        ctx.run = run.clone();
         let runner = match self.fact_runner(&metric) {
             Ok(r) => r,
             Err(e) => {
-                self.log_run(&metric, &ctx, &FactRun::Failed(e.clone()), 0, None)
-                    .await;
+                let this_run = self.collector_run(&metric, &ctx.run);
+                self.log_run(
+                    &metric,
+                    &ctx,
+                    &this_run,
+                    &FactRun::Failed(e.clone()),
+                    0,
+                    None,
+                )
+                .await;
                 return Err(e);
             }
         };
@@ -2091,7 +2102,7 @@ impl MetricsService {
             effort_id: None,
             scan_kind: "delta",
             event: None,
-            source: "system".into(),
+            run: RunContext::core(Actor::System, Mode::External),
         }
     }
 
@@ -2161,10 +2172,15 @@ impl MetricsService {
             ));
         }
         let runner = self.fact_runner(&collector)?;
-        let facts =
-            tokio::task::spawn_blocking(move || runner.run(&input, std::sync::Arc::new(files)))
-                .await
-                .map_err(|e| format!("task failed: {e}"))??;
+        let facts = tokio::task::spawn_blocking(move || {
+            runner.run(
+                &input,
+                std::sync::Arc::new(files),
+                &RunContext::core(Actor::System, Mode::Pure),
+            )
+        })
+        .await
+        .map_err(|e| format!("task failed: {e}"))??;
         Ok(facts
             .into_iter()
             .map(|f| {
@@ -2175,6 +2191,28 @@ impl MetricsService {
                 v
             })
             .collect())
+    }
+
+    /// Fact collector `gauge`'s run, a child of `parent`: named for the
+    /// collector when an extension declares it (core's and the project's
+    /// are core's own work).
+    fn collector_run(&self, gauge: &FactCollector, parent: &RunContext) -> RunContext {
+        let root = &self.project_dir;
+        let declared = self
+            .extensions_cache
+            .get(root)
+            .iter()
+            .find(|e| e.name == gauge.owner)
+            .map(|ext| {
+                crate::run_context::contribution(
+                    &self.extensions_cache,
+                    root,
+                    ext,
+                    oxplow_domain::contribution::ContributionKind::Collector,
+                    &gauge.key,
+                )
+            });
+        parent.child(declared, Mode::External)
     }
 
     /// Run one fact collector: build its runner and run it with the
@@ -2190,7 +2228,8 @@ impl MetricsService {
             Ok(runner) => self.run_fact_runner(gauge, runner, ctx, files).await,
             Err(e) => {
                 tracing::warn!(key = %gauge.key, error = %e, "fact collector: not run");
-                self.log_run(gauge, ctx, &FactRun::Failed(e.clone()), 0, None)
+                let this_run = self.collector_run(gauge, &ctx.run);
+                self.log_run(gauge, ctx, &this_run, &FactRun::Failed(e.clone()), 0, None)
                     .await;
                 FactRun::Failed(e)
             }
@@ -2209,16 +2248,18 @@ impl MetricsService {
         files: Arc<HashMap<String, String>>,
     ) -> FactRun {
         let source = collector_source(gauge);
+        let this_run = self.collector_run(gauge, &ctx.run);
         let started = std::time::Instant::now();
         let outcome = match self.fact_input(gauge, ctx).await {
             Err(e) => Err(e),
             Ok(input) => {
+                let run = this_run.clone();
                 // A tree collector scans the WHOLE tree (hundreds of files,
                 // tree-sitter each): the 5 s default sized for report parsers
                 // silently timed out the broad-query ones on every full-tree
                 // run (tsk47). They run detached under `spawn_blocking`, so a
                 // generous ceiling costs nothing and still catches a runaway.
-                tokio::task::spawn_blocking(move || runner.run(&input, files))
+                tokio::task::spawn_blocking(move || runner.run(&input, files, &run))
                     .await
                     .unwrap_or_else(|e| Err(format!("task failed: {e}")))
             }
@@ -2261,7 +2302,8 @@ impl MetricsService {
             }
         };
         let elapsed = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
-        self.log_run(gauge, ctx, &run, elapsed, capture).await;
+        self.log_run(gauge, ctx, &this_run, &run, elapsed, capture)
+            .await;
         run
     }
 
@@ -2328,6 +2370,7 @@ impl MetricsService {
         &self,
         c: &FactCollector,
         ctx: &CollectorRunContext,
+        this_run: &RunContext,
         run: &FactRun,
         elapsed_ms: i64,
         capture: Option<(oxplow_db::NewMetricCapture, Vec<oxplow_db::NewFact>)>,
@@ -2377,13 +2420,14 @@ impl MetricsService {
                     owner: &c.owner,
                     id: &c.key,
                     trigger,
-                    source: &ctx.source,
+                    source: &ctx.run.actor().source(),
                     cause: ctx.event.as_deref().map(|e| (e.envelope.id.clone(), e.seq)),
                     status,
                     entities: Default::default(),
                     facts,
                     elapsed_ms,
                     error,
+                    run: Some(this_run),
                 },
                 capture,
             )
@@ -3169,12 +3213,20 @@ impl FactRunner {
         self,
         input: &serde_json::Value,
         files: std::sync::Arc<std::collections::HashMap<String, String>>,
+        run: &RunContext,
     ) -> Result<Vec<CollectedFact>, String> {
         use oxplow_script::facts_of;
         use oxplow_script::runtime::run_exec;
         use oxplow_script::workers::{shared, RunHost, ScriptRun};
-        let budget = SandboxBudget::with_timeout(FACT_COLLECTOR_TIMEOUT);
-        let script = |run: ScriptRun<'_>| shared().run(&budget, run, None).map(|r| r.value);
+        let budget = Budget::with_timeout(FACT_COLLECTOR_TIMEOUT);
+        let script = |script_run: ScriptRun<'_>| {
+            shared()
+                .run(&budget, script_run, Some(run.cancel()))
+                .map(|r| {
+                    run.used_cpu(r.cpu_ms, r.peak_bytes);
+                    r.value
+                })
+        };
         match self {
             FactRunner::Starlark(text) => {
                 script(ScriptRun::starlark(&text, input.clone()).with_host(RunHost::Tree(files)))
@@ -4205,7 +4257,7 @@ def transform(input):
             effort_id: None,
             scan_kind: "delta",
             event: None,
-            source: "system".into(),
+            run: RunContext::core(Actor::System, Mode::External),
         };
         // Only src/a.rs has unsafe blocks → one fact recorded.
         let count = svc
@@ -4260,7 +4312,7 @@ def transform(input):
             effort_id: None,
             scan_kind: "delta",
             event: None,
-            source: "system".into(),
+            run: RunContext::core(Actor::System, Mode::External),
         };
 
         // Scan 1: src/a.rs has one unsafe block.
@@ -4321,7 +4373,7 @@ def transform(input):
             effort_id: None,
             scan_kind: "delta",
             event: None,
-            source: "system".into(),
+            run: RunContext::core(Actor::System, Mode::External),
         }
     }
 
@@ -4480,7 +4532,7 @@ def transform(input):
             effort_id: None,
             scan_kind: "delta",
             event: None,
-            source: "system".into(),
+            run: RunContext::core(Actor::System, Mode::External),
         };
         let src = "pub fn f() {\n    unsafe { g(); }\n    console.log(x);\n}\n".to_string();
 
@@ -4559,7 +4611,12 @@ def transform(input):
         assert_eq!(report.ran, 0);
         let err = svc
             .metrics
-            .run_collector_by_key("built-in", "oxplow.rust.unsafe_blocks", None, "human")
+            .run_collector_by_key(
+                "built-in",
+                "oxplow.rust.unsafe_blocks",
+                None,
+                &RunContext::core(Actor::Human, Mode::External),
+            )
             .await
             .unwrap_err();
         assert!(err.contains("keeps no file contents"), "{err}");
@@ -4688,7 +4745,7 @@ def transform(input):
             effort_id: None,
             scan_kind: "delta",
             event: None,
-            source: "system".into(),
+            run: RunContext::core(Actor::System, Mode::External),
         };
         let files = Arc::new(HashMap::from([("a.rs".to_string(), "x".to_string())]));
         svc.metrics
@@ -4736,7 +4793,7 @@ def transform(input):
             effort_id: None,
             scan_kind: "delta",
             event: None,
-            source: "system".into(),
+            run: RunContext::core(Actor::System, Mode::External),
         };
         let unsafe_n = |n: usize| {
             let body = "unsafe { x(); } ".repeat(n);
@@ -4812,7 +4869,7 @@ def transform(input):
             effort_id: None,
             scan_kind: "delta",
             event: None,
-            source: "system".into(),
+            run: RunContext::core(Actor::System, Mode::External),
         };
 
         let s1 =
@@ -4906,7 +4963,7 @@ def transform(input):
             effort_id: Some(effort.id.value()),
             scan_kind: "delta",
             event: None,
-            source: "system".into(),
+            run: RunContext::core(Actor::System, Mode::External),
         };
         let count = svc
             .metrics
@@ -5030,7 +5087,7 @@ def transform(input):
             effort_id: None,
             scan_kind: "delta",
             event: None,
-            source: "system".into(),
+            run: RunContext::core(Actor::System, Mode::External),
         };
         let count = svc
             .metrics
@@ -5112,7 +5169,7 @@ def transform(input):
             effort_id: None,
             scan_kind: "delta",
             event: None,
-            source: "system".into(),
+            run: RunContext::core(Actor::System, Mode::External),
         };
         for key in [
             "oxplow.fn_count",
@@ -5177,7 +5234,7 @@ def transform(input):
             effort_id: None,
             scan_kind: "delta",
             event: None,
-            source: "system".into(),
+            run: RunContext::core(Actor::System, Mode::External),
         };
         svc.metrics
             .run_one_collector(&metric, &ctx, Arc::new(HashMap::new()))
@@ -5241,7 +5298,7 @@ def transform(input):
             effort_id: None,
             scan_kind: "delta",
             event: None,
-            source: "system".into(),
+            run: RunContext::core(Actor::System, Mode::External),
         };
         svc.metrics
             .run_one_collector(&gauge, &ctx, Arc::new(HashMap::new()))
@@ -5313,7 +5370,7 @@ def transform(input):
             effort_id: None,
             scan_kind: "delta",
             event: None,
-            source: "system".into(),
+            run: RunContext::core(Actor::System, Mode::External),
         };
         svc.metrics
             .run_one_collector(&gauge, &ctx, Arc::new(HashMap::new()))
@@ -5381,7 +5438,7 @@ def transform(input):
             effort_id: None,
             scan_kind: "delta",
             event: None,
-            source: "system".into(),
+            run: RunContext::core(Actor::System, Mode::External),
         };
 
         let keys = [
@@ -5451,7 +5508,7 @@ def transform(input):
             effort_id: None,
             scan_kind: "delta",
             event: None,
-            source: "system".into(),
+            run: RunContext::core(Actor::System, Mode::External),
         };
         svc.metrics
             .run_one_collector(
@@ -5977,7 +6034,12 @@ def transform(input):
         // facts and runs without error (the read flip made it facts-only, T-C3b).
         let count = svc
             .metrics
-            .run_collector_by_key("built-in", "oxplow.rust.unsafe_blocks", None, "human")
+            .run_collector_by_key(
+                "built-in",
+                "oxplow.rust.unsafe_blocks",
+                None,
+                &RunContext::core(Actor::Human, Mode::External),
+            )
             .await
             .unwrap();
         assert_eq!(count, 0, "empty snapshot → no facts, runs without error");
@@ -6047,7 +6109,12 @@ def transform(input):
         // Its gauge runs its own script, read through the extension.
         let n = svc
             .metrics
-            .run_collector_by_key("acme", "acme.todo_scan", None, "human")
+            .run_collector_by_key(
+                "acme",
+                "acme.todo_scan",
+                None,
+                &RunContext::core(Actor::Human, Mode::External),
+            )
             .await
             .unwrap();
         assert_eq!(n, 1);
@@ -6076,7 +6143,12 @@ def transform(input):
             .is_some());
         assert!(svc
             .metrics
-            .run_collector_by_key("acme", "acme.todo_scan", None, "human")
+            .run_collector_by_key(
+                "acme",
+                "acme.todo_scan",
+                None,
+                &RunContext::core(Actor::Human, Mode::External)
+            )
             .await
             .is_err());
     }
@@ -6196,7 +6268,12 @@ def transform(input):
         svc.metrics.seed_catalog().await;
         let err = svc
             .metrics
-            .run_collector_by_key("project", "repo.count", None, "human")
+            .run_collector_by_key(
+                "project",
+                "repo.count",
+                None,
+                &RunContext::core(Actor::Human, Mode::External),
+            )
             .await
             .unwrap_err();
         assert!(err.contains("approval"), "{err}");
@@ -6219,7 +6296,12 @@ def transform(input):
         .unwrap();
         assert_eq!(
             svc.metrics
-                .run_collector_by_key("project", "repo.count", None, "human")
+                .run_collector_by_key(
+                    "project",
+                    "repo.count",
+                    None,
+                    &RunContext::core(Actor::Human, Mode::External)
+                )
                 .await
                 .unwrap(),
             1

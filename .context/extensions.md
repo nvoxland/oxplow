@@ -1001,19 +1001,30 @@ boot. It never opens the project's database. It runs `check` there
 - `input: { lens: <slug>, params? }`, `expect: { columns?, rows: n |
   $any }` — the lens runs; its row count (and columns, when expected)
   must match;
-- `input: { collector: <id>, rows? }`, `expect: { entities: { <name>:
+- `input: { collector: <id>, rows?, event? }`, `expect: { entities: { <name>:
   n | $any } }` — a derived collector runs over `rows` (standing in for
-  its `input` query, `preview_collector(…, rows)`), storing nothing, its
+  its `input` query, `preview_collector(…, event, rows)`) and `event`
+  (the event an `on:` collector reacts to, as the envelope), storing nothing, its
   rows typed against the declaration; an exec collector's example is a
   warning, not run (it needs a person's approval);
 - `input: { collector: <id>, files: { <path>: <text> } }`, `expect: {
   facts: [...] }` — a **fact** collector (one with `facts:`) runs over
   `files` as its tree (`MetricsService::preview_fact_collector`, its other
-  input keys — `report`, `rows`, `event` — as its input), storing nothing;
+  input keys — `report`, `rows`, `event` (made the envelope) — as its
+  input), storing nothing;
   each fact is compared on the keys its expected fact names (tsk1047: it
   used to be run as an entity collector and fail);
 - `input: { command, input }` — a provider's, run in its session
   (providers.md "The conformance kit");
+Every example's `event:` is built by `EventView::fixture` through the
+throwaway's vocabulary (core's plus the extensions' declared types,
+synced at its start) — "The event envelope" above: the script gets the
+envelope the runtime would hand over, and a fixture that couldn't happen
+is an error at it (``fixtures/x.yaml:1: example `x`: event: …``). A
+review reads each fixture through that version's own declared types
+(`Vocabulary::with_declared`), so a version that adds v2 carries its v1
+fixtures to it.
+
 - `input: { effect: <id>, event: { type, payload, subject? }, answers? }`,
   `expect: { commands: [names] } | { skip: <part of the reason> } | {
   reacts: false }` (P8.D12) — whether the effect reacts (`on`/`where`),
@@ -1026,8 +1037,7 @@ boot. It never opens the project's database. It runs `check` there
 - `input: { implementation: <id>, event: { type, payload, subject?,
   anchors? }, answers? }`, the same `expect` but `reacts` — an
   **effort policy script** (`implementations:` with `capability:
-  effort_policy`): the event as a `PolicyEvent` (`id`/`source`
-  `fixture`, `v` 1, `seq` 0), `effects::run_over` with the answers, the
+  effort_policy`): the event envelope, `effects::run_over` with the answers, the
   calls checked against the registry; appending events is an error (a
   policy emits nothing). Naming no policy script of the extension is an
   error naming the id. For each such script `test` also runs the
@@ -1769,6 +1779,100 @@ payload. It shows; it never acts.
 `STABLE_KINDS` lists `ui.decorators`; a shared extension may declare
 them.
 
+## The run context
+
+Every run of extension code — and every bus run — carries one
+`RunContext` (`oxplow_domain::run`; the app's constructors are
+`run_context.rs`): its run id (a UUIDv7), its parent run, the
+contribution it belongs to (`<ext>/<kind>/<local>`, the extension's
+`version`, the catalog generation it was built against), its actor,
+anchors, subject and cause, its mode, its budget, its cancel flag and
+its scope trace.
+
+- **Built by a named constructor, never assembled.** `for_effect`,
+  `for_policy`, `for_collector`, `for_command`, `for_dry_run` and
+  `RunContext::core` fill what that run has and leave the rest `None`.
+  Nested work is `child()`: a new run id with this one as parent, the
+  same actor, cancel flag and generation, the budget no larger than
+  what's left. A child can be another contribution's (a collector a
+  person's `oxplow.collector.sync` ran) but never another actor's —
+  `placed_in(stream)` only fills an agent's stream its transport left
+  out.
+- **Modes are explicit.** `Pure` (a composer, an effect's or policy's
+  script: it may be run again, no I/O but scope reads), `Transactional`
+  (a `Tx` handler), `External` (may call a program, a provider, a
+  model). `may_call_out` refuses the first two.
+- **Stale is checkable.** `check(current_generation)` refuses a run
+  built against a catalog generation no longer served, or cancelled.
+- **Who carries it:** the bus (`run_in`, `TxCtx::run`, `Invocation::run`
+  — an `External` call's run is a child of the command's), scope calls
+  (`scope_calls::Calls::new(run, needs, read)`, counted on its trace),
+  a composer (`Composer` gets a pure child; what it calls becomes the
+  run's scopes), effects (`for_effect`: the effect actor on the event's
+  thread and stream, caused by the event), the effort policy
+  (`for_policy`, its composed calls `run_in` it so `command.executed`
+  is caused by the event), entity and fact collectors (a child of the
+  run that ran them, named for the collector), provider invokes (on the
+  wire as `InvokeParams.context`; `host/call`s are answered only inside
+  a registered run) and knowledge, snapshot and harness verbs.
+- **Every contribution's run is recorded once** (`extension_run`,
+  `v_extension_run`; [data-model.md](./data-model.md) "extension_run"):
+  its identity, actor, anchors, cause, outcome, cost (`cpu_ms`,
+  `peak_bytes`, from each script's `Ran`), the scopes it called and its
+  model calls — never what it read or wrote. Nested work of the same
+  contribution adds to its parent's usage (`child()` shares it); another
+  contribution's child is its own row, its `parent_run_id` the run that
+  started it. A person's `oxplow.effect.retry` / `backfill` links the
+  reaction's run to theirs (`under`) without making it theirs: the
+  effect still runs as itself.
+- **Cancel reaches the worker.** Every script a collector, command,
+  effect, policy or fact collector runs is passed its run's cancel flag;
+  an exec collector's program is killed when it's set. Upcasts, report
+  parsers, scripted AI mappings and the MCP adapter's mappings still run
+  under their own fixed budgets without one.
+
+## Grants
+
+A **need** is what a contribution declares; a **grant** is what a person
+approved; a **decision** is what a run was allowed (`oxplow_domain::grant`,
+`grants.rs`).
+
+- **The request.** `GrantRequest { scopes, program, hosts, credentials,
+  env, commands, ai }`, derived from the declaration: an exec collector's
+  entry, `network`, `credentials` and `env`; a model-calling script's
+  `ai`; a script's (effect, command, effort policy) scopes from its
+  `needs`; a project program's from its listing (`program_request`).
+  `widening(granted)` names what a new request asks beyond a grant; a
+  narrower one asks nothing new.
+- **The grant.** `Grant { request, granted_at, granted_by, revoked_at }`.
+  What a run decides against is always the request derived from the
+  declaration *now* — the approval's hash proves that declaration is the
+  approved one — never a request stored in the approvals file, which a
+  process writing that file could widen.
+- **The authority** a run carries (`RunContext::authorized`,
+  `run::Authority { declared, grant, enforcement }`): the grant when a
+  person's approval is what lets it run (a program, a model-calling
+  script, an effect), else its declaration alone (a script command, a
+  policy's script, a provider's `host/call`s — decided against the
+  provider's own `needs`). Core's own work has none and is allowed what
+  it does.
+- **Decisions.** `run.decide(Need)` → `Allowed`, `Denied(why)` or
+  `Unenforced(why)`, recorded on the run (`v_extension_run.decisions`):
+  each scope call (`Calls::serve`); a program collector's `program`,
+  `files`, each `env` name, each `host` and each `credential` — a
+  credential its grant doesn't name is never read from the keychain; a
+  script's model calls (`ai`). A denied need stops what asked for it.
+  `Enforcement { hosts }` is the one table of what this machine holds:
+  egress is confined only under macOS's sandbox, and a program's files
+  never are — those decisions are `unenforced`, and `grants::gaps` says
+  the same on Programs rows and in a review's grant line ("not held
+  here: …").
+- **Revoking** removes the approval ([architecture.md](./architecture.md)
+  "A repo's config never runs a program without consent").
+- **Not yet:** per-model grants for `sql.read`, confining a program's
+  files, and a per-run limit on model calls (left out, 2026-10-10) —
+  the next roadmap item, "Enforce scoped grants".
+
 ## The event envelope
 
 An extension sees an event as one shape, `EventView`
@@ -2007,8 +2111,9 @@ to …`), in the same list a refused declaration shows in. It clears when
 the owner is installed and enabled, and comes back if the owner goes or
 its declaration is refused. Until then the reaction simply never fires:
 nothing can append a type that isn't registered. There is no `type@v` in
-`on:` — the pump hands every consumer an event at its type's newest
-registered version (`at_latest`, the owner's upcasts), so a subscriber is
+`on:` — every consumer, and every script through the event envelope
+("The event envelope" above), gets an event at its type's newest
+registered version (`events::at_latest`, the owner's upcasts), so a subscriber is
 written against the owner's latest shape and a breaking change is the
 owner's new version plus upcast. A subscriber still **appends** only its
 own types (`own_events` is unchanged), and the effects' loop guard
@@ -2198,7 +2303,8 @@ check: `Unapproved`, `BeforeApproval` or `Runs`. The consumer hashes an
 extension's folder once per catalog load (`FolderHashes`, keyed by the
 catalog's `Arc`), not per event: an edit reloads the catalog, so it's
 hashed again and stops the effect (tsk798). The approvals file is read
-on each check, so revoking one takes effect at once.
+on each check, so revoking one (Settings → Data → Programs) takes effect
+at its next event.
 
 **A bundled extension's effect is approved the same way** (P11, tsk953).
 What an approval covers is read through one resolver,
@@ -2507,10 +2613,11 @@ fits, the names are `expect_commands` in order. Without a registry it
 warns that the examples weren't checked. **`compose_calls`** is the one
 compose step, for the dry run and the handler alike: the script in the
 sandbox under `COMMAND_SCRIPT_BUDGET` (5 s of the script's own time, not
-the collectors' 120 s runaway catch, because at run time the script holds
-the bus's write transaction; no files, no `ai_*`), its `scope` calls
-served on the calling thread (`run_starlark_serving`,
-`scope_calls::Calls`; a busy database retries the run), then the
+the collectors' 120 s runaway catch: the bus composes it once, on a read
+snapshot it holds while the script runs; no files, no `ai_*`), its `scope`
+calls served on the calling thread (`run_command_script` with
+`workers::RunHost::Scope`, through `scope_calls::Calls`; a busy database
+retries the run), then the
 `{ commands, result? }` shape (`composed`; any other key is `Invalid`).
 
 **Running** (`extension_command`): each is a composite

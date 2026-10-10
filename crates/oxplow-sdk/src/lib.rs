@@ -190,7 +190,7 @@ pub fn scaffold(
         }
         Kind::Policy => (
             format!(
-                "{{ implementation: {provider_id}, event: {{ type: thread.checkpoint, payload: {{}} }} }}"
+                "{{ implementation: {provider_id}, event: {{ type: thread.checkpoint, payload: {{ thread: \"thread:thr1\", turn: \"turn:trn1\", reason: turn_end, snapshot: \"snapshot:1\", changed: false, writing_tools: 0 }}, anchors: {{ thread_id: thr1, turn_id: 1 }} }} }}"
             ),
             "nothing to do: a checkpoint opens or closes no effort",
             Some("{ skip: $any }".to_string()),
@@ -468,7 +468,8 @@ pub fn scaffold(
         )?,
         Kind::Effect => write(
             &format!("{rel_dir}/effects/on-done.star"),
-            "# Gets {\"event\": {type, payload, subject, ...}, \"rows\": [...]} and returns the\n\
+            "# Gets {\"event\": {id, type, v, seq, at, source, subject, anchors, payload, cause}}\n\
+             # (the event envelope, at its type's newest version) and returns the\n\
              # commands to run — or {\"skip\": \"why\"}. No I/O.\n\
              def transform(x):\n\
              \x20   ref = x[\"event\"][\"payload\"][\"work_item\"]\n\
@@ -566,9 +567,10 @@ pub fn scaffold(
         )?,
         Kind::Policy => write(
             &format!("{rel_dir}/policies/{name}.star"),
-            r#"# Gets {"event": {id, type, v, seq, source, subject, payload, anchors}} — one of
-# core's events a policy hears — and returns the commands to run, as the
-# policy, or {"skip": "why"}. No I/O but its `needs` (`scope("sql.read", …)`).
+            r#"# Gets {"event": {id, type, v, seq, at, source, subject, anchors, payload, cause}}
+# — the event envelope of one of core's events a policy hears — and returns
+# the commands to run, as the policy, or {"skip": "why"}. No I/O but its
+# `needs` (`scope("sql.read", …)`).
 def transform(x):
     e = x["event"]
     if e["type"] != "work_item.state_changed":

@@ -296,9 +296,13 @@ impl ExternalSnapshots {
             .check(&input)
             .map_err(|e| self.failed(format!("its `{verb}` schema refuses the call: {e}")))?;
         let key = format!("{verb}:{}", uuid::Uuid::new_v4().simple());
+        let run = oxplow_domain::run::RunContext::core(
+            oxplow_domain::Actor::System,
+            oxplow_domain::run::Mode::External,
+        );
         let out = self
             .instance
-            .invoke(verb, input, Some(key))
+            .invoke(&run, verb, input, Some(key))
             .await
             .map_err(|e| self.failed(format!("`{verb}`: {e}")))?;
         if !out.events.is_empty() {

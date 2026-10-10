@@ -4996,6 +4996,7 @@ dependencies = [
  "oxplow-code-metrics",
  "oxplow-config",
  "oxplow-coverage",
+ "oxplow-domain",
  "quick-xml 0.42.0",
  "regex",
  "serde",

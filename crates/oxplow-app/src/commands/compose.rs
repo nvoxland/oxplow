@@ -40,11 +40,12 @@ pub struct Composition {
 
 /// Say what a composite runs for `input`, reading on `conn` (a read
 /// snapshot when the bus routes a run, the run's transaction for a call a
-/// handler composes by hand) and counting the scopes it calls in `trace`. The bus composes once per run:
-/// what it routed and checked is what runs.
+/// handler composes by hand), as part of `run` (a pure child of the run:
+/// the scopes it calls are counted on its trace). The bus composes once
+/// per run: what it routed and checked is what runs.
 pub type Composer = dyn Fn(
         &rusqlite::Connection,
-        &oxplow_domain::scope::ScopeTrace,
+        &oxplow_domain::run::RunContext,
         &Value,
     ) -> Result<Composition, CommandError>
     + Send
@@ -110,7 +111,7 @@ pub fn sequence_spec() -> CommandSpec {
 
 pub fn sequence_command() -> Command {
     let spec = sequence_spec();
-    let compose: Arc<Composer> = Arc::new(|_conn, _trace, input: &Value| {
+    let compose: Arc<Composer> = Arc::new(|_conn, _run, input: &Value| {
         let input: SequenceInput =
             serde_json::from_value(input.clone()).map_err(|e| CommandError::Invalid {
                 field: None,

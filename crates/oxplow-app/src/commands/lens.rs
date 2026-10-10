@@ -232,7 +232,7 @@ fn show(target: LensTarget) -> Op {
                 let named: ThreadId = ref_id(raw, "thread", "/thread")?;
                 // An agent shows answers in its own thread only; a person
                 // may name any.
-                if ctx.actor.is_agent_driven() && ctx.actor.thread_id() != Some(named) {
+                if ctx.actor().is_agent_driven() && ctx.actor().thread_id() != Some(named) {
                     return Err(invalid(
                         "/thread",
                         format!("an agent shows answers in its own thread, not `{raw}`"),
@@ -241,7 +241,7 @@ fn show(target: LensTarget) -> Op {
                 named.value()
             }
             None => ctx
-                .actor
+                .actor()
                 .thread_id()
                 .ok_or_else(|| invalid("/thread", "no thread given and the caller has none"))?
                 .value(),
@@ -431,7 +431,8 @@ async fn keeping_spec(
 /// so nothing is left half done. The bus records the run and its
 /// `lens.kept@2` after it returns.
 fn keep(target: LensTarget) -> Op {
-    let handler = Handler::External(Arc::new(move |Invocation { actor, .. }, input| {
+    let handler = Handler::External(Arc::new(move |invocation: Invocation, input| {
+        let actor = invocation.actor().clone();
         let target = target.clone();
         Box::pin(async move {
             let input: KeepInput = parse(input)?;

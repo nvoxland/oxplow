@@ -24,6 +24,8 @@
 //! "Collectors".
 
 use oxplow_domain::events::EventView;
+use oxplow_domain::grant::{Decision, Need};
+use oxplow_domain::run::{Budget, Mode, RunContext};
 use oxplow_domain::vocabulary::VocabularyHandle;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -375,8 +377,11 @@ pub fn approval_hash(ext_dir: &Path, spec: &CollectorSpec) -> std::io::Result<St
         v.sort();
         v.join(",")
     };
+    // Its whole declaration: what it reads (`input`), when it runs, what
+    // it writes — a changed one asks again, as a changed script does.
+    let declared = serde_json::to_string(spec).map_err(std::io::Error::other)?;
     let text = format!(
-        "tree:{tree}\nentry:{}\nenv:{}\ncredentials:{}\nnetwork:{}",
+        "tree:{tree}\nentry:{}\nenv:{}\ncredentials:{}\nnetwork:{}\ndeclared:{declared}",
         entry,
         sorted(&spec.env),
         sorted(&spec.credentials),
@@ -419,6 +424,16 @@ pub fn approve(
     hash: &str,
 ) -> std::io::Result<()> {
     approvals.approve(&format!("{owner}/{id}"), hash)
+}
+
+/// A person revokes `owner/id`'s approval: its next run is refused until
+/// they approve it again.
+pub fn revoke(
+    approvals: &crate::exec_consent::ApprovalStore,
+    owner: &str,
+    id: &str,
+) -> std::io::Result<bool> {
+    approvals.revoke(&format!("{owner}/{id}"))
 }
 
 /// What a collector run returns: rows per entity, and (with `sync: upsert`)
@@ -473,10 +488,11 @@ pub fn exec_collector(
     spec: &CollectorSpec,
     host_env: &dyn Fn(&str) -> Option<String>,
     credentials: &BTreeMap<String, String>,
-    timeout: Duration,
+    run: &RunContext,
     egress: &Egress,
     input: &serde_json::Value,
 ) -> Result<ScriptOutput, String> {
+    let (timeout, cancel) = (run.budget().timeout, run.cancel());
     use std::io::{Read, Write};
     use std::process::{Command, Stdio};
 
@@ -559,6 +575,11 @@ pub fn exec_collector(
                     "collector `{}` timed out after {timeout:?}",
                     spec.id
                 ));
+            }
+            None if cancel.is_cancelled() => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("collector `{}`: the run was cancelled", spec.id));
             }
             None => std::thread::sleep(Duration::from_millis(25)),
         }
@@ -654,7 +675,7 @@ pub async fn dry_run_collector(
         std::sync::Arc::new(RefusingOracle),
         event,
         rows,
-        crate::extension_commands::COMMAND_SCRIPT_BUDGET,
+        &crate::run_context::for_dry_run().within(crate::extension_commands::COMMAND_SCRIPT_BUDGET),
     )
     .await
     {
@@ -666,8 +687,8 @@ pub async fn dry_run_collector(
 /// Run a derived (starlark / jaq) collector: read its `input` rows (the
 /// trigger event's anchors bound by name) — or take `rows`, standing in
 /// for them (an example's fixture) — then run its script over
-/// `{"rows": [...], "event"?: {...}}` in the collector sandbox, within
-/// `budget`.
+/// `{"rows": [...], "event"?: {...}}` in the collector sandbox, as part
+/// of `run` (its budget, its cancel flag).
 pub async fn derive_collector(
     layer: &crate::sql_gateway::SqlGateway,
     script: String,
@@ -675,7 +696,7 @@ pub async fn derive_collector(
     oracle: std::sync::Arc<dyn oxplow_script::AiOracle>,
     event: Option<&EventView>,
     rows: Option<Vec<serde_json::Value>>,
-    budget: oxplow_script::SandboxBudget,
+    run: &RunContext,
 ) -> Result<ScriptOutput, String> {
     let read = match (rows, &spec.input) {
         (Some(rows), _) => InputRows {
@@ -703,15 +724,19 @@ pub async fn derive_collector(
     }
     let input = serde_json::Value::Object(input);
     let runtime = spec.runtime;
+    let (budget, cancel, cost) = (run.budget(), run.cancel().clone(), run.clone());
     let value = tokio::task::spawn_blocking(move || {
         use oxplow_script::workers::{shared, RunHost, ScriptRun};
         // In a worker: its `ai_*` calls are answered here, and the time
         // they wait on a model isn't the script's.
-        let run = match runtime {
+        let script_run = match runtime {
             CollectorRuntime::Jaq => ScriptRun::jaq(&script, input),
             _ => ScriptRun::starlark(&script, input).with_host(RunHost::Ai(oracle)),
         };
-        shared().run(&budget, run, None).map(|ran| ran.value)
+        shared().run(&budget, script_run, Some(&cancel)).map(|ran| {
+            cost.used_cpu(ran.cpu_ms, ran.peak_bytes);
+            ran.value
+        })
     })
     .await
     .map_err(|e| format!("collector task panicked: {e}"))?
@@ -970,10 +995,10 @@ pub fn contribution_key(owner: &str, id: &str) -> oxplow_db::ContributionKey {
 /// third in a row disables it — and a good one starts the count over.
 pub async fn run_collector(
     ctx: &Collectors<'_>,
+    parent: &RunContext,
     owner: &str,
     id: &str,
     trigger: RunTrigger,
-    source: &str,
 ) -> Result<CollectorRunReport, RunCollectorError> {
     let health =
         crate::contribution_health::ContributionHealth::new(ctx.db.clone(), ctx.vocabulary.clone());
@@ -988,8 +1013,34 @@ pub async fn run_collector(
              (`oxplow.contribution.enable`, Settings → Extensions)."
         )));
     }
+    // The collector's run: a child of what ran it, named for the collector.
+    let (ext, spec) = find_collector(ctx, owner, id)?;
+    // What it may do: its declaration, and the grant a person's approval
+    // of it as it is now gives a program or a model-calling script.
+    let consented = needs_approval(ctx.root, owner, &spec);
+    let approved = consented
+        && approval_hash(&ctx.root.join(&ext.path), &spec)
+            .is_ok_and(|h| is_approved(ctx.approvals, owner, id, &h));
+    let calls_ai = consented && spec.runtime == CollectorRuntime::Starlark;
+    let run = parent
+        .child(
+            Some(crate::run_context::contribution(
+                ctx.catalog,
+                ctx.root,
+                &ext,
+                oxplow_domain::contribution::ContributionKind::Collector,
+                id,
+            )),
+            Mode::External,
+        )
+        .authorized(crate::grants::authority(
+            ctx.approvals,
+            &format!("{owner}/{id}"),
+            approved,
+            crate::grants::collector_request(&spec, calls_ai),
+        ));
     let started = std::time::Instant::now();
-    let result = run_collector_once(ctx, owner, id, trigger, source).await;
+    let result = run_collector_once(ctx, &run, owner, id, trigger).await;
     let recorded = match &result {
         Ok(_) => health.succeeded(&key, Some(started.elapsed())).await,
         Err(RunCollectorError::Failed(error)) => health.failed(&key, error).await.map(|_| ()),
@@ -1008,11 +1059,12 @@ pub async fn run_collector(
 /// can show it.
 async fn run_collector_once(
     ctx: &Collectors<'_>,
+    run: &RunContext,
     owner: &str,
     id: &str,
     trigger: RunTrigger,
-    source: &str,
 ) -> Result<CollectorRunReport, RunCollectorError> {
+    let source = run.actor().source();
     let started = std::time::Instant::now();
     // The event as the collector sees it: carried to its type's newest
     // version. One that can't be carried is a failed run, recorded.
@@ -1021,7 +1073,7 @@ async fn run_collector_once(
         .map(|e| EventView::of(e, &ctx.vocabulary.current()))
         .transpose();
     let (spec, output) = match view {
-        Ok(view) => produce(ctx, owner, id, view.as_ref(), None).await?,
+        Ok(view) => produce(ctx, run, owner, id, view.as_ref(), None).await?,
         Err(e) => (
             find_collector(ctx, owner, id)?.1,
             Err(format!("collector `{id}`: its event: {e}")),
@@ -1038,7 +1090,7 @@ async fn run_collector_once(
         Ok((plan_writes(owner, &spec, o)?, events))
     });
     let last_event_id = trigger.event().map(|e| e.seq);
-    let run = |status: &str, error: Option<String>| CollectorRun {
+    let run_row = |status: &str, error: Option<String>| CollectorRun {
         owner: owner.to_string(),
         id: id.to_string(),
         status: status.into(),
@@ -1047,10 +1099,11 @@ async fn run_collector_once(
         row_counts: BTreeMap::new(),
         cursor: None,
         last_event_id,
+        run_id: Some(run.run().to_string()),
     };
     let collector = oxplow_domain::refs::build::collector_ref(owner, id);
     let event = Synced {
-        source: source.to_string(),
+        source: source.clone(),
         cause: trigger.event().map(|e| (e.envelope.id.clone(), e.seq)),
         collector,
         trigger: trigger.name(),
@@ -1058,10 +1111,11 @@ async fn run_collector_once(
     let error = match writes {
         Ok((writes, events)) => {
             let names: Vec<String> = writes.iter().map(|(t, _)| t.entity.clone()).collect();
-            let ok_run = run("ok", None);
+            let ok_run = run_row("ok", None);
             let vocabulary = ctx.vocabulary.clone();
             let event = event.clone();
             let elapsed = elapsed_ms(started);
+            let this_run = run.clone();
             let committed = ctx
                 .db
                 .transaction(move |tx| {
@@ -1076,6 +1130,12 @@ async fn run_collector_once(
                     };
                     oxplow_db::collector_store::record_run_in(tx, &run)
                         .map_err(oxplow_db::map_sql_err)?;
+                    oxplow_db::extension_run_store::record_tx(
+                        tx,
+                        &this_run,
+                        oxplow_domain::run::Outcome::Ok,
+                        None,
+                    )?;
                     let vocabulary = vocabulary.current();
                     let synced = event.envelope("ok", counts.clone(), 0, elapsed, None);
                     oxplow_db::event_log_store::append_tx(tx, &vocabulary, &synced)?;
@@ -1105,7 +1165,7 @@ async fn run_collector_once(
         }
         Err(e) => e,
     };
-    let failed = run("error", Some(error.clone()));
+    let failed = run_row("error", Some(error.clone()));
     let envelope = event.envelope(
         "error",
         BTreeMap::new(),
@@ -1114,10 +1174,21 @@ async fn run_collector_once(
         Some(error.clone()),
     );
     let vocabulary = ctx.vocabulary.clone();
+    let (this_run, why) = (run.clone(), error.clone());
     ctx.db
         .transaction(move |tx| {
             oxplow_db::collector_store::record_run_in(tx, &failed)
                 .map_err(oxplow_db::map_sql_err)?;
+            oxplow_db::extension_run_store::record_tx(
+                tx,
+                &this_run,
+                if this_run.cancel().is_cancelled() {
+                    oxplow_domain::run::Outcome::Cancelled
+                } else {
+                    oxplow_domain::run::Outcome::Failed
+                },
+                Some(&why),
+            )?;
             oxplow_db::event_log_store::append_tx(tx, &vocabulary.current(), &envelope).map(|_| ())
         })
         .await
@@ -1260,6 +1331,8 @@ pub struct RunRecord<'a> {
     pub facts: i64,
     pub elapsed_ms: i64,
     pub error: Option<String>,
+    /// The run, when it was an extension's: recorded with it.
+    pub run: Option<&'a RunContext>,
 }
 
 impl RunLog {
@@ -1319,7 +1392,16 @@ impl RunLog {
             row_counts: r.entities.clone(),
             cursor: None,
             last_event_id: r.cause.as_ref().map(|(_, seq)| *seq),
+            run_id: r.run.map(|run| run.run().to_string()),
         };
+        let ended = r.run.map(|run| {
+            let outcome = match (r.status, run.cancel().is_cancelled()) {
+                ("ok", _) => oxplow_domain::run::Outcome::Ok,
+                (_, true) => oxplow_domain::run::Outcome::Cancelled,
+                _ => oxplow_domain::run::Outcome::Failed,
+            };
+            (run.clone(), outcome, r.error.clone())
+        });
         let synced = Synced {
             source: r.source.to_string(),
             collector: oxplow_domain::refs::build::collector_ref(r.owner, r.id),
@@ -1342,6 +1424,9 @@ impl RunLog {
                 }
                 oxplow_db::collector_store::record_run_in(tx, &run)
                     .map_err(oxplow_db::map_sql_err)?;
+                if let Some((run, outcome, error)) = &ended {
+                    oxplow_db::extension_run_store::record_tx(tx, run, *outcome, error.as_deref())?;
+                }
                 Ok(true)
             })
             .await
@@ -1369,6 +1454,7 @@ impl RunLog {
             row_counts: BTreeMap::new(),
             cursor: None,
             last_event_id,
+            run_id: None,
         };
         self.db
             .transaction(move |tx| {
@@ -1429,12 +1515,17 @@ pub async fn run_for_event(
                 row_counts: BTreeMap::new(),
                 cursor: None,
                 last_event_id: Some(seq),
+                run_id: None,
             })
             .await?;
         return Ok(EventRun::Guarded);
     }
-    let source = oxplow_domain::Actor::System.source();
-    match run_collector(ctx, owner, id, RunTrigger::On(event), &source).await {
+    // The system's run, reacting to the event.
+    let run = RunContext::core(oxplow_domain::Actor::System, Mode::External)
+        .caused_by(event.envelope.id.clone())
+        .anchored(event.envelope.anchors.clone())
+        .about(event.envelope.subject.clone());
+    match run_collector(ctx, &run, owner, id, RunTrigger::On(event)).await {
         Ok(report) => Ok(EventRun::Ran(Ok(report))),
         Err(RunCollectorError::Failed(m)) => Ok(EventRun::Ran(Err(m))),
         Err(RunCollectorError::NotFound | RunCollectorError::Disabled(_)) => Ok(EventRun::Skipped),
@@ -1449,6 +1540,7 @@ pub async fn run_for_event(
                     row_counts: BTreeMap::new(),
                     cursor: None,
                     last_event_id: Some(seq),
+                    run_id: None,
                 })
                 .await?;
             Ok(EventRun::NeedsApproval)
@@ -1510,15 +1602,22 @@ pub struct EntityPreview {
 }
 
 /// Run a collector and return what it would store (see [`CollectorPreview`]).
-/// `rows` stand in for a derived collector's `input` rows (an example's
-/// fixture, `oxplow extension test`).
+/// `event` is the event an `on:` collector reacts to, as a fixture writes
+/// it (`EventView::fixture`); `rows` stand in for a derived collector's
+/// `input` rows (an example's fixture, `oxplow extension test`).
 pub async fn preview_collector(
     ctx: &Collectors<'_>,
     owner: &str,
     id: &str,
+    event: Option<&serde_json::Value>,
     rows: Option<Vec<serde_json::Value>>,
 ) -> Result<CollectorPreview, RunCollectorError> {
-    let (spec, output) = produce(ctx, owner, id, None, rows).await?;
+    let view = event
+        .map(|given| EventView::fixture(given, &ctx.vocabulary.current()))
+        .transpose()
+        .map_err(|e| RunCollectorError::Failed(format!("its event: {}", e.message())))?;
+    let run = RunContext::core(oxplow_domain::Actor::System, Mode::External);
+    let (spec, output) = produce(ctx, &run, owner, id, view.as_ref(), rows).await?;
     let mut output = output.map_err(RunCollectorError::Failed)?;
     let events = plan_events(
         &ctx.vocabulary.current(),
@@ -1642,6 +1741,7 @@ fn check_approved(
 /// failed.
 async fn produce(
     ctx: &Collectors<'_>,
+    run: &RunContext,
     owner: &str,
     id: &str,
     event: Option<&EventView>,
@@ -1682,20 +1782,20 @@ async fn produce(
                 std::sync::Arc::new(crate::ai_compute::CollectorOracle::new(
                     ctx.ai.clone(),
                     format!("collector:{}/{}", ext.name, spec.id),
+                    run.clone(),
                 ))
             } else {
                 std::sync::Arc::new(RefusingOracle)
             };
-        let output = derive_collector(
-            &ctx.layer,
-            script,
-            &spec,
-            oracle,
-            event,
-            rows,
-            oxplow_script::SandboxBudget::default(),
-        )
-        .await;
+        if spec.runtime == CollectorRuntime::Starlark && oxplow_script::ai::calls_ai(&script) {
+            if let Decision::Denied(why) = run.decide(Need::Ai) {
+                return Ok((
+                    spec,
+                    Err(format!("collector `{id}` may not call a model: {why}")),
+                ));
+            }
+        }
+        let output = derive_collector(&ctx.layer, script, &spec, oracle, event, rows, run).await;
         return Ok((spec, output));
     }
     check_approved(
@@ -1705,10 +1805,26 @@ async fn produce(
         &spec,
         &format!("runs `{}`", entry_of(&spec)),
     )?;
+    // What the program may do, decided and recorded on its run: a denied
+    // one stops it before it starts.
+    let mut needs = vec![Need::Program(entry_of(&spec).to_string()), Need::Files];
+    needs.extend(spec.env.iter().map(|e| Need::Env(e.clone())));
+    needs.extend(spec.network.iter().map(|h| Need::Host(h.clone())));
+    for need in needs {
+        if let Decision::Denied(why) = run.decide(need.clone()) {
+            return Ok((spec, Err(format!("collector `{id}`: {need:?}: {why}"))));
+        }
+    }
 
     let mut credentials = BTreeMap::new();
     let mut missing = None;
     for name in &spec.credentials {
+        // A credential its grant doesn't name is never read from the
+        // keychain.
+        if let Decision::Denied(why) = run.decide(Need::Credential(name.clone())) {
+            missing = Some(format!("credential `{name}`: {why}"));
+            continue;
+        }
         match ctx
             .secrets
             .get(&credential_account(&ctx.project, owner, name))
@@ -1723,7 +1839,7 @@ async fn produce(
     }
     let output = match missing {
         Some(e) => Err(e),
-        None => exec_approved(&ext_dir, &spec, credentials, &exec_input(event)).await,
+        None => exec_approved(&ext_dir, &spec, credentials, &exec_input(event), run).await,
     };
     Ok((spec, output))
 }
@@ -1770,10 +1886,10 @@ impl CollectorRunner {
     /// `collector_run` commit (`v_collector_run` changes).
     pub async fn sync(
         &self,
+        run: &RunContext,
         owner: &str,
         id: &str,
         trigger: RunTrigger,
-        source: &str,
     ) -> Result<CollectorRunReport, RunCollectorError> {
         // A fact collector (the project's, a built-in or an extension's
         // that records facts) runs in the fact engine.
@@ -1799,7 +1915,7 @@ impl CollectorRunner {
             }
             let facts = self
                 .metrics
-                .run_collector_by_key(owner, id, None, source)
+                .run_collector_by_key(owner, id, None, run)
                 .await
                 .map_err(RunCollectorError::Failed)?;
             return Ok(CollectorRunReport {
@@ -1810,7 +1926,7 @@ impl CollectorRunner {
             });
         }
         let root = self.worktrees.resolve(None).await.into_local_path();
-        run_collector(&self.collectors(&root), owner, id, trigger, source).await
+        run_collector(&self.collectors(&root), run, owner, id, trigger).await
     }
 }
 
@@ -1843,82 +1959,81 @@ pub fn sync_op(sync: CollectorRunner) -> crate::commands::ops::Op {
         "sync",
         serde_json::to_value(schemars::schema_for!(SyncInput)).expect("schema serializes"),
         false,
-        Handler::External(std::sync::Arc::new(
-            move |Invocation { actor, .. }, input| {
-                let sync = sync.clone();
-                let source = actor.source();
-                let acting = actor.clone();
-                let trigger = match actor {
-                    oxplow_domain::Actor::System => RunTrigger::Every,
-                    _ => RunTrigger::Manual,
-                };
-                Box::pin(async move {
-                    let input: SyncInput =
-                        serde_json::from_value(input).map_err(|e| CommandError::Invalid {
-                            field: None,
-                            message: e.to_string(),
-                        })?;
-                    let failed = |e: RunCollectorError| match e {
-                        RunCollectorError::NotFound => CommandError::Invalid {
+        Handler::External(std::sync::Arc::new(move |invocation: Invocation, input| {
+            let actor = invocation.actor().clone();
+            let run = invocation.run.clone();
+            let sync = sync.clone();
+            let source = actor.source();
+            let acting = actor.clone();
+            let trigger = match actor {
+                oxplow_domain::Actor::System => RunTrigger::Every,
+                _ => RunTrigger::Manual,
+            };
+            Box::pin(async move {
+                let input: SyncInput =
+                    serde_json::from_value(input).map_err(|e| CommandError::Invalid {
+                        field: None,
+                        message: e.to_string(),
+                    })?;
+                let failed = |e: RunCollectorError| match e {
+                    RunCollectorError::NotFound => CommandError::Invalid {
+                        field: Some("/id".into()),
+                        message: format!(
+                            "no collector `{}/{}` in the project's extensions",
+                            input.owner, input.id
+                        ),
+                    },
+                    RunCollectorError::NeedsApproval(m) | RunCollectorError::Disabled(m) => {
+                        CommandError::Invalid {
                             field: Some("/id".into()),
-                            message: format!(
-                                "no collector `{}/{}` in the project's extensions",
-                                input.owner, input.id
-                            ),
-                        },
-                        RunCollectorError::NeedsApproval(m) | RunCollectorError::Disabled(m) => {
-                            CommandError::Invalid {
-                                field: Some("/id".into()),
-                                message: m,
-                            }
+                            message: m,
                         }
-                        RunCollectorError::Failed(m) => CommandError::Failed { message: m },
-                        RunCollectorError::Storage(e) => CommandError::from(e),
-                    };
-                    if input.owner == oxplow_config::collectors::PROJECT
-                        && sync.collection.is_report_collector(&input.id)
-                    {
-                        let thread = crate::commands::thread::acting_thread_of(
-                            &acting,
-                            input.thread.as_deref(),
-                        )?;
-                        let recorded = sync
-                            .collection
-                            .sync_report_collector(
-                                &thread,
-                                &input.id,
-                                &source,
-                                sync.collection.command_turn(&acting, thread).await,
-                            )
-                            .await
-                            .map_err(failed)?;
-                        return Ok(HandlerOutput {
-                            result: serde_json::json!({
-                                "owner": input.owner,
-                                "id": input.id,
-                                "recorded": recorded.to_json(),
-                            }),
-                            ..HandlerOutput::default()
-                        });
                     }
-                    if input.thread.is_some() {
-                        return Err(CommandError::Invalid {
-                            field: Some("/thread".into()),
-                            message: "`thread` is for a project report collector (`records:`)"
-                                .into(),
-                        });
-                    }
-                    let report = sync
-                        .sync(&input.owner, &input.id, trigger, &source)
+                    RunCollectorError::Failed(m) => CommandError::Failed { message: m },
+                    RunCollectorError::Storage(e) => CommandError::from(e),
+                };
+                if input.owner == oxplow_config::collectors::PROJECT
+                    && sync.collection.is_report_collector(&input.id)
+                {
+                    let thread = crate::commands::thread::acting_thread_of(
+                        &acting,
+                        input.thread.as_deref(),
+                    )?;
+                    let recorded = sync
+                        .collection
+                        .sync_report_collector(
+                            &thread,
+                            &input.id,
+                            &source,
+                            sync.collection.command_turn(&acting, thread).await,
+                        )
                         .await
                         .map_err(failed)?;
-                    Ok(HandlerOutput {
-                        result: serde_json::to_value(report).expect("report serializes"),
+                    return Ok(HandlerOutput {
+                        result: serde_json::json!({
+                            "owner": input.owner,
+                            "id": input.id,
+                            "recorded": recorded.to_json(),
+                        }),
                         ..HandlerOutput::default()
-                    })
+                    });
+                }
+                if input.thread.is_some() {
+                    return Err(CommandError::Invalid {
+                        field: Some("/thread".into()),
+                        message: "`thread` is for a project report collector (`records:`)".into(),
+                    });
+                }
+                let report = sync
+                    .sync(&run, &input.owner, &input.id, trigger)
+                    .await
+                    .map_err(failed)?;
+                Ok(HandlerOutput {
+                    result: serde_json::to_value(report).expect("report serializes"),
+                    ..HandlerOutput::default()
                 })
-            },
-        )),
+            })
+        })),
     )
 }
 
@@ -1928,9 +2043,13 @@ async fn exec_approved(
     spec: &CollectorSpec,
     credentials: BTreeMap<String, String>,
     input: &serde_json::Value,
+    run: &RunContext,
 ) -> Result<ScriptOutput, String> {
     let dir = ext_dir.to_path_buf();
-    let input = input.clone();
+    let (input, run) = (
+        input.clone(),
+        run.clone().within(Budget::with_timeout(COLLECTOR_TIMEOUT)),
+    );
     let spec_owned = spec.clone();
     // Where it's enforced, the program's only way out is a proxy that goes
     // just to its declared hosts; the proxy stops when this run ends.
@@ -1953,7 +2072,7 @@ async fn exec_approved(
             &spec_owned,
             &|k| std::env::var(k).ok(),
             &credentials,
-            COLLECTOR_TIMEOUT,
+            &run,
             &egress,
             &input,
         )
@@ -2109,7 +2228,14 @@ pub(crate) mod tests {
         version: &str,
     ) -> Result<CollectorRunReport, RunCollectorError> {
         approve_reviewed(ctx, extension, source, version)?;
-        run_collector(ctx, extension, source, RunTrigger::Manual, "human").await
+        run_collector(
+            ctx,
+            &RunContext::core(oxplow_domain::Actor::Human, Mode::External),
+            extension,
+            source,
+            RunTrigger::Manual,
+        )
+        .await
     }
 
     async fn version_of(ctx: &Collectors<'_>, extension: &str, source: &str) -> String {
@@ -2160,6 +2286,27 @@ pub(crate) mod tests {
         );
     }
 
+    /// A collector's whole declaration is part of what's approved: a
+    /// changed `input` query, trigger or entity asks again, as a changed
+    /// script does.
+    #[test]
+    fn a_collectors_declaration_is_part_of_its_approval() {
+        let ext = tempfile::tempdir().unwrap();
+        script(ext.path(), "bin/sync.sh", "echo one");
+        let base = spec("bin/sync.sh", &["GH_TOKEN"]);
+        let h = approval_hash(ext.path(), &base).unwrap();
+        let mut changed = base.clone();
+        changed.trigger = oxplow_config::collectors::parse_trigger(
+            Some(&serde_yaml::from_str("{ every: 5m }").unwrap()),
+            &|_| true,
+        )
+        .unwrap();
+        assert_ne!(approval_hash(ext.path(), &changed).unwrap(), h);
+        let mut changed = base.clone();
+        changed.doc = "Another doc".into();
+        assert_ne!(approval_hash(ext.path(), &changed).unwrap(), h);
+    }
+
     #[test]
     fn exec_passes_only_declared_env_and_parses_entities() {
         let ext = tempfile::tempdir().unwrap();
@@ -2178,7 +2325,8 @@ pub(crate) mod tests {
             &spec("bin/sync.sh", &["GH_TOKEN"]),
             &env,
             &BTreeMap::new(),
-            Duration::from_secs(10),
+            &RunContext::core(oxplow_domain::Actor::System, Mode::External)
+                .within(Budget::with_timeout(Duration::from_secs(10))),
             &Egress::Open,
             &serde_json::json!({}),
         )
@@ -2196,7 +2344,8 @@ pub(crate) mod tests {
             &spec("fail.sh", &[]),
             &none,
             &BTreeMap::new(),
-            Duration::from_secs(10),
+            &RunContext::core(oxplow_domain::Actor::System, Mode::External)
+                .within(Budget::with_timeout(Duration::from_secs(10))),
             &Egress::Open,
             &serde_json::json!({}),
         )
@@ -2209,7 +2358,8 @@ pub(crate) mod tests {
             &spec("slow.sh", &[]),
             &none,
             &BTreeMap::new(),
-            Duration::from_millis(300),
+            &RunContext::core(oxplow_domain::Actor::System, Mode::External)
+                .within(Budget::with_timeout(Duration::from_millis(300))),
             &Egress::Open,
             &serde_json::json!({}),
         )
@@ -2222,7 +2372,8 @@ pub(crate) mod tests {
             &spec("junk.sh", &[]),
             &none,
             &BTreeMap::new(),
-            Duration::from_secs(10),
+            &RunContext::core(oxplow_domain::Actor::System, Mode::External)
+                .within(Budget::with_timeout(Duration::from_secs(10))),
             &Egress::Open,
             &serde_json::json!({}),
         )
@@ -2239,7 +2390,8 @@ pub(crate) mod tests {
             &spec("undeclared.sh", &[]),
             &none,
             &BTreeMap::new(),
-            Duration::from_secs(10),
+            &RunContext::core(oxplow_domain::Actor::System, Mode::External)
+                .within(Budget::with_timeout(Duration::from_secs(10))),
             &Egress::Open,
             &serde_json::json!({}),
         )
@@ -2251,7 +2403,8 @@ pub(crate) mod tests {
             &spec("missing.sh", &[]),
             &none,
             &BTreeMap::new(),
-            Duration::from_secs(10),
+            &RunContext::core(oxplow_domain::Actor::System, Mode::External)
+                .within(Budget::with_timeout(Duration::from_secs(10))),
             &Egress::Open,
             &serde_json::json!({}),
         )
@@ -2322,9 +2475,15 @@ pub(crate) mod tests {
             ai: no_ai(),
         };
 
-        let err = run_collector(&ctx, "my-gh", "gh", RunTrigger::Manual, "human")
-            .await
-            .unwrap_err();
+        let err = run_collector(
+            &ctx,
+            &RunContext::core(oxplow_domain::Actor::Human, Mode::External),
+            "my-gh",
+            "gh",
+            RunTrigger::Manual,
+        )
+        .await
+        .unwrap_err();
         assert!(
             matches!(err, RunCollectorError::NeedsApproval(ref m) if m.contains("approval")),
             "{err:?}"
@@ -2348,14 +2507,26 @@ pub(crate) mod tests {
         );
 
         // Approved now, so a later run needs no approve flag…
-        run_collector(&ctx, "my-gh", "gh", RunTrigger::Manual, "human")
-            .await
-            .unwrap();
+        run_collector(
+            &ctx,
+            &RunContext::core(oxplow_domain::Actor::Human, Mode::External),
+            "my-gh",
+            "gh",
+            RunTrigger::Manual,
+        )
+        .await
+        .unwrap();
         // …and a failing run is recorded, keeping the last good rows.
         script(&ext, "sync.sh", "echo nope >&2; exit 1");
-        let err = run_collector(&ctx, "my-gh", "gh", RunTrigger::Manual, "human")
-            .await
-            .unwrap_err();
+        let err = run_collector(
+            &ctx,
+            &RunContext::core(oxplow_domain::Actor::Human, Mode::External),
+            "my-gh",
+            "gh",
+            RunTrigger::Manual,
+        )
+        .await
+        .unwrap_err();
         assert!(
             matches!(err, RunCollectorError::NeedsApproval(_)),
             "script changed: {err:?}"
@@ -2393,6 +2564,7 @@ pub(crate) mod tests {
                     row_counts: BTreeMap::new(),
                     cursor: None,
                     last_event_id: None,
+                    run_id: None,
                 }),
             }
         };
@@ -2449,7 +2621,8 @@ pub(crate) mod tests {
             &spec("bin/sync.sh", &[]),
             &|_| None,
             &creds,
-            Duration::from_secs(10),
+            &RunContext::core(oxplow_domain::Actor::System, Mode::External)
+                .within(Budget::with_timeout(Duration::from_secs(10))),
             &Egress::Open,
             &serde_json::json!({}),
         )
@@ -2796,6 +2969,50 @@ pub(crate) mod tests {
         );
     }
 
+    /// A preview can be given the event an `on:` collector reacts to, as
+    /// a fixture writes it: the script gets the event envelope; a fixture
+    /// that couldn't happen fails the preview, saying why.
+    #[tokio::test]
+    async fn a_preview_takes_the_event_it_reacts_to() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let root = fx.svc.layout.project_dir.clone();
+        extension(
+            &root,
+            "work",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: seen\n    runtime: starlark\n    entry: seen.star\n    trigger: { on: [thread.checkpoint] }\n    entities:\n      - { name: seen, key: k, columns: { k: text, v: int, source: text, turn: int } }\n",
+            &[(
+                "seen.star",
+                "def transform(input):\n    e = input[\"event\"]\n    return {\"entities\": {\"seen\": [{\"k\": \"x\", \"v\": e[\"v\"], \"source\": e[\"source\"], \"turn\": e[\"anchors\"][\"turn_id\"]}]}}\n",
+            )],
+        );
+        let ctx = Collectors::of(&fx.svc, &root);
+        let event = serde_json::json!({
+            "type": "thread.checkpoint",
+            "payload": { "thread": "thread:thr1", "turn": "turn:trn7", "reason": "turn_end",
+                         "snapshot": "snapshot:1", "changed": true, "writing_tools": 1 },
+            "anchors": { "thread_id": "thr1", "turn_id": 7 },
+        });
+        let preview = preview_collector(&ctx, "work", "seen", Some(&event), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            preview.entities[0].rows,
+            vec![vec![
+                SqlCell::Text("x".into()),
+                SqlCell::Int(1),
+                SqlCell::Text("fixture".into()),
+                SqlCell::Int(7),
+            ]]
+        );
+        let bad = serde_json::json!({ "type": "thread.checkpoint", "v": 4 });
+        match preview_collector(&ctx, "work", "seen", Some(&bad), None).await {
+            Err(RunCollectorError::Failed(m)) => {
+                assert!(m.contains("its event: event: `thread.checkpoint@4`"), "{m}")
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
     #[tokio::test]
     async fn derived_sources_transform_their_input_without_approval() {
         let root = tempfile::tempdir().unwrap();
@@ -2837,13 +3054,25 @@ pub(crate) mod tests {
             .unwrap()
             .iter()
             .all(|l| l.approved));
-        let report = run_collector(&ctx, "work", "star", RunTrigger::Manual, "human")
-            .await
-            .unwrap();
+        let report = run_collector(
+            &ctx,
+            &RunContext::core(oxplow_domain::Actor::Human, Mode::External),
+            "work",
+            "star",
+            RunTrigger::Manual,
+        )
+        .await
+        .unwrap();
         assert_eq!(report.row_counts["hot"], 1);
-        run_collector(&ctx, "work", "jq", RunTrigger::Manual, "human")
-            .await
-            .unwrap();
+        run_collector(
+            &ctx,
+            &RunContext::core(oxplow_domain::Actor::Human, Mode::External),
+            "work",
+            "jq",
+            RunTrigger::Manual,
+        )
+        .await
+        .unwrap();
         let out = crate::sql_gateway::SqlGateway::new(db)
             .query_sql(
                 "SELECT (SELECT title FROM v_work_hot), (SELECT group_concat(title, ',') FROM v_work_upper)",
@@ -2925,9 +3154,15 @@ pub(crate) mod tests {
                 oxplow_db::SqliteAiResultStore::new(db.clone()),
             )),
         };
-        let err = run_collector(&ctx, "work", "star", RunTrigger::Manual, "human")
-            .await
-            .unwrap_err();
+        let err = run_collector(
+            &ctx,
+            &RunContext::core(oxplow_domain::Actor::Human, Mode::External),
+            "work",
+            "star",
+            RunTrigger::Manual,
+        )
+        .await
+        .unwrap_err();
         assert!(
             matches!(err, RunCollectorError::NeedsApproval(ref m) if m.contains("calls a model")),
             "{err:?}"
@@ -3001,7 +3236,9 @@ pub(crate) mod tests {
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
             ai: no_ai(),
         };
-        let preview = preview_collector(&ctx, "work", "star", None).await.unwrap();
+        let preview = preview_collector(&ctx, "work", "star", None, None)
+            .await
+            .unwrap();
         assert_eq!(preview.entities.len(), 1);
         let hot = &preview.entities[0];
         assert_eq!(
@@ -3026,7 +3263,7 @@ pub(crate) mod tests {
             "nothing stored"
         );
 
-        let err = preview_collector(&ctx, "work", "sh", None)
+        let err = preview_collector(&ctx, "work", "sh", None, None)
             .await
             .unwrap_err();
         assert!(

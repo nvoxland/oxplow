@@ -264,6 +264,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	revokeCollector: (owner: string, id: string) => typedError<null, IpcError>(__TAURI_INVOKE("revoke_collector", { owner, id })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	setCredential: (extension: string, name: string, value: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("set_credential", { extension, name, value })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -275,6 +280,11 @@ export const commands = {
 	 *  implementation and its docs live on the core.
 	 */
 	approveProjectProgram: (kind: ProgramKind, name: string, version: string) => typedError<ProjectProgram[], IpcError>(__TAURI_INVOKE("approve_project_program", { kind, name, version })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	revokeProjectProgram: (kind: ProgramKind, name: string) => typedError<ProjectProgram[], IpcError>(__TAURI_INVOKE("revoke_project_program", { kind, name })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1759,6 +1769,11 @@ export type CollectorRun = {
 	cursor: unknown | null,
 	// The seq of the last trigger event it ran for.
 	lastEventId: number | null,
+	/**
+	 *  The last run (`extension_run.run_id`); `None` for one before runs
+	 *  were recorded.
+	 */
+	runId?: string | null,
 };
 
 // Outcome of one run, as reported to the UI / agent.
@@ -3373,6 +3388,11 @@ export type Grants = {
 	env: string[],
 	// The scopes it may call (a provider's `needs`).
 	scopes: string[],
+	/**
+	 *  What approving it grants that this machine can't hold it to
+	 *  (`grants::gaps`).
+	 */
+	unenforced: string[],
 };
 
 // One registered harness, as the session picker and Settings see it.
@@ -5097,6 +5117,15 @@ export type ProjectProgram = {
 	 *  person's approve click sends back the version they reviewed.
 	 */
 	version: string | null,
+	/**
+	 *  What approving it grants that this machine can't hold it to
+	 *  (`grants::gaps`): files a program touches, network off macOS.
+	 */
+	unenforced?: string[],
+	// When this machine approved it, while it is (RFC 3339).
+	grantedAt?: string | null,
+	// When a person revoked it, if they did and haven't approved it since.
+	revokedAt?: string | null,
 };
 
 // Who offers a prompt.

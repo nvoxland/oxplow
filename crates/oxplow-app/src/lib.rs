@@ -81,6 +81,7 @@ pub mod extension_ref_kinds;
 pub mod extensions;
 pub mod file_ref_version;
 pub mod followup;
+pub mod grants;
 pub mod harness_conformance;
 pub mod harnesses;
 pub mod hook_ingest;
@@ -122,6 +123,9 @@ pub mod recovery;
 pub mod ref_moves;
 pub mod ref_resolver;
 pub mod resume_check;
+pub mod run_context;
+#[cfg(test)]
+mod run_context_tests;
 pub mod scope_calls;
 pub mod semantic_catalog;
 pub mod session_auth;
@@ -1283,6 +1287,9 @@ impl Services {
             capabilities: capabilities.clone(),
             policies: effort_policies.clone(),
             vocabulary: vocabulary.clone(),
+            db: db.clone(),
+            catalog: extension_catalog.clone(),
+            root: layout.project_dir.clone(),
         }));
         for command in commands::vcs::ops(commands::vcs::VcsTarget {
             vcs: vcs.clone(),

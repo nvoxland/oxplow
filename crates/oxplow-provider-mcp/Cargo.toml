@@ -17,6 +17,7 @@ name = "oxplow-provider-mcp-notes"
 path = "src/bin/notes.rs"
 
 [dependencies]
+oxplow-domain = { workspace = true }
 oxplow-provider-protocol = { workspace = true }
 oxplow-script = { workspace = true }
 # The streamable-HTTP client is the adapter's (a server by `url`); the
@@ -45,7 +46,6 @@ oxplow-app = { workspace = true }
 # stand-in authorization server it signs in at.
 oxplow-ai = { workspace = true }
 oxplow-config = { workspace = true }
-oxplow-domain = { workspace = true }
 oxplow-oauth-sim = { workspace = true }
 oxplow-oauth-redirect = { workspace = true }
 oxplow-sdk = { workspace = true }

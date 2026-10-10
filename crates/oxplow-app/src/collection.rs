@@ -915,6 +915,7 @@ impl CollectionService {
                     facts: 0,
                     elapsed_ms,
                     error: error.clone(),
+                    run: None,
                 },
                 None,
             )

@@ -51,10 +51,19 @@ pub struct RefFreshness {
 /// Who writes a page, as a store sees it.
 #[derive(Debug, Clone)]
 pub struct PageCall<'a> {
-    pub actor: &'a Actor,
+    /// The run it's part of: who writes, and where a provider's
+    /// `host/call`s are counted.
+    pub run: &'a crate::run::RunContext,
     /// The write's idempotency key (an effect's step's); `None` mints one
     /// where it's re-sent.
     pub idempotency_key: Option<String>,
+}
+
+impl PageCall<'_> {
+    /// Who writes.
+    pub fn actor(&self) -> &Actor {
+        self.run.actor()
+    }
 }
 
 /// What a store kept of a write: the page's body as it now stands there

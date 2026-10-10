@@ -169,6 +169,7 @@ mod tests {
             row_counts: Default::default(),
             cursor: None,
             last_event_id: None,
+            run_id: None,
         }
     }
 

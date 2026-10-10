@@ -638,6 +638,31 @@ impl Actor {
         }
     }
 
+    /// This actor with the agent behind it (directly or through a lens)
+    /// in `stream`, which its transport didn't carry. Anyone else is
+    /// unchanged.
+    pub fn in_stream(&self, stream: StreamId) -> Actor {
+        match self {
+            Actor::Agent {
+                session_id,
+                thread_id,
+                ..
+            } => Actor::Agent {
+                session_id: *session_id,
+                thread_id: *thread_id,
+                stream_id: Some(stream),
+            },
+            Actor::Lens {
+                lens_id,
+                on_behalf_of,
+            } => Actor::Lens {
+                lens_id: lens_id.clone(),
+                on_behalf_of: Box::new(on_behalf_of.in_stream(stream)),
+            },
+            other => other.clone(),
+        }
+    }
+
     /// The anchors every event this actor causes carries.
     pub fn anchors(&self) -> crate::events::Anchors {
         crate::events::Anchors {

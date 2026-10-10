@@ -1,7 +1,7 @@
 //! An external provider's effort policy: [`ExternalEffortPolicy`] is the
 //! [`EffortPolicy`] the effort-policy dispatcher calls while the instance
 //! is the project's choice. Each event it's offered is one `react`
-//! invoke, `{ event }` (a [`PolicyEvent`], anchors included); it answers as
+//! invoke, `{ event }` (the event envelope, `EventView`); it answers as
 //! an effect's script does — `{ commands: [{ name, input }] }` or
 //! `{ skip: "why" }` — and core runs the commands as the policy's own
 //! effect actor, through every gate an agent meets. It emits nothing of
@@ -78,7 +78,11 @@ impl EffortPolicy for ExternalEffortPolicy {
         &self.instance.id
     }
 
-    async fn react(&self, event: &EventView) -> Result<Vec<CommandCall>, DomainError> {
+    async fn react(
+        &self,
+        run: &oxplow_domain::run::RunContext,
+        event: &EventView,
+    ) -> Result<Vec<CommandCall>, DomainError> {
         let failed = |message: String| {
             DomainError::Invariant(format!("effort policy `{}`: {message}", self.instance.name))
         };
@@ -88,13 +92,13 @@ impl EffortPolicy for ExternalEffortPolicy {
             .map_err(|e| failed(format!("its `react` schema refuses the event: {e}")))?;
         // One key per event: a redelivered event is the same call, which a
         // provider keeping `idempotent_writes` answers once.
+        let key = match &event.id {
+            Some(id) => format!("react:{id}"),
+            None => format!("react:{}", run.run()),
+        };
         let out = self
             .instance
-            .invoke(
-                REACT,
-                input,
-                event.id.as_deref().map(|id| format!("react:{id}")),
-            )
+            .invoke(run, REACT, input, Some(key))
             .await
             .map_err(|e| failed(e.to_string()))?;
         if !out.events.is_empty() {

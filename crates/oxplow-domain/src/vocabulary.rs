@@ -19,6 +19,7 @@ use crate::refs::kind::{core_kinds, KindRegistry};
 use crate::DomainError;
 
 /// The event types and ref kinds one process speaks, as of one swap.
+#[derive(Clone)]
 pub struct Vocabulary {
     pub events: EventSchemaRegistry,
     pub kinds: KindRegistry,
@@ -32,6 +33,22 @@ impl Vocabulary {
     /// Core's event types and ref kinds, nothing more.
     pub fn core() -> Self {
         Self::new(EventSchemaRegistry::core(), core_kinds())
+    }
+
+    /// This vocabulary plus what `extension` declares that it doesn't
+    /// already have — how a review reads events as one version of an
+    /// extension would. A declaration it refuses (one already registered,
+    /// one that doesn't hold) is left out: the version's check reports it.
+    pub fn with_declared(
+        &self,
+        extension: &str,
+        declared: impl IntoIterator<Item = crate::events::schema::DeclaredEventType>,
+    ) -> Self {
+        let mut out = self.clone();
+        for d in declared {
+            let _ = out.events.register_declared(extension, d);
+        }
+        out
     }
 
     /// Refuse a payload that isn't valid for a registered `type@v`.

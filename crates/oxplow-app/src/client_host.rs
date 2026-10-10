@@ -204,7 +204,7 @@ impl ClientHost {
             Handler::External(Arc::new(move |invocation: Invocation, input: Value| {
                 let host = host.clone();
                 Box::pin(async move {
-                    let result = host.call(&invocation.actor, scope, op, input).await?;
+                    let result = host.call(invocation.actor(), scope, op, input).await?;
                     Ok(HandlerOutput {
                         result,
                         ..HandlerOutput::default()

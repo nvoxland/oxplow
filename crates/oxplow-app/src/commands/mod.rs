@@ -46,6 +46,7 @@ pub mod util;
 pub mod vcs;
 pub mod work_item;
 
+use oxplow_domain::run::{Mode, RunContext};
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -126,7 +127,8 @@ pub struct NestedChild {
 /// appended after the handler, so a core's events precede it in `seq`).
 pub struct TxCtx<'a> {
     pub conn: &'a rusqlite::Connection,
-    pub actor: &'a Actor,
+    /// The run: who runs it, what caused it, where it sits.
+    pub run: &'a RunContext,
     pub events: oxplow_db::EventCtx<'a>,
     /// Step 4's answer: a person confirmed this call. A handler that
     /// learns only while running that a confirmation is needed — a
@@ -152,7 +154,12 @@ pub struct TxCtx<'a> {
 /// commands composing one another).
 pub const MAX_NESTING: usize = 8;
 
-impl TxCtx<'_> {}
+impl TxCtx<'_> {
+    /// Who runs it.
+    pub fn actor(&self) -> &Actor {
+        self.run.actor()
+    }
+}
 
 pub type TxHandler = dyn Fn(&TxCtx<'_>, Value) -> Result<HandlerOutput, CommandError> + Send + Sync;
 pub type ExternalFuture = Pin<Box<dyn Future<Output = Result<HandlerOutput, CommandError>> + Send>>;
@@ -166,11 +173,18 @@ pub type ExternalHandler = dyn Fn(Invocation, Value) -> ExternalFuture + Send + 
 /// re-sends (`providers::Instance::invoke`).
 #[derive(Debug, Clone)]
 pub struct Invocation {
-    pub actor: Actor,
+    /// The call's run — a child of the command's run, so the scopes it
+    /// calls on its way (a provider's `host/call`s) are counted on its
+    /// trace and recorded with the command's run.
+    pub run: RunContext,
     pub idempotency_key: Option<String>,
-    /// The scopes the run calls on its way (a provider's
-    /// `host/call`s): recorded with the run, like `TxCtx::trace`.
-    pub trace: Arc<oxplow_domain::scope::ScopeTrace>,
+}
+
+impl Invocation {
+    /// Who runs it.
+    pub fn actor(&self) -> &Actor {
+        self.run.actor()
+    }
 }
 
 /// The idempotency key of step `index` (calling `call` with `input`) of
@@ -273,7 +287,16 @@ pub struct Command {
     confirm_for: Option<Arc<ConfirmFor>>,
     /// Its check before the transaction, if it has one ([`Precheck`]).
     precheck: Option<Arc<Precheck>>,
+    /// The extension contribution it is (an extension's `commands:`
+    /// entry), named when it runs (its version and the catalog generation
+    /// are the ones then): its runs are that contribution's, recorded as
+    /// its.
+    contribution: Option<Arc<ContributionOf>>,
 }
+
+/// A command's own run, nested in the run that called it: named for the
+/// contribution it is, as of now, with what that contribution may do.
+pub type ContributionOf = dyn Fn(&RunContext) -> RunContext + Send + Sync;
 
 impl Command {
     /// This command, offered to a person as `ui` says (label, group, …).
@@ -292,6 +315,7 @@ impl Command {
             validator: self.validator.clone(),
             confirm_for: self.confirm_for.clone(),
             precheck: self.precheck.clone(),
+            contribution: self.contribution.clone(),
         };
         copy.check_atomicity()?;
         Ok(copy)
@@ -326,6 +350,7 @@ impl Command {
             validator,
             confirm_for: None,
             precheck: None,
+            contribution: None,
         };
         command.check_atomicity()?;
         Ok(command)
@@ -352,6 +377,13 @@ impl Command {
 
     /// Its confirmation decided per input. A command that only reads may not have
     /// one (see [`Self::may_ask`]).
+    /// This command as `contribution`'s: its runs are recorded as that
+    /// contribution's.
+    pub fn of_contribution(mut self, contribution: Arc<ContributionOf>) -> Self {
+        self.contribution = Some(contribution);
+        self
+    }
+
     /// This command with its check before the transaction ([`Precheck`]).
     pub fn with_precheck(mut self, f: Arc<Precheck>) -> Self {
         self.precheck = Some(f);
@@ -567,23 +599,23 @@ enum RunOrigin {
 
 impl RunOrigin {
     /// What the run's `command.executed` is caused by: the event an
-    /// effect reacted to.
-    fn cause(&self) -> Option<oxplow_domain::EventId> {
+    /// effect reacted to, else what caused the run (an effort policy's
+    /// event, a collector run's trigger).
+    fn cause(&self, run: &RunContext) -> Option<oxplow_domain::EventId> {
         match self {
             RunOrigin::Effect(key, _) => Some(oxplow_domain::EventId(key.event_id.clone())),
-            _ => None,
+            _ => run.cause().cloned(),
         }
     }
-    /// How an `External` call at `index` of this run is invoked: an
+    /// How an `External` call at `index` of `run` is invoked: an
     /// effect's step carries its key.
-    fn invocation(&self, actor: &Actor, index: usize, call: &str, input: &Value) -> Invocation {
+    fn invocation(&self, run: &RunContext, index: usize, call: &str, input: &Value) -> Invocation {
         Invocation {
-            actor: actor.clone(),
+            run: run.child(None, Mode::External),
             idempotency_key: match self {
-                RunOrigin::Effect(run, _) => Some(effect_step_key(run, index, call, input)),
+                RunOrigin::Effect(key, _) => Some(effect_step_key(key, index, call, input)),
                 _ => None,
             },
-            trace: Arc::default(),
         }
     }
 }
@@ -862,7 +894,21 @@ impl CommandBus {
         input: Value,
         confirmed: bool,
     ) -> Result<CommandOutcome, CommandError> {
-        self.run_inner(actor, name, input, confirmed, RunOrigin::Call)
+        let run = RunContext::core(actor.clone(), Mode::External);
+        self.run_inner(&run, name, input, confirmed, RunOrigin::Call)
+            .await
+    }
+
+    /// [`Self::run`] as part of `run`: its actor, caused by what caused
+    /// it (an effort policy's event), recorded as its.
+    pub async fn run_in(
+        &self,
+        run: &RunContext,
+        name: &str,
+        input: Value,
+        confirmed: bool,
+    ) -> Result<CommandOutcome, CommandError> {
+        self.run_inner(run, name, input, confirmed, RunOrigin::Call)
             .await
     }
 
@@ -887,19 +933,14 @@ impl CommandBus {
     /// kept with its claim (tsk954).
     pub(crate) async fn run_effect(
         &self,
+        run: &RunContext,
         key: oxplow_db::effect_run_store::EffectRunKey,
         resend: Option<String>,
         command: Command,
         input: Value,
-        anchors: &oxplow_domain::Anchors,
     ) -> Result<CommandOutcome, CommandError> {
-        let actor = Actor::Effect {
-            effect: key.effect.clone(),
-            thread_id: anchors.thread_id,
-            stream_id: anchors.stream_id,
-        };
         self.run_prepared(
-            &actor,
+            run,
             Arc::new(command),
             input,
             false,
@@ -915,7 +956,7 @@ impl CommandBus {
     /// row — or two approvals of one proposal — can't both run.
     async fn run_inner(
         &self,
-        actor: &Actor,
+        run: &RunContext,
         name: &str,
         input: Value,
         confirmed: bool,
@@ -929,7 +970,7 @@ impl CommandBus {
                 .ok_or_else(|| CommandError::Unknown {
                     name: name.to_string(),
                 })?;
-        self.run_prepared(actor, command, input, confirmed, origin)
+        self.run_prepared(run, command, input, confirmed, origin)
             .await
     }
 
@@ -937,21 +978,28 @@ impl CommandBus {
     /// command already looked up — or, for an effect, made for the run.
     async fn run_prepared(
         &self,
-        actor: &Actor,
+        run: &RunContext,
         command: Arc<Command>,
         input: Value,
         confirmed: bool,
         origin: RunOrigin,
     ) -> Result<CommandOutcome, CommandError> {
         let spec = &command.spec;
-        let actor = &match self.resolved(actor).await {
-            Ok(actor) => actor,
+        let run = &match self.resolved(run).await {
+            Ok(run) => run,
             Err(err) => {
-                self.audit_only(actor, spec, &input, Outcome::Denied, Some(err.to_string()))
+                self.audit_only(run, spec, &input, Outcome::Denied, Some(err.to_string()))
                     .await;
                 return Err(err);
             }
         };
+        // An extension's command runs as that contribution: a child of the
+        // run that called it.
+        let run = &match &command.contribution {
+            Some(named) => named(run),
+            None => run.clone(),
+        };
+        let actor = run.actor();
 
         // 0. It must be offered: what it needs is active, and so is the
         // implementation that owns it.
@@ -960,7 +1008,7 @@ impl CommandBus {
                 field: None,
                 message,
             };
-            self.audit_only(actor, spec, &input, Outcome::Invalid, Some(err.to_string()))
+            self.audit_only(run, spec, &input, Outcome::Invalid, Some(err.to_string()))
                 .await;
             return Err(err);
         }
@@ -969,7 +1017,7 @@ impl CommandBus {
         let routing = match command.validator.check(&input).map(|()| command.resolve()) {
             Ok(routing) => routing,
             Err(err) => {
-                self.audit_only(actor, spec, &input, Outcome::Invalid, Some(err.to_string()))
+                self.audit_only(run, spec, &input, Outcome::Invalid, Some(err.to_string()))
                     .await;
                 return Err(err);
             }
@@ -979,7 +1027,7 @@ impl CommandBus {
             let err = CommandError::Denied {
                 reason: format!("`{}` is not open to {:?} callers", spec.id, actor.invoker()),
             };
-            self.audit_only(actor, spec, &input, Outcome::Denied, Some(err.to_string()))
+            self.audit_only(run, spec, &input, Outcome::Denied, Some(err.to_string()))
                 .await;
             return Err(err);
         }
@@ -999,7 +1047,7 @@ impl CommandBus {
                 self.policy.check_command(thread_id.as_ref(), spec, gated)
             {
                 let err = CommandError::Denied { reason };
-                self.audit_only(actor, spec, &input, Outcome::Denied, Some(err.to_string()))
+                self.audit_only(run, spec, &input, Outcome::Denied, Some(err.to_string()))
                     .await;
                 return Err(err);
             }
@@ -1014,31 +1062,32 @@ impl CommandBus {
                     .map(|p| steps::Pending::own(p, input.clone()));
                 (resolved, own.into_iter().collect())
             }
-            Routing::Composite(compose) => match self.route_composite(spec, &compose, &input).await
-            {
-                Ok((resolved, mut prechecks)) => {
-                    // Its own check, then each composed call's.
-                    if let Some(own) = command.precheck.clone() {
-                        prechecks.insert(0, steps::Pending::own(own, input.clone()));
+            Routing::Composite(compose) => {
+                match self.route_composite(run, spec, &compose, &input).await {
+                    Ok((resolved, mut prechecks)) => {
+                        // Its own check, then each composed call's.
+                        if let Some(own) = command.precheck.clone() {
+                            prechecks.insert(0, steps::Pending::own(own, input.clone()));
+                        }
+                        (resolved, prechecks)
                     }
-                    (resolved, prechecks)
+                    Err(err) => {
+                        let recorded = match err {
+                            CommandError::Denied { .. } => Outcome::Denied,
+                            _ => Outcome::Error,
+                        };
+                        self.audit_only(run, spec, &input, recorded, Some(err.to_string()))
+                            .await;
+                        return Err(err);
+                    }
                 }
-                Err(err) => {
-                    let recorded = match err {
-                        CommandError::Denied { .. } => Outcome::Denied,
-                        _ => Outcome::Error,
-                    };
-                    self.audit_only(actor, spec, &input, recorded, Some(err.to_string()))
-                        .await;
-                    return Err(err);
-                }
-            },
+            }
         };
         // Each check that needs more than a transaction, before it opens
         // (tsk1010): the command's own, or each composed call's.
         for pending in prechecks {
             if let Err(err) = pending.run().await {
-                self.audit_only(actor, spec, &input, Outcome::Invalid, Some(err.to_string()))
+                self.audit_only(run, spec, &input, Outcome::Invalid, Some(err.to_string()))
                     .await;
                 return Err(err);
             }
@@ -1055,17 +1104,19 @@ impl CommandBus {
                 input: input.clone(),
                 destructive: matches!(confirm, oxplow_domain::Confirm::Destructive),
             };
-            let run = Prepared {
+            let prepared = Prepared {
                 command: &command,
                 resolved: &resolved,
             };
             return Err(self
-                .unconfirmed(actor, origin, run, input, preview, gates)
+                .unconfirmed(run, origin, prepared, input, preview, gates)
                 .await);
         }
         // 5a. A read runs without a record: no audit row, no event.
         if spec.access.reads_only() {
-            return self.run_read(&resolved, actor, input).await;
+            let read = self.run_read(&resolved, run, input).await;
+            self.ran_unaudited(run, read.as_ref().err()).await;
+            return read;
         }
         // 5'. A composite's steps run outside one transaction: each lands
         // as it runs, the run recorded once at the end (`steps.rs`). A step
@@ -1077,16 +1128,16 @@ impl CommandBus {
                 origin: origin.clone(),
             };
             return match self
-                .run_steps(actor, spec, &input, plan.clone(), admitted)
+                .run_steps(run, spec, &input, plan.clone(), admitted)
                 .await
             {
                 Err(CommandError::NeedsConfirmation { preview }) => {
-                    let run = Prepared {
+                    let prepared = Prepared {
                         command: &command,
                         resolved: &resolved,
                     };
                     Err(self
-                        .unconfirmed(actor, origin, run, input, *preview, gates)
+                        .unconfirmed(run, origin, prepared, input, *preview, gates)
                         .await)
                 }
                 Ok(done) => {
@@ -1101,6 +1152,7 @@ impl CommandBus {
             Resolved::Tx(handler) => {
                 let handler = handler.clone();
                 let actor_c = actor.clone();
+                let run_c = run.clone();
                 let spec_c = spec.clone();
                 let input_c = input.clone();
                 let vocabulary = self.log.vocabulary().clone();
@@ -1113,7 +1165,7 @@ impl CommandBus {
                         let trace = oxplow_domain::scope::ScopeTrace::default();
                         let ctx = TxCtx {
                             conn: tx,
-                            actor: &actor_c,
+                            run: &run_c,
                             events: oxplow_db::EventCtx {
                                 vocabulary: &vocabulary.current(),
                                 source: actor_c.source(),
@@ -1154,13 +1206,12 @@ impl CommandBus {
                         let recorded = record_tx(
                             tx,
                             &vocabulary.current(),
-                            &actor_c,
                             &spec_c,
                             &input_c,
                             &out,
                             Executed {
                                 scopes: trace.summary(),
-                                ..Executed::ok(executed_id, &origin_tx)
+                                ..Executed::ok(executed_id, &origin_tx, &run_c)
                             },
                         )?;
                         // Fails (and rolls the whole run back) when the row
@@ -1202,7 +1253,10 @@ impl CommandBus {
                     .await;
                 match ran {
                     Ok((out, recorded)) => Ok(finish(out, recorded)),
-                    Err(TxError::Aborted(Abort::Unchanged(out))) => return Ok(unrecorded(*out)),
+                    Err(TxError::Aborted(Abort::Unchanged(out))) => {
+                        self.ran_unaudited(run, None).await;
+                        return Ok(unrecorded(*out));
+                    }
                     Err(TxError::Aborted(Abort::Lost(e))) => return Err(e),
                     Err(TxError::Aborted(Abort::Failed(e))) => Err(e),
                     Err(TxError::Storage(e)) => Err(CommandError::from(e)),
@@ -1211,11 +1265,23 @@ impl CommandBus {
             Resolved::Steps(_) => unreachable!("composite steps ran above"),
             Resolved::External(handler) => {
                 self.claim(&origin).await?;
-                let invocation = origin.invocation(actor, 0, &spec.id, &input);
-                let trace = invocation.trace.clone();
+                // The command's own run: what it starts (a collector run,
+                // a provider's `host/call`s) is part of the run audited.
+                let invocation = Invocation {
+                    run: run.clone(),
+                    ..origin.invocation(run, 0, &spec.id, &input)
+                };
+                let called = invocation.run.clone();
                 match handler(invocation, input.clone()).await {
                     Ok(out) => Ok(self
-                        .record_external(actor, spec, &input, out, origin.clone(), trace.summary())
+                        .record_external(
+                            run,
+                            spec,
+                            &input,
+                            out,
+                            origin.clone(),
+                            called.trace().summary(),
+                        )
                         .await),
                     Err(err) => {
                         self.release(&origin).await;
@@ -1233,12 +1299,12 @@ impl CommandBus {
             // whose child asks) is step 4's answer, late: rolled back,
             // nothing audited — a person is asked, an agent's run proposed.
             Err(CommandError::NeedsConfirmation { preview }) => {
-                let run = Prepared {
+                let prepared = Prepared {
                     command: &command,
                     resolved: &resolved,
                 };
                 Err(self
-                    .unconfirmed(actor, origin, run, input, *preview, gates)
+                    .unconfirmed(run, origin, prepared, input, *preview, gates)
                     .await)
             }
             Err(err) => {
@@ -1248,10 +1314,33 @@ impl CommandBus {
                     CommandError::Denied { .. } => Outcome::Denied,
                     _ => Outcome::Error,
                 };
-                self.audit_only(actor, spec, &input, recorded, Some(err.to_string()))
+                self.audit_only(run, spec, &input, recorded, Some(err.to_string()))
                     .await;
                 Err(err)
             }
+        }
+    }
+
+    /// A run that leaves no audit row — a read, or one that changed
+    /// nothing — is still an extension's run when it is one: recorded as
+    /// such ([`oxplow_db::extension_run_store`]).
+    async fn ran_unaudited(&self, run: &RunContext, failed: Option<&CommandError>) {
+        if run.contribution_ref().is_none() {
+            return;
+        }
+        let (ended, error) = match failed {
+            None => (oxplow_domain::run::Outcome::Ok, None),
+            Some(e) => (oxplow_domain::run::Outcome::Failed, Some(e.to_string())),
+        };
+        let run = run.clone();
+        if let Err(e) = self
+            .db
+            .transaction(move |tx| {
+                oxplow_db::extension_run_store::record_tx(tx, &run, ended, error.as_deref())
+            })
+            .await
+        {
+            tracing::warn!(error = %e, "recording an unaudited run failed");
         }
     }
 
@@ -1260,9 +1349,10 @@ impl CommandBus {
     /// thread's stream, so every handler's "the caller's stream" is
     /// `actor.stream_id()`, one answer; an agent claiming a thread that
     /// doesn't exist is refused.
-    async fn resolved(&self, actor: &Actor) -> Result<Actor, CommandError> {
+    async fn resolved(&self, run: &RunContext) -> Result<RunContext, CommandError> {
+        let actor = run.actor();
         let (Some(Some(thread)), None) = (actor.agent_thread(), actor.stream_id()) else {
-            return Ok(actor.clone());
+            return Ok(run.clone());
         };
         use rusqlite::OptionalExtension as _;
         let stream: Option<i64> = self
@@ -1278,7 +1368,7 @@ impl CommandBus {
             })
             .await?;
         match stream {
-            Some(s) => Ok(with_stream(actor, oxplow_domain::StreamId::new(s))),
+            Some(s) => Ok(run.clone().placed_in(oxplow_domain::StreamId::new(s))),
             None => Err(CommandError::Denied {
                 reason: format!("the agent's thread `{thread}` doesn't exist"),
             }),
@@ -1316,6 +1406,7 @@ impl CommandBus {
             conn: ctx.conn,
             active: active.as_ref(),
             prechecks: Vec::new(),
+            run: ctx.run,
         };
         let (routed, outside) = router.route_calls(calls.to_vec(), ctx.depth, "")?;
         if let Some(i) = outside {
@@ -1336,13 +1427,13 @@ impl CommandBus {
     async fn run_read(
         &self,
         resolved: &Resolved,
-        actor: &Actor,
+        run: &RunContext,
         input: Value,
     ) -> Result<CommandOutcome, CommandError> {
         let out = match resolved {
             Resolved::Tx(handler) => {
                 let handler = handler.clone();
-                let actor = actor.clone();
+                let run = run.clone();
                 let vocabulary = self.log.vocabulary().clone();
                 // A read snapshot, always rolled back: a reading handler's
                 // stray write can't land (it isn't audited).
@@ -1350,10 +1441,10 @@ impl CommandBus {
                     .read_or(move |tx| {
                         let ctx = TxCtx {
                             conn: tx,
-                            actor: &actor,
+                            run: &run,
                             events: oxplow_db::EventCtx {
                                 vocabulary: &vocabulary.current(),
-                                source: actor.source(),
+                                source: run.actor().source(),
                                 cause: None,
                             },
                             confirmed: false,
@@ -1368,9 +1459,8 @@ impl CommandBus {
             }
             Resolved::External(handler) => {
                 let invocation = Invocation {
-                    actor: actor.clone(),
+                    run: run.child(None, Mode::External),
                     idempotency_key: None,
-                    trace: Arc::default(),
                 };
                 handler(invocation, input).await?
             }
@@ -1404,29 +1494,6 @@ pub(super) fn offered(
             message: format!("`{}`: {message}", spec.id),
         }),
         None => Ok(()),
-    }
-}
-
-/// `actor` with the agent behind it in `stream`.
-fn with_stream(actor: &Actor, stream: oxplow_domain::StreamId) -> Actor {
-    match actor {
-        Actor::Agent {
-            session_id,
-            thread_id,
-            ..
-        } => Actor::Agent {
-            session_id: *session_id,
-            thread_id: *thread_id,
-            stream_id: Some(stream),
-        },
-        Actor::Lens {
-            lens_id,
-            on_behalf_of,
-        } => Actor::Lens {
-            lens_id: lens_id.clone(),
-            on_behalf_of: Box::new(with_stream(on_behalf_of, stream)),
-        },
-        other => other.clone(),
     }
 }
 

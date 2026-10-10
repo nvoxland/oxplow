@@ -568,6 +568,10 @@ pub struct PreviewCollectorParams {
     pub id: String,
     /// Stream whose worktree to run it from; omit for your own.
     pub stream_id: Option<String>,
+    /// The event an `on:` collector reacts to, as a fixture writes it:
+    /// `{ type, v?, payload?, subject?, anchors? }`. The script gets it as
+    /// the event envelope, carried to the type's newest version.
+    pub event: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -891,8 +895,10 @@ impl OxplowMcp {
                        store (first 50 per entity, coerced to the declared columns), storing \
                        nothing. Use it to check a collector you're writing, especially in a \
                        worktree stream: run_collector always runs the primary's copy, and \
-                       collected data is project-wide. An exec collector still needs a person's \
-                       approval of that exact version; starlark/jaq collectors run without it."
+                       collected data is project-wide. Pass `event` (`{ type, payload, anchors? }`) \
+                       to preview an `on:` collector on the event it reacts to. An exec \
+                       collector still needs a person's approval of that exact version; \
+                       starlark/jaq collectors run without it."
     )]
     async fn preview_collector(
         &self,
@@ -915,6 +921,7 @@ impl OxplowMcp {
             &oxplow_app::collector_runner::Collectors::of(&self.services, &root),
             &p.owner,
             &p.id,
+            p.event.as_ref(),
             None,
         )
         .await
@@ -1045,7 +1052,7 @@ impl OxplowMcp {
         let decision = self
             .services
             .ai_compute
-            .decide(&caller, &p.state, &questions)
+            .decide(caller.as_str(), &p.state, &questions)
             .await
             .map_err(compute_error)?;
         json_result(&serde_json::json!({
@@ -1071,7 +1078,7 @@ impl OxplowMcp {
         let summary = self
             .services
             .ai_compute
-            .summarize(&caller, &p.text, p.focus.as_deref())
+            .summarize(caller.as_str(), &p.text, p.focus.as_deref())
             .await
             .map_err(compute_error)?;
         Ok(CallToolResult::success(vec![ContentBlock::text(
@@ -4006,6 +4013,7 @@ mod tests {
                     owner: "work".into(),
                     id: "one".into(),
                     stream_id: None,
+                    event: None,
                 }),
             )
             .await

@@ -32,4 +32,14 @@ impl DomainError {
     pub fn is_retryable(&self) -> bool {
         matches!(self, DomainError::Busy(_))
     }
+
+    /// What went wrong, without the kind's prefix: a validation error's
+    /// own words, to quote where the kind is already said ("example
+    /// `basic`: event: …").
+    pub fn message(&self) -> String {
+        match self {
+            DomainError::Invalid(m) => m.clone(),
+            other => other.to_string(),
+        }
+    }
 }

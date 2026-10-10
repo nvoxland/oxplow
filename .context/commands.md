@@ -164,8 +164,10 @@ commits with the run; the file is written after it commits), while
 Today there is one: **`sql.read`** — `{ sql, params? }`, one read-only
 statement over the published models (`v_*`), its `:name`s bound from
 `params`, at most `SQL_READ_ROW_CAP` (1000) rows, answered as a list of
-row objects (`semantic_layer::read_on` on the run's connection: the
-`query_sql` authorizer, inside the transaction). More than 1000 result
+row objects (`semantic_layer::read_on` under the `query_sql`
+authorizer: a command's composer reads on the routing pass's read
+snapshot; an effect's or policy's script, and a provider's `host/call`,
+through the SQL gateway or a read of their own). More than 1000 result
 rows fails with an error; it never hands a script a silently truncated
 list. Exactly 1000 rows is allowed. Aggregate in SQL to calculate across
 all matching source rows, or explicitly narrow the query with a filter
@@ -279,19 +281,21 @@ everyone unconfirmed; `CommandBus::open_ops` lists those, pinned by
 choice. A manifest command's `invokers` is **required** (an omitted one
 once meant everyone, agents included).
 
-**The per-run trace.** Each run has a `ScopeTrace`
-(`oxplow_domain::scope`; `TxCtx::trace`): fresh per transaction attempt,
-shared by the runs nested in it; steps add each step's to the composing
-pass's. An `External` run's is its `Invocation::trace`: a provider's
+**The per-run trace.** Every run carries a `RunContext`
+([extensions.md](./extensions.md) "The run context") whose trace counts
+its scope calls. A `Tx` run's attempt keeps its own (`TxCtx::trace`,
+fresh per attempt, shared by the runs nested in it). The routing pass
+composes a composite once on a read snapshot as a pure child of the run,
+and what that child called becomes the plan's scopes, which the run
+records; steps add each step's. An `External` call's is its
+`Invocation::run`, a child of the command's run: a provider's
 `host/call`s during it count there — its own command's (`run_op`) and a
 capability verb's, which the `work_item.<verb>` run hands its verbs in
-`VerbCall::trace` ([providers.md](./providers.md) "The protocol"). Its summary — per scope,
-how many calls (`{"sql.read": 2}`) — is written on the run's audit row
-(`command_audit.scopes_json`, V27, named so in V34; NULL when it used
-none). The
-routing pass (a composite composed on a read snapshot to decide where
-its calls run) counts nothing. Later: each call's detail (what it
-touched), sampled or on by setting, and approvals by scope.
+`VerbCall::run` ([providers.md](./providers.md) "The protocol"). Its
+summary — per scope, how many calls (`{"sql.read": 2}`) — is written on
+the run's audit row (`command_audit.scopes_json`, V27, named so in V34;
+NULL when it used none). Later: each call's detail (what it touched),
+sampled or on by setting, and approvals by scope.
 
 ## The pipeline (`crates/oxplow-app/src/commands/mod.rs`)
 
@@ -709,7 +713,8 @@ a VCS, an external provider's process, a collector script, the lens files on dis
 whose state can't join the bus's transaction; the bus audits it after it returns (a failure to
 record is logged, never reported as the run failing); its audit row
 holds the handler's `result` like a `Tx` run's. It is
-`Fn(Invocation, Value)`: `Invocation { actor, idempotency_key }`, the key
+`Fn(Invocation, Value)`: `Invocation { run, idempotency_key }` (its
+actor is `run.actor()`; the run is a child of the command's), the key
 set for a step of an effect's reaction (`effect_step_key`:
 `effect:<effect>:<event id>:<index>:<hash of the call>`, the same on
 every attempt at it — P10) and `None` otherwise; an external provider's

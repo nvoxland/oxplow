@@ -45,11 +45,13 @@ pub fn save_op(files: Arc<WorkspaceFiles>) -> Op {
                 let stream: StreamId = ref_id(&input.stream, "stream", "/stream")?;
                 // A person saves in any stream; anyone else only in its
                 // own — an agent's tools' rule (an effect has none).
-                if !invocation.actor.may_confirm() && invocation.actor.stream_id() != Some(stream) {
+                if !invocation.actor().may_confirm()
+                    && invocation.actor().stream_id() != Some(stream)
+                {
                     return Err(CommandError::Denied {
                         reason: format!(
                             "{} saves only in its own stream's worktree, not `{}`",
-                            invocation.actor.source(),
+                            invocation.actor().source(),
                             input.stream
                         ),
                     });
@@ -68,7 +70,7 @@ pub fn save_op(files: Arc<WorkspaceFiles>) -> Op {
                         },
                     })?;
                 let mut saved_event = Envelope::typed::<FileSaved>(
-                    invocation.actor.source(),
+                    invocation.actor().source(),
                     &FileSavedV1 {
                         stream: stream.to_string(),
                         path: saved.path.clone(),

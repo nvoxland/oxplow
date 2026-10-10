@@ -5284,6 +5284,7 @@ async fn a_backfill_stops_after_three_failures_even_while_they_retry() {
             to_seq: None,
         },
         50,
+        None,
     )
     .await
     .unwrap();
@@ -5324,6 +5325,7 @@ async fn a_backfill_attempt_whose_reply_was_lost_is_sent_again() {
             to_seq: None,
         },
         50,
+        None,
     )
     .await
     .unwrap();
@@ -5480,7 +5482,7 @@ async fn a_cut_off_backfill_is_sent_again_at_start() {
             since: None,
             to_seq: None,
         };
-        let _ = crate::commands::effect::backfill(&svc, &ext, &decl, &range, 50).await;
+        let _ = crate::commands::effect::backfill(&svc, &ext, &decl, &range, 50, None).await;
     })
     .await;
     assert_eq!(
@@ -5634,7 +5636,7 @@ async fn a_cut_off_found_at_start_counts_toward_health() {
             since: None,
             to_seq: None,
         };
-        let _ = crate::commands::effect::backfill(&svc, &ext, &decl, &range, 50).await;
+        let _ = crate::commands::effect::backfill(&svc, &ext, &decl, &range, 50, None).await;
     })
     .await;
     assert_eq!(
@@ -6284,6 +6286,42 @@ async fn a_provider_is_the_projects_effort_policy() {
     agent_moves(&fx, &task, "done").await;
     let (efforts, _) = policy_efforts(&fx).await;
     assert!(efforts.iter().all(|e| !e.1), "it closed: {efforts:?}");
+}
+
+/// What the fake provider last kept of its state.
+fn fake_policy_state(fx: &EffortFixture) -> serde_json::Value {
+    std::fs::read_to_string(
+        fx.svc
+            .layout
+            .project_dir
+            .join(".oxplow/fake-policy-fake.json"),
+    )
+    .ok()
+    .and_then(|t| serde_json::from_str(&t).ok())
+    .unwrap_or_default()
+}
+
+/// A provider is told the run each call is part of: the policy's react
+/// runs as its effect actor, caused by the item's move, on the agent's
+/// thread.
+#[tokio::test]
+async fn a_policy_provider_is_told_the_run_it_reacts_in() {
+    let (fx, _ext) = running_policy("").await;
+    choose_policy(&fx, "fake");
+    let task = file_task(&fx).await;
+    agent_moves(&fx, &task, "in_progress").await;
+    let context = fake_policy_state(&fx)["last_context"].clone();
+    assert!(
+        context["run"].as_str().is_some_and(|r| !r.is_empty()),
+        "{context}"
+    );
+    assert_eq!(context["actor"], "effect:effort_policy:fake", "{context}");
+    assert!(context["cause"].as_str().is_some(), "{context}");
+    assert_eq!(
+        context["anchors"]["thread_id"],
+        fx.thread.to_string(),
+        "{context}"
+    );
 }
 
 /// Only the chosen policy hears events: with `oxplow` or `none` active,

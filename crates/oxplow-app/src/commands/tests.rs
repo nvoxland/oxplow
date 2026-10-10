@@ -1390,7 +1390,7 @@ async fn an_agents_stream_is_its_threads() {
             spec,
             Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, _| {
                 Ok(HandlerOutput {
-                    result: json!(ctx.actor.stream_id().map(|s| s.to_string())),
+                    result: json!(ctx.actor().stream_id().map(|s| s.to_string())),
                     ..HandlerOutput::default()
                 })
             })),
@@ -2488,7 +2488,7 @@ fn placing_an_agent_in_its_stream_keeps_its_session() {
         lens_id: "l".into(),
         on_behalf_of: Box::new(agent),
     };
-    let placed = with_stream(&lens, oxplow_domain::StreamId::new(1));
+    let placed = lens.in_stream(oxplow_domain::StreamId::new(1));
     assert_eq!(
         placed.session_id(),
         Some(oxplow_domain::AgentSessionId::new(5))

@@ -345,7 +345,7 @@ fn dispatching(
             if verb == "create" {
                 if let Value::Object(fields) = &mut input {
                     let named = fields.get("thread").and_then(Value::as_str);
-                    thread = filing_thread(&invocation.actor, named)?;
+                    thread = filing_thread(invocation.actor(), named)?;
                     match thread {
                         Some(t) => fields.insert("thread".into(), Value::String(t.to_string())),
                         None => fields.remove("thread"),
@@ -362,9 +362,8 @@ fn dispatching(
                 .verbs
                 .invoke(
                     oxplow_domain::work_items::VerbCall {
-                        actor: &invocation.actor,
-                        idempotency_key: invocation.idempotency_key,
-                        trace: invocation.trace.clone(),
+                        run: invocation.run.clone(),
+                        idempotency_key: invocation.idempotency_key.clone(),
                     },
                     verb,
                     input.clone(),
@@ -413,7 +412,7 @@ fn dispatching(
             // verb that left it where it was.
             let moved = state.filter(|s| prior != Some(*s));
             events.extend(canonical_events(
-                &invocation.actor.source(),
+                &invocation.actor().source(),
                 verb,
                 &input,
                 &result,

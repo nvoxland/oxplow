@@ -3,6 +3,36 @@
     "Handle": {
       "description": "An opaque token for a checked instance, carried by the other calls.",
       "type": "string"
+    },
+    "InvokeContext": {
+      "additionalProperties": false,
+      "description": "The run an `invoke` is part of.",
+      "properties": {
+        "actor": {
+          "description": "Who it runs as: `human`, `agent:thr3`, `system`,\n`effect:<extension>/<id>`, `effect:effort_policy:<id>`.",
+          "type": "string"
+        },
+        "anchors": {
+          "description": "Where it sits — `stream_id`, `thread_id`, `effort_id`, `turn_id`,\n`agent_session_id`, `snapshot_id` — as the event envelope has them,\n`null` where the run has none."
+        },
+        "cause": {
+          "description": "The id of the event that caused it, when one did.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run": {
+          "description": "The run's id in oxplow's records.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run",
+        "actor",
+        "anchors"
+      ],
+      "type": "object"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -11,6 +41,17 @@
     "command": {
       "description": "A declared command's name.",
       "type": "string"
+    },
+    "context": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/InvokeContext"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The run this call is part of, as oxplow records it. A provider may\nlog or forward it; it changes nothing about the call."
     },
     "handle": {
       "$ref": "#/$defs/Handle"

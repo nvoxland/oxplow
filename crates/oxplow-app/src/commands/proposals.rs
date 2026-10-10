@@ -3,6 +3,7 @@
 //! then approved (run as the person) or declined.
 
 use super::*;
+use oxplow_domain::run::{Mode, RunContext};
 
 impl CommandBus {
     /// A run that needs a confirmation it doesn't have. A person (or the
@@ -14,7 +15,7 @@ impl CommandBus {
     /// like one. No audit row for a proposal: nothing ran.
     pub(super) async fn unconfirmed(
         &self,
-        actor: &Actor,
+        run_ctx: &RunContext,
         origin: RunOrigin,
         run: Prepared<'_>,
         input: Value,
@@ -22,6 +23,7 @@ impl CommandBus {
         gates: Gates,
     ) -> CommandError {
         let Prepared { command, resolved } = run;
+        let actor = run_ctx.actor();
         if !actor.proposes() {
             return CommandError::NeedsConfirmation {
                 preview: Box::new(preview),
@@ -48,7 +50,7 @@ impl CommandBus {
                             CommandError::Denied { .. } => Outcome::Denied,
                             _ => Outcome::Error,
                         };
-                        self.audit_only(actor, spec, &input, recorded, Some(err.to_string()))
+                        self.audit_only(run_ctx, spec, &input, recorded, Some(err.to_string()))
                             .await;
                         return err;
                     }
@@ -140,16 +142,19 @@ impl CommandBus {
         input: &Value,
         gates: Gates,
     ) -> Result<Value, CommandError> {
-        let (actor, input) = (actor.clone(), input.clone());
+        let (run, input) = (
+            RunContext::core(actor.clone(), Mode::Transactional),
+            input.clone(),
+        );
         let vocabulary = self.log.vocabulary().clone();
         self.db
             .rehearse_or(move |tx| {
                 let ctx = TxCtx {
                     conn: tx,
-                    actor: &actor,
+                    run: &run,
                     events: oxplow_db::EventCtx {
                         vocabulary: &vocabulary.current(),
-                        source: actor.source(),
+                        source: run.actor().source(),
                         cause: None,
                     },
                     confirmed: true,
@@ -177,7 +182,7 @@ impl CommandBus {
     pub async fn approve(&self, actor: &Actor, id: i64) -> Result<CommandOutcome, CommandError> {
         let proposal = self.pending_proposal(actor, id).await?;
         self.run_inner(
-            actor,
+            &RunContext::core(actor.clone(), Mode::External),
             &proposal.command,
             proposal.input,
             true,

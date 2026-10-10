@@ -687,12 +687,12 @@ pub enum Composed {
     Refused(String),
 }
 
-/// How long a command's script may run. It runs inside the bus's write
-/// transaction, holding the write lock, so this is far tighter than a
-/// collector's runaway catch: composing a few commands is milliseconds.
-/// A script past it has its worker stopped and the transaction released.
-pub const COMMAND_SCRIPT_BUDGET: oxplow_script::SandboxBudget =
-    oxplow_script::SandboxBudget::with_timeout(std::time::Duration::from_secs(5));
+/// How long a command's script may run. The bus holds a read snapshot
+/// while it composes, so this is far tighter than a collector's runaway
+/// catch: composing a few commands is milliseconds. A script past it has
+/// its worker stopped and the snapshot released.
+pub const COMMAND_SCRIPT_BUDGET: oxplow_domain::run::Budget =
+    oxplow_domain::run::Budget::with_timeout(std::time::Duration::from_secs(5));
 
 /// Run a command script's (or an effect's) `transform` over `input` in a
 /// script worker within [`COMMAND_SCRIPT_BUDGET`], its `scope(…)` calls
@@ -702,15 +702,19 @@ pub fn run_command_script(
     script: &str,
     input: Value,
     serve: &mut oxplow_script::workers::Serve<'_>,
+    run: &oxplow_domain::run::RunContext,
 ) -> Result<Value, oxplow_script::CollectError> {
     use oxplow_script::workers::{shared, RunHost, ScriptRun};
     shared()
         .run(
             &COMMAND_SCRIPT_BUDGET,
             ScriptRun::starlark(script, input).with_host(RunHost::Scope(serve)),
-            None,
+            Some(run.cancel()),
         )
-        .map(|ran| ran.value)
+        .map(|ran| {
+            run.used_cpu(ran.cpu_ms, ran.peak_bytes);
+            ran.value
+        })
 }
 
 /// The most examples one command may declare: `check_extension` runs
@@ -727,8 +731,9 @@ pub fn compose_calls(
     input: Value,
     calls: &mut crate::scope_calls::Calls<'_>,
 ) -> Result<Composed, oxplow_domain::CommandError> {
+    let run = calls.run().clone();
     let mut serve = |id: &str, args: Value| calls.serve(id, args);
-    let out = run_command_script(script, json!({ "input": input }), &mut serve);
+    let out = run_command_script(script, json!({ "input": input }), &mut serve, &run);
     // The database was busy answering a read: the run is retried.
     if let Some(message) = calls.take_busy() {
         return Err(oxplow_domain::CommandError::Busy { message });
@@ -803,12 +808,10 @@ pub fn extension_command(
     let (vocabulary, extension) = (bus.vocabulary().clone(), extension.to_string());
     let source = format!("extension:{extension}/{}", decl.name);
     let compose: std::sync::Arc<Composer> = std::sync::Arc::new(
-        move |conn: &rusqlite::Connection,
-              trace: &oxplow_domain::scope::ScopeTrace,
-              input: &Value| {
+        move |conn: &rusqlite::Connection, run: &oxplow_domain::run::RunContext, input: &Value| {
             let read =
                 Box::new(|q: oxplow_db::SqlQuery| oxplow_db::semantic_layer::read_on(conn, &q));
-            let mut calls = crate::scope_calls::Calls::new(&needs, trace, read);
+            let mut calls = crate::scope_calls::Calls::new(run, &needs, read);
             match compose_calls(&script, input.clone(), &mut calls)? {
                 Composed::Run { calls, events, .. }
                     if reads && !(calls.is_empty() && events.is_empty()) =>
@@ -1060,7 +1063,45 @@ impl ExtensionCommands {
         let built = commands
             .iter()
             .map(|decl| {
+                let (catalog, root) = (self.catalog.clone(), self.root.clone());
+                // Its local id, as its descriptor has it: the bus id
+                // without the namespace (`<area>.<verb>`).
+                let name = decl
+                    .name
+                    .strip_prefix(&format!("{ns}."))
+                    .unwrap_or(&decl.name)
+                    .to_string();
+                let ext = extension.to_string();
+                // Its runs are the command's, named as the catalog has it
+                // when each runs.
+                let declared = crate::grants::script_request(&decl.needs);
+                let named: std::sync::Arc<crate::commands::ContributionOf> =
+                    std::sync::Arc::new(move |parent: &oxplow_domain::run::RunContext| {
+                        let contribution = oxplow_domain::run::ContributionRef {
+                            id: oxplow_domain::contribution::ContributionId::new(
+                                &ext,
+                                oxplow_domain::contribution::ContributionKind::Command,
+                                &name,
+                            ),
+                            version: catalog
+                                .get(&root)
+                                .iter()
+                                .find(|e| e.name == ext)
+                                .and_then(|e| e.version.clone()),
+                            generation: Some(catalog.generation(&root)),
+                        };
+                        // A script command needs no person's approval: it
+                        // may do what it declares.
+                        parent
+                            .child(Some(contribution), oxplow_domain::run::Mode::External)
+                            .authorized(oxplow_domain::run::Authority {
+                                declared: declared.clone(),
+                                grant: None,
+                                enforcement: crate::grants::enforcement(),
+                            })
+                    });
                 extension_command(&self.bus, extension, decl)
+                    .map(|c| c.of_contribution(named))
                     .map_err(|e| format!("`{}`: {e}", decl.name))
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -1208,9 +1249,9 @@ pub async fn dry_run(
     let (layer, answers) = (layer.clone(), answers.clone());
     let runtime = tokio::runtime::Handle::current();
     let decided = tokio::task::spawn_blocking(move || {
-        let trace = oxplow_domain::scope::ScopeTrace::default();
+        let run = crate::run_context::for_dry_run();
         let read = Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(layer.run(q)));
-        let mut calls = crate::scope_calls::Calls::new(&needs, &trace, read).with_answers(&answers);
+        let mut calls = crate::scope_calls::Calls::new(&run, &needs, read).with_answers(&answers);
         compose_calls(&script, input, &mut calls)
     })
     .await
@@ -2261,8 +2302,8 @@ mod tests {
         assert_eq!(task(&fx).await.title, before, "nothing kept");
     }
 
-    /// The script runs inside the bus's write transaction, so a runaway
-    /// one is given up on after `COMMAND_SCRIPT_BUDGET`, not the
+    /// The script runs while the bus holds a read snapshot for it, so a
+    /// runaway one is given up on after `COMMAND_SCRIPT_BUDGET`, not the
     /// collectors' two minutes.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_runaway_script_is_given_up_on_within_the_budget() {

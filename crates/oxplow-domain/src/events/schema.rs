@@ -98,8 +98,11 @@ pub struct DeclaredEventType {
 
 pub use crate::contribution::extension_namespace;
 
+#[derive(Clone)]
 struct Registered {
-    validator: jsonschema::Validator,
+    /// Shared, so a registry clones cheaply (a review's copy plus one
+    /// version's declarations).
+    validator: Arc<jsonschema::Validator>,
     schema: Value,
     /// Who registered it: `None` for core, `Some(extension)` otherwise.
     owner: Option<String>,
@@ -109,7 +112,7 @@ struct Registered {
 
 /// Every event type the log accepts, by `type@v`, with the newest version
 /// of each type and its upcast chain.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct EventSchemaRegistry {
     by_version: HashMap<(String, u32), Registered>,
     latest: HashMap<String, u32>,
@@ -329,7 +332,7 @@ impl EventSchemaRegistry {
         self.by_version.insert(
             key,
             Registered {
-                validator,
+                validator: Arc::new(validator),
                 schema,
                 owner,
                 summary,

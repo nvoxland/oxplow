@@ -258,6 +258,10 @@ pub const MANIFEST: &[Capability] = &[
         "consent to run a collector's program is a person's",
     ),
     ui(
+        "revoke_collector",
+        "consent is a person's to take back, as it is to give",
+    ),
+    ui(
         "set_credential",
         "secrets are a person's to set; an agent only sees whether one is set",
     ),
@@ -268,6 +272,10 @@ pub const MANIFEST: &[Capability] = &[
     ui(
         "approve_project_program",
         "consent to run a program from the repo is a person's (tsk331)",
+    ),
+    ui(
+        "revoke_project_program",
+        "consent is a person's to take back, as it is to give",
     ),
     ui(
         "program_source",

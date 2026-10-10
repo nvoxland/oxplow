@@ -3,6 +3,7 @@
 //! two undos — or two approvals — can't both apply.
 
 use super::*;
+use oxplow_domain::run::{Mode, RunContext};
 
 impl CommandBus {
     /// Apply the inverse recorded for `audit_id`, as `actor`, through the
@@ -23,7 +24,7 @@ impl CommandBus {
             })?;
         let inverse = undoable(&row)?;
         self.run_inner(
-            actor,
+            &RunContext::core(actor.clone(), Mode::External),
             &inverse.name,
             inverse.input.clone(),
             confirmed,

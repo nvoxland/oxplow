@@ -369,7 +369,7 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
             schema::<SetInput>(),
             true,
             Handler::Tx(Arc::new(move |ctx: &super::TxCtx<'_>, input| {
-                let actor = ctx.actor;
+                let actor = ctx.actor();
                 let input: SetInput = parse(input)?;
                 change(&t, actor, &input.key, Some(input.value), input.layer)
             })),
@@ -384,7 +384,7 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
             schema::<UnsetInput>(),
             true,
             Handler::Tx(Arc::new(move |ctx: &super::TxCtx<'_>, input| {
-                let actor = ctx.actor;
+                let actor = ctx.actor();
                 let input: UnsetInput = parse(input)?;
                 change(&t, actor, &input.key, None, input.layer)
             })),
@@ -466,10 +466,11 @@ mod tests {
         };
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         let vocabulary = oxplow_domain::vocabulary::Vocabulary::core();
-        let actor = agent();
+        let run =
+            oxplow_domain::run::RunContext::core(agent(), oxplow_domain::run::Mode::Transactional);
         let ctx = super::super::TxCtx {
             conn: &conn,
-            actor: &actor,
+            run: &run,
             events: oxplow_db::EventCtx::system(&vocabulary, "test"),
             confirmed: true,
             may_write: None,

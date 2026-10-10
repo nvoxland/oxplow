@@ -266,7 +266,8 @@ pub fn enable_op(
         "enable",
         serde_json::to_value(schemars::schema_for!(EnableInput)).expect("schema serializes"),
         false,
-        Handler::External(Arc::new(move |Invocation { actor, .. }, input| {
+        Handler::External(Arc::new(move |invocation: Invocation, input| {
+            let actor = invocation.actor().clone();
             let (health, providers) = (health.clone(), providers.clone());
             Box::pin(async move {
                 let EnableInput {

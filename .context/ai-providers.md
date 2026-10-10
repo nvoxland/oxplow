@@ -190,11 +190,20 @@ saying so (`oxplow_ai::config::DROPPED_ROLES`; project.yaml's
   which breaks numbers inside internally tagged enums.
 - `AiService` (in `oxplow-app`, on `Services.ai`) is what callers use:
   role → provider + model + keychain key → call → record.
-- **No budgets or cost tracking**, by the owner's decision (2026-09-26).
-  Don't add them back without asking. Tokens are recorded.
+- **No money budgets or cost tracking**, by the owner's decision
+  (2026-09-26): a provider doesn't tell oxplow what a call cost. Don't add
+  them back without asking. Tokens are recorded. A per-run limit on the
+  *number* of model calls an extension may make was considered with
+  scoped grants (2026-10-10) and left out for now: a grant says only
+  whether a contribution may call a model, and each run's calls are
+  counted (`v_extension_run.ai_calls`, `v_ai_call.run_id`).
 - Every call, including failures, is a row in `ai_call` / `v_ai_call`
-  (role, provider, model, caller, tokens, latency, ok, error), so AI
-  usage is itself queryable in the [semantic layer](./semantic-layer.md).
+  (role, provider, model, caller, tokens, latency, ok, error, and
+  `run_id` — the extension run that made it, V48), so AI usage is itself
+  queryable in the [semantic layer](./semantic-layer.md). An `AiCompute`
+  computation takes a `Caller { name, run }` (a bare name converts to
+  one with no run); a collector's `CollectorOracle` names its run and
+  counts each call on it (`extension_run.ai_calls`).
 - **Every call keeps what it was asked and answered** (V41): the request
   as `AiService` hands it to the provider — `ModelRequest::Complete {
   system, prompt, json }` or `Decide { state, questions }`, its `body()`

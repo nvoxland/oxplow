@@ -47,6 +47,7 @@
 //! (`.context/providers.md` "Idempotency").
 
 use oxplow_domain::events::EventView;
+use oxplow_domain::run::{Mode, RunContext};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Weak};
 
@@ -238,8 +239,16 @@ impl AsyncEventConsumer for EffectTriggers {
             let program = effects::effect_program(&ext, &decl);
             let hash = self.folder_hash(&load, &svc.layout.project_dir, &program);
             let approved = effects::is_approved(&svc.approvals, &program, hash.as_deref());
-            let reacted =
-                run_reaction(&svc, &ext, &decl, approved, event, ReactionOrigin::Live).await;
+            let reacted = run_reaction(
+                &svc,
+                &ext,
+                &decl,
+                approved,
+                event,
+                ReactionOrigin::Live,
+                None,
+            )
+            .await;
             match reacted {
                 Ok(reacted) => count(&health, &decl, &reacted, started.elapsed()).await,
                 Err(error) if matches!(error, DomainError::Busy(_)) => return Err(error),
@@ -486,6 +495,7 @@ pub(crate) async fn run_reaction(
     approved: bool,
     event: &StoredEvent,
     origin: ReactionOrigin,
+    under: Option<&RunContext>,
 ) -> Result<Reacted, DomainError> {
     let (effect, event_id) = (decl.name(), event.envelope.id.to_string());
     let latest = {
@@ -508,6 +518,7 @@ pub(crate) async fn run_reaction(
                 event_seq: event.seq,
                 attempt,
                 origin,
+                run_id: None,
             };
             return cut_off(svc, &key).await;
         }
@@ -530,12 +541,34 @@ pub(crate) async fn run_reaction(
             )))
         }
     };
+    // The reaction's run: the effect, caused by the event, where it
+    // happened. Its attempt's row names it.
+    let run = crate::run_context::for_effect(
+        &svc.extension_catalog,
+        &svc.layout.project_dir,
+        ext,
+        decl,
+        event,
+    );
+    // A person's retry or backfill started it: linked to their run.
+    let run = match under {
+        Some(parent) => run.under(parent),
+        None => run,
+    };
+    // What it may do: the scopes it declares, on the person's approval.
+    let run = run.authorized(crate::grants::authority(
+        &svc.approvals,
+        &format!("effect:{}", decl.name()),
+        approved,
+        crate::grants::script_request(&decl.needs),
+    ));
     let key = EffectRunKey {
         effect,
         event_id,
         event_seq: event.seq,
         attempt,
         origin,
+        run_id: Some(run.run().to_string()),
     };
     // The live consumer never reacts to the past; a person's retry or
     // backfill names what to react to, and needs only the approval.
@@ -557,6 +590,7 @@ pub(crate) async fn run_reaction(
     }
     let skipped = |why: String| async {
         finish(svc, &key, ended(RunState::Skipped, why.clone())).await?;
+        record_run(svc, &run, oxplow_domain::run::Outcome::Skipped, Some(&why)).await;
         Ok(Reacted::Skipped(why))
     };
     if let Some(why) = lineage.refusal() {
@@ -565,6 +599,13 @@ pub(crate) async fn run_reaction(
     // A failure counts once: not when the attempt was already recorded
     // (its run lost a race to another delivery, or finished it failed).
     let failed = |reason: String| async {
+        record_run(
+            svc,
+            &run,
+            oxplow_domain::run::Outcome::Failed,
+            Some(&reason),
+        )
+        .await;
         Ok(
             if finish(svc, &key, ended(RunState::Failed, reason.clone())).await? {
                 Reacted::Failed(reason)
@@ -594,7 +635,7 @@ pub(crate) async fn run_reaction(
         };
         (calls, events)
     } else {
-        let (composed, used) = match run_script(svc, decl, event).await {
+        let (composed, used) = match run_script(svc, &run, decl, event).await {
             Ok(c) => c,
             Err(reason) => return failed(reason).await,
         };
@@ -627,7 +668,7 @@ pub(crate) async fn run_reaction(
     let kept = safe.then(|| resend.clone());
     match svc
         .commands
-        .run_effect(key.clone(), kept, command, input, &event.envelope.anchors)
+        .run_effect(&run, key.clone(), kept, command, input)
         .await
     {
         Ok(_) => Ok(Reacted::Ran),
@@ -823,7 +864,7 @@ async fn retry_one(
         return Ok(false);
     };
     let started = std::time::Instant::now();
-    let reacted = run_reaction(svc, &ext, &decl, true, &event, ReactionOrigin::Auto).await?;
+    let reacted = run_reaction(svc, &ext, &decl, true, &event, ReactionOrigin::Auto, None).await?;
     count(health, &decl, &reacted, started.elapsed()).await;
     Ok(!matches!(reacted, Reacted::Nothing | Reacted::NotResent(_)))
 }
@@ -872,6 +913,26 @@ pub(crate) fn find_effect(svc: &Services, name: &str) -> Option<(Extension, Effe
     effects(svc).into_iter().find(|(_, d)| d.name() == name)
 }
 
+/// Record `run`'s end when it never reached the bus (its script skipped
+/// or failed). Best effort: the reaction's own record is what decides.
+async fn record_run(
+    svc: &Services,
+    run: &RunContext,
+    outcome: oxplow_domain::run::Outcome,
+    error: Option<&str>,
+) {
+    let (run, error) = (run.clone(), error.map(str::to_string));
+    if let Err(e) = svc
+        .db
+        .transaction(move |tx| {
+            oxplow_db::extension_run_store::record_tx(tx, &run, outcome, error.as_deref())
+        })
+        .await
+    {
+        tracing::warn!(error = %e, "recording an effect's run failed");
+    }
+}
+
 /// The run of an effect's reaction: the registered `oxplow.command.sequence` —
 /// its spec and compiled schema — over what its script composed: `calls`,
 /// and its own `events` beside them, with the scopes composing them
@@ -886,8 +947,8 @@ fn effect_command(
     let sequence = bus.command(SEQUENCE).ok_or_else(|| CommandError::Failed {
         message: format!("`{SEQUENCE}` isn't registered"),
     })?;
-    let composer: Arc<Composer> = Arc::new(move |_conn, trace, _input| {
-        trace.add(&scopes);
+    let composer: Arc<Composer> = Arc::new(move |_conn, run, _input| {
+        run.trace().add(&scopes);
         Ok(Composition {
             calls: calls.clone(),
             result: None,
@@ -910,6 +971,7 @@ fn effect_command(
 /// it called; `Err` is why it failed.
 pub(crate) async fn run_script(
     svc: &Services,
+    run: &RunContext,
     decl: &EffectDecl,
     event: &StoredEvent,
 ) -> Result<(Reaction, BTreeMap<String, u32>), String> {
@@ -917,13 +979,15 @@ pub(crate) async fn run_script(
         .map_err(|e| format!("its event: {e}"))?
         .to_json();
     let (script, needs, layer) = (decl.script.clone(), decl.needs.clone(), svc.sql.clone());
+    // The script is the run's pure part: what it calls is counted apart,
+    // then added to the run it composes.
+    let composing = run.child(None, Mode::Pure);
     let runtime = tokio::runtime::Handle::current();
     tokio::task::spawn_blocking(move || {
-        let trace = oxplow_domain::scope::ScopeTrace::default();
         let read = Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(layer.run(q)));
-        let mut calls = crate::scope_calls::Calls::new(&needs, &trace, read);
+        let mut calls = crate::scope_calls::Calls::new(&composing, &needs, read);
         let reaction = effects::run_script(&script, event, &mut calls)?;
-        Ok((reaction, trace.summary()))
+        Ok((reaction, composing.trace().summary()))
     })
     .await
     .map_err(|e| format!("the script panicked: {e}"))?
@@ -2221,11 +2285,11 @@ mod tests {
 
         // Two a run: the third waits for the next.
         let (ext, decl) = find_effect(svc, "acme/mark-done").unwrap();
-        let first = backfill(svc, &ext, &decl, &Range::default(), 2)
+        let first = backfill(svc, &ext, &decl, &Range::default(), 2, None)
             .await
             .unwrap();
         assert_eq!((first.planned, first.ran, first.remaining), (3, 2, 1));
-        let second = backfill(svc, &ext, &decl, &Range::default(), 2)
+        let second = backfill(svc, &ext, &decl, &Range::default(), 2, None)
             .await
             .unwrap();
         assert_eq!((second.planned, second.ran, second.remaining), (1, 1, 0));
@@ -2261,6 +2325,7 @@ mod tests {
             &decl,
             &crate::commands::effect::Range::default(),
             50,
+            None,
         )
         .await
         .unwrap();

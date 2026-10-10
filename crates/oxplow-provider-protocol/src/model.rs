@@ -199,6 +199,28 @@ pub struct InvokeParams {
     /// may ignore the key.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub idempotency_key: Option<String>,
+    /// The run this call is part of, as oxplow records it. A provider may
+    /// log or forward it; it changes nothing about the call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<InvokeContext>,
+}
+
+/// The run an `invoke` is part of.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InvokeContext {
+    /// The run's id in oxplow's records.
+    pub run: String,
+    /// Who it runs as: `human`, `agent:thr3`, `system`,
+    /// `effect:<extension>/<id>`, `effect:effort_policy:<id>`.
+    pub actor: String,
+    /// The id of the event that caused it, when one did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cause: Option<String>,
+    /// Where it sits — `stream_id`, `thread_id`, `effort_id`, `turn_id`,
+    /// `agent_session_id`, `snapshot_id` — as the event envelope has them,
+    /// `null` where the run has none.
+    pub anchors: Value,
 }
 
 /// Provider → host (protocol 3): call a scope the provider's manifest

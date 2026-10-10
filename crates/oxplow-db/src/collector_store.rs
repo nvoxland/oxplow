@@ -86,6 +86,10 @@ pub struct CollectorRun {
     pub cursor: Option<serde_json::Value>,
     /// The seq of the last trigger event it ran for.
     pub last_event_id: Option<i64>,
+    /// The last run (`extension_run.run_id`); `None` for one before runs
+    /// were recorded.
+    #[serde(default)]
+    pub run_id: Option<String>,
 }
 
 #[derive(Clone)]
@@ -295,7 +299,8 @@ pub fn write_rows_tx(
 }
 
 const RUN_SELECT: &str =
-    "SELECT owner, id, status, last_run_at, error, row_counts_json, cursor_json, last_event_id
+    "SELECT owner, id, status, last_run_at, error, row_counts_json, cursor_json, last_event_id,
+            run_id
      FROM collector_run";
 
 fn run_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<CollectorRun> {
@@ -310,6 +315,7 @@ fn run_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<CollectorRun> {
         row_counts: serde_json::from_str(&counts).unwrap_or_default(),
         cursor: cursor.and_then(|c| serde_json::from_str(&c).ok()),
         last_event_id: r.get(7)?,
+        run_id: r.get(8)?,
     })
 }
 
@@ -319,11 +325,11 @@ pub fn record_run_in(conn: &rusqlite::Connection, run: &CollectorRun) -> rusqlit
     let counts = serde_json::to_string(&run.row_counts).unwrap_or_else(|_| "{}".into());
     let cursor = run.cursor.as_ref().map(|c| c.to_string());
     conn.execute(
-        "INSERT INTO collector_run (owner, id, status, last_run_at, error, row_counts_json, cursor_json, last_event_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        "INSERT INTO collector_run (owner, id, status, last_run_at, error, row_counts_json, cursor_json, last_event_id, run_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
          ON CONFLICT (owner, id) DO UPDATE SET
            status = excluded.status, last_run_at = excluded.last_run_at,
-           error = excluded.error,
+           error = excluded.error, run_id = excluded.run_id,
            -- a failed run keeps the last good counts and checkpoint
            row_counts_json = CASE WHEN excluded.status = 'ok'
              THEN excluded.row_counts_json ELSE collector_run.row_counts_json END,
@@ -338,7 +344,8 @@ pub fn record_run_in(conn: &rusqlite::Connection, run: &CollectorRun) -> rusqlit
             run.error,
             counts,
             cursor,
-            run.last_event_id
+            run.last_event_id,
+            run.run_id
         ],
     )
     .map(|_| ())
@@ -979,6 +986,7 @@ mod tests {
             row_counts: counts,
             cursor: None,
             last_event_id: None,
+            run_id: None,
         };
         store.record_run(state.clone()).await.unwrap();
         assert_eq!(store.list_runs().await.unwrap(), vec![state]);
@@ -1006,6 +1014,7 @@ mod tests {
             row_counts: [("pr".to_string(), 3)].into(),
             cursor,
             last_event_id: Some(event),
+            run_id: None,
         };
         store
             .record_run(run("ok", Some(json!({"since": "a"})), 7))

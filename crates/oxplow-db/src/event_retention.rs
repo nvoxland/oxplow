@@ -183,6 +183,8 @@ pub struct SweepReport {
     pub payloads_expired: usize,
     /// Refused runs' audit rows past [`REFUSED_AUDIT_DAYS`], deleted.
     pub refused_audit_deleted: usize,
+    /// Extension runs past [`EXTENSION_RUN_DAYS`], deleted.
+    pub extension_runs_deleted: usize,
     /// A project's windows naming a namespace nothing logs (tsk985): kept
     /// for an extension not installed yet, and said, since a typo does nothing.
     pub unused: Vec<String>,
@@ -194,6 +196,10 @@ pub struct SweepReport {
 /// only a record of an attempt; a confused or polling agent makes many.
 /// Runs that did something stay.
 pub const REFUSED_AUDIT_DAYS: i64 = 30;
+
+/// How long an extension run's record is kept: a collector's events'
+/// window, so a run and the events it led to age out together.
+pub const EXTENSION_RUN_DAYS: i64 = 90;
 
 /// Rows one sweep transaction touches: small enough that a hook waiting on
 /// the writer lock waits milliseconds, not the whole backlog.
@@ -294,6 +300,20 @@ async fn sweep_in_batches(
             })
             .await?;
         report.refused_audit_deleted += n;
+        if (n as i64) < batch {
+            break;
+        }
+    }
+    // Extension runs past their window.
+    let cutoff = before(EXTENSION_RUN_DAYS);
+    loop {
+        let cutoff = cutoff.clone();
+        let n = db
+            .transaction(move |tx| {
+                crate::extension_run_store::sweep_tx(tx, &cutoff, batch as usize)
+            })
+            .await?;
+        report.extension_runs_deleted += n;
         if (n as i64) < batch {
             break;
         }
@@ -419,6 +439,7 @@ mod tests {
                 content_deleted: 5,
                 payloads_expired: 5,
                 refused_audit_deleted: 0,
+                extension_runs_deleted: 0,
                 unused: Vec::new(),
             }
         );

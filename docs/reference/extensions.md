@@ -187,6 +187,38 @@ An effect runs as a program you approve in Settings → Data, and only
 on events logged after the approval. Any edit to the extension's files
 stops it until it's approved again.
 
+### The event your script gets
+
+An effect, an effort policy and an `on:` collector all get the same
+event object. A Starlark or jaq collector gets it as `input.event`, and
+an exec collector as `{"event": …}` on stdin (`{}` when nothing
+triggered it):
+
+```json
+{
+  "id": "0199…", "type": "work_item.state_changed", "v": 1, "seq": 812,
+  "at": "2026-10-09T14:02:11.120000Z", "source": "agent:thr3",
+  "subject": ["work_item:oxplow:tsk4"],
+  "anchors": { "stream_id": "str1", "thread_id": "thr3", "effort_id": null,
+               "turn_id": 41, "agent_session_id": "ses2", "snapshot_id": null },
+  "payload": { "work_item": "work_item:oxplow:tsk4", "to": "done" },
+  "cause": null
+}
+```
+
+- Every key is always there; what the event doesn't have is `null`.
+- `payload` is always at `v`, the type's newest version: an event
+  logged before its type gained a version is carried forward through
+  the type's upcasts first.
+- An example's `event:` is `{ type, v?, payload, subject?, anchors? }`
+  (and optionally `id`, `seq`, `at`, `source`, `cause`). Your script
+  gets it the same way: what you leave out is `null` (`source` is
+  `fixture`), and an older `v` is carried forward, so a v1 fixture tests
+  what your script sees of an old event. A type oxplow doesn't know, a
+  newer `v`, a payload that doesn't match its schema, a malformed anchor
+  (`thread_id: thr1`, `turn_id: 7`) or a key the event doesn't have
+  fails the example and says which.
+
 ### AI providers
 
 An AI provider is a Starlark script: oxplow's own (Anthropic, OpenAI,
