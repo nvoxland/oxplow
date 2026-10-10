@@ -6,6 +6,7 @@ import {
   filterMetricRows,
   metricStatus,
   metricSiblings,
+  sliceGroups,
 } from "./metricsRows.js";
 
 const row = (key: string, enabled: boolean, title = key) => ({ key, title, enabled });
@@ -131,3 +132,39 @@ describe("metricStatus (tsk121)", () => {
   });
 });
 
+
+describe("sliceGroups", () => {
+  // Samples come newest first, as the Metrics list reads them.
+  const point = (group: string | null, value: number, at: number) =>
+    ({ group, value, captured_at: `2026-10-0${at}T00:00:00Z` }) as unknown as import("../api.js").SeriesPoint;
+
+  it("makes one series per group, ranked by its latest value, newest point first", () => {
+    const samples = [
+      point("rust", 5, 3),
+      point("ts", 9, 3),
+      point("rust", 4, 2),
+      point("ts", 8, 2),
+      point("py", 20, 1),
+    ];
+    const { shown, hidden } = sliceGroups(samples, 5);
+    expect(shown.map((g) => [g.group, g.latest.value, g.samples.length])).toEqual([
+      ["py", 20, 1],
+      ["ts", 9, 2],
+      ["rust", 5, 2],
+    ]);
+    expect(hidden).toBe(0);
+  });
+
+  it("shows the top N and counts the rest", () => {
+    const samples = ["a", "b", "c", "d", "e"].map((g, i) => point(g, i + 1, 1));
+    const { shown, hidden } = sliceGroups(samples, 2);
+    expect(shown.map((g) => g.group)).toEqual(["e", "d"]);
+    expect(hidden).toBe(3);
+  });
+
+  it("ties break by name, and a point with no group isn't a group", () => {
+    const { shown } = sliceGroups([point("b", 1, 1), point(null, 99, 1), point("a", 1, 1)], 5);
+    expect(shown.map((g) => g.group)).toEqual(["a", "b"]);
+    expect(sliceGroups([], 3)).toEqual({ shown: [], hidden: 0 });
+  });
+});

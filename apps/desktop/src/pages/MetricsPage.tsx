@@ -8,6 +8,7 @@ import {
   listMetricCatalog,
   listMetricDefinitions,
   listMetricSamples,
+  querySql,
 } from "../api.js";
 import { coalescedRefresh } from "../coalesced-refresh.js";
 import { NO_READS, unionReads, useRerunOnChange } from "../lens/lensRerun.js";
@@ -25,6 +26,7 @@ import { useRouteDispatch } from "../tabs/RouteLink.js";
 import type { NavSiblings } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { buildMetricSections } from "./metricCategories.js";
+import { DIMENSIONS_SQL } from "./exploreData.js";
 import {
   DEFAULT_RANGE_KEY,
   RANGE_PRESETS,
@@ -41,6 +43,7 @@ import {
   filterMetricRows,
   metricStatusColor,
   metricSiblings,
+  sliceGroups,
 } from "./metricsRows.js";
 
 /** One listed metric. Identity/enabled/grouping come from the **catalog** (the
@@ -56,9 +59,14 @@ type Row = {
   def: MetricSpec | null;
   latest: SeriesPoint | null;
   samples: SeriesPoint[];
+  /** The samples sliced by the chosen dimension (one point per group per
+   *  capture); empty when the list isn't sliced or the metric has none. */
+  grouped: SeriesPoint[];
 };
 
 const SAMPLE_LIMIT = 200;
+/** How many groups a sliced metric lists beneath it; the rest are counted. */
+const SLICE_TOP_N = 3;
 
 
 
@@ -69,40 +77,80 @@ function MetricRow({
   row,
   onOpenPage,
   siblings,
+  slice,
 }: {
   row: Row;
   onOpenPage?: (ref: TabRef) => void;
   siblings?: NavSiblings;
+  /** The dimension the list is sliced by (its label), when it is. */
+  slice: string | null;
 }) {
   const { def, latest, samples } = row;
   // Colored by where the latest value stands against the metric's target.
   const color = def && latest ? metricStatusColor(def, latest.value) : undefined;
   const unit = def?.unit;
   const { handlers } = useRouteDispatch(metricRef(row.key), { onNavigate: onOpenPage, siblings });
+  const { shown, hidden } = useMemo(() => sliceGroups(row.grouped, SLICE_TOP_N), [row.grouped]);
+  const quiet = { padding: "2px 8px 2px 24px", fontSize: 12, opacity: 0.6 } as const;
   return (
-    <tr
-      onClick={handlers.onClick}
-      onAuxClick={handlers.onAuxClick}
-      onContextMenu={handlers.onContextMenu}
-      style={{ borderTop: "1px solid var(--border, #2a2a2a)", cursor: "pointer" }}
-    >
-      <td style={{ padding: "6px 8px", fontWeight: 600 }}>{row.title}</td>
-      <td style={{ padding: "6px 8px" }}>
-        <Sparkline
-          values={samples
-            .slice()
-            .reverse()
-            .map((s) => s.value)}
-          color={color}
-        />
-      </td>
-      <td
-        style={{ padding: "6px 8px", fontWeight: 600, color }}
-        title={latest ? formatMetricValueExact(latest.value, unit) : undefined}
+    <>
+      <tr
+        onClick={handlers.onClick}
+        onAuxClick={handlers.onAuxClick}
+        onContextMenu={handlers.onContextMenu}
+        style={{ borderTop: "1px solid var(--border, #2a2a2a)", cursor: "pointer" }}
       >
-        {latest ? formatMetricValue(latest.value, unit) : "—"}
-      </td>
-    </tr>
+        <td style={{ padding: "6px 8px", fontWeight: 600 }}>{row.title}</td>
+        <td style={{ padding: "6px 8px" }}>
+          <Sparkline
+            values={samples
+              .slice()
+              .reverse()
+              .map((s) => s.value)}
+            color={color}
+          />
+        </td>
+        <td
+          style={{ padding: "6px 8px", fontWeight: 600, color }}
+          title={latest ? formatMetricValueExact(latest.value, unit) : undefined}
+        >
+          {latest ? formatMetricValue(latest.value, unit) : "—"}
+        </td>
+      </tr>
+      {/* Sliced: the top groups, each its own latest value and trend. A group
+          is a value of the dimension, not a metric, so it doesn't open a page. */}
+      {slice && def && shown.length === 0 ? (
+        <tr data-testid="recorded-slice-none">
+          <td colSpan={3} style={quiet}>
+            Not sliced by {slice}
+          </td>
+        </tr>
+      ) : null}
+      {shown.map((g) => (
+        <tr key={g.group} data-testid="recorded-slice-group">
+          <td style={{ padding: "2px 8px 2px 24px", fontSize: 12 }}>{g.group}</td>
+          <td style={{ padding: "2px 8px" }}>
+            <Sparkline
+              values={g.samples
+                .slice()
+                .reverse()
+                .map((s) => s.value)}
+              color={color}
+            />
+          </td>
+          <td style={{ padding: "2px 8px", fontSize: 12 }} title={formatMetricValueExact(g.latest.value, unit)}>
+            {formatMetricValue(g.latest.value, unit)}
+          </td>
+        </tr>
+      ))}
+      {hidden > 0 ? (
+        <tr data-testid="recorded-slice-more">
+          <td colSpan={3} style={quiet}>
+            + {hidden} more
+          </td>
+        </tr>
+      ) : null}
+    </>
   );
 }
 
@@ -138,6 +186,14 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
   const [branch, setBranch] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [showMode, setShowMode] = useState<ShowMode>(DEFAULT_SHOW_MODE);
+  // Slice By (tsk594): a dimension splits every metric that has it into groups.
+  const [sliceBy, setSliceBy] = useState<string | null>(null);
+  const [dimensions, setDimensions] = useState<{ key: string; label: string }[]>([]);
+  useEffect(() => {
+    void querySql(DIMENSIONS_SQL, [], null)
+      .then((r) => setDimensions(r.rows.map(([key, label]) => ({ key: String(key), label: String(label ?? key) }))))
+      .catch(() => setDimensions([]));
+  }, []);
 
   const [reads, setReads] = useState<Reads>(NO_READS);
   const guard = useRequestGuard();
@@ -156,9 +212,19 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
           const def = specs.get(entry.key) ?? null;
           // No spec ⇒ nothing to grid. Bound the read to the widest preset
           // (tsk202); the page filters to the selected range client-side.
+          const window = widestPresetWindow(Date.now());
           const samples = def
-            ? await listMetricSamples(entry.key, SAMPLE_LIMIT, null, widestPresetWindow(Date.now()))
+            ? await listMetricSamples(entry.key, SAMPLE_LIMIT, null, window)
             : { rows: [], reads: NO_READS };
+          // Sliced: the same read, split by the dimension. A metric that
+          // doesn't have it just comes back with no groups.
+          const grouped =
+            def && sliceBy
+              ? await listMetricSamples(entry.key, SAMPLE_LIMIT, sliceBy, window).catch(() => ({
+                  rows: [] as SeriesPoint[],
+                  reads: NO_READS,
+                }))
+              : { rows: [] as SeriesPoint[], reads: NO_READS };
           const row: Row = {
             key: entry.key,
             title: entry.title,
@@ -168,8 +234,9 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
             def,
             latest: samples.rows[0] ?? null,
             samples: samples.rows,
+            grouped: grouped.rows,
           };
-          return { row, reads: samples.reads };
+          return { row, reads: unionReads([samples.reads, grouped.reads]) };
         }),
       );
       if (!current()) return;
@@ -177,7 +244,7 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
       setReads(unionReads([catalog.reads, defs.reads, ...built.map((b) => b.reads)]));
       setLoading(false);
     });
-  }, [guard]);
+  }, [guard, sliceBy]);
   const gate = useMemo(() => coalescedRefresh(load, 0), [load]);
   useEffect(() => {
     gate.schedule();
@@ -193,7 +260,8 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
     const range = rangeFromPreset(rangeKey, Date.now());
     return filterMetricRows(rows, showMode, query).map((r) => {
       const samples = filterByBranch(filterByRange(r.samples, range), branch);
-      return { ...r, latest: samples[0] ?? null, samples };
+      const grouped = filterByBranch(filterByRange(r.grouped, range), branch);
+      return { ...r, latest: samples[0] ?? null, samples, grouped };
     });
   }, [rows, rangeKey, branch, query, showMode]);
 
@@ -283,6 +351,23 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
               ))}
             </select>
           </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            <span style={{ opacity: 0.6, fontSize: 12 }}>Slice by</span>
+            <select
+              value={sliceBy ?? ""}
+              onChange={(e) => setSliceBy(e.target.value || null)}
+              data-testid="recorded-slice-by"
+              title="Splits each metric that has the dimension into its groups, the top few beneath it."
+              style={sel}
+            >
+              <option value="">No slice</option>
+              {dimensions.map((d) => (
+                <option key={d.key} value={d.key}>
+                  {d.label}
+                </option>
+              ))}
+            </select>
+          </div>
           {/* Not a filter, but this rail is the page's control panel — the
               controls self-hide while there are no sections to act on. */}
           <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
@@ -355,6 +440,7 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
                       <MetricRow
                         key={row.key}
                         row={row}
+                        slice={sliceBy ? (dimensions.find((d) => d.key === sliceBy)?.label ?? sliceBy) : null}
                         onOpenPage={onOpenPage}
                         siblings={{
                           entries: siblings.entries,

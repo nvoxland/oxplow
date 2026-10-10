@@ -1,5 +1,6 @@
 // Row filtering for the Metrics page (tsk87). Pure — React-free.
 
+import type { SeriesPoint } from "../api.js";
 import type { TabRef } from "../tabs/tabState.js";
 
 /** Which metrics the page lists: enabled only (default) or every
@@ -104,4 +105,34 @@ export function metricSiblings<T extends { key: string; title: string }>(
     }
   }
   return { entries, indexByKey };
+}
+
+/** One group of a sliced metric: its newest point and its points, newest
+ *  first. */
+export type SliceGroup = { group: string; latest: SeriesPoint; samples: SeriesPoint[] };
+
+/**
+ * A sliced metric's groups for the Metrics list: one series per group value,
+ * the `topN` ranked by their latest value (largest first, name for ties) and
+ * the count left out. `samples` is newest first, as the list reads them. A
+ * point with no group (a fact missing the dimension) isn't placed on any.
+ */
+export function sliceGroups(
+  samples: readonly SeriesPoint[],
+  topN: number,
+): { shown: SliceGroup[]; hidden: number } {
+  const byGroup = new Map<string, SeriesPoint[]>();
+  for (const p of samples) {
+    if (p.group === null) continue;
+    const points = byGroup.get(p.group);
+    if (points) points.push(p);
+    else byGroup.set(p.group, [p]);
+  }
+  const groups: SliceGroup[] = [...byGroup].map(([group, points]) => ({
+    group,
+    latest: points[0]!,
+    samples: points,
+  }));
+  groups.sort((a, b) => b.latest.value - a.latest.value || a.group.localeCompare(b.group));
+  return { shown: groups.slice(0, topN), hidden: Math.max(0, groups.length - topN) };
 }

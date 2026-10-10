@@ -2123,5 +2123,15 @@ one that deletes facts, `db.memo().invalidate_all()`.
 `listMetricSamples(key, limit, groupBy)` (`metricSeriesSql`'s grouped
 `metric_grid('capture', '<dimension>')`), and the page draws one chart per
 dimension value (`seriesByGroup`, the same small multiples as a lens line
-chart). The Metrics list doesn't slice yet ([[tsk594]]).
+chart).
+
+The **Metrics list** has the same select in its Filters rail ("Slice by",
+`MetricsPage`). Sliced, every metric keeps its row (its overall sparkline and
+latest value) and lists its **top three groups beneath it** — each group's
+latest value and trend, ranked by latest value (`sliceGroups`,
+`metricsRows.ts`), the rest counted as "+ N more". A metric with nothing on
+that dimension says "Not sliced by <dimension>". The groups follow the page's
+range and branch filters; a group is a value of the dimension, not a metric,
+so it opens no page (the detail page, sliced the same way, is where one
+group's chart lives). It costs a second read per metric while a slice is on.
 
