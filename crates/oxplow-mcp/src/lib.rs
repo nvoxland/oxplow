@@ -2406,6 +2406,16 @@ impl OxplowMcp {
     }
 
     #[tool(
+        description = "The host services an extension's Starlark script may use, each a scope \
+                       it declares in its `needs`: what it gives, the builtins it provides, \
+                       whether a person approves it (a model spends their key) and the runs \
+                       that may use it (a script that composes runs pure: no model)."
+    )]
+    async fn list_services(&self) -> Result<CallToolResult, McpError> {
+        json_result(&oxplow_domain::service::SERVICES)
+    }
+
+    #[tool(
         description = "Run a command by its id with its input (see `list_commands`). Returns \
                        `{ result, audit_id, event_id, inverse? }`. Invalid input names the \
                        failing field; a denied command says why. A command that needs a \
@@ -2757,6 +2767,7 @@ const READ_ONLY_TOOLS: &[&str] = &[
     "list_outbound",
     "list_dead_letters",
     "list_commands",
+    "list_services",
     "code_definition",
     "code_hover",
     "code_references",
@@ -4220,6 +4231,32 @@ mod tests {
             caller_of(&rmcp::model::Extensions::new()),
             McpCaller::default()
         );
+    }
+
+    /// The services a script may use, as the reference describes them:
+    /// each with its builtins, whether a person approves it, and the runs
+    /// that may use it.
+    #[tokio::test]
+    async fn list_services_describes_what_a_script_may_use() {
+        let (_proj, _services, server) = boot();
+        let listed = server.list_services().await.unwrap();
+        let text = listed.content[0].as_text().unwrap().text.clone();
+        let services: Vec<serde_json::Value> = serde_json::from_str(&text).unwrap();
+        let ai = services
+            .iter()
+            .find(|s| s["scope"] == "ai.compute")
+            .unwrap();
+        assert_eq!(ai["approval"], true);
+        assert_eq!(ai["modes"], serde_json::json!(["external"]));
+        assert!(ai["builtins"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("ai_classify")));
+        let scopes: Vec<&str> = services
+            .iter()
+            .map(|s| s["scope"].as_str().unwrap())
+            .collect();
+        assert_eq!(scopes, ["sql.read", "tree.read", "ai.compute"]);
     }
 
     #[tokio::test]

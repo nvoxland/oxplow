@@ -1866,7 +1866,19 @@ uses):
   whose script names an `ai_*` builtin uses `ai.compute`. A collector's
   descriptor lists declared ∪ implied.
 - **What a script uses** is read from its syntax
-  (`oxplow_script::uses::services_used`, which `calls_ai` is a view of).
+  (`oxplow_script::uses::services_used`, which `calls_ai` is a view of),
+  and **checked at load**: `services::check_uses` refuses a script that
+  uses a service its needs don't name (a collector's needs include what
+  its kind implies), or one its kind may not use
+  (`scope_calls::check_script_need` / `check_command_need`) — a load
+  error at the script, "uses `files()` without `tree.read` in its
+  `needs` — fix: …". The router's refusals are the run-time backstop.
+- **Discovery.** `services::of_extension` lists each script's services
+  (declared / implied / undeclared, used or not, approval) —
+  `CheckReport.services`, `oxplow extension check --services`; the MCP
+  `list_services` tool serves `SERVICES`; `docs/reference/extensions.md`
+  "Services" is generated from it (`the_reference_lists_every_service`,
+  sharing `test_fixtures::generated_section` with the kinds table).
 - **At run time, one router** (`crates/oxplow-app/src/services.rs`):
   every host that runs a Starlark script — entity collectors
   (`collector_runner::given`), fact collectors (`MetricsService::given`),

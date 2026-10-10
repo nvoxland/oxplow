@@ -56,6 +56,23 @@ pub fn check_script_need(id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// A command's need `id`: a composing script's ([`check_script_need`]),
+/// and never the tree — the bus composes a command inside its
+/// transaction, and reading a whole tree there would hold the database
+/// while it reads.
+pub fn check_command_need(id: &str) -> Result<(), String> {
+    check_script_need(id)?;
+    if id == "tree.read" {
+        return Err(
+            "`needs`: `tree.read` can't be used here: a command's script composes inside its \
+             transaction, so it reads the semantic layer (`sql.read`) — an effect or a \
+             collector can read the tree"
+                .into(),
+        );
+    }
+    Ok(())
+}
+
 /// The most rows one `sql.read` answers. A result over this cap is
 /// refused: the row-only answer cannot represent truncation.
 pub const SQL_READ_ROW_CAP: usize = 1_000;

@@ -1866,7 +1866,12 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                     Some((entry, Some(script)))
                         if c.runtime == oxplow_config::collectors::CollectorRuntime::Starlark =>
                     {
-                        match oxplow_script::runtime::check_starlark(entry, &script) {
+                        let needs = crate::services::collector_needs(&c, Some(&script));
+                        let checked = oxplow_script::runtime::check_starlark(entry, &script)
+                            .and_then(|()| {
+                                crate::services::check_uses(&script, &needs, |_| Ok(()))
+                            });
+                        match checked {
                             Ok(()) => ext.collectors.push(c),
                             Err(e) => ext.errors.push(at(
                                 &file,

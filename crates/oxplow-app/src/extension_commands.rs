@@ -417,17 +417,7 @@ fn command_of(
                 .iter()
                 .filter(|n| oxplow_domain::scope::scope(n).is_some())
             {
-                crate::scope_calls::check_script_need(need).map_err(at_name)?;
-                // The bus composes it inside its transaction: reading a
-                // whole tree there would hold the database while it reads.
-                if need == "tree.read" {
-                    return Err(at_name(
-                        "`needs`: `tree.read` can't be used here: a command's script composes \
-                         inside its transaction, so it reads the semantic layer (`sql.read`) — \
-                         an effect or a collector can read the tree"
-                            .into(),
-                    ));
-                }
+                crate::scope_calls::check_command_need(need).map_err(at_name)?;
             }
             if f.op.is_some() {
                 return Err(at_name("`op:` names an operation of a `scope:`".into()));
@@ -446,6 +436,8 @@ fn command_of(
             let script = read(&entry)
                 .ok_or_else(|| at_name(format!("entry `{entry}` isn't a file in the extension")))?;
             oxplow_script::runtime::check_starlark(&entry, &script)
+                .map_err(|e| at_name(format!("entry `{entry}` {e}")))?;
+            crate::services::check_uses(&script, &f.needs, crate::scope_calls::check_command_need)
                 .map_err(|e| at_name(format!("entry `{entry}` {e}")))?;
             (
                 CommandHandler::Script { entry, script },
@@ -2093,8 +2085,8 @@ mod tests {
         assert!(problem.contains("has no op `erase`"), "{problem}");
     }
 
-    /// A scope the command didn't declare in `needs` is refused before
-    /// its script runs: the run fails, writing nothing.
+    /// A scope the command's script calls but its `needs` don't declare is
+    /// refused at load: the command isn't offered, and nothing runs.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_scope_the_command_didnt_declare_is_refused() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
@@ -2105,22 +2097,18 @@ mod tests {
             &[("handlers/finish.star", FINISH)],
         );
         fx.svc.extension_commands.reconcile().await;
-        let r = oxplow_tasks::work_item_ref(fx.task);
-        let err = fx
+        assert!(fx.svc.commands.spec("my_review.review.finish").is_none());
+        let errors = fx
             .svc
-            .commands
-            .run(
-                &oxplow_domain::Actor::Human,
-                "my_review.review.finish",
-                json!({ "ref": r }),
-                false,
-            )
-            .await
-            .unwrap_err();
+            .extension_catalog
+            .get(fx._dir.path())
+            .iter()
+            .find(|e| e.name == "my-review")
+            .map(|e| e.errors.join("\n"))
+            .unwrap();
         assert!(
-            err.to_string()
-                .contains("`scope()` needs `sql.read` in this script's `needs`"),
-            "{err}"
+            errors.contains("uses `scope()` without `sql.read` in its `needs`"),
+            "{errors}"
         );
         assert_eq!(task(&fx).await.status, oxplow_tasks::TaskStatus::InProgress);
     }
@@ -2260,9 +2248,8 @@ mod tests {
     async fn a_script_that_misbehaves_writes_nothing() {
         for (script, says) in [
             ("def transform(x):\n    return [1]\n", "the script must return"),
-            // No host: a model call is refused (and `files()` sees no files).
             (
-                "def transform(x):\n    return {\"commands\": [], \"result\": ai_summarize(\"x\")}\n",
+                "def transform(x):\n    return {\"commands\": [], \"result\": 1 // 0}\n",
                 "the script failed",
             ),
             (

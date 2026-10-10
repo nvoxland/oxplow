@@ -908,6 +908,9 @@ pub struct CheckReport {
     pub impact: Option<oxplow_app::extension_impact::ImpactReport>,
     /// The revision `impact` compares the working tree with.
     pub against: Option<String>,
+    /// The services each of its Starlark scripts uses or declares
+    /// (`--services` prints them).
+    pub services: Vec<oxplow_app::services::ScriptServices>,
 }
 
 /// The database a check dry-runs an extension's SQL on. It always has one
@@ -978,6 +981,7 @@ pub async fn check(
         errors: extension.errors.clone(),
         warnings: extension.warnings.clone(),
         dry_run,
+        services: oxplow_app::services::of_extension(root, &extension),
         extension,
         impact,
         against: against.map(str::to_string),
@@ -1064,6 +1068,35 @@ pub enum Format {
 
 /// The report as text or JSON. Text is what an agent reads back from the
 /// CLI; JSON is for tooling.
+/// Each script's services, as `check --services` prints them: the script,
+/// then a line per service — declared or implied by its kind, used or not,
+/// and whether a person approves it.
+pub fn render_services(report: &CheckReport) -> String {
+    use oxplow_app::services::Declared;
+    let mut out = String::new();
+    for s in &report.services {
+        out.push_str(&format!("{} ({}):\n", s.script, s.entry));
+        if s.services.is_empty() {
+            out.push_str("  (none)\n");
+        }
+        for u in &s.services {
+            let declared = match u.declared {
+                Declared::Declared => "declared",
+                Declared::Implied => "implied",
+                Declared::Undeclared => "NOT declared",
+            };
+            let used = if u.used { "used" } else { "not used" };
+            let approval = if u.approval {
+                " — a person approves it"
+            } else {
+                ""
+            };
+            out.push_str(&format!("  {}: {declared}, {used}{approval}\n", u.scope));
+        }
+    }
+    out
+}
+
 pub fn render_findings(report: &CheckReport, format: Format) -> String {
     match format {
         Format::Json => serde_json::to_string_pretty(report).expect("report serializes"),

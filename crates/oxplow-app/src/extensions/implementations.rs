@@ -275,6 +275,13 @@ fn script_decl(
             }
             let script = script(&f.entry)?;
             oxplow_script::runtime::check_starlark(&f.entry, &script)
+                .and_then(|()| {
+                    crate::services::check_uses(
+                        &script,
+                        &f.needs,
+                        crate::scope_calls::check_script_need,
+                    )
+                })
                 .map_err(|e| format!("`effort_policy` implementation `{}`: {e}", f.id))?;
             script
         }

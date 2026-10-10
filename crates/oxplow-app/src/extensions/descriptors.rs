@@ -643,23 +643,7 @@ mod catalog_tests {
                 more(k.kind)
             ));
         }
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../docs/reference/extensions.md");
-        let doc = std::fs::read_to_string(&path).unwrap();
-        let begin = doc.find("<!-- kinds:begin").expect("the begin marker");
-        let begin = begin + doc[begin..].find("-->").unwrap() + 3;
-        let end = doc.find("<!-- kinds:end -->").expect("the end marker");
-        let generated = format!("\n{table}");
-        if std::env::var_os("OXPLOW_BLESS").is_some() {
-            let blessed = format!("{}{generated}{}", &doc[..begin], &doc[end..]);
-            std::fs::write(&path, blessed).unwrap();
-            return;
-        }
-        assert_eq!(
-            &doc[begin..end],
-            generated,
-            "docs/reference/extensions.md's kinds table is stale; bless it with OXPLOW_BLESS=1"
-        );
+        crate::test_fixtures::generated_section("docs/reference/extensions.md", "kinds", &table);
     }
 
     fn write(root: &std::path::Path, ext: &str, body: &str) {

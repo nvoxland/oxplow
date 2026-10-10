@@ -1659,6 +1659,11 @@ export type CheckReport_Deserialize = {
 	impact: ImpactReport | null,
 	// The revision `impact` compares the working tree with.
 	against: string | null,
+	/**
+	 *  The services each of its Starlark scripts uses or declares
+	 *  (`--services` prints them).
+	 */
+	services: ScriptServices[],
 };
 
 // What `check` found.
@@ -1679,6 +1684,11 @@ export type CheckReport_Serialize = {
 	impact: ImpactReport | null,
 	// The revision `impact` compares the working tree with.
 	against: string | null,
+	/**
+	 *  The services each of its Starlark scripts uses or declares
+	 *  (`--services` prints them).
+	 */
+	services: ScriptServices[],
 };
 
 // How a client authenticates to a token endpoint.
@@ -2355,6 +2365,8 @@ export type DeadLetter = {
 	// `pending` | `retried` | `discarded`.
 	state: string,
 };
+
+export type Declared = "declared" | "implied" | "undeclared";
 
 // Where in the manifest it was declared.
 export type DeclaredAt = {
@@ -5523,6 +5535,18 @@ export type Scope =
 "global";
 
 /**
+ *  One script of an extension and the services it uses or declares:
+ *  what `oxplow extension check --services` prints.
+ */
+export type ScriptServices = {
+	// What runs it: `collector \`paths\``, `command \`note.sum\``.
+	script: string,
+	// Its file, in the extension folder.
+	entry: string,
+	services: ServiceUse[],
+};
+
+/**
  *  The limits on the processes that run extension and project scripts
  *  (the `scripts:` block): how many run at once, host-wide, and how much
  *  memory one may use before it is stopped.
@@ -5556,6 +5580,17 @@ export type SearchHit = {
 export type SelectThreadRequest = {
 	streamId: StreamId,
 	threadId: ThreadId | null,
+};
+
+// One service of a script.
+export type ServiceUse = {
+	scope: string,
+	// `declared` in its `needs`, `implied` by its kind, or `undeclared`.
+	declared: Declared,
+	// Its script names one of the service's builtins.
+	used: boolean,
+	// A person approves a script that uses it.
+	approval: boolean,
 };
 
 /**

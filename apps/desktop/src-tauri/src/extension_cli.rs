@@ -27,7 +27,7 @@ usage:
       a page or a panel over a lens. Each checks clean
       and passes `test` as written
       (a provider once a real program replaces its stub)
-  oxplow extension check <name|path> [--impact] [--against <rev>] [--json] [--root <dir>]
+  oxplow extension check <name|path> [--impact] [--against <rev>] [--services] [--json] [--root <dir>]
       load the extension and report every problem with file:line, dry-running
       its models, commands, lenses and advisories — against the project's
       database when it has been opened in oxplow (.oxplow/local.sqlite),
@@ -35,7 +35,8 @@ usage:
       --impact also says what the working tree's version changes against
       git HEAD (or --against <rev>, which implies --impact): lenses' text,
       models and their rows, collectors' outputs, providers' grants —
-      writing nothing
+      writing nothing. --services lists, per script, the host services it
+      uses (sql.read, tree.read, ai.compute) and whether it declared them
   oxplow extension test <name|path> [--bless] [--json] [--root <dir>]
       on a throwaway oxplow over a copy of the project's extensions: check,
       then each intent example's fixture (a lens's rows, a collector's
@@ -93,6 +94,8 @@ struct Parsed {
     bless: bool,
     /// `check --impact`: compare the working tree with `against`.
     impact: bool,
+    /// `check --services`: each script's services.
+    services: bool,
     against: Option<String>,
 }
 
@@ -105,6 +108,7 @@ fn parse(args: &[String]) -> Result<Parsed, Failure> {
         json: false,
         bless: false,
         impact: false,
+        services: false,
         against: None,
     };
     let mut it = args.iter();
@@ -132,6 +136,7 @@ fn parse(args: &[String]) -> Result<Parsed, Failure> {
             }
             "--json" => p.json = true,
             "--impact" => p.impact = true,
+            "--services" => p.services = true,
             "--against" => {
                 p.against = Some(
                     it.next()
@@ -227,6 +232,8 @@ fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Resul
             let _ = write!(out, "{}", oxplow_sdk::render_findings(&report, format));
             if p.json {
                 let _ = writeln!(out);
+            } else if p.services {
+                let _ = write!(out, "{}", oxplow_sdk::render_services(&report));
             }
             Ok(if report.ok { 0 } else { 1 })
         }
@@ -365,6 +372,52 @@ mod tests {
             "{out}"
         );
         assert!(out.contains("team: 1 error, 0 warnings"), "{out}");
+    }
+
+    /// `check --services` says, per script, which services it uses and
+    /// whether it declared them; `--json` always carries them.
+    #[test]
+    fn check_services_lists_what_each_script_uses() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_str().unwrap();
+        let folder = dir.path().join("oxplow/extensions/svc");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(
+            folder.join("extension.yaml"),
+            "manifest: 2\nname: svc\nsharing: private\nintent:\n  purpose: Reads.\n  examples: [{ name: a }]\n\
+             collectors:\n\
+             \x20 - id: paths\n    runtime: starlark\n    entry: paths.star\n    needs: [tree.read, sql.read]\n    entities:\n      - { name: seen, key: k, columns: { k: text } }\n\
+             \x20 - id: kinds\n    runtime: starlark\n    entry: kinds.star\n    entities:\n      - { name: kind, key: k, columns: { k: text } }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            folder.join("paths.star"),
+            "def transform(input):\n    return {\"entities\": {\"seen\": [{\"k\": f[\"path\"]} for f in files(\"**\")]}}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            folder.join("kinds.star"),
+            "def transform(input):\n    return {\"entities\": {\"kind\": [{\"k\": ai_classify(\"t\", [\"a\"])[\"label\"]}]}}\n",
+        )
+        .unwrap();
+        let (code, out, err) = cli(&["check", "svc", "--root", root, "--services"]);
+        assert_eq!(code, 0, "{out}{err}");
+        assert!(
+            out.contains(
+                "collector `paths` (paths.star):\n  sql.read: declared, not used\n  tree.read: declared, used\n"
+            ),
+            "{out}"
+        );
+        assert!(
+            out.contains(
+                "collector `kinds` (kinds.star):\n  ai.compute: implied, used — a person approves it\n"
+            ),
+            "{out}"
+        );
+        let (_, out, _) = cli(&["check", "svc", "--root", root, "--json"]);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["services"][0]["script"], "collector `paths`");
+        assert_eq!(v["services"][0]["services"][1]["declared"], "declared");
     }
 
     /// tsk865: there is no `migrate`: a manifest is v2 or doesn't load.

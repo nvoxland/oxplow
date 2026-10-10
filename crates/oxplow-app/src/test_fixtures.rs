@@ -270,3 +270,34 @@ pub fn claude_tool(
         oxplow_harnesses::built_in("oxplow:claude-code", "claude", "Claude").expect("the built-in");
     futures::executor::block_on(claude.tool_use(body))
 }
+
+/// Keep the section of reference doc `doc` (repo-relative) between
+/// `<!-- {name}:begin … -->` and `<!-- {name}:end -->` equal to
+/// `generated`: `OXPLOW_BLESS=1` rewrites it, else a stale one fails.
+pub fn generated_section(doc: &str, name: &str, generated: &str) {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(doc);
+    let text = std::fs::read_to_string(&path).unwrap();
+    let begin = text
+        .find(&format!("<!-- {name}:begin"))
+        .unwrap_or_else(|| panic!("{doc}: the {name}:begin marker"));
+    let begin = begin + text[begin..].find("-->").unwrap() + 3;
+    let end = text
+        .find(&format!("<!-- {name}:end -->"))
+        .unwrap_or_else(|| panic!("{doc}: the {name}:end marker"));
+    let generated = format!("\n{generated}");
+    if std::env::var_os("OXPLOW_BLESS").is_some() {
+        std::fs::write(
+            &path,
+            format!("{}{generated}{}", &text[..begin], &text[end..]),
+        )
+        .unwrap();
+        return;
+    }
+    assert_eq!(
+        &text[begin..end],
+        generated,
+        "{doc}'s {name} table is stale; bless it with OXPLOW_BLESS=1"
+    );
+}

@@ -216,6 +216,149 @@ fn unavailable(builtin: &str, scope: &str) -> String {
     format!("`{builtin}()`: `{scope}` isn't available where this script runs")
 }
 
+/// Whether Starlark `script` declares each service it uses: `needs`
+/// names it, and `may` (the kind's rule — a composing script never asks a
+/// model) allows it. What a loader checks, so a script fails at load
+/// rather than on its first call.
+pub fn check_uses(
+    script: &str,
+    needs: &[String],
+    may: impl Fn(&str) -> Result<(), String>,
+) -> Result<(), String> {
+    for builtin in oxplow_script::uses::builtins_used(script) {
+        let scope = oxplow_domain::service::service_of_builtin(builtin)
+            .expect("a service builtin")
+            .scope;
+        may(scope).map_err(|e| format!("uses `{builtin}()`: {e}"))?;
+        if !needs.iter().any(|n| n == scope) {
+            return Err(format!(
+                "uses `{builtin}()` without `{scope}` in its `needs` — fix: add `{scope}` to \
+                 `needs`"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// One script of an extension and the services it uses or declares:
+/// what `oxplow extension check --services` prints.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ScriptServices {
+    /// What runs it: `collector \`paths\``, `command \`note.sum\``.
+    pub script: String,
+    /// Its file, in the extension folder.
+    pub entry: String,
+    pub services: Vec<ServiceUse>,
+}
+
+/// One service of a script.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceUse {
+    pub scope: String,
+    /// `declared` in its `needs`, `implied` by its kind, or `undeclared`.
+    pub declared: Declared,
+    /// Its script names one of the service's builtins.
+    pub used: bool,
+    /// A person approves a script that uses it.
+    pub approval: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum Declared {
+    Declared,
+    Implied,
+    Undeclared,
+}
+
+/// The services each Starlark script of `ext` (under `root`) uses or
+/// declares, in manifest order: collectors, commands, effects, policies.
+pub fn of_extension(
+    root: &std::path::Path,
+    ext: &crate::extensions::Extension,
+) -> Vec<ScriptServices> {
+    use oxplow_config::collectors::CollectorRuntime;
+    let mut out = Vec::new();
+    let mut push =
+        |script: String, entry: &str, text: &str, declared: &[String], needs: &[String]| {
+            let used = oxplow_script::uses::services_used(text);
+            let services = oxplow_domain::service::SERVICES
+                .iter()
+                .filter(|s| used.contains(s.scope) || needs.iter().any(|n| n == s.scope))
+                .map(|s| ServiceUse {
+                    scope: s.scope.to_string(),
+                    declared: if declared.iter().any(|n| n == s.scope) {
+                        Declared::Declared
+                    } else if needs.iter().any(|n| n == s.scope) {
+                        Declared::Implied
+                    } else {
+                        Declared::Undeclared
+                    },
+                    used: used.contains(s.scope),
+                    approval: s.approval,
+                })
+                .collect();
+            out.push(ScriptServices {
+                script,
+                entry: entry.to_string(),
+                services,
+            });
+        };
+    for c in &ext.collectors {
+        let Some(entry) = c
+            .entry
+            .as_deref()
+            .filter(|_| c.runtime == CollectorRuntime::Starlark)
+        else {
+            continue;
+        };
+        let text =
+            crate::extensions::read_extension_file(root, &ext.name, entry).unwrap_or_default();
+        let needs = collector_needs(c, Some(&text));
+        push(
+            format!("collector `{}`", c.id),
+            entry,
+            &text,
+            &c.needs,
+            &needs,
+        );
+    }
+    for c in &ext.commands {
+        if let crate::extension_commands::CommandHandler::Script { entry, script } = &c.handler {
+            push(
+                format!("command `{}`", c.name),
+                entry,
+                script,
+                &c.needs,
+                &c.needs,
+            );
+        }
+    }
+    for e in &ext.effects {
+        push(
+            format!("effect `{}`", e.id),
+            &e.entry,
+            &e.script,
+            &e.needs,
+            &e.needs,
+        );
+    }
+    for i in &ext.implementations {
+        if let Some(script) = &i.script {
+            push(
+                format!("{} `{}`", i.capability, i.id),
+                &i.entry,
+                script,
+                &i.needs,
+                &i.needs,
+            );
+        }
+    }
+    out
+}
+
 /// A Starlark collector's needs: what it declares, and what its kind
 /// implies — a fact collector reads the tree, an entity collector that
 /// asks a model uses `ai.compute`.
@@ -327,6 +470,35 @@ mod tests {
                 .collect::<Vec<_>>(),
             [Decision::Allowed, Decision::Allowed]
         );
+    }
+
+    /// The reference's Services table, from the services' table: the two
+    /// can't drift. `OXPLOW_BLESS=1` rewrites it.
+    #[test]
+    fn the_reference_lists_every_service() {
+        let mut table = String::from(
+            "| `needs` | What it gives | Builtins | Approval | In a script that composes |\n|---|---|---|---|---|\n",
+        );
+        for s in oxplow_domain::service::SERVICES {
+            let builtins = s
+                .builtins
+                .iter()
+                .map(|b| format!("`{b}`"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let who = if s.modes.contains(&Mode::Pure) {
+                "yes"
+            } else {
+                "no"
+            };
+            let approval = if s.approval { "yours" } else { "none" };
+            table.push_str(&format!(
+                "| `{}` | {} | {builtins} | {approval} | {who} |\n",
+                s.scope,
+                s.summary.split_whitespace().collect::<Vec<_>>().join(" ")
+            ));
+        }
+        crate::test_fixtures::generated_section("docs/reference/extensions.md", "services", &table);
     }
 
     /// What the script declares but its grant doesn't cover is refused,

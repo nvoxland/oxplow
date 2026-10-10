@@ -170,6 +170,8 @@ fn decl_of(
         .ok_or_else(|| named(format!("entry `{}` isn't in the extension", f.entry)))?;
     oxplow_script::runtime::check_starlark(&f.entry, &script)
         .map_err(|e| named(format!("`{}` {e}", f.entry)))?;
+    crate::services::check_uses(&script, &f.needs, crate::scope_calls::check_script_need)
+        .map_err(|e| named(format!("`{}` {e}", f.entry)))?;
     Ok(EffectDecl {
         id: f.id,
         extension: extension.to_string(),

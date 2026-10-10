@@ -63,7 +63,7 @@ async fn decided(svc: &Services, contribution: &str) -> Value {
 }
 
 /// An entity collector that declares `tree.read` reads the tree its run
-/// is anchored to; one that doesn't is told the need, and reads nothing.
+/// is anchored to; one that uses it without declaring it doesn't load.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_collector_reads_the_tree_it_declares() {
     let fx = crate::test_fixtures::services_with_task_effort().await;
@@ -93,65 +93,7 @@ async fn a_collector_reads_the_tree_it_declares() {
         json!([{ "need": "scope", "name": "tree.read", "decision": "allowed" }])
     );
 
-    let err = run_collector(&collectors, &as_person, "acme", "peek", RunTrigger::Manual)
-        .await
-        .unwrap_err();
-    assert!(
-        matches!(&err, RunCollectorError::Failed(m)
-            if m.contains("`files()` needs `tree.read` in this script's `needs`")),
-        "{err:?}"
-    );
-    assert_eq!(trees.asked.lock().unwrap().len(), 1, "it read no tree");
-}
-
-/// A command's script composes, so it can't ask a model: it fails naming
-/// its mode before it runs, and the refusal is on its run. Declaring the
-/// tree is refused at load: the bus composes inside its transaction.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_commands_script_cant_ask_a_model_or_read_the_tree() {
-    let fx = crate::test_fixtures::services_with_task_effort().await;
-    let svc = &fx.svc;
-    let root = svc.layout.project_dir.clone();
-    let manifest = |needs: &str| {
-        format!(
-            "manifest: 2\nname: acme\nsharing: private\nintent: {{ purpose: Asks., origin: null, examples: [] }}\n\
-             commands:\n\
-             \x20 - name: note.sum\n    summary: Sum.\n    input_schema: {{ type: object }}\n    entry: sum.star\n    needs: [{needs}]\n    invokers: {{ human: true, agent: true, lens: true }}\n"
-        )
-    };
-    write(
-        &root,
-        "oxplow/extensions/acme/extension.yaml",
-        &manifest("sql.read"),
-    );
-    write(
-        &root,
-        "oxplow/extensions/acme/sum.star",
-        "def transform(x):\n    return {\"commands\": [], \"result\": {\"s\": ai_summarize(\"t\")}}\n",
-    );
-    svc.extension_commands.reconcile().await;
-    let err = svc
-        .commands
-        .run(&Actor::Human, "acme.note.sum", json!({}), false)
-        .await
-        .unwrap_err()
-        .to_string();
-    assert!(
-        err.contains("`ai_summarize()`: a pure run can't use `ai.compute`"),
-        "{err}"
-    );
-    assert_eq!(
-        decided(svc, "acme/command/note.sum").await[0]["decision"],
-        "denied"
-    );
-
-    write(
-        &root,
-        "oxplow/extensions/acme/extension.yaml",
-        &manifest("tree.read"),
-    );
-    svc.extension_commands.reconcile().await;
-    assert!(svc.commands.spec("acme.note.sum").is_none());
+    // One that uses the tree without declaring it doesn't load.
     let errors = svc
         .extension_catalog
         .get(&root)
@@ -160,9 +102,60 @@ async fn a_commands_script_cant_ask_a_model_or_read_the_tree() {
         .map(|e| e.errors.join("\n"))
         .unwrap();
     assert!(
+        errors.contains("uses `files()` without `tree.read` in its `needs`"),
+        "{errors}"
+    );
+    assert!(matches!(
+        run_collector(&collectors, &as_person, "acme", "peek", RunTrigger::Manual).await,
+        Err(RunCollectorError::NotFound)
+    ));
+}
+
+/// A command's script composes, so it can't ask a model, and the bus
+/// composes it inside its transaction, so it can't read the tree: each is
+/// refused at load, naming why. (Its run's refusal of a model, had one
+/// got through: `services::tests::a_pure_run_cant_ask_a_model`.)
+#[tokio::test(flavor = "multi_thread")]
+async fn a_commands_script_cant_ask_a_model_or_read_the_tree() {
+    let fx = crate::test_fixtures::services_with_task_effort().await;
+    let svc = &fx.svc;
+    let root = svc.layout.project_dir.clone();
+    let errors_with = |needs: &str, body: &str| {
+        write(
+            &root,
+            "oxplow/extensions/acme/extension.yaml",
+            &format!(
+                "manifest: 2\nname: acme\nsharing: private\nintent: {{ purpose: Asks., origin: null, examples: [] }}\n\
+                 commands:\n\
+                 \x20 - name: note.sum\n    summary: Sum.\n    input_schema: {{ type: object }}\n    entry: sum.star\n    needs: [{needs}]\n    invokers: {{ human: true, agent: true, lens: true }}\n"
+            ),
+        );
+        write(
+            &root,
+            "oxplow/extensions/acme/sum.star",
+            &format!("def transform(x):\n    return {{\"commands\": [], \"result\": {body}}}\n"),
+        );
+        svc.extension_catalog
+            .get(&root)
+            .iter()
+            .find(|e| e.name == "acme")
+            .map(|e| e.errors.join("\n"))
+            .unwrap()
+    };
+    let errors = errors_with("sql.read", "ai_summarize(\"t\")");
+    assert!(
+        errors.contains(
+            "uses `ai_summarize()`: `needs`: `ai.compute` (ask a model) can't be used here"
+        ),
+        "{errors}"
+    );
+    let errors = errors_with("tree.read", "len(files(\"**\"))");
+    assert!(
         errors.contains("a command's script composes inside its transaction"),
         "{errors}"
     );
+    svc.extension_commands.reconcile().await;
+    assert!(svc.commands.spec("acme.note.sum").is_none());
 }
 
 /// A fact collector that declares `sql.read` reads the semantic layer

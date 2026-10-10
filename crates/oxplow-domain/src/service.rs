@@ -32,8 +32,8 @@ pub const SERVICES: &[ServiceSpec] = &[
     ServiceSpec {
         scope: "sql.read",
         title: "Read the semantic layer",
-        summary: "One read-only statement over the published models (`v_*`) a call, \
-                  complete or an error, or a page at a time.",
+        summary: "Read-only SQL over the published models (`v_*`): \
+                  `scope(\"sql.read\", {sql, params?, page?})` returns every row, or one page.",
         builtins: &["scope"],
         approval: false,
         modes: ALL,
@@ -41,7 +41,7 @@ pub const SERVICES: &[ServiceSpec] = &[
     ServiceSpec {
         scope: "tree.read",
         title: "Read the captured tree",
-        summary: "The files of the snapshot the run is anchored to, their syntax, \
+        summary: "The files of the snapshot the run is anchored to, with their syntax, \
                   metrics and duplicate blocks.",
         builtins: &["files", "source_files", "duplicate_blocks"],
         approval: false,
@@ -50,9 +50,9 @@ pub const SERVICES: &[ServiceSpec] = &[
     ServiceSpec {
         scope: "ai.compute",
         title: "Ask a model",
-        summary: "Recorded model computations on the person's AI provider: classify, \
-                  score, summarize, extract. Each answer is kept, so the same question \
-                  costs one call.",
+        summary: "Model calls on your AI provider: classify, score, summarize, extract. \
+                  Each answer is recorded, so the same question on the same text costs \
+                  one call.",
         builtins: &["ai_classify", "ai_score", "ai_summarize", "ai_extract"],
         approval: true,
         modes: &[Mode::External],

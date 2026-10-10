@@ -107,6 +107,41 @@ intent:
 `ui.replacements` (a lens in place of a core component) is
 experimental: a private extension only.
 
+### Services
+
+A script reaches oxplow through services. Declare each one your script
+uses in its `needs:`:
+
+```yaml
+collectors:
+  - id: todos
+    runtime: starlark
+    entry: collectors/todos.star
+    needs: [tree.read, sql.read]
+    facts: [acme.todos]
+```
+
+<!-- services:begin (generated from oxplow_domain::service::SERVICES; bless with OXPLOW_BLESS=1) -->
+| `needs` | What it gives | Builtins | Approval | In a script that composes |
+|---|---|---|---|---|
+| `sql.read` | Read-only SQL over the published models (`v_*`): `scope("sql.read", {sql, params?, page?})` returns every row, or one page. | `scope` | none | yes |
+| `tree.read` | The files of the snapshot the run is anchored to, with their syntax, metrics and duplicate blocks. | `files`, `source_files`, `duplicate_blocks` | none | yes |
+| `ai.compute` | Model calls on your AI provider: classify, score, summarize, extract. Each answer is recorded, so the same question on the same text costs one call. | `ai_classify`, `ai_score`, `ai_summarize`, `ai_extract` | yours | no |
+<!-- services:end -->
+
+- A fact collector reads the tree without declaring it, and a
+  collector whose script calls an `ai_*` builtin asks a model without
+  declaring it. Everything else is declared.
+- A script that uses a service it doesn't declare doesn't load: `check`
+  says which builtin and which `needs` entry fixes it.
+- A command's, an effect's or an effort policy's script composes
+  commands and may run more than once, so it never asks a model. A
+  command's script reads the semantic layer but not the tree: oxplow
+  composes it inside a database transaction.
+- `oxplow extension check --services` lists what each script uses and
+  whether it declared it. Your coding agent has the same list through
+  the `list_services` MCP tool.
+
 ### Collectors
 
 ```yaml
@@ -128,7 +163,7 @@ that many rows and `input.complete` saying whether they were all of
 them.
 
 A Starlark or jaq collector runs sandboxed: no files, network,
-environment or credentials. Every Starlark and jaq script — collectors,
+environment or credentials beyond the services it declares. Every Starlark and jaq script — collectors,
 commands, effects, policies — runs in its own worker process, which is
 stopped when it runs past its time budget or its memory cap (`scripts:`
 in Settings reference). It needs no approval, with one exception:
@@ -296,7 +331,8 @@ implementations:
 `oxplow extension check` loads the extension the way oxplow does and
 dry-runs its models, commands, lenses and advisories. Each finding is
 one line: `file:line: what — fix`. `--impact` adds what your working
-tree's version changes against git `HEAD`.
+tree's version changes against git `HEAD`. `--services` lists the
+services each script uses.
 
 `oxplow extension test` runs on a throwaway oxplow: the check, then
 each intent example's fixture, then each declared provider's
