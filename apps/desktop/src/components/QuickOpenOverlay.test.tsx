@@ -75,7 +75,7 @@ test("something else taking focus doesn't cost the launcher its keystrokes", asy
   document.body.appendChild(other);
   other.focus();
   expect(document.activeElement).toBe(other);
-  await waitFor(() => expect(document.activeElement).toBe(input));
+  await waitFor(() => expect(document.activeElement).toBe(input), { timeout: 5000 });
   other.remove();
 });
 

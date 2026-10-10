@@ -206,3 +206,66 @@ export function reviewModel(review: ExtensionReview): ReviewModel {
     canInstall: ext.errors.length === 0,
   };
 }
+
+/** The latest run of each contribution — the rows Settings → Extensions
+ *  reads (`v_extension_run`, `latest = 1`). */
+export const LATEST_RUNS_SQL =
+  "SELECT extension, contribution, outcome, error, finished_at, decisions FROM v_extension_run WHERE latest = 1";
+
+export interface RunRow {
+  extension: string;
+  /** `<extension>/<kind>/<local>`. */
+  contribution: string;
+  outcome: string;
+  error: string | null;
+  finished_at: string;
+  /** JSON: what its grant decided, `[{ need, name?, decision, reason? }]`. */
+  decisions: string | null;
+}
+
+/** An extension's last run as its row shows it. */
+export interface LastRun {
+  text: string;
+  /** Why, for a run that failed, was denied or went stale. */
+  reason: string | null;
+  /** Failed, denied and stale are shown in the warning color. */
+  warn: boolean;
+}
+
+const localWhen = (iso: string) => new Date(iso).toLocaleString();
+
+/** The decision that refused a run, as a person reads it: `host evil.example:
+ *  it isn't in the grant`. */
+function deniedReason(decisions: string | null): string | null {
+  if (!decisions) return null;
+  try {
+    const list = JSON.parse(decisions) as Array<{ need?: string; name?: string; decision?: string; reason?: string }>;
+    const d = list.find((x) => x.decision === "denied");
+    if (!d) return null;
+    const what = [d.need, d.name].filter(Boolean).join(" ");
+    return d.reason ? (what ? `${what}: ${d.reason}` : d.reason) : what || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Each extension's most recent run, from the latest run of each of its
+ *  contributions. */
+export function lastRuns(rows: readonly RunRow[], when: (iso: string) => string = localWhen): Record<string, LastRun> {
+  const newest = new Map<string, RunRow>();
+  for (const r of rows) {
+    const seen = newest.get(r.extension);
+    if (!seen || r.finished_at > seen.finished_at) newest.set(r.extension, r);
+  }
+  return Object.fromEntries(
+    [...newest].map(([extension, r]) => {
+      const [, kind = "", ...local] = r.contribution.split("/");
+      const warn = r.outcome === "failed" || r.outcome === "denied" || r.outcome === "stale";
+      const reason = !warn ? null : r.outcome === "denied" ? (deniedReason(r.decisions) ?? r.error) : r.error;
+      return [
+        extension,
+        { text: `Last run: ${r.outcome} · ${kind} ${local.join("/")} · ${when(r.finished_at)}`, reason, warn },
+      ];
+    }),
+  );
+}

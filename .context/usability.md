@@ -119,6 +119,14 @@ Things I keep forgetting. Read this before adding any UI.
   `revokeProjectProgram(kind, name)` — or `revokeCollector(owner, id)` for an
   extension's exec or model-calling collector on the Collectors list. The row
   model is `dataSectionModel.ts` (`programRow`, `collectorRevoke`).
+- **Settings → Extensions shows each extension's last run.** One line under
+  the row from `v_extension_run` (`latest = 1` per contribution; the
+  extension's most recent): "Last run: ok · collector pull · <when>".
+  Failed, denied and stale are in the warning color (`--severity-medium`) and
+  say why — a failed or stale run's `error`, a denied run's refusing decision
+  from `decisions` ("host evil.example: it isn't in the grant"). An extension
+  that has never run shows no line. `lastRuns` in `extensionRowModel.ts`; the
+  line re-reads when a run commits (`useRerunOnChange` on the read's models).
 - **Every `<button>` needs an explicit `type`.** HTML defaults
   `<button>` to `type="submit"`, which silently submits any enclosing
   form on click. Use `type="button"` for every action button; use
