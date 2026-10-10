@@ -668,9 +668,15 @@ pub async fn derive_collector(
     rows: Option<Vec<serde_json::Value>>,
     budget: oxplow_script::SandboxBudget,
 ) -> Result<ScriptOutput, String> {
-    let rows = match (rows, &spec.input) {
-        (Some(rows), _) => rows,
-        (None, None) => Vec::new(),
+    let read = match (rows, &spec.input) {
+        (Some(rows), _) => InputRows {
+            rows,
+            complete: None,
+        },
+        (None, None) => InputRows {
+            rows: Vec::new(),
+            complete: None,
+        },
         (None, Some(sql)) => {
             input_rows(
                 layer,
@@ -681,10 +687,12 @@ pub async fn derive_collector(
             .await?
         }
     };
-    let mut input = serde_json::json!({ "rows": rows });
+    let mut input = serde_json::Map::new();
+    read.into_input(&mut input);
     if let Some(e) = event {
-        input["event"] = event_input(e);
+        input.insert("event".into(), event_input(e));
     }
+    let input = serde_json::Value::Object(input);
     let runtime = spec.runtime;
     let value = tokio::task::spawn_blocking(move || {
         use oxplow_script::workers::{shared, RunHost, ScriptRun};
@@ -864,28 +872,36 @@ pub fn anchor_params(event: Option<&StoredEvent>, known: Anchored) -> Vec<(Strin
 }
 
 /// A collector's `input` rows: its read-only `sql` with `params` bound, as
-/// objects. More than the row limit fails rather than handing over a
-/// partial set.
+/// objects, and — when it declares a `limit` — whether they were all of
+/// them. Without a limit, more than the row cap fails rather than handing
+/// over a partial set.
 pub async fn input_rows(
     layer: &crate::sql_gateway::SqlGateway,
     id: &str,
-    sql: &str,
+    input: &oxplow_config::collectors::CollectorInput,
     params: Vec<(String, SqlCell)>,
-) -> Result<Vec<serde_json::Value>, String> {
-    let limit = oxplow_db::semantic_layer::MAX_ROW_LIMIT;
-    let query = oxplow_db::semantic_layer::SqlQuery::new(sql)
+) -> Result<InputRows, String> {
+    const _: () = assert!(
+        oxplow_config::collectors::MAX_INPUT_ROWS <= oxplow_db::semantic_layer::MAX_ROW_LIMIT
+    );
+    let limit = input
+        .limit
+        .unwrap_or(oxplow_config::collectors::MAX_INPUT_ROWS);
+    let query = oxplow_db::semantic_layer::SqlQuery::new(&input.sql)
         .named(params)
         .limit(Some(limit));
     let out = layer
         .run(query)
         .await
         .map_err(|e| format!("collector `{id}` input: {e}"))?;
-    if out.truncated {
+    if out.truncated && input.limit.is_none() {
         return Err(format!(
-            "collector `{id}` input returned more than {limit} rows; narrow it"
+            "collector `{id}` input returned more than {limit} rows; narrow it, or declare \
+             `input: {{ sql, limit }}` to take a bounded read on purpose"
         ));
     }
-    Ok(out
+    let complete = input.limit.map(|_| !out.truncated);
+    let rows = out
         .rows
         .into_iter()
         .map(|r| {
@@ -900,7 +916,25 @@ pub async fn input_rows(
                     .collect(),
             )
         })
-        .collect())
+        .collect();
+    Ok(InputRows { rows, complete })
+}
+
+/// What a collector's `input` read handed over.
+pub struct InputRows {
+    pub rows: Vec<serde_json::Value>,
+    /// With a declared `limit`: whether the rows are all there were.
+    pub complete: Option<bool>,
+}
+
+impl InputRows {
+    /// Into a script's input object: `rows`, and `complete` when bounded.
+    pub fn into_input(self, input: &mut serde_json::Map<String, serde_json::Value>) {
+        input.insert("rows".into(), serde_json::Value::Array(self.rows));
+        if let Some(complete) = self.complete {
+            input.insert("complete".into(), complete.into());
+        }
+    }
 }
 
 /// The trigger event as a script sees it (`input.event`).
@@ -2690,6 +2724,49 @@ pub(crate) mod tests {
             })
             .await
             .unwrap()
+    }
+
+    /// An input without a bound is complete or the run fails; one that
+    /// declares `limit` hands over that many rows and says whether that was
+    /// all of them.
+    #[tokio::test]
+    async fn a_bounded_input_says_whether_it_is_complete() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let count = |limit: Option<usize>| {
+            let limit = limit.map(|l| format!(", limit: {l}")).unwrap_or_default();
+            format!(
+                "- id: count\n  runtime: jaq\n  entry: count.jq\n  input: {{ sql: \"WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n WHERE x < 5) SELECT x FROM n\"{limit} }}\n  entities:\n    - {{ name: seen, key: n, columns: {{ n: int, complete: text }} }}\n"
+            )
+        };
+        let script =
+            r#"{entities: {seen: [{n: (.rows | length), complete: (.complete | tostring)}]}}"#;
+        let seen = |yaml: String| {
+            let svc = &fx.svc;
+            async move {
+                let v: serde_yaml::Value = serde_yaml::from_str(&yaml).unwrap();
+                let (specs, errors) =
+                    oxplow_config::collectors::parse_collectors("x", &v, &|_| true);
+                assert!(errors.is_empty(), "{errors:?}");
+                match dry_run_collector(&svc.sql, &specs[0], Some(script.into()), None, None).await
+                {
+                    DryRun::Output(out) => out.entities["seen"][0].clone(),
+                    other => panic!("{other:?}"),
+                }
+            }
+        };
+        assert_eq!(
+            seen(count(Some(3))).await,
+            serde_json::json!({ "n": 3, "complete": "false" })
+        );
+        assert_eq!(
+            seen(count(Some(5))).await,
+            serde_json::json!({ "n": 5, "complete": "true" })
+        );
+        // No bound: every row, and no `complete` to check.
+        assert_eq!(
+            seen(count(None)).await,
+            serde_json::json!({ "n": 5, "complete": "null" })
+        );
     }
 
     #[tokio::test]

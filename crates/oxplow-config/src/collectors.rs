@@ -301,6 +301,34 @@ fn text_format() -> String {
     "text".into()
 }
 
+/// The most rows a collector's `input` hands over: an input past it fails
+/// unless it declares a `limit`.
+pub const MAX_INPUT_ROWS: usize = 10_000;
+
+/// A derived collector's input query (`input`): read-only SQL over the
+/// semantic layer, handed over as `input.rows`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CollectorInput {
+    pub sql: String,
+    /// A bound taken on purpose: at most this many rows, with
+    /// `input.complete` saying whether they were all of them. Absent, the
+    /// input is every row or the run fails.
+    pub limit: Option<usize>,
+}
+
+/// `input` as written: its SQL, or `{ sql, limit }`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+enum RawInput {
+    Sql(String),
+    Bounded {
+        sql: String,
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+}
+
 /// The report formats a collector can read.
 pub const REPORT_FORMATS: &[&str] = &["text", "json", "xml", "lcov", "lines"];
 
@@ -326,7 +354,7 @@ pub struct CollectorSpec {
     /// `:effort_id`, `:thread_id` and `:turn_id` bind the triggering
     /// event's anchors, `:event_id` its id and `:event_seq` its seq (NULL
     /// otherwise).
-    pub input: Option<String>,
+    pub input: Option<CollectorInput>,
     /// A report file handed over as `input.report`.
     pub report: Option<ReportInput>,
     pub sync: CollectorSync,
@@ -485,7 +513,7 @@ pub struct RawCollector {
     #[serde(default)]
     after: Vec<String>,
     #[serde(default)]
-    input: Option<String>,
+    input: Option<RawInput>,
     #[serde(default)]
     report: Option<RawReport>,
     /// How a run's entities land; absent, `replace`.
@@ -930,10 +958,23 @@ fn validate(
         "upsert" => CollectorSync::Upsert,
         other => return Err(ctx(format!("sync `{other}`: use `replace` or `upsert`"))),
     };
-    let input = raw
-        .input
-        .map(|i| i.trim().to_string())
-        .filter(|i| !i.is_empty());
+    let input = match raw.input {
+        None => None,
+        Some(RawInput::Sql(sql)) => Some(CollectorInput { sql, limit: None }),
+        Some(RawInput::Bounded { sql, limit }) => {
+            if limit.is_some_and(|l| l == 0 || l > MAX_INPUT_ROWS) {
+                return Err(ctx(format!(
+                    "`input.limit` is at least 1 and at most {MAX_INPUT_ROWS}"
+                )));
+            }
+            Some(CollectorInput { sql, limit })
+        }
+    }
+    .map(|i| CollectorInput {
+        sql: i.sql.trim().to_string(),
+        ..i
+    })
+    .filter(|i| !i.sql.is_empty());
     match runtime {
         CollectorRuntime::Read => {
             if raw.provider.is_none() {
@@ -1096,7 +1137,7 @@ fn validate(
             relations: e.relations,
         });
     }
-    if let Some(sql) = &input {
+    if let Some(CollectorInput { sql, .. }) = &input {
         let lower = sql.to_ascii_lowercase();
         if let Some(own) = entities.iter().find(|e| lower.contains(&e.view)) {
             return Err(ctx(format!(
@@ -1521,6 +1562,35 @@ mod tests {
       columns: { ref: text, title: text }
 "#;
 
+    /// `input` is its SQL, or `{ sql, limit }` when the script takes a
+    /// bounded read on purpose; the limit is within the input row cap.
+    #[test]
+    fn an_input_may_declare_its_bound() {
+        let (out, errors) = parse(DERIVED);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(out[0].input.as_ref().and_then(|i| i.limit), None);
+        let bounded = DERIVED.replace(
+            r#"input: "SELECT ref, title FROM v_work_item WHERE json_extract(native, '$.priority') = 'high'""#,
+            "input: { sql: \"SELECT ref, title FROM v_work_item\", limit: 50 }",
+        );
+        let (out, errors) = parse(&bounded);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(
+            out[0].input,
+            Some(CollectorInput {
+                sql: "SELECT ref, title FROM v_work_item".into(),
+                limit: Some(50),
+            })
+        );
+        for limit in ["0", &(MAX_INPUT_ROWS + 1).to_string()] {
+            let (_, errors) = parse(&bounded.replace("limit: 50", &format!("limit: {limit}")));
+            assert!(
+                errors.iter().any(|e| e.contains("`input.limit`")),
+                "{limit}: {errors:?}"
+            );
+        }
+    }
+
     #[test]
     fn derived_collectors_take_an_input_and_no_secrets() {
         let (out, errors) = parse(DERIVED);
@@ -1532,7 +1602,7 @@ mod tests {
         );
         assert!(s.runtime.is_derived());
         assert_eq!(
-            s.input.as_deref(),
+            s.input.as_ref().map(|i| i.sql.as_str()),
             Some("SELECT ref, title FROM v_work_item WHERE json_extract(native, '$.priority') = 'high'")
         );
         assert_eq!(parse(GOOD).0[0].sync, CollectorSync::Replace);

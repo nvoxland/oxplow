@@ -90,7 +90,7 @@ pub struct FactCollector {
     pub entry: Option<String>,
     pub report: Option<ReportInput>,
     /// Read-only SQL handed over as `input.rows`, the trigger's anchors bound.
-    pub input: Option<String>,
+    pub input: Option<oxplow_config::collectors::CollectorInput>,
     /// With an `on:` trigger: the pump consumers that must have handled the
     /// event first.
     pub after: Vec<String>,
@@ -2297,8 +2297,9 @@ impl MetricsService {
                     thread_id: ctx.thread_id,
                 },
             );
-            let rows = crate::collector_runner::input_rows(&log.layer, &c.key, sql, params).await?;
-            input.insert("rows".into(), serde_json::Value::Array(rows));
+            crate::collector_runner::input_rows(&log.layer, &c.key, sql, params)
+                .await?
+                .into_input(&mut input);
         }
         if let Some(e) = &ctx.event {
             input.insert("event".into(), crate::collector_runner::event_input(e));
@@ -3228,8 +3229,11 @@ fn collector_fingerprint(gauge: &FactCollector, root: &Path) -> Option<String> {
         gauge.facts.join(","),
         script,
     );
-    if let Some(sql) = &gauge.input {
-        material.push_str(&format!("\u{0}input:{sql}"));
+    if let Some(input) = &gauge.input {
+        material.push_str(&format!("\u{0}input:{}", input.sql));
+        if let Some(limit) = input.limit {
+            material.push_str(&format!("\u{0}limit:{limit}"));
+        }
     }
     Some(crate::blob_store::BlobStore::hash(material.as_bytes()))
 }

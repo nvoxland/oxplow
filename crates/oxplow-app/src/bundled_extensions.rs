@@ -306,8 +306,8 @@ mod tests {
                 )
                 .chain(ext.collectors.iter().filter_map(|s| {
                     s.input
-                        .clone()
-                        .map(|q| (format!("collector {} input", s.id), q))
+                        .as_ref()
+                        .map(|q| (format!("collector {} input", s.id), q.sql.clone()))
                 }));
             for (what, sql) in queries {
                 let reads = f

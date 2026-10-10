@@ -666,20 +666,9 @@ An extension entity `<entity>` owned by extension `<ext>` is exposed as
     connection stays writable after a failure at each stage.
   - A 5 s interrupt timer (`InterruptHandle`) stops runaway queries.
   - The row cap defaults to 500 and can be raised to at most 10 000.
-    `truncated: true` means more rows existed. The lens view and Explore
-    Data say so above the rows ("Showing the first N rows"), and list
-    each `coverage` source that isn't `current` with its status, last run
-    and error (`apps/desktop/src/lens/completeness.ts`,
-    `ResultCompleteness`); a compact strip shows neither.
-    Hosts that return only rows must check that flag before discarding
-    the result metadata: collector `input_rows` refuses truncation at
-    10 000, and `scope_calls::Calls` refuses it at 1000 for `sql.read`
-    (commands, effects, effort policies and provider host calls).
-    Exactly the cap is allowed; SQL aggregation sees all matching rows
-    before the result cap, and an authored `LIMIT` explicitly defines
-    the query's subset. These guarantees say nothing about collection
-    coverage. `freshness` records model changes observed since startup,
-    not source collection completeness or a successful last collection.
+    `truncated: true` means more rows existed. Every host that hands
+    rows on says what happened past the cap — see "Completeness and
+    coverage" below.
   - Caller mistakes (bad SQL, writes, timeouts) are `Invalid` errors: the
     IPC `INVALID` code, and MCP `invalid_params`.
   - `reads.tables` is empty except in a raw read. Every bundled lens,
@@ -700,6 +689,46 @@ An extension entity `<entity>` owned by extension `<ext>` is exposed as
   the same `query_sql` as core data. Agents never need
   an extension-specific tool. Full agent surface:
   [extensions.md](./extensions.md) → "Agents: the MCP surface".
+
+### Completeness and coverage
+
+A query finishing says two things it doesn't establish on its own: that
+the rows are all the rows, and that the data behind them was collected.
+The result keeps the two apart.
+
+- **Rows: complete, bounded on purpose, or an error.** `truncated` is
+  the gateway's flag. A host that returns rows alone never drops it:
+  `sql.read` without `page` fails past 1000 rows; with `page: { limit,
+  offset }` (limit 1–1000) it answers `{ rows, more, next_offset?,
+  warning? }` — `more` says whether rows follow, `next_offset` where the
+  next page starts, and `warning` is set when the SQL has no `ORDER BY`
+  (pages of an unordered query can overlap or skip). A collector's
+  `input` fails past 10 000 rows (`collectors::MAX_INPUT_ROWS`) unless it
+  declares `input: { sql, limit }`; then the script gets `limit` rows
+  and `input.complete` saying whether they were all of them
+  (`collector_runner::input_rows`). The lens view and Explore Data say
+  "Showing the first N rows" above a truncated result
+  (`apps/desktop/src/lens/completeness.ts`, `ResultCompleteness`); a
+  compact strip shows nothing. Exactly the cap is allowed; SQL
+  aggregation sees every matching row before the cap, and an authored
+  `LIMIT` is the query's own subset.
+- **Coverage: what fed each model read, observed.** `coverage` has one
+  entry per collector that declares an entity whose view the query read
+  (`collection_coverage::Feeds`, restated on every catalog change):
+  `{ model, source: "collector:<owner>/<id>", status, at, error }`, the
+  status read at query time from `collector_run` and
+  `contribution_health` — `never` (no run), `failed` (the last run's
+  error), `needs_approval`, `disabled` (health says so, with its
+  reason), `stale` (its schedule's `next_due_at` passed) or `current`.
+  Core's own models carry no entry: core keeps them current. Nothing is
+  inferred from timestamps alone. The lens view lists each entry that
+  isn't `current` with its last run and error.
+- **Generation: what the catalog was.** `generation` is the extension
+  catalog's fingerprint (`ExtensionCatalog::generation`) when the query
+  ran — an opaque string that changes when any extension does.
+- MCP and RPC `query_sql` and lens runs return the whole result; the
+  row-only script reads carry the row guarantees but not coverage.
+- `freshness` is separate: model changes observed since startup.
 
 ## Collectors (P7.B3)
 

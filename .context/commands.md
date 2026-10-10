@@ -169,9 +169,14 @@ row objects (`semantic_layer::read_on` on the run's connection: the
 rows fails with an error; it never hands a script a silently truncated
 list. Exactly 1000 rows is allowed. Aggregate in SQL to calculate across
 all matching source rows, or explicitly narrow the query with a filter
-or `LIMIT` when a subset is intended. The same `scope_calls::Calls`
+or `LIMIT` when a subset is intended. A script that wants a large result
+a slice at a time asks for it: `page: { limit, offset }` (limit at most
+1000) answers `{ rows, more, next_offset?, warning? }`, the `warning`
+set when the SQL has no `ORDER BY` (semantic-layer.md "Completeness and
+coverage"). The same `scope_calls::Calls`
 guard serves commands, effects, effort policies, dry runs and provider
-`host/call`. Fixture `answers` stand in for the scope's complete row list.
+`host/call`. Fixture `answers` stand in for the scope's answer: a row
+list, or the page object when the call asks for a `page`.
 
 Completeness here is **of the query's result**, not collection coverage
 or freshness. An explicit `LIMIT` is part of the authored query; the

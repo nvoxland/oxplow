@@ -225,12 +225,14 @@ Prerequisites: Normalize contribution descriptors and public extension terminolo
 
 #### Make SQL completeness and collection freshness explicit
 
-Status: in progress. The row-only `sql.read` scope now refuses gateway
-truncation across commands, effects, effort policies and provider host
-calls. Boundary and command-write regressions cover the guard, SQL
-aggregation and explicit SQL limits. The compatible metadata contract
-for bounded/paged results, generation and collection freshness remains
-to be designed and implemented.
+Status: done. `sql.read` refuses gateway truncation across commands,
+effects, effort policies and provider host calls, and pages on request
+(`page: { limit, offset }` → `{ rows, more, next_offset }`); a
+collector's `input` is complete or declares its `limit` and reads
+`input.complete`. Every gateway result carries `generation` and the
+observed `coverage` of the collected models it read, which MCP/RPC
+`query_sql` and lens runs return and the lens view shows
+(semantic-layer.md "Completeness and coverage").
 
 Scope: First stop sql.read from returning an apparently complete result when its 1000-row limit truncates data. Then define a compatible result contract for completeness, limits/pagination, generation and available collection freshness. Keep SQL read-only and distinguish complete query results from complete collection coverage.
 

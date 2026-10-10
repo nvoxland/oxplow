@@ -1696,6 +1696,20 @@ export type CollectorImpact = {
 	scriptChanged: boolean,
 };
 
+/**
+ *  A derived collector's input query (`input`): read-only SQL over the
+ *  semantic layer, handed over as `input.rows`.
+ */
+export type CollectorInput = {
+	sql: string,
+	/**
+	 *  A bound taken on purpose: at most this many rows, with
+	 *  `input.complete` saying whether they were all of them. Absent, the
+	 *  input is every row or the run fails.
+	 */
+	limit: number | null,
+};
+
 // A declared collector with its last run and consent status.
 export type CollectorListing = {
 	// The extension that declares it.
@@ -1803,7 +1817,7 @@ export type CollectorSpec = {
 	 *  event's anchors, `:event_id` its id and `:event_seq` its seq (NULL
 	 *  otherwise).
 	 */
-	input: string | null,
+	input: CollectorInput | null,
 	// A report file handed over as `input.report`.
 	report: ReportInput | null,
 	sync: CollectorSync,

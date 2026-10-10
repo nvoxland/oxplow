@@ -120,6 +120,13 @@ collectors:
       - { name: pr, key: number, columns: { number: int, title: text } }
 ```
 
+`input` is read-only SQL whose rows the script gets as `input.rows`.
+More than 10,000 rows fails the run rather than handing over part of
+them. To take a bounded read on purpose, declare the bound:
+`input: { sql: "SELECT …", limit: 500 }`; the script then gets at most
+that many rows and `input.complete` saying whether they were all of
+them.
+
 A Starlark or jaq collector runs sandboxed: no files, network,
 environment or credentials. Every Starlark and jaq script — collectors,
 commands, effects, policies — runs in its own worker process, which is
@@ -149,8 +156,13 @@ commands:
   More than 1,000 result rows fails instead of returning a partial list;
   exactly 1,000 is allowed. Aggregate in SQL to calculate over all
   matching rows, or explicitly filter/limit the query when you want a
-  subset. This rule also applies to effects, effort policies and provider
-  host calls. A complete result does not prove every source was collected.
+  subset. To walk a large result a slice at a time, ask for a page:
+  `scope("sql.read", { sql, params, page: { limit: 500, offset: 0 } })`
+  returns `{ rows, more, next_offset }` (`limit` at most 1,000). Give
+  the query an `ORDER BY`, or pages can overlap or skip rows; without
+  one the answer carries a `warning`. This rule also applies to effects,
+  effort policies and provider host calls. A complete result does not
+  prove every source was collected.
 - `ui` says how a person meets it. `about` offers it on that kind of
   ref's page and rows. `input` binds `{{stream}}`, `{{thread}}`,
   `{{ref}}` or `{{ref.id}}`, each as a whole string. `form` opens a

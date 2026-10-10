@@ -2354,7 +2354,9 @@ command instead.
 
 `sql.read` returns complete row lists only: more than 1000 result rows
 fails in `scope_calls::Calls` before composition can act on a partial
-set. Exactly 1000 is allowed. Aggregate in SQL when all matching data
+set. Exactly 1000 is allowed. A script that means to walk a large result
+asks for a `page: { limit, offset }` and gets `{ rows, more,
+next_offset? }` ([commands.md](./commands.md) "Scopes"). Aggregate in SQL when all matching data
 must contribute, or explicitly filter/limit a query when a subset is
 intended. Commands, effects, effort policies, provider host calls and
 dry runs share this check. A complete query result does not establish

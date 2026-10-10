@@ -1477,8 +1477,12 @@ impl OxplowMcp {
                        as columns of a grid: `SELECT bucket, zone, MEASURE('<metric key>') FROM \
                        metric_grid('day'|'week'|'month'[, '<dimension>'])` (keys in \
                        v_metric_spec, dimensions in v_dimension). Positional params `?1`, `?2`, … \
-                       bind from `params`. Returns `{columns, rows, truncated, reads}`; rows are \
-                       positional arrays. Writes, PRAGMA, ATTACH and multiple statements are \
+                       bind from `params`. Returns `{columns, rows, truncated, reads, generation, \
+                       coverage}`; rows are positional arrays; `truncated` means more rows \
+                       existed than `limit`. `coverage` names the collector behind each \
+                       collected model it read and how its last run stands (`current`, \
+                       `stale`, `failed`, `disabled`, `needs_approval`, `never`): a complete \
+                       result over a failed collector is still missing data. Writes, PRAGMA, ATTACH and multiple statements are \
                        rejected; queries time out after 5s. `v_model_column` documents every \
                        column."
     )]

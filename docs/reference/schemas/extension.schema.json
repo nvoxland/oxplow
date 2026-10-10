@@ -1020,11 +1020,14 @@
           "default": []
         },
         "input": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RawInput"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "report": {
           "anyOf": [
@@ -1268,6 +1271,34 @@
       "enum": [
         "test",
         "analysis"
+      ]
+    },
+    "RawInput": {
+      "description": "`input` as written: its SQL, or `{ sql, limit }`.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "sql": {
+              "type": "string"
+            },
+            "limit": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint",
+              "minimum": 0,
+              "default": null
+            }
+          },
+          "required": [
+            "sql"
+          ]
+        }
       ]
     },
     "RawReport": {

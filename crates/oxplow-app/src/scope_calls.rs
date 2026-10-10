@@ -109,36 +109,93 @@ impl<'a> Calls<'a> {
     fn sql_read(&mut self, args: Value) -> Result<Value, String> {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
+        struct Page {
+            limit: usize,
+            #[serde(default)]
+            offset: usize,
+        }
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
         struct Args {
             sql: String,
             #[serde(default)]
             params: serde_json::Map<String, Value>,
+            #[serde(default)]
+            page: Option<Page>,
         }
         let args: Args = serde_json::from_value(args)
-            .map_err(|e| format!("`sql.read` takes {{ sql, params? }}: {e}"))?;
-        let query = oxplow_db::SqlQuery::new(&args.sql)
-            .named(
-                args.params
-                    .into_iter()
-                    .map(|(k, v)| (k, oxplow_db::SqlCell::from(v)))
-                    .collect(),
-            )
-            .limit(Some(SQL_READ_ROW_CAP));
-        match (self.read)(query) {
-            Ok(result) if result.truncated => Err(format!(
-                "`sql.read` returned more than {SQL_READ_ROW_CAP} rows; aggregate in SQL \
-                 or explicitly narrow the query; partial results are not returned"
-            )),
-            Ok(result) => Ok(Value::Array(rows_json(&result))),
+            .map_err(|e| format!("`sql.read` takes {{ sql, params?, page? }}: {e}"))?;
+        let mut params: Vec<(String, oxplow_db::SqlCell)> = args
+            .params
+            .into_iter()
+            .map(|(k, v)| (k, oxplow_db::SqlCell::from(v)))
+            .collect();
+        // A page: this slice of the query's rows, one more asked for to
+        // tell whether any follow.
+        let (sql, cap) = match &args.page {
+            None => (args.sql.clone(), SQL_READ_ROW_CAP),
+            Some(page) if page.limit == 0 || page.limit > SQL_READ_ROW_CAP => {
+                return Err(format!(
+                    "`sql.read`'s `page.limit` is at least 1 and at most {SQL_READ_ROW_CAP}"
+                ))
+            }
+            Some(page) => {
+                params.push((
+                    "__page_limit".into(),
+                    oxplow_db::SqlCell::Int(page.limit as i64 + 1),
+                ));
+                params.push((
+                    "__page_offset".into(),
+                    oxplow_db::SqlCell::Int(page.offset as i64),
+                ));
+                (
+                    format!(
+                        "SELECT * FROM ({}) LIMIT :__page_limit OFFSET :__page_offset",
+                        args.sql.trim().trim_end_matches(';')
+                    ),
+                    page.limit + 1,
+                )
+            }
+        };
+        let query = oxplow_db::SqlQuery::new(&sql)
+            .named(params)
+            .limit(Some(cap));
+        let result = match (self.read)(query) {
+            Ok(result) => result,
             Err(DomainError::Busy(m)) => {
                 self.busy = Some(m.clone());
-                Err(m)
+                return Err(m);
             }
-            Err(e) => Err(format!(
-                "`sql.read`: {}",
-                e.to_string().replacen("invalid value: ", "", 1)
-            )),
+            Err(e) => {
+                return Err(format!(
+                    "`sql.read`: {}",
+                    e.to_string().replacen("invalid value: ", "", 1)
+                ))
+            }
+        };
+        let Some(page) = args.page else {
+            if result.truncated {
+                return Err(format!(
+                    "`sql.read` returned more than {SQL_READ_ROW_CAP} rows; aggregate in SQL, \
+                     explicitly narrow the query, or ask for it a `page` at a time; partial \
+                     results are not returned"
+                ));
+            }
+            return Ok(Value::Array(rows_json(&result)));
+        };
+        let mut rows = rows_json(&result);
+        let more = rows.len() > page.limit;
+        rows.truncate(page.limit);
+        let mut answer = serde_json::json!({ "rows": rows, "more": more });
+        if more {
+            answer["next_offset"] = (page.offset + page.limit).into();
         }
+        if !args.sql.to_ascii_lowercase().contains("order by") {
+            answer["warning"] = Value::String(
+                "the query has no ORDER BY, so its pages may overlap or skip rows".into(),
+            );
+        }
+        Ok(answer)
     }
 }
 
@@ -201,7 +258,7 @@ mod tests {
         let err = calls
             .serve("sql.read", json!({ "query": "x" }))
             .unwrap_err();
-        assert!(err.contains("`sql.read` takes { sql, params? }"), "{err}");
+        assert!(err.contains("`sql.read` takes { sql, params?, page? }"), "{err}");
         drop(calls);
         assert_eq!(asked, vec!["SELECT 1 AS n", "SELECT 2"]);
         assert_eq!(trace.summary(), [("sql.read".to_string(), 3)].into());
@@ -295,6 +352,58 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Asking for a page reads past the cap a page at a time: each page
+    /// says whether more rows follow and where the next starts, and a
+    /// query with no `ORDER BY` is answered with a warning (its pages may
+    /// overlap or skip).
+    #[tokio::test]
+    async fn sql_read_pages_through_a_result_on_request() {
+        let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
+        let script = format!(
+            r#"def transform(x):
+    total = 0
+    pages = 0
+    offset = 0
+    for i in range(10):
+        page = scope("sql.read", {{"sql": {sql:?}, "params": {{"total": 2500}}, "page": {{"limit": 1000, "offset": offset}}}})
+        total += len(page["rows"])
+        pages += 1
+        if not page["more"]:
+            break
+        offset = page["next_offset"]
+    return {{"skip": "%d rows in %d pages, last %d" % (total, pages, page["rows"][-1]["n"])}}
+"#,
+            sql = NUMBER_ROWS,
+        );
+        let out = crate::effects::run_over(&layer, &needs(&["sql.read"]), &script, json!({}), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            out,
+            crate::effects::Reaction::Skip("2500 rows in 3 pages, last 2500".into())
+        );
+        let unordered = r#"def transform(x):
+    page = scope("sql.read", {"sql": "SELECT 1 AS n", "page": {"limit": 10}})
+    return {"skip": page.get("warning", "")}
+"#;
+        let out =
+            crate::effects::run_over(&layer, &needs(&["sql.read"]), unordered, json!({}), None)
+                .await
+                .unwrap();
+        assert!(
+            matches!(&out, crate::effects::Reaction::Skip(w) if w.contains("ORDER BY")),
+            "{out:?}"
+        );
+        // A page is at most the cap.
+        let big = r#"def transform(x):
+    return scope("sql.read", {"sql": "SELECT 1 ORDER BY 1", "page": {"limit": 5000}})
+"#;
+        let err = crate::effects::run_over(&layer, &needs(&["sql.read"]), big, json!({}), None)
+            .await
+            .unwrap_err();
+        assert!(err.contains("at most 1000"), "{err}");
     }
 
     /// Aggregate in SQL to keep all source rows in the calculation while
