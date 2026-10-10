@@ -531,6 +531,83 @@ mod tests {
         assert_eq!(test.suites[0].cases.len(), 1);
     }
 
+    fn failure_report(cases: &str) -> String {
+        format!("<testsuites><testsuite name=\"s\">{cases}</testsuite></testsuites>")
+    }
+
+    fn messages(report: &str) -> Vec<(String, Option<String>)> {
+        let out = bundled("junit", report).expect("parses");
+        out.as_test().expect("tests").suites[0]
+            .cases
+            .iter()
+            .map(|c| (c.name.clone(), c.message.clone()))
+            .collect()
+    }
+
+    /// A failed case keeps what the report said went wrong — the failure's
+    /// `message` and its body (the assertion and where it happened) — and a
+    /// case that didn't fail keeps nothing.
+    #[test]
+    fn a_failed_case_keeps_its_message_and_location() {
+        let got = messages(&failure_report(
+            r#"<testcase classname="c" name="boom"><failure message="assertion failed: left == right" type="AssertionError">thread panicked at src/a.rs:12:5</failure></testcase>
+               <testcase classname="c" name="errored"><error message="boom"/></testcase>
+               <testcase classname="c" name="bodyonly"><failure>just a body</failure></testcase>
+               <testcase classname="c" name="empty"><failure/></testcase>
+               <testcase classname="c" name="ok"/>
+               <testcase classname="c" name="skipped"><skipped message="not today"/></testcase>"#,
+        ));
+        assert_eq!(
+            got,
+            vec![
+                (
+                    "boom".to_string(),
+                    Some(
+                        "assertion failed: left == right\nthread panicked at src/a.rs:12:5"
+                            .to_string()
+                    )
+                ),
+                ("errored".to_string(), Some("boom".to_string())),
+                ("bodyonly".to_string(), Some("just a body".to_string())),
+                ("empty".to_string(), None),
+                ("ok".to_string(), None),
+                ("skipped".to_string(), None),
+            ]
+        );
+    }
+
+    /// Each message is cut at `MAX_MESSAGE_BYTES`, on a character boundary,
+    /// and a run keeps at most `MAX_MESSAGE_BYTES_PER_RUN` of them: a report
+    /// with a thousand failures, or one huge one, can't grow the capture
+    /// without bound. Later failures keep their status and lose the message.
+    #[test]
+    fn failure_messages_are_bounded_per_message_and_per_run() {
+        use crate::runtime::{MAX_MESSAGE_BYTES, MAX_MESSAGE_BYTES_PER_RUN};
+        let big = "é".repeat(MAX_MESSAGE_BYTES); // 2 bytes a character
+        let many: String = (0..200)
+            .map(|i| {
+                format!(
+                    r#"<testcase classname="c" name="t{i}"><failure>{big}</failure></testcase>"#
+                )
+            })
+            .collect();
+        let got = messages(&failure_report(&many));
+        let kept: Vec<&String> = got.iter().filter_map(|(_, m)| m.as_ref()).collect();
+        assert!(!kept.is_empty() && kept.len() < got.len());
+        assert!(kept
+            .iter()
+            .all(|m| m.len() <= MAX_MESSAGE_BYTES + '…'.len_utf8()));
+        assert!(kept.iter().all(|m| m.ends_with('…')), "cut ones say so");
+        let total: usize = kept.iter().map(|m| m.len()).sum();
+        assert!(
+            total <= MAX_MESSAGE_BYTES_PER_RUN + kept.len() * '…'.len_utf8(),
+            "{total}"
+        );
+        // The earliest failures are the ones kept.
+        assert!(got.iter().take(kept.len()).all(|(_, m)| m.is_some()));
+        assert!(got.last().unwrap().1.is_none());
+    }
+
     #[test]
     fn nested_junit_counts_each_case_once() {
         // tsk361: a nested testcase must not be double-counted under both
@@ -843,6 +920,7 @@ def transform(input):
             name: name.into(),
             status,
             time_ms,
+            message: None,
         }
     }
 
@@ -1053,12 +1131,15 @@ def transform(input):
                         TestStatus::Passed,
                         Some(1),
                     ),
-                    case(
-                        "oxplow_app::collection",
-                        "ingest_coverage",
-                        TestStatus::Failed,
-                        Some(50),
-                    ),
+                    oxplow_coverage::TestCase {
+                        message: Some("assert failed\nleft != right".into()),
+                        ..case(
+                            "oxplow_app::collection",
+                            "ingest_coverage",
+                            TestStatus::Failed,
+                            Some(50),
+                        )
+                    },
                     case("oxplow_app::collection", "flaky", TestStatus::Skipped, None),
                 ],
             }],

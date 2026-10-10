@@ -5360,6 +5360,7 @@ mod tests {
                         name: "t1".into(),
                         status: TestStatus::Passed,
                         time_ms: None,
+                        message: None,
                     }],
                 }],
             };
@@ -5574,12 +5575,14 @@ mod tests {
                             name: "t1".into(),
                             status: TestStatus::Passed,
                             time_ms: Some(3),
+                            message: None,
                         },
                         TestCase {
                             classname: "mod".into(),
                             name: "t2".into(),
                             status: TestStatus::Failed,
                             time_ms: None,
+                            message: None,
                         },
                     ],
                 }],
@@ -5677,6 +5680,7 @@ mod tests {
                 name: name.into(),
                 status,
                 time_ms: None,
+                message: None,
             };
             let report = |cases: Vec<TestCase>| TestReport {
                 suites: vec![TestSuite {
@@ -5748,6 +5752,7 @@ mod tests {
                         name: "t1".into(),
                         status: TestStatus::Passed,
                         time_ms: Some(3),
+                        message: None,
                     }],
                 }],
             };
@@ -5807,6 +5812,7 @@ mod tests {
                         name: "t1".into(),
                         status: TestStatus::Passed,
                         time_ms: None,
+                        message: None,
                     }],
                 }],
             };
@@ -5864,6 +5870,7 @@ mod tests {
                         name: "t1".into(),
                         status,
                         time_ms: None,
+                        message: None,
                     }],
                 }],
             };

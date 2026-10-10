@@ -782,6 +782,9 @@ struct TestCaseJson {
     status: TestStatusJson,
     #[serde(default, rename = "timeMs")]
     time_ms: Option<u64>,
+    /// A failed case's message and location, as the parser read them.
+    #[serde(default)]
+    message: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -861,8 +864,29 @@ impl From<AnalysisReportJson> for AnalysisReport {
     }
 }
 
+/// The most bytes of one failed case's message a capture keeps; a longer one
+/// is cut at a character boundary and ends in `…`.
+pub const MAX_MESSAGE_BYTES: usize = 4096;
+/// The most message bytes a whole run's capture keeps: failures past it keep
+/// their status and lose the message, so a report of a thousand failures (or
+/// one huge one) can't grow the capture without bound.
+pub const MAX_MESSAGE_BYTES_PER_RUN: usize = 64 * 1024;
+
+/// `message` cut to [`MAX_MESSAGE_BYTES`], saying so.
+fn capped(message: &str) -> String {
+    if message.len() <= MAX_MESSAGE_BYTES {
+        return message.to_string();
+    }
+    let mut end = MAX_MESSAGE_BYTES;
+    while !message.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &message[..end])
+}
+
 impl From<TestReportJson> for TestReport {
     fn from(j: TestReportJson) -> Self {
+        let mut budget = MAX_MESSAGE_BYTES_PER_RUN;
         let suites = j
             .suites
             .into_iter()
@@ -871,11 +895,21 @@ impl From<TestReportJson> for TestReport {
                 cases: s
                     .cases
                     .into_iter()
-                    .map(|c| TestCase {
-                        classname: c.classname,
-                        name: c.name,
-                        status: c.status.into(),
-                        time_ms: c.time_ms,
+                    .map(|c| {
+                        let failed = matches!(c.status, TestStatusJson::Failed);
+                        let message = c
+                            .message
+                            .filter(|m| failed && !m.is_empty())
+                            .map(|m| capped(&m))
+                            .filter(|m| m.len() <= budget)
+                            .inspect(|m| budget -= m.len());
+                        TestCase {
+                            classname: c.classname,
+                            name: c.name,
+                            status: c.status.into(),
+                            time_ms: c.time_ms,
+                            message,
+                        }
                     })
                     .collect(),
             })
