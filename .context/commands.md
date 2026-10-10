@@ -161,7 +161,9 @@ They don't follow each other: `config.write`'s `set` is `Tx` (the record
 commits with the run; the file is written after it commits), while
 `providers.sync` and `test_runs.write` are `record` and `External`
 (each commits in its own service's transaction).
-Today there is one: **`sql.read`** — `{ sql, params? }`, one read-only
+Two more scopes are services a script uses through builtins rather than
+`scope(…)` — `tree.read` and `ai.compute` ([extensions.md](./extensions.md)
+"Services"). The one a script calls by `scope(…)` is **`sql.read`** — `{ sql, params? }`, one read-only
 statement over the published models (`v_*`), its `:name`s bound from
 `params`, at most `SQL_READ_ROW_CAP` (1000) rows, answered as a list of
 row objects (`semantic_layer::read_on` under the `query_sql`

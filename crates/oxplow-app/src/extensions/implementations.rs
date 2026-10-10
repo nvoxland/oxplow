@@ -266,7 +266,7 @@ fn script_decl(
                 ));
             }
             for need in &f.needs {
-                crate::scope_calls::check_callable(need).map_err(|e| {
+                crate::scope_calls::check_script_need(need).map_err(|e| {
                     format!(
                         "`effort_policy` implementation `{}`: needs `{need}`: {e}",
                         f.id

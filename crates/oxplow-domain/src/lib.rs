@@ -25,6 +25,7 @@ pub mod refs;
 pub mod replaceable;
 pub mod run;
 pub mod scope;
+pub mod service;
 pub mod snapshot;
 pub mod stores;
 pub mod stream;

@@ -143,6 +143,7 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
         };
         let mut d = new(ContributionKind::Collector, &c.id, trigger);
         d.after = c.after.clone();
+        d.needs = c.service_needs();
         // A fact collector's id is flat across owners (the fact engine's
         // key); an entity collector's is `<owner>/<id>`.
         if !c.facts.is_empty() {

@@ -1072,6 +1072,14 @@
           },
           "default": []
         },
+        "needs": {
+          "description": "The services its script uses beyond what its kind implies (a\nStarlark collector's).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
         "entities": {
           "type": "array",
           "items": {

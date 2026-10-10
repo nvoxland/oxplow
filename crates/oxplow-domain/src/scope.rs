@@ -103,6 +103,14 @@ pub const SCOPES: &[Scope] = &[
         summary: "Open, rename and close a thread's agent sessions. Opening one only adds the slot (the UI starts its process, and nothing types into it); closing one stops its process.",
     },
     Scope {
+        id: "ai.compute",
+        access: Access::Read,
+        host: Host::Daemon,
+        summary: "Ask the configured model a recorded question (`ai_classify`, `ai_score`, \
+                  `ai_summarize`, `ai_extract`), spending the person's AI provider key: \
+                  only on their approval, and only from a run that may call out.",
+    },
+    Scope {
         id: "bookmarks.write",
         access: Access::Record,
         host: Host::Daemon,
@@ -266,6 +274,13 @@ pub const SCOPES: &[Scope] = &[
         access: Access::Record,
         host: Host::Daemon,
         summary: "Create, rename, reorder, promote, close and reopen threads.",
+    },
+    Scope {
+        id: "tree.read",
+        access: Access::Read,
+        host: Host::Daemon,
+        summary: "Read the captured tree a run is anchored to — its files, their syntax \
+                  (`ast_query`), metrics and duplicate blocks — as the snapshot holds it.",
     },
     Scope {
         id: "vcs.remote",

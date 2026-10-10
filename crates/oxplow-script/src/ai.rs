@@ -52,24 +52,7 @@ pub const AI_BUILTINS: &[&str] = &["ai_classify", "ai_score", "ai_summarize", "a
 /// each run. Starlark reaches a global only by its name, so this is every
 /// way in; a script that doesn't parse runs nothing.
 pub fn calls_ai(script: &str) -> bool {
-    use starlark::syntax::ast::{AstExpr, ExprP};
-    use starlark::syntax::{AstModule, Dialect};
-    fn names_ai(e: &AstExpr) -> bool {
-        if let ExprP::Identifier(id) = &e.node {
-            if AI_BUILTINS.contains(&id.node.ident.as_str()) {
-                return true;
-            }
-        }
-        let mut found = false;
-        e.node.visit_expr(|child| found = found || names_ai(child));
-        found
-    }
-    let Ok(ast) = AstModule::parse("script.star", script.to_string(), &Dialect::Standard) else {
-        return false;
-    };
-    let mut found = false;
-    ast.statement().visit_expr(|e| found = found || names_ai(e));
-    found
+    crate::uses::services_used(script).contains("ai.compute")
 }
 
 fn host<'a>(

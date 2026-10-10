@@ -1842,6 +1842,11 @@ export type CollectorSpec = {
 	network: string[],
 	// Keychain secrets an exec collector gets as environment variables.
 	credentials: string[],
+	/**
+	 *  The services a Starlark collector's script uses beyond what its kind
+	 *  implies (`tree.read`, `sql.read`, `ai.compute`; `oxplow_domain::service`).
+	 */
+	needs?: string[],
 	entities: EntityDecl[],
 	/**
 	 *  The measures its facts land on (`repo.rust_clone`); a fact on any

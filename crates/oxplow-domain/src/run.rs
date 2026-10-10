@@ -470,6 +470,30 @@ impl RunContext {
         decision
     }
 
+    /// Decide its use of service `scope` (`crate::service`): refused when
+    /// this run's mode may not use it (a pure run asking a model), else
+    /// decided by its authority — recorded either way.
+    pub fn decide_service(&self, scope: &str) -> crate::grant::Decision {
+        let need = crate::grant::Need::Scope(scope.to_string());
+        if let Some(service) = crate::service::service(scope) {
+            if !service.modes.contains(&self.mode) {
+                let decision = crate::grant::Decision::Denied(format!(
+                    "a {} run can't use `{scope}` ({}): only a run that may call out can",
+                    self.mode.as_str(),
+                    service.title.to_lowercase()
+                ));
+                self.decided.lock().unwrap_or_else(|e| e.into_inner()).push(
+                    crate::grant::Decided {
+                        need,
+                        decision: decision.clone(),
+                    },
+                );
+                return decision;
+            }
+        }
+        self.decide(need)
+    }
+
     /// What its authority decided, in order.
     pub fn decisions(&self) -> Vec<crate::grant::Decided> {
         self.decided
@@ -616,6 +640,36 @@ mod tests {
         assert_eq!(
             RunContext::core(Actor::System, Mode::Pure).check(Some("g2")),
             Ok(())
+        );
+    }
+
+    /// A pure run may not ask a model, whatever it declares; it may read.
+    #[test]
+    fn a_pure_run_may_not_use_a_service_that_calls_out() {
+        let declared = crate::grant::GrantRequest {
+            scopes: ["ai.compute".to_string(), "tree.read".to_string()].into(),
+            ..Default::default()
+        };
+        let authority = |mode| {
+            RunContext::contribution(effect("g1"), Actor::System, mode).authorized(Authority {
+                declared: declared.clone(),
+                grant: None,
+                enforcement: crate::grant::Enforcement { hosts: true },
+            })
+        };
+        let pure = authority(Mode::Pure);
+        assert!(matches!(
+            pure.decide_service("ai.compute"),
+            crate::grant::Decision::Denied(why) if why.contains("a pure run can't use `ai.compute`")
+        ));
+        assert_eq!(
+            pure.decide_service("tree.read"),
+            crate::grant::Decision::Allowed
+        );
+        assert_eq!(pure.decisions().len(), 2, "both recorded");
+        assert_eq!(
+            authority(Mode::External).decide_service("ai.compute"),
+            crate::grant::Decision::Allowed
         );
     }
 

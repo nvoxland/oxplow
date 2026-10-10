@@ -164,7 +164,7 @@ fn decl_of(
         _ => return Err(named("`on` lists the event types it reacts to".into())),
     };
     for need in &f.needs {
-        crate::scope_calls::check_callable(need).map_err(&named)?;
+        crate::scope_calls::check_script_need(need).map_err(&named)?;
     }
     let script = read(&f.entry)
         .ok_or_else(|| named(format!("entry `{}` isn't in the extension", f.entry)))?;
@@ -601,7 +601,13 @@ effects:
             (
                 "entry: effects/announce.star",
                 "entry: effects/announce.star\n    needs: [threads.write]",
-                "a script calls only `sql.read`",
+                "`threads.write` is a scope a script can't use",
+            ),
+            // An effect's script composes: it may read, never ask a model.
+            (
+                "entry: effects/announce.star",
+                "entry: effects/announce.star\n    needs: [ai.compute]",
+                "this script composes, so it runs pure",
             ),
         ] {
             let dir = tempfile::tempdir().unwrap();
