@@ -19,6 +19,8 @@ import {
   listProjectPrograms,
   listCollectors,
   approveCollector,
+  revokeCollector,
+  revokeProjectProgram,
   querySql,
   runCommand,
   syncCollector,
@@ -28,10 +30,12 @@ import {
 import type { DataEntity, ProjectProgram } from "../tauri-bridge/generated/bindings.js";
 import { indexRef } from "../tabs/pageRefs.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
+import { useContextMenu } from "./useRowContextMenu.js";
 import {
   backfillAsk, backfillRunLabel,
   backfillDone,
   canApprove,
+  collectorRevoke,
   entityRows,
   entitySummary,
   programRow,
@@ -53,6 +57,10 @@ export function DataSection() {
   const counting = useRef(0);
   const [collectors, setCollectors] = useState<CollectorListing[]>([]);
   const [programs, setPrograms] = useState<ProjectProgram[]>([]);
+  // The row whose revoke is being confirmed (a program's `kind:name`, or a
+  // collector's `owner/id`); right-click offers it, the strip asks.
+  const [revoking, setRevoking] = useState<string | null>(null);
+  const rowMenu = useContextMenu();
   const [busy, setBusy] = useState<string | null>(null);
   // What approving each unapproved provider would change, by instance.
   const [impacts, setImpacts] = useState<Record<string, ProviderImpactState>>({});
@@ -158,6 +166,34 @@ export function DataSection() {
     }
   }
 
+  async function revokeProgram(p: ProjectProgram) {
+    setRevoking(null);
+    setBusy(`${p.kind}:${p.name}`);
+    try {
+      setPrograms(await revokeProjectProgram(p.kind, p.name));
+      showToast({ message: `Revoked ${p.name}. It won't run until you approve it again.` });
+    } catch (e) {
+      recordOpError({ label: `Revoke ${p.name}`, message: String(e) });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function revokeListed(l: CollectorListing) {
+    const key = `${l.owner}/${l.spec.id}`;
+    setRevoking(null);
+    setBusy(key);
+    try {
+      await revokeCollector(l.owner, l.spec.id);
+      showToast({ message: `Revoked ${key}. It won't run until you approve it again.` });
+    } catch (e) {
+      recordOpError({ label: `Revoke ${key}`, message: String(e) });
+    } finally {
+      setBusy(null);
+      await refresh();
+    }
+  }
+
   async function approve(p: ProjectProgram) {
     const key = `${p.kind}:${p.name}`;
     setBusy(key);
@@ -221,8 +257,19 @@ export function DataSection() {
         collectors.map((l) => {
           const s = collectorRowModel(l);
           const key = `${l.owner}/${s.id}`;
+          const revoke = collectorRevoke(l);
           return (
-            <div key={key} data-testid={`collector-row-${key}`} style={rowStyle}>
+            <div
+              key={key}
+              data-testid={`collector-row-${key}`}
+              style={rowStyle}
+              onContextMenu={(e) =>
+                rowMenu.open(
+                  e,
+                  revoke ? [{ id: "revoke", label: "Revoke approval…", enabled: busy === null, run: () => setRevoking(key) }] : [],
+                )
+              }
+            >
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span>
                   <code>{key}</code>
@@ -244,6 +291,14 @@ export function DataSection() {
               </div>
               {s.error ? <div style={errorStyle}>{s.error}</div> : null}
               {s.missingCredentials ? <div style={mutedStyle}>{s.missingCredentials}</div> : null}
+              {revoke && revoking === key ? (
+                <RevokeAsk
+                  testId={`collector-revoke-${key}`}
+                  ask={revoke.ask}
+                  onConfirm={() => void revokeListed(l)}
+                  onCancel={() => setRevoking(null)}
+                />
+              ) : null}
             </div>
           );
         })
@@ -260,7 +315,17 @@ export function DataSection() {
           const failed = impact !== undefined && impact !== "loading" && "error" in impact ? impact.error : null;
           const diff = impact !== undefined && impact !== "loading" && !("error" in impact) ? impact : null;
           return (
-            <div key={m.key} data-testid={`program-row-${m.key}`} style={rowStyle}>
+            <div
+              key={m.key}
+              data-testid={`program-row-${m.key}`}
+              style={rowStyle}
+              onContextMenu={(e) =>
+                rowMenu.open(
+                  e,
+                  m.canRevoke ? [{ id: "revoke", label: "Revoke approval…", enabled: busy === null, run: () => setRevoking(m.key) }] : [],
+                )
+              }
+            >
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span>{m.label}</span>
                 <code style={{ ...mutedStyle, whiteSpace: "pre-wrap" }}>{m.command}</code>
@@ -278,6 +343,16 @@ export function DataSection() {
                   </button>
                 )}
               </div>
+              {m.grant ? <div style={mutedStyle} data-testid={`program-grant-${m.key}`}>{m.grant}</div> : null}
+              {m.unenforced ? <div style={mutedStyle} data-testid={`program-unenforced-${m.key}`}>{m.unenforced}</div> : null}
+              {revoking === m.key ? (
+                <RevokeAsk
+                  testId={`program-revoke-${m.key}`}
+                  ask={m.revokeAsk}
+                  onConfirm={() => void revokeProgram(p)}
+                  onCancel={() => setRevoking(null)}
+                />
+              ) : null}
               {m.showsSource ? <ProgramSource rowKey={m.key} program={p} /> : null}
               {p.kind === "effect" && p.approved ? <BackfillAction rowKey={m.key} effect={p.name} /> : null}
               {impact === "loading" ? (
@@ -299,6 +374,7 @@ export function DataSection() {
       )}
       <h3 style={subheadStyle} id="settings-data-delivery">Delivery</h3>
       <DeliveryList emptyLabel="Every event reached its consumers." />
+      {rowMenu.menu}
     </div>
   );
 }
@@ -317,6 +393,44 @@ const tdStyle: CSSProperties = { padding: "3px 6px", borderBottom: "1px solid va
 const subheadStyle: CSSProperties = { fontSize: "var(--text-sm)", margin: "16px 0 4px" };
 const rowStyle: CSSProperties = { padding: "6px 0", borderBottom: "1px solid var(--border-subtle)", fontSize: "var(--text-sm)" };
 const errorStyle: CSSProperties = { fontSize: "var(--text-xs)", color: "var(--severity-critical)", marginTop: 4 };
+
+/** The inline question under a row whose approval is being revoked: no
+ *  modal (usability.md), Enter on the focused Revoke runs it, Escape or
+ *  Cancel backs out. */
+function RevokeAsk({
+  testId,
+  ask,
+  onConfirm,
+  onCancel,
+}: {
+  testId: string;
+  ask: string;
+  onConfirm(): void;
+  onCancel(): void;
+}) {
+  const confirm = useRef<HTMLButtonElement>(null);
+  useEffect(() => confirm.current?.focus(), []);
+  return (
+    <div
+      data-testid={`${testId.replace(/-revoke-/, "-revoke-ask-")}`}
+      style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, fontSize: "var(--text-xs)" }}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          onCancel();
+        }
+      }}
+    >
+      <span style={{ color: "var(--severity-critical)" }}>{ask}</span>
+      <button ref={confirm} type="button" data-testid={testId.replace(/-revoke-/, "-revoke-confirm-")} onClick={onConfirm}>
+        Revoke
+      </button>
+      <button type="button" onClick={onCancel}>
+        Cancel
+      </button>
+    </div>
+  );
+}
 
 /** Backfill… on an approved effect's row (P9.D5): the live consumer never
  *  reacts to what was logged before the effect's approval, so a person has

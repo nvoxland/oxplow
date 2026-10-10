@@ -7,6 +7,9 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 const realApi = await import("../api.js");
 let answer: () => Promise<unknown> = () => new Promise(() => {});
 const decided: string[] = [];
+const revoked: string[] = [];
+/** What Settings → Data lists as extension collectors. */
+let collectorListings: unknown[] = [];
 const ran: Array<[string, unknown, boolean]> = [];
 /** What `oxplow.effect.retry` answers. */
 let retried: unknown = { effect: "acme/mark-done", event: "event:e1", attempt: 2, outcome: "ok" };
@@ -60,7 +63,14 @@ mock.module("../api.js", () => ({
     return { ...letter, state: "discarded" };
   },
   listDataEntities: async () => entities,
-  listCollectors: async () => [],
+  listCollectors: async () => collectorListings,
+  revokeProjectProgram: async (kind: string, name: string) => {
+    revoked.push(`${kind}:${name}`);
+    return [];
+  },
+  revokeCollector: async (owner: string, id: string) => {
+    revoked.push(`collector ${owner}/${id}`);
+  },
   listProjectPrograms: async () => [
     {
       kind: "provider",
@@ -88,6 +98,8 @@ mock.module("../api.js", () => ({
       remote: false,
       approved: true,
       version: "h2",
+      unenforced: ["a program reads and writes files as you"],
+      grantedAt: "2026-10-09T10:00:00Z",
     },
     {
       kind: "effect",
@@ -114,6 +126,8 @@ afterEach(() => {
   entities = [];
   counts = {};
   decided.length = 0;
+  revoked.length = 0;
+  collectorListings = [];
   ran.length = 0;
   cleanup();
 });
@@ -236,4 +250,59 @@ test("a model that can't be counted in time leaves the rest of the list", async 
   await waitFor(() => expect(cell("v_work_item").textContent).toBe("3"));
   expect(cell("v_file_metric").textContent).toBe("—");
   expect(cell("v_file_metric").getAttribute("title")).toContain("timed out");
+});
+
+// Programs: what the grant doesn't hold, when it was given, and taking it
+// back — a destructive action, so on right-click with an inline confirm.
+test("a program row shows what isn't held here and when it was approved", async () => {
+  const view = render(<DataSection />);
+  const row = await view.findByTestId("program-row-effect:acme/mark-done");
+  expect(row.textContent).toContain("not held here: a program reads and writes files as you");
+  expect(row.textContent).toMatch(/Approved .*2026/);
+  // A program with none of that says nothing of it.
+  expect(view.getByTestId("program-row-effect:oxplow-bundled/verify-unchecked").textContent).not.toContain("not held here");
+});
+
+test("revoking is on right-click, asks inline, and Escape backs out", async () => {
+  const view = render(<DataSection />);
+  const row = await view.findByTestId("program-row-effect:acme/mark-done");
+  fireEvent.contextMenu(row);
+  fireEvent.click(await view.findByTestId("menu-item-revoke"));
+  expect((await view.findByTestId("program-revoke-ask-effect:acme/mark-done")).textContent).toContain("Revoke approval of Effect acme/mark-done");
+  fireEvent.keyDown(view.getByTestId("program-revoke-ask-effect:acme/mark-done"), { key: "Escape" });
+  expect(view.queryByTestId("program-revoke-ask-effect:acme/mark-done")).toBeNull();
+  expect(revoked).toEqual([]);
+
+  fireEvent.contextMenu(row);
+  fireEvent.click(await view.findByTestId("menu-item-revoke"));
+  fireEvent.click(await view.findByTestId("program-revoke-confirm-effect:acme/mark-done"));
+  await waitFor(() => expect(revoked).toEqual(["effect:acme/mark-done"]));
+});
+
+test("an unapproved program has nothing to revoke", async () => {
+  const view = render(<DataSection />);
+  const row = await view.findByTestId("program-row-provider:tracker/fake");
+  fireEvent.contextMenu(row);
+  expect(view.queryByTestId("menu-item-revoke")).toBeNull();
+});
+
+test("an approved extension collector is revoked the same way", async () => {
+  collectorListings = [
+    {
+      owner: "acme",
+      spec: { id: "pull", runtime: "exec", entry: "pull.sh", trigger: { kind: "manual" }, env: [], network: [], credentials: [], entities: [], facts: [] },
+      run: null,
+      approved: true,
+      networkEnforced: false,
+      credentials: [],
+      version: "v1",
+      disabled: null,
+    },
+  ];
+  const view = render(<DataSection />);
+  const row = await view.findByTestId("collector-row-acme/pull");
+  fireEvent.contextMenu(row);
+  fireEvent.click(await view.findByTestId("menu-item-revoke"));
+  fireEvent.click(await view.findByTestId("collector-revoke-confirm-acme/pull"));
+  await waitFor(() => expect(revoked).toEqual(["collector acme/pull"]));
 });

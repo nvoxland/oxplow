@@ -1,6 +1,7 @@
 /// Pure view model for Settings → Data (DataSection.tsx): what data the
 /// semantic layer holds, who provides it, and how much. See
 /// `.context/semantic-layer.md`.
+import type { CollectorListing } from "../api.js";
 import type { DataEntity, ProjectProgram, ProviderImpact } from "../tauri-bridge/generated/bindings.js";
 
 export interface EntityRowModel {
@@ -62,12 +63,56 @@ export interface ProgramRowModel {
   /** The row offers to show its entry: a bundled program's files aren't
    *  in the project, and an AI provider's script is what's approved. */
   showsSource: boolean;
+  /** What approving it grants that this machine can't hold it to, worded
+   *  as the review's grant line says it: "not held here: …". */
+  unenforced: string | null;
+  /** When it was approved ("Approved …"), or taken back ("Revoked …"). */
+  grant: string | null;
+  /** An approved program can be revoked (right-click). */
+  canRevoke: boolean;
+  /** The inline confirmation's question. */
+  revokeAsk: string;
 }
 
+/** The row's pieces that don't depend on the kind: [`programRow`] adds them. */
+type BaseRow = Omit<ProgramRowModel, "unenforced" | "grant" | "canRevoke" | "revokeAsk">;
+
+const localWhen = (iso: string) => new Date(iso).toLocaleString();
+
 /// A program the project's config would run (an `exec` collector, an ACP
-/// agent, an extension's provider, effect or component): unapproved ones don't run until a person approves them here.
+/// agent, an extension's provider, effect or component): unapproved ones
+/// don't run until a person approves them here. What the grant doesn't
+/// hold on this machine (`unenforced`), when it was approved or revoked,
+/// and whether it can be revoked, are the same for every kind.
+export function programRow(p: ProjectProgram, when: (iso: string) => string = localWhen): ProgramRowModel {
+  const base = baseRow(p);
+  const gaps = p.unenforced ?? [];
+  return {
+    ...base,
+    unenforced: gaps.length > 0 ? `not held here: ${gaps.join("; ")}` : null,
+    grant:
+      p.approved && p.grantedAt
+        ? `Approved ${when(p.grantedAt)}`
+        : !p.approved && p.revokedAt
+          ? `Revoked ${when(p.revokedAt)}`
+          : null,
+    canRevoke: p.approved,
+    revokeAsk: `Revoke approval of ${base.label}? Nothing it was approved to do holds from its next trigger, until you approve it again.`,
+  };
+}
+
+/** The Revoke offer of an extension's exec or model-calling collector: its
+ *  approval is what lets it run (a derived collector that calls no model
+ *  has none to take back). `null` when there is nothing to revoke. */
+export function collectorRevoke(l: CollectorListing): { ask: string } | null {
+  if (!l.approved || l.version === null) return null;
+  return {
+    ask: `Revoke approval of ${l.owner}/${l.spec.id}? It won't run again until you approve it again.`,
+  };
+}
+
 /// A shared extension's advisories are shown as what they'd say.
-export function programRow(p: ProjectProgram): ProgramRowModel {
+function baseRow(p: ProjectProgram): BaseRow {
   if (p.kind === "advisories") {
     const command = p.args.join("\n");
     return {

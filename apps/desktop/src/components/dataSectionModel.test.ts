@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 
 import type { DataEntity } from "../tauri-bridge/generated/bindings.js";
-import { entityRows, entitySummary, programRow } from "./dataSectionModel.js";
+import { collectorRevoke, entityRows, entitySummary, programRow } from "./dataSectionModel.js";
+import type { CollectorListing } from "../api.js";
 
 const entity = (name: string, owner: string, kind: string): DataEntity => ({
   name,
@@ -325,3 +326,43 @@ test("a backfill's button says how many one run reacts to", () => {
   expect(backfillRunLabel(500, 200)).toBe("Run on the first 200 of 500");
 });
 
+
+// Settings → Data → Programs shows what the grant doesn't hold, when it was
+// given or taken back, and offers to take it back (tsk: grants).
+const when = (iso: string) => `<${iso}>`;
+const program = (over: Record<string, unknown> = {}) =>
+  ({ kind: "collector", name: "tests.parse", program: "tools/parse.sh", args: [], env: [], approved: true, ...over }) as Parameters<typeof programRow>[0];
+
+test("a program row says what isn't held here, worded as the review line says it", () => {
+  expect(programRow(program()).unenforced).toBeNull();
+  expect(programRow(program({ unenforced: [] })).unenforced).toBeNull();
+  const m = programRow(
+    program({ unenforced: ["a program reads and writes files as you", "network isn't confined on this OS"] }),
+  );
+  expect(m.unenforced).toBe("not held here: a program reads and writes files as you; network isn't confined on this OS");
+});
+
+test("a program row says when it was approved, or revoked", () => {
+  expect(programRow(program({ grantedAt: "2026-10-09T10:00:00Z" }), when).grant).toBe("Approved <2026-10-09T10:00:00Z>");
+  const revoked = programRow(program({ approved: false, grantedAt: "2026-10-09T10:00:00Z", revokedAt: "2026-10-10T08:00:00Z" }), when);
+  expect(revoked.grant).toBe("Revoked <2026-10-10T08:00:00Z>");
+  expect(programRow(program({ approved: false }), when).grant).toBeNull();
+  expect(programRow(program(), when).grant).toBeNull();
+});
+
+test("only an approved program can be revoked, and the ask names what stops", () => {
+  const m = programRow(program());
+  expect(m.canRevoke).toBe(true);
+  expect(m.revokeAsk).toContain("Collector tests.parse");
+  expect(m.revokeAsk).toMatch(/until you approve it again/);
+  expect(programRow(program({ approved: false })).canRevoke).toBe(false);
+});
+
+test("an extension's exec or model-calling collector can be revoked once approved", () => {
+  const listing = (over: Record<string, unknown>) =>
+    ({ owner: "acme", spec: { id: "pull", entry: "pull.sh" }, approved: true, version: "abc", ...over }) as unknown as CollectorListing;
+  expect(collectorRevoke(listing({}))?.ask).toContain("acme/pull");
+  // A derived collector that calls no model needs no approval: nothing to take back.
+  expect(collectorRevoke(listing({ version: null }))).toBeNull();
+  expect(collectorRevoke(listing({ approved: false }))).toBeNull();
+});

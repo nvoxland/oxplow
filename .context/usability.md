@@ -110,6 +110,15 @@ Things I keep forgetting. Read this before adding any UI.
   `oxplow-codebase` skill say so, so "can you see that error?" needs no
   screenshot). A report that fails is logged with
   `logUi`, never recorded as another op error (it would loop).
+- **Settings → Data → Programs shows the grant, not only the verdict.**
+  Each row says when it was approved ("Approved …") or revoked, and what the
+  grant doesn't hold on this machine ("not held here: …", the review line's
+  wording: `ProjectProgram.unenforced`). **Revoking is destructive, so it is
+  on right-click** ("Revoke approval…", approved rows only), asks in a strip
+  under the row (Escape or Cancel backs out) and then runs
+  `revokeProjectProgram(kind, name)` — or `revokeCollector(owner, id)` for an
+  extension's exec or model-calling collector on the Collectors list. The row
+  model is `dataSectionModel.ts` (`programRow`, `collectorRevoke`).
 - **Every `<button>` needs an explicit `type`.** HTML defaults
   `<button>` to `type="submit"`, which silently submits any enclosing
   form on click. Use `type="button"` for every action button; use
