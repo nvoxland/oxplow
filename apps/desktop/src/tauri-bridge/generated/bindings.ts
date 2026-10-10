@@ -5694,6 +5694,23 @@ export type SnapshotTrigger =
 // Backfilled for a snapshot taken before the operation log existed.
 "legacy";
 
+// How one collector feeding a model a query read stands.
+export type SourceCoverage = {
+	// The model it feeds (`v_acme_pull_request`).
+	model: string,
+	// `collector:<owner>/<id>`.
+	source: string,
+	/**
+	 *  `current`, `stale` (past its next due run), `failed` (its last run
+	 *  errored), `disabled`, `needs_approval` or `never` (it hasn't run).
+	 */
+	status: string,
+	// Its last run (RFC 3339), when it has one.
+	at: string | null,
+	// Why it failed or was disabled.
+	error: string | null,
+};
+
 /**
  *  One SQL value, serialized as a plain JSON scalar (`null`, boolean,
  *  number or string) so the TS binding is `null | boolean | number |
@@ -5716,6 +5733,19 @@ export type SqlQueryResult = {
 	 *  SQL gateway fills it, P4.6); a model unchanged since then is absent.
 	 */
 	freshness: ModelFreshness[],
+	/**
+	 *  The extension catalog's generation the query ran against (the SQL
+	 *  gateway fills it): what its models and their meaning were. Opaque;
+	 *  equal generations read the same catalog.
+	 */
+	generation?: string | null,
+	/**
+	 *  For each model it read that a collector feeds, how that collection
+	 *  stands (the SQL gateway fills it). A query finishing says nothing
+	 *  about whether its sources were collected; this does. Models core
+	 *  keeps current carry no entry.
+	 */
+	coverage?: SourceCoverage[],
 };
 
 // Whether a contract is permanent API.

@@ -14,16 +14,17 @@ use oxplow_sdk::{Format, Kind};
 
 const USAGE: &str = "\
 usage:
-  oxplow extension new <lens|extension|provider|collector|command|effect|component|policy> <name> [--origin <ref>] [--capability <cap>] [--root <dir>]
+  oxplow extension new <lens|extension|provider|collector|command|effect|component|policy|advisory|skill|page|panel> <name> [--origin <ref>] [--capability <cap>] [--root <dir>]
       scaffold oxplow/extensions/<name>/ with a v2 manifest, an intent
       (--origin = the effort/thread ref that asked for it), one example
       and its fixture, and the kind's starter: a lens with a row action; a
-      provider of --capability (work_items, the default, effort_policy or
-      agent_harness)
+      provider of --capability (work_items, the default, effort_policy,
+      agent_harness, snapshots or knowledge)
       with its contract's declarations, a stub program and test config; a Starlark
       collector with a model and a lens over it; a command composing core
       commands; an effect reacting to an event; a custom component with
-      its lens and bundle; an effort policy script. Each checks clean
+      its lens and bundle; an effort policy script; an advisory; a skill;
+      a page or a panel over a lens. Each checks clean
       and passes `test` as written
       (a provider once a real program replaces its stub)
   oxplow extension check <name|path> [--impact] [--against <rev>] [--json] [--root <dir>]
@@ -376,7 +377,7 @@ mod tests {
         assert_eq!(cli(&["migrate", "old", "--root", root]).0, 2);
         let (code, _, err) = cli(&["new", "widget", "x", "--root", root]);
         assert_eq!(code, 2);
-        assert!(err.contains("`component` or `policy`"), "{err}");
+        assert!(err.contains("`page` or `panel`"), "{err}");
         let (code, _, err) = cli(&["check", "nope", "--root", root]);
         assert_eq!(code, 1);
         assert!(err.contains("no extension `nope`"), "{err}");
