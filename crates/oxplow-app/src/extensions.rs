@@ -3353,9 +3353,7 @@ pub struct ExtensionReview {
     pub impact: Option<crate::extension_impact::ImpactReport>,
     /// The services each of its Starlark scripts declares or is given
     /// (`services::of_extension`), so a person sees what a script can
-    /// reach before installing. A collector's script text isn't read from
-    /// the candidate, so for a collector these are what it declares and
-    /// its kind implies — never "used".
+    /// reach before installing — read from the candidate's own files.
     pub services: Vec<crate::services::ScriptServices>,
 }
 
@@ -3431,10 +3429,9 @@ pub async fn review_extension(
         Some(report)
     };
     let problems = extension.errors.split_off(load_errors);
-    // No project root has the candidate's files: a collector's script
-    // can't be read, and the installed copy of the same name must not
-    // stand in for it.
-    let services = crate::services::of_extension(Path::new(""), &extension);
+    // The candidate's own files, never the installed copy of the same
+    // name.
+    let services = crate::services::of_extension(&extension, &read_candidate);
     Ok(ExtensionReview {
         extension,
         git: git_url.to_string(),
@@ -4757,7 +4754,7 @@ empty: No items.
         write(
             repo.path(),
             "collectors/todo.star",
-            "def transform(input):\n    return {\"facts\": []}\n",
+            "def transform(input):\n    return {\"facts\": [], \"n\": len(files(\"**\"))}\n",
         );
         git(repo.path(), &["add", "."]);
         git(repo.path(), &["commit", "-q", "-m", "source"]);
@@ -4777,14 +4774,15 @@ empty: No items.
             panic!("{:?}", review.services)
         };
         assert_eq!(script.script, "collector `acme.todo_scan`");
+        // Read from the candidate's script, not the project's.
         let scopes: Vec<_> = script
             .services
             .iter()
-            .map(|s| (s.scope.as_str(), s.declared))
+            .map(|s| (s.scope.as_str(), s.declared, s.used))
             .collect();
         assert_eq!(
             scopes,
-            vec![("tree.read", crate::services::Declared::Implied)]
+            vec![("tree.read", crate::services::Declared::Implied, true)]
         );
     }
 

@@ -983,7 +983,9 @@ pub async fn check(
         errors: extension.errors.clone(),
         warnings: extension.warnings.clone(),
         dry_run,
-        services: oxplow_app::services::of_extension(root, &extension),
+        services: oxplow_app::services::of_extension(&extension, &|file| {
+            extensions::read_extension_file(root, name, file)
+        }),
         extension,
         impact,
         against: against.map(str::to_string),

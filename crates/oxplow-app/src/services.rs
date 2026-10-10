@@ -273,11 +273,14 @@ pub enum Declared {
     Undeclared,
 }
 
-/// The services each Starlark script of `ext` (under `root`) uses or
-/// declares, in manifest order: collectors, commands, effects, policies.
+/// The services each Starlark script of `ext` uses or declares, in
+/// manifest order: collectors, commands, effects, policies. `read` gives
+/// one of its files by its path in the extension folder (a collector's
+/// script isn't kept on its spec): the project's copy, or a candidate's
+/// under review.
 pub fn of_extension(
-    root: &std::path::Path,
     ext: &crate::extensions::Extension,
+    read: &dyn Fn(&str) -> Option<String>,
 ) -> Vec<ScriptServices> {
     use oxplow_config::collectors::CollectorRuntime;
     let mut out = Vec::new();
@@ -314,8 +317,7 @@ pub fn of_extension(
         else {
             continue;
         };
-        let text =
-            crate::extensions::read_extension_file(root, &ext.name, entry).unwrap_or_default();
+        let text = read(entry).unwrap_or_default();
         let needs = collector_needs(c, Some(&text));
         push(
             format!("collector `{}`", c.id),

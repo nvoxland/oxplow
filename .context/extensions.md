@@ -1887,9 +1887,9 @@ uses):
   in `needs` flagged "(not in its needs)". The row's lines come from the
   extension's check (`validate_extension` → `CheckReport.services`); the
   install and update review (`ExtensionReview.services`, listed under what
-  it declares and before the impact report) computes them for the candidate
-  without reading its collector scripts, so for a collector they are what it
-  declares and its kind implies — never "used". Bundled extensions show no
+  it declares and before the impact report) computes them from the
+  candidate's own files (`of_extension` reads through the review's
+  reader, never the installed copy of the same name). Bundled extensions show no
   line (they are not checked in the section). Row model:
   `serviceLines` in `extensionRowModel.ts`. `oxplow extension new
   collector` scaffolds `needs: []` under a comment naming the three
