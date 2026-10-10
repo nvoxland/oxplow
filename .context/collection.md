@@ -78,7 +78,11 @@ section for the column.
   BUNDLED_PARSERS`, tsk935): each one's name, what it records, how its
   report is pre-parsed and its jq program (`oxplow-config/src/parsers/
   *.jq`). The config check and the runtime (`Collector::bundled`, which
-  reads it) can't disagree. Any other `entry` is the project's own `jaq` / `starlark` /
+  reads it) can't disagree. `lcov` is the exception in *how* it runs: its jq
+  program is the reference, and the collector runs a native parser
+  (`helpers::lcov_coverage`, in process, one linear pass) that a test holds
+  to the program's reading, because the program took seconds on a 12 MB
+  report ([performance.md](./performance.md) "Reading a big lcov"). Any other `entry` is the project's own `jaq` / `starlark` /
   `exec` parser (`runtime:`, `report.format` = the host pre-parse). There
   is no format registry: a collector names its parser. A parser writes
   paths as the report has them (`cargo llvm-cov` and eslint write absolute

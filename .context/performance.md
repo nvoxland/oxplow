@@ -722,3 +722,45 @@ over the records. Each scan's log line (`duplicate scan`) carries
 `cache_hits`, `cache_misses` and `elapsed_ms`, so a cold scan after a
 restart is visible.
 
+## Reading a big lcov (measured 2026-10-09)
+
+The coverage report collector read a 12 MB `lcov.info` (read after every
+`test:collect`) through the bundled jq program: the host split the report
+into records, serialized them to JSON, ran the program in a script worker,
+and deserialized its answer. Where the time went, on a generated 14.2 MB /
+240,000-line report of 603 files (`tests/lcov_cost.rs`, Apple M4 Max; the
+debug build is what developers run, and the interpreter is ~6x slower
+there):
+
+| Stage | Release | Debug |
+|---|---|---|
+| Split into records (native) | 17 ms | 110 ms |
+| Serialize them to JSON (13.9 MB) | 7 ms | 224 ms |
+| The jq program, including parsing that JSON | 626 ms (26 ms of it the input) | 4,332 ms (386 ms) |
+| Coerce its answer into typed coverage | 5 ms | 24 ms |
+| Whole `Collector::run` (worker included) | 733 ms | 5,484 ms |
+
+So the cost was the program: about 100,000 `DA` entries, each split,
+`tonumber?`-ed and built into an object by the interpreter. Parsing and
+coercion were noise, and nothing was quadratic any more (the earlier
+`reduce` fix held).
+
+The fix is a native parser for the bundled `lcov` collector
+(`helpers::lcov_coverage`): one linear pass from the text to the typed
+`CoverageReport`, in process, with no JSON in between and no worker to
+spawn. The jq program stays as the reference, and a test holds the two to
+the same reading on a generated report and the edge cases (a repeated
+`SF`, a trailing record, junk and short `DA`, the first of each summary
+line).
+
+| | Release | Debug |
+|---|---|---|
+| Before (jq in a worker) | 733 ms | 5,484 ms |
+| After (native) | 10 ms | 64 ms |
+
+One behaviour differs at the margins: a `DA` whose line isn't a whole
+number (`2.5`, `-1`) is skipped, where the program passed it on and the
+typed coercion then failed the whole report. The other bundled parsers
+(junit, cobertura, jacoco, clippy, eslint) read XML or JSON and were not
+measured as costly.
+

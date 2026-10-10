@@ -291,6 +291,9 @@ enum Runner {
     },
     /// An external program (`argv`): raw content on stdin, kind JSON on stdout.
     Exec { argv: Vec<String> },
+    /// A bundled parser written in Rust, run in this process: pure and
+    /// linear, with no script worker to spawn and no JSON to round-trip.
+    Native(fn(&str) -> CollectorOutput),
 }
 
 /// An executable report parser: its name, kind and a way to run it.
@@ -330,6 +333,19 @@ impl Collector {
             Records::Coverage => CollectorKind::Coverage,
             Records::Analysis => CollectorKind::Analysis,
         };
+        // The report formats whose size makes the jq program the cost have
+        // a native parser, tested against the program (which stays the
+        // reference): `lcov` read in seconds on a 12 MB report.
+        if p.name == "lcov" {
+            return Some(Self::new(
+                format!("oxplow.{}", p.name),
+                kind,
+                CollectorRuntime::Jaq,
+                Runner::Native(|content| {
+                    CollectorOutput::Coverage(helpers::lcov_coverage(content))
+                }),
+            ));
+        }
         let input = CollectorInput::named(p.format)?;
         Some(Self::jaq(
             format!("oxplow.{}", p.name),
@@ -432,6 +448,7 @@ impl Collector {
                 let raw = runtime::run_exec(&self.budget, argv, content)?;
                 runtime::value_to_output(kind, raw)
             }
+            Runner::Native(parse) => Ok(parse(content)),
         }
     }
 }
