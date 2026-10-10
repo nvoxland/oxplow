@@ -719,6 +719,8 @@ mod tests {
                 truncated: false,
                 reads: Reads::default(),
                 freshness: Vec::new(),
+                generation: None,
+                coverage: Vec::new(),
             },
             alert: None,
             warnings: Vec::new(),

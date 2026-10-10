@@ -119,6 +119,24 @@ impl ExtensionCatalog {
         extensions
     }
 
+    /// The generation of `root`'s catalog: a hash of everything its load
+    /// depends on (every file under its extensions folder and the project
+    /// config). Equal generations are the same catalog; what a query's
+    /// result says it ran against.
+    pub fn generation(&self, root: &Path) -> String {
+        let fingerprint = fingerprint(root, self.project_of(root));
+        let mut h = xxhash_rust::xxh3::Xxh3::new();
+        for (path, len, mtime) in &fingerprint {
+            h.update(path.to_string_lossy().as_bytes());
+            h.update(&len.to_le_bytes());
+            let since = mtime
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |d| d.as_nanos());
+            h.update(&since.to_le_bytes());
+        }
+        format!("{:016x}", h.digest())
+    }
+
     /// One extension by name. A disabled one is an error saying so; an
     /// unknown one is `NotFound`.
     pub fn named(&self, root: &Path, name: &str) -> Result<Extension, DomainError> {

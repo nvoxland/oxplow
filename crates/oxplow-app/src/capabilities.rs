@@ -1042,6 +1042,7 @@ pub async fn refresh(svc: &crate::Services) -> Result<(), DomainError> {
         .flat_map(|e| e.contributions.iter().cloned())
         .collect();
     oxplow_db::contribution_store::reset(&svc.db, contributions).await?;
+    svc.feeds.restate(&extensions);
     let config = crate::config_service::read_config(&svc.config);
     let published = svc.capabilities.publish(&config, &svc.db).await;
     // A reload can drop the chosen snapshot implementation (its extension

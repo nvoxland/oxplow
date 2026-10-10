@@ -20,7 +20,7 @@ pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Result of a read-only SQL query. `rows` are positional, aligned with
 /// `columns`. `truncated` is true when more rows existed than the cap.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SqlQueryResult {
     pub columns: Vec<String>,
@@ -31,6 +31,34 @@ pub struct SqlQueryResult {
     /// When each model it read last changed since the app started (the
     /// SQL gateway fills it, P4.6); a model unchanged since then is absent.
     pub freshness: Vec<ModelFreshness>,
+    /// The extension catalog's generation the query ran against (the SQL
+    /// gateway fills it): what its models and their meaning were. Opaque;
+    /// equal generations read the same catalog.
+    #[serde(default)]
+    pub generation: Option<String>,
+    /// For each model it read that a collector feeds, how that collection
+    /// stands (the SQL gateway fills it). A query finishing says nothing
+    /// about whether its sources were collected; this does. Models core
+    /// keeps current carry no entry.
+    #[serde(default)]
+    pub coverage: Vec<SourceCoverage>,
+}
+
+/// How one collector feeding a model a query read stands.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceCoverage {
+    /// The model it feeds (`v_acme_pull_request`).
+    pub model: String,
+    /// `collector:<owner>/<id>`.
+    pub source: String,
+    /// `current`, `stale` (past its next due run), `failed` (its last run
+    /// errored), `disabled`, `needs_approval` or `never` (it hasn't run).
+    pub status: String,
+    /// Its last run (RFC 3339), when it has one.
+    pub at: Option<String>,
+    /// Why it failed or was disabled.
+    pub error: Option<String>,
 }
 
 /// When one model last changed.
@@ -953,6 +981,8 @@ fn run_read_only(
             truncated,
             reads,
             freshness: Vec::new(),
+            generation: None,
+            coverage: Vec::new(),
         })
     })();
 

@@ -178,6 +178,8 @@ mod tests {
                 truncated: false,
                 reads: Default::default(),
                 freshness: Vec::new(),
+                generation: None,
+                coverage: Vec::new(),
             })
         })
     }

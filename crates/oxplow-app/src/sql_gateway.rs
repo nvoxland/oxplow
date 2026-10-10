@@ -23,6 +23,18 @@ pub struct SqlGateway {
     /// Temp views every query recreates on its connection: a check's
     /// overlay of what an extension declares but hasn't published (P7.C6).
     overlay: std::sync::Arc<Vec<TempView>>,
+    /// What a result's `coverage` and `generation` come from.
+    collection: Option<std::sync::Arc<Collection>>,
+}
+
+/// What a query result says about the data behind it: which collectors
+/// feed the models it read and how they stand, and the catalog's
+/// generation (`crate::collection_coverage`).
+pub struct Collection {
+    pub feeds: std::sync::Arc<crate::collection_coverage::Feeds>,
+    pub db: Database,
+    pub catalog: std::sync::Arc<crate::extension_catalog::ExtensionCatalog>,
+    pub root: std::path::PathBuf,
 }
 
 impl SqlGateway {
@@ -32,7 +44,15 @@ impl SqlGateway {
             engine: None,
             watermarks: None,
             overlay: std::sync::Arc::new(Vec::new()),
+            collection: None,
         }
+    }
+
+    /// Say how current the collected data behind a query is, and which
+    /// catalog generation it ran against.
+    pub fn with_collection(mut self, collection: Collection) -> Self {
+        self.collection = Some(std::sync::Arc::new(collection));
+        self
     }
 
     /// This gateway with `views` created (in order) for every query it
@@ -80,6 +100,10 @@ impl SqlGateway {
         query.temp_views.extend(self.overlay.iter().cloned());
         let mut out = self.layer.run(query).await?;
         out.reads.measures = measures;
+        if let Some(c) = &self.collection {
+            out.coverage = c.feeds.coverage(&c.db, &out.reads.models).await?;
+            out.generation = Some(c.catalog.generation(&c.root));
+        }
         Ok(self.fresh(out))
     }
 

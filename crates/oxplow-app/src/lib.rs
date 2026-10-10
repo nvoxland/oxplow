@@ -36,6 +36,7 @@ pub mod code_intel;
 pub mod code_intel_conformance;
 pub mod code_quality_runner;
 pub mod collection;
+pub mod collection_coverage;
 pub mod collector_runner;
 pub mod collector_triggers;
 pub mod commands;
@@ -549,6 +550,8 @@ pub struct Services {
     /// The knowledge implementations and the active one: oxplow's wiki
     /// (bundled), a provider's, or none (`.context/knowledge.md`).
     pub knowledge: Arc<oxplow_domain::knowledge::KnowledgeRegistry>,
+    /// Which collectors feed which models (`collection_coverage`).
+    pub feeds: Arc<collection_coverage::Feeds>,
     /// Whether oxplow's wiki is the active store (its watch and repair
     /// run only then).
     pub wiki: Arc<knowledge::WikiFollow>,
@@ -1060,6 +1063,15 @@ impl Services {
         let extension_catalog = Arc::new(extension_catalog::ExtensionCatalog::for_project(
             &layout.project_dir,
         ));
+        // A query's result says which collectors feed what it read and how
+        // they stand, and the catalog generation it ran against.
+        let feeds = Arc::new(collection_coverage::Feeds::default());
+        let sql = sql.with_collection(sql_gateway::Collection {
+            feeds: feeds.clone(),
+            db: db.clone(),
+            catalog: extension_catalog.clone(),
+            root: layout.project_dir.clone(),
+        });
         // Every capability's implementations (`capabilities`): core's (the
         // VCS here, knowledge once it's built), what the project's
         // extensions declare, and running provider instances'.
@@ -1645,6 +1657,7 @@ impl Services {
             snapshots,
             providers,
             knowledge,
+            feeds,
             wiki,
             wiki_page_store,
             page_visit_store,

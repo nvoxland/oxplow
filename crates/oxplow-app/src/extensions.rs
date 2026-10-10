@@ -2816,6 +2816,8 @@ pub async fn run_lens(
                     truncated: false,
                     reads: Default::default(),
                     freshness: Vec::new(),
+                    generation: None,
+                    coverage: Vec::new(),
                 },
                 alert: None,
                 warnings: Vec::new(),
@@ -3008,6 +3010,8 @@ async fn execute(
             truncated: false,
             reads: oxplow_db::Reads::default(),
             freshness: Vec::new(),
+            generation: None,
+            coverage: Vec::new(),
         }
     } else {
         layer
