@@ -1744,6 +1744,37 @@ mod tests {
             .unwrap();
     }
 
+    /// The latest acceptance delivered under an id the log never had: what
+    /// the effect knows of the event is what its envelope carries.
+    async fn deliver_unlogged_acceptance(f: &crate::test_fixtures::EffortFixture) {
+        let seq: i64 = f
+            .svc
+            .db
+            .read(|c| {
+                c.query_row(
+                    "SELECT max(seq) FROM event_log WHERE type = 'oxplow_bundled.accepted'",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let mut ev = f
+            .svc
+            .event_log_store
+            .read_after(seq - 1, 1)
+            .await
+            .unwrap()
+            .remove(0);
+        ev.envelope.id = oxplow_domain::EventId::generate();
+        use crate::event_pump::AsyncEventConsumer as _;
+        crate::effect_triggers::EffectTriggers::new(std::sync::Arc::downgrade(&f.svc))
+            .handle(&ev)
+            .await
+            .unwrap();
+    }
+
     /// The follow-ups the effect filed: (title, body, author).
     async fn follow_ups(
         f: &crate::test_fixtures::EffortFixture,
@@ -1876,6 +1907,27 @@ mod tests {
             })
             .await
             .unwrap()
+    }
+
+    /// The effect takes the effort, its item and what was accepted
+    /// unchecked from the event's own subject, not from a second read of the
+    /// log: an event the log doesn't hold still files its follow-up.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_follow_up_reads_the_acceptance_from_its_envelope() {
+        let f = review_fixture().await;
+        approve_follow_up(&f).await;
+        review(
+            &f,
+            &oxplow_domain::Actor::Human,
+            "oxplow.review.accept",
+            serde_json::json!({ "ref": effort_ref(&f), "force": true }),
+        )
+        .await
+        .unwrap();
+        deliver_unlogged_acceptance(&f).await;
+        let filed = follow_ups(&f).await;
+        assert_eq!(filed.len(), 1, "{filed:?}");
+        assert!(filed[0].1.contains("- [ ] "), "{}", filed[0].1);
     }
 
     /// tsk991: an earlier forced acceptance stops a second follow-up only
