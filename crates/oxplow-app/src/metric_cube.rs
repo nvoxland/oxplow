@@ -58,7 +58,7 @@ pub struct MetricCubeBuilder {
 
 /// What a measure's last complete pass saw: its producers' capture token
 /// and the cube epoch.
-type BuiltAt = ((i64, Option<i64>), i64);
+type BuiltAt = ((i64, Option<i64>), i64, String);
 
 /// Captures folded per build transaction (tsk113). Large enough to amortize
 /// the WAL page rewrites the profile flagged; small enough to bound the
@@ -70,22 +70,94 @@ const BUILD_CHUNK: usize = 256;
 /// `metric_live_fact` shape, held in Rust for the chunk (tsk113).
 type LivePartition = HashMap<(String, String), Vec<FactRow>>;
 
+/// A value threshold a spec of the measure filters on — `min_value` or
+/// `max_value` — as a bucketing term. A cube bucket is the facts that agree on
+/// the promoted dims **and on whether they pass each bound**, so a threshold
+/// count is a sum over the buckets that pass instead of a fold of raw facts
+/// (the cube drops the individual values, which is why it once declined these
+/// specs). The terms are exactly the bounds the measure's specs use, so the
+/// bucket count stays bounded by them, not by the distinct values.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ValueBound {
+    min: bool,
+    at: f64,
+}
+
+impl ValueBound {
+    /// The bounds `filter` reads.
+    pub(crate) fn of(filter: &FactFilter) -> Vec<ValueBound> {
+        let mut out = Vec::new();
+        if let Some(at) = filter.min_value {
+            out.push(ValueBound { min: true, at });
+        }
+        if let Some(at) = filter.max_value {
+            out.push(ValueBound { min: false, at });
+        }
+        out
+    }
+
+    /// Its `dims_key` entry: `value>=11` or `value<=0.5`.
+    fn key(&self) -> String {
+        format!("value{}{}", if self.min { ">=" } else { "<=" }, self.at)
+    }
+
+    /// The same test `FactFilter::matches` makes of a fact's value.
+    fn passes(&self, value: f64) -> bool {
+        if self.min {
+            value >= self.at
+        } else {
+            value <= self.at
+        }
+    }
+}
+
+/// What a measure's cube is bucketed by: the promoted dimensions and the value
+/// bounds its specs use. A change to either is a different grain, which is a
+/// cube REBUILD, never a schema change.
+#[derive(Debug, Clone, Default)]
+struct Grain {
+    promoted: Vec<String>,
+    bounds: Vec<ValueBound>,
+}
+
+impl Grain {
+    /// The bound entries a `dims_key` of this grain carries.
+    fn bound_keys(&self) -> BTreeSet<String> {
+        self.bounds.iter().map(ValueBound::key).collect()
+    }
+}
+
+/// The bound entries (`value>=…` / `value<=…`) a stored `dims_key` carries.
+fn stored_bound_keys(dims_key: &str) -> BTreeSet<String> {
+    let dims: BTreeMap<String, String> = serde_json::from_str(dims_key).unwrap_or_default();
+    dims.into_keys()
+        .filter(|k| k.starts_with("value>=") || k.starts_with("value<="))
+        .collect()
+}
+
 /// The canonical `dims_key` for a bucket: the promoted dimension values a fact
-/// carries, as sorted-key JSON. `{}` when nothing is promoted or the fact carries
-/// none of the promoted dims.
+/// carries, plus `0`/`1` for each value bound, as sorted-key JSON. `{}` when
+/// nothing is promoted or bounded and the fact carries none of the promoted dims.
 ///
 /// **`BTreeMap` is load-bearing, not tidiness** — `dims_key` is part of the cube's
 /// PRIMARY KEY, so an unstable field order would write the same logical bucket
 /// under two keys and double-count it on merge.
-fn dims_key(f: &FactRow, promoted: &[String]) -> String {
+fn dims_key(f: &FactRow, grain: &Grain) -> String {
     // ONE `dims_json` parse for the whole promoted set (tsk214). Most promoted
     // dims are JSON-backed, so a cache per dim meant re-parsing the same string
     // once per dim, per fact, per capture — the bulk of `dim_value`'s 11.5%.
     let mut dims = DimsCache::default();
-    let map: BTreeMap<&str, String> = promoted
+    let mut map: BTreeMap<String, String> = grain
+        .promoted
         .iter()
-        .filter_map(|d| dim_value_cached(f, d, &mut dims).map(|v| (d.as_str(), v)))
+        .filter_map(|d| dim_value_cached(f, d, &mut dims).map(|v| (d.clone(), v)))
         .collect();
+    for bound in &grain.bounds {
+        map.insert(
+            bound.key(),
+            if bound.passes(f.value) { "1" } else { "0" }.into(),
+        );
+    }
     serde_json::to_string(&map).unwrap_or_else(|_| "{}".into())
 }
 
@@ -111,7 +183,7 @@ impl MetricCubeBuilder {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .get(&measure)
-            .copied()
+            .cloned()
     }
 
     /// Attach the ancestry resolver — the same instance the engine holds, so
@@ -146,6 +218,15 @@ impl MetricCubeBuilder {
         };
         let scope = parse_capture_scope(measure_key, &measure.capture_scope)?;
         let producers = self.facts.producers_for_measure(measure.id).await?;
+        // The grain the specs call for now. A cube built to another grain is
+        // dropped and folded again: its rows would answer a bound they don't
+        // carry, or carry one nothing reads.
+        let grain = self.grain(&measure).await?;
+        if let Some(stored) = self.facts.cube_sample_dims_key(measure.id).await? {
+            if stored_bound_keys(&stored) != grain.bound_keys() {
+                self.facts.reset_cube(measure.id).await?;
+            }
+        }
         // Nothing recorded since the last complete pass, and no invalidation:
         // nothing past the watermark, so don't load every capture to see so.
         let at: BuiltAt = (
@@ -153,13 +234,16 @@ impl MetricCubeBuilder {
                 .capture_token_for_producers(producers.clone())
                 .await?,
             self.facts.cube_epoch().await?,
+            format!("{:?}", grain.bound_keys()),
         );
-        if self.built_at(measure.id) == Some(at) {
+        if self.built_at(measure.id).as_ref() == Some(&at) {
             return Ok(0);
         }
         #[cfg(test)]
         self.loads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let folded = self.build_measure_from(&measure, scope, producers).await?;
+        let folded = self
+            .build_measure_from(&measure, scope, producers, &grain)
+            .await?;
         // A pass an invalidation fenced (the epoch moved) isn't complete.
         if self.facts.cube_epoch().await? == at.1 {
             self.built
@@ -170,18 +254,10 @@ impl MetricCubeBuilder {
         Ok(folded)
     }
 
-    /// [`Self::build_measure`]'s pass over `producers`' captures.
-    async fn build_measure_from(
-        &self,
-        measure: &Measure,
-        scope: CaptureScope,
-        producers: Vec<String>,
-    ) -> Result<usize, DomainError> {
-        let captures = self.facts.captures_for_producers(producers).await?;
-
-        // Promoted dims ARE the cube's grain. Read once per build: promoting a dim
-        // later changes the grain, which is a cube REBUILD, never a schema change
-        // (the raw facts always keep every dim).
+    /// The grain `measure`'s cube is built to: the promoted dimensions (a flip
+    /// is a rebuild, never a schema change — the raw facts keep every dim) and
+    /// the value bounds the specs over the measure use.
+    async fn grain(&self, measure: &Measure) -> Result<Grain, DomainError> {
         let promoted: Vec<String> = self
             .facts
             .list_dimensions()
@@ -190,6 +266,37 @@ impl MetricCubeBuilder {
             .filter(|d| d.promoted && !crate::metric_engine::is_spine_dim(&d.key))
             .map(|d| d.key)
             .collect();
+        let mut bounds: Vec<ValueBound> = Vec::new();
+        for spec in self.facts.list_specs().await? {
+            if spec.source_measure.as_deref() != Some(measure.key.as_str()) {
+                continue;
+            }
+            let Some(filter) = spec
+                .filter_json
+                .as_deref()
+                .and_then(|f| FactFilter::from_json(f).ok())
+            else {
+                continue;
+            };
+            for bound in ValueBound::of(&filter) {
+                if !bounds.iter().any(|b| b.key() == bound.key()) {
+                    bounds.push(bound);
+                }
+            }
+        }
+        bounds.sort_by_key(ValueBound::key);
+        Ok(Grain { promoted, bounds })
+    }
+
+    /// [`Self::build_measure`]'s pass over `producers`' captures.
+    async fn build_measure_from(
+        &self,
+        measure: &Measure,
+        scope: CaptureScope,
+        producers: Vec<String>,
+        grain: &Grain,
+    ) -> Result<usize, DomainError> {
+        let captures = self.facts.captures_for_producers(producers).await?;
 
         // One fold per stream — a stream is a WORKTREE and the fold reconstructs
         // one worktree's state (tsk98).
@@ -201,11 +308,11 @@ impl MetricCubeBuilder {
         for (stream, caps) in by_stream {
             folded += match scope {
                 CaptureScope::Complete => {
-                    self.build_stream_complete(measure, stream, &caps, &promoted)
+                    self.build_stream_complete(measure, stream, &caps, grain)
                         .await?
                 }
                 _ => {
-                    self.build_stream(measure, scope, stream, &caps, &promoted)
+                    self.build_stream(measure, scope, stream, &caps, grain)
                         .await?
                 }
             };
@@ -229,7 +336,7 @@ impl MetricCubeBuilder {
         measure: &Measure,
         stream: i64,
         caps: &[MetricCapture],
-        promoted: &[String],
+        grain: &Grain,
     ) -> Result<usize, DomainError> {
         let todo = self.uncubed(measure, stream, caps).await?;
         if todo.is_empty() {
@@ -245,7 +352,7 @@ impl MetricCubeBuilder {
                     .facts_for_captures(measure.id, vec![c.id])
                     .await?;
                 let own_refs: Vec<&FactRow> = own.iter().collect();
-                let rows = cube_rows(&own_refs, promoted);
+                let rows = cube_rows(&own_refs, grain);
                 // Complete scope needs no branch STATE (each capture restates
                 // the whole population), but the watermark row is per branch,
                 // so the capture still advances — and, first time, creates —
@@ -344,7 +451,7 @@ impl MetricCubeBuilder {
         scope: CaptureScope,
         stream: i64,
         caps: &[MetricCapture],
-        promoted: &[String],
+        grain: &Grain,
     ) -> Result<usize, DomainError> {
         let todo = self.uncubed(measure, stream, caps).await?;
         if todo.is_empty() {
@@ -434,7 +541,7 @@ impl MetricCubeBuilder {
                 // the previous row: min/max are not decrementable, so a fresh
                 // aggregate is correct for every aggregation by construction.
                 let live: Vec<&FactRow> = part.values().flatten().collect();
-                let rows = cube_rows(&live, promoted);
+                let rows = cube_rows(&live, grain);
                 steps.push((
                     Some(oxplow_db::BatchApply {
                         branch: c.branch.clone(),
@@ -665,11 +772,13 @@ pub async fn cube_series(
 ) -> Result<Option<Vec<SeriesPoint>>, DomainError> {
     // --- eligibility: can the cube answer this EXACTLY? ---
     // A value threshold (min/max) filters on each fact's OWN value, which the
-    // cube summed away — it must fall back to the facts (tsk124 added max_value
-    // for `oxplow.coverage.untested_files`).
-    if !Cell::decomposes(agg) || filter.min_value.is_some() || filter.max_value.is_some() {
+    // cube summed away — except for the bounds its grain carries: each bucket
+    // knows whether its facts pass them (`ValueBound`). A bound that isn't in
+    // the rows' grain is read from the facts (checked against the rows below).
+    if !Cell::decomposes(agg) {
         return Ok(None);
     }
+    let bounds = ValueBound::of(filter);
     let promoted: BTreeSet<String> = facts
         .list_dimensions()
         .await?
@@ -742,9 +851,17 @@ pub async fn cube_series(
     // producers' grouped live state, exactly as `tree_state_series` does).
     // Group placement is decided per bucket below, at emit time.
     let mut kept: Vec<&oxplow_db::CubeReadRow> = Vec::new();
-    for r in &rows {
+    'rows: for r in &rows {
         let dims: BTreeMap<String, String> = serde_json::from_str(&r.dims_key).unwrap_or_default();
         let hit = |key: &str, want: &str| dims.get(key).map(String::as_str) == Some(want);
+        for bound in &bounds {
+            match dims.get(&bound.key()).map(String::as_str) {
+                // The rows weren't built to this bound: only the facts know.
+                None => return Ok(None),
+                Some("1") => {}
+                Some(_) => continue 'rows,
+            }
+        }
         if let Some(sev) = &filter.severity {
             if !hit("oxplow.severity", sev) {
                 continue;
@@ -885,11 +1002,11 @@ pub async fn cube_series(
 ///
 /// Keyed on the FACT's producer, not the capture's — the state at capture N holds
 /// every producer's live facts, including ones whose last run was long ago.
-fn cube_rows(live: &[&FactRow], promoted: &[String]) -> Vec<NewCubeRow> {
+fn cube_rows(live: &[&FactRow], grain: &Grain) -> Vec<NewCubeRow> {
     let mut buckets: BTreeMap<(String, String), Vec<&FactRow>> = BTreeMap::new();
     for &f in live {
         buckets
-            .entry((f.producer.clone(), dims_key(f, promoted)))
+            .entry((f.producer.clone(), dims_key(f, grain)))
             .or_default()
             .push(f);
     }
@@ -1256,11 +1373,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_value_threshold_spec_never_touches_the_cube() {
+    async fn a_value_threshold_no_spec_uses_never_touches_the_cube() {
         // `oxplow.high_complexity_fns` (min_value 11) and `oxplow.long_functions`
         // (min_value 61) filter on each fact's OWN value — which the cube summed
-        // away. These reads stay on the facts permanently, by design; the cube is
-        // a lossy projection and the lossiness IS the speedup.
+        // away, except for the bounds the measure's specs use (`ValueBound`).
+        // With no spec using this one it isn't in the grain, and the read stays
+        // on the facts.
         let (engine, facts, builder) = fixture().await;
         let m = per_subject_measure(&facts, "acme.complexity").await;
         facts
@@ -1304,6 +1422,225 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![1.0],
             "the facts answer it, exactly as before the cube existed"
+        );
+    }
+
+    /// What a threshold spec's first read costs from the facts and from the
+    /// cube: ignored; prints.
+    /// `cargo nextest run -p oxplow-app --release --run-ignored only --no-capture threshold_read_cost`
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "a measurement"]
+    async fn threshold_read_cost() {
+        let (engine, facts, builder) = fixture().await;
+        let m = per_subject_measure(&facts, "acme.complexity").await;
+        let hot = threshold_spec(
+            &facts,
+            "acme.hot",
+            "acme.complexity",
+            "count",
+            r#"{"min_value":11.0}"#,
+        )
+        .await;
+        // 600 captures of 3,000 functions, a tenth re-measured each time.
+        for h in 0..600u32 {
+            let rows: Vec<NewFact> = (0..3000u32)
+                .filter(|f| h == 0 || (f + h) % 10 == 0)
+                .map(|f| case(m, &format!("fn{f}"), f64::from((f * 7 + h * 13) % 40)))
+                .collect();
+            facts
+                .record_facts(
+                    cap_in(
+                        1,
+                        &format!(
+                            "2026-06-{:02}T{:02}:{:02}:00Z",
+                            1 + h / 24 % 28,
+                            h % 24,
+                            h % 60
+                        ),
+                    ),
+                    rows,
+                )
+                .await
+                .unwrap();
+        }
+        let t = std::time::Instant::now();
+        let from_facts = engine.series_for_spec(&hot, None).await.unwrap();
+        let facts_ms = t.elapsed().as_millis();
+        let t = std::time::Instant::now();
+        builder.build_measure("acme.complexity").await.unwrap();
+        let build_ms = t.elapsed().as_millis();
+        let t = std::time::Instant::now();
+        let from_cube = engine.series_for_spec(&hot, None).await.unwrap();
+        let cube_ms = t.elapsed().as_millis();
+        assert_eq!(from_facts, from_cube);
+        println!(
+            "threshold count over {} captures: from the facts {facts_ms} ms, cube build {build_ms} ms, from the cube {cube_ms} ms",
+            from_cube.len()
+        );
+    }
+
+    /// A threshold spec over a measure: the specs a cube is built for.
+    async fn threshold_spec(
+        facts: &SqliteFactStore,
+        key: &str,
+        measure: &str,
+        agg: &str,
+        filter: &str,
+    ) -> MetricSpec {
+        let mut s = NewMetricSpec::base(key, key, measure, agg);
+        s.filter_json = Some(filter.into());
+        facts.upsert_spec(s).await.unwrap();
+        facts.get_spec(key).await.unwrap().unwrap()
+    }
+
+    /// Restated values crossing the threshold both ways, and a value on it.
+    async fn complexity_history(facts: &SqliteFactStore, m: i64) {
+        for (at, rows) in [
+            (
+                "2026-06-30T10:00:00Z",
+                vec![("a", 14.0), ("b", 3.0), ("c", 11.0), ("d", 61.0)],
+            ),
+            ("2026-06-30T11:00:00Z", vec![("a", 5.0), ("b", 20.0)]),
+            ("2026-06-30T12:00:00Z", vec![("c", 2.0), ("e", 70.0)]),
+        ] {
+            facts
+                .record_facts(
+                    cap_in(1, at),
+                    rows.into_iter().map(|(s, v)| case(m, s, v)).collect(),
+                )
+                .await
+                .unwrap();
+        }
+    }
+
+    /// The three specs the cube used to decline — `min_value` counts and a
+    /// `max_value` count — are served from it: bucketing by whether a fact
+    /// passes each threshold a spec of the measure uses keeps the answer
+    /// exactly the facts', whichever way a restated subject crosses.
+    #[tokio::test]
+    async fn threshold_specs_are_cube_served_and_equal_the_facts() {
+        let (engine, facts, builder) = fixture().await;
+        let m = per_subject_measure(&facts, "acme.complexity").await;
+        let specs = [
+            threshold_spec(
+                &facts,
+                "acme.hot",
+                "acme.complexity",
+                "count",
+                r#"{"min_value":11.0}"#,
+            )
+            .await,
+            threshold_spec(
+                &facts,
+                "acme.cold",
+                "acme.complexity",
+                "count",
+                r#"{"max_value":5.0}"#,
+            )
+            .await,
+            threshold_spec(
+                &facts,
+                "acme.hot_total",
+                "acme.complexity",
+                "sum",
+                r#"{"min_value":11.0}"#,
+            )
+            .await,
+            threshold_spec(
+                &facts,
+                "acme.long",
+                "acme.complexity",
+                "count",
+                r#"{"min_value":61.0}"#,
+            )
+            .await,
+        ];
+        complexity_history(&facts, m).await;
+        let mut oracles = Vec::new();
+        for s in &specs {
+            oracles.push(oracle(&engine, s).await);
+        }
+        assert_eq!(
+            oracles[0].iter().map(|p| p.value).collect::<Vec<_>>(),
+            vec![3.0, 3.0, 3.0],
+            "the facts: a, c, d; then b, d, c; then b, d, e"
+        );
+        builder.build_measure("acme.complexity").await.unwrap();
+        for (s, o) in specs.iter().zip(&oracles) {
+            assert_cube_answers(&engine, &facts, "acme.complexity", s, o).await;
+        }
+    }
+
+    /// A threshold a spec adds after the cube was built changes its grain:
+    /// the cube is rebuilt for it rather than served without it.
+    #[tokio::test]
+    async fn a_threshold_added_after_the_cube_was_built_rebuilds_it() {
+        let (engine, facts, builder) = fixture().await;
+        let m = per_subject_measure(&facts, "acme.complexity").await;
+        complexity_history(&facts, m).await;
+        let plain = spec(&facts, "acme.total", "acme.complexity", "sum").await;
+        let plain_oracle = oracle(&engine, &plain).await;
+        builder.build_measure("acme.complexity").await.unwrap();
+        assert_cube_answers(&engine, &facts, "acme.complexity", &plain, &plain_oracle).await;
+
+        let hot = threshold_spec(
+            &facts,
+            "acme.hot",
+            "acme.complexity",
+            "count",
+            r#"{"min_value":11.0}"#,
+        )
+        .await;
+        let hot_oracle = engine.series_for_spec(&hot, None).await.unwrap();
+        builder.build_measure("acme.complexity").await.unwrap();
+        assert_cube_answers(&engine, &facts, "acme.complexity", &hot, &hot_oracle).await;
+        // The rebuilt grain still answers what it answered.
+        assert_cube_answers(&engine, &facts, "acme.complexity", &plain, &plain_oracle).await;
+    }
+
+    /// A threshold no spec of the measure uses isn't in the grain, so the
+    /// cube declines it rather than guess.
+    #[tokio::test]
+    async fn a_threshold_outside_the_grain_declines() {
+        let (_engine, facts, builder) = fixture().await;
+        let m = per_subject_measure(&facts, "acme.complexity").await;
+        complexity_history(&facts, m).await;
+        threshold_spec(
+            &facts,
+            "acme.hot",
+            "acme.complexity",
+            "count",
+            r#"{"min_value":11.0}"#,
+        )
+        .await;
+        builder.build_measure("acme.complexity").await.unwrap();
+        let measure = facts.get_measure("acme.complexity").await.unwrap().unwrap();
+        let served = |filter: &str| {
+            let (facts, measure) = (facts.clone(), measure.clone());
+            let filter = FactFilter::from_json(filter).unwrap();
+            async move {
+                cube_series(
+                    &facts,
+                    &measure,
+                    CaptureScope::PerSubject,
+                    Aggregation::Count,
+                    &filter,
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                .unwrap()
+            }
+        };
+        assert!(served(r#"{"min_value":11.0}"#).await.is_some());
+        assert!(
+            served(r#"{"min_value":12.0}"#).await.is_none(),
+            "not a bound any spec reads"
+        );
+        assert!(
+            served(r#"{"max_value":11.0}"#).await.is_none(),
+            "nor the other direction"
         );
     }
 
@@ -1875,6 +2212,94 @@ mod tests {
         );
         assert_eq!(builder.build_measure("acme.hit").await.unwrap(), 2);
         assert_cube_answers(&engine, &facts, "acme.hit", &spec, &oracle).await;
+    }
+
+    /// `oxplow.coverage.untested_files` is a per-path `max_value` count: files
+    /// whose fact is 0. A file that gains coverage leaves the count and one
+    /// that loses it joins, and the cube — bucketing by the bound — says the
+    /// same as the facts, evictions by the scan's file list included.
+    #[tokio::test]
+    async fn a_per_path_max_value_count_is_cube_served_and_equals_the_facts() {
+        let (engine, facts, builder, db) = fixture_full().await;
+        let snapshots = oxplow_db::SqliteSnapshotStore::new(db);
+        let m = facts
+            .upsert_measure(oxplow_db::NewMeasure {
+                capture_scope: "per-path".into(),
+                ..oxplow_db::NewMeasure::new("acme.covered", "Covered")
+            })
+            .await
+            .unwrap();
+        let file = |path: &str, snap: i64| oxplow_db::FileSnapshot {
+            id: 0,
+            stream_id: oxplow_domain::StreamId::new(1),
+            path: path.into(),
+            blob_hash: Some("h".into()),
+            size_bytes: 1,
+            captured_at: ts("2026-06-30T09:00:00Z"),
+            storage: oxplow_db::SnapshotStorage::Oxplow,
+            snapshot_id: Some(snap),
+            mtime_ms: None,
+            content_hash: None,
+        };
+        let mut snaps = Vec::new();
+        for paths in [
+            vec!["a.rs", "b.rs", "c.rs"],
+            vec!["a.rs", "b.rs"],
+            vec!["b.rs", "c.rs"],
+        ] {
+            let snap = snapshots
+                .create_snapshot(oxplow_domain::StreamId::new(1))
+                .await
+                .unwrap();
+            for p in paths {
+                snapshots.capture(file(p, snap)).await.unwrap();
+            }
+            snaps.push(snap);
+        }
+        let scan = |snap: i64, at: &str| NewMetricCapture {
+            captured_at: Some(ts(at)),
+            snapshot_id: Some(snap),
+            ..NewMetricCapture::done(1, "gauge", "builtin")
+        };
+        let cov = |path: &str, v: f64| NewFact {
+            path: Some(path.into()),
+            ..NewFact::new(m, v)
+        };
+        let spec = threshold_spec(
+            &facts,
+            "acme.untested",
+            "acme.covered",
+            "count",
+            r#"{"max_value":0.0}"#,
+        )
+        .await;
+        for (snap, at, rows) in [
+            (
+                snaps[0],
+                "2026-06-30T10:00:00Z",
+                vec![cov("a.rs", 0.0), cov("b.rs", 40.0), cov("c.rs", 0.0)],
+            ),
+            (
+                snaps[1],
+                "2026-06-30T11:00:00Z",
+                vec![cov("a.rs", 12.0), cov("b.rs", 0.0)],
+            ),
+            (
+                snaps[2],
+                "2026-06-30T12:00:00Z",
+                vec![cov("b.rs", 0.0), cov("c.rs", 0.0)],
+            ),
+        ] {
+            facts.record_facts(scan(snap, at), rows).await.unwrap();
+        }
+        let oracle = oracle(&engine, &spec).await;
+        assert_eq!(
+            oracle.iter().map(|p| p.value).collect::<Vec<_>>(),
+            vec![2.0, 2.0, 2.0],
+            "a, c; then c (kept), b; then b, c (a evicted by the scan)"
+        );
+        builder.build_measure("acme.covered").await.unwrap();
+        assert_cube_answers(&engine, &facts, "acme.covered", &spec, &oracle).await;
     }
 
     #[tokio::test]

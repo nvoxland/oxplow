@@ -158,6 +158,7 @@ disallowed-methods = [
   { path = "oxplow_db::fact_store::SqliteFactStore::record_facts", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::fact_store::SqliteFactStore::record_facts_logged", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::fact_store::SqliteFactStore::record_test_run", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
+  { path = "oxplow_db::fact_store::SqliteFactStore::reset_cube", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::fact_store::SqliteFactStore::seed_live_state", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::fact_store::SqliteFactStore::upsert_dimension", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::fact_store::SqliteFactStore::upsert_measure", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },

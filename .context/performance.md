@@ -153,7 +153,8 @@ cube rows) is ~10 ms in SQLite. **Pushing the window into the cube's SQL
 isn't worth doing**: it would save at most that. More than half of what's
 left is three per-path *threshold counts* the cube declines; a time window
 can't cut them — an in-window point still folds per-path state from before
-it. They need per-capture counts built with the cube (tsk1019).
+it. They get per-capture counts built with the cube ("Threshold counts from
+the cube" below).
 
 ## The cube as an asset: what a burst costs (P7.B1, 2026-10-01; corrected 2026-10-02)
 
@@ -811,4 +812,32 @@ after), release build, median of five `facts_for_measure` reads
 
 A third of the read, in the case where it can matter; nothing where facts
 have no message.
+
+## Threshold counts from the cube (measured 2026-10-09)
+
+The three specs the cube declined (`oxplow.long_functions` and
+`oxplow.high_complexity_fns` `min_value` counts, `oxplow.coverage.untested_files`
+a `max_value` count) folded per-path state from raw facts on the first read of
+each generation — 698, 685 and 544 ms on the 6 M-fact copy. A cube bucket now
+also records whether its facts pass each value bound the measure's specs use,
+so these are sums over the passing buckets (`.context/metrics.md` "Value bounds
+are part of the grain").
+
+On a synthetic per-subject measure (600 captures of 3,000 functions, a tenth
+re-measured each capture, release; `metric_cube::tests::threshold_read_cost`,
+ignored), one `min_value` count:
+
+| | ms |
+|---|---|
+| Read from the facts | 227 |
+| Cube build (once; incremental after) | 994 |
+| Read from the cube | 1 |
+
+The build is the one-time fold every cube-served measure pays at write time,
+and a changed bound set re-folds that measure once. Equality with the facts is
+held by `threshold_specs_are_cube_served_and_equal_the_facts` (counts and a
+sum, min and max bounds, a value on the bound, restated subjects crossing it
+both ways) and `a_per_path_max_value_count_is_cube_served_and_equals_the_facts`;
+the real-data gate (`cube_equivalence` on a copy of the live database) has not
+been run on this change.
 

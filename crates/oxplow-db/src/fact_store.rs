@@ -1951,6 +1951,43 @@ impl SqliteFactStore {
         Ok(producers)
     }
 
+    /// One bucket's `dims_key` of `measure_id`'s cube, or `None` when it has
+    /// none: every bucket of a measure is built to one grain, so one tells it.
+    pub async fn cube_sample_dims_key(
+        &self,
+        measure_id: i64,
+    ) -> Result<Option<String>, DomainError> {
+        self.db
+            .call(move |conn| {
+                conn.prepare_cached(
+                    "SELECT dims_key FROM metric_cube WHERE measure_id = ?1 LIMIT 1",
+                )?
+                .query_row(params![measure_id], |r| r.get(0))
+                .optional()
+            })
+            .await
+    }
+
+    /// Drop `measure_id`'s cube, its live state and watermarks, and fence any
+    /// build in flight: the cube is disposable, and a different grain is
+    /// folded again from the facts.
+    pub async fn reset_cube(&self, measure_id: i64) -> Result<(), DomainError> {
+        self.db
+            .transaction(move |tx| {
+                for sql in [
+                    "DELETE FROM metric_cube WHERE measure_id = ?1",
+                    "DELETE FROM metric_live_fact WHERE measure_id = ?1",
+                    "DELETE FROM metric_cube_state WHERE measure_id = ?1",
+                ] {
+                    tx.execute(sql, params![measure_id]).map_err(map_sql_err)?;
+                }
+                tx.execute("UPDATE metric_cube_epoch SET epoch = epoch + 1", [])
+                    .map_err(map_sql_err)?;
+                Ok(())
+            })
+            .await
+    }
+
     /// How far the cube is built for `(measure, stream)` — the newest capture
     /// folded in, as `(captured_at, id)` so it compares on the same key the fold
     /// orders by. `None` ⇒ nothing cubed yet.
