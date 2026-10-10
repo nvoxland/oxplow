@@ -837,7 +837,18 @@ The build is the one-time fold every cube-served measure pays at write time,
 and a changed bound set re-folds that measure once. Equality with the facts is
 held by `threshold_specs_are_cube_served_and_equal_the_facts` (counts and a
 sum, min and max bounds, a value on the bound, restated subjects crossing it
-both ways) and `a_per_path_max_value_count_is_cube_served_and_equals_the_facts`;
-the real-data gate (`cube_equivalence` on a copy of the live database) has not
-been run on this change.
+both ways) and `a_per_path_max_value_count_is_cube_served_and_equals_the_facts`.
 
+**On real data** (`cube_equivalence` on a `VACUUM INTO` copy of the live
+database, 1.37 M facts, 162,275 captures folded in 98.7 s; the live file was
+never opened by the harness): **all 72 series identical to the fact oracle**,
+72 specs in 27,778 ms from facts → 1,823 ms with the cube, and the three
+specs are no longer among the ones the cube declines (5 remain, all
+unrelated: `oxplow.coverage.branch_pct`, `repo.eval_usage`,
+`repo.focused_tests`, `repo.hardcoded_secrets`, `work.open_tasks`):
+
+| spec | From facts | From the cube |
+|---|---|---|
+| `oxplow.long_functions` | 1,878.9 ms | 7.8 ms |
+| `oxplow.high_complexity_fns` | 1,818.7 ms | 7.9 ms |
+| `oxplow.coverage.untested_files` | 579.5 ms | 29.0 ms |
