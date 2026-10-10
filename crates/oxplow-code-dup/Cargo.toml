@@ -11,5 +11,9 @@ license.workspace = true
 oxplow-code-metrics = { workspace = true }
 tree-sitter = { workspace = true }
 
+[dev-dependencies]
+# The measurement example shapes blocks as the `duplicate_blocks` builtin does.
+serde_json = { workspace = true }
+
 [lints]
 workspace = true
