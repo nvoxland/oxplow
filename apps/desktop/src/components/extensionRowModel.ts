@@ -162,6 +162,12 @@ export interface ReviewModel {
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
+/** `event_type` → `Event type`: how a person names a kind of contribution. */
+const kindTitle = (kind: string) => {
+  const words = kind.replace(/_/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+};
+
 export function reviewModel(review: ExtensionReview): ReviewModel {
   const ext = review.extension;
   const declares: string[] = [];
@@ -185,10 +191,10 @@ export function reviewModel(review: ExtensionReview): ReviewModel {
       `${plural(advisories.length, "advisory", "advisories")} shown to your agents: ${advisories.map((a) => a.id).join(", ")}`,
     );
   }
-  const metrics = ext.metrics ?? [];
-  if (metrics.length > 0) declares.push(plural(metrics.length, "metric"));
-  if (ext.ui.slots.length > 0) {
-    declares.push(`Adds to pages: ${[...new Set(ext.ui.slots.map((s) => s.slot))].join(", ")}`);
+  // Every other contribution, one row each: the kinds above say more.
+  for (const d of ext.contributions ?? []) {
+    if (d.id.kind === "lens" || d.id.kind === "collector") continue;
+    declares.push(`${kindTitle(d.id.kind)} ${d.id.local}`);
   }
   return {
     name: ext.name,

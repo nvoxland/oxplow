@@ -2193,6 +2193,26 @@ export type ContributionId = {
 	local: string,
 };
 
+/**
+ *  A contribution of a kind with no impact detail of its own, by its
+ *  descriptors before and after.
+ */
+export type ContributionImpact = {
+	kind: ContributionKind,
+	// The kind as a person names it (`Event type`).
+	title: string,
+	// `<extension>/<kind>/<local>`.
+	id: string,
+	// The part of the id after the kind: what a row is called.
+	local: string,
+	change: Change,
+	/**
+	 *  For a change: which of `version`, `needs`, `runs_on` and `global`
+	 *  differ.
+	 */
+	differs: string[],
+};
+
 // Every kind of contribution a manifest can declare.
 export type ContributionKind = "model" | "measure" | "metric" | "dimension" | "collector" | "event_type" | "ref_kind" | "command" | "effect" | "advisory" | "skill" | "implementation" | "provider" | "lens" | "page" | "panel" | "slot" | "decorator" | "replacement" | "custom_component";
 
@@ -3450,6 +3470,12 @@ export type ImpactReport = {
 	 *  composes on the same events.
 	 */
 	effects: EffectImpact[],
+	/**
+	 *  Every other contribution it adds, removes or changes, from the
+	 *  descriptors: the kinds above have their own detail, these a
+	 *  generic row.
+	 */
+	contributions: ContributionImpact[],
 	/**
 	 *  What its dry runs didn't get to (`collector <id>`, `effect <id>`):
 	 *  the review stops running scripts at its deadline.

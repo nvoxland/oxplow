@@ -915,3 +915,61 @@ fn copy(from: &Path, to: &Path) {
         }
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_scaffolded_advisory_checks_loads_and_stays_quiet() {
+    let dir = project().await;
+    scaffolded(dir.path(), "advisory", "watch-effort").await;
+    // Like a bare extension: its example has nothing to run (`extension
+    // test` runs lenses, collectors, commands, effects and providers), so
+    // that warning is the only one.
+    let report = test_extension(dir.path(), "watch-effort", false)
+        .await
+        .unwrap();
+    assert_eq!(report.errors, Vec::<String>::new());
+    let svc = booted(dir.path()).await;
+    let ext = loaded(&svc, dir.path(), "watch-effort");
+    assert_eq!(ext.advisories.len(), 1);
+    assert_eq!(ext.advisories[0].id, "watch-effort");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_scaffolded_skill_checks_and_is_declared() {
+    let dir = project().await;
+    scaffolded(dir.path(), "skill", "house-style").await;
+    let report = test_extension(dir.path(), "house-style", false)
+        .await
+        .unwrap();
+    assert_eq!(report.errors, Vec::<String>::new());
+    let svc = booted(dir.path()).await;
+    let ext = loaded(&svc, dir.path(), "house-style");
+    assert_eq!(ext.skills.len(), 1);
+    assert_eq!(ext.skills[0].name, "house-style");
+    assert_eq!(ext.skills[0].file, "skills/house-style/SKILL.md");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_scaffolded_page_checks_tests_and_shows_its_lens() {
+    let dir = project().await;
+    scaffolded(dir.path(), "page", "open-work").await;
+    assert!(tested(dir.path(), "open-work")
+        .await
+        .contains(&"example basic".to_string()));
+    let svc = booted(dir.path()).await;
+    let ext = loaded(&svc, dir.path(), "open-work");
+    assert_eq!(ext.pages.len(), 1);
+    assert_eq!(ext.pages[0].lens, "open-work/open-work");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_scaffolded_panel_checks_tests_and_shows_its_lens() {
+    let dir = project().await;
+    scaffolded(dir.path(), "panel", "open-work").await;
+    assert!(tested(dir.path(), "open-work")
+        .await
+        .contains(&"example basic".to_string()));
+    let svc = booted(dir.path()).await;
+    let ext = loaded(&svc, dir.path(), "open-work");
+    assert_eq!(ext.panels.len(), 1);
+    assert_eq!(ext.panels[0].body, "open-work/open-work");
+}
