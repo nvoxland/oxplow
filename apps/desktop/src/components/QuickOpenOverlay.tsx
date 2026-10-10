@@ -133,6 +133,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
   const [recentCollapsed, setRecentCollapsed] = useState<boolean>(loadRecentCollapsed);
   const [panelCoords, setPanelCoords] = useState<CSSProperties>(centeredFallbackCoords);
   const inputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
 
   // Anchor the panel *over* the title bar's "Search…" field so it reads
@@ -381,7 +382,25 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
 
   return (
     <div style={backdropStyle} onMouseDown={onClose}>
-      <div style={{ ...panelStyle, ...panelCoords }} onMouseDown={(event) => event.stopPropagation()}>
+      <div
+        ref={panelRef}
+        style={{ ...panelStyle, ...panelCoords }}
+        onMouseDown={(event) => event.stopPropagation()}
+        // While it is open the launcher is where typing goes. After a reload
+        // the window settles under it — a restored tab or terminal mounts and
+        // takes focus — and the keys that follow reached neither (tsk1055).
+        // Focus leaving for somewhere outside it, with the launcher still
+        // showing, comes back; a click outside closes it first (the
+        // backdrop), and focus inside it is left alone.
+        onBlur={(event) => {
+          const to = event.relatedTarget as Node | null;
+          if (to && panelRef.current?.contains(to)) return;
+          requestAnimationFrame(() => {
+            const panel = panelRef.current;
+            if (panel && !panel.contains(document.activeElement)) inputRef.current?.focus();
+          });
+        }}
+      >
         <input
           ref={inputRef}
           value={query}
