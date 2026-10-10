@@ -592,7 +592,9 @@ of a program copies at a time (tsk839): the copy, keep and cleanup run
 under an advisory lock on `<ext>/<id>.lock` (`fs2`, beside the folder
 the cleanup empties) that threads and processes alike wait on — no
 start removes another's temp copy or the copy another just kept, and a
-temp copy found under the lock was abandoned.
+temp copy found under the lock was abandoned. Readers of the copies take
+the same lock (`last_approved`, `last_ran_credentials`), so a review never
+sees a copy a start is half way through replacing.
 
 **The spawn** (`host.rs`, `connect`) mirrors an `exec` source: a
 scrubbed environment (PATH, HOME, the declared `env` names, the

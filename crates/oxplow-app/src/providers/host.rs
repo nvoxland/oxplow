@@ -521,7 +521,7 @@ pub fn approved_copy(
 
 /// The advisory lock on a program's copies (`<base>.lock`, beside the
 /// folder its cleanup empties), held until the file is dropped.
-fn lock_copies(base: &Path) -> std::io::Result<std::fs::File> {
+pub(crate) fn lock_copies(base: &Path) -> std::io::Result<std::fs::File> {
     use fs2::FileExt;
     let parent = base.parent().unwrap_or(base);
     std::fs::create_dir_all(parent)?;
@@ -547,7 +547,14 @@ pub fn last_approved(
     spec: &ProviderSpec,
 ) -> Option<super::spec::DeclaredProvider> {
     let rel = ext.path.trim_end_matches('/');
-    let entries = std::fs::read_dir(copies.join(&ext.name).join(&spec.id)).ok()?;
+    let base = copies.join(&ext.name).join(&spec.id);
+    if !base.is_dir() {
+        return None;
+    }
+    // A start replacing the copy holds this lock: read between its removal
+    // of the old one and its rename of the new and there is no copy to see.
+    let _one_at_a_time = lock_copies(&base).ok()?;
+    let entries = std::fs::read_dir(&base).ok()?;
     entries.flatten().find_map(|entry| {
         let hash = entry.file_name().into_string().ok()?;
         if hash.starts_with('.') {
@@ -573,7 +580,14 @@ pub fn last_approved(
 /// extension no longer declares the provider (tsk841). None when it never
 /// ran.
 pub fn last_ran_credentials(copies: &Path, ext: &str, provider: &str) -> Vec<String> {
-    let Ok(entries) = std::fs::read_dir(copies.join(ext).join(provider)) else {
+    let base = copies.join(ext).join(provider);
+    if !base.is_dir() {
+        return Vec::new();
+    }
+    let Ok(_one_at_a_time) = lock_copies(&base) else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(&base) else {
         return Vec::new();
     };
     entries

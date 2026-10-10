@@ -1146,6 +1146,59 @@ async fn declaration_impact_compare_against_the_last_approved_copy() {
         .all(|c| c.change == crate::extension_impact::Change::Unchanged));
 }
 
+/// Every reader of the copies directory holds the lock the writer does: a
+/// start replacing a copy is half done while it holds it, so `last_approved`
+/// waits for it rather than finding no copy.
+#[tokio::test]
+async fn reading_the_approved_copy_waits_for_a_start_replacing_it() {
+    let (fx, ext) = approved("").await;
+    fx.svc
+        .providers
+        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
+        .await
+        .unwrap();
+    first_read(&fx).await;
+    let copies = fx
+        .svc
+        .layout
+        .project_dir
+        .join(".oxplow/global-config/provider-copies");
+    let spec = ext.providers[0].clone();
+    let read = {
+        let (copies, ext, spec) = (copies.clone(), ext.clone(), spec.clone());
+        move || {
+            let (copies, ext, spec) = (copies.clone(), ext.clone(), spec.clone());
+            tokio::task::spawn_blocking(move || host::last_approved(&copies, &ext, &spec))
+        }
+    };
+    assert!(read().await.unwrap().is_some(), "the copy is there to read");
+
+    // A start mid-replacement: the lock held, the old copy moved aside.
+    let base = copies.join(&ext.name).join(&spec.id);
+    let held = host::lock_copies(&base).unwrap();
+    let kept: Vec<_> = std::fs::read_dir(&base)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .collect();
+    let aside = base.join(".aside");
+    std::fs::create_dir_all(&aside).unwrap();
+    for path in &kept {
+        std::fs::rename(path, aside.join(path.file_name().unwrap())).unwrap();
+    }
+    let reading = tokio::spawn(read());
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert!(!reading.is_finished(), "it read while the lock was held");
+    for path in &kept {
+        std::fs::rename(aside.join(path.file_name().unwrap()), path).unwrap();
+    }
+    drop(held);
+    assert!(
+        reading.await.unwrap().unwrap().is_some(),
+        "it read the copy once the replacement was whole"
+    );
+}
+
 /// tsk546: a provider's args are hashed where it runs (its extension
 /// folder), and an arg reaching outside the folder is refused, so no file
 /// it runs escapes the approval.
