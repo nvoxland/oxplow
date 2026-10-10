@@ -489,6 +489,8 @@ mod tests {
             closed_at: None,
             closed_reason: None,
             updated_at: now,
+            pid: None,
+            last_seen_at: None,
         };
         assert!(super::has_a_terminal(&open).is_ok());
         let chat = AgentSession {

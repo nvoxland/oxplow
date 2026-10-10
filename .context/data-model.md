@@ -366,7 +366,15 @@ One agent slot a person opened on a thread (V32; `ses<n>`, ref
   harness's own session id: `claude --resume`, ACP `session/load`), `host`
   (reserved; NULL is the local machine), `opened_at`, `closed_at`,
   `closed_reason` (`closed`, `thread_closed`, `stream_archived`),
-  `updated_at`.
+  `updated_at`, `pid` and `last_seen_at` (V49).
+- **Live identity:** `pid` is the OS pid of the process the daemon
+  spawned for the session (`HookIngestService::record_agent_pid`, called
+  at every spawn, so a restart overwrites it; also stamps `last_seen_at`).
+  `last_seen_at` is the newest hook from it, written at most every 30 s
+  (`touch_seen_tx`, in `session_row_tx`). A pid alone can be dead or
+  reused: a reader pairs it with a recent `last_seen_at` or checks the
+  process exists (`daemon_supervisor::process_alive`). Agent-neutral —
+  no harness-private socket paths.
 - **Lifecycle: the row is the slot, not the process.** `closed_at` is set
   only by closing the session (`oxplow.agent_session.close`), its thread
   (`thread_closed`) or its stream's archive (`stream_archived`) —

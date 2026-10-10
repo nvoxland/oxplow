@@ -268,6 +268,22 @@ impl HookIngestService {
         Ok(outcome)
     }
 
+    /// Record the OS pid of the process just spawned for agent session
+    /// `session` (every spawn, so a restarted agent's new pid replaces
+    /// the old).
+    pub async fn record_agent_pid(
+        &self,
+        session: oxplow_domain::AgentSessionId,
+        pid: u32,
+    ) -> Result<(), HookIngestError> {
+        self.db
+            .transaction(move |tx| {
+                oxplow_db::agent_session_store::set_pid_tx(tx, session, pid, Timestamp::now())
+            })
+            .await?;
+        Ok(())
+    }
+
     /// Log and announce an agent session's status outside a hook (the ACP
     /// session's permission cards). `session` resolves as a hook's does.
     pub async fn set_status(
@@ -414,6 +430,9 @@ fn session_row_tx(
         env.agent_session_id,
         env.session_id.as_deref(),
     )?;
+    if let Some(s) = &session {
+        oxplow_db::agent_session_store::touch_seen_tx(conn, s.id, Timestamp::now())?;
+    }
     Ok(Some(ThreadRow {
         session: session.as_ref().map(|s| s.id),
         resume_session_id: session
@@ -1332,6 +1351,29 @@ mod tests {
             of_type(&logged(&svc).await, "agent.session.started").len(),
             1
         );
+    }
+
+    /// Any hook from a session stamps when it was last seen.
+    #[tokio::test]
+    async fn a_hook_stamps_when_its_session_was_last_seen() {
+        let (svc, tid) = fixture().await;
+        svc.ingest(hook(
+            HookKind::UserPromptSubmit,
+            tid,
+            Some("h1"),
+            json!({"prompt": "go"}),
+        ))
+        .await
+        .unwrap();
+        let seen = svc
+            .db
+            .read(|c| {
+                Ok(oxplow_db::agent_session_store::get_tx(c, first_session())?
+                    .and_then(|s| s.last_seen_at))
+            })
+            .await
+            .unwrap();
+        assert!(seen.is_some());
     }
 
     /// A background subagent outlives its parent's turn: the Stop leaves

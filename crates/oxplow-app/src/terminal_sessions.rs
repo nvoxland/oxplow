@@ -271,6 +271,13 @@ impl TerminalSessionRegistry {
         let pane_id = handle.id.clone();
         let pid = handle.pid;
         let session_id = format!("term-{}", uuid::Uuid::new_v4().simple());
+        if let (Some(agent_session), Some(pid), Some(ingest)) =
+            (agent.and_then(|pane| pane.session), pid, self.exits.get())
+        {
+            if let Err(err) = ingest.record_agent_pid(agent_session, pid).await {
+                warn!(?err, "recording an agent's pid failed");
+            }
+        }
 
         // Spawn a forwarder that pumps PaneEvents → TerminalBridgeEvents
         // and tees a copy into the session's replay buffer so any
@@ -373,6 +380,11 @@ impl TerminalSessionRegistry {
         self.by_key.lock().await.insert(key, session_id.clone());
         drop(map);
         Ok(session_id)
+    }
+
+    /// The OS pid of a live session's child process.
+    pub async fn pid_of(&self, session_id: &str) -> Option<u32> {
+        self.inner.lock().await.get(session_id)?.pid
     }
 
     /// Best-effort live working directory of a session's child process:
@@ -666,6 +678,54 @@ mod tests {
         assert_eq!(ended.envelope.payload["reason"], "exit");
         assert_eq!(ended.envelope.payload["session"], "h1");
         assert_eq!(ended.envelope.anchors.agent_session_id, Some(session));
+    }
+
+    /// The pid the daemon spawned for an agent session is recorded on it.
+    #[tokio::test]
+    async fn an_agent_panes_pid_is_recorded_on_its_session() {
+        use oxplow_domain::stores::AgentSessionStore as _;
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let session = svc
+            .agent_session_store
+            .newest_for_thread(fx.thread)
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
+        let result = svc
+            .terminal_sessions
+            .attach_or_create_for_agent(
+                "s|ses-pid".to_string(),
+                Some(AgentPane {
+                    thread: fx.thread,
+                    session: Some(session),
+                }),
+                80,
+                24,
+                |c, r| SpawnRequest {
+                    command: "sleep".into(),
+                    args: vec!["30".into()],
+                    cwd: std::env::temp_dir(),
+                    env: vec![],
+                    env_remove: vec![],
+                    cols: c,
+                    rows: r,
+                },
+            )
+            .await
+            .expect("spawn");
+        let pid = svc.terminal_sessions.pid_of(&result.session_id).await;
+        let row = svc
+            .agent_session_store
+            .get(&session)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(pid.is_some());
+        assert_eq!(row.pid, pid);
+        assert!(row.last_seen_at.is_some());
+        let _ = svc.terminal_sessions.close(&result.session_id).await;
     }
 
     #[test]
