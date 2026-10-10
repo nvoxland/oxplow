@@ -169,6 +169,16 @@ impl Mode {
     }
 }
 
+/// What a run may do: what its contribution declares, the grant it runs
+/// on when a person's approval is what lets it run, and where this
+/// machine can hold it to that (`crate::grant`).
+#[derive(Debug, Clone)]
+pub struct Authority {
+    pub declared: crate::grant::GrantRequest,
+    pub grant: Option<crate::grant::Grant>,
+    pub enforcement: crate::grant::Enforcement,
+}
+
 /// Which contribution a run belongs to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContributionRef {
@@ -236,6 +246,8 @@ pub struct RunContext {
     cancel: Cancel,
     trace: Arc<ScopeTrace>,
     usage: Arc<std::sync::Mutex<Usage>>,
+    authority: Option<Arc<Authority>>,
+    decided: Arc<std::sync::Mutex<Vec<crate::grant::Decided>>>,
 }
 
 impl RunContext {
@@ -255,6 +267,8 @@ impl RunContext {
             cancel: Cancel::default(),
             trace: Arc::new(ScopeTrace::default()),
             usage: Arc::default(),
+            authority: None,
+            decided: Arc::default(),
         }
     }
 
@@ -292,6 +306,13 @@ impl RunContext {
         self
     }
 
+    /// May do what `authority` says (its declaration, and its grant when
+    /// it runs on one).
+    pub fn authorized(mut self, authority: Authority) -> Self {
+        self.authority = Some(Arc::new(authority));
+        self
+    }
+
     /// Within `budget`.
     pub fn within(mut self, budget: Budget) -> Self {
         self.budget = budget;
@@ -322,9 +343,13 @@ impl RunContext {
     /// same contribution adds to this run's usage; another's keeps its own.
     pub fn child(&self, contribution: Option<ContributionRef>, mode: Mode) -> Self {
         let left = self.budget.ceiling.saturating_sub(self.started.elapsed());
-        let usage = match &contribution {
-            None => self.usage.clone(),
-            Some(_) => Arc::default(),
+        let (usage, authority, decided) = match &contribution {
+            None => (
+                self.usage.clone(),
+                self.authority.clone(),
+                self.decided.clone(),
+            ),
+            Some(_) => (Arc::default(), None, Arc::default()),
         };
         RunContext {
             run: RunId::generate(),
@@ -344,6 +369,8 @@ impl RunContext {
             cancel: self.cancel.clone(),
             trace: Arc::new(ScopeTrace::default()),
             usage,
+            authority,
+            decided,
         }
     }
 
@@ -422,6 +449,40 @@ impl RunContext {
     /// It called a model.
     pub fn used_ai(&self) {
         self.usage_lock().ai_calls += 1;
+    }
+
+    /// Decide `need` against its authority and record it. A run with no
+    /// authority (core's own work) is allowed what it does.
+    pub fn decide(&self, need: crate::grant::Need) -> crate::grant::Decision {
+        let decision = match &self.authority {
+            Some(a) => crate::grant::decide(&need, a.grant.as_ref(), &a.declared, a.enforcement),
+            None => crate::grant::Decision::Allowed,
+        };
+        if self.authority.is_some() {
+            self.decided
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(crate::grant::Decided {
+                    need,
+                    decision: decision.clone(),
+                });
+        }
+        decision
+    }
+
+    /// What its authority decided, in order.
+    pub fn decisions(&self) -> Vec<crate::grant::Decided> {
+        self.decided
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Whether anything it did was denied.
+    pub fn was_denied(&self) -> bool {
+        self.decisions()
+            .iter()
+            .any(|d| matches!(d.decision, crate::grant::Decision::Denied(_)))
     }
 
     /// What it has used so far.

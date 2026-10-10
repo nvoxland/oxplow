@@ -164,8 +164,10 @@ commits with the run; the file is written after it commits), while
 Today there is one: **`sql.read`** — `{ sql, params? }`, one read-only
 statement over the published models (`v_*`), its `:name`s bound from
 `params`, at most `SQL_READ_ROW_CAP` (1000) rows, answered as a list of
-row objects (`semantic_layer::read_on` on the run's connection: the
-`query_sql` authorizer, inside the transaction). More than 1000 result
+row objects (`semantic_layer::read_on` under the `query_sql`
+authorizer: a command's composer reads on the routing pass's read
+snapshot; an effect's or policy's script, and a provider's `host/call`,
+through the SQL gateway or a read of their own). More than 1000 result
 rows fails with an error; it never hands a script a silently truncated
 list. Exactly 1000 rows is allowed. Aggregate in SQL to calculate across
 all matching source rows, or explicitly narrow the query with a filter

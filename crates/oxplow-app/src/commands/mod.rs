@@ -294,8 +294,9 @@ pub struct Command {
     contribution: Option<Arc<ContributionOf>>,
 }
 
-/// Names the contribution a command is, as of now.
-pub type ContributionOf = dyn Fn() -> oxplow_domain::run::ContributionRef + Send + Sync;
+/// A command's own run, nested in the run that called it: named for the
+/// contribution it is, as of now, with what that contribution may do.
+pub type ContributionOf = dyn Fn(&RunContext) -> RunContext + Send + Sync;
 
 impl Command {
     /// This command, offered to a person as `ui` says (label, group, …).
@@ -995,7 +996,7 @@ impl CommandBus {
         // An extension's command runs as that contribution: a child of the
         // run that called it.
         let run = &match &command.contribution {
-            Some(named) => run.child(Some(named()), Mode::External),
+            Some(named) => named(run),
             None => run.clone(),
         };
         let actor = run.actor();
@@ -1113,7 +1114,9 @@ impl CommandBus {
         }
         // 5a. A read runs without a record: no audit row, no event.
         if spec.access.reads_only() {
-            return self.run_read(&resolved, run, input).await;
+            let read = self.run_read(&resolved, run, input).await;
+            self.ran_unaudited(run, read.as_ref().err()).await;
+            return read;
         }
         // 5'. A composite's steps run outside one transaction: each lands
         // as it runs, the run recorded once at the end (`steps.rs`). A step
@@ -1250,7 +1253,10 @@ impl CommandBus {
                     .await;
                 match ran {
                     Ok((out, recorded)) => Ok(finish(out, recorded)),
-                    Err(TxError::Aborted(Abort::Unchanged(out))) => return Ok(unrecorded(*out)),
+                    Err(TxError::Aborted(Abort::Unchanged(out))) => {
+                        self.ran_unaudited(run, None).await;
+                        return Ok(unrecorded(*out));
+                    }
                     Err(TxError::Aborted(Abort::Lost(e))) => return Err(e),
                     Err(TxError::Aborted(Abort::Failed(e))) => Err(e),
                     Err(TxError::Storage(e)) => Err(CommandError::from(e)),
@@ -1312,6 +1318,29 @@ impl CommandBus {
                     .await;
                 Err(err)
             }
+        }
+    }
+
+    /// A run that leaves no audit row — a read, or one that changed
+    /// nothing — is still an extension's run when it is one: recorded as
+    /// such ([`oxplow_db::extension_run_store`]).
+    async fn ran_unaudited(&self, run: &RunContext, failed: Option<&CommandError>) {
+        if run.contribution_ref().is_none() {
+            return;
+        }
+        let (ended, error) = match failed {
+            None => (oxplow_domain::run::Outcome::Ok, None),
+            Some(e) => (oxplow_domain::run::Outcome::Failed, Some(e.to_string())),
+        };
+        let run = run.clone();
+        if let Err(e) = self
+            .db
+            .transaction(move |tx| {
+                oxplow_db::extension_run_store::record_tx(tx, &run, ended, error.as_deref())
+            })
+            .await
+        {
+            tracing::warn!(error = %e, "recording an unaudited run failed");
         }
     }
 

@@ -687,10 +687,10 @@ pub enum Composed {
     Refused(String),
 }
 
-/// How long a command's script may run. It runs inside the bus's write
-/// transaction, holding the write lock, so this is far tighter than a
-/// collector's runaway catch: composing a few commands is milliseconds.
-/// A script past it has its worker stopped and the transaction released.
+/// How long a command's script may run. The bus holds a read snapshot
+/// while it composes, so this is far tighter than a collector's runaway
+/// catch: composing a few commands is milliseconds. A script past it has
+/// its worker stopped and the snapshot released.
 pub const COMMAND_SCRIPT_BUDGET: oxplow_domain::run::Budget =
     oxplow_domain::run::Budget::with_timeout(std::time::Duration::from_secs(5));
 
@@ -1074,19 +1074,31 @@ impl ExtensionCommands {
                 let ext = extension.to_string();
                 // Its runs are the command's, named as the catalog has it
                 // when each runs.
+                let declared = crate::grants::script_request(&decl.needs);
                 let named: std::sync::Arc<crate::commands::ContributionOf> =
-                    std::sync::Arc::new(move || oxplow_domain::run::ContributionRef {
-                        id: oxplow_domain::contribution::ContributionId::new(
-                            &ext,
-                            oxplow_domain::contribution::ContributionKind::Command,
-                            &name,
-                        ),
-                        version: catalog
-                            .get(&root)
-                            .iter()
-                            .find(|e| e.name == ext)
-                            .and_then(|e| e.version.clone()),
-                        generation: Some(catalog.generation(&root)),
+                    std::sync::Arc::new(move |parent: &oxplow_domain::run::RunContext| {
+                        let contribution = oxplow_domain::run::ContributionRef {
+                            id: oxplow_domain::contribution::ContributionId::new(
+                                &ext,
+                                oxplow_domain::contribution::ContributionKind::Command,
+                                &name,
+                            ),
+                            version: catalog
+                                .get(&root)
+                                .iter()
+                                .find(|e| e.name == ext)
+                                .and_then(|e| e.version.clone()),
+                            generation: Some(catalog.generation(&root)),
+                        };
+                        // A script command needs no person's approval: it
+                        // may do what it declares.
+                        parent
+                            .child(Some(contribution), oxplow_domain::run::Mode::External)
+                            .authorized(oxplow_domain::run::Authority {
+                                declared: declared.clone(),
+                                grant: None,
+                                enforcement: crate::grants::enforcement(),
+                            })
                     });
                 extension_command(&self.bus, extension, decl)
                     .map(|c| c.of_contribution(named))
@@ -2290,8 +2302,8 @@ mod tests {
         assert_eq!(task(&fx).await.title, before, "nothing kept");
     }
 
-    /// The script runs inside the bus's write transaction, so a runaway
-    /// one is given up on after `COMMAND_SCRIPT_BUDGET`, not the
+    /// The script runs while the bus holds a read snapshot for it, so a
+    /// runaway one is given up on after `COMMAND_SCRIPT_BUDGET`, not the
     /// collectors' two minutes.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_runaway_script_is_given_up_on_within_the_budget() {

@@ -707,6 +707,12 @@ export async function approveCollector(owner: string, id: string, version: strin
   unwrap(await commands.approveCollector(owner, id, version));
 }
 
+/// A person takes back a collector's approval: its next run is refused
+/// until they approve it again.
+export async function revokeCollector(owner: string, id: string): Promise<void> {
+  unwrap(await commands.revokeCollector(owner, id));
+}
+
 /** Run a collector now (`oxplow.collector.sync`); it never approves. */
 export async function syncCollector(owner: string, id: string): Promise<CollectorRunReport> {
   return (await runCommand("oxplow.collector.sync", { owner, id })).result as CollectorRunReport;
@@ -850,6 +856,15 @@ export async function approveProjectProgram(
   version: string,
 ): Promise<ProjectProgram[]> {
   return unwrap(await commands.approveProjectProgram(kind, name, version));
+}
+
+/// A person takes back a program's approval: from the next thing it does,
+/// nothing it was granted holds.
+export async function revokeProjectProgram(
+  kind: ProgramKind,
+  name: string,
+): Promise<ProjectProgram[]> {
+  return unwrap(await commands.revokeProjectProgram(kind, name));
 }
 
 /// A program's entry, to read before approving it (a bundled extension's

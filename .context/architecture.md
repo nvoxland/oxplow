@@ -102,10 +102,11 @@ None of these run until a person approves that program on their machine.
   - its args, plus the content of any arg that names a file, read where
     the program runs (an ACP agent from its stream's worktree), so
     `node tools/agent.js` covers `agent.js`;
-  - for an extension source, every file in the extension except
+  - for an extension collector, every file in the extension except
     `extension.yaml` and `lenses/` (not code it runs, so a lens edit
-    doesn't ask again), plus what the manifest grants it: `entry`, `env`
-    passthrough, `credentials` and `network` (tsk348);
+    doesn't ask again), plus its whole declaration — `entry`, `env`
+    passthrough, `credentials`, `network`, and its `input` query,
+    trigger and entities (tsk348; a changed `input` asks again);
   - for an external provider (`ProgramKind::Provider`, key
     `provider:<ext>/<id>`), the same tree — which holds its checked-in
     declarations — plus its entry, `args`, `env` names, `credentials`
@@ -130,8 +131,21 @@ None of these run until a person approves that program on their machine.
   commit an approval, an agent's shell can't forge one, and each teammate
   consents for themselves. The old in-repo `.oxplow/source-approvals.json`
   is never read; programs approved there ask once more.
-- **Who approves.** Only a person, in Settings → Data. Agents can't, and a
-  lens button never does.
+- **Who approves, and revokes.** Only a person, in Settings → Data.
+  Agents can't, and a lens button never does. A person revokes an
+  approval the same way (`revoke_project_program`, `revoke_collector`,
+  UI-only, through `exec_consent::revoke_program` /
+  `collector_runner::revoke`): the entry leaves the approvals file —
+  so editing the file can't undo a revocation — and when it was revoked
+  is noted beside it for the listing. From the next thing it does,
+  nothing it was granted holds; a running provider is stopped.
+- **What it grants, and what isn't held.** Approving grants the
+  contribution's request (`oxplow_domain::grant`, derived by `grants.rs`
+  from what it declares) — never more, and a narrower request asks
+  nothing new. Every run decides what it does against it and records
+  the decisions ([extensions.md](./extensions.md) "Grants"). Where oxplow
+  can't hold a grant here — a program's files, network egress off
+  macOS — the decision is `unenforced`, and Programs and a review say so.
 - **What is approved is what they saw** (tsk349). Listings carry each
   program's and source's `version` (its approval hash as it is now).
   Approving sends that version back, and a program that changed between
@@ -140,10 +154,10 @@ None of these run until a person approves that program on their machine.
 - **Not gated:** pure in-process Starlark/jq transforms without privileged
   host access, and the user's own global-scope config. Model-calling
   collectors, scripted effort policies, effects, AI-provider scripts and
-  components that invoke commands have their own consent gates. I/O
-  restriction alone does not contain CPU or memory: current in-process
-  script timeouts can leave a worker running; the foundation roadmap
-  includes enforceable computation limits.
+  components that invoke commands have their own consent gates. Every
+  script runs in its own worker process, killed and reaped past its time
+  budget or memory cap, or when its run is cancelled
+  ([collection.md](./collection.md) "Containing scripts").
 
 A new way for config to start a program must go through the same gate.
 

@@ -48,6 +48,19 @@ pub struct Grants {
     pub env: Vec<String>,
     /// The scopes it may call (a provider's `needs`).
     pub scopes: Vec<String>,
+    /// What approving it grants that this machine can't hold it to
+    /// (`grants::gaps`).
+    pub unenforced: Vec<String>,
+}
+
+/// What granting `g` leaves unenforced here: a program's files, and
+/// network where egress isn't confined.
+fn gaps_of(runs_program: bool, hosts: &[String]) -> Vec<String> {
+    crate::grants::gaps(&oxplow_domain::grant::GrantRequest {
+        program: runs_program.then(String::new),
+        hosts: hosts.iter().cloned().collect(),
+        ..oxplow_domain::grant::GrantRequest::default()
+    })
 }
 
 /// A lens, by its rendered text before and after.
@@ -819,8 +832,18 @@ pub fn grants_line(g: &Grants) -> String {
     } else {
         format!(" · calls {}", g.scopes.join(", "))
     };
+    let env = if g.env.is_empty() {
+        String::new()
+    } else {
+        format!(" · reads env {}", g.env.join(", "))
+    };
+    let unenforced = if g.unenforced.is_empty() {
+        String::new()
+    } else {
+        format!(" · not held here: {}", g.unenforced.join("; "))
+    };
     format!(
-        "runs {} · reaches {} · reads {}{calls}",
+        "runs {} · reaches {} · reads {}{env}{calls}{unenforced}",
         run_line(g),
         listed_or_none(&g.hosts),
         listed_or_none(&g.credentials)
@@ -1216,6 +1239,7 @@ fn collector_grants(s: &CollectorSpec) -> Grants {
         credentials: s.credentials.clone(),
         env: s.env.clone(),
         scopes: Vec::new(),
+        unenforced: gaps_of(s.runtime == CollectorRuntime::Exec, &s.network),
     }
 }
 
@@ -1447,6 +1471,7 @@ fn provider_grants(p: &ProviderSpec) -> Grants {
         credentials: p.credential_grants(),
         env: p.env.clone(),
         scopes: p.needs.clone(),
+        unenforced: gaps_of(!p.is_remote(), &p.network),
     }
 }
 
@@ -3027,7 +3052,23 @@ mod tests {
             credentials: credentials.iter().map(|c| c.to_string()).collect(),
             env: vec![],
             scopes: Vec::new(),
+            unenforced: Vec::new(),
         }
+    }
+
+    /// A grant line says what isn't held here, and the env it reads; an
+    /// exec collector's grants name the files it can touch as one.
+    #[test]
+    fn a_grant_line_names_what_isnt_held_here() {
+        let mut g = grants(&["api.github.com"], &["GH_TOKEN"]);
+        g.env = vec!["HOME".into()];
+        g.unenforced = vec!["a program reads and writes files as you".into()];
+        assert_eq!(
+            grants_line(&g),
+            "runs bin/p · reaches api.github.com · reads GH_TOKEN · reads env HOME · not held here: a program reads and writes files as you"
+        );
+        assert!(gaps_of(true, &[]).iter().any(|g| g.contains("files")));
+        assert!(gaps_of(false, &[]).is_empty());
     }
 
     fn command(name: &str, change: Change, after: Option<Value>) -> CommandChange {

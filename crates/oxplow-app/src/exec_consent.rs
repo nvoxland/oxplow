@@ -47,12 +47,20 @@ struct ApprovalFile {
     /// `collector:<id>`, `acp:<name>`, …) → the approved hash and its MAC.
     #[serde(default)]
     approved: BTreeMap<String, Approval>,
+    /// When each approval a person revoked was revoked (for a person
+    /// reading it; a revoked approval is gone from `approved`, so editing
+    /// this grants nothing).
+    #[serde(default)]
+    revoked: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Approval {
     hash: String,
     mac: String,
+    /// When it was granted (RFC 3339), for a person reading it.
+    #[serde(default)]
+    granted_at: Option<String>,
 }
 
 impl ApprovalStore {
@@ -181,12 +189,48 @@ impl ApprovalStore {
             Approval {
                 hash: hash.to_string(),
                 mac: self.mac(&mac_key, key, hash),
+                granted_at: Some(oxplow_domain::Timestamp::now().to_string()),
             },
         );
+        data.revoked.remove(key);
+        self.write(file, &data)
+    }
+
+    /// A person revokes `key`'s approval: it holds no more, from the next
+    /// thing that asks. `false` when there was none to revoke.
+    pub fn revoke(&self, key: &str) -> std::io::Result<bool> {
+        let file = self
+            .file
+            .as_ref()
+            .ok_or_else(|| std::io::Error::other("no oxplow home dir to keep approvals in"))?;
+        let mut data = self.read();
+        if data.approved.remove(key).is_none() {
+            return Ok(false);
+        }
+        data.revoked
+            .insert(key.to_string(), oxplow_domain::Timestamp::now().to_string());
+        self.write(file, &data)?;
+        Ok(true)
+    }
+
+    /// When `key` was approved, while it is.
+    pub fn granted_at(&self, key: &str) -> Option<String> {
+        self.read()
+            .approved
+            .get(key)
+            .and_then(|a| a.granted_at.clone())
+    }
+
+    /// When `key`'s approval was revoked, if it was and isn't approved again.
+    pub fn revoked_at(&self, key: &str) -> Option<String> {
+        self.read().revoked.get(key).cloned()
+    }
+
+    fn write(&self, file: &Path, data: &ApprovalFile) -> std::io::Result<()> {
         if let Some(dir) = file.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        let text = serde_json::to_string_pretty(&data).map_err(std::io::Error::other)?;
+        let text = serde_json::to_string_pretty(data).map_err(std::io::Error::other)?;
         std::fs::write(file, text)
     }
 }
@@ -277,6 +321,16 @@ pub struct ProjectProgram {
     /// Its approval hash as it is now (`None` when it can't be read). The
     /// person's approve click sends back the version they reviewed.
     pub version: Option<String>,
+    /// What approving it grants that this machine can't hold it to
+    /// (`grants::gaps`): files a program touches, network off macOS.
+    #[serde(default)]
+    pub unenforced: Vec<String>,
+    /// When this machine approved it, while it is (RFC 3339).
+    #[serde(default)]
+    pub granted_at: Option<String>,
+    /// When a person revoked it, if they did and haven't approved it since.
+    #[serde(default)]
+    pub revoked_at: Option<String>,
 }
 
 impl ProjectProgram {
@@ -546,6 +600,9 @@ pub fn program_hash(project_dir: &Path, program: &str, args: &[String]) -> std::
         remote: false,
         approved: false,
         version: None,
+        unenforced: Vec::new(),
+        granted_at: None,
+        revoked_at: None,
     }
     .hash(project_dir)
 }
@@ -575,6 +632,9 @@ pub fn may_run(
         remote: false,
         approved: false,
         version: None,
+        unenforced: Vec::new(),
+        granted_at: None,
+        revoked_at: None,
     };
     approved_now(store, project_dir, &p)
 }
@@ -611,6 +671,9 @@ pub fn ai_provider_program(
         remote: false,
         approved: false,
         version: None,
+        unenforced: Vec::new(),
+        granted_at: None,
+        revoked_at: None,
     }
 }
 
@@ -646,6 +709,9 @@ pub fn acp_program(agent: &oxplow_config::AcpAgentConfig) -> ProjectProgram {
         remote: false,
         approved: false,
         version: None,
+        unenforced: Vec::new(),
+        granted_at: None,
+        revoked_at: None,
     }
 }
 
@@ -691,6 +757,9 @@ pub fn advisory_program(ext: &crate::extensions::Extension) -> ProjectProgram {
         remote: false,
         approved: false,
         version: None,
+        unenforced: Vec::new(),
+        granted_at: None,
+        revoked_at: None,
     }
 }
 
@@ -742,6 +811,9 @@ pub fn provider_program(
         tree: Some(dir.to_string()),
         approved: false,
         version: None,
+        unenforced: Vec::new(),
+        granted_at: None,
+        revoked_at: None,
     }
 }
 
@@ -771,6 +843,9 @@ pub fn component_program(
         remote: false,
         approved: false,
         version: None,
+        unenforced: Vec::new(),
+        granted_at: None,
+        revoked_at: None,
     }
 }
 
@@ -873,6 +948,9 @@ pub fn effort_policy_program(
         remote: false,
         approved: false,
         version: None,
+        unenforced: Vec::new(),
+        granted_at: None,
+        revoked_at: None,
     }
 }
 
@@ -920,6 +998,9 @@ pub fn list(
             remote: false,
             approved: false,
             version: None,
+            unenforced: Vec::new(),
+            granted_at: None,
+            revoked_at: None,
         });
     };
     for c in &config.collectors {
@@ -969,6 +1050,9 @@ pub fn list(
             .version
             .as_ref()
             .is_some_and(|h| store.is_approved(&p.key(), h));
+        p.unenforced = crate::grants::gaps(&crate::grants::program_request(p));
+        p.granted_at = store.granted_at(&p.key()).filter(|_| p.approved);
+        p.revoked_at = store.revoked_at(&p.key());
     }
     out
 }
@@ -988,6 +1072,25 @@ pub fn version_of(
         .find(|p| p.kind == kind && p.name == name)
         .and_then(|p| p.version)
         .unwrap_or_default()
+}
+
+/// A person revokes `kind`/`name`'s approval on this machine: from the
+/// next thing it does, nothing it was granted holds. Errs when there's no
+/// such program.
+pub fn revoke_program(
+    store: &ApprovalStore,
+    project_dir: &Path,
+    config: &oxplow_config::OxplowConfig,
+    extensions: &[crate::extensions::Extension],
+    kind: ProgramKind,
+    name: &str,
+) -> Result<(), String> {
+    let program = list(store, project_dir, config, extensions)
+        .into_iter()
+        .find(|p| p.kind == kind && p.name == name)
+        .ok_or_else(|| format!("no {kind:?} program `{name}`"))?;
+    store.revoke(&program.key()).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Approve the project program `kind`/`name` as it is now. Only a person
@@ -1099,6 +1202,9 @@ mod tests {
             remote: false,
             approved: false,
             version: None,
+            unenforced: Vec::new(),
+            granted_at: None,
+            revoked_at: None,
         };
         assert!(program.hash(dir.path()).is_ok());
     }
@@ -1123,6 +1229,9 @@ mod tests {
             remote: false,
             approved: false,
             version: None,
+            unenforced: Vec::new(),
+            granted_at: None,
+            revoked_at: None,
         };
         assert!(bundled
             .source(dir.path())
@@ -1402,6 +1511,78 @@ mod tests {
         )
         .unwrap();
         assert!(may_run_acp(&st, dir.path(), dir.path(), &cfg.acp_agents[1]));
+    }
+
+    /// A person revokes an approval: it stops holding at once, and says
+    /// when; approving again holds again.
+    #[test]
+    fn an_approval_can_be_revoked() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let st = store(home.path(), dir.path());
+        st.approve("effect:acme/note", "h1").unwrap();
+        assert!(st.is_approved("effect:acme/note", "h1"));
+        assert!(st.granted_at("effect:acme/note").is_some());
+        assert!(st.revoke("effect:acme/note").unwrap());
+        assert!(!st.is_approved("effect:acme/note", "h1"));
+        assert!(st.revoked_at("effect:acme/note").is_some());
+        assert!(
+            !st.revoke("effect:acme/note").unwrap(),
+            "nothing left to revoke"
+        );
+        st.approve("effect:acme/note", "h1").unwrap();
+        assert!(st.is_approved("effect:acme/note", "h1"));
+        assert!(st.revoked_at("effect:acme/note").is_none());
+    }
+
+    /// A person revokes a program: it may not run again until they approve
+    /// it again, and its row says when; a program row names what it can do
+    /// that isn't held here.
+    #[test]
+    fn a_revoked_program_may_not_run_and_says_when() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let st = store(home.path(), dir.path());
+        std::fs::create_dir_all(dir.path().join("tools")).unwrap();
+        std::fs::write(dir.path().join("tools/agent"), "v1").unwrap();
+        let cfg = config(
+            dir.path(),
+            "acpAgents:\n  - { name: mine, command: tools/agent, args: [--acp] }\n",
+        );
+        approve_program(
+            &st,
+            dir.path(),
+            &cfg,
+            &[],
+            ProgramKind::AcpAgent,
+            "mine",
+            &current(&st, dir.path(), &cfg, "mine"),
+        )
+        .unwrap();
+        let row = |st: &ApprovalStore| {
+            list(st, dir.path(), &cfg, &[])
+                .into_iter()
+                .find(|p| p.name == "mine")
+                .unwrap()
+        };
+        let approved = row(&st);
+        assert!(approved.approved && approved.granted_at.is_some());
+        assert!(
+            approved.unenforced.iter().any(|g| g.contains("files")),
+            "{:?}",
+            approved.unenforced
+        );
+        revoke_program(&st, dir.path(), &cfg, &[], ProgramKind::AcpAgent, "mine").unwrap();
+        assert!(!may_run_acp(
+            &st,
+            dir.path(),
+            dir.path(),
+            &cfg.acp_agents[0]
+        ));
+        let revoked = row(&st);
+        assert!(!revoked.approved && revoked.granted_at.is_none());
+        assert!(revoked.revoked_at.is_some());
+        assert!(revoke_program(&st, dir.path(), &cfg, &[], ProgramKind::AcpAgent, "nope").is_err());
     }
 
     #[test]

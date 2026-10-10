@@ -1831,6 +1831,48 @@ its scope trace.
   parsers, scripted AI mappings and the MCP adapter's mappings still run
   under their own fixed budgets without one.
 
+## Grants
+
+A **need** is what a contribution declares; a **grant** is what a person
+approved; a **decision** is what a run was allowed (`oxplow_domain::grant`,
+`grants.rs`).
+
+- **The request.** `GrantRequest { scopes, program, hosts, credentials,
+  env, commands, ai }`, derived from the declaration: an exec collector's
+  entry, `network`, `credentials` and `env`; a model-calling script's
+  `ai`; a script's (effect, command, effort policy) scopes from its
+  `needs`; a project program's from its listing (`program_request`).
+  `widening(granted)` names what a new request asks beyond a grant; a
+  narrower one asks nothing new.
+- **The grant.** `Grant { request, granted_at, granted_by, revoked_at }`.
+  What a run decides against is always the request derived from the
+  declaration *now* — the approval's hash proves that declaration is the
+  approved one — never a request stored in the approvals file, which a
+  process writing that file could widen.
+- **The authority** a run carries (`RunContext::authorized`,
+  `run::Authority { declared, grant, enforcement }`): the grant when a
+  person's approval is what lets it run (a program, a model-calling
+  script, an effect), else its declaration alone (a script command, a
+  policy's script, a provider's `host/call`s — decided against the
+  provider's own `needs`). Core's own work has none and is allowed what
+  it does.
+- **Decisions.** `run.decide(Need)` → `Allowed`, `Denied(why)` or
+  `Unenforced(why)`, recorded on the run (`v_extension_run.decisions`):
+  each scope call (`Calls::serve`); a program collector's `program`,
+  `files`, each `env` name, each `host` and each `credential` — a
+  credential its grant doesn't name is never read from the keychain; a
+  script's model calls (`ai`). A denied need stops what asked for it.
+  `Enforcement { hosts }` is the one table of what this machine holds:
+  egress is confined only under macOS's sandbox, and a program's files
+  never are — those decisions are `unenforced`, and `grants::gaps` says
+  the same on Programs rows and in a review's grant line ("not held
+  here: …").
+- **Revoking** removes the approval ([architecture.md](./architecture.md)
+  "A repo's config never runs a program without consent").
+- **Not yet:** per-model grants for `sql.read`, confining a program's
+  files, and a per-run limit on model calls (left out, 2026-10-10) —
+  the next roadmap item, "Enforce scoped grants".
+
 ## The event envelope
 
 An extension sees an event as one shape, `EventView`
@@ -2261,7 +2303,8 @@ check: `Unapproved`, `BeforeApproval` or `Runs`. The consumer hashes an
 extension's folder once per catalog load (`FolderHashes`, keyed by the
 catalog's `Arc`), not per event: an edit reloads the catalog, so it's
 hashed again and stops the effect (tsk798). The approvals file is read
-on each check, so revoking one takes effect at once.
+on each check, so revoking one (Settings → Data → Programs) takes effect
+at its next event.
 
 **A bundled extension's effect is approved the same way** (P11, tsk953).
 What an approval covers is read through one resolver,
@@ -2570,10 +2613,11 @@ fits, the names are `expect_commands` in order. Without a registry it
 warns that the examples weren't checked. **`compose_calls`** is the one
 compose step, for the dry run and the handler alike: the script in the
 sandbox under `COMMAND_SCRIPT_BUDGET` (5 s of the script's own time, not
-the collectors' 120 s runaway catch, because at run time the script holds
-the bus's write transaction; no files, no `ai_*`), its `scope` calls
-served on the calling thread (`run_starlark_serving`,
-`scope_calls::Calls`; a busy database retries the run), then the
+the collectors' 120 s runaway catch: the bus composes it once, on a read
+snapshot it holds while the script runs; no files, no `ai_*`), its `scope`
+calls served on the calling thread (`run_command_script` with
+`workers::RunHost::Scope`, through `scope_calls::Calls`; a busy database
+retries the run), then the
 `{ commands, result? }` shape (`composed`; any other key is `Invalid`).
 
 **Running** (`extension_command`): each is a composite

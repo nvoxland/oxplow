@@ -33,6 +33,16 @@ pub async fn approve_collector(
     Ok(())
 }
 
+/// A person revokes an exec or model-calling collector's approval: its
+/// next run is refused until they approve it again. UI only.
+pub async fn revoke_collector(svc: &Services, owner: String, id: String) -> Result<(), IpcError> {
+    collector_runner::revoke(&svc.approvals, &owner, &id)
+        .map_err(|e| IpcError::invalid(e.to_string()))?;
+    svc.events
+        .emit(oxplow_app::events::OxplowEvent::ApprovalsChanged);
+    Ok(())
+}
+
 /// Set (or clear with `null`) a credential an extension's collector or
 /// provider declares.
 /// The value goes to the keychain and never comes back. UI only.
@@ -135,6 +145,42 @@ pub async fn approve_project_program(
             oxplow_app::effects::approved(&svc.db, &name).await?;
         }
         _ => {}
+    }
+    svc.events
+        .emit(oxplow_app::events::OxplowEvent::ApprovalsChanged);
+    Ok(oxplow_app::exec_consent::list(
+        &svc.approvals,
+        &svc.layout.project_dir,
+        &config,
+        &shared_extensions(svc).await,
+    ))
+}
+
+/// A person revokes one of the project's programs' approval: from the
+/// next thing it does, nothing it was granted holds (a running provider is
+/// stopped). UI only, as approving is.
+pub async fn revoke_project_program(
+    svc: &Services,
+    kind: oxplow_app::exec_consent::ProgramKind,
+    name: String,
+) -> Result<Vec<oxplow_app::exec_consent::ProjectProgram>, IpcError> {
+    let config = svc
+        .config
+        .read()
+        .map(|c| c.clone())
+        .unwrap_or_else(|p| p.into_inner().clone());
+    let extensions = shared_extensions(svc).await;
+    oxplow_app::exec_consent::revoke_program(
+        &svc.approvals,
+        &svc.layout.project_dir,
+        &config,
+        &extensions,
+        kind,
+        &name,
+    )
+    .map_err(IpcError::invalid)?;
+    if kind == oxplow_app::exec_consent::ProgramKind::Provider {
+        svc.providers.approved(&name).await;
     }
     svc.events
         .emit(oxplow_app::events::OxplowEvent::ApprovalsChanged);

@@ -279,7 +279,15 @@ Prerequisites: none; can start independently.
 
 #### Define scoped extension grants and usage audit contracts
 
-Status: planned.
+Status: done. `oxplow_domain::grant` defines the request (derived from a
+contribution's declaration by `grants.rs`), the grant (a person's
+approval of exactly that request; narrowing asks nothing new), and each
+run's decisions (`allowed`, `denied`, `unenforced`), recorded on
+`v_extension_run` — the usage record, with actor, cause, anchors, cost,
+scopes and model calls, never values or contents. A collector's approval
+covers its whole declaration; approvals can be revoked. Per-model reads,
+file confinement and a model-call limit are left to the enforcement
+item.
 
 Scope: Extend the existing approval work into one grant model: extension/version identity, granted services, semantic model/entity scopes, path scopes/read-write, destinations, program execution, named credential use, AI invocation and resource budgets. Separate declared requirements from user-granted authority, and simple program approval from actual enforcement.
 
@@ -325,7 +333,12 @@ Give authors reusable data, analysis, AI, actions, state, identity, and job serv
 
 #### Introduce a shared extension RunContext
 
-Status: planned.
+Status: done. `oxplow_domain::run::RunContext` (built by `run_context.rs`)
+carries identity, version and generation, actor, anchors, subject,
+cause, mode, budget, cancel, trace, usage and authority through the bus,
+scope calls, collectors, effects, the effort policy and provider invokes
+(on the wire). Upcasts, report parsers, scripted AI providers and the MCP
+adapter's mappings still run on their own fixed budgets.
 
 Scope: Provide one execution context for extension/contribution/version and generation identity, actor, project/stream/thread, subject/anchors, cause/trace, cancellation and budgets. Fields depend on actual invocation context; absence is explicit. This is the basis for consistent host adapters, not permission to expose all services.
 

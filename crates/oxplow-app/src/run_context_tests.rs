@@ -253,3 +253,98 @@ async fn every_run_is_recorded_once_as_itself() {
         ]]
     );
 }
+
+/// A run records what its authority decided for each thing it did: an
+/// approved program collector its program, the files it can touch, its
+/// credential and its host; a command's script its scope calls.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_run_records_what_its_grant_decided() {
+    use std::os::unix::fs::PermissionsExt;
+    let fx = crate::test_fixtures::services_with_task_effort().await;
+    let svc = &fx.svc;
+    let root = svc.layout.project_dir.clone();
+    write(
+        &root,
+        "oxplow/extensions/acme/extension.yaml",
+        "manifest: 2\nname: acme\nsharing: private\nintent: { purpose: Runs., origin: null, examples: [] }\n\
+         collectors:\n\
+         \x20 - id: gh\n    runtime: exec\n    entry: sync.sh\n    credentials: [GH_TOKEN]\n    network: [api.github.com]\n    entities:\n      - { name: pr, key: n, columns: { n: int } }\n\
+         commands:\n\
+         \x20 - name: note.count\n    summary: Count.\n    input_schema: { type: object }\n    entry: count.star\n    needs: [sql.read]\n    invokers: { human: true, agent: true, lens: true }\n",
+    );
+    write(
+        &root,
+        "oxplow/extensions/acme/sync.sh",
+        "#!/bin/sh\necho '{\"entities\":{\"pr\":[{\"n\":1}]}}'\n",
+    );
+    std::fs::set_permissions(
+        root.join("oxplow/extensions/acme/sync.sh"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    write(
+        &root,
+        "oxplow/extensions/acme/count.star",
+        "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT 1 AS n\"})\n    return {\"commands\": [], \"result\": {\"n\": len(rows)}}\n",
+    );
+    svc.extension_commands.reconcile().await;
+    let collectors = Collectors::of(svc, &root);
+    let (ext, spec) = svc
+        .extension_catalog
+        .get(&root)
+        .iter()
+        .find(|e| e.name == "acme")
+        .map(|e| (e.clone(), e.collectors[0].clone()))
+        .unwrap();
+    let hash = crate::collector_runner::approval_hash(&root.join(&ext.path), &spec).unwrap();
+    crate::collector_runner::approve(&svc.approvals, "acme", "gh", &hash).unwrap();
+    crate::collector_runner::run_collector(
+        &collectors,
+        &oxplow_domain::run::RunContext::core(Actor::Human, oxplow_domain::run::Mode::External),
+        "acme",
+        "gh",
+        crate::collector_runner::RunTrigger::Manual,
+    )
+    .await
+    .unwrap();
+    let decided = rows(
+        svc,
+        "SELECT decisions_json FROM extension_run WHERE contribution = 'acme/collector/gh'",
+    )
+    .await;
+    let decided: Value = serde_json::from_str(decided[0][0].as_str().unwrap()).unwrap();
+    let of = |need: &str| {
+        decided
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["need"] == need)
+            .cloned()
+            .unwrap_or_else(|| panic!("{need}: {decided}"))
+    };
+    assert_eq!(of("program")["decision"], "allowed", "{decided}");
+    assert_eq!(of("files")["decision"], "unenforced", "{decided}");
+    assert_eq!(of("credential")["name"], "GH_TOKEN");
+    assert_eq!(of("credential")["decision"], "allowed");
+    let host = of("host");
+    assert_eq!(host["name"], "api.github.com");
+    assert!(
+        host["decision"] == "allowed" || host["decision"] == "unenforced",
+        "{host}"
+    );
+
+    svc.commands
+        .run(&Actor::Human, "acme.note.count", json!({}), false)
+        .await
+        .unwrap();
+    let decided = rows(
+        svc,
+        "SELECT decisions_json FROM extension_run WHERE contribution = 'acme/command/note.count'",
+    )
+    .await;
+    let decided: Value = serde_json::from_str(decided[0][0].as_str().unwrap()).unwrap();
+    assert_eq!(
+        decided,
+        json!([{ "need": "scope", "name": "sql.read", "decision": "allowed" }])
+    );
+}

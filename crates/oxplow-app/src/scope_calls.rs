@@ -84,10 +84,17 @@ impl<'a> Calls<'a> {
         if oxplow_domain::scope::scope(id).is_none() {
             return Err(format!("no scope `{id}`"));
         }
+        // Decided and recorded on the run either way.
+        let decision = self
+            .run
+            .decide(oxplow_domain::grant::Need::Scope(id.to_string()));
         if !self.needs.iter().any(|n| n == id) {
             return Err(format!(
                 "`{id}` isn't in the command's `needs` — declare it to call it"
             ));
+        }
+        if let oxplow_domain::grant::Decision::Denied(why) = decision {
+            return Err(format!("`{id}`: {why}"));
         }
         self.run.trace().count(id);
         self.run.used_scope(id);

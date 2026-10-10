@@ -430,6 +430,13 @@ impl HostCalls {
             let read = Box::new(|q: oxplow_db::SqlQuery| {
                 runtime.block_on(db.read(move |tx| oxplow_db::semantic_layer::read_on(tx, &q)))
             });
+            // Decided against the provider's own declaration, on the run
+            // it serves.
+            let run = run.clone().authorized(oxplow_domain::run::Authority {
+                declared: crate::grants::script_request(&needs),
+                grant: None,
+                enforcement: crate::grants::enforcement(),
+            });
             let mut calls = crate::scope_calls::Calls::new(&run, &needs, read);
             calls.serve(&params.scope, params.args)
         })

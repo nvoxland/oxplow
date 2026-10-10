@@ -42,13 +42,7 @@ impl CommandBus {
             .db
             .transaction(move |tx| {
                 insert_tx(tx, &row)?;
-                oxplow_db::extension_run_store::record_tx(
-                    tx,
-                    &run_c,
-                    ended,
-                    error_c.as_deref(),
-                    &serde_json::json!([]),
-                )
+                oxplow_db::extension_run_store::record_tx(tx, &run_c, ended, error_c.as_deref())
             })
             .await
         {
@@ -280,7 +274,6 @@ pub(super) fn record_tx(
             None => oxplow_domain::run::Outcome::Ok,
         },
         failed.as_deref(),
-        &serde_json::json!([]),
     )?;
     let mut executed = Envelope::typed::<CommandExecuted>(
         actor.source(),

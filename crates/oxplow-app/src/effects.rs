@@ -204,6 +204,9 @@ pub fn effect_program(ext: &Extension, decl: &EffectDecl) -> ProjectProgram {
         remote: false,
         approved: false,
         version: None,
+        unenforced: Vec::new(),
+        granted_at: None,
+        revoked_at: None,
     }
 }
 

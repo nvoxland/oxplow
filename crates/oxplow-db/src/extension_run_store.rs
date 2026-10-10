@@ -14,13 +14,12 @@ use crate::command_audit_store::actor_kind_str;
 use crate::database::map_sql_err;
 
 /// Record `run`, finished with `outcome` (and `error`, when it failed), if
-/// it is a contribution's. `decisions` is what its grant decided, as JSON.
+/// it is a contribution's, with what its authority decided.
 pub fn record_tx(
     conn: &rusqlite::Connection,
     run: &RunContext,
     outcome: Outcome,
     error: Option<&str>,
-    decisions: &serde_json::Value,
 ) -> Result<(), DomainError> {
     let Some(contribution) = run.contribution_ref() else {
         return Ok(());
@@ -63,7 +62,7 @@ pub fn record_tx(
             i64::try_from(usage.peak_bytes).unwrap_or(i64::MAX),
             usage.ai_calls,
             serde_json::to_string(&usage.scopes).expect("scopes serialize"),
-            decisions.to_string(),
+            serde_json::to_string(&run.decisions()).expect("decisions serialize"),
         ],
     )
     .map_err(map_sql_err)?;
@@ -150,8 +149,8 @@ mod tests {
         run.used_cpu(12, 4096);
         let core = RunContext::core(Actor::Human, Mode::External);
         db.transaction(move |tx| {
-            record_tx(tx, &run, Outcome::Ok, None, &serde_json::json!([]))?;
-            record_tx(tx, &core, Outcome::Ok, None, &serde_json::json!([]))
+            record_tx(tx, &run, Outcome::Ok, None)?;
+            record_tx(tx, &core, Outcome::Ok, None)
         })
         .await
         .unwrap();
@@ -173,17 +172,9 @@ mod tests {
     async fn the_sweep_removes_old_runs() {
         let db = Database::in_memory();
         let run = effect_run();
-        db.transaction(move |tx| {
-            record_tx(
-                tx,
-                &run,
-                Outcome::Failed,
-                Some("no"),
-                &serde_json::json!([]),
-            )
-        })
-        .await
-        .unwrap();
+        db.transaction(move |tx| record_tx(tx, &run, Outcome::Failed, Some("no")))
+            .await
+            .unwrap();
         let gone = db
             .transaction(|tx| sweep_tx(tx, "2000-01-01T00:00:00Z", 100))
             .await

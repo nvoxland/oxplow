@@ -451,13 +451,7 @@ impl EffortPolicyConsumer {
         if let Err(e) = self
             .db
             .transaction(move |tx| {
-                oxplow_db::extension_run_store::record_tx(
-                    tx,
-                    &run,
-                    outcome,
-                    error.as_deref(),
-                    &serde_json::json!([]),
-                )
+                oxplow_db::extension_run_store::record_tx(tx, &run, outcome, error.as_deref())
             })
             .await
         {
@@ -521,8 +515,20 @@ impl AsyncEventConsumer for EffortPolicyConsumer {
                     .find(|e| e.name == name)
                     .cloned()
             });
+        // A script policy may call the scopes it declares.
+        let declared = match self.capabilities.get(CAPABILITY, &id).map(|i| i.source) {
+            Some(crate::capabilities::Source::Script { needs, .. }) => {
+                crate::grants::script_request(&needs)
+            }
+            _ => oxplow_domain::grant::GrantRequest::default(),
+        };
         let run =
-            crate::run_context::for_policy(&self.catalog, &self.root, &id, owner.as_ref(), event);
+            crate::run_context::for_policy(&self.catalog, &self.root, &id, owner.as_ref(), event)
+                .authorized(oxplow_domain::run::Authority {
+                    declared,
+                    grant: None,
+                    enforcement: crate::grants::enforcement(),
+                });
         let lineage =
             crate::event_lineage::lineage(&self.db, event, &format!("effect:{CAPABILITY}:{id}"))
                 .await?;

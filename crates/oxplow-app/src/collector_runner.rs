@@ -24,6 +24,7 @@
 //! "Collectors".
 
 use oxplow_domain::events::EventView;
+use oxplow_domain::grant::{Decision, Need};
 use oxplow_domain::run::{Budget, Mode, RunContext};
 use oxplow_domain::vocabulary::VocabularyHandle;
 use std::collections::BTreeMap;
@@ -376,8 +377,11 @@ pub fn approval_hash(ext_dir: &Path, spec: &CollectorSpec) -> std::io::Result<St
         v.sort();
         v.join(",")
     };
+    // Its whole declaration: what it reads (`input`), when it runs, what
+    // it writes — a changed one asks again, as a changed script does.
+    let declared = serde_json::to_string(spec).map_err(std::io::Error::other)?;
     let text = format!(
-        "tree:{tree}\nentry:{}\nenv:{}\ncredentials:{}\nnetwork:{}",
+        "tree:{tree}\nentry:{}\nenv:{}\ncredentials:{}\nnetwork:{}\ndeclared:{declared}",
         entry,
         sorted(&spec.env),
         sorted(&spec.credentials),
@@ -420,6 +424,16 @@ pub fn approve(
     hash: &str,
 ) -> std::io::Result<()> {
     approvals.approve(&format!("{owner}/{id}"), hash)
+}
+
+/// A person revokes `owner/id`'s approval: its next run is refused until
+/// they approve it again.
+pub fn revoke(
+    approvals: &crate::exec_consent::ApprovalStore,
+    owner: &str,
+    id: &str,
+) -> std::io::Result<bool> {
+    approvals.revoke(&format!("{owner}/{id}"))
 }
 
 /// What a collector run returns: rows per entity, and (with `sync: upsert`)
@@ -1000,17 +1014,31 @@ pub async fn run_collector(
         )));
     }
     // The collector's run: a child of what ran it, named for the collector.
-    let (ext, _) = find_collector(ctx, owner, id)?;
-    let run = parent.child(
-        Some(crate::run_context::contribution(
-            ctx.catalog,
-            ctx.root,
-            &ext,
-            oxplow_domain::contribution::ContributionKind::Collector,
-            id,
-        )),
-        Mode::External,
-    );
+    let (ext, spec) = find_collector(ctx, owner, id)?;
+    // What it may do: its declaration, and the grant a person's approval
+    // of it as it is now gives a program or a model-calling script.
+    let consented = needs_approval(ctx.root, owner, &spec);
+    let approved = consented
+        && approval_hash(&ctx.root.join(&ext.path), &spec)
+            .is_ok_and(|h| is_approved(ctx.approvals, owner, id, &h));
+    let calls_ai = consented && spec.runtime == CollectorRuntime::Starlark;
+    let run = parent
+        .child(
+            Some(crate::run_context::contribution(
+                ctx.catalog,
+                ctx.root,
+                &ext,
+                oxplow_domain::contribution::ContributionKind::Collector,
+                id,
+            )),
+            Mode::External,
+        )
+        .authorized(crate::grants::authority(
+            ctx.approvals,
+            &format!("{owner}/{id}"),
+            approved,
+            crate::grants::collector_request(&spec, calls_ai),
+        ));
     let started = std::time::Instant::now();
     let result = run_collector_once(ctx, &run, owner, id, trigger).await;
     let recorded = match &result {
@@ -1107,7 +1135,6 @@ async fn run_collector_once(
                         &this_run,
                         oxplow_domain::run::Outcome::Ok,
                         None,
-                        &serde_json::json!([]),
                     )?;
                     let vocabulary = vocabulary.current();
                     let synced = event.envelope("ok", counts.clone(), 0, elapsed, None);
@@ -1161,7 +1188,6 @@ async fn run_collector_once(
                     oxplow_domain::run::Outcome::Failed
                 },
                 Some(&why),
-                &serde_json::json!([]),
             )?;
             oxplow_db::event_log_store::append_tx(tx, &vocabulary.current(), &envelope).map(|_| ())
         })
@@ -1399,13 +1425,7 @@ impl RunLog {
                 oxplow_db::collector_store::record_run_in(tx, &run)
                     .map_err(oxplow_db::map_sql_err)?;
                 if let Some((run, outcome, error)) = &ended {
-                    oxplow_db::extension_run_store::record_tx(
-                        tx,
-                        run,
-                        *outcome,
-                        error.as_deref(),
-                        &serde_json::json!([]),
-                    )?;
+                    oxplow_db::extension_run_store::record_tx(tx, run, *outcome, error.as_deref())?;
                 }
                 Ok(true)
             })
@@ -1767,6 +1787,14 @@ async fn produce(
             } else {
                 std::sync::Arc::new(RefusingOracle)
             };
+        if spec.runtime == CollectorRuntime::Starlark && oxplow_script::ai::calls_ai(&script) {
+            if let Decision::Denied(why) = run.decide(Need::Ai) {
+                return Ok((
+                    spec,
+                    Err(format!("collector `{id}` may not call a model: {why}")),
+                ));
+            }
+        }
         let output = derive_collector(&ctx.layer, script, &spec, oracle, event, rows, run).await;
         return Ok((spec, output));
     }
@@ -1777,10 +1805,26 @@ async fn produce(
         &spec,
         &format!("runs `{}`", entry_of(&spec)),
     )?;
+    // What the program may do, decided and recorded on its run: a denied
+    // one stops it before it starts.
+    let mut needs = vec![Need::Program(entry_of(&spec).to_string()), Need::Files];
+    needs.extend(spec.env.iter().map(|e| Need::Env(e.clone())));
+    needs.extend(spec.network.iter().map(|h| Need::Host(h.clone())));
+    for need in needs {
+        if let Decision::Denied(why) = run.decide(need.clone()) {
+            return Ok((spec, Err(format!("collector `{id}`: {need:?}: {why}"))));
+        }
+    }
 
     let mut credentials = BTreeMap::new();
     let mut missing = None;
     for name in &spec.credentials {
+        // A credential its grant doesn't name is never read from the
+        // keychain.
+        if let Decision::Denied(why) = run.decide(Need::Credential(name.clone())) {
+            missing = Some(format!("credential `{name}`: {why}"));
+            continue;
+        }
         match ctx
             .secrets
             .get(&credential_account(&ctx.project, owner, name))
@@ -2240,6 +2284,27 @@ pub(crate) mod tests {
             !is_approved(&approvals, "my-gh", "gh", &h2),
             "a changed script needs re-approval"
         );
+    }
+
+    /// A collector's whole declaration is part of what's approved: a
+    /// changed `input` query, trigger or entity asks again, as a changed
+    /// script does.
+    #[test]
+    fn a_collectors_declaration_is_part_of_its_approval() {
+        let ext = tempfile::tempdir().unwrap();
+        script(ext.path(), "bin/sync.sh", "echo one");
+        let base = spec("bin/sync.sh", &["GH_TOKEN"]);
+        let h = approval_hash(ext.path(), &base).unwrap();
+        let mut changed = base.clone();
+        changed.trigger = oxplow_config::collectors::parse_trigger(
+            Some(&serde_yaml::from_str("{ every: 5m }").unwrap()),
+            &|_| true,
+        )
+        .unwrap();
+        assert_ne!(approval_hash(ext.path(), &changed).unwrap(), h);
+        let mut changed = base.clone();
+        changed.doc = "Another doc".into();
+        assert_ne!(approval_hash(ext.path(), &changed).unwrap(), h);
     }
 
     #[test]

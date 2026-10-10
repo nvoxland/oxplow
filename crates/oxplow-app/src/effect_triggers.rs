@@ -555,6 +555,13 @@ pub(crate) async fn run_reaction(
         Some(parent) => run.under(parent),
         None => run,
     };
+    // What it may do: the scopes it declares, on the person's approval.
+    let run = run.authorized(crate::grants::authority(
+        &svc.approvals,
+        &format!("effect:{}", decl.name()),
+        approved,
+        crate::grants::script_request(&decl.needs),
+    ));
     let key = EffectRunKey {
         effect,
         event_id,
@@ -918,13 +925,7 @@ async fn record_run(
     if let Err(e) = svc
         .db
         .transaction(move |tx| {
-            oxplow_db::extension_run_store::record_tx(
-                tx,
-                &run,
-                outcome,
-                error.as_deref(),
-                &serde_json::json!([]),
-            )
+            oxplow_db::extension_run_store::record_tx(tx, &run, outcome, error.as_deref())
         })
         .await
     {
