@@ -129,6 +129,9 @@ pub mod run_context;
 mod run_context_tests;
 pub mod scope_calls;
 pub mod semantic_catalog;
+pub mod services;
+#[cfg(test)]
+mod services_tests;
 pub mod session_auth;
 pub mod snapshot_capture;
 pub mod snapshot_capture_registry;
@@ -1158,7 +1161,8 @@ impl Services {
             db: db.clone(),
             vocabulary: event_log_store.vocabulary().clone(),
             layer: sql.clone(),
-        });
+        })
+        .with_ai(ai_compute.clone());
         let efforts =
             effort_service::EffortService::new(effort_store.clone(), thread_store.clone())
                 .with_event_pump(event_pump.clone())
@@ -1272,6 +1276,7 @@ impl Services {
             &effort_policies,
             &declared,
             &sql,
+            &(Arc::new(metrics.clone()) as Arc<dyn services::TreeSource>),
             &approvals,
             &layout.project_dir,
         );

@@ -982,11 +982,14 @@ pub(crate) async fn run_script(
     // The script is the run's pure part: what it calls is counted apart,
     // then added to the run it composes.
     let composing = run.child(None, Mode::Pure);
+    let sources = crate::services::Sources::default()
+        .with_tree(crate::services::Trees::From(Arc::new(svc.metrics.clone())));
+    let given = crate::services::prepare(&composing, &script, &needs, &sources).await?;
     let runtime = tokio::runtime::Handle::current();
     tokio::task::spawn_blocking(move || {
         let read = Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(layer.run(q)));
         let mut calls = crate::scope_calls::Calls::new(&composing, &needs, read);
-        let reaction = effects::run_script(&script, event, &mut calls)?;
+        let reaction = effects::run_script(&script, event, given, &mut calls)?;
         Ok((reaction, composing.trace().summary()))
     })
     .await

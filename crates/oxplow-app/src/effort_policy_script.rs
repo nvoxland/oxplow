@@ -27,6 +27,8 @@ pub struct ScriptedPolicy {
     /// The scopes it may call.
     pub needs: Vec<String>,
     pub sql: SqlGateway,
+    /// Where it reads the tree, when it declares `tree.read`.
+    pub trees: Arc<dyn crate::services::TreeSource>,
     /// Whether a person approved it as it is now, asked before each event.
     pub gate: Gate,
 }
@@ -56,6 +58,8 @@ impl EffortPolicy for ScriptedPolicy {
             &self.script,
             event,
             None,
+            &crate::services::Sources::default()
+                .with_tree(crate::services::Trees::From(self.trees.clone())),
         )
         .await
         .map_err(&failed)?

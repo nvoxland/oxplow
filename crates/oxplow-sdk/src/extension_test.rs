@@ -502,6 +502,7 @@ async fn policy_example(
         script,
         event,
         Some(&answers),
+        &oxplow_app::services::Sources::default(),
     )
     .await
     .and_then(|reaction| match &reaction {

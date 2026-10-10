@@ -99,6 +99,9 @@ pub struct FactCollector {
     /// It reads the whole tree as of the snapshot on every run, so its
     /// capture restates every file (a built-in whole-tree scan).
     pub whole_tree: bool,
+    /// The services its script may use: what it declares and what a fact
+    /// collector implies (`tree.read`).
+    pub needs: Vec<String>,
 }
 
 impl FactCollector {
@@ -116,6 +119,7 @@ impl FactCollector {
             input: spec.input.clone(),
             after: spec.after.clone(),
             whole_tree: false,
+            needs: spec.service_needs(),
         })
     }
 
@@ -144,6 +148,7 @@ impl FactCollector {
             input: None,
             after: Vec::new(),
             whole_tree: m.whole_tree,
+            needs: vec!["tree.read".into()],
         }
     }
 
@@ -259,14 +264,64 @@ pub struct MetricsService {
     /// Per state entity metric: when it was last captured and the value
     /// (tsk322), for the throttle and the unchanged-value skip.
     entity_captures: Arc<std::sync::Mutex<HashMap<String, (std::time::Instant, f64)>>>,
+    /// The last tree a script was given (`tree.read`, [`crate::services::TreeSource`]),
+    /// by snapshot: the runs one event triggers share it.
+    last_tree: Arc<std::sync::Mutex<Option<(i64, crate::services::Tree)>>>,
     /// Where a fact collector's run is recorded (`collector_run` +
     /// `collector.synced@1`) and its `input` read. `None` in tests that don't
     /// wire it: the run still records its capture.
     run_log: Option<crate::collector_runner::RunLog>,
+    /// What a fact collector that declares `ai.compute` asks. `None` in
+    /// tests that don't wire it: such a collector is refused the model.
+    ai: Option<Arc<crate::ai_compute::AiCompute>>,
 }
 
 /// How often a state entity metric may be re-captured.
 const ENTITY_CAPTURE_EVERY: std::time::Duration = std::time::Duration::from_secs(600);
+
+#[async_trait::async_trait]
+impl crate::services::TreeSource for MetricsService {
+    /// The whole tree as of the snapshot the run is anchored to — else its
+    /// stream's latest, else the primary stream's — as the fact engine
+    /// reads it (deleted, oversize and binary files left out).
+    async fn tree(
+        &self,
+        anchors: &oxplow_domain::events::Anchors,
+    ) -> Result<crate::services::Tree, String> {
+        let stream = match anchors.stream_id {
+            Some(s) => Some(s.value()),
+            None => match &self.fact_store {
+                Some(facts) => {
+                    primary_stream(&crate::sql_gateway::SqlGateway::new(facts.database())).await
+                }
+                None => None,
+            },
+        };
+        let snapshot = match (anchors.snapshot_id, stream) {
+            (Some(id), _) => Some(id),
+            (None, Some(stream)) => self
+                .snapshot_store
+                .latest_snapshot_id_for_stream(StreamId::new(stream))
+                .await
+                .map_err(|e| format!("`tree.read`: {e}"))?,
+            (None, None) => None,
+        };
+        let Some(snapshot) = snapshot else {
+            return Err("`tree.read`: there's no snapshot to read yet".into());
+        };
+        let cached = self
+            .last_tree
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        if let Some((_, tree)) = cached.filter(|(id, _)| *id == snapshot) {
+            return Ok(tree);
+        }
+        let tree = Arc::new(self.build_full_file_map(snapshot).await);
+        *self.last_tree.lock().unwrap_or_else(|e| e.into_inner()) = Some((snapshot, tree.clone()));
+        Ok(tree)
+    }
+}
 
 /// One row in the **available** metric catalog (built-in ∪ global ∪ project) for
 /// the Catalog UI (tsk219, P4): what the metric is + whether the project has it
@@ -375,13 +430,21 @@ impl MetricsService {
             snapshot_captures: None,
             extensions_cache,
             entity_captures: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            last_tree: Arc::default(),
             run_log: None,
+            ai: None,
         }
     }
 
     /// Record fact collectors' runs and read their `input` through `log`.
     pub fn with_run_log(mut self, log: crate::collector_runner::RunLog) -> Self {
         self.run_log = Some(log);
+        self
+    }
+
+    /// What a fact collector that asks a model asks (`ai.compute`).
+    pub fn with_ai(mut self, ai: Arc<crate::ai_compute::AiCompute>) -> Self {
+        self.ai = Some(ai);
         self
     }
 
@@ -2120,7 +2183,20 @@ impl MetricsService {
             })
         };
         Ok(match c.runtime {
-            CollectorRuntime::Starlark => FactRunner::Starlark(script()?),
+            CollectorRuntime::Starlark => {
+                let text = script()?;
+                // A script that asks a model spends the person's key each
+                // run: it runs once they approved it.
+                if oxplow_script::ai::calls_ai(&text) && !self.approved_to_ask(c) {
+                    return Err(format!(
+                        "collector `{}` calls a model (`ai_*`), spending your AI provider's key \
+                         each run, and needs a person's approval first (Settings → Data). \
+                         Approval is per machine and per script version.",
+                        c.key
+                    ));
+                }
+                FactRunner::Starlark(text)
+            }
             CollectorRuntime::Jaq => FactRunner::Jaq(script()?),
             CollectorRuntime::Exec => {
                 // A project collector's program comes from the repo: it runs
@@ -2172,15 +2248,14 @@ impl MetricsService {
             ));
         }
         let runner = self.fact_runner(&collector)?;
-        let facts = tokio::task::spawn_blocking(move || {
-            runner.run(
-                &input,
-                std::sync::Arc::new(files),
-                &RunContext::core(Actor::System, Mode::Pure),
-            )
-        })
-        .await
-        .map_err(|e| format!("task failed: {e}"))??;
+        let run = RunContext::core(Actor::System, Mode::Pure);
+        let given = self
+            .given(&collector, &runner, &run, Arc::new(files))
+            .await?;
+        let layer = self.run_log.as_ref().map(|l| l.layer.clone());
+        let facts = tokio::task::spawn_blocking(move || runner.run(&input, given, layer, &run))
+            .await
+            .map_err(|e| format!("task failed: {e}"))??;
         Ok(facts
             .into_iter()
             .map(|f| {
@@ -2193,26 +2268,69 @@ impl MetricsService {
             .collect())
     }
 
-    /// Fact collector `gauge`'s run, a child of `parent`: named for the
-    /// collector when an extension declares it (core's and the project's
-    /// are core's own work).
-    fn collector_run(&self, gauge: &FactCollector, parent: &RunContext) -> RunContext {
+    /// Whether a person approved fact collector `c` — whose script asks a
+    /// model — as it is now: an extension's in Settings → Data (its
+    /// approval covers its extension's files), the project's under
+    /// Programs.
+    fn approved_to_ask(&self, c: &FactCollector) -> bool {
+        use crate::exec_consent::{may_run, ProgramKind};
+        if c.owner == oxplow_config::collectors::PROJECT {
+            return may_run(
+                &self.approvals,
+                &self.project_dir,
+                ProgramKind::Collector,
+                &c.key,
+                c.entry.as_deref().unwrap_or_default(),
+                &[],
+            );
+        }
         let root = &self.project_dir;
-        let declared = self
-            .extensions_cache
+        self.extensions_cache
             .get(root)
             .iter()
-            .find(|e| e.name == gauge.owner)
-            .map(|ext| {
-                crate::run_context::contribution(
-                    &self.extensions_cache,
-                    root,
-                    ext,
-                    oxplow_domain::contribution::ContributionKind::Collector,
-                    &gauge.key,
-                )
+            .find(|e| e.name == c.owner)
+            .and_then(|ext| {
+                let spec = ext.collectors.iter().find(|s| s.id == c.key)?;
+                crate::collector_runner::approval_hash(&root.join(&ext.path), spec).ok()
+            })
+            .is_some_and(|hash| {
+                crate::collector_runner::is_approved(&self.approvals, &c.owner, &c.key, &hash)
+            })
+    }
+
+    /// Fact collector `gauge`'s run, a child of `parent`: named for the
+    /// collector when an extension declares it (core's and the project's
+    /// are core's own work), and deciding what it does against what it
+    /// declares — or, once a person approved it, their grant.
+    fn collector_run(&self, gauge: &FactCollector, parent: &RunContext) -> RunContext {
+        let root = &self.project_dir;
+        let extensions = self.extensions_cache.get(root);
+        let Some(ext) = extensions.iter().find(|e| e.name == gauge.owner) else {
+            return parent.child(None, Mode::External);
+        };
+        let run = parent.child(
+            Some(crate::run_context::contribution(
+                &self.extensions_cache,
+                root,
+                ext,
+                oxplow_domain::contribution::ContributionKind::Collector,
+                &gauge.key,
+            )),
+            Mode::External,
+        );
+        let Some(spec) = ext.collectors.iter().find(|s| s.id == gauge.key) else {
+            return run;
+        };
+        let approved = crate::collector_runner::approval_hash(&root.join(&ext.path), spec)
+            .is_ok_and(|h| {
+                crate::collector_runner::is_approved(&self.approvals, &gauge.owner, &gauge.key, &h)
             });
-        parent.child(declared, Mode::External)
+        run.authorized(crate::grants::authority(
+            &self.approvals,
+            &format!("{}/{}", gauge.owner, gauge.key),
+            approved,
+            crate::grants::collector_request(spec, &gauge.needs),
+        ))
     }
 
     /// Run one fact collector: build its runner and run it with the
@@ -2252,17 +2370,21 @@ impl MetricsService {
         let started = std::time::Instant::now();
         let outcome = match self.fact_input(gauge, ctx).await {
             Err(e) => Err(e),
-            Ok(input) => {
-                let run = this_run.clone();
-                // A tree collector scans the WHOLE tree (hundreds of files,
-                // tree-sitter each): the 5 s default sized for report parsers
-                // silently timed out the broad-query ones on every full-tree
-                // run (tsk47). They run detached under `spawn_blocking`, so a
-                // generous ceiling costs nothing and still catches a runaway.
-                tokio::task::spawn_blocking(move || runner.run(&input, files, &run))
-                    .await
-                    .unwrap_or_else(|e| Err(format!("task failed: {e}")))
-            }
+            Ok(input) => match self.given(gauge, &runner, &this_run, files).await {
+                Err(e) => Err(e),
+                Ok(given) => {
+                    let run = this_run.clone();
+                    let layer = self.run_log.as_ref().map(|l| l.layer.clone());
+                    // A tree collector scans the WHOLE tree (hundreds of files,
+                    // tree-sitter each): the 5 s default sized for report parsers
+                    // silently timed out the broad-query ones on every full-tree
+                    // run (tsk47). They run detached under `spawn_blocking`, so a
+                    // generous ceiling costs nothing and still catches a runaway.
+                    tokio::task::spawn_blocking(move || runner.run(&input, given, layer, &run))
+                        .await
+                        .unwrap_or_else(|e| Err(format!("task failed: {e}")))
+                }
+            },
         };
         // Facts the ingest would refuse fail the run here, with why (tsk986).
         let outcome = match outcome {
@@ -2305,6 +2427,32 @@ impl MetricsService {
         self.log_run(gauge, ctx, &this_run, &run, elapsed, capture)
             .await;
         run
+    }
+
+    /// The services fact collector `gauge`'s script is given on `run`
+    /// (`services::prepare`): the tree it runs over, the semantic layer
+    /// and a model when it declares them and its run allows them.
+    async fn given(
+        &self,
+        gauge: &FactCollector,
+        runner: &FactRunner,
+        run: &RunContext,
+        files: Arc<HashMap<String, String>>,
+    ) -> Result<crate::services::Given, String> {
+        let FactRunner::Starlark(script) = runner else {
+            return Ok(crate::services::Given::default());
+        };
+        let mut sources =
+            crate::services::Sources::default().with_tree(crate::services::Trees::Fixed(files));
+        if let Some(ai) = &self.ai {
+            sources = sources.with_ai(
+                ai.clone(),
+                format!("collector:{}/{}", gauge.owner, gauge.key),
+            );
+        }
+        crate::services::prepare(run, script, &gauge.needs, &sources)
+            .await
+            .map_err(|e| format!("collector `{}`: {e}", gauge.key))
     }
 
     /// A fact collector's input: its `report` parsed in its format, its
@@ -3207,12 +3355,15 @@ enum FactRunner {
 }
 
 impl FactRunner {
-    /// Run over `input` under the fact-collector budget and read its
-    /// `{"facts": [...]}`. Blocking: call it from `spawn_blocking`.
+    /// Run over `input` under the fact-collector budget, with the
+    /// services it was `given` (its `sql.read` calls read through
+    /// `layer`), and read its `{"facts": [...]}`. Blocking: call it from
+    /// `spawn_blocking`, inside the runtime.
     fn run(
         self,
         input: &serde_json::Value,
-        files: std::sync::Arc<std::collections::HashMap<String, String>>,
+        given: crate::services::Given,
+        layer: Option<crate::sql_gateway::SqlGateway>,
         run: &RunContext,
     ) -> Result<Vec<CollectedFact>, String> {
         use oxplow_script::facts_of;
@@ -3229,7 +3380,17 @@ impl FactRunner {
         };
         match self {
             FactRunner::Starlark(text) => {
-                script(ScriptRun::starlark(&text, input.clone()).with_tree(files))
+                let needs = given.needs.clone();
+                let handle = tokio::runtime::Handle::current();
+                let read = Box::new(|q: oxplow_db::SqlQuery| match &layer {
+                    Some(layer) => handle.block_on(layer.run(q)),
+                    None => Err(oxplow_domain::DomainError::Invariant(
+                        "no semantic layer to read here".into(),
+                    )),
+                });
+                let mut calls = crate::scope_calls::Calls::new(run, &needs, read);
+                let mut serve = |id: &str, args: serde_json::Value| calls.serve(id, args);
+                script(given.onto(ScriptRun::starlark(&text, input.clone()), Some(&mut serve)))
             }
             FactRunner::Jaq(text) => script(ScriptRun::jaq(&text, input.clone())),
             FactRunner::Exec(argv) => run_exec(&budget, &argv, &input.to_string()),
@@ -4216,6 +4377,7 @@ mod tests {
             input: None,
             after: Vec::new(),
             whole_tree: false,
+            needs: vec!["tree.read".into()],
         }
     }
 

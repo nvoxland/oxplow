@@ -774,12 +774,13 @@ extension's own declared event types, logged with the run (P9.D2;
 - An **entity collector** (`entities:`) writes rows published as
   `v_<owner>_<entity>`; `collector_runner` runs it. It may be `exec`
   (approved), `starlark` / `jaq` (derived, below; a Starlark one may call
-  `ai_*` once approved, has no `files()`) or `read`.
+  `ai_*` once approved, and read the tree when it declares `tree.read`)
+  or `read`.
 - A **fact collector** (`facts: [<measure>, …]`) is what a *gauge* was
   until P7.B3. It runs in the fact engine (`MetricsService`,
   [metrics.md](./metrics.md)): its Starlark gets the snapshot tree
-  (`files()` / `source_files()` / `ast_query()`, the `TreeHost`) but no
-  `ai_*`; its input is `{report?, rows?, event?}` (`report: { path,
+  (`files()` / `source_files()` / `ast_query()`, `tree.read`) and, when
+  it declares them, the semantic layer and a model (approved); its input is `{report?, rows?, event?}` (`report: { path,
   format }` parsed — text | json | xml | lcov | lines; the `input:`
   query's rows; the trigger event); it returns `{"facts": [{measure,
   value, subject?, path?, line?, rule?, num?, den?, dims?}]}` and nothing
@@ -905,11 +906,12 @@ entities from data already in the semantic layer:
   More than 10k rows fails the run rather than deriving from a partial
   set. The script gets `{"rows": [{col: value, …}]}` and returns the exec
   shape.
-- **Sandbox.** It runs in the collector sandbox
-  (a script worker given a model, `ScriptRun::with_ai`, or `run_jaq`), with
-  no files, network, env or secrets. Its one way out is oxplow's own: the
-  `ai_*` builtins (`ai_classify` / `ai_score` / `ai_summarize` /
-  `ai_extract`), recorded computations on the project's AI roles as caller
+- **Sandbox.** It runs in a script worker with no files, network, env or
+  secrets. Its ways out are oxplow's own services, each one it declares
+  (extensions.md "Services"): the captured tree (`tree.read`), the
+  semantic layer (`sql.read`), and the `ai_*` builtins (`ai_classify` /
+  `ai_score` / `ai_summarize` / `ai_extract`, implied when its script
+  names one), recorded computations on the project's AI roles as caller
   `collector:<owner>/<id>`, whose wait is left out of the budget
   ([ai-providers.md](./ai-providers.md) "`ai_*` functions for sources").
   A model call spends the person's key — on an `every:` trigger, every few
@@ -921,7 +923,8 @@ entities from data already in the semantic layer:
   `produce` refuses it (a scheduled run records `needs_approval`),
   `list_collectors` lists it unapproved with its `version`, `extension
   test` skips its examples with a warning, and only an approved script is
-  handed a model at all — every other derived run gets `RefusingOracle`.
+  handed a model at all (the services router builds no model for any
+  other run, extensions.md "Services").
   Any other derived collector needs **no approval**: `list_collectors`
   reports it approved and the scheduler runs it on its `every:` trigger.
 - **Refused at parse:** `env` / `credentials` on a derived collector,

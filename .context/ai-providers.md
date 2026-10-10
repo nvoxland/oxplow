@@ -284,8 +284,7 @@ which blocks the script's worker thread on the runtime and asks
 recorded computation (the same question on the same text is one call,
 ever). Only a script a person approved gets it: one that names an `ai_*`
 builtin runs only once approved, like an exec program
-([semantic-layer.md](./semantic-layer.md) "Sandbox"), and every other
-derived run gets `RefusingOracle`. The script runs in a script worker
+([semantic-layer.md](./semantic-layer.md) "Sandbox"). The script runs in a script worker
 ([collection.md](./collection.md) "Containing scripts"); each `ai_*` call
 crosses to the host, which asks the oracle. The time it waits is left out
 of the run's `timeout` (`RunClock`, the in-flight call included) but not
@@ -293,10 +292,16 @@ out of its `ceiling` (10 min of wall clock, model time included), so a
 per-row loop of calls can't run for hours and hold up every scheduled
 source behind it. Past either the worker is killed: no paid calls after
 a timeout. A run cut off keeps
-what it recorded, so its next run gets further (tsk559). A run not given a model —
-a **fact collector** (`facts:`, run by the fact engine with the tree), a
-report parser — has no `AiHost`, and the builtins refuse with the need
-it lacks: "`ai_classify()` needs `ai.compute` in this script's
+what it recorded, so its next run gets further (tsk559). Who gets a model is the
+services router's ([extensions.md](./extensions.md) "Services"): an
+entity collector whose script names an `ai_*` builtin implies
+`ai.compute`; a **fact collector** gets one when it declares
+`needs: [ai.compute]` and a person approved it (otherwise it is refused
+before it runs); a script that composes — a command's, an effect's, a
+policy's, a review's dry run — runs pure and is refused before it runs:
+"`ai_summarize()`: a pure run can't use `ai.compute` (ask a model): only
+a run that may call out can". A run not given a model (a report parser)
+is told the need: "`ai_classify()` needs `ai.compute` in this script's
 `needs`". Lenses never call a model when they render; they read
 what collectors recorded. The extension skill's example classifies each
 turn's prompt (`turn_kind`).

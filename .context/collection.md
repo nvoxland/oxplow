@@ -602,8 +602,10 @@ parsers pre-parse via `input` instead. (Standard Starlark forbids recursion +
 easier fit.)
 
 More globals back **fact collectors** (the metric substrate's author-able
-producers — see [metrics.md](./metrics.md)); a fact collector can't call
-the `ai_*` builtins, and an entity collector has no `files()`:
+producers — see [metrics.md](./metrics.md)); what a script may call is
+the services it declares (extensions.md "Services": a fact collector
+implies `tree.read`; an entity collector reads the tree when it declares
+it):
 - `ast_query(text, language, sexpr)` → a flat `[{capture, text, start_row,
   start_col, end_row, end_col}]` list. Parses `text` with the named tree-sitter
   grammar (`rust`/`typescript`/`tsx`/`javascript`/`python`/`go`/`java`/`c`/`cpp`/

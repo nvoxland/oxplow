@@ -2,8 +2,8 @@
 //! call was decided (`.context/extensions.md` "Grants").
 //!
 //! A [`GrantRequest`] is derived from what a contribution declares — the
-//! scopes it calls, the program it runs, the hosts it reaches, the
-//! credentials and environment it reads, whether it calls a model. A
+//! scopes it calls (a model among them, `ai.compute`), the program it
+//! runs, the hosts it reaches, the credentials and environment it reads. A
 //! declaration is never a grant: a [`Grant`] is a person's approval of
 //! exactly a request, on this machine, until they revoke it or the request
 //! changes. A run decides each thing it does against its grant (or, for a
@@ -19,7 +19,9 @@ use crate::time::Timestamp;
 /// What a contribution asks to do.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GrantRequest {
-    /// The scopes it calls (`sql.read`).
+    /// The scopes it calls (`sql.read`), the services its scripts use
+    /// among them (`tree.read`; `ai.compute`, which spends the person's AI
+    /// provider key).
     pub scopes: BTreeSet<String>,
     /// The program it runs (its entry, an MCP server's url), when it runs
     /// one: a program reads and writes files as the person, which oxplow
@@ -33,8 +35,6 @@ pub struct GrantRequest {
     pub env: BTreeSet<String>,
     /// The commands it may run with its viewer's rights (a component).
     pub commands: BTreeSet<String>,
-    /// It calls a model (`ai_*`), spending the person's AI provider key.
-    pub ai: bool,
 }
 
 impl GrantRequest {
@@ -66,9 +66,6 @@ impl GrantRequest {
             if let Some(p) = &self.program {
                 out.push(format!("runs {p}"));
             }
-        }
-        if self.ai && !granted.ai {
-            out.push("calls a model".into());
         }
         out
     }
@@ -108,7 +105,6 @@ pub enum Need {
     Credential(String),
     Env(String),
     Command(String),
-    Ai,
     /// Files outside oxplow, read or written by a program it runs.
     Files,
 }
@@ -179,7 +175,6 @@ pub fn decide(
         Need::Credential(c) => allowed.credentials.contains(c),
         Need::Env(e) => allowed.env.contains(e),
         Need::Command(c) => allowed.commands.contains(c),
-        Need::Ai => allowed.ai,
         Need::Files => allowed.program.is_some(),
     };
     if !within {
@@ -216,7 +211,6 @@ mod tests {
             ]
             .into(),
             credentials: ["GH_TOKEN".to_string()].into(),
-            ai: false,
             ..GrantRequest::default()
         }
     }
@@ -252,7 +246,10 @@ mod tests {
             d(Need::Credential("AWS_KEY".into())),
             Decision::Denied(_)
         ));
-        assert!(matches!(d(Need::Ai), Decision::Denied(_)));
+        assert!(matches!(
+            d(Need::Scope("ai.compute".into())),
+            Decision::Denied(_)
+        ));
     }
 
     /// What oxplow can't hold to the grant is said, not passed off as
@@ -303,7 +300,7 @@ mod tests {
             Decision::Allowed
         );
         assert_eq!(
-            decide(&Need::Ai, None, &declared, MAC),
+            decide(&Need::Scope("ai.compute".into()), None, &declared, MAC),
             Decision::Denied("not declared".into())
         );
     }
@@ -317,10 +314,10 @@ mod tests {
         assert!(narrower.widening(&granted).is_empty());
         let mut wider = request();
         wider.hosts.insert("evil.com".into());
-        wider.ai = true;
+        wider.scopes.insert("ai.compute".into());
         assert_eq!(
             wider.widening(&granted),
-            vec!["reaches evil.com", "calls a model"]
+            vec!["calls ai.compute", "reaches evil.com"]
         );
     }
 

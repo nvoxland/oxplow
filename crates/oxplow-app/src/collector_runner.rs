@@ -111,6 +111,9 @@ pub struct Collectors<'a> {
     pub catalog: &'a crate::extension_catalog::ExtensionCatalog,
     /// What a derived collector's `ai_*` builtins ask (recorded computations).
     pub ai: std::sync::Arc<crate::ai_compute::AiCompute>,
+    /// Where a script that reads the tree (`tree.read`) reads it; `None`
+    /// in tests that read none.
+    pub trees: Option<std::sync::Arc<dyn crate::services::TreeSource>>,
 }
 
 impl<'a> Collectors<'a> {
@@ -126,6 +129,7 @@ impl<'a> Collectors<'a> {
             layer: svc.sql.clone(),
             catalog: &svc.extension_catalog,
             ai: svc.ai_compute.clone(),
+            trees: Some(std::sync::Arc::new(svc.metrics.clone())),
         }
     }
 }
@@ -610,32 +614,6 @@ pub fn exec_collector(
     ScriptOutput::parse(spec, value)
 }
 
-/// A model call refused: a review runs no model (P8.C4) — the `ai_*`
-/// builtins answer with this error, so a review never spends or sends.
-pub struct RefusingOracle;
-
-const REFUSED: &str = "a review runs no model: `ai_*` calls are refused";
-
-impl oxplow_script::AiOracle for RefusingOracle {
-    fn classify(&self, _: &str, _: &[String]) -> Result<serde_json::Value, String> {
-        Err(REFUSED.into())
-    }
-    fn score(&self, _: &str, _: &[String]) -> Result<serde_json::Value, String> {
-        Err(REFUSED.into())
-    }
-    fn summarize(&self, _: &str, _: Option<&str>) -> Result<String, String> {
-        Err(REFUSED.into())
-    }
-    fn extract(
-        &self,
-        _: &str,
-        _: &str,
-        _: &serde_json::Value,
-    ) -> Result<serde_json::Value, String> {
-        Err(REFUSED.into())
-    }
-}
-
 /// What a review's dry run of a collector gave (P8.C4).
 #[derive(Debug, Clone, PartialEq)]
 pub enum DryRun {
@@ -647,7 +625,8 @@ pub enum DryRun {
 }
 
 /// Run collector `spec` — `script` being its entry's text in the version
-/// under review — on `event` / `rows`, storing nothing and asking no model,
+/// under review — on `event` / `rows`, storing nothing and asking no model
+/// (a dry run is pure: a script that asks one is refused before it runs),
 /// within the command scripts' budget (a review waits on it, so a runaway
 /// script is given up on in seconds, not a collector's two minutes).
 /// Only a derived collector (Starlark, jaq) runs; an exec or read one is
@@ -668,17 +647,13 @@ pub async fn dry_run_collector(
     let Some(script) = script else {
         return DryRun::Failed(format!("entry `{}` doesn't exist", entry_of(spec)));
     };
-    match derive_collector(
-        layer,
-        script,
-        spec,
-        std::sync::Arc::new(RefusingOracle),
-        event,
-        rows,
-        &crate::run_context::for_dry_run().within(crate::extension_commands::COMMAND_SCRIPT_BUDGET),
-    )
-    .await
-    {
+    let run =
+        crate::run_context::for_dry_run().within(crate::extension_commands::COMMAND_SCRIPT_BUDGET);
+    let given = match given(spec, &run, &script, &crate::services::Sources::default()).await {
+        Ok(given) => given,
+        Err(e) => return DryRun::Failed(e),
+    };
+    match derive_collector(layer, script, spec, given, event, rows, &run).await {
         Ok(out) => DryRun::Output(out),
         Err(e) => DryRun::Failed(e),
     }
@@ -687,13 +662,14 @@ pub async fn dry_run_collector(
 /// Run a derived (starlark / jaq) collector: read its `input` rows (the
 /// trigger event's anchors bound by name) — or take `rows`, standing in
 /// for them (an example's fixture) — then run its script over
-/// `{"rows": [...], "event"?: {...}}` in the collector sandbox, as part
-/// of `run` (its budget, its cancel flag).
+/// `{"rows": [...], "event"?: {...}}` in a script worker, as part of `run`
+/// (its budget, its cancel flag), with the services it was `given`
+/// ([`given`]).
 pub async fn derive_collector(
     layer: &crate::sql_gateway::SqlGateway,
     script: String,
     spec: &CollectorSpec,
-    oracle: std::sync::Arc<dyn oxplow_script::AiOracle>,
+    given: crate::services::Given,
     event: Option<&EventView>,
     rows: Option<Vec<serde_json::Value>>,
     run: &RunContext,
@@ -725,13 +701,21 @@ pub async fn derive_collector(
     let input = serde_json::Value::Object(input);
     let runtime = spec.runtime;
     let (budget, cancel, cost) = (run.budget(), run.cancel().clone(), run.clone());
+    let (layer, needs, handle) = (
+        layer.clone(),
+        given.needs.clone(),
+        tokio::runtime::Handle::current(),
+    );
     let value = tokio::task::spawn_blocking(move || {
         use oxplow_script::workers::{shared, ScriptRun};
-        // In a worker: its `ai_*` calls are answered here, and the time
-        // they wait on a model isn't the script's.
+        // In a worker: its `ai_*` and `scope` calls are answered here, and
+        // the time they wait isn't the script's.
+        let read = Box::new(|q: oxplow_db::SqlQuery| handle.block_on(layer.run(q)));
+        let mut calls = crate::scope_calls::Calls::new(&cost, &needs, read);
+        let mut serve = |id: &str, args: serde_json::Value| calls.serve(id, args);
         let script_run = match runtime {
             CollectorRuntime::Jaq => ScriptRun::jaq(&script, input),
-            _ => ScriptRun::starlark(&script, input).with_ai(oracle),
+            _ => given.onto(ScriptRun::starlark(&script, input), Some(&mut serve)),
         };
         shared().run(&budget, script_run, Some(&cancel)).map(|ran| {
             cost.used_cpu(ran.cpu_ms, ran.peak_bytes);
@@ -742,6 +726,27 @@ pub async fn derive_collector(
     .map_err(|e| format!("collector task panicked: {e}"))?
     .map_err(|e| format!("collector `{}`: {e}", spec.id))?;
     ScriptOutput::parse(spec, value)
+}
+
+/// The services derived collector `spec`'s `script` is given on `run`, from
+/// `sources`: those it uses that it declares (and its kind implies) and
+/// its run allows (`services::prepare`). A jaq script uses none.
+pub async fn given(
+    spec: &CollectorSpec,
+    run: &RunContext,
+    script: &str,
+    sources: &crate::services::Sources,
+) -> Result<crate::services::Given, String> {
+    let needs = crate::services::collector_needs(spec, Some(script));
+    match spec.runtime {
+        CollectorRuntime::Starlark => crate::services::prepare(run, script, &needs, sources)
+            .await
+            .map_err(|e| format!("collector `{}`: {e}", spec.id)),
+        _ => Ok(crate::services::Given {
+            needs,
+            ..Default::default()
+        }),
+    }
 }
 
 /// Coerce raw JSON rows to the entity's declared columns (in order).
@@ -1021,7 +1026,10 @@ pub async fn run_collector(
     let approved = consented
         && approval_hash(&ctx.root.join(&ext.path), &spec)
             .is_ok_and(|h| is_approved(ctx.approvals, owner, id, &h));
-    let calls_ai = consented && spec.runtime == CollectorRuntime::Starlark;
+    let script = (spec.runtime == CollectorRuntime::Starlark)
+        .then(|| crate::extensions::read_extension_file(ctx.root, &ext.name, entry_of(&spec)))
+        .flatten();
+    let needs = crate::services::collector_needs(&spec, script.as_deref());
     let run = parent
         .child(
             Some(crate::run_context::contribution(
@@ -1037,7 +1045,7 @@ pub async fn run_collector(
             ctx.approvals,
             &format!("{owner}/{id}"),
             approved,
-            crate::grants::collector_request(&spec, calls_ai),
+            crate::grants::collector_request(&spec, &needs),
         ));
     let started = std::time::Instant::now();
     let result = run_collector_once(ctx, &run, owner, id, trigger).await;
@@ -1764,38 +1772,31 @@ async fn produce(
             );
             return Ok((spec, Err(missing)));
         };
-        // Only a script a person approved gets a model: one that doesn't
-        // name an `ai_*` builtin gets the oracle that refuses.
-        let oracle: std::sync::Arc<dyn oxplow_script::AiOracle> =
-            if spec.runtime == CollectorRuntime::Starlark && oxplow_script::ai::calls_ai(&script) {
-                check_approved(
-                    approvals,
-                    &ext_dir,
-                    owner,
-                    &spec,
-                    &format!(
-                        "calls a model (`ai_*`) in `{}`, spending your AI provider's key each \
-                         run,",
-                        entry_of(&spec)
-                    ),
-                )?;
-                std::sync::Arc::new(crate::ai_compute::CollectorOracle::new(
-                    ctx.ai.clone(),
-                    format!("collector:{}/{}", ext.name, spec.id),
-                    run.clone(),
-                ))
-            } else {
-                std::sync::Arc::new(RefusingOracle)
-            };
+        // A script that asks a model runs only once a person approved it:
+        // it spends their key each run.
         if spec.runtime == CollectorRuntime::Starlark && oxplow_script::ai::calls_ai(&script) {
-            if let Decision::Denied(why) = run.decide(Need::Ai) {
-                return Ok((
-                    spec,
-                    Err(format!("collector `{id}` may not call a model: {why}")),
-                ));
-            }
+            check_approved(
+                approvals,
+                &ext_dir,
+                owner,
+                &spec,
+                &format!(
+                    "calls a model (`ai_*`) in `{}`, spending your AI provider's key each run,",
+                    entry_of(&spec)
+                ),
+            )?;
         }
-        let output = derive_collector(&ctx.layer, script, &spec, oracle, event, rows, run).await;
+        let mut sources = crate::services::Sources::default().with_ai(
+            ctx.ai.clone(),
+            format!("collector:{}/{}", ext.name, spec.id),
+        );
+        if let Some(trees) = &ctx.trees {
+            sources = sources.with_tree(crate::services::Trees::From(trees.clone()));
+        }
+        let output = match given(&spec, run, &script, &sources).await {
+            Ok(given) => derive_collector(&ctx.layer, script, &spec, given, event, rows, run).await,
+            Err(e) => Err(e),
+        };
         return Ok((spec, output));
     }
     check_approved(
@@ -1877,6 +1878,7 @@ impl CollectorRunner {
             layer: self.layer.clone(),
             catalog: &self.catalog,
             ai: self.ai.clone(),
+            trees: Some(std::sync::Arc::new(self.metrics.clone())),
         }
     }
 
@@ -2473,6 +2475,7 @@ pub(crate) mod tests {
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
             ai: no_ai(),
+            trees: None,
         };
 
         let err = run_collector(
@@ -2668,6 +2671,7 @@ pub(crate) mod tests {
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
             ai: no_ai(),
+            trees: None,
         };
 
         let list = list_collectors(&ctx).await.unwrap();
@@ -2698,6 +2702,7 @@ pub(crate) mod tests {
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
             ai: no_ai(),
+            trees: None,
         };
         let other = list_collectors(&elsewhere).await.unwrap();
         assert!(
@@ -3047,6 +3052,7 @@ pub(crate) mod tests {
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
             ai: no_ai(),
+            trees: None,
         };
         // No approval asked for, and the listing says it can run.
         assert!(list_collectors(&ctx)
@@ -3153,6 +3159,7 @@ pub(crate) mod tests {
                 ai,
                 oxplow_db::SqliteAiResultStore::new(db.clone()),
             )),
+            trees: None,
         };
         let err = run_collector(
             &ctx,
@@ -3235,6 +3242,7 @@ pub(crate) mod tests {
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
             ai: no_ai(),
+            trees: None,
         };
         let preview = preview_collector(&ctx, "work", "star", None, None)
             .await
@@ -3297,6 +3305,7 @@ pub(crate) mod tests {
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
             ai: no_ai(),
+            trees: None,
         };
         script(
             &ext,
@@ -3438,6 +3447,7 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
             ai: no_ai(),
+            trees: None,
         };
         assert!(list_collectors(&ctx).await.unwrap()[0].network_enforced);
         reviewed_run(&ctx, "net", "s", &version_of(&ctx, "net", "s").await)
@@ -3540,6 +3550,7 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
             ai: no_ai(),
+            trees: None,
         };
         let seen = list_collectors(&ctx).await.unwrap()[0]
             .version

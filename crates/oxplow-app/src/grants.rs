@@ -27,15 +27,16 @@ fn scopes(needs: &[String]) -> std::collections::BTreeSet<String> {
 }
 
 /// An extension collector's request: an exec collector's program, hosts,
-/// credentials and environment; a script's model calls when it makes any.
-pub fn collector_request(spec: &CollectorSpec, calls_ai: bool) -> GrantRequest {
+/// credentials and environment; a script's services (`needs`, what it
+/// declares and its kind implies — `services::collector_needs`).
+pub fn collector_request(spec: &CollectorSpec, needs: &[String]) -> GrantRequest {
     let runs_program = spec.runtime == CollectorRuntime::Exec;
     GrantRequest {
+        scopes: scopes(needs),
         program: runs_program.then(|| spec.entry.clone().unwrap_or_default()),
         hosts: spec.network.iter().cloned().collect(),
         credentials: spec.credentials.iter().cloned().collect(),
         env: spec.env.iter().cloned().collect(),
-        ai: calls_ai,
         ..GrantRequest::default()
     }
 }
@@ -67,7 +68,6 @@ pub fn program_request(p: &ProjectProgram) -> GrantRequest {
             .map(|e| e.split('=').next().unwrap_or(e).to_string())
             .collect(),
         commands: p.commands.iter().cloned().collect(),
-        ai: false,
     }
 }
 

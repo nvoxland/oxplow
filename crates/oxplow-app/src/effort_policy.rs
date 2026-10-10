@@ -364,6 +364,7 @@ pub fn register_built_ins(
     registry: &EffortPolicyRegistry,
     declared: &[crate::capabilities::Implementation],
     sql: &SqlGateway,
+    trees: &Arc<dyn crate::services::TreeSource>,
     approvals: &Arc<crate::exec_consent::ApprovalStore>,
     project_dir: &std::path::Path,
 ) {
@@ -395,6 +396,7 @@ pub fn register_built_ins(
                         script: script.as_str().into(),
                         needs: needs.clone(),
                         sql: sql.clone(),
+                        trees: trees.clone(),
                         gate: crate::exec_consent::script_gate(
                             approvals.clone(),
                             project_dir.to_path_buf(),

@@ -199,10 +199,6 @@ pub enum RunError {
         generation: String,
     },
     Cancelled,
-    /// A pure run asked to call out.
-    NotExternal {
-        what: String,
-    },
 }
 
 impl std::fmt::Display for RunError {
@@ -214,9 +210,6 @@ impl std::fmt::Display for RunError {
                  longer loaded; it stops here"
             ),
             RunError::Cancelled => f.write_str("the run was cancelled"),
-            RunError::NotExternal { what } => {
-                write!(f, "{what} needs to call out, which a pure run may not")
-            }
         }
     }
 }
@@ -538,15 +531,6 @@ impl RunContext {
         }
     }
 
-    /// Refuse `what` — a program, a provider, a model — unless this run
-    /// may call out.
-    pub fn may_call_out(&self, what: &str) -> Result<(), RunError> {
-        match self.mode {
-            Mode::External => Ok(()),
-            Mode::Pure | Mode::Transactional => Err(RunError::NotExternal { what: what.into() }),
-        }
-    }
-
     /// What a record or a provider is told about it: everything but the
     /// handles, `null` where absent.
     pub fn describe(&self) -> RunDescription {
@@ -671,16 +655,6 @@ mod tests {
             authority(Mode::External).decide_service("ai.compute"),
             crate::grant::Decision::Allowed
         );
-    }
-
-    /// Only an external run may call out.
-    #[test]
-    fn a_pure_run_may_not_call_out() {
-        let pure = RunContext::core(Actor::System, Mode::Pure);
-        assert!(pure.may_call_out("a model").is_err());
-        assert!(RunContext::core(Actor::System, Mode::External)
-            .may_call_out("a model")
-            .is_ok());
     }
 
     /// The description has every field, `null` where the run has none, and

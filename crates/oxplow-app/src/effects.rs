@@ -340,11 +340,13 @@ pub fn reacts_to(decl: &EffectDecl, event_type: &str, payload: &serde_json::Valu
 }
 
 /// Run `script` over `{ event }`, sandboxed with a command script's budget,
-/// its `capability` calls answered by `calls` (no files, no `ai_*`).
-/// Blocks: call it off the async runtime.
+/// with the services it was `given` (`services::prepare`: it composes, so
+/// never a model), its `scope` calls answered by `calls`. Blocks: call it
+/// off the async runtime.
 pub fn run_script(
     script: &str,
     event: serde_json::Value,
+    given: crate::services::Given,
     calls: &mut crate::scope_calls::Calls<'_>,
 ) -> Result<Reaction, String> {
     let run = calls.run().clone();
@@ -352,6 +354,7 @@ pub fn run_script(
     let out = crate::extension_commands::run_command_script(
         script,
         serde_json::json!({ "event": event }),
+        given,
         &mut serve,
         &run,
     )
@@ -376,7 +379,16 @@ pub async fn dry_run(
         oxplow_domain::Actor::System,
         oxplow_domain::run::Mode::Pure,
     );
-    let reaction = run_over(layer, &run, &decl.needs, script, event, Some(answers)).await?;
+    let reaction = run_over(
+        layer,
+        &run,
+        &decl.needs,
+        script,
+        event,
+        Some(answers),
+        &crate::services::Sources::default(),
+    )
+    .await?;
     if let (Some(registry), Reaction::Run { calls, .. }) = (registry, &reaction) {
         crate::extension_commands::check_calls(registry, calls)?;
     }
@@ -385,9 +397,10 @@ pub async fn dry_run(
 
 /// `script` (an effects-shaped `transform`) over `event`, its scope calls
 /// limited to `needs` and answered from `answers` (a fixture's, in call
-/// order) or for real (reads through `layer`): what it composes, nothing
-/// run. Off the async runtime, under the effects' budget. An effect's dry
-/// run and an effort policy written as a script both run through it.
+/// order) or for real (reads through `layer`), the other services it may
+/// use built from `sources`: what it composes, nothing run. Off the async
+/// runtime, under the effects' budget. An effect's dry run and an effort
+/// policy written as a script both run through it.
 pub async fn run_over(
     layer: &crate::sql_gateway::SqlGateway,
     run: &oxplow_domain::run::RunContext,
@@ -395,7 +408,9 @@ pub async fn run_over(
     script: &str,
     event: serde_json::Value,
     answers: Option<&BTreeMap<String, Vec<serde_json::Value>>>,
+    sources: &crate::services::Sources,
 ) -> Result<Reaction, String> {
+    let given = crate::services::prepare(run, script, needs, sources).await?;
     let (script, needs) = (script.to_string(), needs.to_vec());
     let (layer, answers, run) = (layer.clone(), answers.cloned(), run.clone());
     let runtime = tokio::runtime::Handle::current();
@@ -406,7 +421,7 @@ pub async fn run_over(
             Some(answers) => calls.with_answers(answers),
             None => calls,
         };
-        run_script(&script, event, &mut calls)
+        run_script(&script, event, given, &mut calls)
     })
     .await
     .map_err(|e| format!("the script's worker failed: {e}"))?

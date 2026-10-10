@@ -1920,11 +1920,14 @@ metrics:                              # the read SPEC (the chartable metric)
 - The **fact collector**'s script gets `input = {report?, rows?, event?}` (the
   parsed `report:`, the `input:` query's rows, the trigger event as the
   event envelope — extensions.md "The event envelope") and the
-  snapshot tree through the `TreeHost` builtins `files(glob)` /
-  `source_files()` / `ast_query(text, language, sexpr)` /
-  `duplicate_blocks(min_lines)` (see
-  [collection.md](./collection.md)); it can't call the `ai_*` builtins (an
-  entity collector can, and has no `files()`). It returns `{ "facts": [
+  snapshot tree it runs over through `files(glob)` / `source_files()` /
+  `ast_query(text, language, sexpr)` / `duplicate_blocks(min_lines)` (see
+  [collection.md](./collection.md)) — `tree.read`, which a fact collector
+  implies. It may also read the semantic layer (`scope("sql.read", …)`)
+  or ask a model (`ai_*`) when it declares `needs: [sql.read]` /
+  `[ai.compute]` — the latter only once a person approved it
+  (`MetricsService::approved_to_ask`); `MetricsService::given` builds them
+  (extensions.md "Services"). It returns `{ "facts": [
   {measure, value, subject?, path?, line?, rule?, num?, den?, dims?} ] }` —
   one atomic fact per subject (never a baked total). `facts_of` refuses any
   other output (the old `samples` / `findings` shape is gone); a fact on a

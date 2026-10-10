@@ -418,6 +418,16 @@ fn command_of(
                 .filter(|n| oxplow_domain::scope::scope(n).is_some())
             {
                 crate::scope_calls::check_script_need(need).map_err(at_name)?;
+                // The bus composes it inside its transaction: reading a
+                // whole tree there would hold the database while it reads.
+                if need == "tree.read" {
+                    return Err(at_name(
+                        "`needs`: `tree.read` can't be used here: a command's script composes \
+                         inside its transaction, so it reads the semantic layer (`sql.read`) — \
+                         an effect or a collector can read the tree"
+                            .into(),
+                    ));
+                }
             }
             if f.op.is_some() {
                 return Err(at_name("`op:` names an operation of a `scope:`".into()));
@@ -695,12 +705,13 @@ pub const COMMAND_SCRIPT_BUDGET: oxplow_domain::run::Budget =
     oxplow_domain::run::Budget::with_timeout(std::time::Duration::from_secs(5));
 
 /// Run a command script's (or an effect's) `transform` over `input` in a
-/// script worker within [`COMMAND_SCRIPT_BUDGET`], its `scope(…)` calls
-/// answered by `serve` on this thread (the command's transaction lives
-/// here). Blocks.
+/// script worker within [`COMMAND_SCRIPT_BUDGET`], with the services it was
+/// `given` (`services`), its `scope(…)` calls answered by `serve` on this
+/// thread (the command's transaction lives here). Blocks.
 pub fn run_command_script(
     script: &str,
     input: Value,
+    given: crate::services::Given,
     serve: &mut oxplow_script::workers::Serve<'_>,
     run: &oxplow_domain::run::RunContext,
 ) -> Result<Value, oxplow_script::CollectError> {
@@ -708,7 +719,7 @@ pub fn run_command_script(
     shared()
         .run(
             &COMMAND_SCRIPT_BUDGET,
-            ScriptRun::starlark(script, input).with_scope(serve),
+            given.onto(ScriptRun::starlark(script, input), Some(serve)),
             Some(run.cancel()),
         )
         .map(|ran| {
@@ -725,15 +736,21 @@ pub const MAX_EXAMPLES: usize = 10;
 /// ([`COMMAND_SCRIPT_BUDGET`]), its `scope` calls answered by
 /// `calls`, and read what it composes: the one compose step, for the
 /// handler and the examples dry run alike. Blocks: the handler calls it
-/// inside the bus's transaction (off the async runtime already).
+/// inside the bus's transaction (off the async runtime already), so the
+/// script reads the semantic layer and nothing else (`services`).
 pub fn compose_calls(
     script: &str,
     input: Value,
     calls: &mut crate::scope_calls::Calls<'_>,
 ) -> Result<Composed, oxplow_domain::CommandError> {
     let run = calls.run().clone();
+    let given = crate::services::decide(&run, script, calls.needs())
+        .and_then(crate::services::Wanted::scopes_only)
+        .map_err(|message| oxplow_domain::CommandError::Failed {
+            message: format!("the script failed: {message}"),
+        })?;
     let mut serve = |id: &str, args: Value| calls.serve(id, args);
-    let out = run_command_script(script, json!({ "input": input }), &mut serve, &run);
+    let out = run_command_script(script, json!({ "input": input }), given, &mut serve, &run);
     // The database was busy answering a read: the run is retried.
     if let Some(message) = calls.take_busy() {
         return Err(oxplow_domain::CommandError::Busy { message });
@@ -2076,8 +2093,8 @@ mod tests {
         assert!(problem.contains("has no op `erase`"), "{problem}");
     }
 
-    /// A scope the command didn't declare in `needs` is refused: the
-    /// run fails, writing nothing.
+    /// A scope the command didn't declare in `needs` is refused before
+    /// its script runs: the run fails, writing nothing.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_scope_the_command_didnt_declare_is_refused() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
@@ -2102,7 +2119,7 @@ mod tests {
             .unwrap_err();
         assert!(
             err.to_string()
-                .contains("`sql.read` isn't in the command's `needs`"),
+                .contains("`scope()` needs `sql.read` in this script's `needs`"),
             "{err}"
         );
         assert_eq!(task(&fx).await.status, oxplow_tasks::TaskStatus::InProgress);

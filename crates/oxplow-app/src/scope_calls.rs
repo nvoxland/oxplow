@@ -131,6 +131,11 @@ impl<'a> Calls<'a> {
         self.run
     }
 
+    /// The scopes it may call: what its script declares.
+    pub fn needs(&self) -> &'a [String] {
+        self.needs
+    }
+
     /// Whether answering found the database busy (the run is retried).
     pub fn take_busy(&mut self) -> Option<String> {
         self.busy.take()
@@ -383,6 +388,7 @@ mod tests {
                 ),
                 json!({}),
                 None,
+                &crate::services::Sources::default(),
             )
             .await;
             if total > SQL_READ_ROW_CAP {
@@ -430,6 +436,7 @@ mod tests {
             &script,
             json!({}),
             None,
+            &crate::services::Sources::default(),
         )
         .await
         .unwrap();
@@ -448,6 +455,7 @@ mod tests {
             unordered,
             json!({}),
             None,
+            &crate::services::Sources::default(),
         )
         .await
         .unwrap();
@@ -466,6 +474,7 @@ mod tests {
             big,
             json!({}),
             None,
+            &crate::services::Sources::default(),
         )
         .await
         .unwrap_err();

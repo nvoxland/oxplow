@@ -1012,6 +1012,8 @@ pub async fn refresh(svc: &crate::Services) -> Result<(), DomainError> {
         &svc.effort_policies,
         &declared,
         &svc.sql,
+        &(std::sync::Arc::new(svc.metrics.clone())
+            as std::sync::Arc<dyn crate::services::TreeSource>),
         &svc.approvals,
         &svc.layout.project_dir,
     );

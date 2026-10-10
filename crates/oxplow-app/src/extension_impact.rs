@@ -3038,7 +3038,9 @@ mod tests {
             .error
             .clone()
             .unwrap();
-        assert!(error.contains("refused"), "{error}");
+        // A review is a pure run: a script that asks a model is refused
+        // before it runs.
+        assert!(error.contains("can't use `ai.compute`"), "{error}");
     }
 
     // ---- the wording, ported from the desktop's line tests ----

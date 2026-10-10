@@ -1425,8 +1425,8 @@ in both versions — each version's intent-example fixtures that name it
 five events its `on:` trigger matches, else its `input:` query once — by
 `collector_runner::dry_run_collector`: each version's own script text,
 its `input:` read through that version's own overlay,
-storing nothing, with a `RefusingOracle` answering every `ai_*` builtin
-with an error (a review never spends or sends), under the command
+storing nothing, as a pure run — a script that names an `ai_*` builtin
+is refused before it runs (a review never spends or sends) — under the command
 scripts' `COMMAND_SCRIPT_BUDGET` (5 s, not a live collector's 120 s:
 someone waits on a review). `CollectorImpact.outputs`
 holds each input's `Ran { counts, rows (20 per entity), error? }` before
@@ -1801,7 +1801,9 @@ its scope trace.
 - **Modes are explicit.** `Pure` (a composer, an effect's or policy's
   script: it may be run again, no I/O but scope reads), `Transactional`
   (a `Tx` handler), `External` (may call a program, a provider, a
-  model). `may_call_out` refuses the first two.
+  model). What a mode may use is the services table's (`modes`), enforced
+  by `RunContext::decide_service` ("Services" below): a pure run asking a
+  model is refused before its script runs.
 - **Stale is checkable.** `check(current_generation)` refuses a run
   built against a catalog generation no longer served, or cancelled.
 - **Who carries it:** the bus (`run_in`, `TxCtx::run`, `Invocation::run`
@@ -1853,17 +1855,42 @@ uses):
   builtins, so `needs` there is an error); a composing script — a
   command's `entry:`, an effect, an effort policy script — reads only
   (`scope_calls::check_script_need`: it runs pure, so `ai.compute` is
-  refused, naming why). A provider's `needs` stay `scope()` calls
-  (`check_callable`: `host/call` answers `sql.read`).
+  refused, naming why). A **command's** script reads the semantic layer
+  and not the tree: the bus composes it inside its transaction, and
+  reading a whole tree there would hold the database while it reads
+  (refused at load, naming an effect or a collector). A provider's
+  `needs` stay `scope()` calls (`check_callable`: `host/call` answers
+  `sql.read`).
 - **What a kind implies:** a Starlark fact collector reads its tree
   (`CollectorSpec::service_needs` adds `tree.read`); an entity collector
   whose script names an `ai_*` builtin uses `ai.compute`. A collector's
   descriptor lists declared ∪ implied.
 - **What a script uses** is read from its syntax
   (`oxplow_script::uses::services_used`, which `calls_ai` is a view of).
-- **At run time** `RunContext::decide_service` refuses a service the
-  run's mode excludes (a pure run asking a model) and otherwise decides
-  it against the run's authority — recorded either way.
+- **At run time, one router** (`crates/oxplow-app/src/services.rs`):
+  every host that runs a Starlark script — entity collectors
+  (`collector_runner::given`), fact collectors (`MetricsService::given`),
+  commands (`compose_calls`), effects (`effect_triggers::run_script`,
+  `effects::run_over`) and effort policy scripts — calls
+  `services::decide` / `prepare` with the run, the script and its needs.
+  For each service the script uses it refuses what the run's mode
+  excludes (`RunContext::decide_service`: "a pure run can't use
+  `ai.compute`"), then what `needs` doesn't name ("`files()` needs
+  `tree.read` in this script's `needs`" — a run with no authority too),
+  then what the authority denies — recorded on the run either way — and
+  builds the rest from the caller's `Sources`: the tree (`Trees::From`
+  a `TreeSource` — the fact engine's, which reads the run's anchored
+  snapshot, else its stream's latest, else the primary stream's, and
+  keeps the last one — or `Trees::Fixed`, a fact collector's sweep or a
+  fixture) and the model (a `CollectorOracle` on the run, caller
+  `collector:<owner>/<id>`). A `sql.read` call is decided as it's made
+  (`Calls::serve`), not twice. A caller with nothing to give (a command;
+  a dry run, which is pure) says the service isn't available there. The
+  worker gets the result as its host set (`Given::onto`).
+- **Approval** stays the host's: a script that names an `ai_*` builtin
+  runs only once a person approved it — an entity collector
+  (`check_approved`), a fact collector (`MetricsService::approved_to_ask`:
+  an extension's in Settings → Data, the project's under Programs).
 
 ## Grants
 
@@ -1872,10 +1899,12 @@ approved; a **decision** is what a run was allowed (`oxplow_domain::grant`,
 `grants.rs`).
 
 - **The request.** `GrantRequest { scopes, program, hosts, credentials,
-  env, commands, ai }`, derived from the declaration: an exec collector's
-  entry, `network`, `credentials` and `env`; a model-calling script's
-  `ai`; a script's (effect, command, effort policy) scopes from its
-  `needs`; a project program's from its listing (`program_request`).
+  env, commands }`, derived from the declaration: an exec collector's
+  entry, `network`, `credentials` and `env`; a collector's services
+  (`services::collector_needs`: declared ∪ implied, `ai.compute` among
+  them for a model-calling script — a model is a scope, not a flag); a
+  script's (effect, command, effort policy) scopes from its `needs`; a
+  project program's from its listing (`program_request`).
   `widening(granted)` names what a new request asks beyond a grant; a
   narrower one asks nothing new.
 - **The grant.** `Grant { request, granted_at, granted_by, revoked_at }`.
@@ -1895,7 +1924,8 @@ approved; a **decision** is what a run was allowed (`oxplow_domain::grant`,
   each scope call (`Calls::serve`); a program collector's `program`,
   `files`, each `env` name, each `host` and each `credential` — a
   credential its grant doesn't name is never read from the keychain; a
-  script's model calls (`ai`). A denied need stops what asked for it.
+  script's services (`scope` `tree.read` / `ai.compute`, by the router).
+  A denied need stops what asked for it.
   `Enforcement { hosts }` is the one table of what this machine holds:
   egress is confined only under macOS's sandbox, and a program's files
   never are — those decisions are `unenforced`, and `grants::gaps` says
@@ -2648,7 +2678,8 @@ warns that the examples weren't checked. **`compose_calls`** is the one
 compose step, for the dry run and the handler alike: the script in the
 sandbox under `COMMAND_SCRIPT_BUDGET` (5 s of the script's own time, not
 the collectors' 120 s runaway catch: the bus composes it once, on a read
-snapshot it holds while the script runs; no files, no `ai_*`), its `scope`
+snapshot it holds while the script runs; its services are the router's,
+`services::decide` — `sql.read` only, see "Services"), its `scope`
 calls served on the calling thread (`run_command_script` with
 `ScriptRun::with_scope`, through `scope_calls::Calls`; a busy database
 retries the run), then the
