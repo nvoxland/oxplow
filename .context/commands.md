@@ -163,7 +163,9 @@ commits with the run; the file is written after it commits), while
 (each commits in its own service's transaction).
 Two more scopes are services a script uses through builtins rather than
 `scope(…)` — `tree.read` and `ai.compute` ([extensions.md](./extensions.md)
-"Services"). The one a script calls by `scope(…)` is **`sql.read`** — `{ sql, params? }`, one read-only
+"Services"). A command's script uses `sql.read` only: it composes, so no
+model, and it composes inside the bus's transaction, so no tree
+(`scope_calls::check_command_need`, at load). The one a script calls by `scope(…)` is **`sql.read`** — `{ sql, params? }`, one read-only
 statement over the published models (`v_*`), its `:name`s bound from
 `params`, at most `SQL_READ_ROW_CAP` (1000) rows, answered as a list of
 row objects (`semantic_layer::read_on` under the `query_sql`

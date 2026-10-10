@@ -1,0 +1,41 @@
+manifest: 2
+name: triage
+description: Sorts the code's TODO comments into bugs, cleanup and features, next to how much open work there is.
+sharing: shared
+engine: ">=0.7"
+version: 0.1.0
+intent:
+  purpose: >-
+    Shows what the TODO comments in the code are asking for. Each TODO is
+    classified by a model as a bug, cleanup or a feature, and the count of
+    open work items is kept beside them, so a growing pile of bug TODOs
+    against a short work list stands out.
+  origin: null
+  examples:
+    - name: todos-and-open-work
+      input: { collector: todos }
+      expect: one open-items fact and one TODO fact for src/lib.rs line 1, classified
+    - name: an-older-snapshot-event
+      input: { collector: todos, event: { type: snapshot.taken, v: 1 } }
+      expect: the same facts; the script reads the tree, not the event
+measures:
+  - key: triage.todos
+    title: TODO comments
+    unit: comments
+    subjectKind: file
+    temporalSemantics: non-additive
+    captureScope: per-path
+  - key: triage.open_items
+    title: Open work items
+    unit: items
+    temporalSemantics: non-additive
+collectors:
+  # On each snapshot: its tree (a fact collector reads it without asking),
+  # the open work items (`sql.read`) and a model for each TODO
+  # (`ai.compute`, which a person approves in Settings → Data).
+  - id: todos
+    runtime: starlark
+    entry: collectors/todos.star
+    trigger: { on: [snapshot.taken] }
+    needs: [sql.read, ai.compute]
+    facts: [triage.todos, triage.open_items]

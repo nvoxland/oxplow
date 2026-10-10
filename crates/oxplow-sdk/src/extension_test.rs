@@ -710,9 +710,6 @@ async fn collector_example(
         ));
         return;
     };
-    if !spec.facts.is_empty() {
-        return fact_collector_example(host, ext, ex, spec, report).await;
-    }
     if oxplow_app::collector_runner::needs_approval(&host.root, &ext.name, spec) {
         use oxplow_config::collectors::CollectorRuntime as R;
         let does = match spec.runtime {
@@ -725,6 +722,9 @@ async fn collector_example(
              doesn't run it (it needs a person's approval) — fix: none; run it from Settings → Data"
         ));
         return;
+    }
+    if !spec.facts.is_empty() {
+        return fact_collector_example(host, ext, ex, spec, report).await;
     }
     report.ran.push(format!("example {example}"));
     let rows = ex

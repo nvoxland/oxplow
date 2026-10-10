@@ -352,7 +352,22 @@ Prerequisites: Normalize contribution descriptors and public extension terminolo
 
 #### Compose declared host services through the shared context
 
-Status: planned.
+Status: done. A script's services are scopes it declares in `needs:`
+(`sql.read`, `tree.read`, `ai.compute`; `oxplow_domain::service::SERVICES`).
+One router (`crates/oxplow-app/src/services.rs`) decides each one a script
+uses on its `RunContext` (the mode first, so a pure run never asks a model;
+then the declaration; then the authority; all recorded) and builds the
+worker's host set. Every host goes through it: entity and fact collectors,
+commands, effects and policies. A script that uses a service it doesn't
+declare is a load error. Discovery is `list_services` (MCP), `oxplow
+extension check --services` and the generated reference table.
+`examples/extensions/triage` combines all three and runs end to end
+(`crates/oxplow-sdk/tests/examples.rs`). Not here:
+- A command's script reads the semantic layer but not the tree, because
+  the bus composes it inside its transaction.
+- The tree is shipped whole; a lazily read tree is a follow-up.
+- References and audited commands stay where they were: commands compose
+  through the bus.
 
 Scope: Replace kind-exclusive Host access with a service router governed by RunContext, grants and execution mode. Expose read-only semantic queries, captured trees/AST/metrics, recorded AI, references and audited commands where allowed. Reuse implementations rather than adding a separate built-in API per extension point.
 

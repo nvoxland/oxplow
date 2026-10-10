@@ -545,7 +545,9 @@ collectors:
 - An extension's fact collector runs `starlark` or `jaq` only. `exec` is
   refused (only the project's own fact collectors may be `exec`); it gets
   no `env`, `credentials` or `network`. Its script reads the snapshot
-  with `files()` / `ast_query()` and returns `{"facts": [...]}`.
+  with `files()` / `ast_query()` and returns `{"facts": [...]}`. It may
+  also read the semantic layer or ask a model when it declares them
+  (`needs: [sql.read]`, `[ai.compute]`; "Host services" below).
 - A collector has `entities:` or `facts:`, never both.
 - A `gauges:` block is an unknown key; write `collectors:`.
 - Metrics are `key:` definitions and are on while the extension is
@@ -632,8 +634,10 @@ to a read-only SQL query:
   (`v_ai_result`): the same question on the same text is one model call,
   ever, so a re-sync costs nothing for rows that didn't change. They run
   on the project's AI roles (`decide`, `summarize`, `main`); with no model
-  assigned the run fails saying which role. Fact collectors and report
-  parsers can't call them. For example, what kind of work each turn was:
+  assigned the run fails saying which role. A fact collector calls them
+  when it declares `needs: [ai.compute]`; a command's, an effect's or a
+  policy's script never can ("Host services" below). For example, what
+  kind of work each turn was:
 
   ```yaml
   collectors:
@@ -654,6 +658,28 @@ to a read-only SQL query:
           for r in input["rows"]
       ]}}
   ```
+
+**Host services.** A Starlark script reaches oxplow only through the
+services it lists in `needs:`. `list_services` (MCP) describes them:
+
+- `sql.read`: `scope("sql.read", {sql, params?, page?})`, read-only SQL
+  over the `v_*` models.
+- `tree.read`: `files()`, `source_files()`, `duplicate_blocks()`, the
+  snapshot's files. A fact collector has it without declaring it.
+- `ai.compute`: the `ai_*` builtins. A person approves the script. An
+  entity collector that calls one has it without declaring it.
+
+Rules:
+
+- A script that uses a service it doesn't declare doesn't load. `check`
+  names the builtin and the `needs` entry that fixes it.
+- A command's, an effect's or a policy's script composes, so it never
+  asks a model. A command's script can't read the tree, because oxplow
+  composes it inside a transaction.
+- `oxplow extension check <name> --services` lists each script's
+  services and whether it declared them.
+- `examples/extensions/triage/` in the oxplow repo is a fact collector
+  that uses all three.
 
 **Incremental sync.** For a big or slow upstream, set `sync: upsert`:
 

@@ -284,3 +284,165 @@ async fn the_prompt_efforts_example_tests_clean() {
         );
     }
 }
+
+/// The triage example uses all three host services in one fact collector:
+/// the tree it implies, the semantic layer and a model it declares. It
+/// checks clean and lists them; `test` skips it until a person approves
+/// it; and in a real oxplow, approved, one snapshot's TODO becomes a
+/// classified fact beside the open work, every service decided on its
+/// run.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
+    use oxplow_app::ai_service::{ProviderConfig, Role, RoleBinding};
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    oxplow_app::vcs::GitProvider
+        .init_repository(root)
+        .await
+        .unwrap();
+    let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/triage");
+    copy_dir(&example, &root.join("oxplow/extensions/triage"));
+
+    let report = check(root, "triage", &ExtensionCatalog::new(), None, None, None)
+        .await
+        .unwrap();
+    assert!(report.ok, "{}", render_findings(&report, Format::Text));
+    assert_eq!(
+        oxplow_sdk::render_services(&report),
+        "collector `todos` (collectors/todos.star):\n  \
+         sql.read: declared, used\n  \
+         tree.read: implied, used\n  \
+         ai.compute: declared, used — a person approves it\n"
+    );
+    let tested = test_extension(root, "triage", false).await.unwrap();
+    assert_eq!(tested.errors, Vec::<String>::new());
+    assert!(
+        tested.warnings.iter().any(|w| w.contains("calls a model")),
+        "{:?}",
+        tested.warnings
+    );
+
+    // A real oxplow: a source file with a TODO, one open work item, a
+    // model that calls everything a bug, and the person's approval.
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("src/lib.rs"),
+        "// TODO: the cache never expires\nfn a() {}\n",
+    )
+    .unwrap();
+    let svc = oxplow_app::Services::in_memory(root).unwrap();
+    svc.metrics.seed_catalog().await;
+    svc.commands
+        .run(
+            &oxplow_domain::Actor::Human,
+            "oxplow.work_item.create",
+            serde_json::json!({ "title": "Expire the cache" }),
+            false,
+        )
+        .await
+        .unwrap();
+    let reply = serde_json::json!({ "answers": { "label": { "type": "choice", "choice": "bug", "probabilities": { "bug": 0.9, "cleanup": 0.05, "feature": 0.05 } } } });
+    let (base, _) = oxplow_ai_fake::mock(
+        "/chat/completions",
+        200,
+        serde_json::json!({ "choices": [{ "message": { "content": reply.to_string() } }], "usage": { "prompt_tokens": 4, "completion_tokens": 2 } }),
+    )
+    .await;
+    svc.ai
+        .save_provider(
+            ProviderConfig {
+                id: "m".into(),
+                kind: "openai_compatible".into(),
+                base_url: Some(base),
+            },
+            None,
+        )
+        .unwrap();
+    svc.ai
+        .set_role(
+            Role::Decide,
+            Some(RoleBinding {
+                provider: "m".into(),
+                model: "x".into(),
+            }),
+        )
+        .unwrap();
+    // The provider kind is itself a script a person approves.
+    let config = svc.config.read().unwrap().clone();
+    let extensions = svc.extension_catalog.get(root);
+    let provider = oxplow_app::exec_consent::list(&svc.approvals, root, &config, &extensions)
+        .into_iter()
+        .find(|p| {
+            p.kind == oxplow_app::exec_consent::ProgramKind::AiProvider
+                && p.name.ends_with("/openai_compatible")
+        })
+        .expect("the provider is on Programs");
+    oxplow_app::exec_consent::approve_program(
+        &svc.approvals,
+        root,
+        &config,
+        &extensions,
+        oxplow_app::exec_consent::ProgramKind::AiProvider,
+        &provider.name,
+        provider.version.as_deref().unwrap(),
+    )
+    .unwrap();
+    let ext = svc.extension_catalog.named(root, "triage").unwrap();
+    let hash =
+        oxplow_app::collector_runner::approval_hash(&root.join(&ext.path), &ext.collectors[0])
+            .unwrap();
+    oxplow_app::collector_runner::approve(&svc.approvals, "triage", "todos", &hash).unwrap();
+    let stream = svc.streams.list_streams().await.unwrap()[0].id;
+    let capture = svc.snapshot_captures.get(&stream).unwrap();
+    capture.enqueue_startup_diff().await.unwrap();
+    capture
+        .request_snapshot(oxplow_domain::snapshot::SnapshotTrigger::Startup)
+        .await
+        .unwrap();
+
+    let recorded = svc
+        .metrics
+        .run_collector_by_key(
+            "triage",
+            "todos",
+            Some(stream),
+            &oxplow_domain::run::RunContext::core(
+                oxplow_domain::Actor::Human,
+                oxplow_domain::run::Mode::External,
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(recorded, 2);
+    let rows = svc
+        .sql
+        .query_sql(
+            "SELECT measure_key, value, path, rule FROM v_fact WHERE measure_key LIKE 'triage.%' \
+             ORDER BY measure_key",
+            vec![],
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(&rows.rows).unwrap(),
+        serde_json::json!([
+            ["triage.open_items", 1.0, null, null],
+            ["triage.todos", 1.0, "src/lib.rs", "bug"],
+        ])
+    );
+    let decided = svc
+        .sql
+        .query_sql(
+            "SELECT decisions FROM v_extension_run WHERE contribution = 'triage/collector/todos'",
+            vec![],
+            None,
+        )
+        .await
+        .unwrap();
+    let decided = serde_json::to_value(&decided.rows).unwrap().to_string();
+    for scope in ["tree.read", "ai.compute", "sql.read"] {
+        assert!(decided.contains(scope), "{scope}: {decided}");
+    }
+    assert!(!decided.contains("denied"), "{decided}");
+}

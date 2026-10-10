@@ -1,0 +1,9 @@
+# Runs once a person approved the collector: it asks a model.
+input:
+  collector: todos
+  files:
+    src/lib.rs: "// TODO: the cache never expires\nfn a() {}\n"
+expect:
+  facts:
+    - { measure: triage.open_items }
+    - { measure: triage.todos, path: src/lib.rs, line: 1 }

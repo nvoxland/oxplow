@@ -30,6 +30,7 @@ tokio = { workspace = true }
 oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
 
 [dev-dependencies]
+oxplow-ai-fake = { workspace = true }
 oxplow-provider-fake = { workspace = true }
 oxplow-harness-fake = { workspace = true }
 # Scaffolds are checked against the extension and lens schemas.

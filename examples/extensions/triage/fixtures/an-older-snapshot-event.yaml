@@ -1,0 +1,14 @@
+# A snapshot.taken logged at v1 reaches the script upcast; the script
+# doesn't read the event, so it answers the same.
+input:
+  collector: todos
+  event:
+    type: snapshot.taken
+    v: 1
+    payload: { stream: "1", snapshot: "12", trigger: manual, unchanged: false, file_count: 1, elapsed_ms: 4, over_budget: false }
+  files:
+    src/lib.rs: "// TODO: the cache never expires\nfn a() {}\n"
+expect:
+  facts:
+    - { measure: triage.open_items }
+    - { measure: triage.todos, path: src/lib.rs, line: 1 }
