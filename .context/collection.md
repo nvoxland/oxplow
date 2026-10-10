@@ -67,6 +67,14 @@ section for the column.
     - { id: tests.rust_coverage, records: coverage, entry: "oxplow:lcov", report: { path: target/coverage/lcov.info }, trigger: { on_run: test } }
     - { id: lint.clippy, records: analysis, entry: "oxplow:clippy", report: { path: target/clippy.json }, trigger: { on_run: analysis } }
   ```
+  **Listed in Settings → Data → Collectors** beside the extensions' (owner
+  `project`; `project_collectors::listings`, which `list_collectors` adds after
+  the extensions'): each with its trigger ("after a test run"), last run
+  (`collector_run`), why failures turned it off with **Enable Again**, and **Sync
+  Now** (`oxplow.collector.sync { owner: "project", id }`). A bundled parser or a
+  derived script needs no approval; a project `exec` collector is approved in
+  its row under Programs (the Collectors button points there), and revoking it
+  from the Collectors list revokes that program.
 - **Parsers — `oxplow-script`** (`crates/oxplow-script/`).
   A parser turns report text into a **typed output** for its kind
   (coverage = per-file `{ instrumented, covered }` line-sets; tests =

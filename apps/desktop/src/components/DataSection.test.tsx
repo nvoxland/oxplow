@@ -306,3 +306,54 @@ test("an approved extension collector is revoked the same way", async () => {
   fireEvent.click(await view.findByTestId("collector-revoke-confirm-acme/pull"));
   await waitFor(() => expect(revoked).toEqual(["collector acme/pull"]));
 });
+
+// The project's own collectors (report collectors among them) are listed
+// beside the extensions': last run, health, Sync Now, Enable Again.
+const projectCollector = (over: Record<string, unknown> = {}) => ({
+  owner: "project",
+  spec: { id: "tests.cov", runtime: "jaq", entry: "oxplow:lcov", trigger: { kind: "onRun", run: "test" }, env: [], network: [], credentials: [], entities: [], facts: [] },
+  run: { owner: "project", id: "tests.cov", status: "ok", lastRunAt: "2026-10-10T08:00:00Z", error: null, rowCounts: {}, cursor: null },
+  approved: true,
+  networkEnforced: false,
+  credentials: [],
+  version: null,
+  disabled: null,
+  ...over,
+});
+
+test("a project report collector is listed with its trigger and last run, and syncs by hand", async () => {
+  collectorListings = [projectCollector()];
+  const view = render(<DataSection />);
+  const row = await view.findByTestId("collector-row-project/tests.cov");
+  expect(row.textContent).toContain("after a test run");
+  expect(row.textContent).toContain("last run");
+  expect((view.getByTestId("collector-run-project/tests.cov") as HTMLButtonElement).textContent).toBe("Sync Now");
+});
+
+test("a project exec collector is approved under Programs, not by Sync", async () => {
+  collectorListings = [projectCollector({ approved: false, version: "h1", run: null, spec: { ...projectCollector().spec, runtime: "exec", entry: "tools/fetch.sh" } })];
+  const view = render(<DataSection />);
+  const button = (await view.findByTestId("collector-run-project/tests.cov")) as HTMLButtonElement;
+  expect(button.textContent).toBe("Approve under Programs");
+  expect(button.disabled).toBe(true);
+});
+
+test("a collector failures turned off says why and Enable Again turns it back on", async () => {
+  collectorListings = [projectCollector({ disabled: "failed 3 times in a row: report not found" })];
+  const view = render(<DataSection />);
+  const row = await view.findByTestId("collector-row-project/tests.cov");
+  expect(row.textContent).toContain("Off on this machine: failed 3 times in a row: report not found");
+  fireEvent.click(view.getByTestId("collector-enable-project/tests.cov"));
+  await waitFor(() =>
+    expect(ran).toContainEqual(["oxplow.contribution.enable", { extension: "project", kind: "collector", contribution: "tests.cov" }, false]),
+  );
+});
+
+test("revoking a project collector revokes its program, not an extension-style key", async () => {
+  collectorListings = [projectCollector({ version: "h1", spec: { ...projectCollector().spec, runtime: "exec", entry: "tools/fetch.sh" } })];
+  const view = render(<DataSection />);
+  fireEvent.contextMenu(await view.findByTestId("collector-row-project/tests.cov"));
+  fireEvent.click(await view.findByTestId("menu-item-revoke"));
+  fireEvent.click(await view.findByTestId("collector-revoke-confirm-project/tests.cov"));
+  await waitFor(() => expect(revoked).toEqual(["collector:tests.cov"]));
+});

@@ -131,6 +131,40 @@ describe("collectorRowModel", () => {
     expect(collectorRowModel(listing()).actionTitle).toContain("no network access");
   });
 
+  // The project's own collectors (its report collectors among them), listed
+  // beside the extensions': owner `project`.
+  test("a report collector says when it runs, and syncs without an approval", () => {
+    const m = collectorRowModel(
+      listing({
+        owner: "project",
+        approved: true,
+        spec: { ...listing().spec, id: "tests.cov", runtime: "jaq", entry: "oxplow:lcov", trigger: { kind: "onRun", run: "test" }, env: [] },
+      }),
+    );
+    expect(m.trigger).toBe("after a test run");
+    expect(m.action).toBe("sync");
+    expect(m.actionLabel).toBe("Sync Now");
+    const analysis = collectorRowModel(
+      listing({ owner: "project", approved: true, spec: { ...listing().spec, trigger: { kind: "onRun", run: "analysis" } } }),
+    );
+    expect(analysis.trigger).toBe("after an analysis run");
+  });
+
+  test("a project collector's approval is the Programs row's, not this button's", () => {
+    const m = collectorRowModel(listing({ owner: "project", version: "h1" }));
+    expect(m.action).toBe("approve-in-programs");
+    expect(m.actionLabel).toBe("Approve under Programs");
+    expect(m.actionTitle).toMatch(/Programs/);
+  });
+
+  test("a collector failures disabled says why and offers Enable Again", () => {
+    const m = collectorRowModel(listing({ approved: true, disabled: "failed 3 times in a row: report not found" }));
+    expect(m.disabled).toBe("Off on this machine: failed 3 times in a row: report not found");
+    expect(m.canEnableAgain).toBe(true);
+    expect(collectorRowModel(listing({ approved: true })).disabled).toBeNull();
+    expect(collectorRowModel(listing({ approved: true })).canEnableAgain).toBe(false);
+  });
+
   test("an approved collector syncs and summarizes its last run", () => {
     const m = collectorRowModel(
       listing({
