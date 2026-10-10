@@ -9,6 +9,7 @@ import { formatFullDateTime, formatMetricValue, formatMetricValueExact } from ".
 import { MarkdownView } from "../components/Wiki/MarkdownView.js";
 import { DiffPane } from "../components/Diff/DiffPane.js";
 import { CommandConfirm } from "../components/CommandConfirm.js";
+import { ResultCompleteness } from "./ResultCompleteness.js";
 import { SchemaForm } from "../components/SchemaForm/SchemaForm.js";
 import { needsConfirmation } from "../ipc-error.js";
 import { RouteLink } from "../tabs/RouteLink.js";
@@ -330,6 +331,7 @@ function RowsBody({
   const rowsView: RowsView = { groups, heading, rowLook };
   return (
     <>
+      {compact ? null : <ResultCompleteness result={result} />}
       <LensViz {...{ run, result, lens, cols, cell, first, compact, streamId, onOpenPage, rowMenu, rowsView, onCustomFailure, onCustomReady }} />
       {ctxMenu.menu}
     </>
@@ -475,21 +477,21 @@ function LensViz({
     case "hunks":
       return <HunksViz rows={hunkRows(lens, result)} streamId={streamId} rowMenu={rowMenu} />;
     case "list":
-      return <ListViz rows={result.rows} cols={cols} cell={cell} truncated={result.truncated} rowMenu={rowMenu} view={rowsView} />;
+      return <ListViz rows={result.rows} cols={cols} cell={cell} rowMenu={rowMenu} view={rowsView} />;
     case "custom":
       return (
         <CustomComponentViz
           run={{ ...run, result }}
           streamId={streamId}
           onOpenPage={onOpenPage}
-          fallback={<TableViz rows={result.rows} cols={cols} cell={cell} truncated={result.truncated} rowMenu={rowMenu} />}
+          fallback={<TableViz rows={result.rows} cols={cols} cell={cell} rowMenu={rowMenu} />}
           onFailure={onCustomFailure}
           onReady={onCustomReady}
         />
       );
     case "table":
     default:
-      return <TableViz rows={result.rows} cols={cols} cell={cell} truncated={result.truncated} rowMenu={rowMenu} view={rowsView} />;
+      return <TableViz rows={result.rows} cols={cols} cell={cell} rowMenu={rowMenu} view={rowsView} />;
   }
 }
 
@@ -915,7 +917,6 @@ interface RowsVizProps {
   rows: SqlCell[][];
   cols: DisplayColumn[];
   cell: CellRenderer;
-  truncated: boolean;
   /** Right-click on a row (per-row actions are right-click only). */
   rowMenu: RowMenu;
   /** Groups, emphasis, depth and dragging; absent, plain rows. */
@@ -933,14 +934,7 @@ function sections(rows: SqlCell[][], view: RowsView | undefined): { group: RowGr
 
 const noLook: RowLookOut = { props: {}, emphasized: false, indent: 0 };
 
-function TruncatedNote({ rows, truncated }: { rows: number; truncated: boolean }) {
-  if (!truncated) return null;
-  return (
-    <p style={{ color: "var(--text-muted)", fontSize: "var(--text-xs)" }}>Showing the first {rows} rows.</p>
-  );
-}
-
-function ListViz({ rows, cols, cell, truncated, rowMenu, view }: RowsVizProps) {
+function ListViz({ rows, cols, cell, rowMenu, view }: RowsVizProps) {
   const [head, ...rest] = cols;
   return (
     <>
@@ -979,12 +973,11 @@ function ListViz({ rows, cols, cell, truncated, rowMenu, view }: RowsVizProps) {
           </Fragment>
         ))}
       </ul>
-      <TruncatedNote rows={rows.length} truncated={truncated} />
     </>
   );
 }
 
-function TableViz({ rows, cols, cell, truncated, rowMenu, view }: RowsVizProps) {
+function TableViz({ rows, cols, cell, rowMenu, view }: RowsVizProps) {
   return (
     <>
       <table data-testid="lens-table" style={tableStyle}>
@@ -1023,7 +1016,6 @@ function TableViz({ rows, cols, cell, truncated, rowMenu, view }: RowsVizProps) 
           ))}
         </tbody>
       </table>
-      <TruncatedNote rows={rows.length} truncated={truncated} />
     </>
   );
 }

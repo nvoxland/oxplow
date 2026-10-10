@@ -666,7 +666,11 @@ An extension entity `<entity>` owned by extension `<ext>` is exposed as
     connection stays writable after a failure at each stage.
   - A 5 s interrupt timer (`InterruptHandle`) stops runaway queries.
   - The row cap defaults to 500 and can be raised to at most 10 000.
-    `truncated: true` means more rows existed.
+    `truncated: true` means more rows existed. The lens view and Explore
+    Data say so above the rows ("Showing the first N rows"), and list
+    each `coverage` source that isn't `current` with its status, last run
+    and error (`apps/desktop/src/lens/completeness.ts`,
+    `ResultCompleteness`); a compact strip shows neither.
     Hosts that return only rows must check that flag before discarding
     the result metadata: collector `input_rows` refuses truncation at
     10 000, and `scope_calls::Calls` refuses it at 1000 for `sql.read`
