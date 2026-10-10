@@ -1,3 +1,7 @@
+# REFERENCE: the bundled `lcov` collector runs a native parser
+# (`oxplow_script::helpers::lcov_coverage`), because this program took seconds
+# on a 12 MB report. A test (`native_lcov` in oxplow-script) holds the two to
+# the same reading, so change them together.
 # lcov coverage parser (input: lcov → array of records).
 # Each record: { "SF": ["<path>"], "DA": ["<line>,<hits>[,…]"], … }.
 # A line is covered when hits > 0.

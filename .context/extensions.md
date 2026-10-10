@@ -1834,7 +1834,10 @@ reaches the extension:
 
 An event that can't be carried to its type's newest version (its
 upcast fails) is a failed run, with the reason — on a review, that
-input's error.
+input's error (`Composes.error` / `Ran.error`, starting "its event: …"),
+which the review lists on the input's line even when both versions fail
+the same way (`Effect <id> on fixture <name>: fails (its event: …)`), so
+the Review page (`ImpactReportView`) never drops it.
 
 ## Event types
 
@@ -1883,9 +1886,11 @@ table, so promoting a kind is moving it from one table to the other.
 
 **`effects` is stable** (P11, tsk956), on the evidence rule: a bundled
 extension acts with one. oxplow-bundled's **`verify-unchecked`** reacts to
-`oxplow_bundled.accepted`: its script reads (`scope("sql.read")`) the acceptance's subject
-(`:event_id`, tsk955) — the effort, its item, and each claim and decision
-accepted unchecked, still unverified or inferred now — and is empty when
+`oxplow_bundled.accepted`: its script takes the acceptance's subject from its envelope
+(`event["subject"]`) — the effort, its item, and each claim and decision
+accepted unchecked — and reads (`scope("sql.read")`) only what the event
+can't say: which of those are still unverified or inferred now, and its
+own earlier reactions. It is empty when
 the effect already filed (or proposed) a follow-up for an earlier
 acceptance of the same effort (its `v_effect_run` reaction to that event
 is `ok` or `proposed`, tsk991; an earlier acceptance from before its

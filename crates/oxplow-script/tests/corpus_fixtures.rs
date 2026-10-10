@@ -84,3 +84,76 @@ fn the_tree_has_duplicated_blocks_for_the_detector() {
     );
     assert!(blocks.len() >= 10, "{} duplicate blocks", blocks.len());
 }
+
+/// The native lcov parser (what the bundled `lcov` collector runs) and the
+/// jq program it replaced (`oxplow-config`'s `parsers/lcov.jq`, kept as its
+/// reference) read the same reports the same way.
+mod native_lcov {
+    use oxplow_script::runtime::run_jaq;
+    use oxplow_script::{parse_report, CollectorKind};
+
+    use super::fixtures::lcov;
+
+    fn by_jaq(report: &str) -> oxplow_coverage::CoverageReport {
+        let program = oxplow_config::collectors::bundled_parser("lcov")
+            .expect("bundled")
+            .program;
+        let records = parse_report("lcov", report).expect("records");
+        let value = run_jaq(program, &records).expect("jaq");
+        match oxplow_script::runtime::value_to_output(CollectorKind::Coverage, value)
+            .expect("shape")
+        {
+            oxplow_script::CollectorOutput::Coverage(c) => c,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    fn same(report: &str) {
+        assert_eq!(
+            oxplow_script::helpers::lcov_coverage(report),
+            by_jaq(report)
+        );
+    }
+
+    #[test]
+    fn a_generated_report_reads_as_the_jq_program_reads_it() {
+        same(&lcov::report(30_000));
+    }
+
+    #[test]
+    fn the_edges_read_as_the_jq_program_reads_them() {
+        // A repeated SF (the later record wins), a trailing record with no
+        // end_of_record, a junk DA (skipped), a DA with a third field, a
+        // missing hits count, summary lines (the first of each key), a
+        // record with no SF (dropped), CRLF and indentation.
+        same(
+            "SF:a.rs\nDA:1,1\nend_of_record\n\
+             SF:a.rs\nDA:2,0\nDA:3,5,abc\nDA:junk\nDA:4\nBRF:4\nBRF:9\nBRH:3\nFNF:2\nFNH:1\nend_of_record\n\
+             DA:9,9\nend_of_record\r\n\
+             SF:b.rs\r\n  DA:7,2  \r\nLF:1\nend_of_record\n\
+             SF:c.rs\nDA:5,1",
+        );
+        same("");
+        same("TN:\nend_of_record\n");
+    }
+}
+
+/// The bundled `lcov` collector reads a 14 MB report well inside a budget
+/// the jq program it replaced overran in a debug build (5.5 s there). A
+/// completion budget, generous on purpose: a loaded or instrumented run is
+/// several times slower than a quiet one.
+#[test]
+fn the_bundled_lcov_collector_reads_a_big_report_within_a_budget() {
+    let report = fixtures::lcov::report(240_000);
+    let started = std::time::Instant::now();
+    let out = oxplow_script::Collector::bundled("lcov")
+        .expect("bundled")
+        .run(&report)
+        .expect("runs");
+    assert!(out.as_coverage().is_some_and(|c| c.files.len() > 100));
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(3),
+        "took {:?}",
+        started.elapsed()
+    );
+}

@@ -3,27 +3,26 @@
 # them — a checklist naming each, on the active tracker like every new
 # item.
 
-# The acceptance's subject: the effort, its item, and each claim and
-# decision accepted unchecked — still unverified or inferred now. None
-# when this effect already filed (or proposed) a follow-up for an earlier
-# acceptance of the effort; an earlier one it never reacted to (before its
-# approval) or that skipped or failed doesn't count.
+# What is still unchecked among the acceptance's subject — the effort, its
+# item, and each claim and decision accepted unchecked, which the event
+# carries (`event["subject"]`) — read as it stands now (a claim verified
+# since, or a decision no longer inferred, drops off). Empty when this
+# effect already filed (or proposed) a follow-up for an earlier acceptance
+# of the effort; an earlier one it never reacted to (before its approval)
+# or that skipped or failed doesn't count. The log and the effect's own
+# runs are the only reads the event can't answer.
 _ACCEPTED = """
-SELECT CAST(json_extract(e.subject, '$[0]') AS TEXT) AS effort,
-       CAST(json_extract(e.subject, '$[1]') AS TEXT) AS work_item,
-       (SELECT json_group_array(json_object('claim', s.value, 'statement', c.statement))
-          FROM json_each(e.subject) s JOIN v_claim c ON s.value = 'claim:' || c.id
+SELECT (SELECT json_group_array(json_object('claim', s.value, 'statement', c.statement))
+          FROM json_each(:subject) s JOIN v_claim c ON s.value = 'claim:' || c.id
          WHERE c.verified = 0) AS claims,
        (SELECT json_group_array(json_object('decision', s.value, 'question', d.question, 'choice', d.choice))
-          FROM json_each(e.subject) s JOIN v_decision d ON s.value = 'decision:' || d.id
+          FROM json_each(:subject) s JOIN v_decision d ON s.value = 'decision:' || d.id
          WHERE d.provenance = 'inferred') AS decisions
-FROM v_event e
-WHERE e.id = :event_id
-  AND NOT EXISTS (
+WHERE NOT EXISTS (
     SELECT 1 FROM v_event p
       JOIN v_effect_run r ON r.event_id = p.id
      WHERE p.type = 'oxplow_bundled.accepted' AND p.seq < :event_seq
-       AND json_extract(p.subject, '$[0]') = json_extract(e.subject, '$[0]')
+       AND json_extract(p.subject, '$[0]') = :effort
        AND r.effect = 'oxplow-bundled/verify-unchecked' AND r.latest = 1
        AND r.state IN ('ok', 'proposed'))
 """
@@ -37,9 +36,16 @@ _ITEMS = 50
 
 def transform(x):
     event = x["event"]
+    subject = event["subject"]
+    if len(subject) < 2:
+        return {"skip": "an acceptance names an effort and its item"}
     rows = scope("sql.read", {
         "sql": _ACCEPTED,
-        "params": {"event_id": event["id"], "event_seq": event["seq"]},
+        "params": {
+            "subject": json.encode(subject),
+            "event_seq": event["seq"],
+            "effort": subject[0],
+        },
     })
     if not rows:
         return {"skip": "nothing new was accepted unchecked"}
@@ -48,8 +54,8 @@ def transform(x):
     decisions = _list(row["decisions"])
     if not claims and not decisions:
         return {"skip": "nothing was accepted unchecked"}
-    effort = row["effort"]
-    item = row["work_item"]
+    effort = subject[0]
+    item = subject[1]
     items = ["- [ ] %s: %s" % (c["claim"], md_text(c["statement"])) for c in claims]
     items.extend(["- [ ] %s: %s → %s" % (d["decision"], md_text(d["question"]), md_text(d["choice"])) for d in decisions])
     lines = ["The review of %s (%s) accepted these unchecked:" % (effort, item), ""]

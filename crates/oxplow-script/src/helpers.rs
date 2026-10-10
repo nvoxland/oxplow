@@ -126,6 +126,110 @@ pub fn lcov_records(content: &str) -> Value {
     Value::Array(records)
 }
 
+/// An lcov report as typed coverage, in one linear pass: what the bundled
+/// `lcov` collector runs. It reads exactly as `oxplow-config`'s
+/// `parsers/lcov.jq` program does over [`lcov_records`] (a test holds them
+/// together) without building a record per file and a JSON value per DA
+/// line first, which cost seconds on a 12 MB report:
+///
+/// - a record is the lines up to `end_of_record` (a trailing one counts);
+///   its file is its first `SF`, and a record with none is dropped;
+/// - a `DA:<line>,<hits>[,…]` instruments `<line>` and covers it when
+///   `<hits>` is above 0; a `DA` whose line isn't a whole number is skipped,
+///   and a missing or non-numeric hits count is 0;
+/// - `BRF`, `BRH`, `FNF` and `FNH` are each the record's first, 0 when it
+///   has none or it isn't a whole number;
+/// - a file in two records is the later one.
+pub fn lcov_coverage(content: &str) -> oxplow_coverage::CoverageReport {
+    use oxplow_coverage::{CoverageReport, FileCoverage};
+    use std::collections::{BTreeMap, BTreeSet};
+
+    /// A number the way jq's `tonumber?` reads one that must be a count.
+    fn count(text: &str) -> Option<u32> {
+        let n: f64 = text.parse().ok()?;
+        (n.is_finite() && n >= 0.0 && n.fract() == 0.0 && n <= f64::from(u32::MAX))
+            .then_some(n as u32)
+    }
+
+    #[derive(Default)]
+    struct Record {
+        any: bool,
+        sf: Option<String>,
+        instrumented: Vec<u32>,
+        covered: Vec<u32>,
+        /// BRF, BRH, FNF, FNH: the first of each seen, as read.
+        totals: [Option<Option<u32>>; 4],
+    }
+
+    fn finish(rec: Record, files: &mut BTreeMap<String, FileCoverage>) {
+        let Some(path) = rec.sf else { return };
+        let total = |i: usize| rec.totals[i].flatten().unwrap_or(0);
+        files.insert(
+            path,
+            FileCoverage {
+                instrumented: rec.instrumented.into_iter().collect::<BTreeSet<u32>>(),
+                covered: rec.covered.into_iter().collect::<BTreeSet<u32>>(),
+                branches_found: total(0),
+                branches_hit: total(1),
+                functions_found: total(2),
+                functions_hit: total(3),
+            },
+        );
+    }
+
+    let mut files = BTreeMap::new();
+    let mut cur = Record::default();
+    for raw in content.lines() {
+        let line = raw.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line == "end_of_record" {
+            if cur.any {
+                finish(std::mem::take(&mut cur), &mut files);
+            }
+            continue;
+        }
+        let Some((key, val)) = line.split_once(':') else {
+            continue;
+        };
+        cur.any = true;
+        match key {
+            "SF" => {
+                if cur.sf.is_none() {
+                    cur.sf = Some(val.to_string());
+                }
+            }
+            "DA" => {
+                let mut parts = val.split(',');
+                if let Some(n) = parts.next().and_then(count) {
+                    cur.instrumented.push(n);
+                    let hits: f64 = parts.next().and_then(|h| h.parse().ok()).unwrap_or(0.0);
+                    if hits > 0.0 {
+                        cur.covered.push(n);
+                    }
+                }
+            }
+            "BRF" | "BRH" | "FNF" | "FNH" => {
+                let slot = match key {
+                    "BRF" => 0,
+                    "BRH" => 1,
+                    "FNF" => 2,
+                    _ => 3,
+                };
+                if cur.totals[slot].is_none() {
+                    cur.totals[slot] = Some(count(val));
+                }
+            }
+            _ => {}
+        }
+    }
+    if cur.any {
+        finish(cur, &mut files);
+    }
+    CoverageReport { files }
+}
+
 /// Find every match of `pattern` in `text`. Returns an array of matches; each
 /// match is an array whose first element is the full match and whose remaining
 /// elements are the capture groups (`null` for groups that didn't participate).

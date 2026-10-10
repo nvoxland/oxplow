@@ -1712,6 +1712,95 @@ mod tests {
         );
     }
 
+    /// A shipped effect or collector that reacts to a type with more than
+    /// one registered version has a fixture at an older `v` — proof it
+    /// still works once the event is carried to the newest. (Today none
+    /// does: every type they react to has one version registered. This
+    /// fails the day one does, until the fixture is written.)
+    #[test]
+    fn shipped_scripts_that_react_to_a_versioned_type_prove_an_older_version() {
+        use std::collections::{BTreeMap, BTreeSet};
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut dirs = vec![
+            root.join("extensions/oxplow-bundled"),
+            root.join("tests-e2e/fixtures/extension"),
+        ];
+        dirs.extend(
+            std::fs::read_dir(root.join("examples/extensions"))
+                .unwrap()
+                .flatten()
+                .map(|e| e.path()),
+        );
+        let yaml = |p: &std::path::Path| -> Option<serde_yaml::Value> {
+            serde_yaml::from_str(&std::fs::read_to_string(p).ok()?).ok()
+        };
+        let strings = |v: Option<&serde_yaml::Value>| -> Vec<String> {
+            v.and_then(|v| v.as_sequence())
+                .into_iter()
+                .flatten()
+                .filter_map(|s| s.as_str().map(str::to_string))
+                .collect()
+        };
+        let mut versions: BTreeMap<String, BTreeSet<u32>> = BTreeMap::new();
+        for (t, v) in oxplow_domain::events::schema::EventSchemaRegistry::core().versions() {
+            versions.entry(t).or_default().insert(v);
+        }
+        let manifests: Vec<(std::path::PathBuf, serde_yaml::Value)> = dirs
+            .iter()
+            .filter_map(|d| Some((d.clone(), yaml(&d.join("extension.yaml"))?)))
+            .collect();
+        for (_, m) in &manifests {
+            for t in m["event_types"]["types"]
+                .as_sequence()
+                .into_iter()
+                .flatten()
+            {
+                if let (Some(name), Some(v)) = (t["type"].as_str(), t["v"].as_u64()) {
+                    versions.entry(name.into()).or_default().insert(v as u32);
+                }
+            }
+        }
+        for (dir, m) in &manifests {
+            let mut reacts: Vec<(String, String)> = Vec::new();
+            for e in m["effects"].as_sequence().into_iter().flatten() {
+                for t in strings(e.get("on")) {
+                    reacts.push((format!("effect {}", e["id"].as_str().unwrap_or("?")), t));
+                }
+            }
+            for c in m["collectors"].as_sequence().into_iter().flatten() {
+                for t in strings(c["trigger"].get("on")) {
+                    reacts.push((format!("collector {}", c["id"].as_str().unwrap_or("?")), t));
+                }
+            }
+            let mut fixtures: Vec<(String, u32)> = Vec::new();
+            for f in std::fs::read_dir(dir.join("fixtures"))
+                .into_iter()
+                .flatten()
+                .flatten()
+            {
+                if let Some(y) = yaml(&f.path()) {
+                    let ev = &y["input"]["event"];
+                    if let Some(t) = ev["type"].as_str() {
+                        fixtures.push((t.into(), ev["v"].as_u64().unwrap_or(0) as u32));
+                    }
+                }
+            }
+            for (who, t) in reacts {
+                let known = versions.get(&t).cloned().unwrap_or_default();
+                let Some(latest) = known.iter().max().copied() else {
+                    continue;
+                };
+                if known.len() > 1 {
+                    assert!(
+                        fixtures.iter().any(|(ft, fv)| *ft == t && *fv < latest),
+                        "{}: {who} reacts to `{t}`, registered at versions {known:?}, with no fixture at an older `v`",
+                        dir.display()
+                    );
+                }
+            }
+        }
+    }
+
     const VERIFY: &str = "oxplow-bundled/verify-unchecked";
 
     /// The latest `oxplow_bundled.accepted`, delivered to the effects as
@@ -1737,6 +1826,37 @@ mod tests {
             .await
             .unwrap()
             .remove(0);
+        use crate::event_pump::AsyncEventConsumer as _;
+        crate::effect_triggers::EffectTriggers::new(std::sync::Arc::downgrade(&f.svc))
+            .handle(&ev)
+            .await
+            .unwrap();
+    }
+
+    /// The latest acceptance delivered under an id the log never had: what
+    /// the effect knows of the event is what its envelope carries.
+    async fn deliver_unlogged_acceptance(f: &crate::test_fixtures::EffortFixture) {
+        let seq: i64 = f
+            .svc
+            .db
+            .read(|c| {
+                c.query_row(
+                    "SELECT max(seq) FROM event_log WHERE type = 'oxplow_bundled.accepted'",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let mut ev = f
+            .svc
+            .event_log_store
+            .read_after(seq - 1, 1)
+            .await
+            .unwrap()
+            .remove(0);
+        ev.envelope.id = oxplow_domain::EventId::generate();
         use crate::event_pump::AsyncEventConsumer as _;
         crate::effect_triggers::EffectTriggers::new(std::sync::Arc::downgrade(&f.svc))
             .handle(&ev)
@@ -1876,6 +1996,27 @@ mod tests {
             })
             .await
             .unwrap()
+    }
+
+    /// The effect takes the effort, its item and what was accepted
+    /// unchecked from the event's own subject, not from a second read of the
+    /// log: an event the log doesn't hold still files its follow-up.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_follow_up_reads_the_acceptance_from_its_envelope() {
+        let f = review_fixture().await;
+        approve_follow_up(&f).await;
+        review(
+            &f,
+            &oxplow_domain::Actor::Human,
+            "oxplow.review.accept",
+            serde_json::json!({ "ref": effort_ref(&f), "force": true }),
+        )
+        .await
+        .unwrap();
+        deliver_unlogged_acceptance(&f).await;
+        let filed = follow_ups(&f).await;
+        assert_eq!(filed.len(), 1, "{filed:?}");
+        assert!(filed[0].1.contains("- [ ] "), "{}", filed[0].1);
     }
 
     /// tsk991: an earlier forced acceptance stops a second follow-up only
