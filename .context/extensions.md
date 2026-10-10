@@ -1001,19 +1001,30 @@ boot. It never opens the project's database. It runs `check` there
 - `input: { lens: <slug>, params? }`, `expect: { columns?, rows: n |
   $any }` — the lens runs; its row count (and columns, when expected)
   must match;
-- `input: { collector: <id>, rows? }`, `expect: { entities: { <name>:
+- `input: { collector: <id>, rows?, event? }`, `expect: { entities: { <name>:
   n | $any } }` — a derived collector runs over `rows` (standing in for
-  its `input` query, `preview_collector(…, rows)`), storing nothing, its
+  its `input` query, `preview_collector(…, event, rows)`) and `event`
+  (the event an `on:` collector reacts to, as the envelope), storing nothing, its
   rows typed against the declaration; an exec collector's example is a
   warning, not run (it needs a person's approval);
 - `input: { collector: <id>, files: { <path>: <text> } }`, `expect: {
   facts: [...] }` — a **fact** collector (one with `facts:`) runs over
   `files` as its tree (`MetricsService::preview_fact_collector`, its other
-  input keys — `report`, `rows`, `event` — as its input), storing nothing;
+  input keys — `report`, `rows`, `event` (made the envelope) — as its
+  input), storing nothing;
   each fact is compared on the keys its expected fact names (tsk1047: it
   used to be run as an entity collector and fail);
 - `input: { command, input }` — a provider's, run in its session
   (providers.md "The conformance kit");
+Every example's `event:` is built by `EventView::fixture` through the
+throwaway's vocabulary (core's plus the extensions' declared types,
+synced at its start) — "The event envelope" above: the script gets the
+envelope the runtime would hand over, and a fixture that couldn't happen
+is an error at it (``fixtures/x.yaml:1: example `x`: event: …``). A
+review reads each fixture through that version's own declared types
+(`Vocabulary::with_declared`), so a version that adds v2 carries its v1
+fixtures to it.
+
 - `input: { effect: <id>, event: { type, payload, subject? }, answers? }`,
   `expect: { commands: [names] } | { skip: <part of the reason> } | {
   reacts: false }` (P8.D12) — whether the effect reacts (`on`/`where`),
@@ -1026,8 +1037,7 @@ boot. It never opens the project's database. It runs `check` there
 - `input: { implementation: <id>, event: { type, payload, subject?,
   anchors? }, answers? }`, the same `expect` but `reacts` — an
   **effort policy script** (`implementations:` with `capability:
-  effort_policy`): the event as a `PolicyEvent` (`id`/`source`
-  `fixture`, `v` 1, `seq` 0), `effects::run_over` with the answers, the
+  effort_policy`): the event envelope, `effects::run_over` with the answers, the
   calls checked against the registry; appending events is an error (a
   policy emits nothing). Naming no policy script of the extension is an
   error naming the id. For each such script `test` also runs the
@@ -2002,8 +2012,9 @@ to …`), in the same list a refused declaration shows in. It clears when
 the owner is installed and enabled, and comes back if the owner goes or
 its declaration is refused. Until then the reaction simply never fires:
 nothing can append a type that isn't registered. There is no `type@v` in
-`on:` — the pump hands every consumer an event at its type's newest
-registered version (`at_latest`, the owner's upcasts), so a subscriber is
+`on:` — every consumer, and every script through the event envelope
+("The event envelope" above), gets an event at its type's newest
+registered version (`events::at_latest`, the owner's upcasts), so a subscriber is
 written against the owner's latest shape and a breaking change is the
 owner's new version plus upcast. A subscriber still **appends** only its
 own types (`own_events` is unchanged), and the effects' loop guard

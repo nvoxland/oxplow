@@ -38,6 +38,11 @@ impl Host {
             .sync()
             .await
             .map_err(|e| e.to_string())?;
+        // The event types they declare, as the app's log would accept.
+        svc.vocabulary_service
+            .sync()
+            .await
+            .map_err(|e| e.to_string())?;
         svc.extension_commands.reconcile().await;
         Ok(Host {
             _dir: dir,

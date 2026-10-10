@@ -1,7 +1,7 @@
 //! An external provider's effort policy: [`ExternalEffortPolicy`] is the
 //! [`EffortPolicy`] the effort-policy dispatcher calls while the instance
 //! is the project's choice. Each event it's offered is one `react`
-//! invoke, `{ event }` (a [`PolicyEvent`], anchors included); it answers as
+//! invoke, `{ event }` (the event envelope, `EventView`); it answers as
 //! an effect's script does — `{ commands: [{ name, input }] }` or
 //! `{ skip: "why" }` — and core runs the commands as the policy's own
 //! effect actor, through every gate an agent meets. It emits nothing of

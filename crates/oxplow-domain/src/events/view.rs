@@ -82,15 +82,15 @@ impl EventView {
         if from_v <= latest {
             vocabulary
                 .validate(&f.event_type, from_v, &payload)
-                .map_err(|e| invalid(e.to_string()))?;
+                .map_err(|e| invalid(e.message()))?;
         }
         let (v, payload) = vocabulary
             .upcast_to_latest(&f.event_type, from_v, payload)
-            .map_err(|e| invalid(e.to_string()))?;
+            .map_err(|e| invalid(e.message()))?;
         let subject = f.subject.unwrap_or_default();
         for s in &subject {
             crate::refs::validate_ref(&vocabulary.kinds, s)
-                .map_err(|e| invalid(format!("subject `{s}`: {e}")))?;
+                .map_err(|e| invalid(format!("subject `{s}`: {}", e.message())))?;
         }
         Ok(Self {
             id: f.id,

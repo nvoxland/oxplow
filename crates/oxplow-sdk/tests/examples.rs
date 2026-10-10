@@ -254,3 +254,33 @@ async fn the_prompt_efforts_example_checks_and_passes_the_policy_suite() {
         );
     }
 }
+
+/// The prompt-efforts example's fixtures are events oxplow could log: its
+/// examples run clean against the event envelope, as do its policy's.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_prompt_efforts_example_tests_clean() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    oxplow_app::vcs::GitProvider
+        .init_repository(root)
+        .await
+        .unwrap();
+    let example =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/prompt-efforts");
+    copy_dir(&example, &root.join("oxplow/extensions/prompt-efforts"));
+    let tested = test_extension(root, "prompt-efforts", false).await.unwrap();
+    assert_eq!(tested.errors, Vec::<String>::new());
+    for ran in [
+        "example a-prompt-that-changed-files",
+        "example a-question-only-prompt",
+        "example a-prompt-already-covered",
+        "example an-item-started",
+        "example an-item-finished",
+    ] {
+        assert!(
+            tested.ran.iter().any(|r| r == ran),
+            "{ran}: {:?}",
+            tested.ran
+        );
+    }
+}

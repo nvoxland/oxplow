@@ -25,8 +25,8 @@ pub struct SqlGateway {
     overlay: std::sync::Arc<Vec<TempView>>,
     /// What a result's `coverage` and `generation` come from.
     collection: Option<std::sync::Arc<Collection>>,
-    /// The event types the log speaks: what [`Self::recent_events`]
-    /// carries each event to the newest version of. Core's unless set.
+    /// The event types the log speaks (the app's; core's unless set):
+    /// what a review reads logged events through.
     vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
 }
 
@@ -38,13 +38,6 @@ pub struct Collection {
     pub db: Database,
     pub catalog: std::sync::Arc<crate::extension_catalog::ExtensionCatalog>,
     pub root: std::path::PathBuf,
-}
-
-/// A logged event as an extension would get it (the event envelope), or
-/// why it can't be carried to its type's newest version.
-pub struct RecentEvent {
-    pub seq: i64,
-    pub view: Result<oxplow_domain::events::EventView, String>,
 }
 
 impl SqlGateway {
@@ -59,7 +52,7 @@ impl SqlGateway {
         }
     }
 
-    /// Carry [`Self::recent_events`] through `vocabulary` (the app's).
+    /// Speak `vocabulary` (the app's).
     pub fn with_vocabulary(
         mut self,
         vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
@@ -208,19 +201,13 @@ impl SqlGateway {
         &self,
         types: Vec<String>,
         limit: usize,
-    ) -> Result<Vec<RecentEvent>, DomainError> {
-        let vocabulary = self.vocabulary.current();
-        Ok(self
-            .layer
-            .recent_events(types, limit)
-            .await?
-            .into_iter()
-            .map(|e| RecentEvent {
-                seq: e.seq,
-                view: oxplow_domain::events::EventView::of(&e, &vocabulary)
-                    .map_err(|err| err.to_string()),
-            })
-            .collect())
+    ) -> Result<Vec<oxplow_domain::StoredEvent>, DomainError> {
+        self.layer.recent_events(types, limit).await
+    }
+
+    /// The event types the log speaks now.
+    pub fn vocabulary(&self) -> std::sync::Arc<oxplow_domain::vocabulary::Vocabulary> {
+        self.vocabulary.current()
     }
 
     /// The name of every view in the database.

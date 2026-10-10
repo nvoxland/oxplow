@@ -422,10 +422,11 @@ names the file and line and says what to change.
    `input` and `expect` (`$any` matches anything):
    - a lens: `input: { lens: <slug>, params? }`, `expect: { columns?,
      rows: n }` — data is empty, so usually `rows: 0`;
-   - a collector: `input: { collector: <id>, rows: [...] }` (`rows`
-     stands in for its `input` query), `expect: { entities: { <name>: n
-     } }` — it runs your script and types its rows; an exec collector's
-     example isn't run (a person approves it);
+   - a collector: `input: { collector: <id>, rows: [...], event? }`
+     (`rows` stands in for its `input` query; `event` is the event an
+     `on:` collector reacts to), `expect: { entities: { <name>: n } }` —
+     it runs your script and types its rows; an exec collector's example
+     isn't run (a person approves it);
    - a fact collector (one with `facts:`): `input: { collector: <id>,
      files: { "src/a.ts": "…" } }` (the tree its `files()` sees),
      `expect: { facts: [{ measure, value, path? }] }` — each fact is
@@ -439,6 +440,14 @@ names the file and line and says what to change.
      reason> | $any }` — a dry run; the test also runs the effort-policy
      conformance suite over the script;
    - a provider: `input: { command, input }` (below).
+
+   An `event:` in an example is `{ type, v?, payload, subject?, anchors?
+   }`, with a payload valid for its type (the whole payload, as oxplow
+   would log it). The script gets every event field, `null` where the
+   fixture gave none and `source: fixture`; a `v` older than the newest
+   is carried forward. A fixture that couldn't happen (unknown type,
+   newer `v`, a payload that doesn't match, `thread_id` not like `thr1`,
+   an extra key) fails with the reason.
    Give a command's own `examples:` `answers:` too, so they don't depend
    on the project's data.
 6. `oxplow extension test` also runs the extension's `questions.yaml`, if it

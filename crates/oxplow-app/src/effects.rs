@@ -354,8 +354,8 @@ pub fn run_script(
     reaction(out)
 }
 
-/// What `decl` would do with `event` (a fixture's, or a logged one's
-/// [`event_json`]) — its script, its scope calls answered from
+/// What `decl` would do with `event` (the event envelope, a fixture's
+/// or a logged one's) — its script, its scope calls answered from
 /// `answers` or for real (reads through `layer`), the commands it composes
 /// checked against `registry` — running nothing: `extension test` and a
 /// change's review.

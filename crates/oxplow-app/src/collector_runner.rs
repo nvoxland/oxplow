@@ -1510,15 +1510,21 @@ pub struct EntityPreview {
 }
 
 /// Run a collector and return what it would store (see [`CollectorPreview`]).
-/// `rows` stand in for a derived collector's `input` rows (an example's
-/// fixture, `oxplow extension test`).
+/// `event` is the event an `on:` collector reacts to, as a fixture writes
+/// it (`EventView::fixture`); `rows` stand in for a derived collector's
+/// `input` rows (an example's fixture, `oxplow extension test`).
 pub async fn preview_collector(
     ctx: &Collectors<'_>,
     owner: &str,
     id: &str,
+    event: Option<&serde_json::Value>,
     rows: Option<Vec<serde_json::Value>>,
 ) -> Result<CollectorPreview, RunCollectorError> {
-    let (spec, output) = produce(ctx, owner, id, None, rows).await?;
+    let view = event
+        .map(|given| EventView::fixture(given, &ctx.vocabulary.current()))
+        .transpose()
+        .map_err(|e| RunCollectorError::Failed(format!("its event: {}", e.message())))?;
+    let (spec, output) = produce(ctx, owner, id, view.as_ref(), rows).await?;
     let mut output = output.map_err(RunCollectorError::Failed)?;
     let events = plan_events(
         &ctx.vocabulary.current(),
@@ -2796,6 +2802,50 @@ pub(crate) mod tests {
         );
     }
 
+    /// A preview can be given the event an `on:` collector reacts to, as
+    /// a fixture writes it: the script gets the event envelope; a fixture
+    /// that couldn't happen fails the preview, saying why.
+    #[tokio::test]
+    async fn a_preview_takes_the_event_it_reacts_to() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let root = fx.svc.layout.project_dir.clone();
+        extension(
+            &root,
+            "work",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: seen\n    runtime: starlark\n    entry: seen.star\n    trigger: { on: [thread.checkpoint] }\n    entities:\n      - { name: seen, key: k, columns: { k: text, v: int, source: text, turn: int } }\n",
+            &[(
+                "seen.star",
+                "def transform(input):\n    e = input[\"event\"]\n    return {\"entities\": {\"seen\": [{\"k\": \"x\", \"v\": e[\"v\"], \"source\": e[\"source\"], \"turn\": e[\"anchors\"][\"turn_id\"]}]}}\n",
+            )],
+        );
+        let ctx = Collectors::of(&fx.svc, &root);
+        let event = serde_json::json!({
+            "type": "thread.checkpoint",
+            "payload": { "thread": "thread:thr1", "turn": "turn:trn7", "reason": "turn_end",
+                         "snapshot": "snapshot:1", "changed": true, "writing_tools": 1 },
+            "anchors": { "thread_id": "thr1", "turn_id": 7 },
+        });
+        let preview = preview_collector(&ctx, "work", "seen", Some(&event), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            preview.entities[0].rows,
+            vec![vec![
+                SqlCell::Text("x".into()),
+                SqlCell::Int(1),
+                SqlCell::Text("fixture".into()),
+                SqlCell::Int(7),
+            ]]
+        );
+        let bad = serde_json::json!({ "type": "thread.checkpoint", "v": 4 });
+        match preview_collector(&ctx, "work", "seen", Some(&bad), None).await {
+            Err(RunCollectorError::Failed(m)) => {
+                assert!(m.contains("its event: event: `thread.checkpoint@4`"), "{m}")
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
     #[tokio::test]
     async fn derived_sources_transform_their_input_without_approval() {
         let root = tempfile::tempdir().unwrap();
@@ -3001,7 +3051,9 @@ pub(crate) mod tests {
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
             ai: no_ai(),
         };
-        let preview = preview_collector(&ctx, "work", "star", None).await.unwrap();
+        let preview = preview_collector(&ctx, "work", "star", None, None)
+            .await
+            .unwrap();
         assert_eq!(preview.entities.len(), 1);
         let hot = &preview.entities[0];
         assert_eq!(
@@ -3026,7 +3078,7 @@ pub(crate) mod tests {
             "nothing stored"
         );
 
-        let err = preview_collector(&ctx, "work", "sh", None)
+        let err = preview_collector(&ctx, "work", "sh", None, None)
             .await
             .unwrap_err();
         assert!(
