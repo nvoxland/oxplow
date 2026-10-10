@@ -146,7 +146,10 @@ Things I keep forgetting. Read this before adding any UI.
   something else takes it from outside (a restored tab or terminal mounting
   as a reloaded window settles), the input gets it back on the next frame
   (`QuickOpenOverlay`'s `onBlur`); focus moving inside the launcher is left
-  alone, and a click outside closes it first.
+  alone, and a click outside closes it first. If keystrokes are lost again
+  after a reload, log `document.activeElement` in that `onBlur` to name the
+  element that took focus; the fix was made without seeing it in a failing
+  `settings/pages.spec.ts` run.
 - **"Save and Another"** for repetitive-entry flows (see the New Work
   Item modal): saves and re-opens the form with the same
   category/priority/parent pre-filled so the user doesn't re-select
