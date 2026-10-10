@@ -424,7 +424,8 @@ welded to collection.
   **Stored as ids into dictionaries (V38):** `subject_id` → `fact_subject
   (kind, ref)`, `path_id` → `fact_path`, `dims_id` → `fact_dims (json)`;
   the one writer (`insert_fact`) interns, and `FactRow` still carries the
-  text. A fact repeated its subject, path and dims text on every row —
+  text — except `detail`, which bulk reads leave out (`None`; a finding's
+  message is fetched by id with `SqliteFactStore::fact_details`). A fact repeated its subject, path and dims text on every row —
   ~290 bytes a fact with indexes, 3.1 GB of a 4 GB database — while the
   distinct values were ~58k subjects, 1.7k paths and 730 dims sets; the
   fact data went 1.83 GB → 0.52 GB. Reads select the ids and

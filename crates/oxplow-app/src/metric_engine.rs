@@ -2055,13 +2055,22 @@ impl MetricEngine {
             Some(c) => self.facts.facts_for_captures(measure.id, vec![c]).await?,
             None => self.current_facts(&measure).await?,
         };
-        Ok(facts
+        let facts: Vec<FactRow> = facts
             .into_iter()
             .filter(|f| filter.matches(f))
             .filter(|f| match capture_id {
                 Some(c) => f.capture_id == c,
                 None => true,
             })
+            .collect();
+        // A bulk read leaves a fact's `detail` (a finding's message) out;
+        // these are the ones being shown, so ask for theirs.
+        let mut details = self
+            .facts
+            .fact_details(facts.iter().map(|f| f.id).collect())
+            .await?;
+        Ok(facts
+            .into_iter()
             .map(|f| {
                 let severity = f.severity.clone().or_else(|| {
                     threshold_state(&spec.direction, f.value, spec.warn_at, spec.fail_at)
@@ -2075,7 +2084,7 @@ impl MetricEngine {
                     value: f.value,
                     severity,
                     rule: f.rule,
-                    message: f.detail,
+                    message: details.remove(&f.id),
                     branch: f.branch,
                     captured_at: f.captured_at,
                 }

@@ -7687,7 +7687,10 @@ mod tests {
                 .find(|f| f.rule.as_deref() == Some("E0308"))
                 .expect("the error hit landed as a fact");
             assert_eq!(err_hit.severity.as_deref(), Some("error"));
-            assert_eq!(err_hit.detail.as_deref(), Some("boom"));
+            // A bulk read leaves the message out; it is asked for by id.
+            assert_eq!(err_hit.detail, None);
+            let details = facts.fact_details(vec![err_hit.id]).await.unwrap();
+            assert_eq!(details.get(&err_hit.id).map(String::as_str), Some("boom"));
             assert_eq!(err_hit.path.as_deref(), Some("src/a.rs"));
             assert_eq!(err_hit.line, Some(10));
             assert_eq!(err_hit.subject_ref.as_deref(), Some("file:src/a.rs"));

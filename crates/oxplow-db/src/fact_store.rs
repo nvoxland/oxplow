@@ -925,14 +925,33 @@ pub struct FactSliceKey {
 /// A fact's subject ref, from the dictionary it points into (V38).
 const SUBJECT_REF: &str = "(SELECT ref FROM fact_subject WHERE id = f.subject_id)";
 
+/// The [`FactRow`] column list, with `$detail` as the `detail` column's
+/// expression: one list for the full and the slim form, so they can't drift.
+macro_rules! fact_row_cols {
+    ($detail:literal) => {
+        concat!(
+            "f.id, c.id, f.measure_id, f.value, f.numerator, f.denominator, f.subject_id, \
+             f.path_id, f.line, f.severity, f.rule, ",
+            $detail,
+            ", f.dims_id, c.captured_at, c.branch, c.closest_vcs_rev, c.vcs_rev_exact, \
+             c.basis_ref, c.snapshot_id, c.stream_id, c.thread_id, c.effort_id, \
+             c.provenance, c.source, c.producer"
+        )
+    };
+}
+
 /// A [`FactRow`]'s columns, for fact `f` as held by capture `c`. The
 /// subject, path and dims come as the ids of the dictionaries the fact
 /// points into (V38); [`fact_row_mapper`] resolves each id once per read.
-pub(crate) const FACT_ROW_COLS: &str = "f.id, c.id, f.measure_id, f.value, f.numerator, \
-     f.denominator, f.subject_id, f.path_id, f.line, f.severity, f.rule, \
-     f.detail, f.dims_id, c.captured_at, c.branch, c.closest_vcs_rev, \
-     c.vcs_rev_exact, c.basis_ref, c.snapshot_id, c.stream_id, c.thread_id, \
-     c.effort_id, c.provenance, c.source, c.producer";
+pub(crate) const FACT_ROW_COLS: &str = fact_row_cols!("f.detail");
+
+/// [`FACT_ROW_COLS`] without the fact's `detail`: what a bulk read selects.
+/// `detail` is the one large text a fact can carry (an analysis finding's
+/// message), and the paths that fold, filter or bucket facts never look at
+/// it, so a history load shouldn't pull it for every row. The column is
+/// there, `NULL`, so the mapper's positions don't move; the few facts
+/// something shows are asked for by id ([`SqliteFactStore::fact_details`]).
+pub(crate) const FACT_ROW_COLS_SLIM: &str = fact_row_cols!("NULL");
 
 /// A [`FactRow`] mapper that decodes each capture's `captured_at` **once**
 /// (tsk215).
@@ -1818,6 +1837,30 @@ impl SqliteFactStore {
             .await
     }
 
+    /// The `detail` of those of `fact_ids` that have one: a finding's
+    /// message. Bulk reads leave it out ([`FACT_ROW_COLS_SLIM`]); this is how
+    /// the few facts something displays get theirs.
+    pub async fn fact_details(
+        &self,
+        fact_ids: Vec<i64>,
+    ) -> Result<std::collections::HashMap<i64, String>, DomainError> {
+        if fact_ids.is_empty() {
+            return Ok(Default::default());
+        }
+        let ids =
+            serde_json::to_string(&fact_ids).map_err(|e| DomainError::Invariant(e.to_string()))?;
+        self.db
+            .call(move |conn| {
+                let mut stmt = conn.prepare_cached(
+                    "SELECT id, detail FROM fact
+                      WHERE id IN (SELECT value FROM json_each(?1)) AND detail IS NOT NULL",
+                )?;
+                let rows = stmt.query_map([ids], |r| Ok((r.get(0)?, r.get(1)?)))?;
+                rows.collect::<rusqlite::Result<_>>()
+            })
+            .await
+    }
+
     /// All facts of a measure, joined to their capture for the spine, oldest
     /// capture first.
     pub async fn facts_for_measure(&self, measure_id: i64) -> Result<Vec<FactRow>, DomainError> {
@@ -2137,7 +2180,7 @@ impl SqliteFactStore {
         self.db
             .call(move |conn| {
                 let sql = format!(
-                    "SELECT {FACT_ROW_COLS} FROM metric_live_fact lf
+                    "SELECT {FACT_ROW_COLS_SLIM} FROM metric_live_fact lf
                        JOIN fact f ON f.id = lf.fact_id
                        JOIN metric_capture c ON c.id = f.capture_id
                       WHERE lf.measure_id = ?1 AND lf.stream_id = ?2 AND lf.branch = ?3
@@ -2426,7 +2469,7 @@ impl SqliteFactStore {
         self.db
             .call(move |conn| {
                 let sql = format!(
-                    "SELECT {FACT_ROW_COLS} FROM fact f
+                    "SELECT {FACT_ROW_COLS_SLIM} FROM fact f
                        JOIN metric_capture c ON c.id = f.capture_id
                       WHERE f.measure_id = ?1
                         AND f.path_id IS NULL AND {SUBJECT_REF} IS NULL
@@ -2644,7 +2687,7 @@ impl SqliteFactStore {
             .db
             .call(move |conn| {
                 let sql = format!(
-                    "SELECT {FACT_ROW_COLS} FROM fact f
+                    "SELECT {FACT_ROW_COLS_SLIM} FROM fact f
                        JOIN metric_capture c ON c.id = f.capture_id
                       WHERE f.id IN (
                         SELECT MIN(f2.id) FROM fact f2
@@ -2827,7 +2870,7 @@ impl SqliteFactStore {
                      )
                      -- …and the facts it holds for that path: its own rows, or
                      -- through its hold (V43), at the lines it saw.
-                     SELECT {FACT_ROW_COLS} FROM winners w
+                     SELECT {FACT_ROW_COLS_SLIM} FROM winners w
                        CROSS JOIN fact f ON f.capture_id = w.capture_id AND f.path_id = w.path_id
                        CROSS JOIN metric_capture c ON c.id = f.capture_id
                       WHERE f.measure_id = ?1 AND {not_held}
@@ -2838,7 +2881,7 @@ impl SqliteFactStore {
                         AND ph.measure_id = ?1
                       ORDER BY 14, 1",
                     not_held = crate::fact_chain::NOT_PATH_HELD,
-                    path_cols = crate::fact_chain::path_held_cols(),
+                    path_cols = crate::fact_chain::path_held_cols_slim(),
                     path_held = crate::fact_chain::PATH_HELD,
                 );
                 let mut stmt = conn.prepare(&sql)?;
@@ -3399,7 +3442,7 @@ impl SqliteFactStore {
                           AND c.status = 'done'
                           AND (?2 IS NULL OR c.stream_id = ?2)
                      )
-                     SELECT {FACT_ROW_COLS} FROM fact f
+                     SELECT {FACT_ROW_COLS_SLIM} FROM fact f
                        JOIN metric_capture c ON c.id = f.capture_id
                        JOIN ranked r ON r.fact_id = f.id
                       WHERE r.rn = 1
@@ -5814,6 +5857,92 @@ mod tests {
         // And the data is still readable — a checkpoint moves frames into the
         // main DB, it never drops them.
         assert_eq!(store.facts_for_measure(m).await.unwrap().len(), 40 * 200);
+    }
+
+    /// A bulk read leaves `detail` out — a finding's message is the one
+    /// large text a fact can carry, and the read paths that fold or filter
+    /// never look at it — and `fact_details` fetches it for the few facts
+    /// something does show.
+    #[tokio::test]
+    async fn bulk_reads_leave_detail_out_and_fact_details_fetches_it() {
+        let store = fixture().await;
+        let m = measure(&store, "acme.findings").await;
+        let mut with = NewFact::new(m, 1.0);
+        with.path = Some("src/a.rs".into());
+        with.detail = Some("assertion failed at a.rs:3".into());
+        let mut without = NewFact::new(m, 1.0);
+        without.path = Some("src/b.rs".into());
+        let cap = NewMetricCapture::done(1, "analysis", "s");
+        store.record_facts(cap, vec![with, without]).await.unwrap();
+
+        let rows = store.facts_for_measure(m).await.unwrap();
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|r| r.detail.is_none()), "{rows:?}");
+        let in_stream = store.facts_for_measure_in_stream(m, 1).await.unwrap();
+        assert!(in_stream.iter().all(|r| r.detail.is_none()));
+        let captured = store
+            .facts_for_captures(m, vec![rows[0].capture_id])
+            .await
+            .unwrap();
+        assert!(captured.iter().all(|r| r.detail.is_none()));
+
+        let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
+        let details = store.fact_details(ids).await.unwrap();
+        assert_eq!(details.len(), 1, "only a fact with one has an entry");
+        let with_id = rows
+            .iter()
+            .find(|r| r.path.as_deref() == Some("src/a.rs"))
+            .unwrap()
+            .id;
+        assert_eq!(details[&with_id], "assertion failed at a.rs:3");
+        assert!(store.fact_details(vec![]).await.unwrap().is_empty());
+    }
+
+    /// How long a bulk read of a measure's facts takes when the facts carry
+    /// a message each (an analysis finding's `detail`): ignored; prints.
+    /// `cargo nextest run -p oxplow-db --release --run-ignored only --no-capture fact_read_cost`
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "a measurement"]
+    async fn fact_read_cost() {
+        let store = fixture().await;
+        let m = measure(&store, "acme.findings").await;
+        let message = "this value is used here but was moved on a previous line; consider cloning it or borrowing instead of moving it ".repeat(2);
+        for h in 0..200 {
+            let mut cap = NewMetricCapture::done(1, "analysis", "s");
+            cap.captured_at = Some(at(&format!(
+                "2026-06-{:02}T10:{:02}:00.000000Z",
+                1 + h % 28,
+                h % 60
+            )));
+            let facts: Vec<NewFact> = (0..500)
+                .map(|i| {
+                    let mut f = NewFact::new(m, 1.0);
+                    f.path = Some(format!("src/m{}/f{i}.rs", i % 40));
+                    f.line = Some(i);
+                    f.rule = Some("clippy::needless_borrow".into());
+                    f.detail = Some(format!("{message}{i}"));
+                    f
+                })
+                .collect();
+            store.record_facts(cap, facts).await.unwrap();
+        }
+        // Warm, then the median of 5 reads.
+        store.facts_for_measure(m).await.unwrap();
+        let mut times = Vec::new();
+        let mut n = 0;
+        let mut with_detail = 0;
+        for _ in 0..5 {
+            let t = std::time::Instant::now();
+            let rows = store.facts_for_measure(m).await.unwrap();
+            times.push(t.elapsed().as_millis());
+            n = rows.len();
+            with_detail = rows.iter().filter(|r| r.detail.is_some()).count();
+        }
+        times.sort();
+        println!(
+            "facts_for_measure: {n} facts ({with_detail} with a detail): median {} ms of {times:?}",
+            times[2]
+        );
     }
 
     /// tsk211: compaction must bound `detail_json` growth WITHOUT touching a

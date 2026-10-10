@@ -764,3 +764,29 @@ typed coercion then failed the whole report. The other bundled parsers
 (junit, cobertura, jacoco, clippy, eslint) read XML or JSON and were not
 measured as costly.
 
+## Bulk fact reads leave `detail` out (measured 2026-10-09)
+
+A `fact`'s `detail` is the one large text it can carry (an analysis finding's
+message). Every history load (`facts_for_measure`, the stream and live
+reads, the held-facts read) selected it and allocated a `String` for each
+row that had one, though the paths that fold, filter or bucket facts never
+look at it. Bulk reads now select `NULL` in its place
+(`FACT_ROW_COLS_SLIM`, the same column list as `FACT_ROW_COLS` from one
+macro, so the mapper's positions don't move), and the findings read, the
+only reader that shows a message, asks for those of the facts it returns
+by id (`SqliteFactStore::fact_details`). The chain write path keeps the
+full list: it compares a held fact with a new one by `detail`.
+
+Measured on 100,000 facts of one measure, each carrying a 230-byte message
+(the worst case; most facts carry none and read the same before and
+after), release build, median of five `facts_for_measure` reads
+(`fact_store::tests::fact_read_cost`, ignored):
+
+| | Median read |
+|---|---|
+| `detail` selected | 144 ms |
+| Left out (`NULL`) | 96 ms |
+
+A third of the read, in the case where it can matter; nothing where facts
+have no message.
+
