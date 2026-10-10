@@ -199,6 +199,44 @@ impl Trees {
         Ok(out)
     }
 
+    /// Every file in `rev` that `keep` accepts, each with its content id
+    /// and a way to read its text — read only if the duplicate scan's
+    /// cache doesn't know the id. The id is qualified by its space (a
+    /// snapshot's content hash, a VCS object id), so ids from different
+    /// spaces can't meet.
+    pub async fn cached_corpus(
+        &self,
+        ws: &Path,
+        rev: &Revision,
+        keep: impl Fn(&str) -> bool,
+    ) -> Result<Vec<oxplow_code_dup::CachedFile>, DomainError> {
+        let (cells, space) = self.cells(ws, rev).await?;
+        let space = match space {
+            Space::Snapshot => "snapshot",
+            Space::Vcs => "vcs",
+        };
+        let reader = Arc::new(self.reader(ws));
+        Ok(cells
+            .into_iter()
+            .filter(|(p, _)| keep(p))
+            .map(|(path, cell)| {
+                let (reader, source) = (Arc::clone(&reader), cell.source);
+                oxplow_code_dup::CachedFile {
+                    path,
+                    key: Some(oxplow_code_dup::FileKey {
+                        space: space.into(),
+                        id: cell.id,
+                    }),
+                    text: Box::new(move || {
+                        reader
+                            .read(&source)
+                            .and_then(|bytes| String::from_utf8(bytes).ok())
+                    }),
+                }
+            })
+            .collect())
+    }
+
     /// What changed from `from` to `to` (from nothing when `from` is
     /// `None`), sorted by path: ids compared, no bytes read for the
     /// changed files. Use this when the line counts aren't shown.

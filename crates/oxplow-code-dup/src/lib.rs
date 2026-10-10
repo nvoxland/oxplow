@@ -39,7 +39,11 @@ use std::sync::Arc;
 use oxplow_code_metrics::{is_function_node, language_for_path, Language};
 use tree_sitter::Parser;
 
+mod cache;
 mod tokenize;
+
+use cache::{CacheKey, Record};
+pub use cache::{DupCache, FileKey, ScanStats, CACHE_BUDGET_BYTES, DETECTOR_VERSION, RECORD_BYTES};
 
 use tokenize::hash_subtree;
 
@@ -112,6 +116,17 @@ where
     pair_up(subtrees, opts)
 }
 
+#[cfg(test)]
+thread_local! {
+    static PARSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Files parsed on this thread so far (tests).
+#[cfg(test)]
+pub(crate) fn parses() -> usize {
+    PARSES.with(std::cell::Cell::get)
+}
+
 /// Parse one file and keep its subtrees that are eligible for matching —
 /// all of them, or with `wanted`, only those whose hash is in it.
 fn scan_file(
@@ -128,6 +143,8 @@ fn scan_file(
     if parser.set_language(&lang.tree_sitter_language()).is_err() {
         return;
     }
+    #[cfg(test)]
+    PARSES.with(|n| n.set(n.get() + 1));
     let Some(tree) = parser.parse(source, None) else {
         return;
     };
@@ -232,7 +249,12 @@ where
     for (path, source) in &rest {
         scan_file(path, source.as_ref(), opts, Some(&wanted), &mut subtrees);
     }
-    let raw = pair_up(subtrees, opts);
+    scope_blocks(pair_up(subtrees, opts), scope_paths)
+}
+
+/// `raw` blocks as a scoped scan reports them: same-path matches dropped,
+/// blocks with neither side in scope dropped, and the in-scope side first.
+fn scope_blocks(raw: Vec<DuplicateBlock>, scope_paths: &BTreeSet<String>) -> Vec<DuplicateBlock> {
     let mut out = Vec::with_capacity(raw.len());
     for block in raw {
         if block.a_path == block.b_path {
@@ -258,6 +280,108 @@ where
         }
     }
     out
+}
+
+/// A file for a cached scan: its path, its content id (none: never
+/// cached) and a way to read its text, called only when it isn't cached.
+pub struct CachedFile {
+    pub path: String,
+    pub key: Option<FileKey>,
+    pub text: Box<dyn FnOnce() -> Option<String> + Send>,
+}
+
+/// [`detect_duplicates_scoped`] over files that may already be known:
+/// a file whose content id is in `cache` is neither read nor parsed, and
+/// a file that isn't is parsed once and kept for the next scan. Reports
+/// the same blocks, plus how many files hit and missed.
+pub fn detect_duplicates_scoped_cached<I>(
+    files: I,
+    scope_paths: &BTreeSet<String>,
+    opts: DupOptions,
+    cache: &DupCache,
+) -> (Vec<DuplicateBlock>, ScanStats)
+where
+    I: IntoIterator<Item = CachedFile>,
+{
+    let _running = Running::start();
+    let mut stats = ScanStats::default();
+    let (in_scope, rest): (Vec<_>, Vec<_>) = files
+        .into_iter()
+        .partition(|f| scope_paths.contains(&f.path));
+    let mut subtrees: Vec<SubtreeRef> = Vec::new();
+    for file in in_scope {
+        let path: Arc<str> = Arc::from(file.path.as_str());
+        if let Some(records) = records_of(file, opts, cache, &mut stats) {
+            subtrees.extend(records.iter().map(|r| subtree_of(&path, r)));
+        }
+    }
+    let wanted: HashSet<u64> = subtrees.iter().map(|s| s.hash).collect();
+    for file in rest {
+        let path: Arc<str> = Arc::from(file.path.as_str());
+        if let Some(records) = records_of(file, opts, cache, &mut stats) {
+            subtrees.extend(
+                records
+                    .iter()
+                    .filter(|r| wanted.contains(&r.hash))
+                    .map(|r| subtree_of(&path, r)),
+            );
+        }
+    }
+    (scope_blocks(pair_up(subtrees, opts), scope_paths), stats)
+}
+
+fn subtree_of(path: &Arc<str>, r: &Record) -> SubtreeRef {
+    SubtreeRef {
+        path: Arc::clone(path),
+        fn_byte_start: r.fn_byte_start as usize,
+        fn_byte_end: r.fn_byte_end as usize,
+        start_line: r.start_line,
+        end_line: r.end_line,
+        node_count: r.node_count,
+        hash: r.hash,
+    }
+}
+
+/// `file`'s records: from the cache, else parsed (and kept when it has a
+/// content id). `None` for a file in no supported language or unreadable.
+fn records_of(
+    file: CachedFile,
+    opts: DupOptions,
+    cache: &DupCache,
+    stats: &mut ScanStats,
+) -> Option<Arc<[Record]>> {
+    let lang = language_for_path(&file.path)?;
+    let key = file.key.map(|file| CacheKey {
+        file,
+        lang: lang.tag() as u32,
+        min_nodes: opts.min_nodes,
+        min_lines: opts.min_lines,
+        version: DETECTOR_VERSION,
+    });
+    if let Some(records) = key.as_ref().and_then(|k| cache.get(k)) {
+        stats.hits += 1;
+        return Some(records);
+    }
+    stats.misses += 1;
+    let text = (file.text)()?;
+    let mut parsed = Vec::new();
+    scan_file(&file.path, &text, opts, None, &mut parsed);
+    let saturate = |n: usize| u32::try_from(n).unwrap_or(u32::MAX);
+    let records: Arc<[Record]> = parsed
+        .iter()
+        .map(|s| Record {
+            hash: s.hash,
+            node_count: s.node_count,
+            start_line: s.start_line,
+            end_line: s.end_line,
+            fn_byte_start: saturate(s.fn_byte_start),
+            fn_byte_end: saturate(s.fn_byte_end),
+        })
+        .collect();
+    if let Some(key) = key {
+        cache.put(key, Arc::clone(&records));
+    }
+    Some(records)
 }
 
 /// One subtree extracted from the corpus that's eligible for

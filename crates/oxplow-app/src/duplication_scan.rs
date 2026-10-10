@@ -19,7 +19,7 @@ use oxplow_db::CodeQualityScanStatus;
 use oxplow_domain::vcs::Revision;
 use oxplow_domain::DomainError;
 
-use crate::code_quality_runner::{scan_duplicates, CodeQualityFinding, RunOptions};
+use crate::code_quality_runner::{scan_duplicates_cached, CodeQualityFinding, RunOptions};
 use crate::trees::Trees;
 use crate::{BackgroundTaskKind, BackgroundTaskStore, Services, StartInput};
 
@@ -29,6 +29,7 @@ use crate::{BackgroundTaskKind, BackgroundTaskStore, Services, StartInput};
 pub struct DuplicationRecorder {
     code_quality_store: Arc<oxplow_db::SqliteCodeQualityStore>,
     trees: Arc<Trees>,
+    cache: Arc<oxplow_code_dup::DupCache>,
     background_tasks: BackgroundTaskStore,
 }
 
@@ -37,6 +38,7 @@ impl DuplicationRecorder {
         Self {
             code_quality_store: svc.code_quality_store.clone(),
             trees: svc.trees.clone(),
+            cache: svc.dup_cache.clone(),
             background_tasks: svc.background_tasks.clone(),
         }
     }
@@ -75,10 +77,26 @@ impl DuplicationRecorder {
         // Read only what the detector can parse: the rest (binaries,
         // assets, docs) would be read whole and then dropped.
         let parseable = |p: &str| oxplow_code_metrics::is_supported_path(std::path::Path::new(p));
-        let scanned_corpus = match svc.trees.corpus(&ws, &revision, parseable).await {
-            Ok(corpus) => scan_duplicates(corpus, scope_paths, RunOptions::default())
-                .await
-                .map_err(|e| e.to_string()),
+        let started = std::time::Instant::now();
+        let scanned_corpus = match svc.trees.cached_corpus(&ws, &revision, parseable).await {
+            Ok(files) => {
+                scan_duplicates_cached(files, scope_paths, RunOptions::default(), svc.cache.clone())
+                    .await
+                    .map(|(findings, stats)| {
+                        // A cold scan after a restart is all misses.
+                        tracing::info!(
+                            scope = %scope,
+                            revision = %revision_str,
+                            findings = findings.len(),
+                            cache_hits = stats.hits,
+                            cache_misses = stats.misses,
+                            elapsed_ms = started.elapsed().as_millis() as u64,
+                            "duplicate scan"
+                        );
+                        findings
+                    })
+                    .map_err(|e| e.to_string())
+            }
             Err(e) => Err(e.to_string()),
         };
         let findings = match scanned_corpus {
@@ -179,6 +197,28 @@ mod tests {
             )
             .await
             .unwrap()
+    }
+
+    /// A scan leaves its files' records in the service's cache, so the next
+    /// one finds the same blocks without parsing the unchanged files — and
+    /// an edit is seen: its file has a new content id.
+    #[tokio::test]
+    async fn a_second_scan_reuses_the_cache_and_an_edit_is_seen() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let root = f.svc.layout.project_dir.clone();
+        std::fs::write(root.join("a.rs"), BODY).unwrap();
+        std::fs::write(root.join("b.rs"), BODY).unwrap();
+        assert_eq!(f.svc.dup_cache.held(), (0, 0));
+        let first = scan(&f).await;
+        let held = f.svc.dup_cache.held();
+        assert!(held.0 > 0, "{held:?}");
+        let second = scan(&f).await;
+        assert_eq!(first, second);
+        assert_eq!(f.svc.dup_cache.held(), held, "nothing new to keep");
+
+        std::fs::write(root.join("b.rs"), "pub fn unrelated() -> i32 {\n    1\n}\n").unwrap();
+        let third = scan(&f).await;
+        assert!(third.is_empty(), "{third:?}");
     }
 
     /// A change's scan records its findings and no facts: it anchors only
