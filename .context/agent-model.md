@@ -1786,6 +1786,20 @@ startup, resume, clear, and compact receive one fresh note. If a project
 wants to disable injection entirely, set `injectSessionContext: false`
 in `.oxplow/project.yaml` — default is `true`.
 
+### Writer thread's agent
+
+A **read-only** thread's note also carries a `**Writer thread:**` line —
+the stream's writer thread, and its live agent's harness key, pid and the
+harness's own session id (`Thread (thr1) — agent `claude`, pid 11684,
+session `…``) — so the agent can match it against `ListAgents` output and
+message it. The agent is the writer thread's newest open session whose
+`agent_session.pid` names a process that still exists
+(`live_writer_agent` in `agent_context.rs`, using
+`daemon_supervisor::process_alive`); with no live agent the line is
+omitted. A writer thread's own note never has it. It rides the same
+change-detection as the rest of the block, so a restarted writer agent
+(new pid) re-emits it. Built by `build_session_context_block_full`.
+
 ### ROLE CHANGE banner
 
 The initial system prompt's `NON_WRITER_PROMPT_BLOCK` is frozen at

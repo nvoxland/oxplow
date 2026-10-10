@@ -15,7 +15,7 @@
 //! system-prompt mechanism.
 
 use oxplow_config::OxplowConfig;
-use oxplow_domain::{Stream, Thread};
+use oxplow_domain::{Stream, Thread, ThreadId};
 
 /// The two role buckets the agent cares about. Writer threads can
 /// mutate the worktree; read-only threads cannot (their PreToolUse
@@ -67,6 +67,30 @@ pub fn build_session_context_block_with_role(
     thread: Option<&Thread>,
     initial_role: Option<RoleMode>,
 ) -> String {
+    build_session_context_block_full(stream, thread, initial_role, None)
+}
+
+/// The agent running on the stream's writer thread, so a read-only
+/// thread can match it against what `ListAgents` shows. Agent-neutral:
+/// the harness key, the OS pid and the harness's own session id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WriterAgent {
+    pub thread_title: String,
+    pub thread_id: ThreadId,
+    pub harness: String,
+    pub pid: Option<u32>,
+    /// The harness's own session id; empty when unknown.
+    pub session: String,
+}
+
+/// [`build_session_context_block_with_role`] plus, on a read-only
+/// thread, a line naming the live agent on the stream's writer thread.
+pub fn build_session_context_block_full(
+    stream: &Stream,
+    thread: Option<&Thread>,
+    initial_role: Option<RoleMode>,
+    writer: Option<&WriterAgent>,
+) -> String {
     let mut s = String::from(
         "<session-context>\n## Oxplow session context\n\n\
          Oxplow is providing the agent's current workspace assignment. This note is refreshed after a session restart or when the assignment changes.\n\n",
@@ -85,6 +109,19 @@ pub fn build_session_context_block_with_role(
             current.as_str(),
             role_description(current)
         ));
+        if let (RoleMode::ReadOnly, Some(w)) = (current, writer) {
+            s.push_str(&format!(
+                "- **Writer thread:** {} (`{}`) — agent `{}`",
+                w.thread_title, w.thread_id, w.harness
+            ));
+            if let Some(pid) = w.pid {
+                s.push_str(&format!(", pid {pid}"));
+            }
+            if !w.session.is_empty() {
+                s.push_str(&format!(", session `{}`", w.session));
+            }
+            s.push('\n');
+        }
         if let Some(initial) = initial_role {
             if initial != current {
                 s.push('\n');
@@ -361,6 +398,56 @@ mod tests {
         let block = build_session_context_block(&stream(), Some(&t));
         assert!(block.contains("**Access:** **read-only**"));
         assert!(block.contains("project file edits are blocked"));
+    }
+
+    fn writer_agent() -> WriterAgent {
+        WriterAgent {
+            thread_title: "Thread".into(),
+            thread_id: ThreadId::new(1),
+            harness: "claude".into(),
+            pid: Some(11684),
+            session: "abc-123".into(),
+        }
+    }
+
+    #[test]
+    fn a_read_only_thread_is_told_who_the_writer_agent_is() {
+        let mut t = thread();
+        t.id = ThreadId::new(2);
+        t.status = ThreadStatus::Queued;
+        let block =
+            build_session_context_block_full(&stream(), Some(&t), None, Some(&writer_agent()));
+        assert!(
+            block.contains(
+                "**Writer thread:** Thread (`thr1`) — agent `claude`, pid 11684, session `abc-123`"
+            ),
+            "{block}"
+        );
+    }
+
+    #[test]
+    fn a_writer_thread_is_not_told_of_a_writer() {
+        let block = build_session_context_block_full(
+            &stream(),
+            Some(&thread()),
+            None,
+            Some(&writer_agent()),
+        );
+        assert!(!block.contains("Writer thread"));
+    }
+
+    #[test]
+    fn unknown_writer_agent_parts_are_left_out() {
+        let mut t = thread();
+        t.status = ThreadStatus::Queued;
+        let mut w = writer_agent();
+        w.pid = None;
+        w.session = String::new();
+        let block = build_session_context_block_full(&stream(), Some(&t), None, Some(&w));
+        assert!(
+            block.contains("**Writer thread:** Thread (`thr1`) — agent `claude`\n"),
+            "{block}"
+        );
     }
 
     #[test]
