@@ -243,6 +243,8 @@ pub fn scaffold(
              \x20 - id: items\n\
              \x20   runtime: starlark\n\
              \x20   entry: collectors/items.star\n\
+             \x20   # Services its script may use: sql.read (scope()), tree.read (files()), ai.compute (ai_*; you approve it).\n\
+             \x20   needs: []\n\
              \x20   input: \"SELECT ref, title, state FROM v_work_item\"\n\
              \x20   entities:\n\
              \x20     - {{ name: item, key: ref, columns: {{ ref: text, title: text }} }}\n\
@@ -1212,6 +1214,25 @@ mod tests {
         }
     }
 
+    /// A scaffolded collector declares `needs:` (none yet) under a comment
+    /// that names the services it could take.
+    #[test]
+    fn a_scaffolded_collector_declares_its_needs_with_the_services_named() {
+        let dir = tempfile::tempdir().unwrap();
+        scaffold(dir.path(), Kind::Collector, "demo", None).unwrap();
+        let manifest =
+            std::fs::read_to_string(dir.path().join("oxplow/extensions/demo/extension.yaml"))
+                .unwrap();
+        let comment = manifest
+            .lines()
+            .find(|l| l.trim_start().starts_with("# Services its script may use"))
+            .expect("the needs comment");
+        for service in oxplow_domain::service::SERVICES {
+            assert!(comment.contains(service.scope), "{comment}");
+        }
+        assert!(manifest.contains("needs: []"), "{manifest}");
+    }
+
     fn declarations(root: &Path, name: &str) -> serde_json::Value {
         let text =
             std::fs::read_to_string(root.join(format!("oxplow/extensions/{name}/provider.json")))
@@ -1365,6 +1386,29 @@ mod tests {
         .unwrap();
         assert!(report.ok, "{}", render_findings(&report, Format::Text));
         assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+    }
+
+    /// The scaffolded collector, with its `needs:` line, still checks clean
+    /// and passes its own `test`.
+    #[tokio::test]
+    async fn a_scaffolded_collector_checks_clean_and_passes_its_test() {
+        let dir = tempfile::tempdir().unwrap();
+        scaffold(dir.path(), Kind::Collector, "demo", None).unwrap();
+        let report = check(
+            dir.path(),
+            "demo",
+            &ExtensionCatalog::new(),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(report.ok, "{}", render_findings(&report, Format::Text));
+        let tested = crate::extension_test::test_extension(dir.path(), "demo", false)
+            .await
+            .unwrap();
+        assert!(tested.ok, "{:?}", tested.errors);
     }
 
     #[tokio::test]

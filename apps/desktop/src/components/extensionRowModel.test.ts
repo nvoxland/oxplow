@@ -7,6 +7,7 @@ import {
   extensionRowModel,
   lastRuns,
   reviewModel,
+  serviceLines,
   type RunRow,
 } from "./extensionRowModel.js";
 
@@ -260,6 +261,7 @@ describe("reviewModel", () => {
     sha: "0123456789abcdef0123456789abcdef01234567",
     problems,
     impact: { lenses: [], models: [], collectors: [], providers: [], effects: [], contributions: [], outOfTime: [], lines: [] },
+    services: [],
   });
 
   test("spells out what runs, where it reaches and what it reads", () => {
@@ -394,5 +396,72 @@ describe("lastRuns", () => {
     // With no decision recorded, the run's own error stands.
     expect(lastRuns([run({ outcome: "denied", error: "no grant", decisions: "[]" })], when).acme!.reason).toBe("no grant");
     expect(lastRuns([run({ outcome: "denied", error: null, decisions: "not json" })], when).acme!.reason).toBeNull();
+  });
+});
+
+describe("serviceLines", () => {
+  const listing = [
+    { scope: "sql.read", title: "Read the semantic layer", summary: "", approval: false },
+    { scope: "tree.read", title: "Read the captured tree", summary: "", approval: false },
+    { scope: "ai.compute", title: "Ask a model", summary: "", approval: true },
+  ];
+  const use = (scope: string, declared: "declared" | "implied" | "undeclared", approval = false) => ({
+    scope,
+    declared,
+    used: true,
+    approval,
+  });
+
+  test("names each script's services by their titles, and a model call as needing approval", () => {
+    expect(
+      serviceLines(
+        [
+          { script: "collector `paths`", entry: "paths.star", services: [use("tree.read", "implied"), use("ai.compute", "declared", true)] },
+          { script: "effect `stamp`", entry: "stamp.star", services: [use("sql.read", "declared")] },
+        ],
+        listing,
+      ),
+    ).toEqual([
+      { script: "Collector paths", text: "Read the captured tree · Ask a model (you approve it)" },
+      { script: "Effect stamp", text: "Read the semantic layer" },
+    ]);
+  });
+
+  test("says when a script uses a service it doesn't declare, and skips scripts with none", () => {
+    expect(
+      serviceLines(
+        [
+          { script: "command `note.sum`", entry: "sum.star", services: [use("sql.read", "undeclared")] },
+          { script: "effect `quiet`", entry: "quiet.star", services: [] },
+        ],
+        listing,
+      ),
+    ).toEqual([{ script: "Command note.sum", text: "Read the semantic layer (not in its needs)" }]);
+  });
+
+  test("a service the listing doesn't know is shown by its scope", () => {
+    expect(
+      serviceLines([{ script: "effect `x`", entry: "x.star", services: [use("future.thing", "declared")] }], listing),
+    ).toEqual([{ script: "Effect x", text: "future.thing" }]);
+  });
+});
+
+describe("reviewModel services", () => {
+  test("a review carries its scripts' services", () => {
+    const m = reviewModel(
+      {
+        extension: ext({ name: "shared" }),
+        git: "https://github.com/acme/lenses",
+        gitRef: null,
+        sha: "0123456789abcdef0123456789abcdef01234567",
+        problems: [],
+        impact: null,
+        services: [
+          { script: "collector `c`", entry: "c.star", services: [{ scope: "ai.compute", declared: "declared", used: false, approval: true }] },
+        ],
+      },
+      [{ scope: "ai.compute", title: "Ask a model", summary: "", approval: true }],
+    );
+    expect(m.services).toEqual([{ script: "Collector c", text: "Ask a model (you approve it)" }]);
   });
 });

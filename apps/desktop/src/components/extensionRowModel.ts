@@ -1,5 +1,5 @@
 /** Pure row presentation for the Settings → Extensions list. */
-import type { CollectorListing, Extension, ExtensionReview, Trigger } from "../tauri-bridge/generated/bindings.js";
+import type { CollectorListing, Extension, ExtensionReview, ScriptServices, ServiceListing, Trigger } from "../tauri-bridge/generated/bindings.js";
 import { readsChanged } from "../lens/lensRerun.js";
 
 export interface ExtensionRowModel {
@@ -170,6 +170,8 @@ export interface ReviewModel {
   /** What a dry run of its lenses found; shown, not blocking. */
   problems: string[];
   canInstall: boolean;
+  /** What each of its scripts is given (`serviceLines`). */
+  services: ServiceLine[];
 }
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -180,7 +182,7 @@ const kindTitle = (kind: string) => {
   return words.charAt(0).toUpperCase() + words.slice(1);
 };
 
-export function reviewModel(review: ExtensionReview): ReviewModel {
+export function reviewModel(review: ExtensionReview, listing: readonly ServiceListing[] = []): ReviewModel {
   const ext = review.extension;
   const declares: string[] = [];
   if (ext.lenses.length > 0) declares.push(plural(ext.lenses.length, "lens", "lenses"));
@@ -216,7 +218,37 @@ export function reviewModel(review: ExtensionReview): ReviewModel {
     errors: ext.errors,
     problems: review.problems,
     canInstall: ext.errors.length === 0,
+    services: serviceLines(review.services, listing),
   };
+}
+
+/** One script and the services it is given, in a person's words. */
+export interface ServiceLine {
+  /** "Collector paths", "Effect stamp". */
+  script: string;
+  /** The services' titles, " · "-separated: "Read the captured tree · Ask a
+   *  model (you approve it)". */
+  text: string;
+}
+
+/** Each script's services as lines (Settings → Extensions, beside the
+ *  grants): the service titles (`list_services`), a model call marked as
+ *  yours to approve, and a service the script uses without naming it in
+ *  its `needs` flagged. A script with no services has no line. */
+export function serviceLines(scripts: readonly ScriptServices[], listing: readonly ServiceListing[]): ServiceLine[] {
+  const title = (scope: string) => listing.find((s) => s.scope === scope)?.title ?? scope;
+  const out: ServiceLine[] = [];
+  for (const s of scripts) {
+    if (s.services.length === 0) continue;
+    const words = s.script.replace(/`/g, "");
+    out.push({
+      script: words.charAt(0).toUpperCase() + words.slice(1),
+      text: s.services
+        .map((u) => `${title(u.scope)}${u.approval ? " (you approve it)" : ""}${u.declared === "undeclared" ? " (not in its needs)" : ""}`)
+        .join(" · "),
+    });
+  }
+  return out;
 }
 
 /** The latest run of each contribution — the rows Settings → Extensions

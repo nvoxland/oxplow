@@ -28,6 +28,7 @@ const review = (over: Partial<Extension> = {}): ExtensionReview => ({
   sha: "0123456789abcdef0123456789abcdef01234567",
   problems: [],
   impact: { lenses: [], models: [], collectors: [], providers: [], effects: [], contributions: [], outOfTime: [], lines: [] },
+  services: [],
 });
 
 // tsk378: an install shows what it brings in; the person confirms or cancels.
@@ -76,4 +77,37 @@ test("a changed lens shows both texts in the review", () => {
   expect(view.getByTestId("extension-review-impact").textContent).toContain("Lens shared/count: changed");
   expect(view.getByTestId("impact-lens-shared/count-before").textContent).toBe("1");
   expect(view.getByTestId("impact-lens-shared/count-after").textContent).toBe("2");
+});
+
+// A review says what each script is given, in the service titles.
+test("the review panel lists the services its scripts are given", () => {
+  const withServices: ExtensionReview = {
+    ...review(),
+    services: [
+      {
+        script: "collector `triage`",
+        entry: "triage.star",
+        services: [
+          { scope: "tree.read", declared: "implied", used: true, approval: false },
+          { scope: "ai.compute", declared: "declared", used: true, approval: true },
+        ],
+      },
+    ],
+  };
+  const { getByTestId } = render(
+    <ReviewPanel
+      review={withServices}
+      serviceListing={[
+        { scope: "tree.read", title: "Read the captured tree", summary: "", approval: false },
+        { scope: "ai.compute", title: "Ask a model", summary: "", approval: true },
+      ]}
+      action="Install"
+      busy={false}
+      onConfirm={() => {}}
+      onCancel={() => {}}
+    />,
+  );
+  expect(getByTestId("extension-review-services").textContent).toBe(
+    "Collector triage — Read the captured tree · Ask a model (you approve it)",
+  );
 });

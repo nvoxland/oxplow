@@ -1879,6 +1879,21 @@ uses):
   `list_services` tool serves `SERVICES`; `docs/reference/extensions.md`
   "Services" is generated from it (`the_reference_lists_every_service`,
   sharing `test_fixtures::generated_section` with the kinds table).
+- **Where a person sees them.** Settings → Extensions shows a line per
+  script under each project extension's row — "Collector triage — Read the
+  captured tree · Ask a model (you approve it)" — worded from the service
+  titles (`list_services`, one rpc over `SERVICES`; the surface-parity
+  manifest has it as `both`), a service its script uses without naming it
+  in `needs` flagged "(not in its needs)". The row's lines come from the
+  extension's check (`validate_extension` → `CheckReport.services`); the
+  install and update review (`ExtensionReview.services`, listed under what
+  it declares and before the impact report) computes them for the candidate
+  without reading its collector scripts, so for a collector they are what it
+  declares and its kind implies — never "used". Bundled extensions show no
+  line (they are not checked in the section). Row model:
+  `serviceLines` in `extensionRowModel.ts`. `oxplow extension new
+  collector` scaffolds `needs: []` under a comment naming the three
+  services.
 - **At run time, one router** (`crates/oxplow-app/src/services.rs`):
   every host that runs a Starlark script — entity collectors
   (`collector_runner::given`), fact collectors (`MetricsService::given`),
