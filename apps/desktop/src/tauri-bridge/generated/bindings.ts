@@ -1453,6 +1453,11 @@ export type Atomicity = "tx" | "external" | "dispatch";
 export type AttachResult = {
 	sessionId: string,
 	replayB64: string,
+	/**
+	 *  What this attach did: joined a live process, started a fresh
+	 *  conversation, or resumed a saved one.
+	 */
+	launch: LaunchKind,
 };
 
 export type BackgroundTask = {
@@ -3727,6 +3732,15 @@ export type KeyedDiff = {
 	// Up to [`ROW_DIFF_SAMPLES`] of them, in key order.
 	samples: RowSample[],
 };
+
+// What an attach did about the process behind the pane.
+export type LaunchKind = 
+// A live process was already running; the pane joined it.
+"reattached" | 
+// A process was started for a conversation with nothing saved.
+"started" | 
+// A process was started resuming the saved conversation.
+"resumed";
 
 /**
  *  Launcher (Cmd+K) sections a lens can be listed under. Mirrors the

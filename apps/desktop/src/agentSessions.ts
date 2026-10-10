@@ -27,9 +27,12 @@ export interface AgentSessionRow {
   /** What the person called it; empty until renamed. */
   title: string;
   openedAt: string;
+  /** The person stopped it, and hasn't started it again: its tab spawns
+   *  nothing until they do. */
+  stoppedByUser: boolean;
 }
 
-const COLUMNS = "id, thread_id, kind, harness, acp_agent, title, opened_at";
+const COLUMNS = "id, thread_id, kind, harness, acp_agent, title, opened_at, stopped_by_user_at";
 
 export function agentSessionsFromResult(result: SqlQueryResult): AgentSessionRow[] {
   const at = (row: SqlCell[], name: string) => row[result.columns.indexOf(name)] ?? null;
@@ -41,6 +44,7 @@ export function agentSessionsFromResult(result: SqlQueryResult): AgentSessionRow
     acpAgent: at(row, "acp_agent") == null ? null : String(at(row, "acp_agent")),
     title: String(at(row, "title") ?? ""),
     openedAt: String(at(row, "opened_at")),
+    stoppedByUser: at(row, "stopped_by_user_at") != null,
   }));
 }
 

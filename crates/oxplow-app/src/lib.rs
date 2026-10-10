@@ -123,7 +123,6 @@ pub mod reasoning;
 pub mod recovery;
 pub mod ref_moves;
 pub mod ref_resolver;
-pub mod resume_check;
 pub mod run_context;
 #[cfg(test)]
 mod run_context_tests;
@@ -133,6 +132,7 @@ pub mod services;
 #[cfg(test)]
 mod services_tests;
 pub mod session_auth;
+pub mod session_outcome;
 pub mod snapshot_capture;
 pub mod snapshot_capture_registry;
 pub mod snapshot_conformance;

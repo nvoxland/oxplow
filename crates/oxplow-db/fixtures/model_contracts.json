@@ -7940,6 +7940,86 @@
         }
       ],
       "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Session id (its ref is `agent_session:ses<id>`)."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread it's on (v_thread.id)."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`terminal` (a harness in a PTY), `chat` (an ACP agent) or `action` (a one-shot session)."
+        },
+        {
+          "name": "harness",
+          "type": "TEXT",
+          "doc": "What runs in it: `claude`, `codex`, `opencode`, or `acp` (an Agent Client Protocol agent)."
+        },
+        {
+          "name": "acp_agent",
+          "type": "TEXT",
+          "doc": "For an `acp` session, which ACP agent it runs (`claude`, `gemini`, a project `acpAgents` name); NULL otherwise."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "What the person called it; empty until renamed."
+        },
+        {
+          "name": "resume_session_id",
+          "type": "TEXT",
+          "doc": "The harness's own session id, to resume it; empty when unknown."
+        },
+        {
+          "name": "host",
+          "type": "TEXT",
+          "doc": "The host it runs on; NULL is the local machine."
+        },
+        {
+          "name": "opened_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "closed_at",
+          "type": "TEXT",
+          "doc": "When its slot was closed; NULL while open."
+        },
+        {
+          "name": "closed_reason",
+          "type": "TEXT",
+          "doc": "`closed` (closed itself), `thread_closed` or `stream_archived`; NULL while open."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "pid",
+          "type": "INTEGER",
+          "doc": "OS pid of the process the daemon spawned for it, rewritten on every spawn; NULL for a session with no process of its own (a chat) or not yet spawned. May be dead or reused: read it with last_seen_at. (v2)"
+        },
+        {
+          "name": "last_seen_at",
+          "type": "TEXT",
+          "doc": "The newest hook seen from it, to the 30 s (RFC 3339); NULL before the first. A live agent has a recent one and a pid that exists. (v2)"
+        },
+        {
+          "name": "stopped_by_user_at",
+          "type": "TEXT",
+          "doc": "When the person deliberately stopped it; NULL once started again, and after a crash or backend restart (which resume when the tab is shown). A stopped session is not spawned until a person starts it. (v3)"
+        }
+      ],
+      "key": []
     }
   },
   "agent_session_status": {

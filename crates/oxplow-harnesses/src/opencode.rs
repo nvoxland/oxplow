@@ -84,7 +84,7 @@ impl AgentHarness for Opencode {
                 ),
                 env,
             },
-            resume_dropped: false,
+            transcript_missing: false,
         })
     }
 
@@ -200,17 +200,13 @@ fn split_frontmatter_description(asset: &str) -> (Option<String>, String) {
     (description, body.trim().to_string())
 }
 
-/// `opencode -m <model>`, resuming `resume` — which it can't check on
-/// disk, so a fresh session stands in when it fails to start.
+/// `opencode -m <model>`, resuming `resume`.
 fn command(cwd: &str, resume: Option<&str>, program: Option<&str>, model: &str) -> String {
     let (prog, guard) = program_and_guard(program, "opencode");
     let base = format!("{prog} -m {}", shell_escape(model));
     let resume = match resume {
         None => Resume::Fresh,
-        Some(id) => Resume::Unchecked {
-            args: format!("-s {}", shell_escape(id)),
-            harness: "opencode",
-        },
+        Some(id) => Resume::Saved(format!("-s {}", shell_escape(id))),
     };
     in_shell(cwd, &guard, &resume_or_fresh(&base, resume))
 }

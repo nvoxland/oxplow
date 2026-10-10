@@ -14,7 +14,7 @@ use crate::database::{map_sql_err, string_to_ts, ts_to_string, Database};
 use oxplow_domain::vocabulary::VocabularyHandle;
 
 const COLUMNS: &str = "id, thread_id, kind, harness, acp_agent, title, resume_session_id, host,
-                       opened_at, closed_at, closed_reason, updated_at, pid, last_seen_at";
+                       opened_at, closed_at, closed_reason, updated_at, pid, last_seen_at, stopped_by_user_at";
 
 fn conv(e: DomainError) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
@@ -34,6 +34,7 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentSession> {
     let closed_reason: Option<String> = row.get("closed_reason")?;
     let updated_at: String = row.get("updated_at")?;
     let last_seen_at: Option<String> = row.get("last_seen_at")?;
+    let stopped_by_user_at: Option<String> = row.get("stopped_by_user_at")?;
     Ok(AgentSession {
         id: AgentSessionId::new(row.get("id")?),
         thread_id: ThreadId::new(row.get("thread_id")?),
@@ -53,6 +54,10 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentSession> {
             .transpose()?,
         updated_at: string_to_ts(&updated_at).map_err(conv)?,
         pid: row.get("pid")?,
+        stopped_by_user_at: stopped_by_user_at
+            .map(|s| string_to_ts(&s))
+            .transpose()
+            .map_err(conv)?,
         last_seen_at: last_seen_at
             .map(|s| string_to_ts(&s))
             .transpose()
@@ -239,6 +244,23 @@ pub fn set_pid_tx(
     )
     .map_err(map_sql_err)?;
     Ok(())
+}
+
+/// Mark the session stopped by the person at `at`, or (`None`) started
+/// again. The session's previous mark.
+pub fn set_stopped_tx(
+    conn: &Connection,
+    id: AgentSessionId,
+    at: Option<Timestamp>,
+    now: Timestamp,
+) -> Result<Option<Timestamp>, DomainError> {
+    let before = get_tx(conn, id)?.and_then(|s| s.stopped_by_user_at);
+    conn.execute(
+        "UPDATE agent_session SET stopped_by_user_at = ?2, updated_at = ?3 WHERE id = ?1",
+        params![id.value(), at.map(ts_to_string), ts_to_string(now)],
+    )
+    .map_err(map_sql_err)?;
+    Ok(before)
 }
 
 /// How stale `last_seen_at` may get before a hook rewrites it: a hook per
@@ -474,6 +496,34 @@ mod tests {
         // A respawn rewrites the pid.
         set_pid_tx(&conn, s.id, 7, at(50_000)).unwrap();
         assert_eq!(get_tx(&conn, s.id).unwrap().unwrap().pid, Some(7));
+    }
+
+    #[test]
+    fn a_stop_by_the_person_is_marked_and_cleared() {
+        let conn = fixture();
+        let s = insert_tx(
+            &conn,
+            &NewAgentSession::chat(ThreadId::new(1), "acp", "gemini"),
+            at(0),
+        )
+        .unwrap();
+        assert_eq!(s.stopped_by_user_at, None);
+        assert_eq!(
+            set_stopped_tx(&conn, s.id, Some(at(5)), at(5)).unwrap(),
+            None
+        );
+        assert_eq!(
+            get_tx(&conn, s.id).unwrap().unwrap().stopped_by_user_at,
+            Some(at(5))
+        );
+        assert_eq!(
+            set_stopped_tx(&conn, s.id, None, at(6)).unwrap(),
+            Some(at(5))
+        );
+        assert_eq!(
+            get_tx(&conn, s.id).unwrap().unwrap().stopped_by_user_at,
+            None
+        );
     }
 
     #[test]

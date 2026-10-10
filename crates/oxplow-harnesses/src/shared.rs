@@ -47,31 +47,20 @@ pub fn program_and_guard(program: Option<&str>, bin: &str) -> (String, String) {
 }
 
 /// A session started fresh, or resumed: the harness's own session `args`
-/// (`--resume <id>`), `known` when the harness found that session on disk.
-pub enum Resume<'a> {
+/// (`--resume <id>`).
+pub enum Resume {
     Fresh,
-    Known(String),
-    /// A resume it couldn't check; a fresh session stands in when it fails.
-    Unchecked {
-        args: String,
-        harness: &'a str,
-    },
+    Saved(String),
 }
 
-/// `exec <base>`, resuming as `resume` says. A known session is exec'd
-/// directly: the session's process is the agent's, and whatever it exits
-/// with ends the PTY. Only an unchecked one falls back to a fresh session,
-/// on a failure to start it, and says so.
-pub fn resume_or_fresh(base: &str, resume: Resume<'_>) -> String {
+/// `exec <base>`, resuming as `resume` says. The harness's process is the
+/// session's, and whatever it exits with ends the PTY: a resume that
+/// fails is reported to the person and never replaced by a fresh
+/// conversation (only `agent_session.start_fresh` makes one).
+pub fn resume_or_fresh(base: &str, resume: Resume) -> String {
     match resume {
         Resume::Fresh => format!("exec {base}"),
-        Resume::Known(args) => format!("exec {base} {args}"),
-        Resume::Unchecked { args, harness } => format!(
-            "{base} {args} || {{ echo {} >&2; exec {base}; }}",
-            shell_escape(&format!(
-                "[oxplow] the saved {harness} session couldn't be resumed; starting a fresh one"
-            ))
-        ),
+        Resume::Saved(args) => format!("exec {base} {args}"),
     }
 }
 

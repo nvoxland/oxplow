@@ -98,6 +98,22 @@ commands:
     scope: agent_sessions.write
     op: rename
     invokers: { human: true, agent: true, lens: true }
+  - name: agent_session.start
+    summary: "Start a stopped agent session again (`agent_session:ses3`): clears the person's stop so its tab spawns the agent, resuming its saved conversation. A person's only."
+    scope: agent_sessions.write
+    op: start
+    invokers: { human: true, agent: false, lens: false }
+  - name: agent_session.start_fresh
+    summary: "Give an agent session a new conversation (`agent_session:ses3`): forgets its saved conversation and clears its stop. The only way a session gets a new conversation; resuming never does. A person's only."
+    scope: agent_sessions.write
+    op: start_fresh
+    confirm: destructive
+    invokers: { human: true, agent: false, lens: false }
+  - name: agent_session.stop
+    summary: "Stop an agent session's process (`agent_session:ses3`) and keep its slot and saved conversation. It stays stopped across tab changes, reconnects and reloads until a person starts it. A person's only."
+    scope: agent_sessions.write
+    op: stop
+    invokers: { human: true, agent: false, lens: false }
   # bookmarks.write — a person's navigation, not the agent's.
   - name: bookmark.set
     summary: "Bookmark a page at a scope (`thread`, `stream` or `project`), moving it there if it's bookmarked at another."
