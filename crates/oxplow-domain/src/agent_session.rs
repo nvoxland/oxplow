@@ -116,6 +116,9 @@ pub struct AgentSession {
     pub pid: Option<u32>,
     /// The newest hook seen from the session.
     pub last_seen_at: Option<Timestamp>,
+    /// When the person deliberately stopped it; `None` once started again
+    /// and after a crash or restart (which resume on activation).
+    pub stopped_by_user_at: Option<Timestamp>,
 }
 
 impl AgentSession {
