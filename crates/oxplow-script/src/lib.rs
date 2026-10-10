@@ -36,6 +36,7 @@ pub mod builtin_metrics;
 pub mod helpers;
 pub mod runtime;
 pub mod scope;
+pub mod uses;
 pub mod worker;
 pub mod workers;
 pub use ai::{AiHost, AiOracle};

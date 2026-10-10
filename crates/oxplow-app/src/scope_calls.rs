@@ -39,6 +39,23 @@ pub fn check_callable(id: &str) -> Result<(), String> {
     ))
 }
 
+/// A composing script's need `id` (a command's `entry:`, an effect, an
+/// effort policy script): a service it may use, or why not. Such a script
+/// runs pure — it composes, and may be run again — so it may read (the
+/// semantic layer, the tree) but never ask a model.
+pub fn check_script_need(id: &str) -> Result<(), String> {
+    oxplow_domain::service::check_declared(id)?;
+    let service = oxplow_domain::service::service(id).expect("checked");
+    if !service.modes.contains(&oxplow_domain::run::Mode::Pure) {
+        return Err(format!(
+            "`needs`: `{id}` ({}) can't be used here: this script composes, so it runs \
+             pure and can't call out — a collector can",
+            service.title.to_lowercase()
+        ));
+    }
+    Ok(())
+}
+
 /// The most rows one `sql.read` answers. A result over this cap is
 /// refused: the row-only answer cannot represent truncation.
 pub const SQL_READ_ROW_CAP: usize = 1_000;

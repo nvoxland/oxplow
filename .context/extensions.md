@@ -1836,6 +1836,35 @@ its scope trace.
   parsers, scripted AI mappings and the MCP adapter's mappings still run
   under their own fixed budgets without one.
 
+## Services
+
+A script reaches oxplow through **services**, each a scope it names in
+its `needs` (`oxplow_domain::service::SERVICES`, one table every reader
+uses):
+
+| Service | Builtins | Approval | Modes |
+|---|---|---|---|
+| `sql.read` | `scope("sql.read", …)` | no | any |
+| `tree.read` | `files`, `source_files`, `duplicate_blocks` | no | any |
+| `ai.compute` | `ai_classify`, `ai_score`, `ai_summarize`, `ai_extract` | a person's | external only |
+
+- **Who may declare what** (checked at load): a Starlark collector's
+  `needs:` any service (`check_declared`; another runtime has no
+  builtins, so `needs` there is an error); a composing script — a
+  command's `entry:`, an effect, an effort policy script — reads only
+  (`scope_calls::check_script_need`: it runs pure, so `ai.compute` is
+  refused, naming why). A provider's `needs` stay `scope()` calls
+  (`check_callable`: `host/call` answers `sql.read`).
+- **What a kind implies:** a Starlark fact collector reads its tree
+  (`CollectorSpec::service_needs` adds `tree.read`); an entity collector
+  whose script names an `ai_*` builtin uses `ai.compute`. A collector's
+  descriptor lists declared ∪ implied.
+- **What a script uses** is read from its syntax
+  (`oxplow_script::uses::services_used`, which `calls_ai` is a view of).
+- **At run time** `RunContext::decide_service` refuses a service the
+  run's mode excludes (a pure run asking a model) and otherwise decides
+  it against the run's authority — recorded either way.
+
 ## Grants
 
 A **need** is what a contribution declares; a **grant** is what a person

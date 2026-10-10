@@ -21,7 +21,7 @@ if [ ! -f "apps/desktop/src-tauri/binaries/oxplow-daemon-$triple" ] ||
   [ ! -f "apps/desktop/src-tauri/binaries/oxplow-script-worker-$triple" ]; then
   bash apps/desktop/src-tauri/scripts/stage-sidecars.sh debug >&2
 fi
-if [ ! -x target/debug/oxplow-provider-fake ]; then
-  cargo build -q -p oxplow-provider-fake >&2
-fi
+# Always built (a no-op when current): a stale fake or worker would test
+# yesterday's protocol against today's host.
+cargo build -q -p oxplow-provider-fake >&2
 cargo build -q -p oxplow-script --bin oxplow-script-worker >&2

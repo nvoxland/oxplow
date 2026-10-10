@@ -417,7 +417,7 @@ fn command_of(
                 .iter()
                 .filter(|n| oxplow_domain::scope::scope(n).is_some())
             {
-                crate::scope_calls::check_callable(need).map_err(at_name)?;
+                crate::scope_calls::check_script_need(need).map_err(at_name)?;
             }
             if f.op.is_some() {
                 return Err(at_name("`op:` names an operation of a `scope:`".into()));
@@ -1345,7 +1345,7 @@ mod tests {
         );
         let errors = project(d.path(), "my-review").errors.join("\n");
         assert!(
-            errors.contains("`threads.write`") && errors.contains("a script calls only `sql.read`"),
+            errors.contains("`threads.write` is a scope a script can't use"),
             "{errors}"
         );
         assert!(!errors.contains("`work_items`"), "{errors}");

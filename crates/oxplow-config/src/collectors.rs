@@ -284,6 +284,24 @@ pub struct ProviderRead {
     pub collector: String,
 }
 
+impl CollectorSpec {
+    /// The services its script uses: what it declares, and what its kind
+    /// implies — a Starlark fact collector reads the tree it's run over.
+    /// (A Starlark entity collector that calls `ai_*` uses `ai.compute`,
+    /// read from its script by the app.)
+    pub fn service_needs(&self) -> Vec<String> {
+        let mut out = self.needs.clone();
+        let implied = (!self.facts.is_empty() && self.runtime == CollectorRuntime::Starlark)
+            .then_some("tree.read");
+        if let Some(n) = implied {
+            if !out.iter().any(|x| x == n) {
+                out.push(n.to_string());
+            }
+        }
+        out
+    }
+}
+
 /// A report file a collector reads as part of its input
 /// (`input.report`): a tool's output in the worktree.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
@@ -364,6 +382,10 @@ pub struct CollectorSpec {
     pub network: Vec<String>,
     /// Keychain secrets an exec collector gets as environment variables.
     pub credentials: Vec<String>,
+    /// The services a Starlark collector's script uses beyond what its kind
+    /// implies (`tree.read`, `sql.read`, `ai.compute`; `oxplow_domain::service`).
+    #[serde(default)]
+    pub needs: Vec<String>,
     pub entities: Vec<EntityDecl>,
     /// The measures its facts land on (`repo.rust_clone`); a fact on any
     /// other is dropped.
@@ -526,6 +548,10 @@ pub struct RawCollector {
     credentials: Vec<String>,
     #[serde(default)]
     network: Vec<String>,
+    /// The services its script uses beyond what its kind implies (a
+    /// Starlark collector's).
+    #[serde(default)]
+    needs: Vec<String>,
     #[serde(default)]
     entities: Vec<RawEntity>,
     #[serde(default)]
@@ -1146,6 +1172,14 @@ fn validate(
             )));
         }
     }
+    if !raw.needs.is_empty() && runtime != CollectorRuntime::Starlark {
+        return Err(ctx(
+            "`needs` is for a starlark collector: no other runtime has service builtins".into(),
+        ));
+    }
+    for need in &raw.needs {
+        oxplow_domain::service::check_declared(need).map_err(&ctx)?;
+    }
     Ok(CollectorSpec {
         id,
         doc: raw.doc,
@@ -1160,6 +1194,7 @@ fn validate(
         env: raw.env,
         network,
         credentials: raw.credentials,
+        needs: raw.needs,
         entities,
         facts,
         records: None,
@@ -1345,6 +1380,7 @@ fn validate_report_collector(
         env: Vec::new(),
         network: Vec::new(),
         credentials: Vec::new(),
+        needs: Vec::new(),
         entities: Vec::new(),
         facts: Vec::new(),
         records: Some(records),
@@ -1561,6 +1597,41 @@ mod tests {
       key: ref
       columns: { ref: text, title: text }
 "#;
+
+    /// A Starlark collector declares the services its script uses beyond
+    /// what its kind implies; a need that isn't a service, or `needs` on a
+    /// runtime with no builtins, is an error.
+    #[test]
+    fn a_starlark_collector_declares_the_services_it_uses() {
+        let (out, errors) = parse(&DERIVED.replace(
+            "  sync: upsert",
+            "  sync: upsert\n  needs: [tree.read, ai.compute]",
+        ));
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(
+            out[0].needs,
+            vec!["tree.read".to_string(), "ai.compute".to_string()]
+        );
+        let (_, errors) =
+            parse(&DERIVED.replace("  sync: upsert", "  sync: upsert\n  needs: [config.write]"));
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("`config.write` is a scope a script can't use")),
+            "{errors:?}"
+        );
+        let (_, errors) = parse(
+            &DERIVED
+                .replace("runtime: starlark", "runtime: jaq")
+                .replace("  sync: upsert", "  sync: upsert\n  needs: [tree.read]"),
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("`needs` is for a starlark collector")),
+            "{errors:?}"
+        );
+    }
 
     /// `input` is its SQL, or `{ sql, limit }` when the script takes a
     /// bounded read on purpose; the limit is within the input row cap.
