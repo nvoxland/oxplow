@@ -2937,9 +2937,7 @@ export type ExtensionReview_Deserialize = {
 	/**
 	 *  The services each of its Starlark scripts declares or is given
 	 *  (`services::of_extension`), so a person sees what a script can
-	 *  reach before installing. A collector's script text isn't read from
-	 *  the candidate, so for a collector these are what it declares and
-	 *  its kind implies — never "used".
+	 *  reach before installing — read from the candidate's own files.
 	 */
 	services: ScriptServices[],
 };
@@ -2969,9 +2967,7 @@ export type ExtensionReview_Serialize = {
 	/**
 	 *  The services each of its Starlark scripts declares or is given
 	 *  (`services::of_extension`), so a person sees what a script can
-	 *  reach before installing. A collector's script text isn't read from
-	 *  the candidate, so for a collector these are what it declares and
-	 *  its kind implies — never "used".
+	 *  reach before installing — read from the candidate's own files.
 	 */
 	services: ScriptServices[],
 };

@@ -591,7 +591,13 @@ live tree between the check and the exec, or under a provider that
 loads its modules lazily, can't slip in. An existing copy is re-hashed
 before each run (a process running as the person can still write
 there) and replaced if it changed; older copies go. The provider's
-working directory and `OXPLOW_EXTENSION_DIR` are the copy. Instances of
+working directory and `OXPLOW_EXTENSION_DIR` are the copy — so a file the
+provider writes there changes the copy's hash: the next start copies
+afresh, and `last_approved` (the impact baseline) finds nothing until it
+does. The host's env passthrough is `PATH`, `HOME` and the spec's `env`,
+plus `LLVM_PROFILE_FILE` (set only in a coverage run, to an absolute path)
+so an instrumented provider doesn't write its `.profraw` into the copy
+(`host::PASSED_ENV`). Instances of
 one program share its copies and start together routinely, so one start
 of a program copies at a time (tsk839): the copy, keep and cleanup run
 under an advisory lock on `<ext>/<id>.lock` (`fs2`, beside the folder

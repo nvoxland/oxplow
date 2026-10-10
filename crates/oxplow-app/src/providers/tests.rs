@@ -1110,6 +1110,14 @@ async fn declaration_impact_compare_the_files_with_what_runs() {
         .all(|c| c.change == crate::extension_impact::Change::Unchanged));
 }
 
+/// A coverage run's profile path reaches the provider, so an instrumented
+/// provider doesn't write its `.profraw` into its approved copy (which would
+/// change the copy's hash and lose the baseline below).
+#[test]
+fn a_coverage_runs_profile_path_reaches_the_provider() {
+    assert!(super::host::PASSED_ENV.contains(&"LLVM_PROFILE_FILE"));
+}
+
 /// R7: the baseline is the last approved copy, not the running instance —
 /// a changed spec stops the instance (and a restart starts none), and the
 /// re-approval must still show what changed.

@@ -216,7 +216,7 @@ pub async fn spawn(launch: &Launch) -> Result<Spawned, HostError> {
         .kill_on_drop(true)
         .env("OXPLOW_EXTENSION_DIR", &launch.ext_dir)
         .env("OXPLOW_PROVIDER_ID", &launch.instance_id);
-    for name in ["PATH", "HOME"]
+    for name in PASSED_ENV
         .iter()
         .copied()
         .chain(launch.spec.env.iter().map(String::as_str))
@@ -454,6 +454,13 @@ pub fn first_difference(approved: &InitializeResult, live: &InitializeResult) ->
         .map(|(path, a, b)| format!("at `{path}`: approved {a}, running {b}"))
         .unwrap_or_else(|| "they differ".into())
 }
+
+/// The host environment every provider is given, besides what its spec
+/// names. `LLVM_PROFILE_FILE` is set only in a coverage run, to an absolute
+/// path: without it an instrumented provider writes its `.profraw` into its
+/// working directory — the approved copy — which changes the copy's hash
+/// and loses the baseline `last_approved` reads.
+pub(crate) const PASSED_ENV: [&str; 3] = ["PATH", "HOME", "LLVM_PROFILE_FILE"];
 
 /// A verified copy of an approved provider's extension folder: what a
 /// start runs, so the bytes that run are the bytes whose hash was

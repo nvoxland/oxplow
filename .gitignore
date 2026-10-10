@@ -42,3 +42,6 @@ ACCEPTANCE-TEST.md
 .context/target-architecture.md
 .context/command-model-design.md
 CLAUDE.local.md
+
+# Coverage runs: instrumented children that start with a cleared env write these into their cwd.
+*.profraw
