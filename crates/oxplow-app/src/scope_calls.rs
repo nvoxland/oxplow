@@ -258,7 +258,10 @@ mod tests {
         let err = calls
             .serve("sql.read", json!({ "query": "x" }))
             .unwrap_err();
-        assert!(err.contains("`sql.read` takes { sql, params?, page? }"), "{err}");
+        assert!(
+            err.contains("`sql.read` takes { sql, params?, page? }"),
+            "{err}"
+        );
         drop(calls);
         assert_eq!(asked, vec!["SELECT 1 AS n", "SELECT 2"]);
         assert_eq!(trace.summary(), [("sql.read".to_string(), 3)].into());
