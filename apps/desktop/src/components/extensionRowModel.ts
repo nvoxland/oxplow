@@ -249,18 +249,28 @@ function deniedReason(decisions: string | null): string | null {
   }
 }
 
-/** Each extension's most recent run, from the latest run of each of its
- *  contributions. */
+/** How bad a warning is: a refusal or a change under the run says more
+ *  than a failure. `0` for a run that is no warning. */
+const SEVERITY: Record<string, number> = { denied: 3, stale: 2, failed: 1 };
+
+/** Each extension's run to show, from the latest run of each of its
+ *  contributions: the worst current warning (denied, then stale, then
+ *  failed; the newest of equals), so a failing contribution isn't hidden
+ *  behind another's later ok run — else the most recent run. */
 export function lastRuns(rows: readonly RunRow[], when: (iso: string) => string = localWhen): Record<string, LastRun> {
-  const newest = new Map<string, RunRow>();
+  const shown = new Map<string, RunRow>();
+  const outranks = (a: RunRow, b: RunRow) => {
+    const [sa, sb] = [SEVERITY[a.outcome] ?? 0, SEVERITY[b.outcome] ?? 0];
+    return sa !== sb ? sa > sb : a.finished_at > b.finished_at;
+  };
   for (const r of rows) {
-    const seen = newest.get(r.extension);
-    if (!seen || r.finished_at > seen.finished_at) newest.set(r.extension, r);
+    const seen = shown.get(r.extension);
+    if (!seen || outranks(r, seen)) shown.set(r.extension, r);
   }
   return Object.fromEntries(
-    [...newest].map(([extension, r]) => {
+    [...shown].map(([extension, r]) => {
       const [, kind = "", ...local] = r.contribution.split("/");
-      const warn = r.outcome === "failed" || r.outcome === "denied" || r.outcome === "stale";
+      const warn = (SEVERITY[r.outcome] ?? 0) > 0;
       const reason = !warn ? null : r.outcome === "denied" ? (deniedReason(r.decisions) ?? r.error) : r.error;
       return [
         extension,

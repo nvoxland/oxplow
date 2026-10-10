@@ -295,6 +295,30 @@ describe("lastRuns", () => {
     ...over,
   });
 
+  test("a failing contribution isn't hidden behind another's later ok run", () => {
+    const got = lastRuns(
+      [
+        run({ contribution: "acme/collector/pull", outcome: "failed", error: "rate limited", finished_at: "2026-10-10T07:00:00Z" }),
+        run({ contribution: "acme/effect/note", outcome: "ok", finished_at: "2026-10-10T09:00:00Z" }),
+      ],
+      when,
+    );
+    expect(got.acme).toEqual({
+      text: "Last run: failed · collector pull · <2026-10-10T07:00:00Z>",
+      reason: "rate limited",
+      warn: true,
+    });
+  });
+
+  test("of several warnings, denied beats stale beats failed, then the newest", () => {
+    const at = (c: string, outcome: string, h: number) =>
+      run({ contribution: `acme/${c}`, outcome, error: outcome, finished_at: `2026-10-10T0${h}:00:00Z` });
+    const worst = (rows: RunRow[]) => lastRuns(rows, when).acme!.text;
+    expect(worst([at("collector/a", "failed", 9), at("effect/b", "stale", 5), at("command/c", "denied", 1)])).toContain("denied · command c");
+    expect(worst([at("collector/a", "failed", 9), at("effect/b", "stale", 5)])).toContain("stale · effect b");
+    expect(worst([at("collector/a", "failed", 3), at("effect/b", "failed", 8)])).toContain("failed · effect b");
+  });
+
   test("an extension's most recent run, named by its contribution", () => {
     const got = lastRuns(
       [
