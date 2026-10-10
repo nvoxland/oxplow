@@ -753,10 +753,11 @@ function OverlayRow({
         display: "flex",
         alignItems: "center",
         cursor: interactive ? "pointer" : "default",
-        // The row's tab carries its title (below), so the stream's tile
-        // colour and a thread's tab run on across the row. Selection is
-        // the accent left line.
-        background: isStream ? "var(--panel-header-bg)" : "transparent",
+        // The row's tab carries its title (below), so the stream's colour
+        // and a thread's tab run on across the row (the row itself has no
+        // fill, so the stream tab's rounded corner shows). Selection is the
+        // accent left line.
+        background: "transparent",
         borderLeft: selected ? "3px solid var(--accent)" : "3px solid transparent",
         transition: "background 120ms ease",
       }}
@@ -786,7 +787,7 @@ function OverlayRow({
                   fontSize: "var(--text-sm)",
                   fontWeight: isStream ? 700 : 400,
                   color: isStream
-                    ? "var(--text-primary)"
+                    ? "var(--text-on-stream-tile)"
                     : selected
                       ? "var(--text-primary)"
                       : "var(--text-secondary)",
@@ -952,10 +953,9 @@ function IconCell({
         // Rounded only where no tab sits next to it: the stack's top, and
         // its bottom when the stream has no threads.
         borderRadius: hasThreads ? "0 6px 0 0" : "0 6px 6px 0",
-        // The tab strip's own header tint, so the rail matches the tabs.
-        backgroundImage: "linear-gradient(var(--panel-header-bg), var(--panel-header-bg))",
-        backgroundColor: "var(--surface-card)",
-        color: "var(--text-primary)",
+        // The guide line's grey, with dark text to stand out against it.
+        background: "var(--text-muted)",
+        color: "var(--text-on-stream-tile)",
         fontSize: LETTER_FONT,
         fontWeight: 700,
       }
@@ -1004,7 +1004,7 @@ function IconCell({
               justifyContent: "center",
               borderRightWidth: 1,
               borderRightStyle: "solid",
-              borderRightColor: "var(--border-strong)",
+              borderRightColor: isStream ? "rgba(0, 0, 0, 0.3)" : "var(--border-strong)",
             }}
           >
             {letter}

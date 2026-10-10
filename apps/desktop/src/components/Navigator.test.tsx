@@ -427,9 +427,9 @@ test("streams are inverted tiles and threads indented tabs, tied by a guide line
   // Tabs coming out of the window's left edge: rounded on the right only.
   const stream = glyph("navigator-strip-stream-str1");
   expect(stream.dataset.glyph).toBe("stream");
-  // The tab strip's header tint; rounded only at the stack's top.
-  expect(stream.style.backgroundImage).toContain("var(--panel-header-bg)");
-  expect(stream.style.color).toBe("var(--text-primary)");
+  // The guide line's grey with dark text; rounded only at the stack's top.
+  expect(stream.style.background).toBe("var(--text-muted)");
+  expect(stream.style.color).toBe("var(--text-on-stream-tile)");
   expect(stream.style.borderRadius).toBe("0px 6px 0px 0px");
 
   // A stream's threads are tabs butted up against each other: each fills
@@ -467,7 +467,7 @@ test("streams are inverted tiles and threads indented tabs, tied by a guide line
   // stream's tile colour and a thread's tab flow into the label.
   const streamTab = getByTestId("navigator-stream-row-str1").querySelector("[data-glyph]") as HTMLElement;
   expect(streamTab.textContent).toContain("Main");
-  expect(streamTab.style.backgroundImage).toContain("var(--panel-header-bg)");
+  expect(streamTab.style.background).toBe("var(--text-muted)");
   expect(streamTab.style.flexGrow).toBe("1");
   const threadTab = getByTestId("navigator-thread-row-thr2").querySelector("[data-glyph]") as HTMLElement;
   expect(threadTab.textContent).toContain("Research");
