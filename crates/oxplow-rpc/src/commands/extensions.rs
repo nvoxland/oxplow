@@ -30,6 +30,33 @@ pub async fn list_extensions(svc: &Services) -> Result<Vec<Extension>, IpcError>
     Ok(svc.listed_extensions(root(svc)).await)
 }
 
+/// A service a script may be given, as a person reads it
+/// (`oxplow_domain::service::SERVICES`, the table every reader uses).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceListing {
+    /// What a script's `needs` names (`tree.read`).
+    pub scope: String,
+    /// "Read the captured tree".
+    pub title: String,
+    pub summary: String,
+    /// A person approves a script that uses it.
+    pub approval: bool,
+}
+
+/// Every service, for the lines that say what an extension's scripts reach.
+pub async fn list_services(_svc: &Services) -> Result<Vec<ServiceListing>, IpcError> {
+    Ok(oxplow_domain::service::SERVICES
+        .iter()
+        .map(|s| ServiceListing {
+            scope: s.scope.to_string(),
+            title: s.title.to_string(),
+            summary: s.summary.to_string(),
+            approval: s.approval,
+        })
+        .collect())
+}
+
 /// One lens by `<extension>/<slug>`.
 pub async fn get_lens(svc: &Services, id: String) -> Result<Lens, IpcError> {
     Ok(svc.extension_catalog.find_lens(root(svc), &id)?)

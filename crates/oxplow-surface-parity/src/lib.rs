@@ -144,7 +144,7 @@ pub const MANIFEST: &[Capability] = &[
     // The services an extension's script may use (`oxplow_domain::service`):
     // an agent writing an extension asks; the reference and Settings show
     // a person the same table.
-    agent("list_services"),
+    both("list_services"),
     // The bus itself: an agent through MCP (as its verified thread), the
     // person through IPC (`Actor::Human`, confirming where asked).
     both("run_command"),

@@ -129,6 +129,13 @@ Things I keep forgetting. Read this before adding any UI.
   from `decisions` ("host evil.example: it isn't in the grant"). An extension
   that has never run shows no line. `lastRuns` in `extensionRowModel.ts`; the
   line re-reads when a run commits (`useRerunOnChange` on the read's models).
+- **Settings → Extensions says what each script is given.** Under the
+  row, one muted line per Starlark script that has services: its name, then
+  the service titles ("Collector triage — Read the captured tree · Ask a
+  model (you approve it)"). A service the script uses without naming it in
+  `needs` says "(not in its needs)". The install/update review lists the
+  same lines above the impact report. `serviceLines` in
+  `extensionRowModel.ts`.
 - **Every `<button>` needs an explicit `type`.** HTML defaults
   `<button>` to `type="submit"`, which silently submits any enclosing
   form on click. Use `type="button"` for every action button; use

@@ -234,6 +234,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	listServices: () => typedError<ServiceListing[], IpcError>(__TAURI_INVOKE("list_services")),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	validateExtension: (name: string, streamId: string | null) => typedError<CheckReport_Serialize, IpcError>(__TAURI_INVOKE("validate_extension", { name, streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -2929,6 +2934,14 @@ export type ExtensionReview_Deserialize = {
 	 *  load (its `problems` say why).
 	 */
 	impact: ImpactReport | null,
+	/**
+	 *  The services each of its Starlark scripts declares or is given
+	 *  (`services::of_extension`), so a person sees what a script can
+	 *  reach before installing. A collector's script text isn't read from
+	 *  the candidate, so for a collector these are what it declares and
+	 *  its kind implies — never "used".
+	 */
+	services: ScriptServices[],
 };
 
 /**
@@ -2953,6 +2966,14 @@ export type ExtensionReview_Serialize = {
 	 *  load (its `problems` say why).
 	 */
 	impact: ImpactReport | null,
+	/**
+	 *  The services each of its Starlark scripts declares or is given
+	 *  (`services::of_extension`), so a person sees what a script can
+	 *  reach before installing. A collector's script text isn't read from
+	 *  the candidate, so for a collector these are what it declares and
+	 *  its kind implies — never "used".
+	 */
+	services: ScriptServices[],
 };
 
 // Provenance of an installed extension, kept in its `source.yaml`.
@@ -5594,6 +5615,20 @@ export type SearchHit = {
 export type SelectThreadRequest = {
 	streamId: StreamId,
 	threadId: ThreadId | null,
+};
+
+/**
+ *  A service a script may be given, as a person reads it
+ *  (`oxplow_domain::service::SERVICES`, the table every reader uses).
+ */
+export type ServiceListing = {
+	// What a script's `needs` names (`tree.read`).
+	scope: string,
+	// "Read the captured tree".
+	title: string,
+	summary: string,
+	// A person approves a script that uses it.
+	approval: boolean,
 };
 
 // One service of a script.

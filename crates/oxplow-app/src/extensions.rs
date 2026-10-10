@@ -3351,6 +3351,12 @@ pub struct ExtensionReview {
     /// when it replaces one; `None` when the candidate doesn't
     /// load (its `problems` say why).
     pub impact: Option<crate::extension_impact::ImpactReport>,
+    /// The services each of its Starlark scripts declares or is given
+    /// (`services::of_extension`), so a person sees what a script can
+    /// reach before installing. A collector's script text isn't read from
+    /// the candidate, so for a collector these are what it declares and
+    /// its kind implies — never "used".
+    pub services: Vec<crate::services::ScriptServices>,
 }
 
 /// Clone an extension and report what it declares, installing nothing.
@@ -3425,6 +3431,10 @@ pub async fn review_extension(
         Some(report)
     };
     let problems = extension.errors.split_off(load_errors);
+    // No project root has the candidate's files: a collector's script
+    // can't be read, and the installed copy of the same name must not
+    // stand in for it.
+    let services = crate::services::of_extension(Path::new(""), &extension);
     Ok(ExtensionReview {
         extension,
         git: git_url.to_string(),
@@ -3432,6 +3442,7 @@ pub async fn review_extension(
         sha: fetched.sha,
         problems,
         impact,
+        services,
     })
 }
 
@@ -4735,6 +4746,49 @@ empty: No items.
     /// what's wrong with it; install then takes exactly the commit they
     /// reviewed (tsk378).
     #[tokio::test]
+    async fn review_shows_the_services_a_script_is_given() {
+        let project = tempfile::tempdir().unwrap();
+        let repo = published_repo("Count");
+        write(
+            repo.path(),
+            "extension.yaml",
+            "manifest: 2\nname: shared\nintent:\n  purpose: test\nmeasures:\n  - { key: acme.todo }\ncollectors:\n  - { id: acme.todo_scan, runtime: starlark, entry: collectors/todo.star, trigger: { on: [snapshot.taken] }, facts: [acme.todo] }\n",
+        );
+        write(
+            repo.path(),
+            "collectors/todo.star",
+            "def transform(input):\n    return {\"facts\": []}\n",
+        );
+        git(repo.path(), &["add", "."]);
+        git(repo.path(), &["commit", "-q", "-m", "source"]);
+        let url = repo.path().to_string_lossy().to_string();
+        let review = review_extension(
+            &layer().await,
+            &cat(),
+            project.path(),
+            &url,
+            None,
+            None,
+            &|_: &str| -> Option<serde_json::Value> { None },
+        )
+        .await
+        .unwrap();
+        let [script] = review.services.as_slice() else {
+            panic!("{:?}", review.services)
+        };
+        assert_eq!(script.script, "collector `acme.todo_scan`");
+        let scopes: Vec<_> = script
+            .services
+            .iter()
+            .map(|s| (s.scope.as_str(), s.declared))
+            .collect();
+        assert_eq!(
+            scopes,
+            vec![("tree.read", crate::services::Declared::Implied)]
+        );
+    }
+
+    #[tokio::test]
     async fn review_shows_what_an_extension_declares_before_install() {
         let project = tempfile::tempdir().unwrap();
         let repo = published_repo("Count");
@@ -4766,6 +4820,9 @@ empty: No items.
         .await
         .unwrap();
         assert_eq!(review.extension.name, "shared");
+        // The review lists no Starlark scripts here (its one collector is a
+        // program), so no services.
+        assert!(review.services.is_empty(), "{:?}", review.services);
         assert_eq!(review.sha, head(repo.path()));
         let source = &review.extension.collectors[0];
         assert_eq!(source.network, vec!["api.github.com".to_string()]);

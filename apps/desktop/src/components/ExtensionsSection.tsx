@@ -21,6 +21,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   installExtension,
   listExtensions,
+  listServices,
   listCollectors,
   reviewExtension,
   setExtensionEnabled,
@@ -30,13 +31,15 @@ import {
   validateExtension,
   type Extension,
   type ExtensionReview,
+  type ScriptServices,
+  type ServiceListing,
   type CollectorListing,
   querySql,
 } from "../api.js";
 import { NEW_LENS_COMMAND } from "../lens/lensModel.js";
 import { useCommandDraft } from "../commandDraft.js";
 import { enableAgain, healthLine, healthOf, repairWithAgent, useContributionHealth, type ContributionHealth } from "../contributionHealth.js";
-import { collectorRan, extensionCredentials, extensionRowModel, LATEST_RUNS_SQL, lastRuns, type LastRun, type RunRow, reviewModel } from "./extensionRowModel.js";
+import { collectorRan, extensionCredentials, extensionRowModel, LATEST_RUNS_SQL, lastRuns, type LastRun, type RunRow, reviewModel, serviceLines } from "./extensionRowModel.js";
 import { extensionsChanged } from "../lens/lensRerun.js";
 import { ImpactReportView } from "./ImpactReportView.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
@@ -52,6 +55,10 @@ export function ExtensionsSection() {
   /** What each project extension's check found (bundled ones are checked
    *  where they're built). */
   const [checked, setChecked] = useState<Record<string, string[]>>({});
+  /** The services each project extension's scripts are given (its check
+   *  reports them), and the titles that name them. */
+  const [services, setServices] = useState<Record<string, ScriptServices[]>>({});
+  const [serviceListing, setServiceListing] = useState<ServiceListing[]>([]);
   const [collectors, setCollectors] = useState<CollectorListing[]>([]);
   /** Each extension's last run (`v_extension_run`, latest per contribution). */
   const [runs, setRuns] = useState<Record<string, LastRun>>({});
@@ -88,13 +95,15 @@ export function ExtensionsSection() {
           .filter((e) => e.origin !== "bundled" && e.enabled)
           .map(async (e) => {
             try {
-              return [e.name, (await validateExtension(e.name, null)).errors] as const;
+              const report = await validateExtension(e.name, null);
+              return [e.name, report.errors, report.services] as [string, string[], ScriptServices[]];
             } catch (err) {
-              return [e.name, [`couldn't check it: ${String(err)}`]] as const;
+              return [e.name, [`couldn't check it: ${String(err)}`], []] as [string, string[], ScriptServices[]];
             }
           }),
       );
-      setChecked(Object.fromEntries(reports));
+      setChecked(Object.fromEntries(reports.map(([name, errors]) => [name, errors])));
+      setServices(Object.fromEntries(reports.map(([name, , scripts]) => [name, scripts])));
     } catch (e) {
       recordOpError({ label: "List extensions", message: String(e) });
       setExts([]);
@@ -103,6 +112,10 @@ export function ExtensionsSection() {
 
   // A run commits a `v_extension_run` row: the line follows it.
   useRerunOnChange(runReads, () => void refresh());
+  useEffect(() => {
+    // A read that fails costs the lines' wording, not the list.
+    void listServices().then(setServiceListing).catch(() => setServiceListing([]));
+  }, []);
   useEffect(() => {
     void refresh();
     // Scheduled and agent-triggered runs land here too.
@@ -224,6 +237,16 @@ export function ExtensionsSection() {
                     {runs[m.name]!.reason ? ` — ${runs[m.name]!.reason}` : ""}
                   </div>
                 ) : null}
+                {serviceLines(services[m.name] ?? [], serviceListing).map((line) => (
+                  <div
+                    key={line.script}
+                    data-testid={`extension-services-${m.name}`}
+                    title="The services this script is given: what it can reach beyond its own input"
+                    style={mutedStyle}
+                  >
+                    {line.script} — {line.text}
+                  </div>
+                ))}
                 {m.errors.map((err, i) => (
                   <div key={i} style={errorStyle}>
                     {err}
@@ -271,6 +294,7 @@ export function ExtensionsSection() {
       {pending ? (
         <ReviewPanel
           review={pending.review}
+          serviceListing={serviceListing}
           action={pending.kind === "install" ? "Install" : "Update"}
           busy={busy !== null}
           onConfirm={() => void confirm()}
@@ -326,18 +350,21 @@ export function HealthRow({ health }: { health: ContributionHealth }) {
 /// not a modal: the confirm button takes focus, Escape cancels.
 export function ReviewPanel({
   review,
+  serviceListing = [],
   action,
   busy,
   onConfirm,
   onCancel,
 }: {
   review: ExtensionReview;
+  /** The titles that name services (`list_services`). */
+  serviceListing?: ServiceListing[];
   action: "Install" | "Update";
   busy: boolean;
   onConfirm(): void;
   onCancel(): void;
 }) {
-  const m = reviewModel(review);
+  const m = reviewModel(review, serviceListing);
   return (
     <div
       data-testid="extension-review"
@@ -356,6 +383,15 @@ export function ReviewPanel({
           <li key={i}>{line}</li>
         ))}
       </ul>
+      {m.services.length > 0 ? (
+        <ul data-testid="extension-review-services" style={{ margin: "6px 0", paddingLeft: 18 }}>
+          {m.services.map((line) => (
+            <li key={line.script}>
+              {line.script} — {line.text}
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {/* No report when the candidate doesn't load; its errors say why. */}
       {review.impact ? <ImpactReportView report={review.impact} testId="extension-review-impact" /> : null}
       {m.errors.map((err, i) => (

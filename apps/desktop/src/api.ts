@@ -64,6 +64,8 @@ import type {
   RoleBinding,
   CollectorListing,
   CollectorRunReport,
+  ScriptServices,
+  ServiceListing,
   DataEntity,
   CommandOutcome,
   CommandSpec,
@@ -99,6 +101,7 @@ export type {
   TranscriptItem,
 };
 export type { ChangedPath, DiffEntry };
+export type { ServiceListing, ScriptServices };
 export type { DataEntity, Extension, ExtensionReview, Lens, LensRun, LensViz, LensSpec, SearchHit, CollectorListing, CollectorRunReport, SqlCell, SqlQueryResult };
 export type { ProviderInstanceView };
 
@@ -679,6 +682,11 @@ export async function lensText(id: string, params: Record<string, SqlCell>, stre
 }
 
 /// Load an extension and dry-run every lens, returning all problems.
+/** Every service a script may be given, by title (`list_services`). */
+export async function listServices(): Promise<ServiceListing[]> {
+  return unwrap(await commands.listServices());
+}
+
 export async function validateExtension(name: string, streamId: string | null): Promise<CheckReport> {
   return unwrap(await commands.validateExtension(name, streamId));
 }
