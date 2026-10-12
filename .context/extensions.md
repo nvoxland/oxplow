@@ -1198,18 +1198,51 @@ and one calling MCP read identical `file:line: what — fix` lines.
   contract that asks none). A capability with no starter gets its first verb with `{}` and `$any`.
   Then a stub `bin/provider` that exits 1 and `fixtures/provider-<id>.yaml`
   (`config: {}`).
-- **`extension_test::test_extension(root, name, layer, bless)`** (`extension
-  test <name> [--bless] [--json]`, P5.D5) runs `check` and then, per
-  declared provider, the conformance kit ([providers.md](./providers.md)
-  "The conformance kit"): its handshake against its declarations, its
-  `check` of `fixtures/provider-<id>.yaml`, every intent example that has
-  a fixture (`input: { command, input }`, `expect`; `$any` matches
-  anything), every message against the protocol's schema goldens, the
-  golden transcript `fixtures/transcripts/<id>.jsonl` (`--bless` writes
-  it), and the capability's conformance suite through a throwaway host.
-  Without providers, intent examples aren't run (a warning: nothing
-  declares a runtime). `TestReport { ok, errors, warnings, blessed, ran
-  }`; `render` prints it like `check`'s. Exit 0 / 1 / 2 as `check`.
+- **`extension_test::test_extension(root, name, bless)`** (`extension
+  test <name> [--bless] [--json]`, P5.D5; MCP `preview_extension`, which
+  runs it for an agent with an empty environment) runs on **a throwaway
+  oxplow** (`throwaway::Host`) that is a real one: a temp project with a
+  copy of the project's `oxplow/extensions/` and of which it turned off
+  (nothing else of its config — its provider instances would start its
+  programs), `Services::in_memory_on_machine` with an in-memory keychain,
+  its own global config and the environment it is given, activated by
+  `ExtensionActivation::initialize` as boot does (the declared entities
+  are created empty there; see "Database generation candidates"). What
+  that activation held back is the report's first lines (this
+  extension's an error, another's a warning). `start_runtime` then starts
+  what examples need — the effect and collector triggers (each example
+  delivers its event with `EventPump::settle`) and the job scheduler —
+  and binds every AI role to the **fixture model** (`oxplow_ai::fixture`,
+  a host-registered kind no activation replaces): an example's `model: {
+  replies }` is what it answers, in turn. No paid call, no provider.
+  It runs `check`, then every intent example with a fixture
+  (`fixtures/<name>.yaml`: `input`, `expect`, `$any` matching anything):
+  a lens (`{ lens, params?, rows? }` — `rows` seeds the extension's
+  entities, `collector_runner::publish_declared_rows`), an event (`{ event
+  }`: appended to the throwaway's log and delivered; the extension's
+  effects, approved there, react for real — `expect: { effects: [{ id,
+  state }], commands }`, read from `v_effect_run` and `command.executed`),
+  a job (`{ job, intentKey, request }`: through the extension's commands
+  over `jobs.write/enqueue` and `jobs.read/snapshot`, approved there —
+  `expect: { state, result? }`), a component (`{ component, queries?,
+  invokes? }`: `load_component`, `run_component_query`,
+  `invoke_component_command` as its frame would — `expect: { queries:
+  [{ rows }], invokes: [{ ok, refused? }] }`), and the dry runs that
+  stay dry (`{ effect, event }`, `{ implementation, event }`, `{ command,
+  input }`, a derived or fact collector, an event type, a wikilink). For
+  the new forms only the keys `expect` names are compared
+  (`shaped_like`). Then, per declared provider, the conformance kit
+  ([providers.md](./providers.md) "The conformance kit"), the effort
+  policy suite for a policy script, `questions.yaml` and incremental
+  models. `TestReport { ok, errors, warnings, blessed, ran, generation,
+  contributes, unsupported, left }`: `contributes` is the extension's
+  descriptors by public id, `unsupported` what only the app shows
+  (pages, panels, slots, decorators, replacements, skills); `render`
+  prints it like `check`'s. Exit 0 / 1 / 2 as `check`. `check` with no
+  running oxplow asks a throwaway (with no environment) for its command
+  registry. `the_triage_example_reads_the_tree_the_layer_and_a_model`
+  runs the triage example's job, event and component this way and holds
+  its `contributes` equal to a real oxplow's over the same project.
 - **The CLI** is `apps/desktop/src-tauri/src/extension_cli.rs`, dispatched
   by `main.rs` before Tauri boots exactly like `oxplow hook`. It takes a
   bare name (under `--root` or the cwd) or the extension folder's path
@@ -1262,14 +1295,12 @@ an extension, exists for. A questions file is a list of `{ question, skill, reac
   (schema from its declarations).
 
 **`oxplow extension test <name>`** (P5.D5, P7.C6; `extension_test.rs`) runs on
-**a throwaway oxplow** (`Host`): a temp project with a copy of the
-project's `oxplow/extensions/`, `Services::in_memory_inactive` over it, every
-declared entity published empty (`collector_runner::publish_declared_empty`
-— as if each collector had run and found nothing; never on a real
-database), the extension models published and commands registered as at
-boot. It never opens the project's database. It runs `check` there
+**a throwaway oxplow** (`Host`, "The SDK" above: activated as boot
+activates, its entities created empty, the fixture model answering every
+model call). It never opens the project's database. It runs `check` there
 (with that registry, so `commands:` examples dry-run), then — only if `check` is clean — each
-`intent.examples[*]` by its fixture `fixtures/<name>.yaml`:
+`intent.examples[*]` by its fixture `fixtures/<name>.yaml` (the event,
+job and component forms are in "The SDK"):
 
 - `input: { lens: <slug>, params? }`, `expect: { columns?, rows: n |
   $any }` — the lens runs; its row count (and columns, when expected)

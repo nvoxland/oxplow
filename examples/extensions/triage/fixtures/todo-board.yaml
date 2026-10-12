@@ -1,0 +1,8 @@
+# The board reads its own lens; it declares no commands.
+input:
+  component: todo-board
+  queries:
+    - { asset: todos }
+expect:
+  queries:
+    - { rows: 0 }

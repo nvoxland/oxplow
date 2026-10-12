@@ -62,6 +62,14 @@ pub struct TestReport {
     pub blessed: Vec<String>,
     /// What ran: `check`, `provider <id>`, `<capability> suite`.
     pub ran: Vec<String>,
+    /// The throwaway's activation generation the examples ran against.
+    pub generation: Option<String>,
+    /// What the extension contributes, by public id
+    /// (`<extension>/<kind>/<local>`).
+    pub contributes: Vec<String>,
+    /// What it contributes that this host can't run — a person sees it in
+    /// the app (pages, panels, slots, decorators, replacements, skills).
+    pub unsupported: Vec<String>,
     /// What the run made in a provider's own system and didn't remove —
     /// the refs a provider example's `create` returned, and the items the
     /// conformance suite filed and couldn't delete. Against a real
@@ -86,7 +94,10 @@ pub async fn test_extension_in(
     bless: bool,
     env: host::HostEnv,
 ) -> Result<TestReport, SdkError> {
-    let host = Host::start(root).await.map_err(SdkError::Invalid)?;
+    let host = Host::start(root, env.clone())
+        .await
+        .map_err(SdkError::Invalid)?;
+    host.start_runtime().map_err(SdkError::Invalid)?;
     let checked = crate::check(
         &host.root,
         name,
@@ -103,9 +114,33 @@ pub async fn test_extension_in(
         warnings: checked.warnings.clone(),
         blessed: Vec::new(),
         ran: vec!["check".into()],
+        generation: host
+            .svc
+            .extension_activation
+            .current_pin()
+            .and_then(|pin| pin.generation().map(str::to_string))
+            .or_else(|| Some(host.svc.extension_catalog.generation(&host.root))),
+        contributes: Vec::new(),
+        unsupported: Vec::new(),
         left: Vec::new(),
     };
+    // What activation held back: this extension's is an error (unless
+    // check already says it), another's a warning — it's beside it.
+    let prefix = format!("{name}: ");
+    for problem in &host.problems {
+        match problem.strip_prefix(&prefix) {
+            Some(why) if !report.errors.iter().any(|e| e.contains(why)) => report
+                .errors
+                .push(format!("{name}: it doesn't activate: {why}")),
+            Some(_) => {}
+            None => report.warnings.push(format!(
+                "another extension here doesn't activate — {problem}"
+            )),
+        }
+    }
     let ext = checked.extension;
+    report.contributes = ext.contributions.iter().map(|d| d.id.to_string()).collect();
+    report.unsupported = unsupported(&ext);
     if report.errors.is_empty() {
         examples(&host, &ext, &mut report).await;
         for spec in &ext.providers {
@@ -159,9 +194,9 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
         let Some((shown, doc)) = example_fixture(&read, &rel, &example.name) else {
             report.warnings.push(format!(
                 "{rel}/fixtures/{}.yaml:1: example `{}` has no fixture, so it isn't run — fix: \
-                 write its `input` (`{{ lens, params? }}`, `{{ collector, rows? }}`, a fact \
-                 collector's `{{ collector, files }}`, or a \
-                 provider's `{{ command, input }}`) and `expect`",
+                 write its `input` (`{{ lens, params?, rows? }}`, `{{ collector, rows? }}`, a fact \
+                 collector's `{{ collector, files }}`, `{{ event }}`, `{{ job, intentKey, request }}`, \
+                 `{{ component }}`, or a provider's `{{ command, input }}`) and `expect`",
                 example.name, example.name
             ));
             continue;
@@ -179,9 +214,32 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
             input: doc.get("input").cloned().unwrap_or(Value::Null),
             expect: doc.get("expect").cloned().unwrap_or(Value::Null),
         };
+        if let Some(replies) = model_replies(&ex, report) {
+            if let Err(e) = host.answer_with(replies) {
+                report
+                    .errors
+                    .push(format!("{shown}:1: the fixture model: {e}"));
+                continue;
+            }
+        } else {
+            continue;
+        }
         if let Some(slug) = ex.input.get("lens").and_then(Value::as_str) {
             report.ran.push(format!("example {}", ex.name));
             lens_example(host, ext, &ex, slug, report).await;
+        } else if let Some(id) = ex.input.get("job").and_then(Value::as_str) {
+            report.ran.push(format!("example {}", ex.name));
+            job_example(host, ext, &ex, id, report).await;
+        } else if let Some(id) = ex.input.get("component").and_then(Value::as_str) {
+            report.ran.push(format!("example {}", ex.name));
+            component_example(host, ext, &ex, id, report).await;
+        } else if ex.input.get("event").is_some()
+            && ex.input.get("effect").is_none()
+            && ex.input.get("implementation").is_none()
+            && ex.input.get("collector").is_none()
+        {
+            report.ran.push(format!("example {}", ex.name));
+            event_example(host, ext, &ex, report).await;
         } else if let Some(id) = ex.input.get("effect").and_then(Value::as_str) {
             effect_example(host, ext, &ex, id, report).await;
         } else if let Some(id) = ex.input.get("implementation").and_then(Value::as_str) {
@@ -204,14 +262,427 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
         } else if ex.input.get("command").is_none() || ext.providers.is_empty() {
             report.errors.push(format!(
                 "{shown}:1: example `{}`'s `input` names no lens, collector, command, effect, \
-                 effort policy, event type, wikilink or provider command — fix: `{{ lens: <slug>, \
-                 params? }}`, `{{ collector: <id>, rows?, event? }}`, `{{ command: <name>, \
-                 input }}`, `{{ effect: <id>, event: {{ type, payload }} }}`, `{{ implementation: \
-                 <id>, event: {{ type, payload, anchors? }} }}`, `{{ event_type, v?, payload }}`, \
-                 `{{ wikilink }}`, or (with a provider) `{{ command, input }}`",
+                 event, job, component, effort policy, event type, wikilink or provider command — \
+                 fix: `{{ lens: <slug>, params?, rows? }}`, `{{ collector: <id>, rows?, event? }}`, \
+                 `{{ command: <name>, input }}`, `{{ effect: <id>, event: {{ type, payload }} }}` \
+                 (a dry run), `{{ event: {{ type, payload }} }}` (logged, and what reacts runs), \
+                 `{{ job: <id>, intentKey, request }}`, `{{ component: <id>, queries?, invokes? }}`, \
+                 `{{ implementation: <id>, event: {{ type, payload, anchors? }} }}`, \
+                 `{{ event_type, v?, payload }}`, `{{ wikilink }}`, or (with a provider) \
+                 `{{ command, input }}`",
                 example.name
             ));
         }
+    }
+}
+
+/// The example's `model: { replies: [...] }` — what the fixture model
+/// answers its model calls with, in turn; none when it gives none. `None`,
+/// with the error reported, when it isn't that shape.
+fn model_replies(ex: &Example<'_>, report: &mut TestReport) -> Option<Vec<String>> {
+    let Some(model) = ex.input.get("model") else {
+        return Some(Vec::new());
+    };
+    match model.get("replies").and_then(Value::as_array) {
+        Some(replies) => Some(
+            replies
+                .iter()
+                .map(|r| match r {
+                    Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                })
+                .collect(),
+        ),
+        None => {
+            report.errors.push(format!(
+                "{}:1: example `{}`: `model` must be `{{ replies: [ … ] }}` — what the fixture \
+                 model answers, in turn",
+                ex.shown, ex.name
+            ));
+            None
+        }
+    }
+}
+
+/// `got` with only what `expect` names: an object keeps the keys `expect`
+/// has, an array its items shaped like `expect`'s (when as many). So a
+/// fixture says what it cares about — an effect's `state`, not its run's
+/// every field — and `first_mismatch` compares exactly that.
+fn shaped_like(expect: &Value, got: &Value) -> Value {
+    match (expect, got) {
+        (Value::Object(want), Value::Object(have)) => Value::Object(
+            want.keys()
+                .filter_map(|k| have.get(k).map(|v| (k.clone(), shaped_like(&want[k], v))))
+                .collect(),
+        ),
+        (Value::Array(want), Value::Array(have)) if want.len() == have.len() => Value::Array(
+            want.iter()
+                .zip(have)
+                .map(|(w, h)| shaped_like(w, h))
+                .collect(),
+        ),
+        _ => got.clone(),
+    }
+}
+
+/// What `ext` contributes that only a person sees in the app — this host
+/// renders nothing, so these aren't run here.
+fn unsupported(ext: &Extension) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut note = |n: usize, what: &str| {
+        if n > 0 {
+            out.push(format!("{n} {what}"));
+        }
+    };
+    note(ext.pages.len(), "page(s)");
+    note(ext.panels.len(), "panel(s)");
+    note(ext.ui.slots.len(), "slot mount(s)");
+    note(ext.ui.decorators.len(), "decorator(s)");
+    note(ext.ui.replacements.len(), "replacement(s)");
+    note(ext.skills.len(), "skill(s)");
+    out
+}
+
+/// Log the fixture's event (`input: { event: { type, payload, subject?,
+/// anchors? }, model? }`) in the throwaway and deliver it: the extension's
+/// effects — approved here, as a person would — react for real, their
+/// commands run through the bus. What happened against `expect`:
+/// `{ effects: [{ id, state? }], commands: [names] }` (`$any` matches).
+async fn event_example(host: &Host, ext: &Extension, ex: &Example<'_>, report: &mut TestReport) {
+    let shown = ex.shown;
+    if let Err(e) = approve_effects(host, ext).await {
+        report
+            .errors
+            .push(format!("{shown}:1: approving its effects: {e}"));
+        return;
+    }
+    let Some(view) = example_event(host, ex, report) else {
+        return;
+    };
+    let mut env = match oxplow_domain::events::Envelope::new(
+        view.event_type.clone(),
+        view.v,
+        "fixture",
+        view.payload.clone(),
+    ) {
+        Ok(env) => env,
+        Err(e) => {
+            report.errors.push(format!("{shown}:1: the event: {e}"));
+            return;
+        }
+    };
+    env.subject = view.subject.clone();
+    env.anchors = view.anchors.clone();
+    let seq = match host.svc.event_log_store.append(env).await {
+        Ok(seq) => seq,
+        Err(e) => {
+            report
+                .errors
+                .push(format!("{shown}:1: logging the event: {e}"));
+            return;
+        }
+    };
+    host.svc
+        .event_pump
+        .settle(
+            &[oxplow_app::effect_triggers::NAME],
+            std::time::Duration::from_secs(10),
+        )
+        .await;
+    let rows = |sql: &str| {
+        let sql = sql.to_string();
+        let svc = host.svc.clone();
+        async move {
+            svc.sql
+                .query_sql(&sql, vec![oxplow_db::SqlCell::Int(seq)], None)
+                .await
+                .map(|r| r.rows)
+                .unwrap_or_default()
+        }
+    };
+    let text = |c: &oxplow_db::SqlCell| match c {
+        oxplow_db::SqlCell::Text(t) => t.clone(),
+        other => format!("{other:?}"),
+    };
+    let effects: Vec<Value> = rows(
+        "SELECT effect, state, reason FROM v_effect_run WHERE event_seq = ?1 AND latest = 1 \
+         ORDER BY effect",
+    )
+    .await
+    .iter()
+    .map(|r| json!({ "id": text(&r[0]), "state": text(&r[1]), "reason": text(&r[2]) }))
+    .collect();
+    let commands: Vec<String> = rows(
+        "SELECT json_extract(payload, '$.command') FROM v_event \
+         WHERE type = 'command.executed' AND seq > ?1 \
+           AND json_extract(payload, '$.actor_kind') = 'effect' ORDER BY seq",
+    )
+    .await
+    .iter()
+    .map(|r| text(&r[0]))
+    .collect();
+    let got = shaped_like(
+        &ex.expect,
+        &json!({ "effects": effects, "commands": commands }),
+    );
+    if let Some((path, want, got)) = first_mismatch(&ex.expect, &got) {
+        report.errors.push(format!(
+            "{shown}:1: the event led to {got} at `{path}`, the example expects {want} — fix: \
+             the effects, or the example's `expect` (`{{ effects: [{{ id, state }}], commands: \
+             [names] }}`)"
+        ));
+    }
+}
+
+/// Approve `ext`'s effects in the throwaway as a person does, each
+/// starting at the log's head.
+async fn approve_effects(host: &Host, ext: &Extension) -> Result<(), String> {
+    oxplow_app::exec_consent::approve_every(
+        &host.svc,
+        oxplow_app::exec_consent::ProgramKind::Effect,
+    )?;
+    for decl in &ext.effects {
+        oxplow_app::effects::approved(&host.svc.db, &decl.name())
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Record intent for job `id` through the extension's own command over
+/// `jobs.write/enqueue` (`input: { job, intentKey, request, model? }`), the
+/// job approved here as a person would, and read its outcome through its
+/// `jobs.read/snapshot` command once it ends: against `expect` — `{ state,
+/// result? }` (`$any` matches). Its model call answers with the fixture
+/// model's replies.
+async fn job_example(
+    host: &Host,
+    ext: &Extension,
+    ex: &Example<'_>,
+    id: &str,
+    report: &mut TestReport,
+) {
+    use oxplow_app::extension_commands::CommandHandler;
+    let shown = ex.shown;
+    let by_op = |scope: &str, op: &str| {
+        ext.commands
+            .iter()
+            .find(|c| matches!(&c.handler, CommandHandler::Scope { scope: s, op: o } if s == scope && o == op))
+            .map(|c| c.name.clone())
+    };
+    let (Some(enqueue), Some(snapshot)) = (
+        by_op("jobs.write", "enqueue"),
+        by_op("jobs.read", "snapshot"),
+    ) else {
+        report.errors.push(format!(
+            "{shown}:1: job `{id}`: the extension declares no command over \
+             `jobs.write/enqueue` and `jobs.read/snapshot` to run it with — fix: declare both \
+             (`scope: jobs.write, op: enqueue`; `scope: jobs.read, op: snapshot`)"
+        ));
+        return;
+    };
+    if let Err(e) = oxplow_app::exec_consent::approve_every(
+        &host.svc,
+        oxplow_app::exec_consent::ProgramKind::Job,
+    ) {
+        report
+            .errors
+            .push(format!("{shown}:1: approving its jobs: {e}"));
+        return;
+    }
+    let input = json!({
+        "job": id,
+        "intentKey": ex.input.get("intentKey").cloned().unwrap_or_else(|| json!(ex.name)),
+        "request": ex.input.get("request").cloned().unwrap_or(Value::Null),
+    });
+    let queued = match host
+        .svc
+        .commands
+        .run(&Actor::Human, &enqueue, input, false)
+        .await
+    {
+        Ok(out) => out.result,
+        Err(e) => {
+            report
+                .errors
+                .push(format!("{shown}:1: job `{id}` wasn't recorded: {e}"));
+            return;
+        }
+    };
+    let Some(job) = queued.get("id").and_then(Value::as_str).map(str::to_string) else {
+        report
+            .errors
+            .push(format!("{shown}:1: job `{id}`: {queued} names no job"));
+        return;
+    };
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    let done = loop {
+        let state = host
+            .svc
+            .commands
+            .run(&Actor::Human, &snapshot, json!({ "id": job }), false)
+            .await
+            .map(|out| out.result);
+        match state {
+            Ok(s)
+                if ["succeeded", "failed", "cancelled", "interrupted"]
+                    .contains(&s.get("state").and_then(Value::as_str).unwrap_or("")) =>
+            {
+                break s
+            }
+            Ok(s) if tokio::time::Instant::now() >= deadline => break s,
+            Ok(_) => tokio::time::sleep(std::time::Duration::from_millis(50)).await,
+            Err(e) => {
+                report
+                    .errors
+                    .push(format!("{shown}:1: job `{id}`'s snapshot: {e}"));
+                return;
+            }
+        }
+    };
+    let got = shaped_like(
+        &ex.expect,
+        &json!({ "state": done.get("state"), "result": done.get("result") }),
+    );
+    if let Some((path, want, got)) = first_mismatch(&ex.expect, &got) {
+        report.errors.push(format!(
+            "{shown}:1: job `{id}` ended {got} at `{path}`, the example expects {want} — fix: \
+             the job's request, or the example's `expect` (`{{ state, result? }}`)"
+        ));
+    }
+}
+
+/// Load component `id` as its frame would, then ask what the fixture asks
+/// (`input: { component, lens?, queries?: [{ asset, params? }], invokes?:
+/// [{ command, input?, approved? }] }`): each query's rows and each
+/// invoke's outcome — refused until the component is approved, as for a
+/// person — against `expect: { queries?: [{ rows }], invokes?: [{ ok?,
+/// refused? }] }`. The frame itself isn't drawn here.
+async fn component_example(
+    host: &Host,
+    ext: &Extension,
+    ex: &Example<'_>,
+    id: &str,
+    report: &mut TestReport,
+) {
+    use oxplow_app::lens_actions::{
+        invoke_component_command, load_component, run_component_query, ComponentInvoke,
+    };
+    let shown = ex.shown;
+    // The lens that shows it: the one the fixture names, else its first.
+    let lens = ex
+        .input
+        .get("lens")
+        .and_then(Value::as_str)
+        .map(|slug| format!("{}/{slug}", ext.name))
+        .or_else(|| {
+            ext.lenses
+                .iter()
+                .find(|l| l.custom.as_ref().and_then(|c| c.component.as_deref()) == Some(id))
+                .map(|l| l.id.clone())
+        });
+    let Some(lens) = lens else {
+        report.errors.push(format!(
+            "{shown}:1: component `{id}`: no lens of this extension shows it — fix: a `viz: \
+             custom` lens with `custom: {{ component: {id} }}`, or name one with `lens:`"
+        ));
+        return;
+    };
+    let version = match load_component(&host.svc, &host.root, &lens) {
+        Ok(v) => v,
+        Err(e) => {
+            report
+                .errors
+                .push(format!("{shown}:1: component `{id}` doesn't load: {e}"));
+            return;
+        }
+    };
+    let ctx = oxplow_app::extensions::LensContext::default();
+    let mut queries = Vec::new();
+    for q in ex
+        .input
+        .get("queries")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+    {
+        let asset = q
+            .get("asset")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let params = q
+            .get("params")
+            .and_then(Value::as_object)
+            .map(|o| {
+                o.iter()
+                    .map(|(k, v)| (k.clone(), oxplow_db::SqlCell::from(v.clone())))
+                    .collect()
+            })
+            .unwrap_or_default();
+        queries.push(
+            match run_component_query(&host.svc, &host.root, &lens, &asset, params, &ctx, &version)
+                .await
+            {
+                Ok(run) => json!({ "rows": run.result.rows.len() }),
+                Err(e) => json!({ "error": e.to_string() }),
+            },
+        );
+    }
+    let mut invokes = Vec::new();
+    for i in ex
+        .input
+        .get("invokes")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+    {
+        if i.get("approved").and_then(Value::as_bool).unwrap_or(false) {
+            if let Err(e) = oxplow_app::exec_consent::approve_every(
+                &host.svc,
+                oxplow_app::exec_consent::ProgramKind::Component,
+            ) {
+                report
+                    .errors
+                    .push(format!("{shown}:1: approving its component: {e}"));
+                return;
+            }
+        }
+        let out = invoke_component_command(
+            &host.svc,
+            &host.root,
+            ComponentInvoke {
+                lens_id: lens.clone(),
+                command: i
+                    .get("command")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .into(),
+                input: i.get("input").cloned().unwrap_or_else(|| json!({})),
+                on_behalf_of: Actor::Human,
+                confirmed: true,
+                version: version.clone(),
+            },
+        )
+        .await;
+        invokes.push(match out {
+            Ok(_) => json!({ "ok": true }),
+            Err(oxplow_domain::CommandError::Denied { reason }) => {
+                json!({ "ok": false, "refused": reason })
+            }
+            Err(e) => json!({ "ok": false, "error": e.to_string() }),
+        });
+    }
+    let got = shaped_like(
+        &ex.expect,
+        &json!({ "queries": queries, "invokes": invokes }),
+    );
+    if let Some((path, want, got)) = first_mismatch(&ex.expect, &got) {
+        report.errors.push(format!(
+            "{shown}:1: component `{id}` answered {got} at `{path}`, the example expects {want} \
+             — fix: the component's declarations, or the example's `expect` (`{{ queries: [{{ \
+             rows }}], invokes: [{{ ok, refused? }}] }}`)"
+        ));
     }
 }
 
@@ -234,6 +705,27 @@ async fn lens_example(
     report: &mut TestReport,
 ) {
     let (shown, expect) = (ex.shown, &ex.expect);
+    // Rows for the entities it reads, in place of what a collector would
+    // have brought (`rows: { <entity>: [ … ] }`).
+    if let Some(rows) = ex.input.get("rows") {
+        let rows = match serde_json::from_value::<std::collections::BTreeMap<String, Vec<Value>>>(
+            rows.clone(),
+        ) {
+            Ok(rows) => rows,
+            Err(e) => {
+                report.errors.push(format!(
+                    "{shown}:1: `rows` must map each entity to its rows: {e}"
+                ));
+                return;
+            }
+        };
+        if let Err(e) =
+            oxplow_app::collector_runner::publish_declared_rows(&host.svc.db, ext, &rows).await
+        {
+            report.errors.push(format!("{shown}:1: `rows`: {e}"));
+            return;
+        }
+    }
     let params = ex
         .input
         .get("params")
@@ -1706,6 +2198,15 @@ pub fn render(report: &TestReport, format: crate::Format) -> String {
             }
             for l in &report.left {
                 out.push_str(&format!("left in the provider: {l}\n"));
+            }
+            if !report.unsupported.is_empty() {
+                out.push_str(&format!(
+                    "not run here (the app shows them): {}\n",
+                    report.unsupported.join(", ")
+                ));
+            }
+            if let Some(generation) = &report.generation {
+                out.push_str(&format!("generation: {generation}\n"));
             }
             out.push_str(&format!(
                 "{}: {} error{}, {} warning{}; ran {}\n",

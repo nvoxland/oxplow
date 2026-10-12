@@ -12,6 +12,15 @@ intent:
     against a short work list stands out.
   origin: null
   examples:
+    - name: summary-published
+      input: { job: summarize }
+      expect: the job succeeds with the model's answer
+    - name: summary-to-the-wiki
+      input: { event: contribution.job.completed }
+      expect: publish-summary writes the triage-summary page
+    - name: todo-board
+      input: { component: todo-board }
+      expect: the board reads its lens
     - name: todos-and-open-work
       input: { collector: todos }
       expect: one open-items fact and one TODO fact for src/lib.rs line 1, classified
@@ -29,6 +38,16 @@ measures:
     title: Open work items
     unit: items
     temporalSemantics: non-additive
+metrics:
+  # The TODOs counted; each one located, so the board and the drill-in
+  # list them (`metric_findings('triage.todos')`).
+  - key: triage.todos
+    title: TODO comments
+    sourceMeasure: triage.todos
+    aggregation: sum
+    direction: lower-better
+    unit: comments
+    displayKind: findings
 collectors:
   # On each snapshot: its tree (a fact collector reads it without asking),
   # the open work items (`sql.read`) and a model for each TODO
@@ -39,3 +58,36 @@ collectors:
     trigger: { on: [snapshot.taken] }
     needs: [sql.read, ai.compute]
     facts: [triage.todos, triage.open_items]
+# A person asks for a summary of the TODOs (`triage.summary.ask`); a model
+# answers it as a durable job, outside any transaction, once a person has
+# approved the job; when it finishes, `publish-summary` writes the answer
+# to the wiki.
+jobs:
+  - id: summarize
+    description: Summarize the code's TODO comments for a person.
+    version: 1
+    operation: ai.complete_typed
+    needs: [ai.compute]
+commands:
+  - name: summary.ask
+    summary: Ask a model to summarize the TODO comments; returns the job.
+    scope: jobs.write
+    op: enqueue
+    invokers: { human: true, agent: true, lens: true }
+  - name: summary.result
+    summary: A summary job's state and, once it ends, its answer.
+    scope: jobs.read
+    op: snapshot
+    invokers: { human: true, agent: true, lens: true }
+effects:
+  - id: publish-summary
+    summary: When a summary job succeeds, write its answer to the wiki page `triage-summary`.
+    on: [contribution.job.completed]
+    entry: effects/publish_summary.star
+    needs: [jobs.read]
+# The TODOs as a board, grouped by what the model said they ask for. It
+# only shows and reads, so it isn't a program to approve.
+custom_components:
+  - id: todo-board
+    title: TODO board
+    assets: [todos]

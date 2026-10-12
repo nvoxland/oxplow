@@ -1899,16 +1899,23 @@ impl Services {
     /// that writes extension files afterwards re-activates with
     /// `test_fixtures::activate`.
     pub async fn in_memory(project_dir: impl Into<PathBuf>) -> Result<Arc<Self>, AppInitError> {
-        let svc = Self::in_memory_inactive(project_dir)?;
-        svc.initialize_extensions().await?;
-        Ok(svc)
+        let project_dir = project_dir.into();
+        let global = project_dir.join(".oxplow/global-config");
+        Self::in_memory_on_machine(
+            project_dir,
+            global,
+            Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
+            providers::host::process_env(),
+        )
+        .await
     }
 
-    /// [`Self::in_memory`] before boot's `initialize`: for the one caller
-    /// that must seed the database first (the SDK's throwaway host
-    /// publishes the declared entities empty, so the models over them
-    /// compile) and then calls [`Self::initialize_extensions`].
-    pub fn in_memory_inactive(project_dir: impl Into<PathBuf>) -> Result<Arc<Self>, AppInitError> {
+    /// [`Self::in_memory`] before boot's `initialize`: for a test of what
+    /// happens before the first generation.
+    #[cfg(test)]
+    pub(crate) fn in_memory_inactive(
+        project_dir: impl Into<PathBuf>,
+    ) -> Result<Arc<Self>, AppInitError> {
         let project_dir = project_dir.into();
         let global = project_dir.join(".oxplow/global-config");
         Self::on_machine_inactive(
@@ -1955,7 +1962,7 @@ impl Services {
     }
 
     /// Publish the first extension generation, as boot does.
-    pub async fn initialize_extensions(self: &Arc<Self>) -> Result<(), AppInitError> {
+    pub(crate) async fn initialize_extensions(self: &Arc<Self>) -> Result<(), AppInitError> {
         self.extension_activation
             .initialize(self.clone())
             .await

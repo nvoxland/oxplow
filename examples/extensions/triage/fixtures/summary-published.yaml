@@ -1,0 +1,15 @@
+# The job runs once a person approved it; its model call answers with the
+# fixture model's reply — no provider, nothing spent.
+input:
+  job: summarize
+  intentKey: summary-1
+  request:
+    schemaVersion: 1
+    role: summarize
+    messages:
+      - { role: user, parts: [{ type: text, text: "Summarize the TODO comments." }] }
+  model:
+    replies: ["Two cleanup TODOs and one bug."]
+expect:
+  state: succeeded
+  result: $any

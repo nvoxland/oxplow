@@ -97,17 +97,9 @@ async fn a_scaffolded_collector_checks_before_its_first_sync_and_runs() {
     assert!(tested(dir.path(), "open-items")
         .await
         .contains(&"example basic".to_string()));
-    // The extension's model reads its collector's entity, whose table a
-    // first run makes: so the host publishes the declared entities empty
-    // first (the extension would be held back without it).
-    let svc = oxplow_app::Services::in_memory_inactive(dir.path()).unwrap();
-    oxplow_app::collector_runner::publish_declared_empty(
-        &svc.db,
-        &svc.extension_catalog.get(dir.path()),
-    )
-    .await
-    .unwrap();
-    svc.initialize_extensions().await.unwrap();
+    // The extension's model reads its collector's entity: activation
+    // creates it empty, so the model compiles before the first run.
+    let svc = oxplow_app::Services::in_memory(dir.path()).await.unwrap();
     let ext = loaded(&svc, dir.path(), "open-items");
     let collector = &ext.collectors[0];
     // It runs for real: its entity, then its model, publish.

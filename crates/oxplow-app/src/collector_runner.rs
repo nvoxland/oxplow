@@ -2239,37 +2239,6 @@ fn copy_collector(
     Ok(copy)
 }
 
-/// A run's output as the writes it makes, coerced to the declared columns.
-/// Publish every entity the enabled `extensions` declare, empty — what a
-/// throwaway oxplow (`oxplow extension test`, P7.C6) does so the models and
-/// lenses over them run before any collector has. Never on a project's
-/// own database: an empty publish replaces what was collected.
-pub async fn publish_declared_empty(
-    db: &oxplow_db::Database,
-    extensions: &[crate::extensions::Extension],
-) -> Result<(), DomainError> {
-    let mut writes = Vec::new();
-    for ext in extensions.iter().filter(|e| e.enabled) {
-        for spec in ext.collectors.iter().filter(|c| !c.entities.is_empty()) {
-            let empty = ScriptOutput {
-                entities: spec
-                    .entities
-                    .iter()
-                    .map(|e| (e.name.clone(), Vec::new()))
-                    .collect(),
-                deleted: BTreeMap::new(),
-                events: Vec::new(),
-            };
-            writes.extend(plan_writes(&ext.name, spec, empty).map_err(DomainError::Invalid)?);
-        }
-    }
-    db.transaction(move |tx| oxplow_db::collector_store::write_rows_tx(tx, &writes).map(|_| ()))
-        .await
-}
-
-/// Every entity the enabled `extensions`' collectors declare, as the table
-/// it is stored in: what activation creates (empty, once) so the models
-/// over an entity compile before its collector first runs.
 /// Publish `rows` into entities `ext` declares, by entity name, replacing
 /// what each held — what a preview seeds before running a lens example
 /// over them (`oxplow extension test`'s `rows:`). The rows are coerced to

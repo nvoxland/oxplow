@@ -228,9 +228,9 @@ exactly as boot does; there is no test-only way to register commands, models or
 providers. A test that writes extension files or changes config after setup
 is standing in for the generation owner: it calls `test_fixtures::activate(&svc)`
 (asserts no extension was held back) or `activate_with_problems(&svc)` (returns
-what was) at that point. `Services::in_memory_inactive` + `initialize_extensions`
-exist for the SDK's throwaway host, which seeds declared entities before the
-first generation.
+what was) at that point. Declared entities need no seeding: activation creates
+them empty. (`in_memory_inactive` is crate-private, for a test of what happens
+before the first generation.)
 
 **An effort needs no task, and neither does its fixture.**
 `test_fixtures::services_with_effort()` opens an effort linked to nothing

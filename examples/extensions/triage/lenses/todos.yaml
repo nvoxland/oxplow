@@ -1,0 +1,7 @@
+title: TODOs
+description: The TODO comments in the code, each with what a model said it asks for (a bug, cleanup or a feature).
+query: |
+  SELECT path, line, rule AS kind
+  FROM metric_findings('triage.todos')
+  ORDER BY rule, path, line
+hidden: true

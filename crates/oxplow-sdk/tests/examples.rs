@@ -48,12 +48,8 @@ async fn the_github_example_checks_tests_and_its_pr_opens() {
     );
 
     // A real oxplow over the project, one pull request collected.
-    let svc = oxplow_app::Services::in_memory_inactive(root).unwrap();
-    // Its entity's table, as the collector's first run makes it.
-    oxplow_app::collector_runner::publish_declared_empty(&svc.db, &svc.extension_catalog.get(root))
-        .await
-        .unwrap();
-    svc.initialize_extensions().await.unwrap();
+    // Its entity is created empty at activation, as before a first run.
+    let svc = oxplow_app::Services::in_memory(root).await.unwrap();
     svc.db
         .transaction(|tx| {
             tx.execute(
@@ -311,7 +307,9 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
         "collector `todos` (collectors/todos.star):\n  \
          sql.read: declared, used\n  \
          tree.read: implied, used\n  \
-         ai.compute: declared, used — a person approves it\n"
+         ai.compute: declared, used — a person approves it\n\
+         effect `publish-summary` (effects/publish_summary.star):\n  \
+         jobs.read: declared, used\n"
     );
     let tested = test_extension(root, "triage", false).await.unwrap();
     assert_eq!(tested.errors, Vec::<String>::new());
@@ -320,6 +318,34 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
         "{:?}",
         tested.warnings
     );
+    // The preview runs it whole: its job against the fixture model, the
+    // event its job logs through its effect, its component's reads — in
+    // the throwaway's activated generation, listing what it contributes
+    // and what only the app shows.
+    for example in ["summary-published", "summary-to-the-wiki", "todo-board"] {
+        assert!(
+            tested.ran.contains(&format!("example {example}")),
+            "{example}: {:?}",
+            tested.ran
+        );
+    }
+    assert!(tested.generation.is_some());
+    for id in [
+        "triage/job/summarize",
+        "triage/effect/publish-summary",
+        "triage/custom_component/todo-board",
+        "triage/command/summary.ask",
+    ] {
+        assert!(
+            tested.contributes.iter().any(|c| c == id),
+            "{id}: {:?}",
+            tested.contributes
+        );
+    }
+
+    // It ran in its own throwaway: the project has no database of its own
+    // from it.
+    assert!(!root.join(".oxplow/local.sqlite").exists());
 
     // A real oxplow: a source file with a TODO, one open work item, a
     // model that calls everything a bug, and the person's approval.
@@ -330,6 +356,20 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
     )
     .unwrap();
     let svc = oxplow_app::Services::in_memory(root).await.unwrap();
+    // The preview's generation contributes what a real one over the same
+    // project does.
+    let mut real: Vec<String> = svc
+        .extension_catalog
+        .named(root, "triage")
+        .unwrap()
+        .contributions
+        .iter()
+        .map(|d| d.id.to_string())
+        .collect();
+    let mut previewed = tested.contributes.clone();
+    real.sort();
+    previewed.sort();
+    assert_eq!(previewed, real);
     svc.commands
         .run(
             &oxplow_domain::Actor::Human,

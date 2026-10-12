@@ -369,7 +369,8 @@ names the file and line and says what to change.
    one.) `ok: true` (exit 0) means it works. Fix every `error`; fix a
    `warning` unless you can say why not.
 2. `run_lens(id, params?, stream_id, thread_id?)` returns exactly the
-   rows the user will see. Check that they answer the question.
+   rows the user will see. Check that they answer the question. It reads
+   your extension's models as your worktree has them, published or not.
 3. Pass **your own `stream_id`** to both when you're in a worktree
    stream. Extensions are read from the stream's worktree, so the primary
    stream won't see yours until it's merged.
@@ -419,13 +420,34 @@ names the file and line and says what to change.
    instead of `command`: https only (http on loopback), its host in
    `network`, and `auth` one of the provider's `credentials` (sent as the
    bearer token).
-5. **`oxplow extension test <name>`** runs every intent example on a
-   throwaway oxplow (empty data, your extension's entities published
-   empty and its models and commands loaded — never the project's
-   database). Give each example a fixture, `fixtures/<example>.yaml`, with
-   `input` and `expect` (`$any` matches anything):
-   - a lens: `input: { lens: <slug>, params? }`, `expect: { columns?,
-     rows: n }` — data is empty, so usually `rows: 0`;
+5. **`preview_extension(name, stream_id)`** (MCP; `oxplow extension test
+   <name>` from a terminal) runs your whole extension in a throwaway
+   oxplow: activated as the app activates it (your entities empty, your
+   models, commands, effects, jobs and components live), never the
+   project's database, your programs seeing no credentials, and every
+   model call answered by the fixture's `model.replies` — never a real
+   provider. Run it after `validate_extension` and before handing over.
+   Its report says what it ran, the generation, what the extension
+   `contributes`, and what it can't run here (`unsupported`: pages,
+   panels, slots, decorators, replacements, skills — the app shows them).
+   Give each example a fixture, `fixtures/<example>.yaml`, with `input`
+   and `expect` (`$any` matches anything), and `model: { replies: [...] }`
+   in `input` when it calls a model:
+   - a lens: `input: { lens: <slug>, params?, rows? }`, `expect: {
+     columns?, rows: n }` — `rows: { <entity>: [ {…} ] }` fills your
+     collectors' entities first (they start empty);
+   - an event: `input: { event: { type, payload, … } }` — logged in the
+     throwaway and delivered: your effects (approved there) react for
+     real and their commands run. `expect: { effects: [{ id, state }],
+     commands: [names] }` (only the keys you name are compared);
+   - a job: `input: { job: <id>, intentKey, request }` — run through your
+     commands over `jobs.write/enqueue` and `jobs.read/snapshot` (declare
+     both), approved there, its model call answered by `model.replies`;
+     `expect: { state: succeeded, result? }`;
+   - a component: `input: { component: <id>, lens?, queries?: [{ asset,
+     params? }], invokes?: [{ command, input?, approved? }] }` — what its
+     frame would ask; `expect: { queries: [{ rows }], invokes: [{ ok,
+     refused? }] }` (an invoke is refused until `approved: true`);
    - a collector: `input: { collector: <id>, rows: [...], event? }`
      (`rows` stands in for its `input` query; `event` is the event an
      `on:` collector reacts to), `expect: { entities: { <name>: n } }` —

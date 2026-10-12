@@ -342,7 +342,8 @@ impl ExtensionJobs {
         )
     }
 
-    pub(crate) fn spawn(
+    /// Start the scheduler (once), as boot does after activation.
+    pub fn spawn(
         self: &Arc<Self>,
         activation: Arc<crate::extension_activation::ExtensionActivation>,
     ) {

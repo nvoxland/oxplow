@@ -1514,11 +1514,13 @@ impl OxplowMcp {
             .resolve(stream.as_deref())
             .await
             .into_local_path();
+        // An agent's preview: the extension's programs see no environment
+        // (no person's credentials), and model calls answer from the fixtures.
         let report = oxplow_sdk::extension_test::test_extension_in(
             &root,
             &p.name,
             false,
-            oxplow_app::providers::host::process_env(),
+            std::sync::Arc::new(|_: &str| None),
         )
         .await
         .map_err(|e| match e {

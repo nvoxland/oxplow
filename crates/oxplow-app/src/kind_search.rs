@@ -424,15 +424,9 @@ ref_kinds:
         );
     }
 
-    /// Publish the `pr` entity empty, so the models that read it compile
-    /// at the first generation (an entity table exists once something has
-    /// written to it), then activate.
+    /// Activate the extension written after setup: its `pr` entity is
+    /// created empty, so the models that read it compile.
     async fn declare_entities(svc: &std::sync::Arc<crate::Services>) {
-        let root = svc.layout.project_dir.clone();
-        let snapshot = svc.extension_catalog.snapshot(&root);
-        collector_runner::publish_declared_empty(&svc.db, snapshot.extensions())
-            .await
-            .unwrap();
         crate::test_fixtures::activate(svc).await;
     }
 

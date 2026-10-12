@@ -1,0 +1,10 @@
+# The event a finished job logs reaches the effect; a job of another
+# extension's is skipped.
+input:
+  event:
+    type: contribution.job.completed
+    payload: { job_id: "01990000-0000-7000-8000-000000000000", contribution: "other/job/x", run_id: "r", attempt: 1, fence: 1, outcome: ok, version: 1 }
+expect:
+  effects:
+    - { id: triage/publish-summary, state: skipped }
+  commands: []
