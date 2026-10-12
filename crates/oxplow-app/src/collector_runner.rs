@@ -292,6 +292,14 @@ fn last_run_ms(l: &CollectorListing) -> Option<i64> {
 /// command refuses them. Returns what it ran; a failed run
 /// is logged and the rest still run.
 pub async fn run_due_collectors(state: &crate::Services) -> Vec<(String, String)> {
+    state
+        .sql
+        .read_generation(run_due_collectors_unpinned(state))
+        .await
+        .unwrap_or_default()
+}
+
+async fn run_due_collectors_unpinned(state: &crate::Services) -> Vec<(String, String)> {
     let root = state.worktrees.resolve(None).await.into_local_path();
     let Ok(listings) = list_collectors(&Collectors::of(state, &root)).await else {
         return vec![];
@@ -341,8 +349,9 @@ pub fn spawn_scheduler(state: std::sync::Arc<crate::Services>) {
 
 /// SHA-256 of the entry script: what an approval is bound to.
 pub fn entry_hash(ext_dir: &Path, entry: &str) -> std::io::Result<String> {
+    use crate::extensions::ExtensionFiles;
     use sha2::{Digest, Sha256};
-    let bytes = std::fs::read(ext_dir.join(entry))?;
+    let bytes = crate::extensions::Disk(ext_dir.to_path_buf()).bytes(entry)?;
     Ok(hex::encode(Sha256::digest(&bytes)))
 }
 
@@ -361,18 +370,18 @@ pub fn needs_approval(root: &Path, extension: &str, spec: &CollectorSpec) -> boo
 }
 
 /// What an approval covers: every file in the extension (the entry and
-/// any helper it runs, tsk347) and the hosts it may reach (tsk324), so a
+/// any helper it runs) and the hosts it may reach, so a
 /// changed helper or a widened `network` needs approving again.
 ///
 /// The manifest and lenses aren't code the collector runs, so editing a
 /// lens doesn't ask again; what the manifest grants it (its entry,
-/// env passthrough, credentials and network, tsk348) is hashed from the
+/// env passthrough, credentials and network) is hashed from the
 /// spec instead.
 pub fn approval_hash(ext_dir: &Path, spec: &CollectorSpec) -> std::io::Result<String> {
     use sha2::{Digest, Sha256};
     // The entry must exist; the tree hash alone wouldn't notice a typo.
     let entry = entry_of(spec);
-    entry_hash(ext_dir, entry)?;
+    let entry_digest = entry_hash(ext_dir, entry)?;
     let tree = crate::exec_consent::tree_hash_except(ext_dir, &|rel| {
         rel == Path::new("extension.yaml") || rel.starts_with("lenses")
     })?;
@@ -383,14 +392,24 @@ pub fn approval_hash(ext_dir: &Path, spec: &CollectorSpec) -> std::io::Result<St
     };
     // Its whole declaration: what it reads (`input`), when it runs, what
     // it writes — a changed one asks again, as a changed script does.
-    let declared = serde_json::to_string(spec).map_err(std::io::Error::other)?;
-    let text = format!(
+    let mut declared = serde_json::to_string(spec).map_err(std::io::Error::other)?;
+    if spec.execution.is_restricted() {
+        // Preserve the pre-tier declaration hash. This exact token occurs
+        // only as a field, never inside an escaped JSON string value.
+        declared = declared.replacen("\"execution\":\"restricted\",", "", 1);
+    }
+    let mut text = format!(
         "tree:{tree}\nentry:{}\nenv:{}\ncredentials:{}\nnetwork:{}\ndeclared:{declared}",
         entry,
         sorted(&spec.env),
         sorted(&spec.credentials),
         sorted(&spec.network)
     );
+    // Metadata is excluded from the helper tree. If an entry lives there,
+    // its own bytes must still be covered; preserve other existing hashes.
+    if Path::new(entry) == Path::new("extension.yaml") || Path::new(entry).starts_with("lenses") {
+        text.push_str(&format!("\nentry_hash:{entry_digest}"));
+    }
     Ok(hex::encode(Sha256::digest(text.as_bytes())))
 }
 
@@ -496,8 +515,10 @@ pub fn exec_collector(
     egress: &Egress,
     input: &serde_json::Value,
 ) -> Result<ScriptOutput, String> {
+    spec.execution.require_external()?;
+    run.check_authority()?;
+    let bytes = serde_json::to_vec(input).map_err(|e| e.to_string())?;
     let (timeout, cancel) = (run.budget().timeout, run.cancel());
-    use std::io::{Read, Write};
     use std::process::{Command, Stdio};
 
     let entry = ext_dir.join(entry_of(spec));
@@ -540,39 +561,49 @@ pub fn exec_collector(
             cmd.env(name, value);
         }
     }
+    crate::external_process::ProcessGroup::prepare(&mut cmd);
+    run.check_authority()?;
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("couldn't start `{}`: {e}", entry_of(spec)))?;
+    let group = crate::external_process::ProcessGroup::new(child.id());
 
     // Its input on stdin, written on a thread and closed: a program that
     // never reads it can't block the run (a broken pipe is its choice).
-    let mut in_pipe = child.stdin.take().ok_or("no stdin")?;
-    let bytes = serde_json::to_vec(input).map_err(|e| e.to_string())?;
-    std::thread::spawn(move || {
-        let _ = in_pipe.write_all(&bytes);
-    });
-    // Drain both pipes on threads so a chatty program can't deadlock.
-    let mut out_pipe = child.stdout.take().ok_or("no stdout")?;
-    let mut err_pipe = child.stderr.take().ok_or("no stderr")?;
-    let out_thread = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        let _ = out_pipe
-            .by_ref()
-            .take(MAX_OUTPUT_BYTES as u64 + 1)
-            .read_to_end(&mut buf);
-        buf
-    });
-    let err_thread = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        let _ = err_pipe.by_ref().take(64 * 1024).read_to_end(&mut buf);
-        buf
-    });
-
+    let in_pipe = child.stdin.take().ok_or("no stdin")?;
     let started = std::time::Instant::now();
+    let deadline = started + timeout;
+    std::thread::spawn(move || {
+        let _ = oxplow_script::exec_io::write(in_pipe, &bytes, deadline);
+    });
+    let out_pipe = child.stdout.take().ok_or("no stdout")?;
+    let err_pipe = child.stderr.take().ok_or("no stderr")?;
+    let out_thread = std::thread::spawn(move || {
+        oxplow_script::exec_io::read(out_pipe, MAX_OUTPUT_BYTES, deadline)
+    });
+    let err_thread =
+        std::thread::spawn(move || oxplow_script::exec_io::read(err_pipe, 64 * 1024, deadline));
+
     let status = loop {
-        match child.try_wait().map_err(|e| e.to_string())? {
+        if let Err(reason) = run.check_authority() {
+            group.stop();
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!("collector `{}`: {reason}", spec.id));
+        }
+        let state = match child.try_wait() {
+            Ok(state) => state,
+            Err(error) => {
+                group.stop();
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error.to_string());
+            }
+        };
+        match state {
             Some(status) => break status,
             None if started.elapsed() >= timeout => {
+                group.stop();
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err(format!(
@@ -581,6 +612,7 @@ pub fn exec_collector(
                 ));
             }
             None if cancel.is_cancelled() => {
+                group.stop();
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err(format!("collector `{}`: the run was cancelled", spec.id));
@@ -588,8 +620,10 @@ pub fn exec_collector(
             None => std::thread::sleep(Duration::from_millis(25)),
         }
     };
-    let stdout = out_thread.join().unwrap_or_default();
-    let stderr = String::from_utf8_lossy(&err_thread.join().unwrap_or_default())
+    group.stop();
+    run.check_authority()?;
+    let stdout = out_thread.join().map_err(|_| "output drain panicked")??;
+    let stderr = String::from_utf8_lossy(&err_thread.join().map_err(|_| "error drain panicked")??)
         .trim()
         .to_string();
     if !status.success() {
@@ -674,6 +708,11 @@ pub async fn derive_collector(
     rows: Option<Vec<serde_json::Value>>,
     run: &RunContext,
 ) -> Result<ScriptOutput, String> {
+    let run = layer
+        .pin_run(run)
+        .await
+        .map_err(|error| error.to_string())?;
+    run.check_authority()?;
     let read = match (rows, &spec.input) {
         (Some(rows), _) => InputRows {
             rows,
@@ -684,11 +723,12 @@ pub async fn derive_collector(
             complete: None,
         },
         (None, Some(sql)) => {
-            input_rows(
+            input_rows_for_run(
                 layer,
                 &spec.id,
                 sql,
                 anchor_params(event, Anchored::default()),
+                Some(&run),
             )
             .await?
         }
@@ -710,8 +750,11 @@ pub async fn derive_collector(
         use oxplow_script::workers::{shared, ScriptRun};
         // In a worker: its `ai_*` and `scope` calls are answered here, and
         // the time they wait isn't the script's.
-        let read = Box::new(|q: oxplow_db::SqlQuery| handle.block_on(layer.run(q)));
-        let mut calls = crate::scope_calls::Calls::new(&cost, &needs, read);
+        let read = Box::new(|q: oxplow_db::SqlQuery| handle.block_on(layer.run_in(&cost, q)));
+        let mut calls = crate::scope_calls::Calls::new(&cost, &needs, read)
+            .with_state_source(layer.state_source(), &handle)
+            .with_jobs_source(layer.jobs_source(), &handle)
+            .with_configuration_source(layer.configuration_source(), &handle);
         let mut serve = |id: &str, args: serde_json::Value| calls.serve(id, args);
         let script_run = match runtime {
             CollectorRuntime::Jaq => ScriptRun::jaq(&script, input),
@@ -725,6 +768,7 @@ pub async fn derive_collector(
     .await
     .map_err(|e| format!("collector task panicked: {e}"))?
     .map_err(|e| format!("collector `{}`: {e}", spec.id))?;
+    run.check_authority()?;
     ScriptOutput::parse(spec, value)
 }
 
@@ -920,19 +964,41 @@ pub async fn input_rows(
     input: &oxplow_config::collectors::CollectorInput,
     params: Vec<(String, SqlCell)>,
 ) -> Result<InputRows, String> {
+    input_rows_for_run(layer, id, input, params, None).await
+}
+
+pub(crate) async fn input_rows_for_run(
+    layer: &crate::sql_gateway::SqlGateway,
+    id: &str,
+    input: &oxplow_config::collectors::CollectorInput,
+    params: Vec<(String, SqlCell)>,
+    run: Option<&RunContext>,
+) -> Result<InputRows, String> {
     const _: () = assert!(
         oxplow_config::collectors::MAX_INPUT_ROWS <= oxplow_db::semantic_layer::MAX_ROW_LIMIT
     );
     let limit = input
         .limit
         .unwrap_or(oxplow_config::collectors::MAX_INPUT_ROWS);
-    let query = oxplow_db::semantic_layer::SqlQuery::new(&input.sql)
+    let mut query = oxplow_db::semantic_layer::SqlQuery::new(&input.sql)
         .named(params)
         .limit(Some(limit));
-    let out = layer
-        .run(query)
-        .await
-        .map_err(|e| format!("collector `{id}` input: {e}"))?;
+    if let Some(run) = run {
+        match run.decide_service("sql.read") {
+            oxplow_domain::grant::Decision::Allowed => (),
+            oxplow_domain::grant::Decision::Denied(reason)
+            | oxplow_domain::grant::Decision::Unenforced(reason) => return Err(reason),
+        }
+        crate::grants::bound_query(run, &mut query);
+    }
+    let out = match run {
+        Some(run) => layer.run_in(run, query).await,
+        None => layer.run(query).await,
+    }
+    .map_err(|e| format!("collector `{id}` input: {e}"))?;
+    if let Some(run) = run {
+        run.check_authority()?;
+    }
     if out.truncated && input.limit.is_none() {
         return Err(format!(
             "collector `{id}` input returned more than {limit} rows; narrow it, or declare \
@@ -1005,6 +1071,11 @@ pub async fn run_collector(
     id: &str,
     trigger: RunTrigger,
 ) -> Result<CollectorRunReport, RunCollectorError> {
+    let parent = ctx
+        .layer
+        .pin_run(parent)
+        .await
+        .map_err(RunCollectorError::Storage)?;
     let health =
         crate::contribution_health::ContributionHealth::new(ctx.db.clone(), ctx.vocabulary.clone());
     let key = contribution_key(owner, id);
@@ -1018,6 +1089,28 @@ pub async fn run_collector(
              (`oxplow.contribution.enable`, Settings → Extensions)."
         )));
     }
+    let run = collector_context(ctx, &parent, owner, id)?;
+    let started = std::time::Instant::now();
+    let result = run_collector_once(ctx, &run, owner, id, trigger).await;
+    let recorded = match &result {
+        Ok(_) => health.succeeded(&key, Some(started.elapsed())).await,
+        Err(RunCollectorError::Failed(error)) => health.failed(&key, error).await.map(|_| ()),
+        Err(_) => Ok(()),
+    };
+    if let Err(e) = recorded {
+        tracing::warn!(collector = %format!("{owner}/{id}"), error = %e, "recording its health failed");
+    }
+    result
+}
+
+/// Carry the same contribution authority and live consent into real runs
+/// and previews. A preview stores no rows but can still read data or call AI.
+fn collector_context(
+    ctx: &Collectors<'_>,
+    parent: &RunContext,
+    owner: &str,
+    id: &str,
+) -> Result<RunContext, RunCollectorError> {
     // The collector's run: a child of what ran it, named for the collector.
     let (ext, spec) = find_collector(ctx, owner, id)?;
     // What it may do: its declaration, and the grant a person's approval
@@ -1030,7 +1123,7 @@ pub async fn run_collector(
         .then(|| crate::extensions::read_extension_file(ctx.root, &ext.name, entry_of(&spec)))
         .flatten();
     let needs = crate::services::collector_needs(&spec, script.as_deref());
-    let run = parent
+    let mut run = parent
         .child(
             Some(crate::run_context::contribution(
                 ctx.catalog,
@@ -1047,17 +1140,24 @@ pub async fn run_collector(
             approved,
             crate::grants::collector_request(&spec, &needs),
         ));
-    let started = std::time::Instant::now();
-    let result = run_collector_once(ctx, &run, owner, id, trigger).await;
-    let recorded = match &result {
-        Ok(_) => health.succeeded(&key, Some(started.elapsed())).await,
-        Err(RunCollectorError::Failed(error)) => health.failed(&key, error).await.map(|_| ()),
-        Err(_) => Ok(()),
-    };
-    if let Err(e) = recorded {
-        tracing::warn!(collector = %format!("{owner}/{id}"), error = %e, "recording its health failed");
+    if consented {
+        let directory = ctx.root.join(&ext.path);
+        let spec = spec.clone();
+        let pinned = approval_hash(&directory, &spec)
+            .map_err(|e| RunCollectorError::Failed(e.to_string()))?;
+        let gate = ctx
+            .approvals
+            .pinned_gate(format!("{owner}/{id}"), pinned.clone());
+        run = run.guarded(Arc::new(move || {
+            gate()?;
+            if approval_hash(&directory, &spec).is_ok_and(|current| current == pinned) {
+                Ok(())
+            } else {
+                Err("the collector changed during its run; approve the new version".into())
+            }
+        }));
     }
-    result
+    Ok(run)
 }
 
 /// [`run_collector`]'s run: consent check, run, coercion, then one
@@ -1127,6 +1227,7 @@ async fn run_collector_once(
             let committed = ctx
                 .db
                 .transaction(move |tx| {
+                    this_run.check_authority().map_err(DomainError::Invalid)?;
                     let counts: BTreeMap<String, i64> = names
                         .iter()
                         .cloned()
@@ -1166,7 +1267,7 @@ async fn run_collector_once(
                         id: id.to_string(),
                         row_counts,
                         facts: 0,
-                    })
+                    });
                 }
                 Err(e) => e.to_string(),
             }
@@ -1420,6 +1521,9 @@ impl RunLog {
         let vocabulary = self.vocabulary.clone();
         self.db
             .transaction(move |tx| {
+                if let Some((run, oxplow_domain::run::Outcome::Ok, _)) = &ended {
+                    run.check_authority().map_err(DomainError::Invalid)?;
+                }
                 if !oxplow_db::event_log_store::append_unique_tx(
                     tx,
                     &vocabulary.current(),
@@ -1624,7 +1728,13 @@ pub async fn preview_collector(
         .map(|given| EventView::fixture(given, &ctx.vocabulary.current()))
         .transpose()
         .map_err(|e| RunCollectorError::Failed(format!("its event: {}", e.message())))?;
-    let run = RunContext::core(oxplow_domain::Actor::System, Mode::External);
+    let parent = RunContext::core(oxplow_domain::Actor::System, Mode::External);
+    let parent = ctx
+        .layer
+        .pin_run(&parent)
+        .await
+        .map_err(RunCollectorError::Storage)?;
+    let run = collector_context(ctx, &parent, owner, id)?;
     let (spec, output) = produce(ctx, &run, owner, id, view.as_ref(), rows).await?;
     let mut output = output.map_err(RunCollectorError::Failed)?;
     let events = plan_events(
@@ -1729,13 +1839,13 @@ fn check_approved(
     owner: &str,
     spec: &CollectorSpec,
     does: &str,
-) -> Result<(), RunCollectorError> {
+) -> Result<String, RunCollectorError> {
     let id = &spec.id;
     let hash = approval_hash(ext_dir, spec).map_err(|e| {
         RunCollectorError::Failed(format!("collector `{id}`: entry `{}`: {e}", entry_of(spec)))
     })?;
     if is_approved(approvals, owner, id, &hash) {
-        return Ok(());
+        return Ok(hash);
     }
     Err(RunCollectorError::NeedsApproval(format!(
         "collector `{owner}/{id}` {does} and needs a person's approval first \
@@ -1772,6 +1882,24 @@ async fn produce(
             );
             return Ok((spec, Err(missing)));
         };
+        let run = run.clone().guarded({
+            let root = root.to_path_buf();
+            let owner = owner.to_string();
+            let entry = entry_of(&spec).to_string();
+            let loaded = script.clone();
+            Arc::new(move || {
+                if crate::extensions::read_extension_file(&root, &owner, &entry)
+                    .is_some_and(|current| current == loaded)
+                {
+                    Ok(())
+                } else {
+                    Err(
+                        "the loaded collector script differs from its current version; reload it"
+                            .into(),
+                    )
+                }
+            })
+        });
         // A script that asks a model runs only once a person approved it:
         // it spends their key each run.
         if spec.runtime == CollectorRuntime::Starlark && oxplow_script::ai::calls_ai(&script) {
@@ -1793,13 +1921,15 @@ async fn produce(
         if let Some(trees) = &ctx.trees {
             sources = sources.with_tree(crate::services::Trees::From(trees.clone()));
         }
-        let output = match given(&spec, run, &script, &sources).await {
-            Ok(given) => derive_collector(&ctx.layer, script, &spec, given, event, rows, run).await,
+        let output = match given(&spec, &run, &script, &sources).await {
+            Ok(given) => {
+                derive_collector(&ctx.layer, script, &spec, given, event, rows, &run).await
+            }
             Err(e) => Err(e),
         };
         return Ok((spec, output));
     }
-    check_approved(
+    let approved_hash = check_approved(
         approvals,
         &ext_dir,
         owner,
@@ -1840,7 +1970,17 @@ async fn produce(
     }
     let output = match missing {
         Some(e) => Err(e),
-        None => exec_approved(&ext_dir, &spec, credentials, &exec_input(event), run).await,
+        None => {
+            exec_approved(
+                &ext_dir,
+                &spec,
+                credentials,
+                &exec_input(event),
+                run,
+                &approved_hash,
+            )
+            .await
+        }
     };
     Ok((spec, output))
 }
@@ -2046,13 +2186,16 @@ async fn exec_approved(
     credentials: BTreeMap<String, String>,
     input: &serde_json::Value,
     run: &RunContext,
+    approved_hash: &str,
 ) -> Result<ScriptOutput, String> {
+    spec.execution.require_external()?;
     let dir = ext_dir.to_path_buf();
     let (input, run) = (
         input.clone(),
         run.clone().within(Budget::with_timeout(COLLECTOR_TIMEOUT)),
     );
     let spec_owned = spec.clone();
+    let approved_hash = approved_hash.to_string();
     // Where it's enforced, the program's only way out is a proxy that goes
     // just to its declared hosts; the proxy stops when this run ends.
     let proxy = if crate::net_sandbox::enforced() {
@@ -2069,8 +2212,21 @@ async fn exec_approved(
         None => Egress::Open,
     };
     let raw = tokio::task::spawn_blocking(move || {
+        run.check_authority()?;
+        let copy = Arc::new(copy_collector(&dir, &spec_owned, &approved_hash)?);
+        let checked_copy = copy.clone();
+        let checked_spec = spec_owned.clone();
+        let run = run.guarded(Arc::new(move || {
+            if approval_hash(checked_copy.path(), &checked_spec)
+                .is_ok_and(|hash| hash == approved_hash)
+            {
+                Ok(())
+            } else {
+                Err("the collector's approved copy changed during its run".into())
+            }
+        }));
         exec_collector(
-            &dir,
+            copy.path(),
             &spec_owned,
             &|k| std::env::var(k).ok(),
             &credentials,
@@ -2082,6 +2238,24 @@ async fn exec_approved(
     .await
     .map_err(|e| format!("collector task panicked: {e}"))??;
     Ok(raw)
+}
+
+/// Keep a private, bounded copy alive through execution and verify its
+/// complete approval hash before any of it runs. Helpers load from the copy.
+fn copy_collector(
+    directory: &Path,
+    spec: &CollectorSpec,
+    approved_hash: &str,
+) -> Result<tempfile::TempDir, String> {
+    let copy = tempfile::Builder::new()
+        .prefix("oxplow-collector-")
+        .tempdir()
+        .map_err(|e| format!("copying the collector to run: {e}"))?;
+    crate::approved_code::copy_directory(directory, copy.path()).map_err(|e| e.to_string())?;
+    if approval_hash(copy.path(), spec).map_err(|e| e.to_string())? != approved_hash {
+        return Err("collector changed while preparing its approved copy; review it again".into());
+    }
+    Ok(copy)
 }
 
 /// A run's output as the writes it makes, coerced to the declared columns.
@@ -2252,7 +2426,7 @@ pub(crate) mod tests {
 
     fn spec(entry: &str, env: &[&str]) -> CollectorSpec {
         let yaml = format!(
-            "- id: gh\n  runtime: exec\n  entry: {entry}\n  env: [{}]\n  entities:\n    - name: pr\n      key: number\n      columns: {{ number: int, title: text, score: real, draft: bool, opened_at: time }}\n",
+            "- id: gh\n  runtime: exec\n  execution: broader\n  entry: {entry}\n  env: [{}]\n  entities:\n    - name: pr\n      key: number\n      columns: {{ number: int, title: text, score: real, draft: bool, opened_at: time }}\n",
             env.join(", ")
         );
         let (s, e) = parse_collectors("my-gh", &serde_yaml::from_str(&yaml).unwrap(), &|_| true);
@@ -2453,7 +2627,7 @@ pub(crate) mod tests {
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: my-gh\nintent:\n  purpose: test\ncollectors:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int, title: text } }\n",
+            "manifest: 2\nname: my-gh\nintent:\n  purpose: test\ncollectors:\n  - id: gh\n    runtime: exec\n    execution: broader\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int, title: text } }\n",
         )
         .unwrap();
         script(
@@ -2641,7 +2815,7 @@ pub(crate) mod tests {
             std::fs::create_dir_all(&ext).unwrap();
             std::fs::write(
                 ext.join("extension.yaml"),
-                format!("manifest: 2\nname: {name}\nintent:\n  purpose: test\ncollectors:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    credentials: [TOKEN]\n    entities:\n      - {{ name: row, key: id, columns: {{ id: int, token: text }} }}\n"),
+                format!("manifest: 2\nname: {name}\nintent:\n  purpose: test\ncollectors:\n  - id: s\n    runtime: exec\n    execution: broader\n    entry: sync.sh\n    credentials: [TOKEN]\n    entities:\n      - {{ name: row, key: id, columns: {{ id: int, token: text }} }}\n"),
             )
             .unwrap();
             script(
@@ -3035,7 +3209,10 @@ pub(crate) mod tests {
                     "hot.star",
                     "def transform(input):\n    return {\"entities\": {\"hot\": [{\"ref\": r[\"ref\"], \"title\": r[\"title\"]} for r in input[\"rows\"] if r[\"priority\"] == \"high\"]}}\n",
                 ),
-                ("hot.jq", "{entities: {upper: [.rows[] | {ref, title: (.title | ascii_upcase)}]}}"),
+                (
+                    "hot.jq",
+                    "{entities: {upper: [.rows[] | {ref, title: (.title | ascii_upcase)}]}}",
+                ),
             ],
         );
         let db = task_db().await;
@@ -3217,7 +3394,7 @@ pub(crate) mod tests {
         extension(
             root.path(),
             "work",
-            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT ref, title, json_extract(native, '$.priority') AS priority FROM v_work_item WHERE state = 'todo'\"\n    entities:\n      - { name: hot, key: ref, columns: { ref: text, title: text } }\n  - id: sh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: raw, key: id, columns: { id: int } }\n",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT ref, title, json_extract(native, '$.priority') AS priority FROM v_work_item WHERE state = 'todo'\"\n    entities:\n      - { name: hot, key: ref, columns: { ref: text, title: text } }\n  - id: sh\n    runtime: exec\n    execution: broader\n    entry: sync.sh\n    entities:\n      - { name: raw, key: id, columns: { id: int } }\n",
             &[(
                 "hot.star",
                 "def transform(input):\n    return {\"entities\": {\"hot\": [{\"ref\": r[\"ref\"], \"title\": r[\"title\"]} for r in input[\"rows\"] if r[\"priority\"] == \"high\"]}}\n",
@@ -3287,7 +3464,7 @@ pub(crate) mod tests {
         extension(
             root.path(),
             "inc",
-            "manifest: 2\nname: inc\nintent:\n  purpose: test\ncollectors:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    sync: upsert\n    entities:\n      - { name: item, key: id, columns: { id: int, title: text } }\n      - { name: other, key: id, columns: { id: int } }\n",
+            "manifest: 2\nname: inc\nintent:\n  purpose: test\ncollectors:\n  - id: s\n    runtime: exec\n    execution: broader\n    entry: sync.sh\n    sync: upsert\n    entities:\n      - { name: item, key: id, columns: { id: int, title: text } }\n      - { name: other, key: id, columns: { id: int } }\n",
             &[],
         );
         let ext = root.path().join("oxplow/extensions/inc");
@@ -3419,7 +3596,7 @@ pub(crate) mod tests {
         extension(
             root.path(),
             "net",
-            "manifest: 2\nname: net\nintent:\n  purpose: test\ncollectors:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    network: [localhost]\n    entities:\n      - { name: r, key: id, columns: { id: int, declared: text, undeclared: text, direct: text } }\n",
+            "manifest: 2\nname: net\nintent:\n  purpose: test\ncollectors:\n  - id: s\n    runtime: exec\n    execution: broader\n    entry: sync.sh\n    network: [localhost]\n    entities:\n      - { name: r, key: id, columns: { id: int, declared: text, undeclared: text, direct: text } }\n",
             &[],
         );
         let ext = root.path().join("oxplow/extensions/net");
@@ -3528,7 +3705,7 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: my-gh\nintent:\n  purpose: test\ncollectors:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int } }\n",
+            "manifest: 2\nname: my-gh\nintent:\n  purpose: test\ncollectors:\n  - id: gh\n    runtime: exec\n    execution: broader\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int } }\n",
         )
         .unwrap();
         script(

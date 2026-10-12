@@ -123,6 +123,25 @@ impl AdvisoryRunner {
         on: AdvisoryOn,
         scope: &AdvisoryScope,
     ) -> Vec<AdvisoryHit> {
+        match layer
+            .read_generation(self.run_in_generation(layer, extensions, on, scope))
+            .await
+        {
+            Ok(hits) => hits,
+            Err(error) => {
+                tracing::warn!(%error, "advisory generation read failed");
+                Vec::new()
+            }
+        }
+    }
+
+    async fn run_in_generation(
+        &self,
+        layer: &crate::sql_gateway::SqlGateway,
+        extensions: &[Extension],
+        on: AdvisoryOn,
+        scope: &AdvisoryScope,
+    ) -> Vec<AdvisoryHit> {
         let mut hits = Vec::new();
         let mut evaluated = Vec::new();
         // Marks to record once every query has run, so a failure partway
@@ -265,6 +284,25 @@ pub struct AdvisoryDeps {
 /// For an event (`cause`), the turn and effort are the event's anchors;
 /// for a prompt, the effort is the thread's open one and there's no turn.
 pub async fn for_thread(
+    svc: &AdvisoryDeps,
+    thread: &oxplow_domain::ThreadId,
+    on: AdvisoryOn,
+    cause: Option<&crate::collection::RunCause>,
+) -> Vec<AdvisoryHit> {
+    match svc
+        .sql
+        .read_generation(for_thread_in_generation(svc, thread, on, cause))
+        .await
+    {
+        Ok(hits) => hits,
+        Err(error) => {
+            tracing::warn!(%error, "thread advisory generation read failed");
+            Vec::new()
+        }
+    }
+}
+
+async fn for_thread_in_generation(
     svc: &AdvisoryDeps,
     thread: &oxplow_domain::ThreadId,
     on: AdvisoryOn,

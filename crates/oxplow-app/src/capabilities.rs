@@ -21,7 +21,8 @@
 //! writes what it holds, with the active row and why, to
 //! `v_capability_provider`.
 
-use std::sync::RwLock;
+use std::collections::BTreeSet;
+use std::sync::{Arc, OnceLock, RwLock};
 
 use oxplow_config::OxplowConfig;
 use oxplow_db::capability_store::{list_tx, reset_tx};
@@ -417,7 +418,9 @@ impl Active {
             .iter()
             // A scope is always there; what may use it is a
             // separate question (`.context/commands.md`).
-            .filter(|need| oxplow_domain::scope::scope(need).is_none())
+            .filter(|need| {
+                oxplow_domain::scope::scope(oxplow_domain::service::need_scope(need)).is_none()
+            })
             .filter(|need| {
                 let (id, feature) = match need.split_once('.') {
                     Some((id, f)) => (id, Some(f)),
@@ -456,14 +459,126 @@ pub fn needs_message(unmet: &[String]) -> String {
     )
 }
 
-/// Every implementation oxplow has now: core's, the ones extensions
-/// declare, and running provider instances'.
+#[derive(Clone)]
+struct RegistryState {
+    core: Vec<Implementation>,
+    declared: Vec<Implementation>,
+    external: Vec<Implementation>,
+    /// Config choices committed with this published registry generation.
+    published_config: Option<Arc<OxplowConfig>>,
+    revision: Arc<()>,
+}
+
+impl RegistryState {
+    fn implementations(&self) -> Vec<Implementation> {
+        let mut all = self.core.clone();
+        all.extend(self.declared.iter().cloned());
+        all.extend(self.external.iter().cloned());
+        all
+    }
+}
+
+/// Every implementation in one registry snapshot: core, declarations and
+/// running instances. A read never resolves features from another snapshot.
 pub struct CapabilityRegistry {
-    core: RwLock<Vec<Implementation>>,
-    declared: RwLock<Vec<Implementation>>,
-    external: RwLock<Vec<Implementation>>,
+    state: RwLock<RegistryState>,
     /// What `capability.switched` is validated against.
     vocabulary: VocabularyHandle,
+    /// Optional runtime owner filter. This does not change the frozen
+    /// registry state or candidate preparation.
+    catalog: OnceLock<(
+        Arc<crate::extension_catalog::ExtensionCatalog>,
+        std::path::PathBuf,
+    )>,
+}
+
+/// Frozen capability declarations, selections and database rows for one catalog
+/// candidate. Existing external instances are captured, never started here.
+#[derive(Clone)]
+pub struct PreparedCapabilities {
+    generation: String,
+    base: Arc<()>,
+    candidate: RegistryState,
+    active: Active,
+    work_item_ids: Option<(String, String)>,
+    rows: Vec<CapabilityProvider>,
+    resolved: Vec<(&'static str, Resolved)>,
+}
+
+/// A checked replacement holding the registry against competing writers.
+/// Created and consumed on the publication worker; no lock crosses an await.
+pub(crate) struct CapabilityReservation<'a> {
+    state: std::sync::RwLockWriteGuard<'a, RegistryState>,
+    candidate: Option<RegistryState>,
+}
+
+impl CapabilityReservation<'_> {
+    /// The caller has committed the matching database candidate and excluded
+    /// readers. All rejection checks already happened during reservation.
+    pub(crate) fn publish(mut self) {
+        self.apply();
+    }
+
+    /// Retain the writer through the remaining maps and follow policies.
+    pub(crate) fn apply(&mut self) {
+        *self.state = self
+            .candidate
+            .take()
+            .expect("capability reservation applied once");
+    }
+}
+
+impl PreparedCapabilities {
+    pub fn generation(&self) -> &str {
+        &self.generation
+    }
+
+    pub fn active(&self) -> &Active {
+        &self.active
+    }
+
+    pub fn work_item_ids(&self) -> Option<(String, String)> {
+        self.work_item_ids.clone()
+    }
+
+    pub(crate) fn selected(&self, capability: &str) -> Option<&str> {
+        self.resolved
+            .iter()
+            .find(|(name, _)| *name == capability)
+            .map(|(_, selection)| selection.id.as_str())
+    }
+
+    /// Whether the supplied host config still resolves exactly the captured
+    /// selections, including fallback choices and their provenance.
+    pub fn matches_config(&self, config: &OxplowConfig) -> bool {
+        let (rows, resolved) =
+            CapabilityRegistry::rows_from(&self.candidate.implementations(), config);
+        rows == self.rows && resolved == self.resolved
+    }
+
+    /// Restate candidate rows and switch events in the caller's transaction.
+    /// No runtime adapters, registry swaps or external execution happen here.
+    /// Storage/rollback failures require aborting the outer transaction.
+    pub fn restate_tx(
+        &self,
+        tx: &rusqlite::Transaction<'_>,
+        vocabulary: &oxplow_domain::vocabulary::Vocabulary,
+    ) -> Result<(), DomainError> {
+        tx.execute_batch("SAVEPOINT candidate_extension_capabilities")
+            .map_err(oxplow_db::map_sql_err)?;
+        match restate(tx, vocabulary, &self.rows, &self.resolved) {
+            Ok(()) => tx
+                .execute_batch("RELEASE candidate_extension_capabilities")
+                .map_err(oxplow_db::map_sql_err),
+            Err(error) => {
+                tx.execute_batch(
+                    "ROLLBACK TO candidate_extension_capabilities; RELEASE candidate_extension_capabilities",
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                Err(error)
+            }
+        }
+    }
 }
 
 impl CapabilityRegistry {
@@ -499,47 +614,205 @@ impl CapabilityRegistry {
                 }),
         );
         Self {
-            core: RwLock::new(core),
-            declared: RwLock::default(),
-            external: RwLock::default(),
+            state: RwLock::new(RegistryState {
+                core,
+                declared: Vec::new(),
+                external: Vec::new(),
+                published_config: None,
+                revision: Arc::new(()),
+            }),
             vocabulary,
+            catalog: OnceLock::new(),
         }
     }
 
     /// Replace what extensions declare (on boot, and when the catalog
     /// changes).
     pub fn set_declared(&self, declared: Vec<Implementation>) {
-        *self.declared.write().unwrap_or_else(|e| e.into_inner()) = declared;
+        let mut state = self.state.write().unwrap_or_else(|e| e.into_inner());
+        state.declared = declared;
+        state.revision = Arc::new(());
     }
 
     /// A provider instance started (`true`) or stopped.
     pub fn set_external(&self, implementation: Implementation, running: bool) {
-        let mut external = self.external.write().unwrap_or_else(|e| e.into_inner());
-        external
+        let mut state = self.state.write().unwrap_or_else(|e| e.into_inner());
+        state
+            .external
             .retain(|i| !(i.capability == implementation.capability && i.id == implementation.id));
         if running {
-            external.push(implementation);
+            state.external.push(implementation);
+        }
+        state.revision = Arc::new(());
+    }
+
+    /// Prepare declarations and selections from one catalog and one registry
+    /// snapshot. Preparation neither registers adapters nor publishes rows.
+    pub fn prepare(
+        &self,
+        snapshot: &crate::extension_catalog::CatalogSnapshot,
+        config: &OxplowConfig,
+    ) -> Result<PreparedCapabilities, crate::vocabulary_reactor::VocabularyErrors> {
+        self.prepare_candidate(snapshot, config, None)
+    }
+
+    /// Prepare declarations and selections using a host-staged external
+    /// capability map instead of the currently published instances.
+    pub fn prepare_with_external(
+        &self,
+        snapshot: &crate::extension_catalog::CatalogSnapshot,
+        config: &OxplowConfig,
+        external: Vec<Implementation>,
+    ) -> Result<PreparedCapabilities, crate::vocabulary_reactor::VocabularyErrors> {
+        self.prepare_candidate(snapshot, config, Some(external))
+    }
+
+    fn prepare_candidate(
+        &self,
+        snapshot: &crate::extension_catalog::CatalogSnapshot,
+        config: &OxplowConfig,
+        external: Option<Vec<Implementation>>,
+    ) -> Result<PreparedCapabilities, crate::vocabulary_reactor::VocabularyErrors> {
+        let errors: crate::vocabulary_reactor::VocabularyErrors = snapshot
+            .extensions()
+            .iter()
+            .filter(|extension| extension.enabled && !extension.errors.is_empty())
+            .map(|extension| (extension.name.clone(), extension.errors.clone()))
+            .collect();
+        if !errors.is_empty() {
+            return Err(errors);
+        }
+        if let Some(external) = &external {
+            let mut errors = Vec::new();
+            let mut identities = BTreeSet::new();
+            for implementation in external {
+                if implementation.source != Source::External {
+                    errors.push("external capability metadata must use the external source".into());
+                }
+                if capability::spec(&implementation.capability).is_none() {
+                    errors.push("external capability metadata names an unknown capability".into());
+                }
+                if implementation.id.is_empty()
+                    || implementation.id.len() > 256
+                    || !implementation
+                        .id
+                        .bytes()
+                        .all(|byte| byte.is_ascii_graphic())
+                {
+                    errors.push("external capability metadata has an invalid id".into());
+                }
+                if !identities.insert((
+                    implementation.capability.as_str(),
+                    implementation.id.as_str(),
+                )) {
+                    errors.push("external capability metadata has a duplicate identity".into());
+                }
+            }
+            if !errors.is_empty() {
+                return Err(crate::vocabulary_reactor::VocabularyErrors::from([(
+                    "<host>".to_string(),
+                    errors,
+                )]));
+            }
+        }
+        let mut candidate = self.state.read().unwrap_or_else(|e| e.into_inner()).clone();
+        let base = candidate.revision.clone();
+        if let Some(external) = external {
+            candidate.external = external;
+        }
+        candidate.declared = declared_by(snapshot.extensions());
+        candidate.published_config = Some(Arc::new(config.clone()));
+        candidate.revision = Arc::new(());
+        let all = candidate.implementations();
+        let (rows, resolved) = Self::rows_from(&all, config);
+        Ok(PreparedCapabilities {
+            generation: snapshot.generation().to_string(),
+            base,
+            candidate,
+            active: Self::snapshot_from(&all, config),
+            work_item_ids: Self::work_item_ids_from(&all, config),
+            rows,
+            resolved,
+        })
+    }
+
+    /// Swap a prepared registry only if no intervening declaration/instance
+    /// mutation occurred and the supplied config still resolves the captured
+    /// choices. The activation owner must hold its config/catalog publication
+    /// boundary and coordinate the database; this method makes no outer commit.
+    pub fn publish_prepared(
+        &self,
+        prepared: PreparedCapabilities,
+        config: &OxplowConfig,
+    ) -> Result<(), oxplow_domain::CommandError> {
+        self.reserve_prepared(&prepared, config)?.publish();
+        Ok(())
+    }
+
+    pub(crate) fn reserve_prepared(
+        &self,
+        prepared: &PreparedCapabilities,
+        config: &OxplowConfig,
+    ) -> Result<CapabilityReservation<'_>, oxplow_domain::CommandError> {
+        if !prepared.matches_config(config) {
+            return Err(oxplow_domain::CommandError::Unavailable {
+                message: "capability choices changed while their replacement was staged".into(),
+                retry_after_ms: None,
+            });
+        }
+        let state = self.state.write().unwrap_or_else(|e| e.into_inner());
+        if !Arc::ptr_eq(&state.revision, &prepared.base) {
+            return Err(oxplow_domain::CommandError::Unavailable {
+                message: "the capability registry changed while its replacement was staged".into(),
+                retry_after_ms: None,
+            });
+        }
+        Ok(CapabilityReservation {
+            state,
+            candidate: Some(prepared.candidate.clone()),
+        })
+    }
+
+    /// Bind live reads to one project's active catalog. Re-adopting the same
+    /// catalog/root is harmless; sharing this registry across projects is not.
+    pub(crate) fn adopt_catalog(
+        &self,
+        catalog: Arc<crate::extension_catalog::ExtensionCatalog>,
+        root: std::path::PathBuf,
+    ) -> Result<(), DomainError> {
+        let (adopted_catalog, adopted_root) =
+            self.catalog.get_or_init(|| (catalog.clone(), root.clone()));
+        if Arc::ptr_eq(adopted_catalog, &catalog) && *adopted_root == root {
+            Ok(())
+        } else {
+            Err(DomainError::Invalid(
+                "capability registry already belongs to another extension catalog".into(),
+            ))
         }
     }
 
-    /// Every implementation, core's first.
+    /// Every currently available implementation, core's first. After catalog
+    /// adoption, extension-owned implementations disappear immediately when
+    /// their active owner is disabled or removed; the frozen map is unchanged.
     pub fn implementations(&self) -> Vec<Implementation> {
-        let mut all = self.core.read().unwrap_or_else(|e| e.into_inner()).clone();
-        all.extend(
-            self.declared
-                .read()
-                .unwrap_or_else(|e| e.into_inner())
-                .iter()
-                .cloned(),
-        );
-        all.extend(
-            self.external
-                .read()
-                .unwrap_or_else(|e| e.into_inner())
-                .iter()
-                .cloned(),
-        );
-        all
+        let mut implementations = self
+            .state
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .implementations();
+        let Some((catalog, root)) = self.catalog.get() else {
+            return implementations;
+        };
+        let snapshot = catalog.runtime_snapshot(root);
+        implementations.retain(|implementation| {
+            implementation.extension.as_ref().is_none_or(|owner| {
+                snapshot
+                    .extensions()
+                    .iter()
+                    .any(|extension| extension.name == *owner && extension.enabled)
+            })
+        });
+        implementations
     }
 
     /// `capability`'s implementation `id`, if available.
@@ -551,6 +824,11 @@ impl CapabilityRegistry {
 
     /// `capability`'s active implementation under `config`, and why.
     pub fn resolve(&self, config: &OxplowConfig, capability: &str) -> Resolved {
+        let config = self.read_effective_config(config);
+        Self::resolve_from(&self.implementations(), &config, capability)
+    }
+
+    fn resolve_from(all: &[Implementation], config: &OxplowConfig, capability: &str) -> Resolved {
         let Some(spec) = capability::spec(capability) else {
             return Resolved {
                 id: NONE.into(),
@@ -576,7 +854,10 @@ impl CapabilityRegistry {
         } else {
             (spec.default.to_string(), ChosenBy::Default)
         };
-        if self.get(capability, &wanted).is_some() {
+        if all
+            .iter()
+            .any(|i| i.capability == capability && i.id == wanted)
+        {
             return Resolved {
                 id: wanted,
                 chosen_by,
@@ -597,8 +878,12 @@ impl CapabilityRegistry {
 
     /// What's active under `config`, for checking needs.
     pub fn snapshot(&self, config: &OxplowConfig) -> Active {
+        let config = self.read_effective_config(config);
+        Self::snapshot_from(&self.implementations(), &config)
+    }
+
+    fn snapshot_from(all: &[Implementation], config: &OxplowConfig) -> Active {
         let mut by_capability = std::collections::BTreeMap::new();
-        let all = self.implementations();
         for spec in capability::CAPABILITIES {
             if spec.many {
                 // Met while any implementation is declared; a feature while
@@ -622,9 +907,10 @@ impl CapabilityRegistry {
                 by_capability.insert(spec.id.to_string(), (spec.default.to_string(), features));
                 continue;
             }
-            let id = self.active(config, spec.id);
-            let features = self
-                .get(spec.id, &id)
+            let id = Self::resolve_from(all, config, spec.id).id;
+            let features = all
+                .iter()
+                .find(|i| i.capability == spec.id && i.id == id)
                 .and_then(|i| i.features.as_object().cloned())
                 .map(|m| {
                     m.into_iter()
@@ -637,11 +923,9 @@ impl CapabilityRegistry {
         }
         // What a running provider instance owns — its command namespace —
         // kept from offering unless it's the active one.
-        let hidden_commands = self
-            .external
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
+        let hidden_commands = all
             .iter()
+            .filter(|i| matches!(i.source, Source::External))
             .filter(|i| {
                 !by_capability
                     .get(&i.capability)
@@ -664,8 +948,35 @@ impl CapabilityRegistry {
     /// The active work list's id recognizer under `config`: its id and
     /// declared `id_pattern`, if it declares one (none doesn't).
     pub fn work_item_ids(&self, config: &OxplowConfig) -> Option<(String, String)> {
-        let id = self.active(config, "work_items");
-        let pattern = self.get("work_items", &id)?.id_pattern?;
+        let config = self.read_effective_config(config);
+        Self::work_item_ids_from(&self.implementations(), &config)
+    }
+
+    fn read_effective_config(&self, fallback: &OxplowConfig) -> Arc<OxplowConfig> {
+        if self.catalog.get().is_some() {
+            if let Some(config) = self
+                .state
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .published_config
+                .clone()
+            {
+                return config;
+            }
+        }
+        Arc::new(fallback.clone())
+    }
+
+    fn work_item_ids_from(
+        all: &[Implementation],
+        config: &OxplowConfig,
+    ) -> Option<(String, String)> {
+        let id = Self::resolve_from(all, config, "work_items").id;
+        let pattern = all
+            .iter()
+            .find(|i| i.capability == "work_items" && i.id == id)?
+            .id_pattern
+            .clone()?;
         Some((id, pattern))
     }
 
@@ -711,11 +1022,17 @@ impl CapabilityRegistry {
         &self,
         config: &OxplowConfig,
     ) -> (Vec<CapabilityProvider>, Vec<(&'static str, Resolved)>) {
-        let all = self.implementations();
+        Self::rows_from(&self.implementations(), config)
+    }
+
+    fn rows_from(
+        all: &[Implementation],
+        config: &OxplowConfig,
+    ) -> (Vec<CapabilityProvider>, Vec<(&'static str, Resolved)>) {
         let mut rows: Vec<CapabilityProvider> = Vec::new();
         let mut now = Vec::new();
         for spec in capability::CAPABILITIES {
-            let resolved = self.resolve(config, spec.id);
+            let resolved = Self::resolve_from(all, config, spec.id);
             for i in all.iter().filter(|i| i.capability == spec.id) {
                 // Many serve at once: every declared one is active.
                 let active = spec.many || i.id == resolved.id;
@@ -949,7 +1266,9 @@ impl crate::event_pump::AsyncEventConsumer for AgentTextRefresh {
         if let Some(svc) = self.services.upgrade() {
             refresh_agent_text(&svc).await;
             // The vocabulary reads the active list's ids.
-            svc.vocabulary_service.sync().await?;
+            if svc.capabilities.catalog.get().is_none() {
+                svc.vocabulary_service.sync().await?;
+            }
         }
         Ok(())
     }

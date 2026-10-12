@@ -60,6 +60,12 @@ pub fn valid_local(kind: ContributionKind, local: &str) -> bool {
         })
 }
 
+/// An implementation's local id: it is chosen by its capability and id,
+/// so one extension may implement two capabilities under one id.
+pub fn implementation_local(capability: &str, id: &str) -> String {
+    format!("{capability}.{id}")
+}
+
 /// Every kind of contribution a manifest can declare.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, specta::Type,
@@ -74,6 +80,7 @@ pub enum ContributionKind {
     EventType,
     RefKind,
     Command,
+    Job,
     Effect,
     Advisory,
     Skill,
@@ -214,6 +221,15 @@ pub const KINDS: &[KindSpec] = &[
         false,
     ),
     spec(
+        ContributionKind::Job,
+        "jobs",
+        "Job",
+        "durable host operations scheduled by an extension",
+        Stable,
+        false,
+        false,
+    ),
+    spec(
         ContributionKind::Effect,
         "effects",
         "Effect",
@@ -246,7 +262,7 @@ pub const KINDS: &[KindSpec] = &[
         "Implementation",
         "an implementation of a capability: a built-in, or an AI provider or effort policy written as a script",
         Stable,
-        false,
+        true,
         false,
     ),
     spec(
@@ -347,6 +363,7 @@ impl ContributionKind {
             ContributionKind::EventType => "event_type",
             ContributionKind::RefKind => "ref_kind",
             ContributionKind::Command => "command",
+            ContributionKind::Job => "job",
             ContributionKind::Effect => "effect",
             ContributionKind::Advisory => "advisory",
             ContributionKind::Skill => "skill",

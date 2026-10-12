@@ -129,6 +129,8 @@ impl EventSchemaRegistry {
         let mut r = Self::new();
         r.register::<CommandExecutedAtV1>()
             .expect("core type registers");
+        r.register::<CommandExecutedAtV2>()
+            .expect("core type registers");
         r.register::<CommandExecuted>()
             .expect("core type registers");
         r.register::<CapabilitySwitched>()
@@ -230,6 +232,8 @@ impl EventSchemaRegistry {
         r.register::<ContributionEnabled>()
             .expect("core type registers");
         r.register::<ContributionDisabled>()
+            .expect("core type registers");
+        r.register::<ContributionJobCompleted>()
             .expect("core type registers");
         r.register::<LensShown>().expect("core type registers");
         r.register::<LensKeptAtV1>().expect("core type registers");
@@ -465,6 +469,27 @@ impl Envelope {
 // Core types, v1
 // ---------------------------------------------------------------------------
 
+/// A fenced job completion. Result/request values remain private job data;
+/// consumers read them through their contribution's authorized job service.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ContributionJobCompletedV1 {
+    pub job_id: String,
+    pub contribution: String,
+    pub version: Option<u32>,
+    pub run_id: String,
+    pub attempt: u32,
+    pub fence: u64,
+    pub outcome: CommandOutcome,
+}
+
+pub struct ContributionJobCompleted;
+impl EventType for ContributionJobCompleted {
+    const TYPE: &'static str = "contribution.job.completed";
+    const V: u32 = 1;
+    type Payload = ContributionJobCompletedV1;
+}
+
 /// Who ran a command (`.context/target-architecture.md` §7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, specta::Type)]
 #[serde(rename_all = "snake_case")]
@@ -475,6 +500,39 @@ pub enum ActorKind {
     System,
     /// An extension's effect (P8.D8).
     Effect,
+    /// A durable host-managed extension job.
+    Job,
+}
+
+/// Who ran a command (`.context/target-architecture.md` §7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, specta::Type)]
+#[serde(rename_all = "snake_case")]
+#[schemars(rename = "ActorKind")]
+pub enum ActorKindV2 {
+    Human,
+    Agent,
+    Lens,
+    System,
+    /// An extension's effect (P8.D8).
+    Effect,
+}
+
+impl TryFrom<ActorKind> for ActorKindV2 {
+    type Error = DomainError;
+    fn try_from(kind: ActorKind) -> Result<Self, Self::Error> {
+        Ok(match kind {
+            ActorKind::Human => Self::Human,
+            ActorKind::Agent => Self::Agent,
+            ActorKind::Lens => Self::Lens,
+            ActorKind::System => Self::System,
+            ActorKind::Effect => Self::Effect,
+            ActorKind::Job => {
+                return Err(DomainError::Invalid(
+                    "a job cannot emit a command proposal".into(),
+                ))
+            }
+        })
+    }
 }
 
 // The kinds `command.executed@1` and `command.proposed@1` were published
@@ -532,6 +590,29 @@ impl EventType for CommandExecutedAtV1 {
 pub struct CommandExecutedV2 {
     /// The command's name (`oxplow.work_item.transition`, `oxplow.config.set`).
     pub command: String,
+    pub actor_kind: ActorKindV2,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor_id: Option<String>,
+    pub outcome: CommandOutcome,
+    /// The `command_audit` row, which holds the input and the inverse.
+    pub audit_id: i64,
+    /// Whether an inverse was recorded, i.e. `commands.undo` can apply.
+    pub undoable: bool,
+}
+
+pub struct CommandExecutedAtV2;
+impl EventType for CommandExecutedAtV2 {
+    const TYPE: &'static str = "command.executed";
+    const V: u32 = 2;
+    type Payload = CommandExecutedV2;
+}
+
+/// Version 3 adds durable job attribution; earlier schemas stay frozen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CommandExecutedV3 {
+    /// The command's name (`oxplow.work_item.transition`, `oxplow.config.set`).
+    pub command: String,
     pub actor_kind: ActorKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub actor_id: Option<String>,
@@ -545,11 +626,11 @@ pub struct CommandExecutedV2 {
 pub struct CommandExecuted;
 impl EventType for CommandExecuted {
     const TYPE: &'static str = "command.executed";
-    const V: u32 = 2;
-    type Payload = CommandExecutedV2;
+    const V: u32 = 3;
+    type Payload = CommandExecutedV3;
     fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
         match from_v {
-            1 => Ok(payload),
+            1 | 2 => Ok(payload),
             _ => Err(DomainError::Invalid(format!(
                 "no upcast of command.executed from v{from_v}"
             ))),
@@ -596,7 +677,7 @@ pub struct CommandProposedV2 {
     pub proposal: String,
     /// The command's name (`oxplow.config.set`).
     pub command: String,
-    pub actor_kind: ActorKind,
+    pub actor_kind: ActorKindV2,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub actor_id: Option<String>,
     /// Whether the command is destructive.
@@ -2571,11 +2652,13 @@ mod tests {
                 ("command.declined", 1),
                 ("command.executed", 1),
                 ("command.executed", 2),
+                ("command.executed", 3),
                 ("command.proposed", 1),
                 ("command.proposed", 2),
                 ("config.changed", 2),
                 ("contribution.disabled", 1),
                 ("contribution.enabled", 1),
+                ("contribution.job.completed", 1),
                 ("effect.result", 1),
                 ("effect.result", 2),
                 ("effect.result", 3),

@@ -221,6 +221,18 @@ impl AsyncEventConsumer for EffectTriggers {
         let Some(svc) = self.services.upgrade() else {
             return Err(DomainError::Busy("services are shutting down".into()));
         };
+        svc.sql
+            .read_generation(async { self.handle_pinned_impl(&svc, event).await })
+            .await?
+    }
+}
+
+impl EffectTriggers {
+    async fn handle_pinned_impl(
+        &self,
+        svc: &Arc<Services>,
+        event: &StoredEvent,
+    ) -> Result<(), DomainError> {
         let health = crate::contribution_health::ContributionHealth::new(
             svc.db.clone(),
             svc.vocabulary.clone(),
@@ -240,7 +252,7 @@ impl AsyncEventConsumer for EffectTriggers {
             let hash = self.folder_hash(&load, &svc.layout.project_dir, &program);
             let approved = effects::is_approved(&svc.approvals, &program, hash.as_deref());
             let reacted = run_reaction(
-                &svc,
+                svc,
                 &ext,
                 &decl,
                 approved,
@@ -556,12 +568,18 @@ pub(crate) async fn run_reaction(
         None => run,
     };
     // What it may do: the scopes it declares, on the person's approval.
-    let run = run.authorized(crate::grants::authority(
-        &svc.approvals,
-        &format!("effect:{}", decl.name()),
-        approved,
-        crate::grants::script_request(&decl.needs),
-    ));
+    let run = run
+        .authorized(crate::grants::authority(
+            &svc.approvals,
+            &format!("effect:{}", decl.name()),
+            approved,
+            crate::grants::script_request(&decl.needs),
+        ))
+        .guarded(crate::exec_consent::script_gate(
+            svc.approvals.clone(),
+            svc.layout.project_dir.clone(),
+            crate::effects::effect_program(ext, decl),
+        ));
     let key = EffectRunKey {
         effect,
         event_id,
@@ -779,6 +797,15 @@ pub async fn auto_retry_due(
     svc: &Arc<Services>,
     now: oxplow_domain::Timestamp,
 ) -> Result<usize, DomainError> {
+    svc.sql
+        .read_generation(async { auto_retry_due_pinned_impl(svc, now).await })
+        .await?
+}
+
+async fn auto_retry_due_pinned_impl(
+    svc: &Arc<Services>,
+    now: oxplow_domain::Timestamp,
+) -> Result<usize, DomainError> {
     let now_ms = now.unix_ms();
     let now = now.to_string();
     let due = svc
@@ -979,6 +1006,7 @@ pub(crate) async fn run_script(
         .map_err(|e| format!("its event: {e}"))?
         .to_json();
     let (script, needs, layer) = (decl.script.clone(), decl.needs.clone(), svc.sql.clone());
+    let run = svc.sql.pin_run(run).await.map_err(|e| e.to_string())?;
     // The script is the run's pure part: what it calls is counted apart,
     // then added to the run it composes.
     let composing = run.child(None, Mode::Pure);
@@ -987,8 +1015,11 @@ pub(crate) async fn run_script(
     let given = crate::services::prepare(&composing, &script, &needs, &sources).await?;
     let runtime = tokio::runtime::Handle::current();
     tokio::task::spawn_blocking(move || {
-        let read = Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(layer.run(q)));
-        let mut calls = crate::scope_calls::Calls::new(&composing, &needs, read);
+        let read = Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(layer.run_in(&composing, q)));
+        let mut calls = crate::scope_calls::Calls::new(&composing, &needs, read)
+            .with_state_source(layer.state_source(), &runtime)
+            .with_jobs_source(layer.jobs_source(), &runtime)
+            .with_configuration_source(layer.configuration_source(), &runtime);
         let reaction = effects::run_script(&script, event, given, &mut calls)?;
         Ok((reaction, composing.trace().summary()))
     })
@@ -1002,7 +1033,7 @@ mod tests {
     use crate::exec_consent::ProgramKind;
     use oxplow_domain::events::schema::EventType as _;
     use oxplow_domain::events::schema::{
-        ActorKind, CommandExecuted, CommandExecutedV2, CommandOutcome, WorkItemEdited,
+        ActorKind, CommandExecuted, CommandExecutedV3, CommandOutcome, WorkItemEdited,
         WorkItemStateChanged, WorkItemStateChangedV1,
     };
     use oxplow_domain::work_items::CanonicalState;
@@ -1688,7 +1719,7 @@ mod tests {
         for i in 0..MAX_CHAIN {
             let mut executed = Envelope::typed::<CommandExecuted>(
                 format!("effect:other/e{i}"),
-                &CommandExecutedV2 {
+                &CommandExecutedV3 {
                     command: "oxplow.command.sequence".into(),
                     actor_kind: ActorKind::Effect,
                     actor_id: Some(format!("other/e{i}")),
@@ -1959,7 +1990,7 @@ mod tests {
         for i in 0..MAX_CHAIN {
             let mut executed = Envelope::typed::<CommandExecuted>(
                 format!("effect:acme-pr/e{i}"),
-                &CommandExecutedV2 {
+                &CommandExecutedV3 {
                     command: "oxplow.command.sequence".into(),
                     actor_kind: ActorKind::Effect,
                     actor_id: Some(format!("acme-pr/e{i}")),

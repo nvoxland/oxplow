@@ -280,3 +280,16 @@ work, agent spawn returns INVALID.
   shell owns windows, daemons own projects). No remote directory browser.
 - External-URL tabs and the native menu/clipboard stay local to the
   shell in both modes.
+
+## Extension readiness at boot
+
+Shared boot orchestration returns a result. The daemon starts its control plane
+and serves requests only after the required bundled extension baseline commits.
+A failed baseline stops startup with a fixed diagnostic; a rejected full
+extension candidate retains the repairable baseline and exposes candidate
+diagnostics through the extension listing. Later failures retain the last
+coherent generation.
+
+Daemon termination signals the job scheduler before provider shutdown/process
+exit. Dropping a worker propagates cancellation; expired durable leases are
+recovered on restart without claiming the remote computation stopped.

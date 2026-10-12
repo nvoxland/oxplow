@@ -16,12 +16,12 @@ use serde_json::Value;
 
 /// The scopes a script — a command's handler, an effect, a provider's
 /// `host/call` — can call: what [`Calls::serve`] answers.
-pub const CALLABLE: &[&str] = &["sql.read"];
+pub const CALLABLE: &[&str] = oxplow_domain::service::CALLABLE;
 
 /// A script's need of scope `id`: one it can call, or why not — the one
 /// rule a command's `entry:` and an effect meet at load.
 pub fn check_callable(id: &str) -> Result<(), String> {
-    if CALLABLE.contains(&id) {
+    if CALLABLE.contains(&oxplow_domain::service::need_scope(id)) {
         return Ok(());
     }
     let what = if oxplow_domain::scope::scope(id).is_some() {
@@ -62,7 +62,7 @@ pub fn check_script_need(id: &str) -> Result<(), String> {
 /// while it reads.
 pub fn check_command_need(id: &str) -> Result<(), String> {
     check_script_need(id)?;
-    if id == "tree.read" {
+    if oxplow_domain::service::need_scope(id) == "tree.read" {
         return Err(
             "`needs`: `tree.read` can't be used here: a command's script composes inside its \
              transaction, so it reads the semantic layer (`sql.read`) — an effect or a \
@@ -81,11 +81,29 @@ pub const SQL_READ_ROW_CAP: usize = 1_000;
 pub type Reader<'a> =
     dyn FnMut(oxplow_db::SqlQuery) -> Result<oxplow_db::SqlQueryResult, DomainError> + 'a;
 
+pub type StateReader<'a> = dyn FnMut(
+        crate::extension_state::ReadInput,
+    ) -> Result<
+        Option<oxplow_domain::extension_state::Snapshot>,
+        crate::extension_state::StateHostError,
+    > + 'a;
+
+pub type ConfigurationReader<'a> = dyn FnMut() -> Result<
+        crate::extension_configuration::ConfigurationSnapshot,
+        crate::extension_configuration::ConfigurationError,
+    > + 'a;
+
+pub type JobReader<'a> =
+    dyn FnMut(crate::extension_jobs::JobInput) -> Result<Value, oxplow_domain::CommandError> + 'a;
+
 /// One run's scope calls, counted on its context's trace.
 pub struct Calls<'a> {
     needs: &'a [String],
     run: &'a RunContext,
     read: Box<Reader<'a>>,
+    state: Option<Box<StateReader<'a>>>,
+    configuration: Option<Box<ConfigurationReader<'a>>>,
+    jobs: Option<Box<JobReader<'a>>>,
     /// Answers standing in for a scope's own, in call order (an
     /// example's); a scope without any is served for real.
     answers: BTreeMap<String, VecDeque<Value>>,
@@ -99,12 +117,84 @@ impl<'a> Calls<'a> {
             needs,
             run,
             read,
+            state: None,
+            configuration: None,
+            jobs: None,
             answers: BTreeMap::new(),
             busy: None,
         }
     }
 
+    /// A composer reads on its existing connection, without nested DB dispatch.
+    pub fn with_state_reader(mut self, state: Box<StateReader<'a>>) -> Self {
+        self.state = Some(state);
+        self
+    }
+
+    /// A script outside a database transaction reads a fresh owned snapshot for
+    /// each call. The worker waits here while the DB owns only the read itself.
+    pub fn with_state_source(
+        self,
+        source: Option<crate::extension_state::StateSource>,
+        runtime: &tokio::runtime::Handle,
+    ) -> Self {
+        match source {
+            Some(source) => {
+                let (run, runtime) = (self.run.clone(), runtime.clone());
+                self.with_state_reader(Box::new(move |input| {
+                    runtime.block_on(source.snapshot(run.clone(), input))
+                }))
+            }
+            None => self,
+        }
+    }
+
+    pub fn with_configuration_reader(
+        mut self,
+        configuration: Box<ConfigurationReader<'a>>,
+    ) -> Self {
+        self.configuration = Some(configuration);
+        self
+    }
+
+    pub fn with_configuration_source(
+        self,
+        source: Option<crate::extension_configuration::ConfigurationSource>,
+        runtime: &tokio::runtime::Handle,
+    ) -> Self {
+        match source {
+            Some(source) => {
+                let (run, runtime) = (self.run.clone(), runtime.clone());
+                self.with_configuration_reader(Box::new(move || {
+                    runtime.block_on(source.snapshot(run.clone()))
+                }))
+            }
+            None => self,
+        }
+    }
+
     /// These calls answered from `answers` (per scope, in call order).
+    pub fn with_jobs_reader(mut self, jobs: Box<JobReader<'a>>) -> Self {
+        self.jobs = Some(jobs);
+        self
+    }
+
+    pub fn with_jobs_source(
+        self,
+        source: Option<std::sync::Arc<crate::extension_jobs::ExtensionJobs>>,
+        runtime: &tokio::runtime::Handle,
+    ) -> Self {
+        match source {
+            Some(source) => {
+                let (run, runtime) = (self.run.clone(), runtime.clone());
+                self.with_jobs_reader(Box::new(move |input| {
+                    runtime.block_on(source.snapshot_fresh(run.clone(), input))
+                }))
+            }
+            None => self,
+        }
+    }
+
     pub fn with_answers(mut self, answers: &BTreeMap<String, Vec<Value>>) -> Self {
         self.answers = answers
             .iter()
@@ -118,11 +208,12 @@ impl<'a> Calls<'a> {
         if oxplow_domain::scope::scope(id).is_none() {
             return Err(format!("no scope `{id}`"));
         }
+        check_callable(id)?;
         // Decided and recorded on the run either way.
         let decision = self
             .run
             .decide(oxplow_domain::grant::Need::Scope(id.to_string()));
-        if !self.needs.iter().any(|n| n == id) {
+        if !oxplow_domain::service::declares(self.needs, id) {
             return Err(format!(
                 "`{id}` isn't in the command's `needs` — declare it to call it"
             ));
@@ -130,8 +221,34 @@ impl<'a> Calls<'a> {
         if let oxplow_domain::grant::Decision::Denied(why) = decision {
             return Err(format!("`{id}`: {why}"));
         }
-        self.run.trace().count(id);
-        self.run.used_scope(id);
+        // State request shape is checked even when an example supplies answers.
+        // Fixtures simulate reads; production namespace identity is still
+        // derived exclusively by StateHost from the captured run.
+        let state_input = if id == "state.read" {
+            Some(
+                crate::extension_state::ReadInput::deserialize(&args).map_err(|_| {
+                    "`state.read` takes { scope: project|personal, area: state|cache }".to_string()
+                })?,
+            )
+        } else {
+            None
+        };
+        if id == "extension_config.read" {
+            crate::extension_configuration::ReadInput::deserialize(&args)
+                .map_err(|_| "`extension_config.read` takes {}".to_string())?;
+        }
+        let job_input = if id == "jobs.read" {
+            Some(
+                serde_json::from_value::<crate::extension_jobs::JobInput>(args.clone())
+                    .map_err(|_| "jobs.read takes {id}".to_string())?,
+            )
+        } else {
+            None
+        };
+        if !matches!(id, "state.read" | "extension_config.read") || self.answers.contains_key(id) {
+            self.run.trace().count(id);
+            self.run.used_scope(id);
+        }
         if let Some(answers) = self.answers.get_mut(id) {
             return answers
                 .pop_front()
@@ -139,7 +256,16 @@ impl<'a> Calls<'a> {
         }
         match id {
             "sql.read" => self.sql_read(args),
-            other => Err(check_callable(other).err().unwrap_or_default()),
+            "extension_config.read" => self.configuration_read(),
+            "state.read" => self.state_read(state_input.expect("parsed state request")),
+            "jobs.read" => self
+                .jobs
+                .as_mut()
+                .ok_or("jobs.read is unavailable where this script runs")?(
+                job_input.expect("parsed job input"),
+            )
+            .map_err(|error| error.to_string()),
+            _ => unreachable!("checked callable service"),
         }
     }
 
@@ -156,6 +282,44 @@ impl<'a> Calls<'a> {
     /// Whether answering found the database busy (the run is retried).
     pub fn take_busy(&mut self) -> Option<String> {
         self.busy.take()
+    }
+
+    fn state_read(&mut self, input: crate::extension_state::ReadInput) -> Result<Value, String> {
+        let reader = self
+            .state
+            .as_mut()
+            .ok_or("`state.read` isn't available where this script runs")?;
+        match reader(input) {
+            Ok(snapshot) => serde_json::to_value(snapshot)
+                .map_err(|_| "extension state snapshot could not be encoded".into()),
+            Err(crate::extension_state::StateHostError::State(
+                oxplow_domain::extension_state::StateError::Storage(DomainError::Busy(message)),
+            )) => {
+                self.busy = Some(message.clone());
+                Err(message)
+            }
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn configuration_read(&mut self) -> Result<Value, String> {
+        let reader = self
+            .configuration
+            .as_mut()
+            .ok_or("`extension_config.read` isn't available where this script runs")?;
+        match reader() {
+            Ok(snapshot) => serde_json::to_value(snapshot)
+                .map_err(|_| "extension configuration could not be encoded".into()),
+            Err(crate::extension_configuration::ConfigurationError::Store(
+                oxplow_db::extension_config_store::ConfigStoreError::Storage(DomainError::Busy(
+                    message,
+                )),
+            )) => {
+                self.busy = Some(message.clone());
+                Err(message)
+            }
+            Err(error) => Err(error.to_string()),
+        }
     }
 
     fn sql_read(&mut self, args: Value) -> Result<Value, String> {
@@ -209,9 +373,10 @@ impl<'a> Calls<'a> {
                 )
             }
         };
-        let query = oxplow_db::SqlQuery::new(&sql)
+        let mut query = oxplow_db::SqlQuery::new(&sql)
             .named(params)
             .limit(Some(cap));
+        crate::grants::bound_query(self.run, &mut query);
         let result = match (self.read)(query) {
             Ok(result) => result,
             Err(DomainError::Busy(m)) => {
@@ -225,6 +390,7 @@ impl<'a> Calls<'a> {
                 ))
             }
         };
+        self.run.check_authority()?;
         let Some(page) = args.page else {
             if result.truncated {
                 return Err(format!(

@@ -334,7 +334,7 @@ pub fn promote_op() -> Op {
                     return Err(invalid(
                         "/thread",
                         format!("`{}` is closed; reopen it first", input.thread),
-                    ))
+                    ));
                 }
                 ThreadStatus::Active => return Ok(unchanged(&thread)),
                 ThreadStatus::Queued => {}

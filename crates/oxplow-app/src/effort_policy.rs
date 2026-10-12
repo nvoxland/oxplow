@@ -360,14 +360,23 @@ fn text(cell: &SqlCell) -> Option<String> {
 /// built-in ([`BUILT_IN`]) and policies written as scripts
 /// (`effort_policy_script::ScriptedPolicy`, each gated on a person's
 /// approval as it is now). A running provider instance stays registered.
-pub fn register_built_ins(
-    registry: &EffortPolicyRegistry,
+pub struct PreparedEffortPolicies {
+    providers: Vec<Arc<dyn EffortPolicy>>,
+}
+
+impl PreparedEffortPolicies {
+    pub fn publish(self, registry: &EffortPolicyRegistry) {
+        registry.set_declared(self.providers);
+    }
+}
+
+pub fn prepare_built_ins(
     declared: &[crate::capabilities::Implementation],
     sql: &SqlGateway,
     trees: &Arc<dyn crate::services::TreeSource>,
     approvals: &Arc<crate::exec_consent::ApprovalStore>,
     project_dir: &std::path::Path,
-) {
+) -> PreparedEffortPolicies {
     use crate::capabilities::Source;
     let built: Vec<Arc<dyn EffortPolicy>> = declared
         .iter()
@@ -397,10 +406,11 @@ pub fn register_built_ins(
                         needs: needs.clone(),
                         sql: sql.clone(),
                         trees: trees.clone(),
-                        gate: crate::exec_consent::script_gate(
+                        gate: crate::exec_consent::loaded_script_gate(
                             approvals.clone(),
                             project_dir.to_path_buf(),
                             program,
+                            script.clone(),
                         ),
                     }))
                 }
@@ -408,7 +418,18 @@ pub fn register_built_ins(
             }
         })
         .collect();
-    registry.set_declared(built);
+    PreparedEffortPolicies { providers: built }
+}
+
+pub fn register_built_ins(
+    registry: &EffortPolicyRegistry,
+    declared: &[crate::capabilities::Implementation],
+    sql: &SqlGateway,
+    trees: &Arc<dyn crate::services::TreeSource>,
+    approvals: &Arc<crate::exec_consent::ApprovalStore>,
+    project_dir: &std::path::Path,
+) {
+    prepare_built_ins(declared, sql, trees, approvals, project_dir).publish(registry);
 }
 
 /// The dispatcher: offers the active effort policy each of [`EVENTS`] and

@@ -19,7 +19,7 @@ impl From<AiServiceError> for IpcError {
 }
 
 pub async fn ai_settings(svc: &Services) -> Result<AiSettings, IpcError> {
-    Ok(svc.ai.settings()?)
+    Ok(svc.ai.settings_pinned().await?)
 }
 
 /// Add or replace a provider; a non-empty `key` is stored in the keychain.
@@ -29,12 +29,12 @@ pub async fn save_ai_provider(
     key: Option<String>,
 ) -> Result<AiSettings, IpcError> {
     svc.ai.save_provider(provider, key)?;
-    Ok(svc.ai.settings()?)
+    Ok(svc.ai.settings_pinned().await?)
 }
 
 pub async fn remove_ai_provider(svc: &Services, id: String) -> Result<AiSettings, IpcError> {
     svc.ai.remove_provider(&id)?;
-    Ok(svc.ai.settings()?)
+    Ok(svc.ai.settings_pinned().await?)
 }
 
 /// Assign `role` to a provider + model, or unassign it with no binding.
@@ -48,7 +48,7 @@ pub async fn set_ai_role(
 ) -> Result<AiSettings, IpcError> {
     svc.ai.set_role(role, binding)?;
     svc.events.emit(oxplow_app::OxplowEvent::ConfigChanged);
-    Ok(svc.ai.settings()?)
+    Ok(svc.ai.settings_pinned().await?)
 }
 
 /// One small call to check a provider's key, URL and model. Returns the reply.

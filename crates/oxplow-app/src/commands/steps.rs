@@ -57,11 +57,18 @@ pub(super) struct Composed {
 pub(super) struct ComposedCall {
     command: Arc<Command>,
     call: CommandCall,
+    /// Captured while routing, from this command's owning contribution.
+    /// The handler and its authority never come from a later registry lookup.
+    run: RunContext,
     /// A composite call's own composition.
     nested: Option<Arc<Composed>>,
 }
 
 impl Composed {
+    fn has_private_input(&self) -> bool {
+        self.calls.iter().any(ComposedCall::has_private_input)
+    }
+
     /// Calls routed by hand (`CommandBus::run_nested`): no result or events
     /// of their own, nothing composing them called.
     pub(super) fn of(calls: Vec<ComposedCall>) -> Self {
@@ -77,6 +84,44 @@ impl Composed {
     fn preview_input(&self) -> Value {
         json!({ "calls": self.calls.iter().map(|c| &c.call).collect::<Vec<_>>() })
     }
+}
+
+impl ComposedCall {
+    fn has_private_input(&self) -> bool {
+        self.command
+            .spec
+            .unrecorded
+            .iter()
+            .any(|field| field == "*" || self.call.input.get(field).is_some())
+            || self
+                .nested
+                .as_ref()
+                .is_some_and(|nested| nested.has_private_input())
+    }
+
+    fn recorded_input(&self) -> Value {
+        if self
+            .nested
+            .as_ref()
+            .is_some_and(|nested| nested.has_private_input())
+        {
+            // Arbitrary composers can derive a private child from any part of
+            // their input. There is no safe field-level reverse mapping.
+            private_composite_spec(&self.command.spec).recorded_input(&self.call.input)
+        } else {
+            self.command.spec.recorded_input(&self.call.input)
+        }
+    }
+}
+
+/// Preserve command behavior while withholding the entire composite input
+/// from recording. This copy is never published in the registry.
+pub(super) fn private_composite_spec(spec: &CommandSpec) -> CommandSpec {
+    let mut private = spec.clone();
+    if !private.unrecorded.iter().any(|field| field == "*") {
+        private.unrecorded.push("*".into());
+    }
+    private
 }
 
 /// Steps 3 and 4's answers for a run, and what it is: what its steps run
@@ -151,6 +196,18 @@ impl Router<'_> {
         depth: usize,
         at: &str,
     ) -> Result<Routed, CommandError> {
+        self.route_for(self.run, compose, input, name, depth, at)
+    }
+
+    fn route_for(
+        &mut self,
+        run: &RunContext,
+        compose: &Compose,
+        input: &Value,
+        name: &str,
+        depth: usize,
+        at: &str,
+    ) -> Result<Routed, CommandError> {
         if depth >= MAX_NESTING {
             return Err(CommandError::Invalid {
                 field: None,
@@ -160,9 +217,11 @@ impl Router<'_> {
                 ),
             });
         }
-        let composing = self.run.child(None, oxplow_domain::run::Mode::Pure);
+        run.check_authority()
+            .map_err(|reason| CommandError::Denied { reason })?;
+        let composing = run.child(None, oxplow_domain::run::Mode::Pure);
         let composition = (compose.compose)(self.conn, &composing, input)?;
-        let (calls, outside) = self.route_calls(composition.calls, depth, at)?;
+        let (calls, outside) = self.route_calls_for(run, composition.calls, depth, at)?;
         Ok(Routed {
             composed: Composed {
                 calls,
@@ -178,6 +237,16 @@ impl Router<'_> {
     /// one composed in turn. With the first that leaves the transaction.
     pub(super) fn route_calls(
         &mut self,
+        calls: Vec<CommandCall>,
+        depth: usize,
+        at: &str,
+    ) -> Result<(Vec<ComposedCall>, Option<usize>), CommandError> {
+        self.route_calls_for(self.run, calls, depth, at)
+    }
+
+    fn route_calls_for(
+        &mut self,
+        parent: &RunContext,
         calls: Vec<CommandCall>,
         depth: usize,
         at: &str,
@@ -213,6 +282,23 @@ impl Router<'_> {
                 });
             }
             command.validator.check(&call.input).map_err(at_input)?;
+            let mode = match command.handler {
+                Handler::Tx(_) => oxplow_domain::run::Mode::Transactional,
+                _ => oxplow_domain::run::Mode::External,
+            };
+            let run = match &command.contribution {
+                Some(named) => {
+                    let owned = named(parent);
+                    if owned.mode() == mode {
+                        owned
+                    } else {
+                        owned.child(None, mode)
+                    }
+                }
+                None => parent.child(None, mode),
+            };
+            run.check_authority()
+                .map_err(|reason| CommandError::Denied { reason })?;
             if let Some(check) = &command.precheck {
                 self.prechecks.push(Pending {
                     check: check.clone(),
@@ -227,7 +313,8 @@ impl Router<'_> {
                     None
                 }
                 Handler::Compose(c) => {
-                    let inner = self.route(c, &call.input, &call.name, depth + 1, &call_at)?;
+                    let inner =
+                        self.route_for(&run, c, &call.input, &call.name, depth + 1, &call_at)?;
                     if inner.outside.is_some() {
                         return Err(CommandError::Invalid {
                             field: Some(name_field),
@@ -244,6 +331,7 @@ impl Router<'_> {
             routed.push(ComposedCall {
                 command,
                 call,
+                run,
                 nested,
             });
         }
@@ -335,27 +423,30 @@ pub(super) fn run_composed(
 /// nothing, with no events of its own, changed nothing.
 fn run_tree(ctx: &TxCtx<'_>, composed: &Composed) -> Result<HandlerOutput, CommandError> {
     ctx.trace.add(&composed.scopes);
-    let inner = TxCtx {
-        conn: ctx.conn,
-        run: ctx.run,
-        events: ctx.events.clone(),
-        confirmed: ctx.confirmed,
-        may_write: ctx.may_write,
-        depth: ctx.depth + 1,
-        trace: ctx.trace,
-    };
     let mut children = Vec::with_capacity(composed.calls.len());
     let mut events = Vec::new();
     let mut afters: Vec<Box<dyn FnOnce() + Send + Sync>> = Vec::new();
     let mut inverses: Vec<Option<CommandCall>> = Vec::new();
     for c in &composed.calls {
+        c.run
+            .check_authority()
+            .map_err(|reason| CommandError::Denied { reason })?;
+        let inner = TxCtx {
+            conn: ctx.conn,
+            run: &c.run,
+            events: ctx.events.clone(),
+            confirmed: ctx.confirmed,
+            may_write: ctx.may_write,
+            depth: ctx.depth + 1,
+            trace: ctx.trace,
+        };
         let out = match (&c.nested, &c.command.handler) {
             (Some(nested), _) => run_tree(&inner, nested)?,
             (None, Handler::Tx(handler)) => handler(&inner, c.call.input.clone())?,
             (None, _) => {
                 return Err(CommandError::Failed {
                     message: format!("`{}` can't run in the transaction", c.call.name),
-                })
+                });
             }
         };
         let mut out = honest(out, &c.call.name)?;
@@ -449,7 +540,7 @@ impl CommandBus {
         spec: &CommandSpec,
         compose: &Arc<Compose>,
         input: &Value,
-    ) -> Result<(Resolved, Vec<Pending>), CommandError> {
+    ) -> Result<(Resolved, Vec<Pending>, bool), CommandError> {
         let registry = self.commands.read().commands.clone();
         let active = self.active();
         let (c, input, run) = (compose.clone(), input.clone(), run.clone());
@@ -472,6 +563,7 @@ impl CommandBus {
             .map_err(super::command_error)?;
         let (Routed { composed, outside }, prechecks) = routed;
         let composed = Arc::new(composed);
+        let private_input = composed.has_private_input();
         Ok((
             match outside {
                 None => Resolved::Tx(composed_handler(
@@ -482,6 +574,7 @@ impl CommandBus {
                 Some(_) => Resolved::Steps(composed),
             },
             prechecks,
+            private_input,
         ))
     }
 
@@ -530,6 +623,10 @@ impl CommandBus {
         let mut failure: Option<(&ComposedCall, CommandError)> = None;
         let mut scopes = plan.scopes.clone();
         for (index, step) in plan.calls.iter().enumerate() {
+            if let Err(reason) = step.run.check_authority() {
+                failure = Some((step, CommandError::Denied { reason }));
+                break;
+            }
             let tx = match (&step.nested, &step.command.handler) {
                 (Some(nested), _) => Some(composed_handler(
                     self.policy.clone(),
@@ -543,7 +640,7 @@ impl CommandBus {
                 (Some(handler), _) => {
                     self.run_step_tx(
                         handler,
-                        run,
+                        &step.run,
                         &step.call.input,
                         &executed_id,
                         confirmed,
@@ -553,7 +650,7 @@ impl CommandBus {
                 }
                 (None, Handler::External(handler)) => {
                     let invocation =
-                        origin.invocation(run, index, &step.call.name, &step.call.input);
+                        origin.invocation(&step.run, index, &step.call.name, &step.call.input);
                     let key = invocation.idempotency_key.clone();
                     let called = invocation.run.clone();
                     handler(invocation, step.call.input.clone())
@@ -579,7 +676,7 @@ impl CommandBus {
                     events.extend(out.events);
                     landed.push(NestedChild {
                         name: step.call.name.clone(),
-                        input: step.call.input.clone(),
+                        input: step.recorded_input(),
                         result: out.result,
                         inverse: out.inverse.filter(|_| step.command.spec.undoable),
                     });
@@ -616,8 +713,12 @@ impl CommandBus {
         let stop = failure.as_ref().map(|(step, err)| {
             result["failed"] = json!({
                 "name": step.call.name,
-                "input": step.call.input,
-                "error": err.to_string(),
+                "input": step.recorded_input(),
+                "error": if step.has_private_input() {
+                    "private command failed".to_string()
+                } else {
+                    err.to_string()
+                },
             });
             stopped(&step.call.name, &landed, err)
         });

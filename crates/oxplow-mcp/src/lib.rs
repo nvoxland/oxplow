@@ -1004,7 +1004,7 @@ impl OxplowMcp {
                        manages these in Settings → AI."
     )]
     async fn list_ai_roles(&self) -> Result<CallToolResult, McpError> {
-        json_result(&self.services.ai.settings().map_err(ai_error)?)
+        json_result(&self.services.ai.settings_pinned().await.map_err(ai_error)?)
     }
 
     #[tool(

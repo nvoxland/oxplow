@@ -115,12 +115,18 @@ pub struct Connection {
     pub peer: Peer,
     child: tokio::process::Child,
     _proxy: Option<crate::net_sandbox::EgressProxy>,
+    _group: crate::external_process::ProcessGroup,
+    _watch: Option<crate::external_process::RevocationWatch>,
 }
 
 impl Connection {
     /// The process has exited (its connection is gone).
     pub fn exited(&mut self) -> bool {
-        !matches!(self.child.try_wait(), Ok(None))
+        let exited = !matches!(self.child.try_wait(), Ok(None));
+        if exited {
+            self._group.stop();
+        }
+        exited
     }
 
     /// End the process the orderly way: `shutdown` (it finishes what is in
@@ -137,6 +143,7 @@ impl Connection {
             let _ = self.child.wait().await;
         })
         .await;
+        self._group.stop();
         if ended.is_err() {
             let _ = self.child.kill().await;
         }
@@ -145,10 +152,14 @@ impl Connection {
     /// How the process ended, once it has (it's given a moment to be
     /// reaped after its pipes close).
     pub async fn exit_status(&mut self) -> Option<std::process::ExitStatus> {
-        tokio::time::timeout(Duration::from_millis(500), self.child.wait())
+        let status = tokio::time::timeout(Duration::from_millis(500), self.child.wait())
             .await
             .ok()
-            .and_then(Result::ok)
+            .and_then(Result::ok);
+        if status.is_some() {
+            self._group.stop();
+        }
+        status
     }
 }
 
@@ -160,6 +171,7 @@ pub struct Spawned {
     /// The egress proxy it reaches the network through, where enforced;
     /// it lives as long as this does.
     pub proxy: Option<crate::net_sandbox::EgressProxy>,
+    pub group: crate::external_process::ProcessGroup,
 }
 
 /// Start the provider's program the trusted way: a scrubbed environment
@@ -171,6 +183,14 @@ pub async fn spawn(launch: &Launch) -> Result<Spawned, HostError> {
         name: launch.name.clone(),
         message,
     };
+    launch.spec.execution.require_external().map_err(&failed)?;
+    if launch.spec.credentials.iter().any(|credential| {
+        credential.secret_ref.is_some() && !launch.spec.is_host_secret_bearer(credential)
+    }) {
+        return Err(failed(
+            "host secret reference transport is unavailable".into(),
+        ));
+    }
     let (own, _) = launch.spec.program();
     // A server by url has no program of its own in the folder.
     if !launch.spec.is_remote() && !launch.ext_dir.join(&own).is_file() {
@@ -233,9 +253,20 @@ pub async fn spawn(launch: &Launch) -> Result<Spawned, HostError> {
             cmd.env(name, value);
         }
     }
+    if let Some(gate) = launch
+        .host_calls
+        .as_ref()
+        .and_then(|calls| calls.gate.lock().clone())
+    {
+        gate().map_err(&failed)?;
+    }
+    crate::external_process::ProcessGroup::prepare(cmd.as_std_mut());
     let mut child = cmd
         .spawn()
         .map_err(|e| failed(format!("couldn't start `{own}`: {e}")))?;
+    let group = crate::external_process::ProcessGroup::new(
+        child.id().ok_or_else(|| failed("no process id".into()))?,
+    );
     let stdout = child
         .stdout
         .take()
@@ -258,6 +289,7 @@ pub async fn spawn(launch: &Launch) -> Result<Spawned, HostError> {
         stdin,
         stdout,
         proxy,
+        group,
     })
 }
 
@@ -284,6 +316,7 @@ pub async fn connect(launch: &Launch) -> Result<Connection, HostError> {
         stdin,
         stdout,
         proxy,
+        group,
     } = spawn(launch).await?;
     let (peer, incoming) = Peer::spawn(stdout, stdin);
     serve_incoming(
@@ -293,6 +326,12 @@ pub async fn connect(launch: &Launch) -> Result<Connection, HostError> {
         launch.on_changed.clone(),
     );
     let conn = Connection {
+        _watch: launch
+            .host_calls
+            .as_ref()
+            .and_then(|calls| calls.gate.lock().clone())
+            .map(|gate| crate::external_process::RevocationWatch::start(group.clone(), gate)),
+        _group: group,
         peer,
         child,
         _proxy: proxy,
@@ -371,21 +410,82 @@ pub fn serve_incoming(
 /// so the run's audit row records it. A call naming no invoke under way
 /// is refused: nothing a provider does of oxplow is outside a run.
 pub struct HostCalls {
+    gate: parking_lot::Mutex<Option<crate::exec_consent::Gate>>,
     needs: Vec<String>,
     db: oxplow_db::Database,
+    state: Option<(
+        crate::extension_state::StateSource,
+        crate::extension_configuration::ConfigurationSource,
+        oxplow_domain::run::ContributionRef,
+    )>,
     runs: parking_lot::Mutex<std::collections::HashMap<String, oxplow_domain::run::RunContext>>,
 }
 
+/// Keeps an invocation's host-call authority registered for its full future
+/// lifetime. Dropping it also cleans up when the invocation is cancelled.
+pub(crate) struct Registration<'a> {
+    host_calls: &'a HostCalls,
+    key: String,
+}
+
+impl Drop for Registration<'_> {
+    fn drop(&mut self) {
+        self.host_calls.finish(&self.key);
+    }
+}
+
 impl HostCalls {
-    pub fn new(needs: Vec<String>, db: oxplow_db::Database) -> Arc<Self> {
+    pub fn new(
+        needs: Vec<String>,
+        db: oxplow_db::Database,
+        state: Option<(
+            crate::extension_state::StateSource,
+            crate::extension_configuration::ConfigurationSource,
+            oxplow_domain::run::ContributionRef,
+        )>,
+    ) -> Arc<Self> {
         Arc::new(Self {
+            gate: parking_lot::Mutex::new(None),
             needs,
             db,
+            state,
             runs: parking_lot::Mutex::default(),
         })
     }
 
-    /// The calls naming `key` are part of `run` until [`Self::finish`].
+    pub fn set_gate(&self, gate: crate::exec_consent::Gate) {
+        *self.gate.lock() = Some(gate);
+    }
+
+    pub(crate) fn authority_current(&self) -> bool {
+        let gate = self.gate.lock().clone();
+        gate.is_some_and(|gate| gate().is_ok())
+    }
+
+    /// Register invocation authority until the returned guard is dropped.
+    /// Production invokes use this guard so cancellation cannot leave a stale
+    /// run in the host-call table.
+    pub(crate) fn register(
+        &self,
+        key: &str,
+        run: oxplow_domain::run::RunContext,
+    ) -> Result<Registration<'_>, oxplow_domain::CommandError> {
+        let mut runs = self.runs.lock();
+        if runs.contains_key(key) {
+            return Err(oxplow_domain::CommandError::Denied {
+                reason: "an invocation is already registered for this key".into(),
+            });
+        }
+        runs.insert(key.to_string(), run);
+        drop(runs);
+        Ok(Registration {
+            host_calls: self,
+            key: key.to_string(),
+        })
+    }
+
+    /// Legacy registration for compatibility callers; production invokes use
+    /// [`Self::register`] so cancellation releases the run automatically.
     pub fn begin(&self, key: &str, run: oxplow_domain::run::RunContext) {
         self.runs.lock().insert(key.to_string(), run);
     }
@@ -399,6 +499,12 @@ impl HostCalls {
         &self,
         params: serde_json::Value,
     ) -> Result<serde_json::Value, ProtocolError> {
+        if let Some(gate) = self.gate.lock().clone() {
+            gate().map_err(|message| ProtocolError::InvalidInput {
+                field: "/scope".into(),
+                message,
+            })?;
+        }
         let params: oxplow_provider_protocol::model::HostCallParams =
             serde_json::from_value(params)
                 .map_err(|e| ProtocolError::InvalidParams(e.to_string()))?;
@@ -424,7 +530,12 @@ impl HostCalls {
                 None => "a `host/call` names the invoke it serves (`key`)".to_string(),
             }));
         };
-        let (needs, db) = (self.needs.clone(), self.db.clone());
+        let (needs, db, gate, state) = (
+            self.needs.clone(),
+            self.db.clone(),
+            self.gate.lock().clone(),
+            self.state.clone(),
+        );
         let runtime = tokio::runtime::Handle::current();
         tokio::task::spawn_blocking(move || {
             let read = Box::new(|q: oxplow_db::SqlQuery| {
@@ -432,12 +543,47 @@ impl HostCalls {
             });
             // Decided against the provider's own declaration, on the run
             // it serves.
-            let run = run.clone().authorized(oxplow_domain::run::Authority {
+            let mut run = run.clone().authorized(oxplow_domain::run::Authority {
                 declared: crate::grants::script_request(&needs),
                 grant: None,
                 enforcement: crate::grants::enforcement(),
             });
+            if let Some(gate) = gate {
+                run = run.guarded(gate);
+            }
             let mut calls = crate::scope_calls::Calls::new(&run, &needs, read);
+            if let Some((source, configuration, owner)) = state {
+                // A provider reads its own namespace, even when another
+                // extension's command invoked it. Its owner is captured at
+                // instance construction, never supplied by the protocol call.
+                let state_run = run
+                    .child(Some(owner), oxplow_domain::run::Mode::External)
+                    .authorized(oxplow_domain::run::Authority {
+                        declared: crate::grants::script_request(&needs),
+                        grant: None,
+                        enforcement: crate::grants::enforcement(),
+                    });
+                let configuration_run = state_run.clone();
+                let (state_runtime, parent) = (runtime.clone(), &run);
+                calls = calls.with_state_reader(Box::new(move |input| {
+                    let result = state_runtime.block_on(source.snapshot(state_run.clone(), input));
+                    if result.is_ok() {
+                        parent.trace().count("state.read");
+                        parent.used_scope("state.read");
+                    }
+                    result
+                }));
+                let configuration_runtime = runtime.clone();
+                calls = calls.with_configuration_reader(Box::new(move || {
+                    let result = configuration_runtime
+                        .block_on(configuration.snapshot(configuration_run.clone()));
+                    if result.is_ok() {
+                        parent.trace().count("extension_config.read");
+                        parent.used_scope("extension_config.read");
+                    }
+                    result
+                }));
+            }
             calls.serve(&params.scope, params.args)
         })
         .await
@@ -468,6 +614,8 @@ pub(crate) const PASSED_ENV: [&str; 3] = ["PATH", "HOME", "LLVM_PROFILE_FILE"];
 /// between the check and the exec (or under a provider that loads its
 /// modules lazily).
 pub struct ApprovedCopy {
+    pub hash: String,
+    pub root: PathBuf,
     /// The provider's folder inside the copy.
     pub ext_dir: PathBuf,
     /// Its declarations, read from the copy.
@@ -503,8 +651,8 @@ pub fn approved_copy(
     let _one_at_a_time =
         lock_copies(&base).map_err(|e| failed(format!("copying it to run: {e}")))?;
     let tmp = base.join(format!(".tmp-{}", uuid::Uuid::new_v4()));
-    let copied =
-        copy_tree(&project_dir.join(rel), &tmp.join(rel)).and_then(|()| program.hash(&tmp));
+    let copied = crate::approved_code::copy_directory(&project_dir.join(rel), &tmp.join(rel))
+        .and_then(|()| program.hash(&tmp));
     let hash = match copied {
         Ok(h) => h,
         Err(e) => {
@@ -536,7 +684,12 @@ pub fn approved_copy(
     let declared =
         super::spec::read_declarations(spec, &|f| std::fs::read_to_string(ext_dir.join(f)).ok())
             .map_err(&failed)?;
-    Ok(ApprovedCopy { ext_dir, declared })
+    Ok(ApprovedCopy {
+        ext_dir,
+        declared,
+        hash,
+        root,
+    })
 }
 
 /// The advisory lock on a program's copies (`<base>.lock`, beside the
@@ -621,28 +774,6 @@ pub fn last_ran_credentials(copies: &Path, ext: &str, provider: &str) -> Vec<Str
                 .map(|p| p.credential_names())
         })
         .unwrap_or_default()
-}
-
-/// Copy the regular files and directories under `from` to `to`
-/// (permissions kept); a symlink is refused, as the approval refuses it.
-fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(to)?;
-    for entry in std::fs::read_dir(from)? {
-        let entry = entry?;
-        let kind = entry.file_type()?;
-        let target = to.join(entry.file_name());
-        if kind.is_symlink() {
-            return Err(std::io::Error::other(format!(
-                "{} is a symlink",
-                entry.path().display()
-            )));
-        } else if kind.is_dir() {
-            copy_tree(&entry.path(), &target)?;
-        } else {
-            std::fs::copy(entry.path(), &target)?;
-        }
-    }
-    Ok(())
 }
 
 /// oxplow's MCP adapter (`oxplow-provider-mcp`, P7.A6): shipped beside

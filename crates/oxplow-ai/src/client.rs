@@ -9,6 +9,12 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 
+use crate::capabilities::{
+    CapabilitySnapshotV1, CapabilitySupport, ModelCatalogV1, SchemaVersionError,
+};
+use crate::parts::{
+    FinishReasonV1, MessageRoleV1, PartV1, TypedRequestV1, TypedResponseV1, UsageSourceV1, UsageV1,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, thiserror::Error, PartialEq)]
@@ -27,6 +33,14 @@ pub enum AiError {
     Transport { provider: String, message: String },
     #[error("{provider}: unexpected response: {detail}")]
     BadResponse { provider: String, detail: String },
+    #[error("{provider}: model feature `{feature}` has {support:?} support")]
+    UnsupportedFeature {
+        provider: String,
+        feature: String,
+        support: CapabilitySupport,
+    },
+    #[error("{0}")]
+    UnsupportedSchemaVersion(#[from] SchemaVersionError),
     /// Its program — a provider written as a script — runs only once a
     /// person approves it, and nothing was sent.
     #[error("{provider}: {message} (Settings → Data → Programs)")]
@@ -136,6 +150,32 @@ pub trait ModelProvider: Send + Sync {
     /// Its API base when an instance names none; `None` when every instance
     /// must (`baseUrl`).
     fn default_base_url(&self) -> Option<&str>;
+    /// Enumerate locally available metadata. This must not make paid probes
+    /// or use credentials; older providers have no known catalog.
+    async fn discover_models(
+        &self,
+        _instance: &ProviderInstance<'_>,
+    ) -> Result<ModelCatalogV1, AiError> {
+        Ok(ModelCatalogV1::unknown())
+    }
+    /// Discover metadata without making a model call. Older providers return
+    /// an unknown snapshot and never probe a potentially billable endpoint.
+    async fn discover(
+        &self,
+        _instance: &ProviderInstance<'_>,
+        model: &str,
+    ) -> Result<CapabilitySnapshotV1, AiError> {
+        Ok(CapabilitySnapshotV1::unknown(model))
+    }
+    /// Complete a typed, text-only request using the legacy completion API.
+    /// Providers with native image or tool transport can override this method.
+    async fn complete_typed(
+        &self,
+        instance: &ProviderInstance<'_>,
+        req: &TypedRequestV1,
+    ) -> Result<TypedResponseV1, AiError> {
+        complete_typed_via_text(self, instance, req).await
+    }
     async fn complete(
         &self,
         instance: &ProviderInstance<'_>,
@@ -164,6 +204,90 @@ pub trait ModelProvider: Send + Sync {
             .await?;
         Ok(c.text.trim().chars().take(200).collect())
     }
+}
+
+/// Adapt ordered text parts to the legacy API without discarding unsupported parts.
+pub async fn complete_typed_via_text<P: ModelProvider + ?Sized>(
+    provider: &P,
+    instance: &ProviderInstance<'_>,
+    req: &TypedRequestV1,
+) -> Result<TypedResponseV1, AiError> {
+    req.validate_version()?;
+    let unsupported = |feature: &str, support| AiError::UnsupportedFeature {
+        provider: instance.id.to_string(),
+        feature: feature.to_string(),
+        support,
+    };
+    if !req.tools.is_empty() {
+        return Err(unsupported("toolCalling", CapabilitySupport::Unknown));
+    }
+    let mut system = Vec::new();
+    let mut prompt = Vec::new();
+    let mut saw_user = false;
+    for message in &req.messages {
+        let text = message
+            .parts
+            .iter()
+            .map(|part| match part {
+                PartV1::Text { text } => Ok(text.as_str()),
+                PartV1::Image { .. } => Err(("image", CapabilitySupport::Unknown)),
+                PartV1::ToolCall { .. } | PartV1::ToolResult { .. } => {
+                    Err(("toolCalling", CapabilitySupport::Unknown))
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|(feature, support)| unsupported(feature, support))?
+            .join("");
+        match message.role {
+            MessageRoleV1::System if !saw_user => system.push(text),
+            MessageRoleV1::User if !saw_user => {
+                prompt.push(text);
+                saw_user = true;
+            }
+            MessageRoleV1::System => {
+                return Err(unsupported("messageOrder", CapabilitySupport::Unsupported));
+            }
+            MessageRoleV1::User | MessageRoleV1::Assistant | MessageRoleV1::Tool => {
+                return Err(unsupported("conversation", CapabilitySupport::Unsupported));
+            }
+        }
+    }
+    if !saw_user {
+        return Err(unsupported("userMessage", CapabilitySupport::Unsupported));
+    }
+    let system = system.join("\n\n");
+    let prompt = prompt.join("");
+    let result = provider
+        .complete(
+            instance,
+            &CompleteRequest {
+                model: &req.model,
+                system: if system.is_empty() {
+                    None
+                } else {
+                    Some(&system)
+                },
+                prompt: &prompt,
+                json: false,
+            },
+        )
+        .await?;
+    let input_tokens = u64::try_from(result.input_tokens)
+        .ok()
+        .filter(|count| *count > 0);
+    let output_tokens = u64::try_from(result.output_tokens)
+        .ok()
+        .filter(|count| *count > 0);
+    Ok(TypedResponseV1 {
+        schema_version: 1,
+        parts: vec![PartV1::Text { text: result.text }],
+        finish_reason: FinishReasonV1::Unknown,
+        usage: UsageV1 {
+            input_tokens,
+            output_tokens,
+            source: UsageSourceV1::Unknown,
+        },
+    })
 }
 
 /// Answer typed questions with a chat model: a prompt asking for a JSON
@@ -242,8 +366,9 @@ impl Default for Http {
         Self {
             client: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(120))
+                .redirect(reqwest::redirect::Policy::none())
                 .build()
-                .unwrap_or_default(),
+                .expect("build HTTP client with redirects disabled"),
         }
     }
 }
@@ -279,12 +404,12 @@ impl Http {
         }
         let resp = req.send().await.map_err(|e| AiError::Transport {
             provider: id(),
-            message: e.to_string(),
+            message: e.without_url().to_string(),
         })?;
         let status = resp.status().as_u16();
         let text = resp.text().await.map_err(|e| AiError::Transport {
             provider: id(),
-            message: e.to_string(),
+            message: e.without_url().to_string(),
         })?;
         match status {
             200..=299 => serde_json::from_str(&text).map_err(|e| AiError::BadResponse {

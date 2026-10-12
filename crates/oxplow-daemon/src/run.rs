@@ -171,10 +171,14 @@ pub async fn run_main(name: &str, secrets: Arc<dyn oxplow_ai::secrets::SecretSto
     });
     let state = Arc::new(services);
     let providers = state.providers.clone();
+    let jobs = state.jobs.clone();
 
     // Recovery + primary stream + the standard background fleet —
     // identical to the desktop shell's boot.
-    oxplow_app::boot::run_boot_orchestration(&state).await;
+    if let Err(error) = oxplow_app::boot::run_boot_orchestration(&state).await {
+        eprintln!("{name}: required extension activation failed: {error}");
+        std::process::exit(1);
+    }
     oxplow_app::diagnostics::spawn_watchdog(log_dir(&project_dir));
 
     // Hook + MCP control plane (agents spawned on this box
@@ -237,6 +241,7 @@ pub async fn run_main(name: &str, secrets: Arc<dyn oxplow_ai::secrets::SecretSto
         signal = terminated() => format!("received {signal}"),
     };
     tracing::info!("{name} stopping: {reason}");
+    jobs.shutdown();
     // Providers are asked to shut down — not orphaned by the exit, which
     // runs no destructors — within the supervisor's grace for the daemon.
     if tokio::time::timeout(std::time::Duration::from_secs(2), providers.shutdown_all())

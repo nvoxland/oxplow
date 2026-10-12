@@ -1,0 +1,77 @@
+{
+  "$defs": {
+    "ActorKind": {
+      "description": "Who ran a command (`.context/target-architecture.md` §7).",
+      "oneOf": [
+        {
+          "enum": [
+            "human",
+            "agent",
+            "lens",
+            "system"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "effect",
+          "description": "An extension's effect (P8.D8).",
+          "type": "string"
+        },
+        {
+          "const": "job",
+          "description": "A durable host-managed extension job.",
+          "type": "string"
+        }
+      ]
+    },
+    "CommandOutcome": {
+      "description": "How a command run ended.",
+      "enum": [
+        "ok",
+        "denied",
+        "invalid",
+        "error"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Version 3 adds durable job attribution; earlier schemas stay frozen.",
+  "properties": {
+    "actor_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "actor_kind": {
+      "$ref": "#/$defs/ActorKind"
+    },
+    "audit_id": {
+      "description": "The `command_audit` row, which holds the input and the inverse.",
+      "format": "int64",
+      "type": "integer"
+    },
+    "command": {
+      "description": "The command's name (`oxplow.work_item.transition`, `oxplow.config.set`).",
+      "type": "string"
+    },
+    "outcome": {
+      "$ref": "#/$defs/CommandOutcome"
+    },
+    "undoable": {
+      "description": "Whether an inverse was recorded, i.e. `commands.undo` can apply.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "command",
+    "actor_kind",
+    "outcome",
+    "audit_id",
+    "undoable"
+  ],
+  "title": "CommandExecutedV3",
+  "type": "object"
+}

@@ -108,6 +108,26 @@ pub struct SqlQuery {
     /// after its temp tables and dropped before them (a check's overlay:
     /// an extension's models and entities that aren't published, P7.C6).
     pub temp_views: Vec<TempView>,
+    /// Host policy over prepared model lineage, before executing SQL.
+    /// Never supplied by the authored query or the extension itself.
+    pub model_policy: Option<ModelReadPolicy>,
+}
+
+type ModelCheck = dyn Fn(&str) -> Result<(), String> + Send + Sync;
+
+#[derive(Clone)]
+pub struct ModelReadPolicy(std::sync::Arc<ModelCheck>);
+
+impl ModelReadPolicy {
+    pub fn new(check: impl Fn(&str) -> Result<(), String> + Send + Sync + 'static) -> Self {
+        Self(std::sync::Arc::new(check))
+    }
+}
+
+impl std::fmt::Debug for ModelReadPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ModelReadPolicy")
+    }
 }
 
 /// A temp view a query reads: its name and `SELECT`.
@@ -147,6 +167,7 @@ impl SqlQuery {
             stream: None,
             temp: Vec::new(),
             temp_views: Vec::new(),
+            model_policy: None,
         }
     }
 
@@ -935,6 +956,11 @@ fn run_read_only(
     } else {
         Access::Enforce
     };
+    let dependencies = if query.model_policy.is_some() {
+        model_dependencies(conn)?
+    } else {
+        Default::default()
+    };
     let session = ReadSession::open(conn, access, &query.sql)?;
     let mut stmt = match conn.prepare(&query.sql) {
         Ok(stmt) => stmt,
@@ -944,6 +970,9 @@ fn run_read_only(
         return Err(read_only_only());
     }
     let reads = session.reads();
+    if let Some(policy) = &query.model_policy {
+        check_model_policy(&reads, policy, &dependencies)?;
+    }
     bind(&mut stmt, &query.params)?;
     session.query_only()?;
 
@@ -1027,6 +1056,11 @@ pub fn check_query_on(conn: &rusqlite::Connection, query: &SqlQuery) -> Result<R
     } else {
         Access::Enforce
     };
+    let dependencies = if query.model_policy.is_some() {
+        model_dependencies(conn)?
+    } else {
+        Default::default()
+    };
     let session = ReadSession::open(conn, access, &query.sql)?;
     {
         let stmt = match conn.prepare(&query.sql) {
@@ -1037,7 +1071,63 @@ pub fn check_query_on(conn: &rusqlite::Connection, query: &SqlQuery) -> Result<R
             return Err(read_only_only());
         }
     }
-    Ok(session.reads())
+    let reads = session.reads();
+    drop(session);
+    if let Some(policy) = &query.model_policy {
+        check_model_policy(&reads, policy, &dependencies)?;
+    }
+    Ok(reads)
+}
+
+/// Read registry lineage before installing the authorizer. The connection
+/// is exclusively borrowed throughout preparation, policy and execution.
+fn model_dependencies(
+    conn: &rusqlite::Connection,
+) -> Result<std::collections::BTreeMap<String, Vec<String>>, DomainError> {
+    let has_registry: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = 'model_input')",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(crate::database::map_sql_err)?;
+    let mut dependencies: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    if has_registry {
+        let mut statement = conn
+            .prepare("SELECT view, input FROM model_input WHERE kind = 'ref'")
+            .map_err(crate::database::map_sql_err)?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(crate::database::map_sql_err)?;
+        for row in rows {
+            let (view, input) = row.map_err(crate::database::map_sql_err)?;
+            dependencies.entry(view).or_default().push(input);
+        }
+    }
+    Ok(dependencies)
+}
+
+/// Materializing a public model must not hide its referenced models.
+fn check_model_policy(
+    reads: &Reads,
+    policy: &ModelReadPolicy,
+    dependencies: &std::collections::BTreeMap<String, Vec<String>>,
+) -> Result<(), DomainError> {
+    let mut pending = reads.models.clone();
+    let mut checked = std::collections::BTreeSet::new();
+    while let Some(model) = pending.pop() {
+        if !checked.insert(model.clone()) {
+            continue;
+        }
+        (policy.0)(&model)
+            .map_err(|reason| DomainError::Invalid(format!("model `{model}`: {reason}")))?;
+        if let Some(inputs) = dependencies.get(&model) {
+            pending.extend(inputs.iter().cloned());
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

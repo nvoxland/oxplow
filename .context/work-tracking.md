@@ -350,3 +350,24 @@ The four in progress:
 - Next: "none" as a work list end to end, then the three
   capabilities.
 
+
+## Capability candidate consistency
+
+CapabilityRegistry holds core, extension declarations and running-instance
+metadata in one state. Each snapshot, selection, recognizer and row computation
+uses one captured implementation list; feature resolution never rereads a newer
+registry halfway through that operation. This preserves the existing selection
+and fallback rules.
+
+PreparedCapabilities freezes candidate declarations, resolved choices, features,
+work item recognition and SQL rows from one catalog plus registry state. Preparation
+starts no adapters or providers. Its transaction helper restates capability rows
+and switch events with rollback on failure. Registry publication checks the
+original allocation identity and supplied config's resolved choices/provenance;
+a changed registry/config requires restaging. It conveys no authority.
+
+PreparedExtensionDatabase can include those rows/switch events with models,
+vocabulary and contribution descriptors in one savepoint, deriving vocabulary
+recognition from the planned capability selection. Coordinated runtime adapter
+publication, stable config/catalog ownership and compatible reader pinning still
+need the generation activation owner. Legacy refresh remains independent.

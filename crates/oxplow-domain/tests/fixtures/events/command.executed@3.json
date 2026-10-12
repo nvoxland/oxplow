@@ -1,0 +1,8 @@
+{
+  "command": "acme.refresh",
+  "actor_kind": "job",
+  "actor_id": "0199c14e-4f03-7a25-8e41-11d8fb2a1ddf:1:1",
+  "outcome": "denied",
+  "audit_id": 12,
+  "undoable": false
+}

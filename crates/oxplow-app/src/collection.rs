@@ -747,25 +747,54 @@ impl CollectionService {
             .map_err(|e| ParserProblem::Broken(format!("entry {e}")))?
             .unwrap_or_else(|| root.join(entry));
         if spec.runtime == oxplow_config::collectors::CollectorRuntime::Exec {
-            use crate::exec_consent::{may_run, needs_approval, ProgramKind};
-            if !may_run(
-                &self.approvals,
-                root,
+            use crate::exec_consent::{needs_approval, project_collector_program, ProgramKind};
+            spec.execution
+                .require_external()
+                .map_err(ParserProblem::Broken)?;
+            let program = project_collector_program(
                 ProgramKind::Collector,
                 &spec.id,
                 entry,
                 &[],
-            ) {
+                spec.execution,
+            );
+            let gate = crate::exec_consent::script_gate(
+                self.approvals.clone(),
+                root.to_path_buf(),
+                program,
+            );
+            if gate().is_err() {
                 return Err(ParserProblem::NeedsApproval(needs_approval(
                     ProgramKind::Collector,
                     &spec.id,
                     entry,
                 )));
             }
+            let code = crate::approved_code::project_collector(
+                self.approvals.clone(),
+                root.to_path_buf(),
+                project_collector_program(
+                    ProgramKind::Collector,
+                    &spec.id,
+                    entry,
+                    &[],
+                    spec.execution,
+                ),
+            )
+            .map_err(ParserProblem::Broken)?;
             return Ok(Collector::exec(
                 spec.id.clone(),
                 kind,
-                [abs.to_string_lossy().into_owned()],
+                [code.entry.to_string_lossy().into_owned()],
+            )
+            .with_exec_location(code.location)
+            .with_authority(
+                spec.execution,
+                oxplow_domain::run::RunContext::core(
+                    oxplow_domain::Actor::System,
+                    oxplow_domain::run::Mode::External,
+                )
+                .guarded(code.gate),
             ));
         }
         // The host reads the script; the script never touches the files.
@@ -6893,7 +6922,7 @@ mod tests {
             std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
             std::fs::write(dir.join("out.txt"), "whatever the tool wrote").unwrap();
             let value: serde_yaml::Value = serde_yaml::from_str(
-                "- { id: tests.parse, records: tests, runtime: exec, entry: tools/parse.sh, report: { path: out.txt }, trigger: { on_run: test } }",
+                "- { id: tests.parse, records: tests, runtime: exec, execution: broader, entry: tools/parse.sh, report: { path: out.txt }, trigger: { on_run: test } }",
             )
             .unwrap();
             let (specs, errors) = oxplow_config::collectors::parse_collectors(
@@ -6972,7 +7001,7 @@ mod tests {
             std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
             std::fs::write(dir.join("out.txt"), "whatever the tool wrote").unwrap();
             let value: serde_yaml::Value = serde_yaml::from_str(
-                "- { id: tests.parse, records: tests, runtime: exec, entry: tools/parse.sh, report: { path: out.txt }, trigger: { on_run: test } }",
+                "- { id: tests.parse, records: tests, runtime: exec, execution: broader, entry: tools/parse.sh, report: { path: out.txt }, trigger: { on_run: test } }",
             )
             .unwrap();
             let (specs, errors) = oxplow_config::collectors::parse_collectors(

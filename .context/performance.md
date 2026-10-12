@@ -408,8 +408,15 @@ any edit, add or delete — or a config change that disables an extension —
 misses and reloads on the next call. No watcher and no explicit
 invalidation, so there is no window in which an agent's freshly written
 lens is invisible, and worktrees the watcher doesn't cover behave the
-same. Write paths (install, update, `oxplow.lens.keep`) read the disk directly, and
-consent hashing (`approval_hash`) always reads the bytes it approves.
+same. Hidden entries directly under the extensions root are excluded, matching
+the loader; install staging must not cause cache misses or a new generation.
+Hidden files inside a declared extension still participate. Write paths (install,
+update, `oxplow.lens.keep`) read the disk directly, and consent hashing
+(`approval_hash`) always reads the bytes it approves. A cache entry now owns a
+`CatalogSnapshot`: declarations and the generation hash from that entry's
+fingerprint. `get` retains its existing Arc/cache-hit behavior; snapshot callers
+can retain the load identity without another filesystem walk. The current-files
+`generation(root)` remains separate. No new performance measurement was run.
 
 ## Metric visibility: ancestry in bulk (2026-10-06)
 

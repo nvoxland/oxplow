@@ -37,7 +37,7 @@ use oxplow_domain::{InputValidator, StreamId, Timestamp};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::registry::{CapabilityHost, Instance};
+use super::registry::{CapabilityHost, Instance, PreparedProviderCapability};
 use crate::blob_store::BlobStore;
 use crate::snapshot_capture_registry::SnapshotCaptureRegistry;
 use crate::snapshot_files::SnapshotFiles;
@@ -72,7 +72,7 @@ impl CapabilityHost for SnapshotsHost {
         self.registry.has(id)
     }
 
-    fn admit(&self, instance: &Arc<Instance>) -> Result<Value, String> {
+    fn prepare(&self, instance: &Arc<Instance>) -> Result<PreparedProviderCapability, String> {
         let declared = &instance.declared;
         let capability = declared
             .capabilities
@@ -96,14 +96,17 @@ impl CapabilityHost for SnapshotsHost {
                 return Err(format!("it declares no `{required}` verb"));
             }
         }
-        self.registry.register(Arc::new(ExternalSnapshots {
+        let adapter = Arc::new(ExternalSnapshots {
             instance: instance.clone(),
             contents,
             verbs,
             ledger: self.ledger.clone(),
             marking: tokio::sync::Mutex::new(()),
-        }));
-        Ok(features)
+        });
+        let registry = self.registry.clone();
+        Ok(PreparedProviderCapability::new(features, move || {
+            registry.register(adapter);
+        }))
     }
 
     fn retire(&self, id: &str) {

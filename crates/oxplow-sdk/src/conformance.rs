@@ -183,6 +183,7 @@ pub struct ReferenceClient {
     pub peer: Peer,
     child: tokio::process::Child,
     _proxy: Option<oxplow_app::net_sandbox::EgressProxy>,
+    _group: oxplow_app::external_process::ProcessGroup,
     monitor: Arc<Mutex<Monitor>>,
 }
 
@@ -203,6 +204,7 @@ impl ReferenceClient {
             stdin,
             stdout,
             proxy,
+            group,
         } = host::spawn(launch).await?;
         let monitor = Arc::new(Mutex::new(Monitor::default()));
         let (peer_end, tap_end) = tokio::io::duplex(1 << 16);
@@ -216,6 +218,7 @@ impl ReferenceClient {
             peer,
             child,
             _proxy: proxy,
+            _group: group,
             monitor,
         })
     }
@@ -253,6 +256,7 @@ impl ReferenceClient {
         {
             let _ = self.child.kill().await;
         }
+        self._group.stop();
         // Let the pumps see the last lines.
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         let m = std::mem::take(&mut *self.monitor.lock().unwrap_or_else(|e| e.into_inner()));

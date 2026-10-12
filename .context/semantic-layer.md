@@ -138,6 +138,20 @@ struggle signals are what a person reviewing agent work needs most —
 
 ## Models (P4.2)
 
+Extension models and lenses may use `import_ref('binding')` for a model declared
+in the extension's explicit public `imports`. The host resolves the canonical
+target and exact native version before exposing the contribution; an unavailable
+optional binding withholds the referring model/lens. `models::import_references`
+uses the shared SQL tokenizer, preserving comments, literals and quoted names.
+Model calls become ordinary `ref('<extension>/<model>')` before compilation, so
+lineage and model contract enforcement stay in the existing compiler. Lenses
+receive the quoted public view name. Authoring and impact overlays resolve a
+fresh candidate catalog before compiling all enabled model definitions and
+entity stubs. They use that snapshot throughout the overlay and report candidate
+and declared transitive-consumer compilation failures. This does not publish
+models or pin a production runtime generation. Imports never grant SQL access. See
+[extensions.md](./extensions.md) for visibility and dependency propagation.
+
 A published view is a **model**: one `SELECT` in a file, reading only
 through `ref('<model>')` and `source('<table>')`, compiled to a view at
 every open (`crates/oxplow-db/src/models.rs`, called from
@@ -223,6 +237,35 @@ under `oxplow/extensions/`, a config change, or a registry change (a
 source syncing a new entity); its fingerprint — the enabled extensions'
 model sources plus the registered entity views — makes a pass over the
 same inputs, including the one its own registry writes set off, a no-op.
+**Candidate model replacement.** `models::replace_extensions` supplies a
+stricter transaction helper: compile the entire candidate inside its own
+savepoint, then retain it only when every extension's diagnostic list is empty.
+Any compilation or declared model-test diagnostic returns
+`TxError::Aborted<ExtensionModelErrors>` and rolls back candidate views, registry
+rows, contracts, model-test records, materialization changes and orphan cleanup.
+Storage errors roll back too and stay typed. It does not commit the caller's
+transaction; a coordinator must propagate rejection to roll back its other DB
+registrations. `Database::replace_extension_models` wraps this in the normal
+retried write transaction. Rejection never retries; only storage contention does.
+An empty successful set removes all extension SQL models while core/entity
+models remain governed by their existing rules.
+
+`PreparedExtensionDatabase` in oxplow-app now captures the model set and
+vocabulary from one CatalogSnapshot. Its transaction helper wraps strict model
+and vocabulary replacements in an outer savepoint, so a vocabulary diagnostic
+also restores successfully compiled models, contracts and materialized data.
+It also restates enabled contribution descriptors. With prepared capabilities,
+capability rows and switch events join that same savepoint and vocabulary uses
+the planned work-list recognizer. Mismatched catalog identities are rejected.
+It makes no outer commit or runtime swap. The returned vocabulary can be exposed
+only after committed, coordinated generation publication.
+
+This API does not change the existing partial-load background compiler: it
+continues to use `compile_extension_models`. The full generation coordinator
+still needs to prepare all registries, decide diagnostic compatibility and
+intentional disable/removal policy, publish together and pin compatible reads.
+No rollback or concurrency tests were added or run in this slice.
+
 **Versions** (core and extensions alike): a changed contract at the same
 version is refused, so a breaking change bumps `version` — and may keep
 the old one published under `deprecated: [{ version, file, until }]`.
@@ -909,7 +952,8 @@ entities from data already in the semantic layer:
 - **Sandbox.** It runs in a script worker with no files, network, env or
   secrets. Its ways out are oxplow's own services, each one it declares
   (extensions.md "Services"): the captured tree (`tree.read`), the
-  semantic layer (`sql.read`), and the `ai_*` builtins (`ai_classify` /
+  semantic layer (`sql.read`), its own private state (`state.read`, served by
+  StateSource outside SQL), and the `ai_*` builtins (`ai_classify` /
   `ai_score` / `ai_summarize` / `ai_extract`, implied when its script
   names one), recorded computations on the project's AI roles as caller
   `collector:<owner>/<id>`, whose wait is left out of the budget
@@ -1201,3 +1245,39 @@ see extensions.md.)
   can use.
 - [collection.md](./collection.md): test-run and coverage ingest, which
   becomes the tests & coverage source.
+
+## Authority on host SQL reads
+
+Host-only `SqlQuery.model_policy` checks the models SQLite reports during
+preparation before stepping the statement. It also traverses `model_input`
+`ref` lineage so materialization cannot hide dependencies. A failed policy
+restores the connection's authorizer and query-only state. Scope calls and
+collector `input` use the same policy through `RunContext`; core reads have
+no extension authority. Exact `sql.read:<v_model>` needs are additive; bare
+`sql.read` keeps the existing whole-layer meaning. Computed metric table
+functions refuse bounded authority until their precomputation has a matching
+policy. No extension receives a policy callback or a database connection.
+
+Private extension state does not pass through SQL models or query overlays.
+Script hosts can obtain a separate StateSource from the gateway's host-owned
+project resources, then read a namespace derived from their RunContext. Bare
+gateways have no state source. This does not change `run` or query_sql's
+semantic read contract.
+
+## Generation reader boundary
+
+`SqlGateway` can share the project's activation boundary with all of its clones,
+including metric gateways constructed before boot. Boot adopts it after staging
+the required-bundled baseline. `run`, `check`, `recent_events` and `view_names`
+hold a reader pin through their complete operation; nested metric materialization
+inherits the task-local pin rather than reacquiring the fair lock. Results report
+the pinned generation, not a later filesystem fingerprint. Candidate model
+validation stays outside the active reader scope, and standalone gateways retain
+their legacy behavior. Other synchronous metadata and native/background entrypoints
+still need an audit for complete reader coverage.
+
+Entity collector completion requests coordinated reactivation only when the
+registered entity schema differs from the signature captured with the active
+generation (view, version, SQL, columns and key). Ordinary data changes keep the
+published runtime and provider processes. Standalone model consumers retain
+their legacy fingerprinted compilation path.

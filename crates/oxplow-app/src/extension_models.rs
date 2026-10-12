@@ -156,8 +156,38 @@ impl ExtensionModelsService {
 /// no-op when nothing they read changed).
 pub const ENTITIES: &str = "extension_models.entities";
 
+pub(crate) type EntitySignature = Vec<(String, i64, String, String, String)>;
+
+pub(crate) fn entity_signature_tx(
+    tx: &rusqlite::Transaction<'_>,
+) -> Result<EntitySignature, DomainError> {
+    let mut statement = tx
+        .prepare(
+            "SELECT m.view, m.version, m.sql, COALESCE(c.columns_json, ''),
+                COALESCE(c.key_json, '')
+         FROM model m LEFT JOIN model_contract c
+           ON c.view = m.view AND c.version = m.version
+         WHERE m.kind = 'entity' ORDER BY m.view",
+        )
+        .map_err(oxplow_db::map_sql_err)?;
+    let signature = statement
+        .query_map([], |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+            ))
+        })
+        .map_err(oxplow_db::map_sql_err)?
+        .collect::<rusqlite::Result<EntitySignature>>()
+        .map_err(oxplow_db::map_sql_err)?;
+    Ok(signature)
+}
+
 pub struct EntitiesConsumer {
-    models: std::sync::Weak<ExtensionModelsService>,
+    services: std::sync::Weak<crate::Services>,
 }
 
 #[async_trait::async_trait]
@@ -171,16 +201,22 @@ impl crate::event_pump::AsyncEventConsumer for EntitiesConsumer {
     }
 
     async fn handle(&self, _event: &oxplow_domain::StoredEvent) -> Result<(), DomainError> {
-        match self.models.upgrade() {
-            Some(models) => models.sync().await,
-            None => Ok(()),
+        if let Some(svc) = self.services.upgrade() {
+            if svc.sql.has_activation() {
+                svc.extension_activation
+                    .request_entity_refresh(&svc.db)
+                    .await?;
+            } else {
+                svc.extension_models.sync().await?;
+            }
         }
+        Ok(())
     }
 }
 
 pub fn register(state: &Arc<crate::Services>) {
     state.event_pump.register_async(Arc::new(EntitiesConsumer {
-        models: Arc::downgrade(&state.extension_models),
+        services: Arc::downgrade(state),
     }));
 }
 

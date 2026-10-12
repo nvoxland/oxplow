@@ -181,7 +181,7 @@ fn target_effort(
             return Err(invalid(
                 "/effort",
                 "name exactly one of `effort` or `thread`",
-            ))
+            ));
         }
     };
     reachable_thread(ctx, thread, "/effort")?;

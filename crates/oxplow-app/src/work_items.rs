@@ -64,29 +64,56 @@ pub fn built_in_provider(entry: &str, db: &oxplow_db::Database) -> Option<WorkIt
 /// extensions' `implementations:`), and unregister the ones it no longer
 /// does: a built-in list is reachable only while an extension declares
 /// it; its data stays.
+pub struct PreparedWorkItems {
+    changes: Vec<PreparedWorkItemChange>,
+}
+
+enum PreparedWorkItemChange {
+    Register(WorkItemsProvider),
+    Remove(&'static str),
+}
+
+impl PreparedWorkItems {
+    pub fn publish(self, registry: &oxplow_domain::work_items::WorkItemsRegistry) {
+        for change in self.changes {
+            match change {
+                PreparedWorkItemChange::Register(provider) => registry.register(provider),
+                PreparedWorkItemChange::Remove(id) => registry.unregister(id),
+            }
+        }
+    }
+}
+
+pub fn prepare_built_ins(
+    declared: &[crate::capabilities::Implementation],
+    db: &oxplow_db::Database,
+) -> PreparedWorkItems {
+    let mut changes = Vec::new();
+    for built in crate::capabilities::BUILT_INS
+        .iter()
+        .filter(|built| built.capability == "work_items")
+    {
+        let named = declared.iter().any(|implementation| {
+            implementation.capability == "work_items"
+                && matches!(implementation.source, crate::capabilities::Source::BuiltIn(entry) if entry == built.entry)
+        });
+        if named {
+            if let Some(provider) = built_in_provider(built.entry, db) {
+                changes.push(PreparedWorkItemChange::Register(provider));
+            }
+        } else if let Some(id) = built.provider {
+            changes.push(PreparedWorkItemChange::Remove(id));
+        }
+    }
+    PreparedWorkItems { changes }
+}
+
 pub fn register_built_ins(
     registry: &oxplow_domain::work_items::WorkItemsRegistry,
     declared: &[crate::capabilities::Implementation],
     db: &oxplow_db::Database,
 ) {
-    for b in crate::capabilities::BUILT_INS
-        .iter()
-        .filter(|b| b.capability == "work_items")
-    {
-        let named: Vec<&crate::capabilities::Implementation> = declared
-            .iter()
-            .filter(|i| matches!(i.source, crate::capabilities::Source::BuiltIn(e) if e == b.entry))
-            .collect();
-        match (named.is_empty(), b.provider) {
-            (false, _) => {
-                if let Some(provider) = built_in_provider(b.entry, db) {
-                    registry.register(provider);
-                }
-            }
-            (true, Some(id)) => registry.unregister(id),
-            (true, None) => {}
-        }
-    }
+    prepare_built_ins(declared, db).publish(registry);
 }
 
 /// None as a work list: a sink. Every verb succeeds with `{ tracked:

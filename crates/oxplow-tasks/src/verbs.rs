@@ -96,7 +96,7 @@ fn task_author(actor: &Actor) -> Option<TaskAuthor> {
         Actor::Human => Some(TaskAuthor::User),
         Actor::Agent { .. } => Some(TaskAuthor::Agent),
         Actor::Lens { on_behalf_of, .. } => task_author(on_behalf_of),
-        Actor::Effect { .. } | Actor::System => None,
+        Actor::Effect { .. } | Actor::Job { .. } | Actor::System => None,
     }
 }
 
@@ -111,6 +111,7 @@ fn note_author(actor: &Actor) -> String {
         Actor::Lens { on_behalf_of, .. } => note_author(on_behalf_of),
         Actor::Effect { effect, .. } => format!("effect:{effect}"),
         Actor::System => "oxplow".into(),
+        Actor::Job { .. } => actor.source(),
     }
 }
 

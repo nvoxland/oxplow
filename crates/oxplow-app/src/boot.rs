@@ -23,7 +23,9 @@ use crate::{BackgroundTaskKind, Services};
 /// The two awaited steps run synchronously on purpose: the first
 /// client must not observe pre-recovery agent state or a project with
 /// no primary stream.
-pub async fn run_boot_orchestration(state: &Arc<Services>) {
+pub async fn run_boot_orchestration(
+    state: &Arc<Services>,
+) -> Result<(), oxplow_domain::DomainError> {
     let event_bus = state.events.clone();
 
     // Daemon recovery — close any agent_turn rows that the previous
@@ -41,6 +43,13 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         Ok(s) => tracing::info!(stream_id = %s.id, "primary stream ready"),
         Err(e) => tracing::warn!(error = %e, "ensure_primary failed at boot"),
     }
+
+    // Publish the repairable baseline before extension consumers or requests
+    // can run, then attempt one strict full generation. A failed full candidate
+    // leaves core usable; a failed required baseline prevents serving.
+    state.extension_activation.initialize(state.clone()).await?;
+    state.extension_activation.spawn(state);
+    state.jobs.spawn(state.extension_activation.clone());
 
     // Start the file-snapshot manager's watcher loop for every
     // registered stream, plus per-stream VcsRefsChanged listeners so a
@@ -177,31 +186,9 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     crate::collector_runner::spawn_scheduler(state.clone());
     // Paced `on:` collectors: run each deferred one once its pacing allows.
     crate::pacing::spawn(state.clone());
-    // Every capability's implementations and which is active, before the
-    // provider registry adds the instances it starts — and again whenever
-    // the project's extensions change (one may declare or take one away).
-    if let Err(e) = crate::capabilities::refresh(state).await {
-        tracing::warn!(error = %e, "publishing the capability implementations failed");
-    }
     // The agent runtimes' skills: what's offered now.
     crate::capabilities::refresh_agent_text(state).await;
-    {
-        let state = state.clone();
-        let mut changes = state.extension_catalog.changes();
-        tokio::spawn(async move {
-            while let Ok(()) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) =
-                changes.recv().await
-            {
-                if let Err(e) = crate::capabilities::refresh(&state).await {
-                    tracing::warn!(error = %e, "restating the capability implementations failed");
-                }
-                crate::capabilities::refresh_agent_text(&state).await;
-            }
-        });
-    }
-    crate::providers::registry::spawn_reconciler(state.clone());
     crate::providers::sync::spawn_sync_scheduler(state.clone());
-    crate::extension_commands::spawn_reconciler(state.clone());
     // Open efforts' evidence, an asset over the tables it reads (P7.B6).
     crate::effort_evidence::register(state);
 
@@ -397,17 +384,10 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     // Each stream's recorded branch follows its checkout.
     state.branch_reconciler.clone().spawn();
 
-    // The vocabulary (P8.D3): core plus what extensions declare, rebuilt
-    // now and on every change.
-    state
-        .vocabulary_service
-        .clone()
-        .spawn(state.extension_catalog.changes());
-
-    // The renderer hears the catalog's signal too (tsk1030): what it lists
-    // from extensions reloads on this, not on a guess from file paths.
+    // The renderer reloads published metadata (or rejection diagnostics),
+    // rather than observing a candidate before its coordinated publication.
     {
-        let mut changes = state.extension_catalog.changes();
+        let mut changes = state.extension_catalog.runtime_changes();
         let events = state.events.clone();
         tokio::spawn(async move {
             while let Ok(()) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) =
@@ -417,12 +397,6 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
             }
         });
     }
-
-    // Extensions' SQL models (P4.9): compiled now and on every change.
-    state
-        .extension_models
-        .clone()
-        .spawn(state.extension_catalog.changes());
 
     // The one change loop (P4.6, P7.B1, P7.B6): which models each commit
     // changed, which metric samples landed, which assets went stale, and
@@ -541,14 +515,15 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     // (`kind_search`, registered by the change loop); files are the
     // `search.index` pump consumer's.
 
-    // Metric catalog (tsk213, P7.B6): seed the declared metrics, then reseed
-    // when the extensions may have changed (config changes reseed through
-    // the `config.metrics` reactor).
+    // Declarations already committed with extension activation. Capture state
+    // metrics once without exposing a second catalog writer/reactor.
     {
-        let metrics = state.metrics.clone();
-        let changes = state.extension_catalog.changes();
+        let state = state.clone();
         tokio::spawn(async move {
-            metrics.run(changes).await;
+            let _ = state
+                .sql
+                .read_generation(state.metrics.capture_entity_states(true))
+                .await;
         });
     }
 
@@ -582,4 +557,5 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
             }
         });
     }
+    Ok(())
 }

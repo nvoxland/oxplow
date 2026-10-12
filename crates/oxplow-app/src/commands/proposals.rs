@@ -41,6 +41,28 @@ impl CommandBus {
             };
         }
         let spec = &command.spec;
+        // Proposals retain replayable inputs in a published read model.
+        // An operation's private fields must never enter that storage. A
+        // direct confirmed human invocation can use the ordinary redacted
+        // audit path; unattended callers cannot retain a payload for approval.
+        if spec
+            .unrecorded
+            .iter()
+            .any(|field| field == "*" || input.get(field).is_some())
+        {
+            let error = CommandError::Denied {
+                reason: "private command input requires a direct confirmed invocation".into(),
+            };
+            self.audit_only(
+                run_ctx,
+                spec,
+                &input,
+                Outcome::Denied,
+                Some(error.to_string()),
+            )
+            .await;
+            return error;
+        }
         let dry_run = match resolved {
             Resolved::Tx(handler) => {
                 match self.dry_run(handler.clone(), actor, &input, gates).await {
@@ -92,7 +114,7 @@ impl CommandBus {
                     &CommandProposedV2 {
                         proposal: proposal_ref(inserted.id),
                         command: row.command.clone(),
-                        actor_kind: actor_c.kind(),
+                        actor_kind: actor_c.kind().try_into()?,
                         actor_id: actor_c.id(),
                         destructive,
                         supersedes: supersedes.clone(),

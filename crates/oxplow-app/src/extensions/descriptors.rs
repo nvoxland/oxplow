@@ -178,6 +178,12 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
         d.aliases = vec![c.name.clone()];
         out.push(d);
     }
+    for job in &ext.jobs {
+        let mut d = new(ContributionKind::Job, &job.id, RunsOn::Call);
+        d.contract_version = Some(job.version);
+        d.needs = job.needs.clone();
+        out.push(d);
+    }
     for a in &ext.advisories {
         let mut d = new(ContributionKind::Advisory, &a.id, RunsOn::Agent);
         d.needs = a.needs.clone();
@@ -194,7 +200,11 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
     }
     // An implementation is chosen by `<capability>/<id>`.
     for i in &ext.implementations {
-        let mut d = new(ContributionKind::Implementation, &i.id, RunsOn::Call);
+        let mut d = new(
+            ContributionKind::Implementation,
+            &oxplow_domain::contribution::implementation_local(&i.capability, &i.id),
+            RunsOn::Call,
+        );
         d.needs = i.needs.clone();
         d.global = Some(format!("{}/{}", i.capability, i.id));
         d.aliases = vec![format!("{}/{}", i.capability, i.id)];
@@ -255,7 +265,9 @@ pub fn check_catalog(exts: &mut [Extension]) -> Registry {
     // namespace's (`acme-pr`'s `acme_pr_` holds inside `acme`'s `acme_`),
     // so those are registered most specific first; equal namespaces, and
     // every other kind, go in catalog order.
-    let mut by_specificity: Vec<usize> = (0..exts.len()).filter(|&i| exts[i].enabled).collect();
+    let mut by_specificity: Vec<usize> = (0..exts.len())
+        .filter(|&i| exts[i].enabled && !exts[i].public_contracts.blocked)
+        .collect();
     by_specificity.sort_by_key(|&i| std::cmp::Reverse(extension_namespace(&exts[i].name).len()));
     for i in by_specificity {
         for d in exts[i]
@@ -268,7 +280,11 @@ pub fn check_catalog(exts: &mut [Extension]) -> Registry {
             }
         }
     }
-    for (i, ext) in exts.iter().enumerate().filter(|(_, e)| e.enabled) {
+    for (i, ext) in exts
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| e.enabled && !e.public_contracts.blocked)
+    {
         for d in ext
             .contributions
             .iter()
@@ -308,6 +324,7 @@ fn remove(ext: &mut Extension, c: &Collision) {
             let global = c.global.as_str();
             ext.commands.retain(|x| x.name != global)
         }
+        ContributionKind::Job => ext.jobs.retain(|job| job.id != local),
         ContributionKind::Skill => ext.skills.retain(|x| x.name != local),
         ContributionKind::Implementation => {
             let global = c.global.as_str();
@@ -400,6 +417,47 @@ mod tests {
     #[test]
     fn the_fixture_extension_loads_clean() {
         assert_eq!(acme().errors, Vec::<String>::new());
+    }
+
+    /// An implementation is chosen by its capability and id, so one id
+    /// under two capabilities is two contributions.
+    #[test]
+    fn an_implementation_is_named_by_its_capability_and_id() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "oxplow/extensions/acme/extension.yaml",
+            "manifest: 2\nname: acme\nsharing: private\nintent: { purpose: p, origin: null, examples: [] }\n\
+             implementations:\n\
+             \x20 - { capability: effort_policy, id: tidy, entry: policies/tidy.star }\n\
+             \x20 - { capability: ai_provider, id: tidy, entry: providers/tidy.star }\n",
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/acme/policies/tidy.star",
+            "def transform(x):\n    return []\n",
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/acme/providers/tidy.star",
+            "def request(x):\n    return {}\n\ndef response(x):\n    return {}\n",
+        );
+        let ext = load_extensions(dir.path())
+            .into_iter()
+            .find(|e| e.name == "acme")
+            .unwrap();
+        let ids: Vec<String> = of(&ext, K::Implementation)
+            .iter()
+            .map(|d| d.id.to_string())
+            .collect();
+        assert_eq!(ext.errors, Vec::<String>::new());
+        assert_eq!(
+            ids,
+            [
+                "acme/implementation/effort_policy.tidy",
+                "acme/implementation/ai_provider.tidy"
+            ]
+        );
     }
 
     #[test]

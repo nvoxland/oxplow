@@ -130,7 +130,7 @@ pub fn register(state: &Arc<crate::Services>) {
     state.event_pump.register_async(reactor(
         PROVIDERS,
         &["extensionInstances", "activeProviders"],
-        Box::new(|svc| Box::pin(async move { svc.providers.reconcile().await })),
+        Box::new(|svc| Box::pin(async move { svc.extension_activation.request() })),
     ));
     state.event_pump.register_async(reactor(
         SCRIPTS,

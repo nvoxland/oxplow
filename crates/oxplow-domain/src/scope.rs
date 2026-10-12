@@ -91,6 +91,18 @@ pub struct Scope {
 /// Every scope core provides, by id.
 pub const SCOPES: &[Scope] = &[
     Scope {
+        id: "jobs.read",
+        access: Access::Read,
+        host: Host::Daemon,
+        summary: "Read this extension's durable job status and recorded results.",
+    },
+    Scope {
+        id: "jobs.write",
+        access: Access::Record,
+        host: Host::Daemon,
+        summary: "Record intent for this extension's declared jobs or request their cancellation; execution requires its own current approval.",
+    },
+    Scope {
         id: "agent_input.write",
         access: Access::View,
         host: Host::Window,
@@ -109,6 +121,12 @@ pub const SCOPES: &[Scope] = &[
         summary: "Ask the configured model a recorded question (`ai_classify`, `ai_score`, \
                   `ai_summarize`, `ai_extract`), spending the person's AI provider key: \
                   only on their approval, and only from a run that may call out.",
+    },
+    Scope {
+        id: "ai.discover",
+        access: Access::Read,
+        host: Host::Daemon,
+        summary: "Read declared AI models, capabilities and limits, without credentials or paid probes.",
     },
     Scope {
         id: "bookmarks.write",
@@ -168,8 +186,19 @@ pub const SCOPES: &[Scope] = &[
         id: "efforts.write",
         access: Access::Record,
         host: Host::Daemon,
-        summary:
-            "Open, update, link and close efforts; record and review their claims and decisions.",
+        summary: "Open, update, link and close efforts; record and review their claims and decisions.",
+    },
+    Scope {
+        id: "extension_config.read",
+        access: Access::Read,
+        host: Host::Daemon,
+        summary: "Read the resolved defaults, project and personal configuration for an extension, including provenance.",
+    },
+    Scope {
+        id: "extension_config.write",
+        access: Access::Record,
+        host: Host::Daemon,
+        summary: "Write an extension's private configuration through the native configuration operation.",
     },
     Scope {
         id: "extensions.enable",
@@ -247,9 +276,20 @@ pub const SCOPES: &[Scope] = &[
         id: "sql.read",
         access: Access::Read,
         host: Host::Daemon,
-        summary:
-            "Read oxplow's published models (`v_*`) with SQL: one read-only statement a call, \
+        summary: "Read oxplow's published models (`v_*`) with SQL: one read-only statement a call, \
               bound by named parameters.",
+    },
+    Scope {
+        id: "state.read",
+        access: Access::Read,
+        host: Host::Daemon,
+        summary: "Read the calling extension's private workflow state or rebuildable cache.",
+    },
+    Scope {
+        id: "state.write",
+        access: Access::Record,
+        host: Host::Daemon,
+        summary: "Atomically replace the calling extension's own private state or cache with a version/revision check.",
     },
     Scope {
         id: "streams.write",
@@ -316,7 +356,9 @@ pub const SCOPES: &[Scope] = &[
 
 /// The scope `id`, if core provides it.
 pub fn scope(id: &str) -> Option<&'static Scope> {
-    SCOPES.iter().find(|c| c.id == id)
+    SCOPES
+        .iter()
+        .find(|c| c.id == crate::service::need_scope(id))
 }
 
 /// The strongest access among `needs`' scopes; `None` when it

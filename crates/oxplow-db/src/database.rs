@@ -525,6 +525,18 @@ impl Database {
             .await
     }
 
+    /// Publish the complete candidate SQL model set, or retain the previous
+    /// set with structured diagnostics. Validation rejection is never retried;
+    /// storage contention uses the normal transaction retry. This coordinates
+    /// SQL models only, not the runtime's in-memory extension registries.
+    pub async fn replace_extension_models(
+        &self,
+        extensions: Vec<crate::models::ExtensionModels>,
+    ) -> Result<(), TxError<crate::models::ExtensionModelErrors>> {
+        self.transaction_or(move |tx| crate::models::replace_extensions(tx, &extensions))
+            .await
+    }
+
     /// Check the extensions' models without publishing them — works on a
     /// read-only database ([`crate::models::check_extensions`]); `stubs`
     /// stand in for declared entities that haven't synced.
@@ -615,6 +627,86 @@ impl Database {
         A: Send + 'static,
     {
         self.write_transaction(f, true).await
+    }
+
+    /// Run a publication transaction on the database worker. Unlike
+    /// [`Self::transaction_or`], the closure owns its commit boundary so it
+    /// can keep synchronous publication reservations alive across SQL commit
+    /// and an infallible in-memory swap. The closure must not perform process
+    /// or network work; it must hold the necessary reader/writer boundary and
+    /// leave the host fail-closed if publication panics after commit.
+    ///
+    /// A returned success without calling `commit` is an invariant error and
+    /// rolls back. Errors before commit may retry only for storage contention;
+    /// no result is retried after commit, including a post-commit `Busy`.
+    pub async fn transaction_with_publication<R, A, F>(&self, f: F) -> Result<R, TxError<A>>
+    where
+        F: Fn(&mut PublicationTransaction<'_>) -> Result<R, TxError<A>> + Send + 'static,
+        R: Send + 'static,
+        A: Send + 'static,
+    {
+        const MAX_ATTEMPTS: u32 = 3;
+        const BACKOFF: [std::time::Duration; 2] = [
+            std::time::Duration::from_millis(50),
+            std::time::Duration::from_millis(200),
+        ];
+        let permit = self.db_permit().await.map_err(TxError::Storage)?;
+        let db = self.clone();
+        let out = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            let _flush_changes = PublicationChangeFlush(db.changes.clone());
+            let mut attempt: u32 = 0;
+            loop {
+                attempt += 1;
+                let mut conn = db.conn().map_err(|e| {
+                    TxError::Storage(oxplow_domain::DomainError::Storage(format!("pool: {e}")))
+                })?;
+                let tx = match conn
+                    .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                {
+                    Ok(tx) => tx,
+                    Err(error) => {
+                        let error = map_sql_err(error);
+                        if error.is_retryable() && attempt < MAX_ATTEMPTS {
+                            std::thread::sleep(BACKOFF[(attempt - 1) as usize % BACKOFF.len()]);
+                            continue;
+                        }
+                        return Err(TxError::Storage(error));
+                    }
+                };
+                let mut publication = PublicationTransaction {
+                    transaction: Some(tx),
+                    committed: false,
+                };
+                let result = f(&mut publication);
+                let committed = publication.committed;
+                drop(publication);
+                match result {
+                    Ok(value) if committed => return Ok(value),
+                    Ok(_) => {
+                        return Err(TxError::Storage(oxplow_domain::DomainError::Invalid(
+                            "publication transaction returned without committing".into(),
+                        )));
+                    }
+                    Err(error) if committed => return Err(error),
+                    Err(TxError::Storage(error))
+                        if error.is_retryable() && attempt < MAX_ATTEMPTS =>
+                    {
+                        // The publication transaction dropped without a
+                        // successful commit, so SQLite rolled this attempt back.
+                        std::thread::sleep(BACKOFF[(attempt - 1) as usize % BACKOFF.len()]);
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+        })
+        .await
+        .map_err(|e| {
+            TxError::Storage(oxplow_domain::DomainError::Storage(format!(
+                "db task panicked: {e}"
+            )))
+        });
+        out?
     }
 
     /// [`Self::transaction`] on the calling thread, once: for construction
@@ -729,6 +821,47 @@ pub enum TxError<A> {
     Storage(oxplow_domain::DomainError),
     /// The caller's own reason: rolled back, never retried, handed back.
     Aborted(A),
+}
+
+/// A database transaction whose commit is explicit so a publisher can keep
+/// its reservation guards alive while SQL commits and then swap memory state.
+pub struct PublicationTransaction<'conn> {
+    transaction: Option<rusqlite::Transaction<'conn>>,
+    committed: bool,
+}
+
+/// Flush committed table changes when the publication worker exits, even if
+/// its async caller was canceled or the callback unwound after committing.
+struct PublicationChangeFlush(Arc<crate::changes::Changes>);
+
+impl Drop for PublicationChangeFlush {
+    fn drop(&mut self) {
+        self.0.flush();
+    }
+}
+
+impl<'conn> PublicationTransaction<'conn> {
+    /// The live SQLite transaction; unavailable after a commit attempt.
+    pub fn transaction(&self) -> Result<&rusqlite::Transaction<'conn>, oxplow_domain::DomainError> {
+        self.transaction.as_ref().ok_or_else(|| {
+            oxplow_domain::DomainError::Invariant(
+                "publication transaction is no longer available".into(),
+            )
+        })
+    }
+
+    /// Commit the SQL changes. The committed flag is set only if SQLite
+    /// confirms the commit succeeded.
+    pub fn commit(&mut self) -> Result<(), oxplow_domain::DomainError> {
+        let transaction = self.transaction.take().ok_or_else(|| {
+            oxplow_domain::DomainError::Invariant(
+                "publication transaction is no longer available".into(),
+            )
+        })?;
+        transaction.commit().map_err(map_sql_err)?;
+        self.committed = true;
+        Ok(())
+    }
 }
 
 impl<A> From<oxplow_domain::DomainError> for TxError<A> {
@@ -2224,7 +2357,9 @@ mod tests {
         embedded::migrations::runner().run(&mut conn).unwrap();
         let one = |sql: &str| -> String { conn.query_row(sql, [], |r| r.get(0)).unwrap() };
         assert_eq!(
-            one("SELECT group_concat(command, ',') FROM (SELECT command FROM command_audit ORDER BY id)"),
+            one(
+                "SELECT group_concat(command, ',') FROM (SELECT command FROM command_audit ORDER BY id)"
+            ),
             "oxplow.thread.close,oxplow.review.accept"
         );
         assert_eq!(
@@ -2295,7 +2430,9 @@ mod tests {
             vec![12, 13]
         );
         assert_eq!(
-            ids("SELECT CAST(source_id AS INTEGER) FROM page_ref WHERE source_kind = 'finding' ORDER BY 1"),
+            ids(
+                "SELECT CAST(source_id AS INTEGER) FROM page_ref WHERE source_kind = 'finding' ORDER BY 1"
+            ),
             vec![12, 13]
         );
     }

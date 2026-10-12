@@ -76,6 +76,77 @@ workspace, a provider sign-in finishing (`CredentialChanged`: the token
 is in the keychain, which no model reads); every other view re-reads a model on `ModelsChanged`
 (P8.A2–A10).
 
+**Private extension state.** `extension_state_store` is a host persistence
+primitive, with both CAS write entry points denied to thin callers. Its opaque
+payloads have no SQL model or direct store RPC surface. Host services must derive
+namespace identity from RunContext and enforce grants. `StateHost` now does this
+for its synchronous read and write adapters, including current contribution
+identity and live authority checks around each operation. Its write takes an
+already-audited TxCtx, with a publication savepoint and no outer commit; storage
+errors must propagate to abort the caller's transaction. `state.read/snapshot`
+is registered as a native command operation and its read result is not audited.
+`state.write/compare_exchange` is registered too, returns only a stamp, and omits
+private input from audit, including composed calls; private proposals are refused
+before durable storage. The store itself grants no authority.
+
+**Private extension configuration.** `extension_config_store` CAS writes are
+also denied to thin callers. `ConfigurationHost` derives the exact current owner,
+checks declared/live `extension_config.read/write` authority around access and
+resolves defaults/project/personal with the manifest schema. Native read
+`snapshot` returns settings and origins, while `inspect` returns only layer
+stamps for migration. Native write `compare_exchange` validates and updates one
+or both layers in a single audited savepoint, returns stamps, and omits layer
+input from audit/proposals. Scripts/provider hosts have a separate callable
+`extension_config.read` service; this is unrelated to core app settings scopes.
+No private table, settings payload, credential resolver or arbitrary-owner API
+is exposed through SQL/RPC. Both scopes are local project rows. Disable/uninstall
+retains rows but denies access; reset is an empty-object CAS. Draft migrations
+remain unapplied. Opaque versioned host secret references can be stored as
+identity-only settings; the separate human settings ingress writes machine
+keychain values and returns only references/presence. No script, native command
+or MCP service resolves them. The first consumer is the shipped remote MCP HTTP
+transport, after exact declaration approval and live owner checks. Secret
+rotation/revocation changes a synchronous authority revision and schedules
+cancellation-safe consumer cleanup. References are always scoped to the primary
+project and owning extension, including for globally configured instances.
+
+**Durable extension jobs.** Job store enqueue, transition and append-only
+observation writes (sync and async) are denied to thin callers. The helpers
+require an existing transaction and propagate savepoint rollback failures;
+logical conflict/rejection must never leave attempt mutations if caught. Private
+request/result/evidence JSON has no SQL models or direct RPC. Queued/recovery
+pages carry bounded metadata only, history pages stop at row/payload budgets,
+and original-owner observations never grant publication. The dispatcher rechecks
+live grants and runs workers/cancellation waits outside transactions.
+`enqueue_with_context` now persists validated, bounded actor/anchor/cause provenance
+atomically with intent in a private immutable sidecar. Duplicate scheduling compares
+provenance and preserves the original origin; legacy missing context is refused,
+never backfilled. This persisted context remains attribution, not live authority.
+An immutable host operation registry pins exact owner/generation/operation and
+replay policy; work carries a host-derived job/attempt identity and an
+attempt-independent idempotency key. Public enqueue/cancel/snapshot native
+operations, a callable owned-result reader, completion events and bounded boot
+scheduling are integrated for typed AI jobs. Runtime validation remains pending.
+
+**Candidate model publication.** Both `Database::replace_extension_models`
+and `models::replace_extensions` are denied to thin callers. The latter is a
+transaction helper with an inner savepoint, not an IPC write surface. A host
+generation coordinator owns strict candidate rejection and the larger DB /
+in-memory publication boundary; the legacy background compiler remains partial.
+
+**Database generation candidate.** The app's PreparedExtensionDatabase helper
+accepts a caller-owned Transaction and applies models, vocabulary and enabled
+contribution descriptors inside a single surrounding savepoint. Its capability
+variant includes planned capability rows and switch events, with vocabulary
+recognition from the planned choice. Any structured rejection restores the whole
+candidate; rollback/storage failures propagate and require outer abort. Preparing
+copies one catalog snapshot and writes nothing. The helper returns vocabulary
+metadata, makes no outer commit, and does not swap the running handle. It is
+an activation building block, with no RPC surface or worker execution. The boot
+coordinator joins its publication to commands, capability/native/provider maps,
+metric declarations and component bundles under owned reader/writer guards.
+Complete reader coverage and failure-injection validation remain unfinished.
+
 **Then: is it a read of data a model can publish?** Reads are SQL
 (P4): a new read of project data is a **model** (a `models/<name>.sql`
 file with its `models.yaml` entry — [semantic-layer.md](./semantic-layer.md)
@@ -800,3 +871,11 @@ stream purges its file rows (`purge_stream_files`). See
 - [agent-model.md](./agent-model.md) — how the agent calls into MCP
   tools that wrap these stores, including `list_backlinks` /
   `list_outbound`.
+
+## Component query version
+
+`run_component_query` requires the loaded bundle `version`, alongside lens id,
+asset, parameters and stream. The renderer captures it when loading the frame
+and forwards it over local/remote RPC. The host resolves the immutable bundle
+and uses its asset allowlist; missing/foreign versions require a reload. New
+manifest assets cannot widen an old running frame's query authority.

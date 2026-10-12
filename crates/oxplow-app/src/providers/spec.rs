@@ -37,6 +37,9 @@ use serde::{Deserialize, Serialize};
 
 use oxplow_domain::capability::{self, ProviderContract};
 
+/// A host reference cannot choose a process environment control variable.
+pub(crate) const HOST_SECRET_BEARER: &str = "OXPLOW_MCP_BEARER";
+
 /// The capabilities a provider may implement: the ones core gives a
 /// contract (`oxplow_domain::capability::ProviderContract`).
 pub fn capabilities() -> impl Iterator<Item = &'static str> {
@@ -84,6 +87,8 @@ pub struct ProviderSpec {
     /// Hosts it may reach (enforced where the OS can).
     #[serde(default)]
     pub network: Vec<String>,
+    #[serde(default)]
+    pub execution: oxplow_domain::grant::ExecutionTier,
     /// The checked-in `InitializeResult` (JSON), relative to the folder.
     pub declarations: String,
     /// What a work list's own ids look like (a regex matched whole:
@@ -97,7 +102,7 @@ pub struct ProviderSpec {
     #[serde(default)]
     pub fields: Vec<oxplow_domain::work_items::FieldDecl>,
     /// The scopes it calls over the protocol (`host/call`,
-    /// `sql.read`): part of what its approval covers, and the only ones it
+    /// `sql.read` or `state.read`): part of what its approval covers, and the only ones it
     /// may call.
     #[serde(default)]
     pub needs: Vec<String>,
@@ -162,6 +167,9 @@ pub struct CredentialDecl {
     pub name: String,
     /// Obtained by signing in rather than pasted (P9.B3).
     pub oauth: Option<OAuthDecl>,
+    /// An inert host-owned secret identity, usable only as a remote MCP bearer.
+    #[serde(rename = "secretRef", skip_serializing_if = "Option::is_none")]
+    pub secret_ref: Option<oxplow_domain::extension_secret::SecretRef>,
 }
 
 impl CredentialDecl {
@@ -170,6 +178,9 @@ impl CredentialDecl {
     /// come from, as which client and for what — so changing any of them
     /// asks again.
     pub fn grant(&self) -> String {
+        if let Some(reference) = &self.secret_ref {
+            return format!("{} (host secret reference {})", self.name, reference.id());
+        }
         let Some(oauth) = &self.oauth else {
             return self.name.clone();
         };
@@ -203,6 +214,8 @@ struct CredentialFile {
     /// Obtained by signing in rather than pasted.
     #[serde(default)]
     oauth: Option<OAuthDecl>,
+    #[serde(default, rename = "secretRef")]
+    secret_ref: Option<oxplow_domain::extension_secret::SecretRef>,
 }
 
 /// In the manifest a credential is a bare name or `{ name, oauth? }`.
@@ -218,6 +231,7 @@ impl<'de> Deserialize<'de> for CredentialDecl {
                 Ok(CredentialDecl {
                     name: name.to_string(),
                     oauth: None,
+                    secret_ref: None,
                 })
             }
             fn visit_map<A: serde::de::MapAccess<'de>>(
@@ -229,6 +243,7 @@ impl<'de> Deserialize<'de> for CredentialDecl {
                 Ok(CredentialDecl {
                     name: full.name,
                     oauth: full.oauth,
+                    secret_ref: full.secret_ref,
                 })
             }
         }
@@ -259,6 +274,11 @@ impl schemars::JsonSchema for CredentialDecl {
 fn credentials_problem(spec: &ProviderSpec) -> Option<String> {
     let id = &spec.id;
     for (i, c) in spec.credentials.iter().enumerate() {
+        if c.secret_ref.is_some() && !spec.is_host_secret_bearer(c) {
+            return Some(format!(
+                "provider `{id}`: host secret references require the remote MCP bearer credential"
+            ));
+        }
         if spec.credentials[..i].iter().any(|o| o.name == c.name) {
             return Some(format!(
                 "provider `{id}`: credential `{}` is declared twice",
@@ -364,6 +384,15 @@ pub fn instance_name(extension: &str, id: &str) -> String {
 }
 
 impl ProviderSpec {
+    /// References are consumed by the shipped HTTP transport only, never a
+    /// package executable, stdio server or extension script environment.
+    pub(crate) fn is_host_secret_bearer(&self, credential: &CredentialDecl) -> bool {
+        credential.oauth.is_none()
+            && credential.name == HOST_SECRET_BEARER
+            && matches!(self.adapter.as_ref().map(|adapter| &adapter.mcp),
+                Some(McpServer::Url { auth: Some(name), .. }) if name == &credential.name)
+    }
+
     /// Its credentials' names.
     pub fn credential_names(&self) -> Vec<String> {
         self.credentials.iter().map(|c| c.name.clone()).collect()

@@ -301,7 +301,9 @@ Prerequisites: Normalize contribution descriptors and public extension terminolo
 
 #### Enforce scoped grants across hosts and external execution
 
-Status: planned.
+Status: in progress. Model/path bounds, live consent, explicit external
+execution tiers and pinned component authority are implemented; adversarial
+runtime validation and remaining host integration are still required.
 
 Scope: Apply approved authority at host-service calls and semantic reads, external process launch, AI-provider network/credential access and component command bridges. Raw external processes need OS confinement or an explicitly consented broader-authority tier; a declaration alone cannot constrain them. Keep supported-platform enforcement explicit.
 
@@ -381,7 +383,21 @@ Prerequisites: Introduce a shared extension RunContext; Define scoped extension 
 
 #### Provide durable cancellable extension jobs outside database transactions
 
-Status: planned.
+Status: in progress. The lifecycle contract now distinguishes durable intent,
+attempt fencing, lease loss, observed cancellation and actual completion.
+A bounded pure domain module is implemented, including cancellation of uncertain
+retry-queued jobs and validation of persisted identity/state/counters. Dedicated
+private persistence now integrates intent dedupe, revision/lifecycle CAS,
+per-dispatch history and append-only late observations. History pages have row/
+byte cursors; recovery and queued-work pages omit request payload. Explicit
+savepoint rollback errors reach callers, and thin callers cannot bypass the host.
+Strict private restart invocation context and atomic intent/context persistence
+are implemented; duplicate deliveries retain original scheduling provenance.
+The first public path now declares typed AI jobs, enqueues/cancels intent through
+native commands, reads owned results, publishes exact operations with the active
+generation and starts a bounded scheduler after coherent boot readiness. Fenced
+completion emits a metadata-only event. Migration execution and runtime restart,
+duplicate and cancellation validation remain pending.
 
 Scope: Add a public asynchronous job path for AI/external computation, connected to events and commands by durable run identity. Define restart recovery, idempotency, bounded concurrency, timeouts, cancellation, result publication and generation ownership. Keep network/process work outside SQLite transaction closures.
 
@@ -395,7 +411,22 @@ Prerequisites: Compose declared host services through the shared context; Contai
 
 #### Provide namespaced extension state and configuration services
 
-Status: planned.
+Status: in progress. Private namespace snapshots and fenced CAS persistence are
+implemented. Versioned manifest configuration declarations validate with an
+offline schema adapter and value-free diagnostics. Pure layer resolution and provenance are integrated with strict final validation.
+State host ownership/live authority checks, transactional CAS publication and a
+native snapshot read operation are wired. Shared script and provider routing now
+serve typed private state reads with host-derived ownership; script waits stay
+outside DB transactions. Native state CAS writes now return only a stamp and
+withhold private values from audit/proposal/child metadata. Private configuration
+override storage and authorized effective host services are integrated. Metadata
+inspection and an atomic two-layer CAS support explicit schema migration; reset
+retains revisions and disable/uninstall retain inaccessible rows. Automatic
+migration execution remains unfinished. Host-owned versioned secret references
+now have human keychain ingress and a trusted remote MCP transport consumer;
+references convey identity only and imported configuration cannot approve them.
+Generation reader coordination is integrated. Migration/restart/isolation and
+secret-revocation runtime validation remain pending.
 
 Scope: Add host-managed durable workflow state and typed extension configuration with migrations and personal/project scope. Distinguish mutable state, shared domain entities, rebuildable caches and preferences. Provide atomic updates, namespacing, access controls and host-owned secret references.
 
@@ -413,7 +444,39 @@ Make activation, update, unload, and cross-extension integration coherent, versi
 
 #### Stage and activate one coherent extension generation
 
-Status: planned.
+Status: in progress. Import-aware authoring candidates are isolated. Installation
+now stages and revalidates complete copies before replacement, with restoration
+or retained backups on publication failure. Catalog metadata snapshots now pair
+load identity with declarations; command replacement swaps one registry atomically
+and retains prior handlers on registration failure with their original provenance.
+The bus also supplies atomic multi-source replacement, and the DB supplies
+strict model-set replacement with structured rejection and savepoint rollback.
+Command reconciliation now stages all enabled replacements from one catalog
+snapshot, publishes with a registry identity fence, and rejects enabled load
+errors instead of exposing a partial command set. Explicit disable/removal and
+live owner guards remain independent of candidate acceptance. Publication races
+restage up to three times. A prepared database candidate now composes strict
+model and vocabulary replacement from one catalog snapshot; rejection of either
+restores both inside the caller's transaction. Vocabulary candidates also reject
+enabled load errors and invalid host recognizers. Live model/vocabulary reactors
+remain partial until shared coordinator adoption. Capability reads now resolve
+one captured state; prepared capability replacements fence registry/choice
+changes. The database candidate also includes contribution descriptors and
+optional planned capability rows/switch events, with vocabulary recognition from
+that planned selection. Provider preparation, native/external adapters, immutable component bundles,
+strict database/metric publication and pinned runtime reads now join one boot
+activation owner. A required-bundled repair baseline precedes full activation;
+rejection retains the baseline/last coherent generation. Raw candidates and
+runtime metadata are separate, with immediate disable/removal revocation.
+Reader coverage and runtime acceptance validation remain incomplete.
+Startup now scans bounded, marked install staging before the first catalog read:
+it restores a missing target from a retained prior copy, never publishes an
+unconfirmed first-install candidate and preserves ambiguous backups. Plain
+directory checks, file/directory sync barriers and an in-process publication lock
+are integrated; cross-process filesystem races and crash injection need review.
+Composed command routing now retains each child's own contribution context,
+authority and generation through transactional and external execution, including
+the implicit backing scope of native operations.
 
 Scope: Build and validate a candidate catalog including semantic models, vocabulary, commands, providers, capabilities and UI contribution metadata. Activate it through one coherent generation boundary; pinned runs and queries retain the generation that owns them. Define coordination across DB-backed and in-memory registries.
 
@@ -441,7 +504,13 @@ Prerequisites: Stage and activate one coherent extension generation; Provide dur
 
 #### Declare versioned public imports and cross-extension contracts
 
-Status: planned.
+Status: in progress. Canonical identity, visibility, exact contract versions,
+required/optional outcomes and deterministic dependency validation are fixed.
+The pure validator is integrated with manifest declarations, public model SQL
+bindings, optional contribution guards, export withdrawal and dependency
+diagnostics. Authoring/impact overlays and install preflight resolve fresh
+candidate catalogs and reject downstream contract regressions. Coherent runtime
+activation and behavioral validation remain; no runtime tests were added or run.
 
 Scope: Add explicit dependencies and optional dependencies for exported semantic entities, events, commands and services. Distinguish extension package versions, engine compatibility and individual public contract versions. Diagnose missing/incompatible imports and cycles before activation. Evaluate a minimal typed exported extension point only where ordinary contracts cannot express the integration.
 
@@ -473,7 +542,13 @@ Support evolving AI functionality through discoverable typed services and durabl
 
 #### Add AI capability discovery and typed request/response parts
 
-Status: planned.
+Status: in progress. Versioned neutral capability/part envelopes and conservative
+legacy adapters are implemented. Collectors can discover declared metadata
+without keychain access and use recorded typed completion through configured
+roles; scripted providers can opt into typed transport. Authorized image
+asset resolution and runtime validation remain. Shipped Anthropic and
+OpenAI-compatible mappings now support typed history/tools, finish categories
+and optional observed usage; unsupported transport shapes fail explicitly.
 
 Scope: Extend the provider contract beyond one prompt-string/JSON POST: discover models and capability metadata, typed text/image/tool parts, supported limits and usage/token estimation where available. Keep adapters for existing providers and simple complete/decide callers.
 

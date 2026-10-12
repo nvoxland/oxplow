@@ -1065,14 +1065,26 @@ Durations are `30s` / `5m` / `2h` (`parse_duration`). Checked at load
   (`list_span_files`) — what running on each snapshot between would have
   scanned — so pacing never loses a file.
 
-### Exec fact collectors need consent (tsk331)
+### Exec fact collectors need consent
 
 Only the project's own fact collectors may be `runtime: exec` (an extension's
 is starlark or jaq, and a fact collector gets no `env` / `credentials` /
 `network`). One runs only once a person approved it on this machine
-(`exec_consent::may_run` with `ProgramKind::Collector`, approval key
+(`exec_consent::script_gate` with `ProgramKind::Collector`, approval key
 `collector:<id>`, checked in `MetricsService::fact_runner`), at its current
 program content.
+
+Project exec fact collectors require the explicit broader execution tier and
+run from `approved_code`'s verified private copy, with owned process cleanup and
+live consent checks. Relative code and helpers are read from the copy;
+`OXPLOW_PROJECT_DIR` names the checkout for their explicitly approved broader
+file access. See [collection.md](./collection.md) for copy limits and lifetime.
+
+Contained fact scripts also pin the loaded text to the current entry for each
+run, including previews. A new approval cannot authorize older cached code;
+service calls and final results recheck the pin. Previews use the collector's
+ordinary declaration and grant in pure mode, so a fixture cannot bypass model
+or tree bounds or spend a model key.
 
 - **Background runs** (snapshot / event triggers) log "fact collector: not run"
   and record a failed run (`collector_run` + `collector.synced`).
@@ -2138,3 +2150,33 @@ range and branch filters; a group is a value of the dimension, not a metric,
 so it opens no page (the detail page, sliced the same way, is where one
 group's chart lives). It costs a second read per metric while a slice is on.
 
+
+## Coherent extension metric publication
+
+Production boot prepares metric declarations from the same immutable extension
+snapshot and captured project choices as models, commands and vocabulary.
+`metrics_service/generation.rs` resolves measures, dimensions, builtin/configured
+specs and the available catalog without writing. Candidates allow at most 4096
+entries per category and 16 MiB serialized metadata. Inside the publication
+transaction, entity SQL is checked against candidate views, measures/dimensions/
+specs are upserted, removed specs are reconciled and `metric_catalog` is replaced.
+Any diagnostic or storage failure aborts the candidate; published readers keep
+the prior metric rows and declarations. Measures owned by disabled extensions
+remain with their history. The required-bundled repair baseline does not prune
+project measures or cascade away their facts.
+
+Captured metric choices and global definitions publish under the generation
+writer along with the catalog. Fact-collector resolution reads these frozen
+choices; catalogue reads pin before joining declarations and stored specs.
+Production metric reseed requests the activation owner instead of writing a
+second catalog; the independent raw-catalog metric reactor is retired. State
+value recapture happens after publication in a reader scope, outside the
+publication transaction. Standalone metrics retain legacy seeding behavior.
+No script, process, network call or capture executes inside catalog publication.
+Transaction-composable fact-store upserts preserve change-detected cube
+invalidation for capture-scope and promoted-dimension changes. Runtime
+acceptance checks and migration execution remain outstanding.
+
+Paced collector selection and execution retain the same generation reader;
+advisory selection/evaluation also pins before combining runtime declarations
+with queries.

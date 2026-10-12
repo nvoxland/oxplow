@@ -37,6 +37,18 @@ pub async fn run_lens_action(
     call: LensActionCall,
     ctx: &extensions::LensContext,
 ) -> Result<CommandOutcome, CommandError> {
+    svc.sql
+        .read_generation(async { run_lens_action_unpinned(svc, lens_root, call, ctx).await })
+        .await
+        .map_err(CommandError::from)?
+}
+
+async fn run_lens_action_unpinned(
+    svc: &crate::Services,
+    lens_root: &Path,
+    call: LensActionCall,
+    ctx: &extensions::LensContext,
+) -> Result<CommandOutcome, CommandError> {
     let LensActionCall {
         lens_id,
         action_id,
@@ -113,6 +125,19 @@ pub async fn form_start(
     params: BTreeMap<String, SqlCell>,
     ctx: &extensions::LensContext,
 ) -> Result<FormStart, CommandError> {
+    svc.sql
+        .read_generation(async { form_start_unpinned(svc, lens_root, lens_id, params, ctx).await })
+        .await
+        .map_err(CommandError::from)?
+}
+
+async fn form_start_unpinned(
+    svc: &crate::Services,
+    lens_root: &Path,
+    lens_id: &str,
+    params: BTreeMap<String, SqlCell>,
+    ctx: &extensions::LensContext,
+) -> Result<FormStart, CommandError> {
     let run = extensions::run_lens(
         &svc.sql,
         &svc.extension_catalog,
@@ -175,6 +200,18 @@ pub struct FormSubmission {
 /// whoever submitted, with the form's `defaults` (placeholders bound from
 /// its params) under the submitted input.
 pub async fn submit_form(
+    svc: &crate::Services,
+    lens_root: &Path,
+    submission: FormSubmission,
+    ctx: &extensions::LensContext,
+) -> Result<CommandOutcome, CommandError> {
+    svc.sql
+        .read_generation(async { submit_form_unpinned(svc, lens_root, submission, ctx).await })
+        .await
+        .map_err(CommandError::from)?
+}
+
+async fn submit_form_unpinned(
     svc: &crate::Services,
     lens_root: &Path,
     submission: FormSubmission,
@@ -284,20 +321,49 @@ pub async fn run_component_query(
     asset: &str,
     params: BTreeMap<String, SqlCell>,
     ctx: &extensions::LensContext,
+    version: &str,
 ) -> Result<extensions::LensRun, CommandError> {
-    let (_, component) = component_of(svc, lens_root, lens_id)?;
+    svc.sql
+        .read_generation(async {
+            run_component_query_unpinned(svc, lens_root, lens_id, asset, params, ctx, version).await
+        })
+        .await
+        .map_err(CommandError::from)?
+}
+
+async fn run_component_query_unpinned(
+    svc: &crate::Services,
+    lens_root: &Path,
+    lens_id: &str,
+    asset: &str,
+    params: BTreeMap<String, SqlCell>,
+    ctx: &extensions::LensContext,
+    version: &str,
+) -> Result<extensions::LensRun, CommandError> {
+    let (ext, component) = component_of(svc, lens_root, lens_id)?;
+    let loaded = svc
+        .component_bundles
+        .get(version)
+        .filter(|bundle| {
+            bundle.extension == ext.name
+                && bundle.component == component.id
+                && svc.component_bundles.is_current(lens_root, bundle)
+        })
+        .ok_or_else(|| CommandError::Denied {
+            reason: "the component's loaded version is unavailable; reload its lens".into(),
+        })?;
     let asset = if asset.contains('/') {
         asset.to_string()
     } else {
         format!("{}/{asset}", component.extension)
     };
-    if !component.assets.contains(&asset) {
+    if !loaded.assets.contains(&asset) {
         return Err(CommandError::Invalid {
             field: Some("/asset".into()),
             message: format!(
                 "`{asset}` isn't one of component `{}`'s assets ({})",
                 component.id,
-                component.assets.join(", ")
+                loaded.assets.join(", ")
             ),
         });
     }
@@ -340,11 +406,26 @@ pub async fn invoke_component_command(
     lens_root: &Path,
     call: ComponentInvoke,
 ) -> Result<CommandOutcome, CommandError> {
+    svc.sql
+        .read_generation(async { invoke_component_command_unpinned(svc, lens_root, call).await })
+        .await
+        .map_err(CommandError::from)?
+}
+
+async fn invoke_component_command_unpinned(
+    svc: &crate::Services,
+    lens_root: &Path,
+    call: ComponentInvoke,
+) -> Result<CommandOutcome, CommandError> {
     let (ext, component) = component_of(svc, lens_root, &call.lens_id)?;
     let loaded = svc
         .component_bundles
         .get(&call.version)
-        .filter(|b| b.extension == ext.name && b.component == component.id)
+        .filter(|bundle| {
+            bundle.extension == ext.name
+                && bundle.component == component.id
+                && svc.component_bundles.is_current(lens_root, bundle)
+        })
         .ok_or_else(|| CommandError::Denied {
             reason: format!(
                 "component `{}/{}` isn't loaded at that version any more; reload its lens",
@@ -398,6 +479,18 @@ pub fn load_component(
         .load(lens_root, &ext, &component)
         .map_err(CommandError::from)?;
     Ok(loaded.version.clone())
+}
+
+/// Load a component under one pinned extension catalog generation.
+pub async fn load_component_pinned(
+    svc: &crate::Services,
+    lens_root: &Path,
+    lens_id: &str,
+) -> Result<String, CommandError> {
+    svc.sql
+        .read_generation(async { load_component(svc, lens_root, lens_id) })
+        .await
+        .map_err(CommandError::from)?
 }
 
 /// `input` with its placeholders bound: a string that is exactly
@@ -926,18 +1019,34 @@ actions:
             .iter()
             .all(|p| p.kind != crate::exec_consent::ProgramKind::Component));
         let ctx = extensions::LensContext::default();
-        run_component_query(&fx.svc, &root, "acme/view", "tasks", BTreeMap::new(), &ctx)
-            .await
-            .unwrap();
+        run_component_query(
+            &fx.svc,
+            &root,
+            "acme/view",
+            "tasks",
+            BTreeMap::new(),
+            &ctx,
+            &load_board(&fx, &root),
+        )
+        .await
+        .unwrap();
     }
 
     #[tokio::test]
     async fn a_component_queries_only_its_declared_lenses() {
         let (fx, root) = component_fixture().await;
         let ctx = extensions::LensContext::default();
-        let run = run_component_query(&fx.svc, &root, "acme/view", "tasks", BTreeMap::new(), &ctx)
-            .await
-            .unwrap();
+        let run = run_component_query(
+            &fx.svc,
+            &root,
+            "acme/view",
+            "tasks",
+            BTreeMap::new(),
+            &ctx,
+            &load_board(&fx, &root),
+        )
+        .await
+        .unwrap();
         assert_eq!(run.lens.id, "acme/tasks");
         let err = run_component_query(
             &fx.svc,
@@ -946,6 +1055,7 @@ actions:
             "acme/view",
             BTreeMap::new(),
             &ctx,
+            &load_board(&fx, &root),
         )
         .await
         .unwrap_err();
@@ -953,9 +1063,17 @@ actions:
             matches!(&err, CommandError::Invalid { message, .. } if message.contains("isn't one of component `board`'s assets (acme/tasks)")),
             "{err:?}"
         );
-        let err = run_component_query(&fx.svc, &root, "acme/tasks", "tasks", BTreeMap::new(), &ctx)
-            .await
-            .unwrap_err();
+        let err = run_component_query(
+            &fx.svc,
+            &root,
+            "acme/tasks",
+            "tasks",
+            BTreeMap::new(),
+            &ctx,
+            &load_board(&fx, &root),
+        )
+        .await
+        .unwrap_err();
         assert!(
             err.to_string().contains("isn't a custom component lens"),
             "{err}"

@@ -219,7 +219,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	runComponentQuery: (id: string, asset: string, params: { [key in string]: SqlCell } | null, streamId: string | null) => typedError<LensRun_Serialize, IpcError>(__TAURI_INVOKE("run_component_query", { id, asset, params, streamId })),
+	runComponentQuery: (id: string, asset: string, params: { [key in string]: SqlCell } | null, streamId: string | null, version: string) => typedError<LensRun_Serialize, IpcError>(__TAURI_INVOKE("run_component_query", { id, asset, params, streamId, version })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1832,6 +1832,7 @@ export type CollectorSpec = {
 	id: string,
 	doc: string,
 	runtime: CollectorRuntime,
+	execution?: ExecutionTier,
 	/**
 	 *  The program or script, relative to its owner's folder (the
 	 *  extension's, or the project's); absent for `read`.
@@ -2212,6 +2213,16 @@ export type ConfigProblem = {
 	// A JSON pointer into the config (`/team`), `""` for the whole.
 	path: string,
 	message: string,
+};
+
+/**
+ *  A versioned declaration of non-secret settings. This is data, not consent
+ *  or a credential reference. Stored overrides and host services are separate.
+ */
+export type ConfigurationFile = {
+	version: number,
+	schema: unknown,
+	defaults?: unknown,
 };
 
 /**
@@ -2777,6 +2788,20 @@ export type EventTypes = {
 	retention: EventRetention | null,
 };
 
+/**
+ *  An external process has the person's authority unless the host can
+ *  actually confine it. The broader tier requires explicit declaration
+ *  and approval; existing program approval does not imply that opt-in.
+ */
+export type ExecutionTier = "restricted" | "broader";
+
+export type ExportDeclaration = {
+	contribution: ContributionId,
+	version: number,
+	visibility: Visibility,
+	source: DeclaredAt,
+};
+
 // A loaded extension and anything wrong with it.
 export type Extension = Extension_Serialize | Extension_Deserialize;
 
@@ -3079,8 +3104,8 @@ export type Extension_Deserialize = {
 	// What it adds to the core UI (`ui:`).
 	ui: ExtensionUi,
 	/**
-	 *  False when `.oxplow/project.yaml` disables it; a disabled
-	 *  extension has no lenses, slots, sources or advisories.
+	 *  False when configuration disables it or public contracts block it;
+	 *  an inactive extension contributes nothing to the runtime catalog.
 	 */
 	enabled: boolean,
 	// Guidance for the coding agent (valid ones; invalid ones are in `errors`).
@@ -3123,6 +3148,9 @@ export type Extension_Deserialize = {
 	 *  kinds that have moved onto them so far.
 	 */
 	contributions: Descriptor[],
+	// Validated non-secret settings declaration, not resolved values or grants.
+	configuration?: ConfigurationFile | null,
+	publicContracts?: PublicContracts,
 };
 
 // A loaded extension and anything wrong with it.
@@ -3208,8 +3236,8 @@ export type Extension_Serialize = {
 	// What it adds to the core UI (`ui:`).
 	ui: ExtensionUi,
 	/**
-	 *  False when `.oxplow/project.yaml` disables it; a disabled
-	 *  extension has no lenses, slots, sources or advisories.
+	 *  False when configuration disables it or public contracts block it;
+	 *  an inactive extension contributes nothing to the runtime catalog.
 	 */
 	enabled: boolean,
 	// Guidance for the coding agent (valid ones; invalid ones are in `errors`).
@@ -3252,6 +3280,9 @@ export type Extension_Serialize = {
 	 *  kinds that have moved onto them so far.
 	 */
 	contributions: Descriptor[],
+	// Validated non-secret settings declaration, not resolved values or grants.
+	configuration: ConfigurationFile | null,
+	publicContracts: PublicContracts,
 };
 
 /**
@@ -3588,6 +3619,20 @@ export type ImplementationDecl = {
 	 *  else.
 	 */
 	needs: string[],
+};
+
+export type ImportDeclaration = {
+	id: string,
+	contribution: ContributionId,
+	version: number,
+	optional: boolean,
+	source: DeclaredAt,
+};
+
+export type ImportGuard = {
+	contribution: ContributionId,
+	imports: string[],
+	source: DeclaredAt,
 };
 
 // An operation paused mid-way, waiting on its conflicts.
@@ -5123,6 +5168,7 @@ export type ProgramKind =
 
 // A program the project's config would run.
 export type ProjectProgram = {
+	execution?: ExecutionTier,
 	kind: ProgramKind,
 	/**
 	 *  The capability it implements (a provider): what approving it lets
@@ -5311,6 +5357,7 @@ export type ProviderSpec = {
 	credentials?: CredentialDecl[],
 	// Hosts it may reach (enforced where the OS can).
 	network?: string[],
+	execution?: ExecutionTier,
 	// The checked-in `InitializeResult` (JSON), relative to the folder.
 	declarations: string,
 	/**
@@ -5339,6 +5386,27 @@ export type ProviderStatus = {
 	kind: string,
 	baseUrl: string | null,
 	keySet: boolean,
+};
+
+export type PublicBinding = {
+	id: string,
+	contribution: ContributionId,
+	version: number,
+	available: boolean,
+	unavailableReason: UnavailableReason | null,
+	// Published references of the resolved contribution; never lookup keys.
+	references: string[],
+};
+
+export type PublicContracts = {
+	exports: ExportDeclaration[],
+	imports: ImportDeclaration[],
+	guards: ImportGuard[],
+	bindings: PublicBinding[],
+	invalid: boolean,
+	blocked: boolean,
+	activationIndex: number | null,
+	withheld?: ContributionId[],
 };
 
 // What one version's collector made of an input.
@@ -6188,6 +6256,8 @@ export type UiReplacement = {
 	label: string,
 };
 
+export type UnavailableReason = { reason: "missing" } | { reason: "disabled" } | { reason: "blocked" } | { reason: "private" } | { reason: "experimental" } | { reason: "incompatible"; actual: number } | { reason: "ambiguous" } | { reason: "invalid" };
+
 export type UsageEvent = {
 	id: string,
 	kind: string,
@@ -6216,6 +6286,8 @@ export type VcsWorkspace = {
 	// The repository's primary working copy.
 	is_main: boolean,
 };
+
+export type Visibility = "private" | "experimental" | "stable";
 
 export type VisitedPage = {
 	page_kind: string,

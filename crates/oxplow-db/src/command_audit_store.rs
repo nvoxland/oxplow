@@ -22,6 +22,7 @@ pub(crate) fn actor_kind_str(k: ActorKind) -> &'static str {
         ActorKind::Lens => "lens",
         ActorKind::System => "system",
         ActorKind::Effect => "effect",
+        ActorKind::Job => "job",
     }
 }
 
@@ -32,6 +33,7 @@ pub(crate) fn parse_actor_kind(s: &str) -> Result<ActorKind, DomainError> {
         "lens" => ActorKind::Lens,
         "system" => ActorKind::System,
         "effect" => ActorKind::Effect,
+        "job" => ActorKind::Job,
         other => return Err(DomainError::Invalid(format!("actor kind `{other}`"))),
     })
 }

@@ -192,6 +192,7 @@ fn decl_of(
 pub fn effect_program(ext: &Extension, decl: &EffectDecl) -> ProjectProgram {
     let dir = ext.path.trim_end_matches('/');
     ProjectProgram {
+        execution: Default::default(),
         kind: ProgramKind::Effect,
         capability: None,
         name: decl.name(),
@@ -418,7 +419,9 @@ pub async fn run_over(
     let runtime = tokio::runtime::Handle::current();
     tokio::task::spawn_blocking(move || {
         let read = Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(layer.run(q)));
-        let calls = crate::scope_calls::Calls::new(&run, &needs, read);
+        let calls = crate::scope_calls::Calls::new(&run, &needs, read)
+            .with_state_source(layer.state_source(), &runtime)
+            .with_configuration_source(layer.configuration_source(), &runtime);
         let mut calls = match &answers {
             Some(answers) => calls.with_answers(answers),
             None => calls,

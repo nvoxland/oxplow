@@ -19,6 +19,16 @@ use serde_json::Value;
 
 /// What the `ai_*` builtins ask. Each returns JSON or an error message.
 pub trait AiOracle: Send + Sync {
+    /// Local metadata only: no credentials, completion or usage charge.
+    fn capabilities(&self, _role: &str) -> Result<Value, String> {
+        Err("this host has no AI capability discovery".into())
+    }
+    fn models(&self, _role: &str) -> Result<Value, String> {
+        Err("this host has no AI model discovery".into())
+    }
+    fn complete_typed(&self, _role: &str, _request: Value) -> Result<Value, String> {
+        Err("this host has no typed AI completion".into())
+    }
     /// `{ label, probabilities }`: which of `labels` fits `text`.
     fn classify(&self, text: &str, labels: &[String]) -> Result<Value, String>;
     /// `{ level, score, probabilities }`: where `text` sits on `levels`.
@@ -45,7 +55,13 @@ impl AiHost {
 }
 
 /// The builtins that ask a model.
-pub const AI_BUILTINS: &[&str] = &["ai_classify", "ai_score", "ai_summarize", "ai_extract"];
+pub const AI_BUILTINS: &[&str] = &[
+    "ai_classify",
+    "ai_score",
+    "ai_summarize",
+    "ai_extract",
+    "ai_complete",
+];
 
 /// Whether Starlark `script` names an `ai_*` builtin anywhere — a call,
 /// an alias, inside a def or a lambda — and so can spend a model call
@@ -69,6 +85,39 @@ fn strings(v: starlark::values::Value<'_>, what: &str) -> anyhow::Result<Vec<Str
 
 #[starlark::starlark_module]
 pub(crate) fn ai_builtins(builder: &mut starlark::environment::GlobalsBuilder) {
+    /// A V1 request with ordered messages and tools, using a configured role.
+    fn ai_complete<'v>(
+        request: starlark::values::Value<'v>,
+        #[starlark(default = "main")] role: &str,
+        eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
+    ) -> anyhow::Result<starlark::values::Value<'v>> {
+        let request = request.to_json_value()?;
+        let out = host(eval, "ai_complete")?
+            .timed(|o| o.complete_typed(role, request))
+            .map_err(anyhow::Error::msg)?;
+        Ok(eval.heap().alloc(out))
+    }
+
+    fn ai_capabilities<'v>(
+        #[starlark(default = "main")] role: &str,
+        eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
+    ) -> anyhow::Result<starlark::values::Value<'v>> {
+        let out = host(eval, "ai_capabilities")?
+            .timed(|o| o.capabilities(role))
+            .map_err(anyhow::Error::msg)?;
+        Ok(eval.heap().alloc(out))
+    }
+
+    fn ai_models<'v>(
+        #[starlark(default = "main")] role: &str,
+        eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
+    ) -> anyhow::Result<starlark::values::Value<'v>> {
+        let out = host(eval, "ai_models")?
+            .timed(|o| o.models(role))
+            .map_err(anyhow::Error::msg)?;
+        Ok(eval.heap().alloc(out))
+    }
+
     /// `{label, probabilities}`: which of `labels` fits `text`.
     fn ai_classify<'v>(
         text: &str,

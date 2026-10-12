@@ -273,7 +273,7 @@ fn show(target: LensTarget) -> Op {
                 return Err(invalid(
                     "",
                     "give `lens` (an existing lens) or `spec`, not both",
-                ))
+                ));
             }
         };
         let id = answers::insert_tx(ctx.conn, thread, &title, &shows, &json!(params))
@@ -315,7 +315,7 @@ fn kept_lens_tx(
         AnswerShows::Lens(lens) => {
             return Err(DomainError::Invalid(format!(
                 "it shows the lens `{lens}`, which is kept already"
-            )))
+            )));
         }
         AnswerShows::Spec(value) => serde_json::from_value(value.clone())
             .map_err(|e| DomainError::Invalid(format!("its spec doesn't read: {e}")))?,
@@ -391,7 +391,7 @@ async fn keeping_spec(
                             format!(
                                 "an agent keeps a lens in its own thread's stream, not `{raw}`"
                             ),
-                        )))
+                        )));
                     }
                     Ok((id, root)) => (Some(id), root),
                     Err(DomainError::Invalid(m)) => return Ok(Err(invalid("/stream", m))),
@@ -451,7 +451,7 @@ fn keep(target: LensTarget) -> Op {
                     return Err(invalid(
                         "",
                         "give `answer` (an answer to keep) or `spec` (a lens of its own), not both",
-                    ))
+                    ));
                 }
             };
             let Keeping {

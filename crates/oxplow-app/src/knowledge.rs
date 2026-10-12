@@ -571,14 +571,49 @@ impl KnowledgeSwitch {
     }
 }
 
-/// Register the knowledge stores: core's none (the sink, always there) and
-/// the wiki under each id `declared` gives it, which `wiki` follows.
-pub fn register_built_ins(
-    registry: &oxplow_domain::knowledge::KnowledgeRegistry,
+/// Staged built-in providers. Preparing these values has no effect on a live
+/// registry or wiki watcher, so a generation can publish them with its other
+/// prepared capability state.
+pub struct PreparedKnowledge {
+    providers: Vec<Arc<dyn KnowledgeProvider>>,
+}
+
+impl PreparedKnowledge {
+    /// Publish provider maps without resolving the active capability. This
+    /// can run while the activation owner holds its publication reservation.
+    pub(crate) fn publish_maps(
+        self,
+        registry: &oxplow_domain::knowledge::KnowledgeRegistry,
+        wiki: &WikiFollow,
+    ) {
+        wiki.set_serves(
+            self.providers
+                .iter()
+                .filter(|provider| !provider.sink())
+                .map(|provider| provider.id().to_string()),
+        );
+        registry.set_declared(self.providers);
+    }
+
+    /// Publish the staged providers, then point wiki file watching at the
+    /// registry's selected store. Call only after capability reservations are
+    /// released, because resolving the active id reads the capability registry.
+    pub fn publish(
+        self,
+        registry: &oxplow_domain::knowledge::KnowledgeRegistry,
+        wiki: &WikiFollow,
+    ) {
+        self.publish_maps(registry, wiki);
+        wiki.follow(&registry.active_id());
+    }
+}
+
+/// Prepare core's none sink and the wiki providers for each declared id.
+/// This does not mutate a registry or `WikiFollow`.
+pub fn prepare_built_ins(
     declared: &[crate::capabilities::Implementation],
     project_dir: &Path,
-    wiki: &WikiFollow,
-) {
+) -> PreparedKnowledge {
     let mut all: Vec<Arc<dyn KnowledgeProvider>> = vec![Arc::new(NoneKnowledge)];
     all.extend(
         declared
@@ -592,9 +627,18 @@ pub fn register_built_ins(
                 })
             }),
     );
-    wiki.set_serves(all.iter().filter(|s| !s.sink()).map(|s| s.id().to_string()));
-    registry.set_declared(all);
-    wiki.follow(&registry.active_id());
+    PreparedKnowledge { providers: all }
+}
+
+/// Register the knowledge stores: core's none (the sink, always there) and
+/// the wiki under each id `declared` gives it, which `wiki` follows.
+pub fn register_built_ins(
+    registry: &oxplow_domain::knowledge::KnowledgeRegistry,
+    declared: &[crate::capabilities::Implementation],
+    project_dir: &Path,
+    wiki: &WikiFollow,
+) {
+    prepare_built_ins(declared, project_dir).publish(registry, wiki);
 }
 
 /// How current each of `page`'s pinned file refs is (`v_knowledge_ref`:
@@ -1114,7 +1158,7 @@ pub fn ops(target: KnowledgeTarget) -> Vec<Op> {
             Err(e) => {
                 return Err(CommandError::Failed {
                     message: format!("read the page's file: {e}"),
-                })
+                });
             }
             Ok(raw) => {
                 let body = strip_body_version_literals(&raw);

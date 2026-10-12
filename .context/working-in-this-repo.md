@@ -77,6 +77,21 @@ answer, end it with the question itself. A final message that ends in
 a question shows the thread as waiting on them (`.context/work-tracking.md`
 "No gates"), until their next prompt.
 
+### Agent coordination
+
+Main Controller owns the remaining extension foundations. At the owner's
+request, independent Bugfixes worktree assignments and mailbox coordination
+have ended. Main delegates bounded work to managed subagents on lighter models;
+they share Main's workspace and receive explicit disjoint file scopes. Main
+owns contracts, shared wiring, security review and final integration. Keep
+durable plans in `.context/`; the current sequence and ownership are in
+[foundation-execution-plan.md](./foundation-execution-plan.md).
+
+The retired append-only mailbox remains historical evidence. Its receipt bug
+was a read/append race: advancing to the latest Main message could skip a peer
+reply posted in between. If such a mailbox is reused, track and acknowledge
+peer message UUIDs individually. A file does not wake an idle session.
+
 ### oxplow-dev: tasks while the work list is none
 
 Stripping oxplow to its core (disabling `oxplow-bundled` in

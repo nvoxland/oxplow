@@ -43,6 +43,9 @@ impl Invokers {
             Invoker::Human => self.human,
             Invoker::Agent => self.agent,
             Invoker::Lens => self.lens,
+            // Jobs have no generic command surface. An explicit job command
+            // policy can be added separately without widening these floors.
+            Invoker::Job => false,
         }
     }
 
@@ -77,6 +80,7 @@ pub enum Invoker {
     Human,
     Agent,
     Lens,
+    Job,
 }
 
 /// Whether a run must be confirmed by a person first. An agent can never
@@ -216,7 +220,8 @@ pub struct CommandSpec {
     #[serde(default)]
     pub op: Option<OpRef>,
     /// Top-level input fields its record leaves out — a file's content —
-    /// kept as their size (`{ "omitted_bytes": n }`): the run is still
+    /// kept as their size (`{ "omitted_bytes": n }`). The reserved `*`
+    /// marker omits the entire input, including non-object inputs: the run is still
     /// audited, the audit log doesn't grow by every file saved.
     #[serde(default)]
     pub unrecorded: Vec<String>,
@@ -226,13 +231,16 @@ impl CommandSpec {
     /// `input` as its record keeps it: each [`Self::unrecorded`] field
     /// replaced by its size.
     pub fn recorded_input(&self, input: &Value) -> Value {
+        if self.unrecorded.iter().any(|field| field == "*") {
+            return serde_json::json!({ "omitted_bytes": serialized_input_size(input) });
+        }
         let mut out = input.clone();
         if let Some(o) = out.as_object_mut() {
             for field in &self.unrecorded {
                 if let Some(v) = o.get_mut(field) {
                     let bytes = match &*v {
                         Value::String(s) => s.len(),
-                        other => other.to_string().len(),
+                        other => serialized_input_size(other),
                     };
                     *v = serde_json::json!({ "omitted_bytes": bytes });
                 }
@@ -240,6 +248,23 @@ impl CommandSpec {
         }
         out
     }
+}
+
+/// Count private JSON without allocating a serialized payload for the record.
+fn serialized_input_size(input: &Value) -> usize {
+    struct Counter(usize);
+    impl std::io::Write for Counter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 = self.0.saturating_add(bytes.len());
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut count = Counter(0);
+    serde_json::to_writer(&mut count, input).expect("JSON values serialize to a counting writer");
+    count.0
 }
 
 /// An operation of a scope (`scope: tabs.write`, `op: open`).
@@ -504,9 +529,35 @@ pub enum Actor {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         stream_id: Option<StreamId>,
     },
+    /// A host-dispatched extension job. Generic command admission denies
+    /// this invoker; identity is derived only from a validated host token.
+    Job {
+        job_id: String,
+        attempt: u32,
+        fence: u64,
+        thread_id: Option<ThreadId>,
+        stream_id: Option<StreamId>,
+    },
 }
 
 impl Actor {
+    /// Build the attribution actor for a host-owned job execution.
+    /// This does not grant generic command access or confirmation authority.
+    pub fn job(
+        identity: &crate::extension_job_context::JobExecutionIdentity,
+        thread_id: Option<ThreadId>,
+        stream_id: Option<StreamId>,
+    ) -> Actor {
+        let token = identity.attempt_fence();
+        Actor::Job {
+            job_id: identity.job_id().as_str().to_owned(),
+            attempt: token.attempt,
+            fence: token.fence,
+            thread_id,
+            stream_id,
+        }
+    }
+
     pub fn kind(&self) -> ActorKind {
         match self {
             Actor::Human => ActorKind::Human,
@@ -514,6 +565,7 @@ impl Actor {
             Actor::Lens { .. } => ActorKind::Lens,
             Actor::System => ActorKind::System,
             Actor::Effect { .. } => ActorKind::Effect,
+            Actor::Job { .. } => ActorKind::Job,
         }
     }
 
@@ -524,7 +576,7 @@ impl Actor {
         match self {
             Actor::Human => true,
             Actor::Lens { on_behalf_of, .. } => on_behalf_of.may_confirm(),
-            Actor::Agent { .. } | Actor::System | Actor::Effect { .. } => false,
+            Actor::Agent { .. } | Actor::System | Actor::Effect { .. } | Actor::Job { .. } => false,
         }
     }
 
@@ -534,7 +586,7 @@ impl Actor {
         match self {
             Actor::Agent { .. } | Actor::Effect { .. } => true,
             Actor::Lens { on_behalf_of, .. } => on_behalf_of.proposes(),
-            Actor::Human | Actor::System => false,
+            Actor::Human | Actor::System | Actor::Job { .. } => false,
         }
     }
 
@@ -544,7 +596,7 @@ impl Actor {
         match self {
             Actor::Agent { .. } => true,
             Actor::Lens { on_behalf_of, .. } => on_behalf_of.is_agent_driven(),
-            Actor::Human | Actor::System | Actor::Effect { .. } => false,
+            Actor::Human | Actor::System | Actor::Effect { .. } | Actor::Job { .. } => false,
         }
     }
 
@@ -554,6 +606,8 @@ impl Actor {
     pub fn gated_thread(&self) -> Option<Option<ThreadId>> {
         match self {
             Actor::Effect { thread_id, .. } => Some(*thread_id),
+            Actor::Job { thread_id, .. } => Some(*thread_id),
+            Actor::Lens { on_behalf_of, .. } => on_behalf_of.gated_thread(),
             other => other.agent_thread(),
         }
     }
@@ -561,7 +615,10 @@ impl Actor {
     /// Whether this actor works only in its own stream (VCS commands): an
     /// agent (or a lens acting for one), or an effect, in its event's.
     pub fn confined_to_own_stream(&self) -> bool {
-        self.is_agent_driven() || matches!(self, Actor::Effect { .. })
+        match self {
+            Actor::Lens { on_behalf_of, .. } => on_behalf_of.confined_to_own_stream(),
+            _ => self.is_agent_driven() || matches!(self, Actor::Effect { .. } | Actor::Job { .. }),
+        }
     }
 
     /// The agent behind this actor, if any (see [`Self::is_agent_driven`]).
@@ -569,7 +626,7 @@ impl Actor {
         match self {
             Actor::Agent { thread_id, .. } => Some(*thread_id),
             Actor::Lens { on_behalf_of, .. } => on_behalf_of.agent_thread(),
-            Actor::Human | Actor::System | Actor::Effect { .. } => None,
+            Actor::Human | Actor::System | Actor::Effect { .. } | Actor::Job { .. } => None,
         }
     }
 
@@ -577,7 +634,11 @@ impl Actor {
         match self {
             Actor::Human | Actor::System => Invoker::Human,
             Actor::Agent { .. } | Actor::Effect { .. } => Invoker::Agent,
+            Actor::Lens { on_behalf_of, .. } if on_behalf_of.invoker() == Invoker::Job => {
+                Invoker::Job
+            }
             Actor::Lens { .. } => Invoker::Lens,
+            Actor::Job { .. } => Invoker::Job,
         }
     }
 
@@ -595,6 +656,14 @@ impl Actor {
             Actor::Lens { lens_id, .. } => format!("lens:{lens_id}"),
             Actor::System => "system".into(),
             Actor::Effect { effect, .. } => format!("effect:{effect}"),
+            Actor::Job {
+                job_id,
+                attempt,
+                fence,
+                ..
+            } => {
+                format!("job:{job_id}:{attempt}:{fence}")
+            }
         }
     }
 
@@ -606,13 +675,21 @@ impl Actor {
             } => Some(t.to_string()),
             Actor::Lens { lens_id, .. } => Some(lens_id.clone()),
             Actor::Effect { effect, .. } => Some(effect.clone()),
+            Actor::Job {
+                job_id,
+                attempt,
+                fence,
+                ..
+            } => Some(format!("{job_id}:{attempt}:{fence}")),
             _ => None,
         }
     }
 
     pub fn thread_id(&self) -> Option<ThreadId> {
         match self {
-            Actor::Agent { thread_id, .. } | Actor::Effect { thread_id, .. } => *thread_id,
+            Actor::Agent { thread_id, .. }
+            | Actor::Effect { thread_id, .. }
+            | Actor::Job { thread_id, .. } => *thread_id,
             Actor::Lens { on_behalf_of, .. } => on_behalf_of.thread_id(),
             _ => None,
         }
@@ -622,7 +699,9 @@ impl Actor {
     /// chain too, like [`Self::thread_id`]).
     pub fn stream_id(&self) -> Option<StreamId> {
         match self {
-            Actor::Agent { stream_id, .. } | Actor::Effect { stream_id, .. } => *stream_id,
+            Actor::Agent { stream_id, .. }
+            | Actor::Effect { stream_id, .. }
+            | Actor::Job { stream_id, .. } => *stream_id,
             Actor::Lens { on_behalf_of, .. } => on_behalf_of.stream_id(),
             _ => None,
         }

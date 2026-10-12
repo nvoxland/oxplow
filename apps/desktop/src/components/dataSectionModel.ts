@@ -173,6 +173,17 @@ function baseRow(p: ProjectProgram): BaseRow {
       showsSource: bundled,
     };
   }
+  if (String(p.kind) === "job") {
+    return {
+      key: `job:${p.name}`,
+      label: `Job ${p.name}`,
+      command: p.program,
+      status: p.approved ? "Approved on this machine" : "Not approved: queued work waits",
+      approved: p.approved,
+      approveTitle: `Lets ${p.name} use your configured AI models for queued work. Changing the extension manifest or this operation requires approval again.`,
+      showsSource: true,
+    };
+  }
   if (p.kind === "ai-provider") {
     // Its calls carry the person's key and prompts to where it sends them;
     // a shipped one comes with oxplow and asks again when a new oxplow

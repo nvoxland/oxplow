@@ -653,6 +653,40 @@ fn quote(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
 }
 
+/// A host-owned public model binding used in extension SQL. The tokenizer
+/// excludes comments, string literals and qualified function names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportReference {
+    pub binding: String,
+    pub start: usize,
+    pub end: usize,
+    pub line: usize,
+}
+
+pub fn import_references(sql: &str) -> Result<Vec<ImportReference>, DomainError> {
+    calls(sql, "import_ref")?
+        .into_iter()
+        .map(|call| {
+            let (line, column) = line_col(sql, call.start);
+            let binding = match call.args.as_slice() {
+                [arg] => string_literal(arg),
+                _ => None,
+            }
+            .ok_or_else(|| {
+                invalid(format!(
+                    "{line}:{column}: import_ref() takes one quoted local import binding"
+                ))
+            })?;
+            Ok(ImportReference {
+                binding,
+                start: call.start,
+                end: call.end,
+                line,
+            })
+        })
+        .collect()
+}
+
 fn resolve<'a>(
     conn: &Connection,
     sources: &'a [ModelSource],
@@ -1498,6 +1532,9 @@ pub struct ExtensionModels {
     pub sources: Vec<ModelSource>,
 }
 
+/// Source-located candidate diagnostics, grouped by owning extension.
+pub type ExtensionModelErrors = BTreeMap<String, Vec<String>>;
+
 /// The view an extension's model (or entity) publishes:
 /// `v_<extension>_<name>`, dashes as underscores.
 pub fn extension_view(extension: &str, name: &str) -> String {
@@ -1545,6 +1582,42 @@ pub fn compile_extensions(
     // materialized table no published model reads goes.
     drop_orphaned_tables(tx)?;
     Ok(errors)
+}
+
+/// Replace the complete extension SQL model set only when the pass has no
+/// diagnostics. A failed candidate rolls back its own savepoint, including
+/// contracts, test records and materialized-table cleanup. No outer commit is
+/// made. A coordinator should propagate rejection to abort its other DB writes.
+pub fn replace_extensions(
+    tx: &rusqlite::Transaction<'_>,
+    extensions: &[ExtensionModels],
+) -> Result<(), crate::TxError<ExtensionModelErrors>> {
+    tx.execute_batch("SAVEPOINT candidate_extension_models")
+        .map_err(map_sql_err)?;
+    let result = compile_extensions(tx, extensions);
+    match result {
+        Ok(mut errors) => {
+            errors.retain(|_, messages| !messages.is_empty());
+            if errors.is_empty() {
+                tx.execute_batch("RELEASE candidate_extension_models")
+                    .map_err(map_sql_err)?;
+                Ok(())
+            } else {
+                tx.execute_batch(
+                    "ROLLBACK TO candidate_extension_models; RELEASE candidate_extension_models",
+                )
+                .map_err(map_sql_err)?;
+                Err(crate::TxError::Aborted(errors))
+            }
+        }
+        Err(error) => {
+            tx.execute_batch(
+                "ROLLBACK TO candidate_extension_models; RELEASE candidate_extension_models",
+            )
+            .map_err(map_sql_err)?;
+            Err(crate::TxError::Storage(error))
+        }
+    }
 }
 
 /// A declared entity a check stands in for before its collector ever

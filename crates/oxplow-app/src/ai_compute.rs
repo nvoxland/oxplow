@@ -24,7 +24,9 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::ai_service::{AiService, AiServiceError, CallSite, ModelRequest};
+use crate::ai_service::{
+    AiService, AiServiceError, CallSite, ModelRequest, TypedRequestV1, TypedResponseV1,
+};
 
 /// What `classify` asks of the text.
 const CLASSIFY_INSTRUCTIONS: &str = "Which label fits the text best?";
@@ -145,9 +147,59 @@ impl AiCompute {
         Self { ai, results }
     }
 
+    pub(crate) async fn complete_job(
+        &self,
+        run: &oxplow_domain::run::RunContext,
+        input: crate::extension_job_ai::TypedAiJobRequest,
+    ) -> Result<Recorded<TypedResponseV1>, AiComputeError> {
+        if !matches!(
+            run.decide_service("ai.compute"),
+            oxplow_domain::grant::Decision::Allowed
+        ) {
+            return Err(AiComputeError::BadOutput(
+                "job AI authority was refused".into(),
+            ));
+        }
+        let name = format!("job:{}", run.actor().source());
+        self.ai
+            .read_run(run, async {
+                let binding = self.ai.binding_for(input.role())?;
+                let request = input.request_for_model(&binding.model);
+                run.check_authority().map_err(|_| {
+                    AiComputeError::BadOutput("job AI authority was refused".into())
+                })?;
+                run.used_ai();
+                self.complete_typed(
+                    Caller {
+                        name: &name,
+                        run: Some(run.run().as_str()),
+                    },
+                    input.role(),
+                    &request,
+                )
+                .await
+            })
+            .await?
+    }
+
     /// Read `op`'s recorded result, or run `compute` (given the input
     /// hash) and record what it returns.
     async fn recorded<T, F, Fut>(
+        &self,
+        op: Op<'_>,
+        compute: F,
+    ) -> Result<Recorded<T>, AiComputeError>
+    where
+        T: Serialize + DeserializeOwned,
+        F: FnOnce(String) -> Fut,
+        Fut: std::future::Future<Output = Result<(T, i64, i64, Option<i64>), AiComputeError>>,
+    {
+        self.ai
+            .read_generation(self.recorded_unpinned(op, compute))
+            .await?
+    }
+
+    async fn recorded_unpinned<T, F, Fut>(
         &self,
         op: Op<'_>,
         compute: F,
@@ -204,6 +256,36 @@ impl AiCompute {
             input_tokens: kept.input_tokens,
             output_tokens: kept.output_tokens,
         })
+    }
+
+    /// An ordered, typed request, cached with its full request and role binding.
+    pub async fn complete_typed(
+        &self,
+        caller: impl Into<Caller<'_>>,
+        role: Role,
+        request: &TypedRequestV1,
+    ) -> Result<Recorded<TypedResponseV1>, AiComputeError> {
+        request
+            .validate_version()
+            .map_err(oxplow_ai::client::AiError::from)
+            .map_err(AiServiceError::from)?;
+        let caller = caller.into();
+        let op = Op {
+            name: "completeTyped",
+            role,
+            caller,
+            args: serde_json::to_value(request).expect("request serializes"),
+            request: ModelRequest::Typed(request),
+        };
+        self.recorded(op, |hash| async move {
+            let (response, call) = self
+                .ai
+                .complete_typed_as(role, site(caller, &hash), request)
+                .await?;
+            let (input, output) = crate::ai_service::observed_counts(&response);
+            Ok((response, input, output, call))
+        })
+        .await
     }
 
     /// Which of `labels` fits `text` (the `decide` role).
@@ -477,19 +559,98 @@ impl CollectorOracle {
         }
     }
 
+    fn metadata<T: Serialize>(
+        &self,
+        future: impl std::future::Future<Output = Result<T, AiServiceError>>,
+    ) -> Result<Value, String> {
+        if let oxplow_domain::grant::Decision::Denied(reason) =
+            self.run.decide_service("ai.discover")
+        {
+            return Err(reason);
+        }
+        let result = self.runtime.block_on(async {
+            let future = self.compute.ai.read_run(&self.run, future);
+            tokio::pin!(future);
+            loop {
+                tokio::select! {
+                    result = &mut future => return result.map_err(|e| e.to_string())?.map_err(|e| e.to_string()),
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {
+                        self.run.check_authority()?;
+                    }
+                }
+            }
+        });
+        self.run.check_authority()?;
+        result.and_then(|metadata| serde_json::to_value(metadata).map_err(|e| e.to_string()))
+    }
+
     fn run<T: Serialize>(
         &self,
         f: impl std::future::Future<Output = Result<Recorded<T>, AiComputeError>>,
     ) -> Result<Value, String> {
+        if let oxplow_domain::grant::Decision::Denied(reason) =
+            self.run.decide_service("ai.compute")
+        {
+            return Err(reason);
+        }
         self.run.used_ai();
-        self.runtime
-            .block_on(f)
-            .map(|r| serde_json::to_value(r.value).expect("result serializes"))
-            .map_err(|e| e.to_string())
+        let result = self.runtime.block_on(async {
+            let f = self.compute.ai.read_run(&self.run, f);
+            tokio::pin!(f);
+            loop {
+                tokio::select! {
+                    result = &mut f => return result.map_err(|e| e.to_string())?.map_err(|e| e.to_string()),
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {
+                        self.run.check_authority()?;
+                    }
+                }
+            }
+        });
+        self.run.check_authority()?;
+        result.map(|r| serde_json::to_value(r.value).expect("result serializes"))
     }
 }
 
 impl oxplow_script::AiOracle for CollectorOracle {
+    fn capabilities(&self, role: &str) -> Result<Value, String> {
+        let role = serde_json::from_value(Value::String(role.into())).map_err(|e| e.to_string())?;
+        self.metadata(self.compute.ai.capabilities(role))
+    }
+
+    fn models(&self, role: &str) -> Result<Value, String> {
+        let role = serde_json::from_value(Value::String(role.into())).map_err(|e| e.to_string())?;
+        self.metadata(self.compute.ai.models(role))
+    }
+
+    fn complete_typed(&self, role: &str, mut request: Value) -> Result<Value, String> {
+        if let oxplow_domain::grant::Decision::Denied(reason) =
+            self.run.decide_service("ai.compute")
+        {
+            return Err(reason);
+        }
+        let role = serde_json::from_value(Value::String(role.into())).map_err(|e| e.to_string())?;
+        let fields = request
+            .as_object_mut()
+            .ok_or("typed request must be an object")?;
+        if fields.contains_key("model") {
+            return Err("a collector selects an AI role, not a model".into());
+        }
+        self.run(async {
+            let binding = self.compute.ai.binding_for(role)?;
+            // Resolve the role inside the same captured AI configuration as
+            // cache lookup, provider invocation and result attribution.
+            request
+                .as_object_mut()
+                .expect("validated typed request")
+                .insert("model".into(), Value::String(binding.model));
+            let request = serde_json::from_value(request)
+                .map_err(|_| AiComputeError::BadOutput("invalid typed request".into()))?;
+            self.compute
+                .complete_typed(self.caller(), role, &request)
+                .await
+        })
+    }
+
     fn classify(&self, text: &str, labels: &[String]) -> Result<Value, String> {
         self.run(self.compute.classify(self.caller(), text, labels))
     }

@@ -11,6 +11,20 @@ backends, and the MCP adapter (P7.A6).
 
 ## The protocol (`crates/oxplow-provider-protocol`)
 
+**Host secret references.** A remote MCP provider may declare its fixed
+`OXPLOW_MCP_BEARER` credential as `{name, secretRef:{schemaVersion:1,id}}`.
+The reference is scoped to the primary project and owning extension, including
+for global instances; it is inert without the exact reviewed program approval.
+Only the shipped HTTP transport receives the resolved bearer. Package programs,
+stdio servers, OAuth declarations and arbitrary environment variable names
+cannot consume a reference. The host brackets resolution with live owner and
+approval checks. Save/revoke invalidates a synchronous admission revision, stops
+old consumers and requests coherent reconciliation even if the RPC is cancelled.
+Normal instance credential setters refuse these declarations; human host-secret
+ingress returns only reference/presence. See [extensions.md](./extensions.md)
+"Host-owned secret references" for persistence and lifecycle details. Runtime
+validation and the human settings form remain unfinished.
+
 **JSON-RPC 2.0 over NDJSON on stdio**: one message per line
 (`codec::Message` — request, response, error, notification). A small,
 symmetric `Peer` (`peer.rs`) is both sides' connection: `start` /
@@ -455,6 +469,22 @@ record it is). A ref kind the kind registry doesn't scope by provider
 (`wiki`) is the active implementation's, so any well-formed one is an
 instance's own (`registry::owns`).
 
+Each host's `prepare` validates declarations and constructs its adapter
+without changing a live registry or starting a process. It returns a
+`PreparedProviderCapability` with fixed features and an infallible,
+synchronous registry action; the compatibility `admit` method prepares
+and immediately publishes it. All five capability hosts use this split.
+This does not yet stage a whole provider generation: candidate cleanup,
+running-map and database publication, and host read-pin adoption remain
+outside the coordinated activation boundary.
+
+Legacy instance enable now prepares the adapter before process startup and
+rechecks disable epochs and provider-ID collisions before registration. A
+rejected unpublished instance is marked stopped and shut down directly; cleanup
+does not withdraw by name or touch an incumbent's maps/database rows. Process
+supervision starts after successful admission. Whole-generation staging still
+needs the same cleanup for every started candidate and a shared publication pin.
+
 **A knowledge provider** keeps pages (an Obsidian vault, a Confluence or
 MediaWiki space); core keeps the record (`.context/knowledge.md` "The
 capability"). The page commands check a write against core's record
@@ -629,7 +659,8 @@ handle (`HostError::Unconfigured { problems }` otherwise). A request
 from the provider is answered `MethodNotFound` but `host/call`, served by
 the instance's `host::HostCalls` through the gate a command's handler
 meets (`scope_calls::Calls`: its `needs`; `sql.read` on a read of
-the database), each call counted into the trace of the run whose key it
+the database, or `state.read` over its own private namespace), each call counted
+into the trace of the run whose key it
 names (`ProviderRegistry::run_op` registers the run's
 `Invocation::trace` under its key, and `ExternalWorkItems` the
 `work_item.<verb>` run's, from `VerbCall::trace`) — so the run's audit
@@ -1360,3 +1391,97 @@ missing golden fail, blesses, passes, then edits the golden and gets
 one error at the transcript's line and pointer. The fake binary exits
 as soon as serving ends (its runtime would otherwise wait on the
 blocked stdin reader).
+
+## External execution authority
+
+Providers, including MCP adapters, default to `execution: restricted` and
+refuse launch because full OS confinement is unavailable. On Unix, a manifest
+may explicitly declare `execution: broader`; a new approval covers that
+additional file/socket/process authority. On other platforms it also fails
+closed. Network declarations plus the macOS egress proxy limit direct network
+paths but do not promise confinement against local brokers or broader code.
+
+The host launches the verified private approval copy and pins consent to its
+hash. `host/call` rechecks that gate and applies model/path service needs to
+the registered run. A connection monitor checks consent every 100 ms and
+kills its owned process group when revoked or changed. Shutdown, natural exit
+and dropped connections clean up ordinary children and disarm group tracking;
+processes deliberately escaping a broader group have the explicitly approved
+broader authority. Changing a working-tree script does not change the frozen
+provider that is already running.
+
+Copy preparation uses the same bounded regular-file copier as collectors:
+500 files and 16 MiB, including metadata. It rejects symlinks and special
+files, preserves empty helper directories and normal permission bits, and
+strips set-id bits. The copied extension root is owner-only on Unix. A file
+replaced with a FIFO cannot block copy preparation before launch.
+
+## Private state host calls
+
+`host/call` with `scope: state.read` and `{scope: project|personal,
+area: state|cache}` returns null or a private `{stamp, values}` snapshot. The
+provider must declare that need, name an in-flight invoke key, retain live
+consent and match the current generation/version/enabled descriptor. The owner
+is captured from an exact active catalog declaration when the instance is
+built, and requires the same generation before and after approved-copy preparation; a command in another extension cannot redirect it to that extension's
+namespace, and a candidate check cannot borrow the installed owner. No request
+selects an extension or DB path. Each call owns a short read transaction;
+provider execution and waiting hold none. Late catalog changes conservatively
+refuse the old instance's state access until lifetime reconciliation. See
+[extensions.md](./extensions.md) "Private state host boundary".
+
+## Provider resolution snapshots
+
+Resolution captures effective instance config and credential scope together:
+global entries first, replaced whole by project entries of the same name.
+Provider choice and scope use that captured mapping, so an override removed
+mid-resolution cannot pair project config with global credentials. A reconcile
+pass uses one such mapping and one extension declaration snapshot for every
+instance; async stops/starts do not make later instance resolution reread a
+newer config/catalog. Existing approval and approved-copy/live-owner checks
+still apply before execution.
+
+Bundled declaration ownership wins before enabled filtering. A disabled bundled
+owner cannot be replaced by an enabled project namesake. This is a resolution
+consistency prerequisite for generation staging.
+
+## Staged provider generations
+
+`ProviderRegistry::prepare_generation` stages every configured enabled,
+non-disabled provider against one immutable catalog snapshot. It resolves the
+effective project/global configuration and credential scope, rejects duplicate
+instance IDs, prepares capability adapters, starts each process, and completes
+its private `check` before returning a candidate. Preparation performs no
+registry admission, health publication or supervision. Candidate diagnostics
+are fixed and value-free; failed preparation shuts down already-started
+candidates, with owned process-group cleanup as the cancellation/drop fallback.
+
+The candidate owns the provider reconcile gate. Before publication,
+`reserve_running` takes the running-map writer before the database write
+permit. This ordering is required because legacy admission can hold that map
+while awaiting a database write. The reservation verifies that the incumbent
+map still matches the captured base and rechecks effective configuration,
+scope, global-file mtime, catalog generation, disable epoch, candidate peer
+liveness and current pinned consent/hash. Candidate event declarations must
+also match the vocabulary prepared for the same generation. Candidate
+`check`-time `host/changed` notifications are ignored until the instance is
+admitted.
+
+`ProviderGenerationReservation::apply` runs only after the candidate database
+transaction commits. It withdraws incumbent adapters, stops and removes old
+instances, publishes candidate adapters and running instances, marks them
+admitted, then starts supervision. Old processes are shut down orderly outside
+the transaction; dropping the retired connection is the process-group kill
+fallback. Thus a preparation or transaction rejection retains the incumbents.
+`ExtensionActivation::activate` can coordinate these provider candidates with
+native capability, command, model, vocabulary and adapter candidates. This
+coordinator is the boot activation path. It first publishes a required-bundled
+baseline, then attempts strict full activation; failure of the required baseline
+prevents serving, while full-candidate failure retains the baseline or last good
+generation. Provider stop/revocation takes effect immediately and retains the
+running-map state needed for orderly cleanup; replacement is queued for a later
+generation attempt, and process shutdown stays outside the SQL transaction.
+Runtime catalog reads use the committed snapshot plus immediate explicit-disable
+and missing-folder revocation, without loading changed declarations. Some
+native/background and synchronous metadata entrypoints still need reader-pin
+review, and metric catalog reseeding remains separate.

@@ -23,7 +23,10 @@ pub mod dashboard;
 pub mod effect;
 pub mod effort;
 pub mod effort_report;
+pub mod extension_configuration;
 pub mod extension_install;
+pub mod extension_jobs;
+pub mod extension_state;
 pub mod file;
 pub mod hint;
 pub mod lens;
@@ -61,7 +64,7 @@ use oxplow_db::{
 };
 use oxplow_domain::events::schema::{
     CommandApproved, CommandApprovedV1, CommandDeclined, CommandDeclinedV1, CommandExecuted,
-    CommandExecutedV2, CommandOutcome as Outcome, CommandProposed, CommandProposedV2,
+    CommandExecutedV3, CommandOutcome as Outcome, CommandProposed, CommandProposedV2,
 };
 use oxplow_domain::refs::build::{command_ref, proposal_ref};
 use oxplow_domain::{
@@ -288,14 +291,13 @@ pub struct Command {
     /// Its check before the transaction, if it has one ([`Precheck`]).
     precheck: Option<Arc<Precheck>>,
     /// The extension contribution it is (an extension's `commands:`
-    /// entry), named when it runs (its version and the catalog generation
-    /// are the ones then): its runs are that contribution's, recorded as
-    /// its.
+    /// entry). The callback supplies its handler's version and generation:
+    /// its runs are that contribution's, recorded as its.
     contribution: Option<Arc<ContributionOf>>,
 }
 
 /// A command's own run, nested in the run that called it: named for the
-/// contribution it is, as of now, with what that contribution may do.
+/// contribution that owns the handler, with what that contribution may do.
 pub type ContributionOf = dyn Fn(&RunContext) -> RunContext + Send + Sync;
 
 impl Command {
@@ -445,6 +447,42 @@ impl crate::extensions::RunningCommands for CommandBus {
     }
 }
 
+/// One source's replacement prepared by the owning host. An empty command
+/// set removes that source. Each source may appear once in an atomic batch.
+pub struct NamespaceCommands {
+    pub namespace: String,
+    pub source: String,
+    pub commands: Vec<Command>,
+}
+
+/// Validated command registry candidate. It carries the registry identity it
+/// was prepared against; publication cannot overwrite intervening changes or
+/// another bus. No active handler changes while this value is held.
+#[derive(Clone)]
+pub struct PreparedNamespaces {
+    base: Arc<()>,
+    candidate: Registry,
+}
+
+pub(crate) struct NamespaceReservation<'a> {
+    registry: parking_lot::RwLockWriteGuard<'a, Registry>,
+    candidate: Option<Registry>,
+}
+
+impl NamespaceReservation<'_> {
+    /// Commit the matching database candidate before this infallible swap.
+    pub(crate) fn publish(mut self) {
+        self.apply();
+    }
+
+    pub(crate) fn apply(&mut self) {
+        *self.registry = self
+            .candidate
+            .take()
+            .expect("namespace reservation applied once");
+    }
+}
+
 /// Who registered a command: core itself.
 pub const CORE_SOURCE: &str = "core";
 
@@ -462,8 +500,11 @@ fn ships_with_oxplow(source: &str) -> bool {
 /// namespace: `oxplow` for the reserved one — shared by core and oxplow's
 /// own extensions, collisions checked per id — else the one source that
 /// registered it.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Registry {
+    /// An allocation identity avoids wraparound and ABA while candidates retain
+    /// their base. It changes on every successful registry mutation.
+    revision: Arc<()>,
     commands: BTreeMap<String, Arc<Command>>,
     sources: BTreeMap<String, String>,
     holders: BTreeMap<String, String>,
@@ -499,12 +540,19 @@ impl Registry {
                 return Err(invalid(
                     None,
                     format!("the command namespace `{namespace}` is already {held}'s"),
-                ))
+                ));
             }
             _ => {}
         }
+        let mut batch_ids = std::collections::BTreeSet::new();
         for command in &commands {
             let id = &command.spec.id;
+            if !batch_ids.insert(id) {
+                return Err(invalid(
+                    Some("/name"),
+                    format!("command `{id}` is declared more than once"),
+                ));
+            }
             CommandSpec::validate_id(id).map_err(|e| invalid(Some("/name"), e.to_string()))?;
             if oxplow_domain::namespace_of(id) != namespace {
                 return Err(invalid(
@@ -552,11 +600,61 @@ impl Registry {
             self.commands
                 .insert(command.spec.id.clone(), Arc::new(command));
         }
+        self.revision = Arc::new(());
         Ok(())
     }
 
     fn get(&self, name: &str) -> Option<&Arc<Command>> {
         self.commands.get(name)
+    }
+
+    fn remove_source(&mut self, source: &str) -> Vec<String> {
+        let ids: Vec<String> = self
+            .sources
+            .iter()
+            .filter(|(_, registered)| registered.as_str() == source)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in &ids {
+            self.commands.remove(id);
+            self.sources.remove(id);
+        }
+        let held: std::collections::BTreeSet<_> = self
+            .commands
+            .keys()
+            .map(|id| oxplow_domain::namespace_of(id).to_string())
+            .collect();
+        self.holders.retain(|namespace, _| held.contains(namespace));
+        self.revision = Arc::new(());
+        ids
+    }
+
+    fn replacing(&self, replacements: Vec<NamespaceCommands>) -> Result<Self, CommandError> {
+        let mut sources = std::collections::BTreeSet::new();
+        for replacement in &replacements {
+            if !sources.insert(&replacement.source) {
+                return Err(CommandError::Invalid {
+                    field: Some("/source".into()),
+                    message: "a command source may be replaced only once in a batch".into(),
+                });
+            }
+        }
+        let mut candidate = self.clone();
+        for replacement in &replacements {
+            candidate.remove_source(&replacement.source);
+        }
+        for replacement in replacements {
+            if !replacement.commands.is_empty() {
+                candidate.add(
+                    &replacement.namespace,
+                    &replacement.source,
+                    replacement.commands,
+                )?;
+            }
+        }
+        // Even an empty publication receives a distinct identity.
+        candidate.revision = Arc::new(());
+        Ok(candidate)
     }
 }
 
@@ -635,12 +733,16 @@ pub struct CommandBus {
     /// the provider registry, set once it exists.
     providers: std::sync::OnceLock<std::sync::Weak<dyn ProviderRouter>>,
     write_gate: Option<WriteGate>,
+    state_host: Option<crate::extension_state::StateHost>,
+    configuration_host: Option<crate::extension_configuration::ConfigurationHost>,
+    jobs_host: Option<Arc<crate::extension_jobs::ExtensionJobs>>,
     /// What's active, for what a command needs or which implementation
     /// owns it (`capabilities::Active::refusal`); `None` offers everything.
     capabilities: Option<(
         Arc<crate::capabilities::CapabilityRegistry>,
         Arc<std::sync::RwLock<oxplow_config::OxplowConfig>>,
     )>,
+    activation: std::sync::OnceLock<Arc<crate::extension_activation::ExtensionActivation>>,
 }
 
 impl CommandBus {
@@ -661,8 +763,33 @@ impl CommandBus {
             ops: RwLock::new(ops::Ops::default()),
             providers: std::sync::OnceLock::new(),
             write_gate: None,
+            state_host: None,
+            configuration_host: None,
+            jobs_host: None,
             capabilities: None,
+            activation: std::sync::OnceLock::new(),
         }
+    }
+
+    pub fn with_activation(
+        self,
+        activation: Arc<crate::extension_activation::ExtensionActivation>,
+    ) -> Result<Self, CommandError> {
+        self.adopt_activation(activation)?;
+        Ok(self)
+    }
+
+    pub(crate) fn adopt_activation(
+        &self,
+        activation: Arc<crate::extension_activation::ExtensionActivation>,
+    ) -> Result<(), CommandError> {
+        let installed = self.activation.get_or_init(|| activation.clone());
+        if !Arc::ptr_eq(installed, &activation) {
+            return Err(CommandError::Denied {
+                reason: "command bus already belongs to another activation boundary".into(),
+            });
+        }
+        Ok(())
     }
 
     /// Offer and run a command only while what it needs is active and,
@@ -690,6 +817,39 @@ impl CommandBus {
         self
     }
 
+    /// Give composers the private state service on their existing connection.
+    pub fn with_state_host(mut self, host: crate::extension_state::StateHost) -> Self {
+        self.state_host = Some(host);
+        self
+    }
+
+    pub(crate) fn state_host(&self) -> Option<&crate::extension_state::StateHost> {
+        self.state_host.as_ref()
+    }
+
+    pub fn with_configuration_host(
+        mut self,
+        host: crate::extension_configuration::ConfigurationHost,
+    ) -> Self {
+        self.configuration_host = Some(host);
+        self
+    }
+
+    pub(crate) fn configuration_host(
+        &self,
+    ) -> Option<&crate::extension_configuration::ConfigurationHost> {
+        self.configuration_host.as_ref()
+    }
+
+    pub fn with_jobs_host(mut self, host: Arc<crate::extension_jobs::ExtensionJobs>) -> Self {
+        self.jobs_host = Some(host);
+        self
+    }
+
+    pub(crate) fn jobs_host(&self) -> Option<&Arc<crate::extension_jobs::ExtensionJobs>> {
+        self.jobs_host.as_ref()
+    }
+
     /// Register one of core's commands (under `oxplow`). A second command
     /// with the same id is refused: two handlers for one id is a bug, not
     /// an override.
@@ -712,6 +872,73 @@ impl CommandBus {
         commands: Vec<Command>,
     ) -> Result<(), CommandError> {
         self.commands.write().add(namespace, source, commands)
+    }
+
+    /// Replace this source's commands through one registry swap. Rejection
+    /// preserves the prior commands and namespace ownership. Empty removes
+    /// the source. Already resolved commands retain their Arc handlers.
+    pub fn replace_namespace(
+        &self,
+        namespace: &str,
+        source: &str,
+        commands: Vec<Command>,
+    ) -> Result<(), CommandError> {
+        self.replace_namespaces(vec![NamespaceCommands {
+            namespace: namespace.to_owned(),
+            source: source.to_owned(),
+            commands,
+        }])
+    }
+
+    /// Validate and swap several sources together. All prior source holdings
+    /// are removed from the candidate before additions, so sources can exchange
+    /// namespaces, IDs and shortcuts without a transient collision. A rejection
+    /// preserves the entire active registry; already resolved handlers survive.
+    pub fn replace_namespaces(
+        &self,
+        replacements: Vec<NamespaceCommands>,
+    ) -> Result<(), CommandError> {
+        let mut registry = self.commands.write();
+        *registry = registry.replacing(replacements)?;
+        Ok(())
+    }
+
+    /// Validate a complete replacement off the active registry's lock. All
+    /// retained and prepared handlers stay available if validation fails.
+    pub fn prepare_namespaces(
+        &self,
+        replacements: Vec<NamespaceCommands>,
+    ) -> Result<PreparedNamespaces, CommandError> {
+        let registry = self.commands.read().clone();
+        Ok(PreparedNamespaces {
+            base: registry.revision.clone(),
+            candidate: registry.replacing(replacements)?,
+        })
+    }
+
+    /// Publish only on the exact registry used for validation. A host must
+    /// restage after any intervening registration, replacement or removal.
+    /// This is only an in-memory publication, never a DB commit boundary.
+    pub fn publish_namespaces(&self, prepared: PreparedNamespaces) -> Result<(), CommandError> {
+        self.reserve_namespaces(&prepared)?.publish();
+        Ok(())
+    }
+
+    pub(crate) fn reserve_namespaces(
+        &self,
+        prepared: &PreparedNamespaces,
+    ) -> Result<NamespaceReservation<'_>, CommandError> {
+        let registry = self.commands.write();
+        if !Arc::ptr_eq(&registry.revision, &prepared.base) {
+            return Err(CommandError::Unavailable {
+                message: "the command registry changed while its replacement was staged".into(),
+                retry_after_ms: None,
+            });
+        }
+        Ok(NamespaceReservation {
+            registry,
+            candidate: Some(prepared.candidate.clone()),
+        })
     }
 
     /// Add a scope's operation (`ops.rs`): refused when its scope
@@ -763,24 +990,7 @@ impl CommandBus {
     /// provider instance stopped); returns their ids. A namespace left
     /// with no commands is free again.
     pub fn unregister_source(&self, source: &str) -> Vec<String> {
-        let mut registry = self.commands.write();
-        let ids: Vec<String> = registry
-            .sources
-            .iter()
-            .filter(|(_, s)| s.as_str() == source)
-            .map(|(id, _)| id.clone())
-            .collect();
-        for id in &ids {
-            registry.commands.remove(id);
-            registry.sources.remove(id);
-        }
-        let held: std::collections::BTreeSet<String> = registry
-            .commands
-            .keys()
-            .map(|id| oxplow_domain::namespace_of(id).to_string())
-            .collect();
-        registry.holders.retain(|ns, _| held.contains(ns));
-        ids
+        self.commands.write().remove_source(source)
     }
 
     /// Who registered command `id`: `core`, `extension:<name>`,
@@ -962,6 +1172,32 @@ impl CommandBus {
         confirmed: bool,
         origin: RunOrigin,
     ) -> Result<CommandOutcome, CommandError> {
+        if let Some(activation) = self.activation.get() {
+            let run = activation.pin_run(run).await.map_err(CommandError::from)?;
+            let pin = run
+                .host_generation::<crate::extension_activation::GenerationPin>()
+                .expect("pinned command context")
+                .clone();
+            return activation
+                .read_pinned(
+                    &pin,
+                    self.lookup_and_run(&run, name, input, confirmed, origin),
+                )
+                .await
+                .map_err(CommandError::from)?;
+        }
+        self.lookup_and_run(run, name, input, confirmed, origin)
+            .await
+    }
+
+    async fn lookup_and_run(
+        &self,
+        run: &RunContext,
+        name: &str,
+        input: Value,
+        confirmed: bool,
+        origin: RunOrigin,
+    ) -> Result<CommandOutcome, CommandError> {
         let command =
             self.commands
                 .read()
@@ -977,6 +1213,32 @@ impl CommandBus {
     /// The pipeline (`.context/commands.md` "Running a command") for a
     /// command already looked up — or, for an effect, made for the run.
     async fn run_prepared(
+        &self,
+        run: &RunContext,
+        command: Arc<Command>,
+        input: Value,
+        confirmed: bool,
+        origin: RunOrigin,
+    ) -> Result<CommandOutcome, CommandError> {
+        if let Some(activation) = self.activation.get() {
+            let run = activation.pin_run(run).await.map_err(CommandError::from)?;
+            let pin = run
+                .host_generation::<crate::extension_activation::GenerationPin>()
+                .expect("pinned command context")
+                .clone();
+            return activation
+                .read_pinned(
+                    &pin,
+                    self.run_pipeline(&run, command, input, confirmed, origin),
+                )
+                .await
+                .map_err(CommandError::from)?;
+        }
+        self.run_pipeline(run, command, input, confirmed, origin)
+            .await
+    }
+
+    async fn run_pipeline(
         &self,
         run: &RunContext,
         command: Arc<Command>,
@@ -1037,6 +1299,14 @@ impl CommandBus {
         // oxplow's own records.
         let mut gates = Gates { may_write: None };
         if let Some(thread_id) = actor.gated_thread() {
+            if spec.access.needs_writer() && thread_id.is_none() {
+                let err = CommandError::Denied {
+                    reason: "a writer-bound command requires the actor's thread".into(),
+                };
+                self.audit_only(run, spec, &input, Outcome::Denied, Some(err.to_string()))
+                    .await;
+                return Err(err);
+            }
             let may_write = match (spec.access.records(), &thread_id, &self.write_gate) {
                 (true, Some(t), Some(gate)) => Some(gate(*t).await),
                 _ => None,
@@ -1054,22 +1324,22 @@ impl CommandBus {
         }
         // A composite is routed now that the actor is admitted: composed on
         // a read snapshot, each call checked and routed (`steps.rs`).
-        let (resolved, prechecks) = match routing {
+        let (resolved, prechecks, private_children) = match routing {
             Routing::Ready(resolved) => {
                 let own = command
                     .precheck
                     .clone()
                     .map(|p| steps::Pending::own(p, input.clone()));
-                (resolved, own.into_iter().collect())
+                (resolved, own.into_iter().collect(), false)
             }
             Routing::Composite(compose) => {
                 match self.route_composite(run, spec, &compose, &input).await {
-                    Ok((resolved, mut prechecks)) => {
+                    Ok((resolved, mut prechecks, private_children)) => {
                         // Its own check, then each composed call's.
                         if let Some(own) = command.precheck.clone() {
                             prechecks.insert(0, steps::Pending::own(own, input.clone()));
                         }
-                        (resolved, prechecks)
+                        (resolved, prechecks, private_children)
                     }
                     Err(err) => {
                         let recorded = match err {
@@ -1083,6 +1353,17 @@ impl CommandBus {
                 }
             }
         };
+        // Recording and proposals must honor private inputs through arbitrary
+        // composers. Use an invocation-local spec; handler/schema/authority
+        // and the published command registry remain the captured originals.
+        let command = if private_children {
+            let mut private = command.with_handler(command.handler.clone())?;
+            private.spec = steps::private_composite_spec(&command.spec);
+            Arc::new(private)
+        } else {
+            command
+        };
+        let spec = &command.spec;
         // Each check that needs more than a transaction, before it opens
         // (tsk1010): the command's own, or each composed call's.
         for pending in prechecks {
@@ -1468,7 +1749,7 @@ impl CommandBus {
                 return Err(CommandError::Invalid {
                     field: None,
                     message: "a command that only reads can't compose steps that write".into(),
-                })
+                });
             }
         };
         Ok(CommandOutcome {

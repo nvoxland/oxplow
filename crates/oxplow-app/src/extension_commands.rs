@@ -412,11 +412,9 @@ fn command_of(
         (None, Some(entry)) => {
             // Its script calls the scopes it needs; a capability need
             // gates it.
-            for need in f
-                .needs
-                .iter()
-                .filter(|n| oxplow_domain::scope::scope(n).is_some())
-            {
+            for need in f.needs.iter().filter(|n| {
+                oxplow_domain::scope::scope(oxplow_domain::service::need_scope(n)).is_some()
+            }) {
                 crate::scope_calls::check_command_need(need).map_err(at_name)?;
             }
             if f.op.is_some() {
@@ -554,7 +552,11 @@ pub fn refuse_shared_namespaces(extensions: &mut [Extension]) {
     for (i, e) in extensions.iter().enumerate() {
         // `oxplow` is shared by oxplow's own extensions (only they may
         // declare it); any other namespace is one extension's.
-        if e.enabled && !e.commands.is_empty() && e.namespace != oxplow_domain::OXPLOW_NAMESPACE {
+        if e.enabled
+            && !e.public_contracts.blocked
+            && !e.commands.is_empty()
+            && e.namespace != oxplow_domain::OXPLOW_NAMESPACE
+        {
             by_ns.entry(e.namespace.clone()).or_default().push(i);
         }
     }
@@ -815,12 +817,24 @@ pub fn extension_command(
     };
     let (needs, reads) = (decl.needs.clone(), decl.access.reads_only());
     let (vocabulary, extension) = (bus.vocabulary().clone(), extension.to_string());
+    let state_host = bus.state_host().cloned();
+    let configuration_host = bus.configuration_host().cloned();
+    let jobs_host = bus.jobs_host().cloned();
     let source = format!("extension:{extension}/{}", decl.name);
     let compose: std::sync::Arc<Composer> = std::sync::Arc::new(
         move |conn: &rusqlite::Connection, run: &oxplow_domain::run::RunContext, input: &Value| {
             let read =
                 Box::new(|q: oxplow_db::SqlQuery| oxplow_db::semantic_layer::read_on(conn, &q));
             let mut calls = crate::scope_calls::Calls::new(run, &needs, read);
+            if let Some(host) = &state_host {
+                calls = calls.with_state_reader(Box::new(|input| host.snapshot(conn, run, input)));
+            }
+            if let Some(host) = &configuration_host {
+                calls = calls.with_configuration_reader(Box::new(|| host.snapshot(conn, run)));
+            }
+            if let Some(host) = &jobs_host {
+                calls = calls.with_jobs_reader(Box::new(|input| host.snapshot(conn, run, &input)));
+            }
             match compose_calls(&script, input.clone(), &mut calls)? {
                 Composed::Run { calls, events, .. }
                     if reads && !(calls.is_empty() && events.is_empty()) =>
@@ -981,18 +995,57 @@ fn provider_command(
     )
 }
 
-/// Keeps the bus's extension commands matching the enabled extensions of
-/// the primary worktree (where, like providers, they run from): each
-/// extension's namespace registered all-or-nothing, re-registered when
-/// its declarations change, removed when it is disabled or gone. A
-/// namespace someone else already holds (a provider) is refused and
-/// reported as the extension's [`ExtensionCommands::problem`].
+#[derive(Clone, PartialEq)]
+struct RegisteredCommands {
+    namespace: String,
+    commands: Vec<ExtensionCommand>,
+    version: Option<String>,
+    generation: String,
+}
+
+/// A fully validated command candidate, with metadata from one catalog
+/// snapshot and an optimistic registry publication fence. Preparing it neither
+/// changes handlers nor starts external work.
+#[derive(Clone)]
+pub struct StagedExtensionCommands {
+    generation: String,
+    source_generation: String,
+    registrations: BTreeMap<String, RegisteredCommands>,
+    commands: crate::commands::PreparedNamespaces,
+}
+
+/// Worker-local reservation of both handler storage and its owner metadata.
+pub(crate) struct ExtensionCommandReservation<'a> {
+    commands: crate::commands::NamespaceReservation<'a>,
+    registered: tokio::sync::MutexGuard<'a, BTreeMap<String, RegisteredCommands>>,
+    registrations: BTreeMap<String, RegisteredCommands>,
+    problems: &'a parking_lot::Mutex<BTreeMap<String, String>>,
+}
+
+impl ExtensionCommandReservation<'_> {
+    pub(crate) fn apply(&mut self) {
+        self.commands.apply();
+        *self.registered = std::mem::take(&mut self.registrations);
+        self.problems.lock().clear();
+    }
+}
+
+impl StagedExtensionCommands {
+    pub fn generation(&self) -> &str {
+        &self.generation
+    }
+}
+
+/// Keeps the primary worktree's extension commands in one staged batch.
+/// Disabled/removed sources are withdrawn immediately; rejected replacements
+/// retain the remaining old handlers and report candidate diagnostics. This
+/// coordinates commands only, not the database or other extension registries.
 pub struct ExtensionCommands {
     bus: std::sync::Arc<crate::commands::CommandBus>,
     catalog: std::sync::Arc<crate::extension_catalog::ExtensionCatalog>,
     root: std::path::PathBuf,
     /// What's registered, by namespace: the extension and its commands.
-    registered: tokio::sync::Mutex<BTreeMap<String, (String, Vec<ExtensionCommand>)>>,
+    registered: tokio::sync::Mutex<BTreeMap<String, RegisteredCommands>>,
     problems: parking_lot::Mutex<BTreeMap<String, String>>,
 }
 
@@ -1016,63 +1069,233 @@ impl ExtensionCommands {
         self.problems.lock().get(extension).cloned()
     }
 
-    /// Make the registered commands match the enabled extensions.
-    pub async fn reconcile(&self) {
-        let mut registered = self.registered.lock().await;
-        let wanted: BTreeMap<String, (String, Vec<ExtensionCommand>)> = self
-            .catalog
-            .get(&self.root)
+    /// Prepare commands from one snapshot without changing the active bus.
+    /// Enabled declarations with load errors reject the complete candidate;
+    /// no partially parsed command list may silently replace a prior source.
+    pub async fn stage(
+        &self,
+        snapshot: &crate::extension_catalog::CatalogSnapshot,
+    ) -> Result<StagedExtensionCommands, BTreeMap<String, String>> {
+        let registered = self.registered.lock().await;
+        self.stage_from(snapshot, &registered)
+    }
+
+    fn wanted(
+        snapshot: &crate::extension_catalog::CatalogSnapshot,
+    ) -> BTreeMap<String, RegisteredCommands> {
+        snapshot
+            .extensions()
             .iter()
-            // A required one's are registered with the services
-            // (`register_required`) and never change.
+            // Required commands are immutable registrations made at boot.
             .filter(|e| {
                 e.enabled
                     && !e.commands.is_empty()
                     && !crate::bundled_extensions::is_required(&e.name)
             })
-            .map(|e| (e.name.clone(), (e.namespace.clone(), e.commands.clone())))
-            .collect();
-        // Keyed by extension: several of oxplow's share the `oxplow`
-        // namespace, so it is the extension whose commands come and go.
-        let stale: Vec<String> = registered
+            .map(|e| {
+                (
+                    e.name.clone(),
+                    RegisteredCommands {
+                        namespace: e.namespace.clone(),
+                        commands: e.commands.clone(),
+                        version: e.version.clone(),
+                        generation: snapshot.generation().to_string(),
+                    },
+                )
+            })
+            .collect()
+    }
+
+    fn stage_from(
+        &self,
+        snapshot: &crate::extension_catalog::CatalogSnapshot,
+        registered: &BTreeMap<String, RegisteredCommands>,
+    ) -> Result<StagedExtensionCommands, BTreeMap<String, String>> {
+        let wanted = Self::wanted(snapshot);
+        let mut problems: BTreeMap<String, String> = snapshot
+            .extensions()
             .iter()
-            .filter(|(extension, have)| wanted.get(*extension) != Some(*have))
-            .map(|(extension, _)| extension.clone())
+            .filter(|e| e.enabled && !crate::bundled_extensions::is_required(&e.name))
+            .filter(|e| !e.errors.is_empty())
+            .map(|e| (e.name.clone(), e.errors.join("\n")))
             .collect();
-        for extension in stale {
-            self.bus
-                .unregister_source(&format!("extension:{extension}"));
-            registered.remove(&extension);
+        if !problems.is_empty() {
+            return Err(problems);
         }
-        let mut problems = BTreeMap::new();
-        for (extension, (ns, commands)) in wanted {
-            if registered.contains_key(&extension) {
-                continue;
-            }
-            match self.register(&ns, &extension, &commands) {
-                Ok(()) => {
-                    registered.insert(extension, (ns, commands));
-                }
+        let mut replacements = Vec::new();
+        for (extension, registration) in &wanted {
+            match self.build(extension, registration) {
+                Ok(commands) => replacements.push(crate::commands::NamespaceCommands {
+                    namespace: registration.namespace.clone(),
+                    source: format!("extension:{extension}"),
+                    commands,
+                }),
                 Err(problem) => {
-                    tracing::warn!(extension, problem, "extension commands not registered");
-                    problems.insert(extension, problem);
+                    problems.insert(extension.clone(), problem);
                 }
             }
+        }
+        if !problems.is_empty() {
+            return Err(problems);
+        }
+        for (extension, previous) in registered {
+            if !wanted.contains_key(extension) {
+                replacements.push(crate::commands::NamespaceCommands {
+                    namespace: previous.namespace.clone(),
+                    source: format!("extension:{extension}"),
+                    commands: Vec::new(),
+                });
+            }
+        }
+        let commands = self.bus.prepare_namespaces(replacements).map_err(|error| {
+            let problem = registration_problem(error);
+            // A shared registry collision rejects all participating sources.
+            wanted
+                .keys()
+                .chain(registered.keys())
+                .map(|name| (name.clone(), problem.clone()))
+                .collect::<BTreeMap<_, _>>()
+        })?;
+        Ok(StagedExtensionCommands {
+            generation: snapshot.generation().to_string(),
+            source_generation: snapshot.source_generation().to_string(),
+            registrations: wanted,
+            commands,
+        })
+    }
+
+    /// Publish a candidate only if both its catalog and command registry are
+    /// unchanged. Callers must coordinate the other registries separately.
+    pub async fn publish(
+        &self,
+        staged: StagedExtensionCommands,
+    ) -> Result<(), oxplow_domain::CommandError> {
+        let mut registered = self.registered.lock().await;
+        self.publish_into(staged, &mut registered)?;
+        self.problems.lock().clear();
+        Ok(())
+    }
+
+    /// Only call on the blocking publication worker. Lock ordering is owner
+    /// metadata, then the command bus, matching reconciliation. The activation
+    /// owner must exclude readers and other generation writers before this.
+    pub(crate) fn reserve(
+        &self,
+        staged: &StagedExtensionCommands,
+    ) -> Result<ExtensionCommandReservation<'_>, oxplow_domain::CommandError> {
+        let registered = self.registered.blocking_lock();
+        if self.catalog.snapshot(&self.root).generation() != staged.source_generation {
+            return Err(oxplow_domain::CommandError::Unavailable {
+                message: "the extension catalog changed while commands were staged".into(),
+                retry_after_ms: None,
+            });
+        }
+        let commands = self.bus.reserve_namespaces(&staged.commands)?;
+        Ok(ExtensionCommandReservation {
+            commands,
+            registered,
+            registrations: staged.registrations.clone(),
+            problems: &self.problems,
+        })
+    }
+
+    fn publish_into(
+        &self,
+        staged: StagedExtensionCommands,
+        registered: &mut BTreeMap<String, RegisteredCommands>,
+    ) -> Result<(), oxplow_domain::CommandError> {
+        if self.catalog.snapshot(&self.root).generation() != staged.source_generation {
+            return Err(oxplow_domain::CommandError::Unavailable {
+                message: "the extension catalog changed while commands were staged".into(),
+                retry_after_ms: None,
+            });
+        }
+        self.bus.publish_namespaces(staged.commands)?;
+        *registered = staged.registrations;
+        Ok(())
+    }
+
+    /// Withdraw disabled/removed sources, then stage and publish every enabled
+    /// replacement together. A failed candidate cannot retain revoked sources.
+    pub async fn reconcile(&self) {
+        let mut registered = self.registered.lock().await;
+        let mut problems = BTreeMap::new();
+        for attempt in 0..3 {
+            match self.reconcile_once(&mut registered) {
+                Ok(found) => {
+                    problems = found;
+                    break;
+                }
+                Err(oxplow_domain::CommandError::Unavailable { .. }) if attempt < 2 => {
+                    // Provider registrations can race this pass. Yield, then
+                    // rebuild against fresh catalog and registry identities.
+                    tokio::task::yield_now().await;
+                }
+                Err(error) => {
+                    let snapshot = self.catalog.snapshot(&self.root);
+                    problems = Self::wanted(&snapshot)
+                        .keys()
+                        .chain(registered.keys())
+                        .map(|name| (name.clone(), error.to_string()))
+                        .collect();
+                    tracing::warn!(%error, "extension command publication deferred");
+                    break;
+                }
+            }
+        }
+        for (extension, problem) in &problems {
+            tracing::warn!(extension, problem, "extension command candidate rejected");
         }
         *self.problems.lock() = problems;
     }
 
-    /// Register every command of one extension, or none.
-    fn register(
+    fn reconcile_once(
         &self,
-        ns: &str,
+        registered: &mut BTreeMap<String, RegisteredCommands>,
+    ) -> Result<BTreeMap<String, String>, oxplow_domain::CommandError> {
+        let snapshot = self.catalog.snapshot(&self.root);
+        let wanted = Self::wanted(&snapshot);
+        // Keyed by extension: bundled sources can share the oxplow namespace.
+        // Withdrawal is authority revocation, independent of accepting new code.
+        let enabled: std::collections::BTreeSet<_> = snapshot
+            .extensions()
+            .iter()
+            .filter(|e| e.enabled)
+            .map(|e| e.name.as_str())
+            .collect();
+        let removed: Vec<_> = registered
+            .keys()
+            .filter(|name| !enabled.contains(name.as_str()))
+            .cloned()
+            .collect();
+        for extension in removed {
+            self.bus
+                .unregister_source(&format!("extension:{extension}"));
+            registered.remove(&extension);
+        }
+        if *registered == wanted {
+            return Ok(BTreeMap::new());
+        }
+        match self.stage_from(&snapshot, registered) {
+            Ok(staged) => {
+                self.publish_into(staged, registered)?;
+                Ok(BTreeMap::new())
+            }
+            Err(problems) => Ok(problems),
+        }
+    }
+
+    /// Build handlers with their original contribution metadata, without publication.
+    fn build(
+        &self,
         extension: &str,
-        commands: &[ExtensionCommand],
-    ) -> Result<(), String> {
-        let built = commands
+        registration: &RegisteredCommands,
+    ) -> Result<Vec<crate::commands::Command>, String> {
+        let ns = &registration.namespace;
+        registration
+            .commands
             .iter()
             .map(|decl| {
-                let (catalog, root) = (self.catalog.clone(), self.root.clone());
                 // Its local id, as its descriptor has it: the bus id
                 // without the namespace (`<area>.<verb>`).
                 let name = decl
@@ -1080,48 +1303,75 @@ impl ExtensionCommands {
                     .strip_prefix(&format!("{ns}."))
                     .unwrap_or(&decl.name)
                     .to_string();
-                let ext = extension.to_string();
-                // Its runs are the command's, named as the catalog has it
-                // when each runs.
-                let declared = crate::grants::script_request(&decl.needs);
+                // Keep provenance with the handler, including when the
+                // catalog reloads before this command is replaced.
+                let contribution = oxplow_domain::run::ContributionRef {
+                    id: oxplow_domain::contribution::ContributionId::new(
+                        extension,
+                        oxplow_domain::contribution::ContributionKind::Command,
+                        &name,
+                    ),
+                    version: registration.version.clone(),
+                    generation: Some(registration.generation.clone()),
+                };
+                // An operation's backing scope is implicit in its command
+                // spec, and must also be present in the captured authority.
+                let mut needs = decl.needs.clone();
+                if let CommandHandler::Scope { scope, .. } = &decl.handler {
+                    if !needs.contains(scope) {
+                        needs.push(scope.clone());
+                    }
+                }
+                let declared = crate::grants::script_request(&needs);
+                let (catalog, root, owner) = (
+                    self.catalog.clone(),
+                    self.root.clone(),
+                    extension.to_string(),
+                );
+                let live: std::sync::Arc<dyn Fn() -> Result<(), String> + Send + Sync> =
+                    std::sync::Arc::new(move || {
+                        let snapshot = catalog.runtime_snapshot(&root);
+                        let current = snapshot
+                            .extensions()
+                            .iter()
+                            .find(|ext| ext.name == owner && ext.origin == "bundled")
+                            .or_else(|| snapshot.extensions().iter().find(|ext| ext.name == owner));
+                        if current.is_some_and(|ext| ext.enabled) {
+                            Ok(())
+                        } else {
+                            Err("the command's owning extension is disabled or removed".into())
+                        }
+                    });
                 let named: std::sync::Arc<crate::commands::ContributionOf> =
                     std::sync::Arc::new(move |parent: &oxplow_domain::run::RunContext| {
-                        let contribution = oxplow_domain::run::ContributionRef {
-                            id: oxplow_domain::contribution::ContributionId::new(
-                                &ext,
-                                oxplow_domain::contribution::ContributionKind::Command,
-                                &name,
-                            ),
-                            version: catalog
-                                .get(&root)
-                                .iter()
-                                .find(|e| e.name == ext)
-                                .and_then(|e| e.version.clone()),
-                            generation: Some(catalog.generation(&root)),
-                        };
                         // A script command needs no person's approval: it
                         // may do what it declares.
                         parent
-                            .child(Some(contribution), oxplow_domain::run::Mode::External)
+                            .child(
+                                Some(contribution.clone()),
+                                oxplow_domain::run::Mode::External,
+                            )
                             .authorized(oxplow_domain::run::Authority {
                                 declared: declared.clone(),
                                 grant: None,
                                 enforcement: crate::grants::enforcement(),
                             })
+                            .guarded(live.clone())
                     });
                 extension_command(&self.bus, extension, decl)
                     .map(|c| c.of_contribution(named))
                     .map_err(|e| format!("`{}`: {e}", decl.name))
             })
-            .collect::<Result<Vec<_>, _>>()?;
-        self.bus
-            .register_namespace(ns, &format!("extension:{extension}"), built)
-            .map_err(|e| match e {
-                oxplow_domain::CommandError::Invalid { message, .. } => {
-                    format!("{message}; declare another `namespace:`")
-                }
-                other => other.to_string(),
-            })
+            .collect()
+    }
+}
+
+fn registration_problem(error: oxplow_domain::CommandError) -> String {
+    match error {
+        oxplow_domain::CommandError::Invalid { message, .. } => {
+            format!("{message}; declare another `namespace:`")
+        }
+        other => other.to_string(),
     }
 }
 

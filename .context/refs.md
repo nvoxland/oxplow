@@ -272,3 +272,18 @@ Nathan uses oxplow; stale `page_ref`/`page_visit` rows are wiped in V92
 and regenerated, and the UI starts new localStorage keys
 (`oxplow.layout.v2.*`, `oxplow.bookmarks.v2.*`); `legacyRedirects.ts`
 is gone.
+
+## Strict vocabulary candidates
+
+The activation API freezes declarations and the host work item recognizer from
+one catalog snapshot before writing. PreparedVocabulary.replace_tx rejects any
+event/ref/subscription/recognizer diagnostic and restores its database savepoint;
+it returns the candidate vocabulary without swapping VocabularyHandle. A shared
+wikilink prefix rejects the strict candidate, whereas the legacy live reactor
+still registers the kinds without their conflicting sugar. PreparedExtensionDatabase
+composes this with models and contribution descriptors, restoring the complete
+candidate on rejection. When prepared capabilities are included, its recognizer
+comes from the planned work-list selection rather than the prior live registry,
+and capability rows/switch events share that transaction. Coordinated
+commit/publication and reader pinning remain the activation owner's unfinished
+work; these helpers do not change the live reactor's partial diagnostics policy.

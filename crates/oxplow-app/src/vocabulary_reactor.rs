@@ -39,7 +39,7 @@ use oxplow_domain::vocabulary::{Vocabulary, VocabularyHandle};
 use oxplow_domain::DomainError;
 use tokio::sync::Mutex;
 
-use crate::extension_catalog::ExtensionCatalog;
+use crate::extension_catalog::{CatalogSnapshot, ExtensionCatalog};
 use crate::extension_event_types::EventTypes;
 use crate::extension_ref_kinds::RefKindDecl;
 use crate::extensions::Extension;
@@ -82,6 +82,113 @@ struct Declares {
 
 type Declared = Vec<Declares>;
 
+pub type VocabularyErrors = BTreeMap<String, Vec<String>>;
+
+/// Frozen declarations for one candidate catalog. Preparing these does not
+/// change either the database or the running vocabulary.
+pub struct PreparedVocabulary {
+    generation: String,
+    declared: Declared,
+    work_item_ids: Option<(String, String)>,
+}
+
+impl PreparedVocabulary {
+    /// Freeze one candidate's enabled declarations with a host-selected work
+    /// item recognizer. This permits capability and vocabulary candidates to
+    /// use the same planned selection without changing either live registry.
+    pub fn prepare(
+        snapshot: &CatalogSnapshot,
+        work_item_ids: Option<(String, String)>,
+    ) -> Result<Self, VocabularyErrors> {
+        let errors: VocabularyErrors = snapshot
+            .extensions()
+            .iter()
+            .filter(|extension| extension.enabled && !extension.errors.is_empty())
+            .map(|extension| (extension.name.clone(), extension.errors.clone()))
+            .collect();
+        if !errors.is_empty() {
+            return Err(errors);
+        }
+        Ok(Self {
+            generation: snapshot.generation().to_string(),
+            declared: declarations(snapshot.extensions()),
+            work_item_ids,
+        })
+    }
+
+    pub fn generation(&self) -> &str {
+        &self.generation
+    }
+
+    /// Validate and restate the complete candidate inside the caller's write
+    /// transaction. Any diagnostic restores this helper's database writes.
+    /// Propagate rejection to roll back other candidate registrations too.
+    /// The returned vocabulary must only be published after the outer commit;
+    /// this helper neither swaps a handle nor coordinates runtime readers.
+    pub fn replace_tx(
+        &self,
+        tx: &rusqlite::Transaction<'_>,
+        now: oxplow_domain::Timestamp,
+    ) -> Result<Vocabulary, oxplow_db::TxError<VocabularyErrors>> {
+        tx.execute_batch("SAVEPOINT candidate_extension_vocabulary")
+            .map_err(oxplow_db::map_sql_err)?;
+        let result = build_tx(tx, &self.declared, &now.to_string());
+        match result {
+            Ok((mut vocabulary, mut errors)) => {
+                // Unlike the legacy live reactor, a bad recognizer rejects
+                // the candidate instead of silently dropping recognition.
+                match self.work_item_ids.as_ref() {
+                    Some((provider, pattern)) => match vocabulary
+                        .kinds
+                        .clone()
+                        .with_work_item_ids(provider, pattern)
+                    {
+                        Ok(kinds) => vocabulary.kinds = kinds,
+                        Err(error) => errors
+                            .entry("<host>".to_string())
+                            .or_default()
+                            .push(format!("work item id recognizer: {error}")),
+                    },
+                    None => vocabulary.kinds = vocabulary.kinds.without_work_item_ids(),
+                }
+                errors.retain(|_, messages| !messages.is_empty());
+                if errors.is_empty() {
+                    tx.execute_batch("RELEASE candidate_extension_vocabulary")
+                        .map_err(oxplow_db::map_sql_err)?;
+                    Ok(vocabulary)
+                } else {
+                    rollback_candidate(tx)?;
+                    Err(oxplow_db::TxError::Aborted(errors))
+                }
+            }
+            Err(error) => {
+                rollback_candidate(tx)?;
+                Err(oxplow_db::TxError::Storage(error))
+            }
+        }
+    }
+}
+
+fn rollback_candidate(tx: &rusqlite::Transaction<'_>) -> Result<(), DomainError> {
+    tx.execute_batch(
+        "ROLLBACK TO candidate_extension_vocabulary; RELEASE candidate_extension_vocabulary",
+    )
+    .map_err(oxplow_db::map_sql_err)
+}
+
+fn declarations(extensions: &[Extension]) -> Declared {
+    extensions
+        .iter()
+        .filter(|extension| extension.enabled)
+        .map(|extension| Declares {
+            extension: extension.name.clone(),
+            types: extension.event_types.clone(),
+            kinds: extension.ref_kinds.clone(),
+            subscriptions: extension.subscriptions.clone(),
+        })
+        .collect()
+}
+
 impl VocabularyService {
     pub fn new(
         db: Database,
@@ -100,24 +207,23 @@ impl VocabularyService {
         }
     }
 
+    /// Capture declarations and the current host recognizer from one catalog
+    /// snapshot. Coordinated capability changes should instead supply their
+    /// planned recognizer to PreparedVocabulary::prepare.
+    pub fn prepare(
+        &self,
+        snapshot: &CatalogSnapshot,
+    ) -> Result<PreparedVocabulary, VocabularyErrors> {
+        PreparedVocabulary::prepare(snapshot, (self.work_item_ids)())
+    }
+
     /// Rebuild and swap the vocabulary if what extensions declare changed.
     /// Passes are serialized.
     pub async fn sync(&self) -> Result<(), DomainError> {
         let mut state = self.state.lock().await;
         // Every enabled extension: one that declares nothing restates its
         // retention back to the default.
-        let declared: Declared = self
-            .catalog
-            .get(&self.root)
-            .iter()
-            .filter(|e| e.enabled)
-            .map(|e| Declares {
-                extension: e.name.clone(),
-                types: e.event_types.clone(),
-                kinds: e.ref_kinds.clone(),
-                subscriptions: e.subscriptions.clone(),
-            })
-            .collect();
+        let declared = declarations(&self.catalog.get(&self.root));
         let ids = (self.work_item_ids)();
         let fingerprint = {
             let mut h = std::collections::hash_map::DefaultHasher::new();

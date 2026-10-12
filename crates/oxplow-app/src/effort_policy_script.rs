@@ -50,7 +50,9 @@ impl EffortPolicy for ScriptedPolicy {
         (self.gate)().map_err(&failed)?;
         let event = serde_json::to_value(event).map_err(|e| failed(e.to_string()))?;
         // The script is the run's pure part; what it reads is counted on it.
-        let composing = run.child(None, oxplow_domain::run::Mode::Pure);
+        let composing = run
+            .child(None, oxplow_domain::run::Mode::Pure)
+            .guarded(self.gate.clone());
         match crate::effects::run_over(
             &self.sql,
             &composing,

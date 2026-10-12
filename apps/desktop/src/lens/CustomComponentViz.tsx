@@ -198,7 +198,7 @@ function ComponentFrame({
     hostRef.current = createBridgeHost(
       channel.port1,
       {
-        query: (asset, params) => runComponentQuery(runRef.current.lens.id, asset, params, streamId),
+        query: (asset, params) => runComponentQuery(runRef.current.lens.id, asset, params, streamId, version),
         invoke: async (command, input, confirmed) => {
           try {
             const out = await invokeComponentCommand(runRef.current.lens.id, command, input, confirmed, version);

@@ -42,7 +42,7 @@ fn write_extension(project: &Path, hooks: &str) {
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
-        "manifest: 2\nname: tracker\nsharing: private\nintent:\n  purpose: the fake tracker\n  examples: [{ name: a }]\ncommands:\n  - name: item.estimate\n    summary: Set a work item's points.\n    provider: fake\n    op: estimate\n    invokers: { human: true, agent: true, lens: true }\n    ui: { label: \"Estimate in Fake…\", group: Tracker, about: work_item, input: { ref: \"{{ref}}\", points: 3 } }\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/provider\n    declarations: provider.json\n",
+        "manifest: 2\nname: tracker\nsharing: private\nintent:\n  purpose: the fake tracker\n  examples: [{ name: a }]\ncommands:\n  - name: item.estimate\n    summary: Set a work item's points.\n    provider: fake\n    op: estimate\n    invokers: { human: true, agent: true, lens: true }\n    ui: { label: \"Estimate in Fake…\", group: Tracker, about: work_item, input: { ref: \"{{ref}}\", points: 3 } }\nproviders:\n  - id: fake\n    capability: work_items\n    execution: broader\n    entry: bin/provider\n    declarations: provider.json\n",
     )
     .unwrap();
     let script = dir.join("bin/provider");
@@ -1137,8 +1137,8 @@ async fn declaration_impact_compare_against_the_last_approved_copy() {
     std::fs::write(
         &manifest,
         text.replace(
-            "    entry: bin/provider\n",
-            "    entry: bin/provider\n    network: [api.example.com]\n",
+            "    execution: broader\n    entry: bin/provider\n",
+            "    execution: broader\n    entry: bin/provider\n    network: [api.example.com]\n",
         ),
     )
     .unwrap();
@@ -1220,8 +1220,8 @@ async fn provider_args_stay_inside_the_approved_folder() {
     std::fs::write(
         &manifest,
         text.replace(
-            "    entry: bin/provider\n",
-            "    entry: bin/provider\n    args: [../../../tools/tracker.py]\n",
+            "    execution: broader\n    entry: bin/provider\n",
+            "    execution: broader\n    entry: bin/provider\n    args: [../../../tools/tracker.py]\n",
         ),
     )
     .unwrap();
@@ -1243,8 +1243,8 @@ async fn provider_args_stay_inside_the_approved_folder() {
     std::fs::write(
         &manifest,
         text.replace(
-            "    entry: bin/provider\n",
-            "    entry: bin/provider\n    args: [lib/main.py]\n",
+            "    execution: broader\n    entry: bin/provider\n",
+            "    execution: broader\n    entry: bin/provider\n    args: [lib/main.py]\n",
         ),
     )
     .unwrap();
@@ -1258,7 +1258,7 @@ async fn provider_args_stay_inside_the_approved_folder() {
     assert!(!program(&fx, &ext).approved);
 }
 
-const ADAPTER_MANIFEST: &str = "manifest: 2\nname: tracker\nsharing: private\nintent:\n  purpose: notes over MCP\n  examples: [{ name: a }]\nproviders:\n  - id: notes\n    capability: work_items\n    adapter:\n      mcp: { command: [bin/server, --stdio] }\n      mapping: mcp/x.star\n      tools: mcp/tools.json\n    declarations: provider.json\n";
+const ADAPTER_MANIFEST: &str = "manifest: 2\nname: tracker\nsharing: private\nintent:\n  purpose: notes over MCP\n  examples: [{ name: a }]\nproviders:\n  - id: notes\n    capability: work_items\n    execution: broader\n    adapter:\n      mcp: { command: [bin/server, --stdio] }\n      mapping: mcp/x.star\n      tools: mcp/tools.json\n    declarations: provider.json\n";
 
 /// A private extension whose provider is an MCP server behind oxplow's
 /// adapter: the server, its mapping and its pinned tools.
@@ -1302,8 +1302,8 @@ async fn an_adapter_provider_names_its_server_mapping_and_tools_inside_the_folde
         }
     );
     for (from, to, says) in [
-        ("    adapter:\n", "    entry: bin/server\n    adapter:\n", "either `entry` or `adapter`"),
-        ("    adapter:\n      mcp: { command: [bin/server, --stdio] }\n      mapping: mcp/x.star\n      tools: mcp/tools.json\n", "", "either `entry` or `adapter`"),
+        ("    execution: broader\n    adapter:\n", "    entry: bin/server\n    execution: broader\n    adapter:\n", "either `entry` or `adapter`"),
+        ("    execution: broader\n    adapter:\n      mcp: { command: [bin/server, --stdio] }\n      mapping: mcp/x.star\n      tools: mcp/tools.json\n", "", "either `entry` or `adapter`"),
         ("mapping: mcp/x.star", "mapping: ../x.star", "../x.star"),
         ("tools: mcp/tools.json", "tools: /tmp/tools.json", "/tmp/tools.json"),
         ("tools: mcp/tools.json", "tools: mcp/missing.json", "mcp/missing.json"),
@@ -1904,7 +1904,7 @@ fn a_policy_declares_no_data() {
 fn a_manifest_names_a_capability_a_process_may_implement() {
     let manifest = |capability: &str, extra: &str| {
         format!(
-            "  - id: fake\n    capability: {capability}\n    entry: bin/provider\n    declarations: provider.json\n{extra}"
+            "  - id: fake\n    capability: {capability}\n    execution: broader\n    entry: bin/provider\n    declarations: provider.json\n{extra}"
         )
     };
     let read = |rel: &str| {
@@ -4719,8 +4719,8 @@ async fn an_adapter_server_by_url_is_declared_and_checked() {
             "`NOTES_TOKEN` is a client secret",
         ),
         (
-            "    adapter:\n",
-            "    args: [--x]\n    adapter:\n",
+            "    execution: broader\n    adapter:\n",
+            "    args: [--x]\n    execution: broader\n    adapter:\n",
             "`args` go with an `entry`",
         ),
     ] {
@@ -6094,7 +6094,7 @@ fn write_policy_extension(project: &Path, hooks: &str) {
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
-        "manifest: 2\nname: steward\nsharing: private\nintent:\n  purpose: the fake effort policy\n  examples: [{ name: a }]\nproviders:\n  - id: fake\n    capability: effort_policy\n    entry: bin/provider\n    declarations: provider.json\n    needs: [sql.read]\n",
+        "manifest: 2\nname: steward\nsharing: private\nintent:\n  purpose: the fake effort policy\n  examples: [{ name: a }]\nproviders:\n  - id: fake\n    capability: effort_policy\n    execution: broader\n    entry: bin/provider\n    declarations: provider.json\n    needs: [sql.read]\n",
     )
     .unwrap();
     let script = dir.join("bin/provider");
@@ -6399,7 +6399,7 @@ fn write_harness_extension(project: &Path, hooks: &str) {
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
-        "manifest: 2\nname: conductor\nsharing: private\nintent:\n  purpose: the fake agent harness\n  examples: [{ name: a }]\nproviders:\n  - id: fake\n    capability: agent_harness\n    entry: bin/provider\n    declarations: provider.json\n",
+        "manifest: 2\nname: conductor\nsharing: private\nintent:\n  purpose: the fake agent harness\n  examples: [{ name: a }]\nproviders:\n  - id: fake\n    capability: agent_harness\n    execution: broader\n    entry: bin/provider\n    declarations: provider.json\n",
     )
     .unwrap();
     let script = dir.join("bin/provider");
@@ -6613,7 +6613,7 @@ fn write_snapshots_extension(project: &Path, contents: bool) {
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
-        "manifest: 2\nname: shutter\nsharing: private\nintent:\n  purpose: the fake snapshots provider\n  examples: [{ name: a }]\nproviders:\n  - id: shutter\n    capability: snapshots\n    entry: bin/provider\n    declarations: provider.json\n",
+        "manifest: 2\nname: shutter\nsharing: private\nintent:\n  purpose: the fake snapshots provider\n  examples: [{ name: a }]\nproviders:\n  - id: shutter\n    capability: snapshots\n    execution: broader\n    entry: bin/provider\n    declarations: provider.json\n",
     )
     .unwrap();
     let script = dir.join("bin/provider");
@@ -6829,7 +6829,7 @@ fn write_knowledge_extension(project: &Path, state: &Path) {
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
-        "manifest: 2\nname: shelf\nsharing: private\nintent:\n  purpose: the fake knowledge store\n  examples: [{ name: a }]\nproviders:\n  - id: shelf\n    capability: knowledge\n    entry: bin/provider\n    declarations: provider.json\n",
+        "manifest: 2\nname: shelf\nsharing: private\nintent:\n  purpose: the fake knowledge store\n  examples: [{ name: a }]\nproviders:\n  - id: shelf\n    capability: knowledge\n    execution: broader\n    entry: bin/provider\n    declarations: provider.json\n",
     )
     .unwrap();
     let script = dir.join("bin/provider");

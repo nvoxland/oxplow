@@ -28,10 +28,12 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use oxplow_ai::capabilities::{CapabilitySnapshotV1, ModelCatalogV1};
 use oxplow_ai::client::{
-    decide_via_chat, parse_answers, AiError, CompleteRequest, Completion, DecideRequest, Decision,
-    Http, ModelProvider, ProviderInstance, Question,
+    complete_typed_via_text, decide_via_chat, parse_answers, AiError, CompleteRequest, Completion,
+    DecideRequest, Decision, Http, ModelProvider, ProviderInstance, Question,
 };
+use oxplow_ai::parts::{TypedRequestV1, TypedResponseV1};
 use serde_json::{json, Value};
 
 /// How long one of the script's functions may run.
@@ -52,6 +54,8 @@ struct Config {
     base_url: Option<String>,
     #[serde(default)]
     ops: Option<Vec<String>>,
+    #[serde(default)]
+    models: Option<Vec<CapabilitySnapshotV1>>,
 }
 
 /// A provider whose calls a script shapes.
@@ -60,7 +64,9 @@ pub struct Scripted {
     title: String,
     base_url: Option<String>,
     complete: bool,
+    complete_typed: bool,
     decide: bool,
+    models: ModelCatalogV1,
     script: Arc<str>,
     gate: Gate,
     http: Http,
@@ -78,13 +84,21 @@ pub fn scripted(
     gate: Gate,
 ) -> Result<Arc<dyn ModelProvider>, String> {
     let c: Config = serde_json::from_value(config.clone()).map_err(|e| format!("config: {e}"))?;
+    let models = ModelCatalogV1 {
+        schema_version: 1,
+        catalog_known: c.models.is_some(),
+        models: c.models.unwrap_or_default(),
+    };
+    models
+        .validate()
+        .map_err(|e| format!("config models: {e}"))?;
     let ops = c.ops.unwrap_or_else(|| vec!["complete".into()]);
     if let Some(other) = ops
         .iter()
-        .find(|o| !["complete", "decide"].contains(&o.as_str()))
+        .find(|o| !["complete", "decide", "completeTyped"].contains(&o.as_str()))
     {
         return Err(format!(
-            "config: `ops` lists `{other}`; it answers `complete` and `decide`"
+            "config: `ops` lists `{other}`; it answers `complete`, `completeTyped` and `decide`"
         ));
     }
     oxplow_script::runtime::check_starlark_defines(entry, script, FUNCTIONS)
@@ -94,7 +108,9 @@ pub fn scripted(
         title: title.to_string(),
         base_url: c.base_url,
         complete: ops.iter().any(|o| o == "complete"),
+        complete_typed: ops.iter().any(|o| o == "completeTyped"),
         decide: ops.iter().any(|o| o == "decide"),
+        models,
         script: script.into(),
         gate,
         http: Http::default(),
@@ -160,6 +176,18 @@ impl Scripted {
         let mut headers: Vec<(String, String)> = Vec::new();
         if let Some(map) = req["headers"].as_object() {
             for (name, value) in map {
+                if [
+                    "host",
+                    "connection",
+                    "proxy-authorization",
+                    "proxy-connection",
+                ]
+                .contains(&name.to_ascii_lowercase().as_str())
+                {
+                    return Err(bad(
+                        "its request cannot override routing or proxy headers".into()
+                    ));
+                }
                 let value = value
                     .as_str()
                     .ok_or_else(|| bad(format!("its header `{name}` isn't a string")))?;
@@ -176,7 +204,51 @@ impl Scripted {
         }
         let url = format!("{base}{path}");
         let body = req.get("body").cloned().unwrap_or(Value::Null);
-        self.http.post_with(id, &url, headers, body).await.map(Some)
+        (self.gate)().map_err(|message| AiError::Unapproved {
+            provider: id.to_string(),
+            message,
+        })?;
+        let reply = self.http.post_with(id, &url, headers, body).await;
+        match reply {
+            Ok(mut value) => {
+                if let Some(key) = instance.key.filter(|key| !key.is_empty()) {
+                    redact_key(&mut value, key);
+                }
+                Ok(Some(value))
+            }
+            Err(AiError::Http {
+                provider,
+                status,
+                body,
+            }) => Err(AiError::Http {
+                provider,
+                status,
+                body: instance
+                    .key
+                    .filter(|key| !key.is_empty())
+                    .map_or(body.clone(), |key| body.replace(key, "[redacted]")),
+            }),
+            Err(error) => Err(error),
+        }
+    }
+}
+
+/// The host never hands an echoed credential back to a mapping script.
+fn redact_key(value: &mut Value, key: &str) {
+    match value {
+        Value::String(text) => *text = text.replace(key, "[redacted]"),
+        Value::Array(values) => values.iter_mut().for_each(|value| redact_key(value, key)),
+        Value::Object(map) => {
+            *map = std::mem::take(map)
+                .into_iter()
+                .map(|(name, mut value)| {
+                    redact_key(&mut value, key);
+                    (name.replace(key, "[redacted]"), value)
+                })
+                .collect();
+        }
+        Value::Number(number) if number.to_string().contains(key) => *value = Value::Null,
+        _ => (),
     }
 }
 
@@ -210,6 +282,59 @@ impl ModelProvider for Scripted {
 
     fn default_base_url(&self) -> Option<&str> {
         self.base_url.as_deref()
+    }
+
+    async fn discover_models(
+        &self,
+        _instance: &ProviderInstance<'_>,
+    ) -> Result<ModelCatalogV1, AiError> {
+        Ok(self.models.clone())
+    }
+
+    async fn discover(
+        &self,
+        _instance: &ProviderInstance<'_>,
+        model: &str,
+    ) -> Result<CapabilitySnapshotV1, AiError> {
+        Ok(self
+            .models
+            .models
+            .iter()
+            .find(|entry| entry.model.as_deref() == Some(model))
+            .cloned()
+            .unwrap_or_else(|| CapabilitySnapshotV1::unknown(model)))
+    }
+
+    async fn complete_typed(
+        &self,
+        instance: &ProviderInstance<'_>,
+        req: &TypedRequestV1,
+    ) -> Result<TypedResponseV1, AiError> {
+        req.validate_version()?;
+        if !self.complete_typed {
+            return complete_typed_via_text(self, instance, req).await;
+        }
+        let x = json!({ "op": "completeTyped", "model": req.model, "request": req });
+        let body = self
+            .exchange(instance, x)
+            .await?
+            .ok_or_else(|| AiError::BadResponse {
+                provider: instance.id.into(),
+                detail: "its request declined a typed completion".into(),
+            })?;
+        let response = self
+            .call(
+                instance.id,
+                "response",
+                json!({
+                    "op": "completeTyped", "model": req.model, "body": body
+                }),
+            )
+            .await?;
+        serde_json::from_value(response).map_err(|e| AiError::BadResponse {
+            provider: instance.id.into(),
+            detail: format!("its typed response is not V1: {e}"),
+        })
     }
 
     async fn complete(
@@ -302,6 +427,35 @@ impl ModelProvider for Scripted {
     /// One small call to check the key, URL and model: a completion, or —
     /// for one that only decides — a yes/no question.
     async fn test(&self, instance: &ProviderInstance<'_>, model: &str) -> Result<String, AiError> {
+        if self.complete_typed && !self.complete && !self.decide {
+            let request = TypedRequestV1 {
+                schema_version: 1,
+                model: model.into(),
+                tools: Vec::new(),
+                messages: vec![oxplow_ai::parts::MessageV1 {
+                    role: oxplow_ai::parts::MessageRoleV1::User,
+                    parts: vec![oxplow_ai::parts::PartV1::Text {
+                        text: "Reply with the single word OK.".into(),
+                    }],
+                }],
+            };
+            let response = self.complete_typed(instance, &request).await?;
+            let text: String = response
+                .parts
+                .iter()
+                .filter_map(|part| match part {
+                    oxplow_ai::parts::PartV1::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect();
+            if text.is_empty() {
+                return Err(AiError::BadResponse {
+                    provider: instance.id.into(),
+                    detail: "the connection check returned no text".into(),
+                });
+            }
+            return Ok(text.trim().chars().take(200).collect());
+        }
         if self.complete {
             let c = self
                 .complete(

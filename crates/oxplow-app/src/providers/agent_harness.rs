@@ -65,7 +65,10 @@ impl CapabilityHost for HarnessHost {
         self.0.has(id)
     }
 
-    fn admit(&self, instance: &Arc<Instance>) -> Result<Value, String> {
+    fn prepare(
+        &self,
+        instance: &Arc<Instance>,
+    ) -> Result<super::registry::PreparedProviderCapability, String> {
         let declared = &instance.declared;
         let capability = declared
             .capabilities
@@ -93,7 +96,7 @@ impl CapabilityHost for HarnessHost {
             .get("structured_transcript")
             .and_then(Value::as_bool)
             == Some(true);
-        self.0.register(Arc::new(ExternalHarness {
+        let harness = Arc::new(ExternalHarness {
             instance: instance.clone(),
             title: declared.provider.name.clone(),
             interact: Interact {
@@ -105,8 +108,12 @@ impl CapabilityHost for HarnessHost {
             },
             data,
             verbs,
-        }));
-        Ok(features)
+        });
+        let registry = self.0.clone();
+        Ok(super::registry::PreparedProviderCapability::new(
+            features,
+            move || registry.register(harness),
+        ))
     }
 
     fn retire(&self, id: &str) {

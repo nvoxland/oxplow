@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
+pub use oxplow_ai::capabilities::{CapabilitySnapshotV1, ModelCatalogV1};
 use oxplow_ai::client::{
     AiError, CompleteRequest, DecideRequest, ModelProvider, ModelProviders, ProviderInstance,
 };
@@ -16,6 +17,8 @@ use oxplow_ai::client::{
 pub use oxplow_ai::client::{Answer, Completion, Decision, Question};
 use oxplow_ai::config::AiConfig;
 pub use oxplow_ai::config::{ProviderConfig, Role, RoleBinding};
+use oxplow_ai::parts::{PartV1, UsageSourceV1};
+pub use oxplow_ai::parts::{TypedRequestV1, TypedResponseV1};
 use oxplow_ai::secrets::SecretStore;
 use oxplow_db::{NewAiCall, SqliteAiCallStore};
 
@@ -107,6 +110,7 @@ pub enum ModelRequest<'a> {
         state: &'a str,
         questions: &'a BTreeMap<String, Question>,
     },
+    Typed(&'a TypedRequestV1),
 }
 
 impl ModelRequest<'_> {
@@ -119,6 +123,9 @@ impl ModelRequest<'_> {
             } => serde_json::json!({ "system": system, "prompt": prompt, "json": json }),
             ModelRequest::Decide { state, questions } => {
                 serde_json::json!({ "state": state, "questions": questions })
+            }
+            ModelRequest::Typed(request) => {
+                serde_json::to_value(request).expect("request serializes")
             }
         }
     }
@@ -151,6 +158,12 @@ pub struct AiService {
     /// The project's role assignments, read on every resolve so edits to
     /// `project.yaml` apply without syncing anything.
     overrides: OverridesSource,
+    activation: std::sync::OnceLock<Arc<crate::extension_activation::ExtensionActivation>>,
+    identity: Arc<()>,
+}
+
+tokio::task_local! {
+    static CONFIG_READERS: Vec<(Arc<()>, AiConfig)>;
 }
 
 /// Where project role overrides come from (the live project config).
@@ -169,6 +182,8 @@ impl AiService {
             calls,
             config_dir,
             overrides: Arc::new(BTreeMap::new),
+            activation: std::sync::OnceLock::new(),
+            identity: Arc::new(()),
         }
     }
 
@@ -192,6 +207,79 @@ impl AiService {
     pub fn with_project_overrides(mut self, source: OverridesSource) -> Self {
         self.overrides = source;
         self
+    }
+
+    pub(crate) fn adopt_activation(
+        &self,
+        activation: Arc<crate::extension_activation::ExtensionActivation>,
+    ) -> Result<(), oxplow_domain::DomainError> {
+        let adopted = self.activation.get_or_init(|| activation.clone());
+        if Arc::ptr_eq(adopted, &activation) {
+            Ok(())
+        } else {
+            Err(oxplow_domain::DomainError::Invalid(
+                "AI service already belongs to another extension activation".into(),
+            ))
+        }
+    }
+
+    pub(crate) async fn read_generation<F: std::future::Future>(
+        &self,
+        future: F,
+    ) -> Result<F::Output, AiServiceError> {
+        match self.activation.get() {
+            Some(activation) => activation
+                .read(self.read_configured(future))
+                .await
+                .map_err(|_| {
+                    AiServiceError::Config("extension activation is unavailable".into())
+                })?,
+            None => self.read_configured(future).await,
+        }
+    }
+
+    async fn read_configured<F: std::future::Future>(
+        &self,
+        future: F,
+    ) -> Result<F::Output, AiServiceError> {
+        let mut readers = CONFIG_READERS.try_with(Clone::clone).unwrap_or_default();
+        if readers
+            .iter()
+            .any(|(owner, _)| Arc::ptr_eq(owner, &self.identity))
+        {
+            return Ok(future.await);
+        }
+        readers.push((self.identity.clone(), self.config()?));
+        Ok(CONFIG_READERS.scope(readers, future).await)
+    }
+
+    pub(crate) async fn read_run<F: std::future::Future>(
+        &self,
+        run: &oxplow_domain::run::RunContext,
+        future: F,
+    ) -> Result<F::Output, AiServiceError> {
+        match self.activation.get() {
+            Some(activation) => {
+                let run = activation.pin_run(run).await.map_err(|_| {
+                    AiServiceError::Config("extension generation context is unavailable".into())
+                })?;
+                let pin = run
+                    .host_generation::<crate::extension_activation::GenerationPin>()
+                    .expect("pinned AI context");
+                activation
+                    .read_pinned(pin, self.read_configured(future))
+                    .await
+                    .map_err(|_| {
+                        AiServiceError::Config("extension generation context is unavailable".into())
+                    })?
+            }
+            None => self.read_configured(future).await,
+        }
+    }
+
+    /// Production metadata ingress; synchronous settings remains a standalone helper.
+    pub async fn settings_pinned(&self) -> Result<AiSettings, AiServiceError> {
+        self.read_generation(async { self.settings() }).await?
     }
 
     /// The model providers it calls through.
@@ -339,6 +427,15 @@ impl AiService {
     /// URL and model name. Returns the model's reply. Not recorded: it
     /// isn't a role's work.
     pub async fn test_provider(&self, id: &str, model: &str) -> Result<String, AiServiceError> {
+        self.read_generation(self.test_provider_unpinned(id, model))
+            .await?
+    }
+
+    async fn test_provider_unpinned(
+        &self,
+        id: &str,
+        model: &str,
+    ) -> Result<String, AiServiceError> {
         let provider = self
             .config()?
             .providers
@@ -352,6 +449,18 @@ impl AiService {
 
     /// The effective configuration: global `ai.yaml` plus project overrides.
     pub fn config(&self) -> Result<AiConfig, AiServiceError> {
+        if let Some(config) = CONFIG_READERS
+            .try_with(|readers| {
+                readers
+                    .iter()
+                    .find(|(owner, _)| Arc::ptr_eq(owner, &self.identity))
+                    .map(|(_, config)| config.clone())
+            })
+            .ok()
+            .flatten()
+        {
+            return Ok(config);
+        }
         let global = match &self.config_dir {
             Some(dir) => AiConfig::load(dir).map_err(|e| AiServiceError::Config(e.to_string()))?,
             None => AiConfig::default(),
@@ -377,6 +486,18 @@ impl AiService {
     /// [`Self::complete`], recorded against `site`; the call's `ai_call`
     /// row id comes back with it.
     pub async fn complete_as(
+        &self,
+        role: Role,
+        site: CallSite<'_>,
+        system: Option<&str>,
+        prompt: &str,
+        json: bool,
+    ) -> Result<(Completion, Option<i64>), AiServiceError> {
+        self.read_generation(self.complete_as_unpinned(role, site, system, prompt, json))
+            .await?
+    }
+
+    async fn complete_as_unpinned(
         &self,
         role: Role,
         site: CallSite<'_>,
@@ -422,6 +543,133 @@ impl AiService {
         Ok((result?, call_id))
     }
 
+    /// Complete ordered parts on the configured role. The caller cannot use
+    /// this surface to select another model, endpoint or credential.
+    pub async fn complete_typed_as(
+        &self,
+        role: Role,
+        site: CallSite<'_>,
+        request: &TypedRequestV1,
+    ) -> Result<(TypedResponseV1, Option<i64>), AiServiceError> {
+        self.read_generation(self.complete_typed_as_unpinned(role, site, request))
+            .await?
+    }
+
+    async fn complete_typed_as_unpinned(
+        &self,
+        role: Role,
+        site: CallSite<'_>,
+        request: &TypedRequestV1,
+    ) -> Result<(TypedResponseV1, Option<i64>), AiServiceError> {
+        request.validate_version().map_err(AiError::from)?;
+        let (provider, binding) = self.resolve(role)?;
+        if request.model != binding.model {
+            return Err(AiServiceError::Config(
+                "typed request must use the role's configured model".into(),
+            ));
+        }
+        // Opaque assets need an authorized host resolver before transport.
+        // Never reinterpret them as paths, URLs or inline bytes here.
+        if request
+            .messages
+            .iter()
+            .flat_map(|m| &m.parts)
+            .any(|p| matches!(p, PartV1::Image { .. }))
+        {
+            return Err(AiError::UnsupportedFeature {
+                provider: provider.id.clone(),
+                feature: "imageAssetResolution".into(),
+                support: oxplow_ai::capabilities::CapabilitySupport::Unsupported,
+            }
+            .into());
+        }
+        let model_provider = self.provider_of(&provider)?;
+        let metadata = model_provider
+            .discover(&instance(&provider, None), &binding.model)
+            .await?;
+        metadata.validate_version().map_err(AiError::from)?;
+        if metadata.model.as_deref() != Some(&binding.model) {
+            return Err(AiServiceError::Config(
+                "capability metadata does not identify the role's model".into(),
+            ));
+        }
+        let parts: Vec<_> = request.messages.iter().flat_map(|m| &m.parts).collect();
+        let features = [
+            (
+                "text",
+                metadata.text,
+                parts.iter().any(|part| matches!(part, PartV1::Text { .. })),
+            ),
+            (
+                "toolCalling",
+                metadata.tool_calling,
+                !request.tools.is_empty()
+                    || parts.iter().any(|part| {
+                        matches!(part, PartV1::ToolCall { .. } | PartV1::ToolResult { .. })
+                    })
+                    || request
+                        .messages
+                        .iter()
+                        .any(|m| m.role == oxplow_ai::parts::MessageRoleV1::Tool),
+            ),
+        ];
+        for (feature, support, requested) in features {
+            if requested && support == oxplow_ai::capabilities::CapabilitySupport::Unsupported {
+                return Err(AiError::UnsupportedFeature {
+                    provider: provider.id.clone(),
+                    feature: feature.into(),
+                    support,
+                }
+                .into());
+            }
+        }
+        let key = self.key(&provider)?;
+        let started = Instant::now();
+        let result = model_provider
+            .complete_typed(&instance(&provider, key.as_deref()), request)
+            .await
+            .and_then(|response| {
+                response.validate_version()?;
+                if response
+                    .parts
+                    .iter()
+                    .any(|part| matches!(part, PartV1::Image { .. }))
+                {
+                    return Err(AiError::UnsupportedFeature {
+                        provider: provider.id.clone(),
+                        feature: "imageAssetResolution".into(),
+                        support: oxplow_ai::capabilities::CapabilitySupport::Unsupported,
+                    });
+                }
+                Ok(response)
+            });
+        let stored_request = ModelRequest::Typed(request);
+        let outcome = result.as_ref().map(|response| {
+            // Legacy aggregate columns count observed usage only. Optional
+            // counts and provenance are preserved in the complete payload.
+            let (input, output) = observed_counts(response);
+            (
+                input,
+                output,
+                serde_json::to_value(response).expect("response serializes"),
+            )
+        });
+        let call_id = self
+            .record(
+                Attempt {
+                    role,
+                    site,
+                    provider: &provider,
+                    binding: &binding,
+                    started,
+                    request: &stored_request,
+                },
+                outcome,
+            )
+            .await;
+        Ok((result?, call_id))
+    }
+
     /// Answer typed questions about `state` with the model `role` is bound to.
     pub async fn decide(
         &self,
@@ -438,6 +686,17 @@ impl AiService {
     /// [`Self::decide`], recorded against `site`; the call's `ai_call` row
     /// id comes back with it.
     pub async fn decide_as(
+        &self,
+        role: Role,
+        site: CallSite<'_>,
+        state: &str,
+        questions: &BTreeMap<String, Question>,
+    ) -> Result<(Decision, Option<i64>), AiServiceError> {
+        self.read_generation(self.decide_as_unpinned(role, site, state, questions))
+            .await?
+    }
+
+    async fn decide_as_unpinned(
         &self,
         role: Role,
         site: CallSite<'_>,
@@ -486,6 +745,53 @@ impl AiService {
             .ok_or_else(|| AiServiceError::NotConfigured(role_name(role)))
     }
 
+    /// Metadata for the role's selected model. Never fetches a key or makes
+    /// a completion, and records no paid call.
+    pub async fn capabilities(&self, role: Role) -> Result<CapabilitySnapshotV1, AiServiceError> {
+        self.read_generation(self.capabilities_unpinned(role))
+            .await?
+    }
+
+    async fn capabilities_unpinned(
+        &self,
+        role: Role,
+    ) -> Result<CapabilitySnapshotV1, AiServiceError> {
+        let (provider, binding) = self.resolve(role)?;
+        let metadata = self
+            .provider_of(&provider)?
+            .discover(&instance(&provider, None), &binding.model)
+            .await?;
+        metadata.validate_version().map_err(AiError::from)?;
+        if metadata.model.as_deref() != Some(&binding.model) {
+            return Err(AiServiceError::Config(
+                "capability metadata does not identify the role's model".into(),
+            ));
+        }
+        Ok(metadata)
+    }
+
+    /// Enumerated metadata from the role's provider, without keychain access.
+    pub async fn models(&self, role: Role) -> Result<ModelCatalogV1, AiServiceError> {
+        self.read_generation(self.models_unpinned(role)).await?
+    }
+
+    async fn models_unpinned(&self, role: Role) -> Result<ModelCatalogV1, AiServiceError> {
+        let (provider, _) = self.resolve(role)?;
+        let metadata = self
+            .provider_of(&provider)?
+            .discover_models(&instance(&provider, None))
+            .await?;
+        metadata.validate().map_err(AiServiceError::Config)?;
+        Ok(metadata)
+    }
+
+    fn resolve(&self, role: Role) -> Result<(ProviderConfig, RoleBinding), AiServiceError> {
+        self.config()?
+            .resolve(role)
+            .map(|(provider, binding)| (provider.clone(), binding.clone()))
+            .ok_or_else(|| AiServiceError::NotConfigured(role_name(role)))
+    }
+
     /// Resolve `role` and fetch its provider's key.
     /// Keys are stored under the provider id; a provider without one (a
     /// local server) is called without auth.
@@ -493,11 +799,7 @@ impl AiService {
         &self,
         role: Role,
     ) -> Result<(ProviderConfig, RoleBinding, Option<String>), AiServiceError> {
-        let config = self.config()?;
-        let (provider, binding) = config
-            .resolve(role)
-            .map(|(p, b)| (p.clone(), b.clone()))
-            .ok_or_else(|| AiServiceError::NotConfigured(role_name(role)))?;
+        let (provider, binding) = self.resolve(role)?;
         let key = self.key(&provider)?;
         Ok((provider, binding, key))
     }
@@ -600,6 +902,20 @@ impl AiService {
     }
 }
 
+/// Typed payloads retain optional counts and provenance. Legacy numeric
+/// aggregates include only provider-observed usage and use their old sentinel
+/// for missing or non-observed values.
+pub(crate) fn observed_counts(response: &TypedResponseV1) -> (i64, i64) {
+    if response.usage.source != UsageSourceV1::Observed {
+        return (0, 0);
+    }
+    let count = |value: Option<u64>| value.and_then(|n| i64::try_from(n).ok()).unwrap_or(0);
+    (
+        count(response.usage.input_tokens),
+        count(response.usage.output_tokens),
+    )
+}
+
 /// `project.yaml`'s `ai.roles` as role bindings. Names were validated on
 /// load; anything unrecognized is skipped.
 pub fn project_overrides(
@@ -661,6 +977,86 @@ fn instance<'a>(provider: &'a ProviderConfig, key: Option<&'a str>) -> ProviderI
     }
 }
 
+/// Providers prepared from one declared implementation snapshot. Preparing a
+/// candidate does not publish it into the live model-provider map.
+pub struct PreparedModelProviders {
+    providers: Vec<Arc<dyn ModelProvider>>,
+}
+
+impl PreparedModelProviders {
+    pub fn publish(self, providers: &ModelProviders) {
+        providers.set(self.providers);
+    }
+}
+
+/// Build the scripted model providers named by `declared`. This is a pure
+/// staging step: script factories and consent gates are captured, but no
+/// provider is published or called.
+pub fn prepare_built_ins(
+    declared: &[crate::capabilities::Implementation],
+    approvals: &Arc<crate::exec_consent::ApprovalStore>,
+    project_dir: &std::path::Path,
+) -> Result<PreparedModelProviders, BTreeMap<String, String>> {
+    let (prepared, errors) = build_built_ins(declared, approvals, project_dir);
+    if errors.is_empty() {
+        Ok(prepared)
+    } else {
+        Err(errors)
+    }
+}
+
+fn build_built_ins(
+    declared: &[crate::capabilities::Implementation],
+    approvals: &Arc<crate::exec_consent::ApprovalStore>,
+    project_dir: &std::path::Path,
+) -> (PreparedModelProviders, BTreeMap<String, String>) {
+    let mut built: Vec<Arc<dyn ModelProvider>> = Vec::new();
+    let mut errors = BTreeMap::new();
+    for implementation in declared.iter().filter(|i| i.capability == "ai_provider") {
+        if let crate::capabilities::Source::Script {
+            entry,
+            tree,
+            script,
+            ..
+        } = &implementation.source
+        {
+            let program = crate::exec_consent::ai_provider_program(
+                tree,
+                implementation.extension.as_deref().unwrap_or_default(),
+                &implementation.id,
+                entry,
+                implementation
+                    .config
+                    .get("baseUrl")
+                    .and_then(serde_json::Value::as_str),
+            );
+            let gate = crate::exec_consent::loaded_script_gate(
+                approvals.clone(),
+                project_dir.to_path_buf(),
+                program,
+                script.clone(),
+            );
+            match oxplow_ai_providers::scripted(
+                &implementation.id,
+                &implementation.title,
+                entry,
+                script,
+                &implementation.config,
+                gate,
+            ) {
+                Ok(provider) => built.push(provider),
+                Err(_) => {
+                    errors.insert(
+                        implementation.id.clone(),
+                        "scripted model provider failed to load".to_string(),
+                    );
+                }
+            }
+        }
+    }
+    (PreparedModelProviders { providers: built }, errors)
+}
+
 /// Register the model providers `declared` names (the project's
 /// extensions' `ai_provider` implementations), each under its declared id.
 /// One whose config doesn't hold is left out (logged).
@@ -670,41 +1066,11 @@ pub fn register_built_ins(
     approvals: &Arc<crate::exec_consent::ApprovalStore>,
     project_dir: &std::path::Path,
 ) {
-    let built: Vec<Arc<dyn ModelProvider>> = declared
-        .iter()
-        .filter(|i| i.capability == "ai_provider")
-        .filter_map(|i| match &i.source {
-            crate::capabilities::Source::Script {
-                entry,
-                tree,
-                script,
-                ..
-            } => {
-                let program = crate::exec_consent::ai_provider_program(
-                    tree,
-                    i.extension.as_deref().unwrap_or_default(),
-                    &i.id,
-                    entry,
-                    i.config.get("baseUrl").and_then(serde_json::Value::as_str),
-                );
-                let gate = crate::exec_consent::script_gate(
-                    approvals.clone(),
-                    project_dir.to_path_buf(),
-                    program,
-                );
-                match oxplow_ai_providers::scripted(&i.id, &i.title, entry, script, &i.config, gate)
-                {
-                    Ok(p) => Some(p),
-                    Err(error) => {
-                        tracing::warn!(provider = %i.id, %error, "a scripted model provider doesn't load");
-                        None
-                    }
-                }
-            }
-            _ => None,
-        })
-        .collect();
-    providers.set(built);
+    let (prepared, errors) = build_built_ins(declared, approvals, project_dir);
+    for (id, error) in errors {
+        tracing::warn!(provider = %id, error = %error, "a scripted model provider doesn't load");
+    }
+    prepared.publish(providers);
 }
 
 fn endpoint_of(provider: Option<&ProviderConfig>) -> String {

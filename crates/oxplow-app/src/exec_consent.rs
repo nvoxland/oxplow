@@ -173,6 +173,27 @@ impl ApprovalStore {
             .is_some_and(|k| !entry.mac.is_empty() && self.mac(&k, key, hash) == entry.mac)
     }
 
+    /// Re-read consent for a fixed version without borrowing the store.
+    /// Revocation affects running work, and a newly approved version
+    /// cannot authorize an older invocation.
+    pub fn pinned_gate(&self, key: String, hash: String) -> Gate {
+        let store = Self {
+            file: self.file.clone(),
+            project: self.project.clone(),
+            secrets: self.secrets.clone(),
+            key: parking_lot::Mutex::new(self.key.lock().clone()),
+        };
+        std::sync::Arc::new(move || {
+            if store.is_approved(&key, &hash) {
+                Ok(())
+            } else {
+                Err(format!(
+                    "approval of `{key}` was revoked or its version changed"
+                ))
+            }
+        })
+    }
+
     /// Record a person's approval of `key` at `hash`.
     pub fn approve(&self, key: &str, hash: &str) -> std::io::Result<()> {
         let file = self
@@ -283,12 +304,16 @@ pub enum ProgramKind {
     /// `needs` says what it reads).
     #[serde(rename = "effort-policy")]
     EffortPolicy,
+    /// A declared durable operation; approval covers its declaration and AI use.
+    Job,
 }
 
 /// A program the project's config would run.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectProgram {
+    #[serde(default)]
+    pub execution: oxplow_domain::grant::ExecutionTier,
     pub kind: ProgramKind,
     /// The capability it implements (a provider): what approving it lets
     /// it do (an agent harness launches the person's agent sessions).
@@ -344,6 +369,7 @@ impl ProjectProgram {
             ProgramKind::Component => format!("component:{}", self.name),
             ProgramKind::AiProvider => format!("ai_provider:{}", self.name),
             ProgramKind::EffortPolicy => format!("effort_policy:{}", self.name),
+            ProgramKind::Job => format!("job:{}", self.name),
         }
     }
 
@@ -374,7 +400,8 @@ impl ProjectProgram {
         let file = project_dir.join(&self.program);
         match self.kind {
             ProgramKind::Collector => {
-                h.update(std::fs::read(&file)?);
+                use crate::extensions::ExtensionFiles;
+                h.update(crate::extensions::Disk(project_dir.to_path_buf()).bytes(&self.program)?);
                 if let Some(dir) = Path::new(&self.program)
                     .parent()
                     .filter(|d| !d.as_os_str().is_empty())
@@ -385,6 +412,11 @@ impl ProjectProgram {
             }
             // Covered by what it says: each advisory is an arg (below).
             ProgramKind::Advisories => h.update(self.program.as_bytes()),
+            ProgramKind::Job => {
+                h.update(self.program.as_bytes());
+                h.update([0u8]);
+                h.update(self.files(project_dir)?.bytes("extension.yaml")?);
+            }
             // The entry, and every file of its extension but what isn't
             // code it runs (the manifest, whose grants are hashed below,
             // and lenses) — so its declarations file too.
@@ -439,7 +471,10 @@ impl ProjectProgram {
             h.update([0u8]);
             h.update(a.as_bytes());
             let arg_file = cwd.join(a);
-            if self.kind != ProgramKind::Advisories && !a.starts_with('-') && arg_file.is_file() {
+            if !matches!(self.kind, ProgramKind::Advisories | ProgramKind::Job)
+                && !a.starts_with('-')
+                && arg_file.is_file()
+            {
                 h.update([3u8]);
                 h.update(std::fs::read(&arg_file)?);
             }
@@ -464,6 +499,10 @@ impl ProjectProgram {
             h.update([8u8]);
             h.update(c.as_bytes());
         }
+        if self.execution == oxplow_domain::grant::ExecutionTier::Broader {
+            h.update([9u8]);
+            h.update(b"broader file, socket and process authority");
+        }
         Ok(hex::encode(h.finalize()))
     }
 }
@@ -480,15 +519,19 @@ impl ProjectProgram {
     /// Its entry's text, for a person to read before approving: a bundled
     /// extension's from its embedded files (tsk953).
     pub fn source(&self, project_dir: &Path) -> std::io::Result<String> {
+        if self.kind == ProgramKind::Job {
+            return Ok(self.args.join("\n"));
+        }
         Ok(String::from_utf8_lossy(&self.entry_bytes(project_dir)?).into_owned())
     }
 
     /// Its entry's bytes: a file of its extension when it's under `tree`
     /// (a bundled one's is embedded), else a project file.
     fn entry_bytes(&self, project_dir: &Path) -> std::io::Result<Vec<u8>> {
+        use crate::extensions::ExtensionFiles;
         match self.in_tree() {
             Some(rel) => self.files(project_dir)?.bytes(rel),
-            None => std::fs::read(project_dir.join(&self.program)),
+            None => crate::extensions::Disk(project_dir.to_path_buf()).bytes(&self.program),
         }
     }
 
@@ -511,6 +554,10 @@ impl ProjectProgram {
             h.update([7u8]);
             h.update(c.as_bytes());
         }
+        for asset in &self.scopes {
+            h.update([8u8]);
+            h.update(asset.as_bytes());
+        }
         Ok(hex::encode(h.finalize()))
     }
 
@@ -526,8 +573,8 @@ impl ProjectProgram {
 
 /// Most files and bytes [`tree_hash`] covers; a bigger directory can't be
 /// approved as a whole (move the script into its own directory).
-const TREE_MAX_FILES: usize = 500;
-const TREE_MAX_BYTES: u64 = 16 * 1024 * 1024;
+pub(crate) const TREE_MAX_FILES: usize = 500;
+pub(crate) const TREE_MAX_BYTES: u64 = 16 * 1024 * 1024;
 
 /// SHA-256 over every file under `dir` (relative path + content, sorted),
 /// dot-files included (only macOS's `.DS_Store` noise is left out). A
@@ -586,6 +633,7 @@ pub(crate) fn files_hash(
 /// What an approval of a program covers: its content and its args.
 pub fn program_hash(project_dir: &Path, program: &str, args: &[String]) -> std::io::Result<String> {
     ProjectProgram {
+        execution: Default::default(),
         kind: ProgramKind::Collector,
         capability: None,
         name: String::new(),
@@ -617,7 +665,19 @@ pub fn may_run(
     program: &str,
     args: &[String],
 ) -> bool {
-    let p = ProjectProgram {
+    let p = project_collector_program(kind, name, program, args, Default::default());
+    approved_now(store, project_dir, &p)
+}
+
+pub fn project_collector_program(
+    kind: ProgramKind,
+    name: &str,
+    program: &str,
+    args: &[String],
+    execution: oxplow_domain::grant::ExecutionTier,
+) -> ProjectProgram {
+    ProjectProgram {
+        execution,
         kind,
         capability: None,
         name: name.to_string(),
@@ -635,8 +695,7 @@ pub fn may_run(
         unenforced: Vec::new(),
         granted_at: None,
         revoked_at: None,
-    };
-    approved_now(store, project_dir, &p)
+    }
 }
 
 /// Whether `p` is approved on this machine as it is now.
@@ -657,6 +716,7 @@ pub fn ai_provider_program(
 ) -> ProjectProgram {
     let tree = tree.trim_end_matches('/');
     ProjectProgram {
+        execution: Default::default(),
         kind: ProgramKind::AiProvider,
         capability: None,
         name: format!("{extension}/{id}"),
@@ -695,6 +755,7 @@ fn approved_at(store: &ApprovalStore, project_dir: &Path, cwd: &Path, p: &Projec
 /// programs and never need approval.
 pub fn acp_program(agent: &oxplow_config::AcpAgentConfig) -> ProjectProgram {
     ProjectProgram {
+        execution: Default::default(),
         kind: ProgramKind::AcpAgent,
         capability: None,
         name: agent.name.clone(),
@@ -723,6 +784,7 @@ pub fn acp_program(agent: &oxplow_config::AcpAgentConfig) -> ProjectProgram {
 pub fn advisory_program(ext: &crate::extensions::Extension) -> ProjectProgram {
     let text = |v: serde_json::Value| v.as_str().unwrap_or_default().to_string();
     ProjectProgram {
+        execution: Default::default(),
         kind: ProgramKind::Advisories,
         capability: None,
         name: ext.name.clone(),
@@ -793,6 +855,7 @@ pub fn provider_program(
     };
     let remote = spec.is_remote();
     ProjectProgram {
+        execution: spec.execution,
         kind: ProgramKind::Provider,
         capability: Some(spec.capability.clone()),
         name: spec.approval_name(&ext.name),
@@ -829,6 +892,7 @@ pub fn component_program(
 ) -> ProjectProgram {
     let dir = ext.path.trim_end_matches('/');
     ProjectProgram {
+        execution: Default::default(),
         kind: ProgramKind::Component,
         capability: None,
         name: format!("{}/{}", ext.name, component.id),
@@ -838,8 +902,41 @@ pub fn component_program(
         credentials: Vec::new(),
         network: Vec::new(),
         commands: component.commands.clone(),
-        scopes: Vec::new(),
+        scopes: component
+            .assets
+            .iter()
+            .map(|asset| format!("lens:{asset}"))
+            .collect(),
         tree: Some(dir.to_string()),
+        remote: false,
+        approved: false,
+        version: None,
+        unenforced: Vec::new(),
+        granted_at: None,
+        revoked_at: None,
+    }
+}
+
+/// A job has no arbitrary executable. Its reviewed manifest and operation
+/// declaration cover its fixed host service grants; request payloads never
+/// become approval metadata.
+pub fn job_program(
+    ext: &crate::extensions::Extension,
+    job: &crate::extensions::jobs::JobDecl,
+) -> ProjectProgram {
+    ProjectProgram {
+        execution: Default::default(),
+        kind: ProgramKind::Job,
+        capability: None,
+        name: format!("{}/{}", ext.name, job.id),
+        program: job.operation.as_str().into(),
+        args: vec![serde_json::to_string(job).expect("job declaration serializes")],
+        env: Vec::new(),
+        credentials: Vec::new(),
+        network: Vec::new(),
+        commands: Vec::new(),
+        scopes: job.needs.clone(),
+        tree: Some(ext.path.trim_end_matches('/').into()),
         remote: false,
         approved: false,
         version: None,
@@ -894,8 +991,14 @@ pub fn script_gate(
     project_dir: std::path::PathBuf,
     program: ProjectProgram,
 ) -> Gate {
+    let hash = program.hash_at(&project_dir, &project_dir).ok();
     std::sync::Arc::new(move || {
-        if is_program_approved(&approvals, &project_dir, &program) {
+        if hash.as_ref().is_some_and(|pinned| {
+            program
+                .hash_at(&project_dir, &project_dir)
+                .is_ok_and(|current| current == *pinned)
+                && approvals.is_approved(&program.key(), pinned)
+        }) {
             Ok(())
         } else {
             Err(format!(
@@ -919,6 +1022,7 @@ fn kind_title(kind: ProgramKind) -> &'static str {
         ProgramKind::Component => "Component",
         ProgramKind::AiProvider => "AI provider",
         ProgramKind::EffortPolicy => "Effort policy",
+        ProgramKind::Job => "Job",
     }
 }
 
@@ -934,6 +1038,7 @@ pub fn effort_policy_program(
 ) -> ProjectProgram {
     let tree = tree.trim_end_matches('/');
     ProjectProgram {
+        execution: Default::default(),
         kind: ProgramKind::EffortPolicy,
         capability: None,
         name: format!("{extension}/{id}"),
@@ -965,6 +1070,7 @@ pub fn needs_approval(kind: ProgramKind, name: &str, program: &str) -> String {
         ProgramKind::Component => "component",
         ProgramKind::AiProvider => "AI provider",
         ProgramKind::EffortPolicy => "effort policy",
+        ProgramKind::Job => "job",
     };
     format!(
         "{what} `{name}` runs `{program}` from the project's config and needs a person's approval first \
@@ -981,9 +1087,10 @@ pub fn list(
     extensions: &[crate::extensions::Extension],
 ) -> Vec<ProjectProgram> {
     let mut out = Vec::new();
-    let mut push = |kind, name: &str, program: Option<&str>, args: &[String]| {
+    let mut push = |kind, name: &str, program: Option<&str>, args: &[String], execution| {
         let Some(program) = program else { return };
         out.push(ProjectProgram {
+            execution,
             kind,
             capability: None,
             name: name.to_string(),
@@ -1005,7 +1112,13 @@ pub fn list(
     };
     for c in &config.collectors {
         if c.runtime == oxplow_config::collectors::CollectorRuntime::Exec {
-            push(ProgramKind::Collector, &c.id, c.entry.as_deref(), &[]);
+            push(
+                ProgramKind::Collector,
+                &c.id,
+                c.entry.as_deref(),
+                &[],
+                c.execution,
+            );
         }
     }
     out.extend(config.acp_agents.iter().map(acp_program));
@@ -1020,6 +1133,17 @@ pub fn list(
             .iter()
             .map(move |decl| crate::effects::effect_program(e, decl))
     }));
+    out.extend(
+        extensions
+            .iter()
+            .filter(|extension| extension.enabled)
+            .flat_map(|extension| {
+                extension
+                    .jobs
+                    .iter()
+                    .map(move |job| job_program(extension, job))
+            }),
+    );
     out.extend(extensions.iter().filter(|e| e.enabled).flat_map(|e| {
         e.implementations
             .iter()
@@ -1072,6 +1196,25 @@ pub fn version_of(
         .find(|p| p.kind == kind && p.name == name)
         .and_then(|p| p.version)
         .unwrap_or_default()
+}
+
+/// A cached script cannot acquire a changed script's newly approved hash.
+pub fn loaded_script_gate(
+    approvals: std::sync::Arc<ApprovalStore>,
+    project_dir: std::path::PathBuf,
+    program: ProjectProgram,
+    loaded: String,
+) -> Gate {
+    let live = script_gate(approvals, project_dir.clone(), program.clone());
+    std::sync::Arc::new(move || {
+        if !program
+            .entry_bytes(&project_dir)
+            .is_ok_and(|bytes| bytes == loaded.as_bytes())
+        {
+            return Err("the loaded script differs from the approved version; reload it".into());
+        }
+        live()
+    })
 }
 
 /// A person revokes `kind`/`name`'s approval on this machine: from the
@@ -1188,6 +1331,7 @@ mod tests {
         );
         // An effect program in a bundled extension has a version to approve.
         let program = ProjectProgram {
+            execution: Default::default(),
             kind: ProgramKind::Effect,
             capability: None,
             name: "oxplow-bundled/x".into(),
@@ -1215,6 +1359,7 @@ mod tests {
     fn a_programs_source_is_read_where_it_lives() {
         let dir = tempfile::tempdir().unwrap();
         let bundled = ProjectProgram {
+            execution: Default::default(),
             kind: ProgramKind::Effect,
             capability: None,
             name: "oxplow-bundled/x".into(),

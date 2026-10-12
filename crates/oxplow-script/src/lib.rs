@@ -33,6 +33,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod ai;
 pub mod builtin_metrics;
+pub mod exec_io;
 pub mod helpers;
 pub mod runtime;
 pub mod scope;
@@ -306,6 +307,9 @@ pub struct Collector {
     runtime: CollectorRuntime,
     runner: Runner,
     budget: Budget,
+    execution: oxplow_domain::grant::ExecutionTier,
+    authority: Option<oxplow_domain::run::RunContext>,
+    location: Option<runtime::ExecLocation>,
 }
 
 impl Collector {
@@ -321,6 +325,9 @@ impl Collector {
             runtime,
             runner,
             budget: Budget::default(),
+            execution: Default::default(),
+            authority: None,
+            location: None,
         }
     }
 
@@ -410,6 +417,23 @@ impl Collector {
         )
     }
 
+    /// Pin the external execution grant and its live host authority.
+    pub fn with_authority(
+        mut self,
+        execution: oxplow_domain::grant::ExecutionTier,
+        run: oxplow_domain::run::RunContext,
+    ) -> Self {
+        self.execution = execution;
+        self.authority = Some(run);
+        self
+    }
+
+    /// Run from a host-owned approved code copy, with an explicit project path.
+    pub fn with_exec_location(mut self, location: runtime::ExecLocation) -> Self {
+        self.location = Some(location);
+        self
+    }
+
     /// Override the budget for the script tiers.
     pub fn with_budget(mut self, budget: Budget) -> Self {
         self.budget = budget;
@@ -447,7 +471,17 @@ impl Collector {
                 runtime::value_to_output(kind, raw.value)
             }
             Runner::Exec { argv } => {
-                let raw = runtime::run_exec(&self.budget, argv, content)?;
+                let run = self.authority.as_ref().ok_or_else(|| {
+                    CollectError::Exec("external parser has no host authority".into())
+                })?;
+                let raw = runtime::run_exec_authorized_at(
+                    &self.budget,
+                    argv,
+                    content,
+                    self.execution,
+                    &|| run.check_authority(),
+                    self.location.as_ref(),
+                )?;
                 runtime::value_to_output(kind, raw)
             }
             Runner::Native(parse) => Ok(parse(content)),
@@ -825,7 +859,13 @@ def transform(input):
     #[test]
     fn exec_collector_round_trips_stdin_to_stdout() {
         // `cat` echoes the (already kind-shaped) JSON from stdin to stdout.
-        let c = Collector::exec("e", CollectorKind::Test, ["cat"]);
+        let c = Collector::exec("e", CollectorKind::Test, ["cat"]).with_authority(
+            oxplow_domain::grant::ExecutionTier::Broader,
+            oxplow_domain::run::RunContext::core(
+                oxplow_domain::Actor::System,
+                oxplow_domain::run::Mode::External,
+            ),
+        );
         let out = c
             .run(r#"{"suites":[{"name":"s","cases":[]}]}"#)
             .expect("runs");

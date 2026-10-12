@@ -5,6 +5,107 @@ What this doc covers: the SQLite tables, their store classes, and the
 `sort_index` queue invariant for tasks. If you're adding a new persisted concept, also
 read [ipc-and-stores.md](./ipc-and-stores.md).
 
+## Durable extension job persistence
+
+The pure lifecycle is in `oxplow-domain/src/extension_job.rs`; migration
+`V52__extension_jobs.sql` reserves private jobs, per-dispatch attempts and
+append-only late outcome observations. `SqliteExtensionJobStore` and its transaction-composable helpers are integrated;
+a first declared typed-AI operation, fresh consent resolution, bounded boot
+scheduler and fenced completion event are now wired. Runtime validation remains
+unexecuted. No job SQL model or public RPC
+exposes these rows. Installation/generation registry changes cannot cascade
+into history deletion.
+
+Intent uniqueness is `(contribution_id, intent_key)`. Exact optional package
+version, generation, public contract version, operation, invoker, replay policy
+and canonical request JSON are immutable comparison fields. Changed delivery
+input conflicts; a fresh delivery RunId does not replace the original. Rows
+start at revision one; transitions increment revision exactly once and CAS the
+prior revision and lifecycle. SQL checks mirror reachable domain states and
+attempt/fence relations, while triggers preserve attribution, request and first
+cancellation time. Application validation additionally checks canonical UUIDs,
+identifiers, JSON depth and byte bounds. Expiry yields interruption, never proof
+of cancellation. Execution and cancellation waits occur outside transactions.
+
+Succeeded, failed and cancelled aggregate rows reject further transitions,
+including new cancellation requests; the draft SQL trigger enforces this too.
+Metadata point reads share the recovery decoder and never select request JSON.
+
+Attempt rows retain the original claimed odd fence even after recovery invalidates
+the aggregate fence. They close once with actual completion/stopped cancellation
+or interrupted recovery; closed outcomes cannot be rewritten. Request/result/
+evidence JSON is capped at 1 MiB per value. Late observations reference the exact
+original `(job_id, attempt, fence)` and are immutable independent history; they
+cannot change current lifecycle, relabel ownership or authorize publication.
+History pages accept limits of 1..256 and stop at 4 MiB of serialized payload
+with a next cursor, excluding lookahead payloads. Recovery and queued-work pages
+use `(updated_at_ms, id)` cursors and list metadata without loading private
+requests. Separate queued enumeration preserves committed but undispatched
+intent after restart; old interrupted rows cannot starve later recovery pages.
+The store validates decoded canonical IDs, reachable state/token/time invariants
+and positive revisions; borrowed SQLite text is bounded before allocation or
+JSON decoding. Canonical JSON uses sorted object keys, a depth/traversal guard
+and an exact allocation-free count before allocating the bounded serialization.
+Transition CAS checks prior revision/state/attempt/fence/lease/cancellation/time
+and publishes attempt changes inside a savepoint; all normal error paths
+explicitly roll back and propagate rollback failure to abort the outer transaction.
+Enqueue collisions compare immutable input rather than overwriting. Async wrappers
+own transactions and retry only storage contention; typed conflict/lifecycle
+rejection is not Busy. Observation recording has both sync and async helpers. A store validates
+persistence and fences; only the host can grant execution or private access.
+Both sync/async enqueue, transition and observation write entry points are
+on the thin-caller deny lists. The schema is drafted; migration/runtime validation
+has not run. No store operation executes a worker or resolves authority.
+
+## Extension state persistence
+
+`extension_state` reserves storage for host-managed workflow state and
+rebuildable caches, keyed by `(extension, scope, area)` within the project DB.
+Scope is `project` or the current host's `personal` workspace scope; area is
+`state` or `cache`. These rows are private extension data, not published SQL
+models, shared domain entities or configuration preferences. The schema stores
+one JSON object with a positive schema version and a revision for the whole
+namespace. A reset must preserve the row and increase the revision so stale
+requests cannot recreate prior values. Disable and uninstall do not cascade
+into deletion; there is no foreign key to the current contribution registry.
+
+`oxplow_domain::extension_state` defines validated namespaces, stamps and
+snapshots. `SqliteExtensionStateStore` reads consistent snapshots and uses
+compare-and-swap on both version and revision to replace the whole map and
+schema version in one retried transaction. It rejects schema downgrades,
+revision overflow, invalid keys, more than 256 keys or more than 1 MiB of
+serialized data or 64 levels of JSON nesting (including the namespace map),
+so a valid write remains within the decoder's recursion limit. Reads reject
+oversized stored bytes before decoding and reject corrupt data rather than defaulting. Conflicts carry the current stamp and do
+not retry; only storage contention retries. Conditional UPDATE/INSERT also
+protect the synchronous transaction helpers from overwriting a competing write.
+Expected stamps are validated on both entry points. Reset uses an empty map and
+retains the row; there is no physical-delete operation. Neither store errors nor
+models expose state payloads. The thin callers' clippy deny lists include both
+write entry points.
+
+Extension migration code must run on a copy outside a DB transaction, then
+publish with that same CAS. Host
+identity/grant checks are now supplied by `oxplow-app/src/extension_state.rs`:
+derive the namespace from a valid declared RunContext contribution, match its
+current catalog generation/version and enabled descriptor, and recheck live
+authority before and after the store operation. Read inputs select only scope
+and area. The write helper takes an audited TxCtx with an existing transaction
+and event cause, rejects pure runs, and uses a savepoint so failed publication
+checks restore state even if caught. Storage/rollback failures must abort the
+outer transaction. It creates no transaction or external work of its own.
+The primary-project native `state.read/snapshot` command operation is wired;
+its unaudited read returns a private snapshot without publishing a SQL model.
+The shared script/provider router also serves `state.read`: command composers
+use their current connection, while external hosts use StateSource for a
+separate owned read per call. Provider namespace ownership is captured from
+its active provider declaration, independently of the invoking command.
+Public write commands still require private audit/proposal input handling.
+Migration execution and configuration services still need integration. The
+lower-level store APIs grant no authority themselves. Configuration continues to
+use the project/personal file layers. A file edit and a SQLite
+reset cannot be represented as one atomic DB transaction.
+
 ## Storage
 
 All persistence lives in one SQLite file under `.oxplow/local.sqlite`, opened
@@ -84,6 +185,17 @@ It cannot deadlock: a permit is held only across the `spawn_blocking`, and those
 closures are synchronous, so they can't await another gated call and permits
 never nest. The in-memory test pool is `max_size(1)`, so the whole suite runs
 through a **one-permit** gate — a standing stress of that property.
+
+**Host generation publication.** `Database::transaction_with_publication` runs
+on the blocking worker under the normal write permit, with an explicit
+`PublicationTransaction::commit`. It lets the host retain synchronous registry
+reservations through SQL commit and subsequent map publication. Success without
+commit is rejected and rolled back. Only precommit storage contention retries;
+postcommit errors and panics never retry. The caller must exclude readers and
+leave that boundary unavailable if postcommit publication fails. Process/network
+work is forbidden in this callback. A worker-owned drop guard flushes committed
+table-change notifications even if the awaiting caller is cancelled or the
+worker unwinds. Thin callers are denied both the helper and its commit method.
 
 **Transactions.** One user-visible action that spans multiple writes
 to the same DB must commit as ONE transaction. The pattern (see the
@@ -2314,3 +2426,71 @@ the docs in one diff:
 - [agent-model.md](./agent-model.md) — how the agent acts on this data.
 - [git-integration.md](./git-integration.md) — `gitCommitAll` for the
   Files-panel commit button (user-driven).
+
+## Durable job restart context
+
+The private jobs migration now drafts extension_job_context alongside intent
+and attempt history. Each immutable context row belongs to one job and its
+original RunId, with JSON object/schema_version and 64 KiB checks; an insertion
+trigger requires the parent's same origin. The host validates strict nested
+scheduling Actor/anchors, canonical subject/cause identities and version before
+writing/reading. No grant or credential state is serialized, and no model exposes
+the context. The pure types and backend enqueue/read integration are implemented;
+the dispatcher/public scheduling integration remains pending. The draft migration
+has not been executed.
+
+Context must join intent atomically and survive independently of completed
+extension_run retention. Duplicate delivery preserves original provenance and
+rejects changed scheduling identity/anchors/subjects/cause. Missing or invalid
+context fails closed at dispatch; historical run telemetry is not a fallback.
+Execution identity is a job plus attempt/fence, separate from scheduling Actor.
+Worker authority must be resolved from current live owner/grants/gates.
+
+`extension_job_store::enqueue_with_context_tx` wraps intent and context in one
+savepoint, with explicit rollback on caught errors. Context origin must match
+the scheduling job. Duplicate input additionally compares Actor, anchors,
+subjects and cause, excluding only the new delivery's RunId; it preserves the
+original row. Missing context cannot be backfilled by redelivery. `get_context_tx`
+checks borrowed stored-byte limits before allocation, exact parent linkage and
+normalized strict V1 JSON before returning private attribution. Async wrappers
+exist, but no authority or worker wake is supplied by the backend.
+
+## Private extension configuration overrides
+
+`extension_config_store` and draft `V53__extension_config.sql` persist one JSON
+object per host-derived extension and Project/Personal layer, both in the local
+project database. There is no global-user namespace or cross-project lookup.
+The store exposes no SQL model, wire type, payload Debug or authority. The host
+must validate the manifest schema, derive the owner, check live grants and
+resolve host-owned secret references before using the effective configuration.
+
+Whole-object CAS requires the exact schema-version/revision stamp. Creation
+requires no prior stamp; updates increase revision and cannot decrease schema
+version. Reset uses an empty object at a newer revision, preserving stale-token
+rejection. Canonical JSON has a 1 MiB byte and 64-level depth limit; writes count
+before cloning/canonical allocation, reads bound borrowed SQLite text first.
+Namespace-changing/counter-regressing SQL updates are also rejected by a trigger.
+Writes require a caller transaction and roll back their savepoint on logical or
+storage failure. The configuration host now resolves and authorizes reads and
+native audited writes. An explicit migration can CAS both layers together;
+metadata inspection supplies old stamps without invalid effective values.
+Disable/uninstall retain rows while ownership guards deny access; reset uses an
+empty object. Automatic migrations and host secret references remain pending.
+The draft migration has not been executed.
+
+## Dedicated job actor audit compatibility
+
+Draft V54 widens command_audit actor_kind to include `job`, retaining every
+column/row, proposal audit links, the refused-audit index and AUTOINCREMENT
+high-water. The rebuild uses the migration transaction and legacy rename mode;
+foreign_keys is not disabled inside that transaction. It has not been executed.
+ActorKindV2 preserves both published command event schemas; current
+command.executed@3 adds job attribution with identity upcasts from v1/v2.
+command.proposed remains v2 because jobs cannot create confirmation proposals.
+
+Metric declaration upserts expose caller-transaction helpers for coherent
+extension generation publication. Their async wrappers use the same helpers;
+measure capture-scope and dimension promotion changes retain their transactional
+cube invalidation/fencing. Metric specs, dimensions, measures and available
+catalog metadata can therefore commit with candidate views and vocabulary.
+Thin callers cannot invoke these write helpers.

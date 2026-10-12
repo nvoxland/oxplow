@@ -37,7 +37,51 @@ type Fingerprint = Vec<(PathBuf, u64, Option<std::time::SystemTime>)>;
 
 struct Entry {
     fingerprint: Fingerprint,
+    snapshot: Arc<CatalogSnapshot>,
+}
+
+/// Loaded declarations and the fingerprint of the load that owns them.
+/// This pins catalog metadata, not database models or runtime registries.
+pub struct CatalogSnapshot {
     extensions: Arc<Vec<Extension>>,
+    generation: String,
+    source_generation: String,
+}
+
+impl CatalogSnapshot {
+    pub fn extensions(&self) -> &Arc<Vec<Extension>> {
+        &self.extensions
+    }
+
+    pub fn generation(&self) -> &str {
+        &self.generation
+    }
+
+    /// Fingerprint of the raw catalog source captured during preparation.
+    /// Unlike `generation`, this is unchanged by synthetic runtime baselines
+    /// and revocation overlays.
+    pub fn source_generation(&self) -> &str {
+        &self.source_generation
+    }
+    /// A safe initial active generation while extension candidates are
+    /// prepared. It contains only required bundled declarations; project and
+    /// non-required bundled extensions remain available through raw snapshots.
+    pub(crate) fn core_baseline(&self) -> Arc<CatalogSnapshot> {
+        let extensions = self
+            .extensions()
+            .iter()
+            .filter(|extension| {
+                extension.origin == "bundled"
+                    && crate::bundled_extensions::is_required(&extension.name)
+            })
+            .cloned()
+            .collect();
+        Arc::new(CatalogSnapshot {
+            extensions: Arc::new(extensions),
+            generation: format!("core:{}", self.source_generation()),
+            source_generation: self.source_generation().to_string(),
+        })
+    }
 }
 
 pub struct ExtensionCatalog {
@@ -46,10 +90,14 @@ pub struct ExtensionCatalog {
     /// checks): each root is its own project.
     project: Option<PathBuf>,
     by_root: Mutex<HashMap<PathBuf, Entry>>,
+    /// Last atomically published primary-project declarations. Raw loads stay
+    /// available for authoring and candidate validation.
+    active: Mutex<Option<Arc<CatalogSnapshot>>>,
     /// Full loads performed; tests read it to prove a hit parses nothing.
     loads: AtomicUsize,
     /// The primary worktree's extensions may have changed.
     changes: tokio::sync::broadcast::Sender<()>,
+    runtime_changes: tokio::sync::broadcast::Sender<()>,
 }
 
 impl Default for ExtensionCatalog {
@@ -57,8 +105,10 @@ impl Default for ExtensionCatalog {
         Self {
             project: None,
             by_root: Mutex::default(),
+            active: Mutex::default(),
             loads: AtomicUsize::default(),
             changes: tokio::sync::broadcast::channel(64).0,
+            runtime_changes: tokio::sync::broadcast::channel(64).0,
         }
     }
 }
@@ -79,6 +129,21 @@ impl ExtensionCatalog {
         }
     }
 
+    /// Replace the active primary-project catalog after coordinated
+    /// generation publication. This never changes the raw load cache.
+    pub(crate) fn publish_active(&self, snapshot: Arc<CatalogSnapshot>) {
+        *self.active.lock() = Some(snapshot);
+        self.runtime_changed();
+    }
+
+    pub(crate) fn runtime_changed(&self) {
+        let _ = self.runtime_changes.send(());
+    }
+
+    pub(crate) fn runtime_changes(&self) -> tokio::sync::broadcast::Receiver<()> {
+        self.runtime_changes.subscribe()
+    }
+
     /// The project whose config governs a load of `root`.
     pub fn project_of<'a>(&'a self, root: &'a Path) -> &'a Path {
         self.project.as_deref().unwrap_or(root)
@@ -95,46 +160,107 @@ impl ExtensionCatalog {
         let _ = self.changes.send(());
     }
 
-    /// Every extension under `root` (bundled ones included), as
-    /// `load_extensions` returns them, reloaded only when a file under
-    /// `oxplow/extensions/` or the project config changed.
+    /// Runtime declarations under `root`. An activated primary project reads
+    /// its published snapshot; authoring roots and standalone callers read
+    /// current files. Use `snapshot` explicitly for candidate preparation.
     pub fn get(&self, root: &Path) -> Arc<Vec<Extension>> {
+        self.runtime_snapshot(root).extensions.clone()
+    }
+
+    /// Take declarations and their load identity together. Retained
+    /// snapshots keep their identity when a later load replaces the cache.
+    pub fn snapshot(&self, root: &Path) -> Arc<CatalogSnapshot> {
         let project = self.project_of(root);
         let fingerprint = fingerprint(root, project);
         let mut cache = self.by_root.lock();
         if let Some(entry) = cache.get(root) {
             if entry.fingerprint == fingerprint {
-                return entry.extensions.clone();
+                return entry.snapshot.clone();
             }
         }
         let extensions = Arc::new(extensions::load_extensions_in(root, project));
+        let source_generation = fingerprint_generation(&fingerprint);
+        let snapshot = Arc::new(CatalogSnapshot {
+            extensions,
+            generation: source_generation.clone(),
+            source_generation,
+        });
         self.loads.fetch_add(1, Ordering::Relaxed);
         cache.insert(
             root.to_path_buf(),
             Entry {
                 fingerprint,
-                extensions: extensions.clone(),
+                snapshot: snapshot.clone(),
             },
         );
-        extensions
+        snapshot
+    }
+
+    /// Runtime declarations for the primary project: the last coordinated
+    /// snapshot, with only immediate disable/removal revocations applied.
+    /// Other roots and the not-yet-activated state use the current raw load.
+    /// `snapshot` remains the current-files API for authoring and staging.
+    pub fn runtime_snapshot(&self, root: &Path) -> Arc<CatalogSnapshot> {
+        let Some(project) = self.project.as_deref().filter(|project| *project == root) else {
+            return self.snapshot(root);
+        };
+        let Some(active) = self.active.lock().clone() else {
+            return self.snapshot(root);
+        };
+
+        let mut revoked = oxplow_config::disabled_extensions(project)
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>();
+        revoked.retain(|name| !crate::bundled_extensions::is_required(name));
+        for extension in active
+            .extensions()
+            .iter()
+            .filter(|extension| extension.enabled && extension.origin == "project")
+        {
+            let path = root.join(&extension.path);
+            let still_present = std::fs::symlink_metadata(path).is_ok_and(|metadata| {
+                let kind = metadata.file_type();
+                kind.is_dir() && !kind.is_symlink()
+            });
+            if !still_present {
+                revoked.insert(extension.name.clone());
+            }
+        }
+
+        if !active
+            .extensions()
+            .iter()
+            .any(|extension| extension.enabled && revoked.contains(&extension.name))
+        {
+            return active;
+        }
+
+        let disabled: Vec<_> = revoked.into_iter().collect();
+        Arc::new(CatalogSnapshot {
+            extensions: Arc::new(extensions::resolve_catalog(
+                active.extensions().as_ref().clone(),
+                &disabled,
+            )),
+            generation: active.generation().to_string(),
+            source_generation: active.source_generation().to_string(),
+        })
+    }
+
+    pub(crate) fn candidate(
+        &self,
+        root: &Path,
+        candidate: Extension,
+    ) -> extensions::candidates::CandidateCatalog {
+        extensions::candidates::build(root, self.project_of(root), candidate)
     }
 
     /// The generation of `root`'s catalog: a hash of everything its load
     /// depends on (every file under its extensions folder and the project
-    /// config). Equal generations are the same catalog; what a query's
-    /// result says it ran against.
+    /// config). This observes current files; a retained snapshot names its
+    /// own load through `CatalogSnapshot::generation` instead.
     pub fn generation(&self, root: &Path) -> String {
         let fingerprint = fingerprint(root, self.project_of(root));
-        let mut h = xxhash_rust::xxh3::Xxh3::new();
-        for (path, len, mtime) in &fingerprint {
-            h.update(path.to_string_lossy().as_bytes());
-            h.update(&len.to_le_bytes());
-            let since = mtime
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map_or(0, |d| d.as_nanos());
-            h.update(&since.to_le_bytes());
-        }
-        format!("{:016x}", h.digest())
+        fingerprint_generation(&fingerprint)
     }
 
     /// One extension by name. A disabled one is an error saying so; an
@@ -148,6 +274,12 @@ impl ExtensionCatalog {
             .or_else(|| all.iter().find(|e| e.name == name))
             .ok_or(DomainError::NotFound)?;
         if !ext.enabled {
+            if ext.public_contracts.blocked {
+                return Err(DomainError::Invalid(format!(
+                    "extension `{name}` cannot activate because its public contracts are invalid or unavailable: {}",
+                    ext.errors.join("; ")
+                )));
+            }
             return Err(extensions::disabled_error(name));
         }
         Ok(ext.clone())
@@ -169,24 +301,42 @@ impl ExtensionCatalog {
     }
 }
 
+fn fingerprint_generation(fingerprint: &Fingerprint) -> String {
+    let mut h = xxhash_rust::xxh3::Xxh3::new();
+    for (path, len, mtime) in fingerprint {
+        h.update(path.to_string_lossy().as_bytes());
+        h.update(&len.to_le_bytes());
+        let since = mtime
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |d| d.as_nanos());
+        h.update(&since.to_le_bytes());
+    }
+    format!("{:016x}", h.digest())
+}
+
 /// What a load of `root` depends on: every file under its extensions
 /// folder, and `project`'s config (which can disable an extension).
 fn fingerprint(root: &Path, project: &Path) -> Fingerprint {
     let mut out = Fingerprint::new();
-    walk(&root.join(EXTENSIONS_DIR), &mut out);
+    walk(&root.join(EXTENSIONS_DIR), &mut out, true);
     push_file(&oxplow_config::config_path(project), &mut out);
     out.sort();
     out
 }
 
-fn walk(dir: &Path, out: &mut Fingerprint) {
+fn walk(dir: &Path, out: &mut Fingerprint, extensions_root: bool) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
     for entry in entries.flatten() {
+        // The loader skips hidden extension folders. Publication staging
+        // must not appear as a new loaded catalog generation either.
+        if extensions_root && entry.file_name().to_string_lossy().starts_with('.') {
+            continue;
+        }
         let path = entry.path();
         match entry.file_type() {
-            Ok(t) if t.is_dir() => walk(&path, out),
+            Ok(t) if t.is_dir() => walk(&path, out, false),
             Ok(t) if t.is_file() || t.is_symlink() => push_file(&path, out),
             _ => {}
         }

@@ -12,17 +12,22 @@
 //! path joined with the manifest's `bundle` — so a spelling that differs
 //! from the disk's only in case still hashes every file it serves.
 
-use std::collections::{BTreeMap, VecDeque};
-use std::path::Path;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use oxplow_domain::DomainError;
 
 use crate::exec_consent::{component_program, ProjectProgram};
+use crate::extension_catalog::CatalogSnapshot;
 use crate::extensions::custom_components::{
     BundleLook, CustomComponent, MAX_BUNDLE_BYTES, MAX_BUNDLE_FILES,
 };
 use crate::extensions::{Extension, ExtensionFiles};
+use crate::vocabulary_reactor::VocabularyErrors;
+
+const MAX_GENERATION_BUNDLES: usize = 64;
+const MAX_GENERATION_BYTES: u64 = 128 * 1024 * 1024;
 
 /// How many loaded bundles are kept for their frames; an older one's frame
 /// is asked to reload.
@@ -36,8 +41,11 @@ pub struct BundleSnapshot {
     /// The extension and the component it is.
     pub extension: String,
     pub component: String,
+    /// Catalog generation whose enabled declarations produced this snapshot.
+    pub(crate) generation: Option<String>,
     /// The commands it may run, as hashed.
     pub commands: Vec<String>,
+    pub assets: Vec<String>,
     /// Every file of the folder, by `/`-separated path inside it.
     files: BTreeMap<String, Vec<u8>>,
 }
@@ -55,6 +63,96 @@ impl BundleSnapshot {
 #[derive(Default)]
 pub struct ComponentBundles {
     kept: parking_lot::Mutex<VecDeque<Arc<BundleSnapshot>>>,
+    active: parking_lot::Mutex<Option<PreparedComponentBundles>>,
+}
+
+/// Bundles captured from one enabled catalog generation. Preparation reads
+/// at most 64 bundles and 128 MiB of aggregate file bytes; it does not mutate
+/// the live bundle map or execute component code.
+pub struct PreparedComponentBundles {
+    root: PathBuf,
+    generation: String,
+    bundles: BTreeMap<(String, String), Arc<BundleSnapshot>>,
+}
+
+impl PreparedComponentBundles {
+    pub fn prepare(root: &Path, snapshot: &CatalogSnapshot) -> Result<Self, VocabularyErrors> {
+        let mut bundles = BTreeMap::new();
+        let mut keys = BTreeSet::new();
+        let mut errors = VocabularyErrors::new();
+        let mut count = 0usize;
+        let mut total_bytes = 0u64;
+
+        for ext in snapshot.extensions().iter().filter(|ext| ext.enabled) {
+            // Bundled components are deliberately not served by this host.
+            if ext.origin == "bundled" {
+                continue;
+            }
+            for component in &ext.custom_components {
+                count += 1;
+                if count > MAX_GENERATION_BUNDLES {
+                    return Err(host_error("too many custom component bundles"));
+                }
+                let key = (ext.name.clone(), component.id.clone());
+                if !keys.insert(key.clone()) {
+                    add_error(
+                        &mut errors,
+                        &ext.name,
+                        "custom component bundle identity is duplicated",
+                    );
+                    continue;
+                }
+                let bundle = match build_snapshot(
+                    root,
+                    ext,
+                    component,
+                    Some(snapshot.generation().to_string()),
+                ) {
+                    Ok(bundle) => bundle,
+                    Err(_) => {
+                        add_error(
+                            &mut errors,
+                            &ext.name,
+                            "custom component bundle could not be staged",
+                        );
+                        continue;
+                    }
+                };
+                let bytes = bundle
+                    .files
+                    .values()
+                    .map(|file| file.len() as u64)
+                    .sum::<u64>();
+                if total_bytes.saturating_add(bytes) > MAX_GENERATION_BYTES {
+                    add_error(
+                        &mut errors,
+                        &ext.name,
+                        "custom component generation exceeds its byte limit",
+                    );
+                    continue;
+                }
+                total_bytes += bytes;
+                bundles.insert(key, bundle);
+            }
+        }
+        if !errors.is_empty() {
+            return Err(errors);
+        }
+        Ok(Self {
+            root: root.to_path_buf(),
+            generation: snapshot.generation().to_string(),
+            bundles,
+        })
+    }
+
+    pub fn generation(&self) -> &str {
+        &self.generation
+    }
+
+    /// Replace the active generation's bundle map in one infallible swap.
+    pub fn publish(self, registry: &ComponentBundles) {
+        *registry.active.lock() = Some(self);
+    }
 }
 
 impl ComponentBundles {
@@ -70,41 +168,106 @@ impl ComponentBundles {
         ext: &Extension,
         component: &CustomComponent,
     ) -> Result<Arc<BundleSnapshot>, DomainError> {
-        if ext.origin == "bundled" {
-            return Err(DomainError::Invalid(format!(
-                "`{}` comes with oxplow, and its components aren't served",
-                ext.name
-            )));
+        let active = {
+            let active = self.active.lock();
+            active.as_ref().and_then(|active| {
+                (active.root.as_path() == root).then(|| {
+                    active
+                        .bundles
+                        .get(&(ext.name.clone(), component.id.clone()))
+                        .cloned()
+                })
+            })
+        };
+        if let Some(active) = active {
+            let snapshot = active.ok_or(DomainError::NotFound)?;
+            self.keep(snapshot.clone());
+            return Ok(snapshot);
         }
-        let program = component_program(ext, component);
-        let files = read_bundle(root, &program)?;
-        let version = program
-            .component_hash(&files)
-            .map_err(|e| DomainError::Invalid(format!("{}: {e}", program.program)))?;
-        let snapshot = Arc::new(BundleSnapshot {
-            version,
-            extension: ext.name.clone(),
-            component: component.id.clone(),
-            commands: component.commands.clone(),
-            files: files.0,
-        });
+        let snapshot = build_snapshot(root, ext, component, None)?;
+        self.keep(snapshot.clone());
+        Ok(snapshot)
+    }
+
+    fn keep(&self, snapshot: Arc<BundleSnapshot>) {
         let mut kept = self.kept.lock();
         kept.retain(|s| s.version != snapshot.version);
-        kept.push_back(snapshot.clone());
+        kept.push_back(snapshot);
         while kept.len() > KEPT {
             kept.pop_front();
         }
-        Ok(snapshot)
     }
 
     /// The loaded bundle at `version`, if it is still kept.
     pub fn get(&self, version: &str) -> Option<Arc<BundleSnapshot>> {
-        self.kept
-            .lock()
-            .iter()
-            .find(|s| s.version == version)
-            .cloned()
+        let active = {
+            let active = self.active.lock();
+            active.as_ref().and_then(|active| {
+                active
+                    .bundles
+                    .values()
+                    .find(|snapshot| snapshot.version == version)
+                    .cloned()
+            })
+        };
+        active.or_else(|| {
+            self.kept
+                .lock()
+                .iter()
+                .find(|s| s.version == version)
+                .cloned()
+        })
     }
+
+    /// Old frames can still read retained bytes, but invoking against a later
+    /// activated catalog requires reloading. Standalone roots retain legacy
+    /// behavior until their host adopts generation publication.
+    pub fn is_current(&self, root: &Path, bundle: &BundleSnapshot) -> bool {
+        let active = self.active.lock();
+        match active.as_ref().filter(|active| active.root == root) {
+            Some(active) => bundle.generation.as_deref() == Some(active.generation()),
+            None => true,
+        }
+    }
+}
+
+fn build_snapshot(
+    root: &Path,
+    ext: &Extension,
+    component: &CustomComponent,
+    generation: Option<String>,
+) -> Result<Arc<BundleSnapshot>, DomainError> {
+    if ext.origin == "bundled" {
+        return Err(DomainError::Invalid(format!(
+            "`{}` comes with oxplow, and its components aren't served",
+            ext.name
+        )));
+    }
+    let program = component_program(ext, component);
+    let files = read_bundle(root, &program)?;
+    let version = program
+        .component_hash(&files)
+        .map_err(|e| DomainError::Invalid(format!("{}: {e}", program.program)))?;
+    Ok(Arc::new(BundleSnapshot {
+        version,
+        extension: ext.name.clone(),
+        component: component.id.clone(),
+        generation,
+        commands: component.commands.clone(),
+        assets: component.assets.clone(),
+        files: files.0,
+    }))
+}
+
+fn add_error(errors: &mut VocabularyErrors, owner: &str, message: &str) {
+    let owner_errors = errors.entry(owner.to_string()).or_default();
+    if !owner_errors.iter().any(|error| error == message) {
+        owner_errors.push(message.to_string());
+    }
+}
+
+fn host_error(message: &str) -> VocabularyErrors {
+    VocabularyErrors::from([("<host>".to_string(), vec![message.to_string()])])
 }
 
 /// A bundle's files in memory, bytes and all.

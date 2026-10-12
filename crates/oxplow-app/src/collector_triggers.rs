@@ -220,6 +220,18 @@ impl AsyncEventConsumer for CollectorTriggers {
         let Some(svc) = self.services.upgrade() else {
             return Err(DomainError::Busy("services are shutting down".into()));
         };
+        svc.sql
+            .read_generation(async { self.handle_pinned_impl(&svc, event).await })
+            .await?
+    }
+}
+
+impl CollectorTriggers {
+    async fn handle_pinned_impl(
+        &self,
+        svc: &Arc<Services>,
+        event: &StoredEvent,
+    ) -> Result<(), DomainError> {
         let event = Arc::new(event.clone());
         let event_type = event.envelope.event_type.as_str();
         let now = oxplow_domain::Timestamp::now().to_text();
@@ -230,7 +242,7 @@ impl AsyncEventConsumer for CollectorTriggers {
             .filter(|c| c.runs_on(event_type) && matches_where(&c.trigger, &event))
             .collect();
         if facts.iter().any(|c| !c.defers(event_type)) {
-            run_fact_collectors(&svc, event.clone()).await?;
+            run_fact_collectors(svc, event.clone()).await?;
         }
         // The paced ones wait, recorded pending (`crate::pacing`).
         for c in facts.iter().filter(|c| c.defers(event_type)) {
@@ -239,8 +251,8 @@ impl AsyncEventConsumer for CollectorTriggers {
                 .await?;
         }
         let root = svc.layout.project_dir.clone();
-        let ctx = Collectors::of(&svc, &root);
-        for (owner, spec) in Self::entity_collectors(&svc) {
+        let ctx = Collectors::of(svc, &root);
+        for (owner, spec) in Self::entity_collectors(svc) {
             if !triggered_by(&spec, &event) {
                 continue;
             }

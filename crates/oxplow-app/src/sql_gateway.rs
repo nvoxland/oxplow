@@ -25,6 +25,11 @@ pub struct SqlGateway {
     overlay: std::sync::Arc<Vec<TempView>>,
     /// What a result's `coverage` and `generation` come from.
     collection: Option<std::sync::Arc<Collection>>,
+    /// Optional project activation boundary. Standalone gateways (including
+    /// fixtures and candidate checks) retain their existing behavior.
+    activation: std::sync::Arc<
+        std::sync::OnceLock<std::sync::Arc<crate::extension_activation::ExtensionActivation>>,
+    >,
     /// The event types the log speaks (the app's; core's unless set):
     /// what a review reads logged events through.
     vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
@@ -34,6 +39,7 @@ pub struct SqlGateway {
 /// feed the models it read and how they stand, and the catalog's
 /// generation (`crate::collection_coverage`).
 pub struct Collection {
+    pub jobs: std::sync::Arc<crate::extension_jobs::ExtensionJobs>,
     pub feeds: std::sync::Arc<crate::collection_coverage::Feeds>,
     pub db: Database,
     pub catalog: std::sync::Arc<crate::extension_catalog::ExtensionCatalog>,
@@ -48,6 +54,7 @@ impl SqlGateway {
             watermarks: None,
             overlay: std::sync::Arc::new(Vec::new()),
             collection: None,
+            activation: std::sync::Arc::new(std::sync::OnceLock::new()),
             vocabulary: oxplow_domain::vocabulary::VocabularyHandle::core(),
         }
     }
@@ -66,6 +73,137 @@ impl SqlGateway {
     pub fn with_collection(mut self, collection: Collection) -> Self {
         self.collection = Some(std::sync::Arc::new(collection));
         self
+    }
+
+    /// Pin queries to the project's active extension generation.
+    pub fn with_activation(
+        self,
+        activation: std::sync::Arc<crate::extension_activation::ExtensionActivation>,
+    ) -> Result<Self, DomainError> {
+        self.adopt_activation(activation)?;
+        Ok(self)
+    }
+
+    /// Adopt the project's shared activation boundary. Gateways cloned before
+    /// boot (including metric gateways) observe the same adoption.
+    pub(crate) fn adopt_activation(
+        &self,
+        activation: std::sync::Arc<crate::extension_activation::ExtensionActivation>,
+    ) -> Result<(), DomainError> {
+        let adopted = self.activation.get_or_init(|| activation.clone());
+        if std::sync::Arc::ptr_eq(adopted, &activation) {
+            Ok(())
+        } else {
+            Err(DomainError::Invalid(
+                "SQL gateway already belongs to another extension activation".into(),
+            ))
+        }
+    }
+
+    pub(crate) fn has_activation(&self) -> bool {
+        self.activation.get().is_some()
+    }
+
+    pub(crate) fn request_activation(&self) {
+        if let Some(activation) = self.activation.get() {
+            activation.request();
+        }
+    }
+
+    /// Re-enter a retained run's reader scope before looking up declarations.
+    pub(crate) async fn read_in<F: std::future::Future>(
+        &self,
+        run: &oxplow_domain::run::RunContext,
+        future: F,
+    ) -> Result<F::Output, DomainError> {
+        match self.activation.get() {
+            Some(activation) => {
+                let run = activation.pin_run(run).await?;
+                let pin = run
+                    .host_generation::<crate::extension_activation::GenerationPin>()
+                    .expect("pinned gateway context");
+                activation.read_pinned(pin, future).await
+            }
+            None => Ok(future.await),
+        }
+    }
+
+    /// Retain this gateway's generation before looking up declarations or
+    /// handlers which a later query/invocation will use. Standalone gateways
+    /// execute directly; nested scopes inherit their current pin.
+    pub(crate) async fn read_generation<F: std::future::Future>(
+        &self,
+        future: F,
+    ) -> Result<F::Output, DomainError> {
+        match self.activation.get() {
+            Some(activation) => activation.read(future).await,
+            None => Ok(future.await),
+        }
+    }
+
+    pub(crate) async fn pin_run(
+        &self,
+        run: &oxplow_domain::run::RunContext,
+    ) -> Result<oxplow_domain::run::RunContext, DomainError> {
+        match self.activation.get() {
+            Some(activation) => activation.pin_run(run).await,
+            None => Ok(run.clone()),
+        }
+    }
+
+    /// Spawned/script worker calls must re-enter using the retained host pin;
+    /// task-local inheritance alone does not cross those task/thread boundaries.
+    pub(crate) async fn run_in(
+        &self,
+        run: &oxplow_domain::run::RunContext,
+        query: SqlQuery,
+    ) -> Result<SqlQueryResult, DomainError> {
+        if let Some(activation) = self.activation.get() {
+            let run = activation.pin_run(run).await?;
+            let pin = run
+                .host_generation::<crate::extension_activation::GenerationPin>()
+                .expect("pinned gateway context");
+            return activation
+                .read_pinned(pin, self.run_unpinned(query))
+                .await?;
+        }
+        self.run_unpinned(query).await
+    }
+
+    /// A separate private state reader for script hosts sharing this project's
+    /// resources. State never enters `run`, overlays, models or SQL results.
+    pub(crate) fn state_source(&self) -> Option<crate::extension_state::StateSource> {
+        self.collection.as_ref().map(|resources| {
+            crate::extension_state::StateSource::new(
+                crate::extension_state::StateHost::new(
+                    resources.catalog.clone(),
+                    resources.root.clone(),
+                ),
+                resources.db.clone(),
+            )
+        })
+    }
+
+    pub(crate) fn jobs_source(
+        &self,
+    ) -> Option<std::sync::Arc<crate::extension_jobs::ExtensionJobs>> {
+        self.collection
+            .as_ref()
+            .map(|resources| resources.jobs.clone())
+    }
+
+    pub(crate) fn configuration_source(
+        &self,
+    ) -> Option<crate::extension_configuration::ConfigurationSource> {
+        self.collection.as_ref().map(|resources| {
+            crate::extension_configuration::ConfigurationSource::new(
+                crate::extension_configuration::ConfigurationHost::new(
+                    resources.catalog.clone(),
+                    resources.root.clone(),
+                ),
+                resources.db.clone(),
+            )
+        })
     }
 
     /// This gateway with `views` created (in order) for every query it
@@ -103,7 +241,22 @@ impl SqlGateway {
     /// reading metrics — `metric_grid()`, `metric_findings()` — has them
     /// computed first, before any connection is taken, and runs against
     /// them as temp tables.
-    pub async fn run(&self, mut query: SqlQuery) -> Result<SqlQueryResult, DomainError> {
+    pub async fn run(&self, query: SqlQuery) -> Result<SqlQueryResult, DomainError> {
+        if let Some(activation) = self.activation.get() {
+            return activation.read(self.run_unpinned(query)).await?;
+        }
+        self.run_unpinned(query).await
+    }
+
+    async fn run_unpinned(&self, mut query: SqlQuery) -> Result<SqlQueryResult, DomainError> {
+        if query.model_policy.is_some()
+            && (crate::metric_grid::plan(&query.sql)?.is_some()
+                || crate::metric_findings::plan(&query.sql)?.is_some())
+        {
+            return Err(DomainError::Invalid(
+                "bounded model grants cannot use metric_grid()/metric_findings(); query granted published models instead".into()
+            ));
+        }
         // Boxed: the engine reads entity metrics through a gateway, so
         // this future contains another `run`.
         let (sql, temp, measures) =
@@ -115,7 +268,20 @@ impl SqlGateway {
         out.reads.measures = measures;
         if let Some(c) = &self.collection {
             out.coverage = c.feeds.coverage(&c.db, &out.reads.models).await?;
-            out.generation = Some(c.catalog.generation(&c.root));
+            out.generation = Some(
+                self.activation
+                    .get()
+                    .and_then(|activation| activation.current_pin())
+                    .map(|pin| pin.generation().to_string())
+                    .unwrap_or_else(|| c.catalog.generation(&c.root)),
+            );
+        } else if let Some(generation) = self
+            .activation
+            .get()
+            .and_then(|activation| activation.current_pin())
+            .map(|pin| pin.generation().to_string())
+        {
+            out.generation = Some(generation);
         }
         Ok(self.fresh(out))
     }
@@ -175,6 +341,13 @@ impl SqlGateway {
     /// Check a query compiles as a read, without running it; say what it
     /// would read.
     pub async fn check(&self, sql: &str) -> Result<Reads, DomainError> {
+        if let Some(activation) = self.activation.get() {
+            return activation.read(self.check_unpinned(sql)).await?;
+        }
+        self.check_unpinned(sql).await
+    }
+
+    async fn check_unpinned(&self, sql: &str) -> Result<Reads, DomainError> {
         // The metrics are resolved (a dimension checked) but not read; the
         // query compiles against empty tables.
         let (rewritten, temp, measures) = Box::pin(self.materialize(sql, None, false)).await?;
@@ -202,6 +375,19 @@ impl SqlGateway {
         types: Vec<String>,
         limit: usize,
     ) -> Result<Vec<oxplow_domain::StoredEvent>, DomainError> {
+        if let Some(activation) = self.activation.get() {
+            return activation
+                .read(self.recent_events_unpinned(types, limit))
+                .await?;
+        }
+        self.recent_events_unpinned(types, limit).await
+    }
+
+    async fn recent_events_unpinned(
+        &self,
+        types: Vec<String>,
+        limit: usize,
+    ) -> Result<Vec<oxplow_domain::StoredEvent>, DomainError> {
         self.layer.recent_events(types, limit).await
     }
 
@@ -212,6 +398,13 @@ impl SqlGateway {
 
     /// The name of every view in the database.
     pub async fn view_names(&self) -> Result<std::collections::HashSet<String>, DomainError> {
+        if let Some(activation) = self.activation.get() {
+            return activation.read(self.view_names_unpinned()).await?;
+        }
+        self.view_names_unpinned().await
+    }
+
+    async fn view_names_unpinned(&self) -> Result<std::collections::HashSet<String>, DomainError> {
         self.layer.view_names().await
     }
 }

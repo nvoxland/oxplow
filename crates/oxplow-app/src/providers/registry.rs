@@ -45,6 +45,12 @@ use crate::exec_consent::ApprovalStore;
 use crate::extension_catalog::ExtensionCatalog;
 use crate::extensions::Extension;
 
+#[path = "generation.rs"]
+mod generation;
+pub use generation::{
+    PreparedProviderGeneration, ProviderGenerationPublication, ProviderGenerationReservation,
+};
+
 /// The longest a failed instance waits before its next start.
 pub const MAX_BACKOFF: Duration = Duration::from_secs(60);
 /// The errors an instance's health keeps.
@@ -361,7 +367,9 @@ pub struct Instance {
     live: tokio::sync::Mutex<Option<Live>>,
     /// Stopped (torn down): it never starts again, so a late caller still
     /// holding it can't bring back a process nobody runs (tsk836).
-    stopped: std::sync::atomic::AtomicBool,
+    stopped: Arc<std::sync::atomic::AtomicBool>,
+    /// Candidate/check processes cannot trigger incumbent reads by name.
+    admitted: Arc<std::sync::atomic::AtomicBool>,
     /// One start at a time; held across a start, which `live` never is.
     starting: tokio::sync::Mutex<()>,
     /// When each signed-in credential was last renewed because its
@@ -435,6 +443,48 @@ impl Instance {
         let mut problems = Vec::new();
         for c in &self.spec.credentials {
             let name = c.name.as_str();
+            if let Some(reference) = &c.secret_ref {
+                let current = || {
+                    self.spec.is_host_secret_bearer(c)
+                        && self.host_calls.authority_current()
+                        && self
+                            .deps
+                            .catalog
+                            .runtime_snapshot(&self.deps.project_dir)
+                            .extensions()
+                            .iter()
+                            .any(|ext| {
+                                ext.enabled
+                                    && ext.name == self.ext.name
+                                    && ext.origin == self.ext.origin
+                                    && ext.version == self.ext.version
+                                    && ext.providers.contains(&self.spec)
+                            })
+                };
+                if !current() {
+                    return Err(failed(
+                        name,
+                        "host secret access is no longer authorized".into(),
+                    ));
+                }
+                let value = secrets
+                    .get(&crate::extension_secrets::account(
+                        &self.deps.project,
+                        &self.ext.name,
+                        reference,
+                    ))
+                    .map_err(|_| failed(name, "host secret storage is unavailable".into()))?;
+                if !current() {
+                    return Err(failed(
+                        name,
+                        "host secret access is no longer authorized".into(),
+                    ));
+                }
+                if let Some(value) = value {
+                    out.insert(name.to_owned(), value);
+                }
+                continue;
+            }
             let Some(decl) = &c.oauth else {
                 if self.spec.is_client_secret(name) {
                     continue;
@@ -526,6 +576,12 @@ impl Instance {
         refused: Option<(&str, &str)>,
     ) -> Result<Live, (HostError, Option<CheckRefusal>)> {
         let plain = |e: HostError| (e, None);
+        self.spec.execution.require_external().map_err(|message| {
+            plain(HostError::Failed {
+                name: self.name.clone(),
+                message,
+            })
+        })?;
         let copy = copy_approved(&self.deps, &self.ext, &self.spec)
             .await
             .map_err(plain)?;
@@ -535,6 +591,98 @@ impl Instance {
                 detail: "its declarations changed since it was enabled".into(),
             }));
         }
+        let program = crate::exec_consent::provider_program(&self.ext, &self.spec);
+        let gate = self
+            .deps
+            .approvals
+            .pinned_gate(program.key(), copy.hash.clone());
+        let (copy_root, pinned) = (copy.root.clone(), copy.hash.clone());
+        let (stopped, admitted, registry, name, scope, ext, spec) = (
+            self.stopped.clone(),
+            self.admitted.clone(),
+            self.registry.clone(),
+            self.name.clone(),
+            self.scope,
+            self.ext.clone(),
+            self.spec.clone(),
+        );
+        let secret_revisions: Vec<_> = self
+            .registry
+            .upgrade()
+            .and_then(|registry| registry.extension_secrets.get().cloned())
+            .map(|secrets| {
+                self.spec
+                    .credentials
+                    .iter()
+                    .filter_map(|credential| credential.secret_ref.as_ref())
+                    .map(|reference| {
+                        let revision = secrets.watch(&self.ext.name, reference);
+                        let expected = revision.load(std::sync::atomic::Ordering::Acquire);
+                        (revision, expected)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if self
+            .spec
+            .credentials
+            .iter()
+            .any(|credential| credential.secret_ref.is_some())
+            && secret_revisions.is_empty()
+        {
+            return Err(plain(HostError::Failed {
+                name: self.name.clone(),
+                message: "host secret service is unavailable".into(),
+            }));
+        }
+        self.host_calls.set_gate(Arc::new(move || {
+            if stopped.load(std::sync::atomic::Ordering::Acquire) {
+                return Err("the provider instance was stopped".into());
+            }
+            gate()?;
+            if secret_revisions.iter().any(|(revision, expected)| {
+                revision.load(std::sync::atomic::Ordering::Acquire) != *expected
+            }) {
+                return Err("the host secret changed during execution".into());
+            }
+            if admitted.load(std::sync::atomic::Ordering::Acquire) {
+                let registry = registry
+                    .upgrade()
+                    .ok_or_else(|| "the provider host is unavailable".to_string())?;
+                if registry
+                    .coordinated
+                    .load(std::sync::atomic::Ordering::Acquire)
+                {
+                    let configured = registry.scoped_instances();
+                    if !configured
+                        .get(&name)
+                        .is_some_and(|(current_scope, config)| {
+                            *current_scope == scope && config.enabled
+                        })
+                    {
+                        return Err("the provider instance is disabled or removed".into());
+                    }
+                }
+                let snapshot = registry
+                    .deps
+                    .catalog
+                    .runtime_snapshot(&registry.deps.project_dir);
+                if !snapshot.extensions().iter().any(|current| {
+                    current.name == ext.name
+                        && current.origin == ext.origin
+                        && current.enabled
+                        && current.version == ext.version
+                        && current.providers.contains(&spec)
+                }) {
+                    return Err("the provider's owning declaration is no longer active".into());
+                }
+            }
+            if program.hash(&copy_root).is_ok_and(|hash| hash == pinned) {
+                Ok(())
+            } else {
+                Err("the approved provider copy changed during execution".into())
+            }
+        }));
         let (dir, declared) = (copy.ext_dir, copy.declared);
         let credentials = self.credentials(refused).await.map_err(plain)?;
         let names: Vec<String> = credentials.keys().cloned().collect();
@@ -781,6 +929,15 @@ impl Instance {
         }
     }
 
+    /// End a candidate that was never admitted. Do not withdraw by name: an
+    /// incumbent with that name may still own the live maps and database rows.
+    async fn discard_unpublished(&self) {
+        self.stopped
+            .store(true, std::sync::atomic::Ordering::Release);
+        let live = self.live.lock().await.take();
+        self.end(live).await;
+    }
+
     /// Watch the process `peer` talks to: one that exits while it is this
     /// instance's process — not ended by the host, which takes it out of
     /// `live` first — is noticed at once rather than at the next call. The
@@ -843,7 +1000,11 @@ impl Instance {
         let this = self.this.clone();
         Arc::new(move |collectors| {
             if let Some(instance) = this.upgrade() {
-                instance.announce(collectors);
+                if instance.admitted.load(std::sync::atomic::Ordering::Acquire)
+                    && !instance.is_stopped()
+                {
+                    instance.announce(collectors);
+                }
             }
         })
     }
@@ -913,14 +1074,41 @@ impl Instance {
         input: Value,
         idempotency_key: Option<String>,
     ) -> Result<InvokeResult, CommandError> {
+        if let Some(activation) = self
+            .registry
+            .upgrade()
+            .and_then(|registry| registry.activation.get().cloned())
+        {
+            let run = activation.pin_run(run).await.map_err(CommandError::from)?;
+            let pin = run
+                .host_generation::<crate::extension_activation::GenerationPin>()
+                .expect("pinned provider context")
+                .clone();
+            return activation
+                .read_pinned(
+                    &pin,
+                    self.invoke_owned(&run, command, input, idempotency_key),
+                )
+                .await
+                .map_err(CommandError::from)?;
+        }
+        self.invoke_owned(run, command, input, idempotency_key)
+            .await
+    }
+
+    async fn invoke_owned(
+        &self,
+        run: &RunContext,
+        command: &str,
+        input: Value,
+        idempotency_key: Option<String>,
+    ) -> Result<InvokeResult, CommandError> {
         let key =
             idempotency_key.unwrap_or_else(|| format!("call:{}", uuid::Uuid::new_v4().simple()));
         // What it calls of oxplow while it serves this (`host/call`, naming
         // the key) is part of `run`.
-        self.host_calls.begin(&key, run.clone());
-        let out = self.invoke_keyed(run, command, input, key.clone()).await;
-        self.host_calls.finish(&key);
-        out
+        let _registration = self.host_calls.register(&key, run.clone())?;
+        self.invoke_keyed(run, command, input, key).await
     }
 
     async fn invoke_keyed(
@@ -1197,15 +1385,44 @@ fn instance_in<'r>(kind: &str, r: &'r str) -> Option<&'r str> {
 /// One capability's side of the host: what turns a started instance into
 /// the capability's implementation (the work list's `ExternalWorkItems`,
 /// an external effort policy) and takes it out again.
+/// Validated capability adapter awaiting registration. Construction cannot
+/// mutate a live registry; publication is a synchronous map change only.
+pub struct PreparedProviderCapability {
+    features: Value,
+    publish: Box<dyn FnOnce() + Send>,
+}
+
+impl PreparedProviderCapability {
+    pub(super) fn new(features: Value, publish: impl FnOnce() + Send + 'static) -> Self {
+        Self {
+            features,
+            publish: Box::new(publish),
+        }
+    }
+
+    pub fn features(&self) -> &Value {
+        &self.features
+    }
+
+    pub(crate) fn publish(self) -> Value {
+        (self.publish)();
+        self.features
+    }
+}
+
 pub trait CapabilityHost: Send + Sync {
     /// The capability it hosts (`work_items`).
     fn capability(&self) -> &'static str;
     /// Whether `id` already names one of this capability's
     /// implementations: an instance can't take it.
     fn has(&self, id: &str) -> bool;
-    /// Register a started instance as an implementation, answering the
-    /// features published for it (what the UI gates on).
-    fn admit(&self, instance: &Arc<Instance>) -> Result<Value, String>;
+    /// Validate and construct an adapter without registering it. Its features
+    /// and synchronous publication action belong to one activation candidate.
+    fn prepare(&self, instance: &Arc<Instance>) -> Result<PreparedProviderCapability, String>;
+
+    fn admit(&self, instance: &Arc<Instance>) -> Result<Value, String> {
+        Ok(self.prepare(instance)?.publish())
+    }
     /// Take a stopped instance's implementation out.
     fn retire(&self, id: &str);
 }
@@ -1217,10 +1434,14 @@ pub struct ProviderRegistry {
     pub(super) bus: Weak<CommandBus>,
     /// Each capability's host, by capability.
     hosts: BTreeMap<&'static str, Arc<dyn CapabilityHost>>,
-    pub(super) running: tokio::sync::Mutex<BTreeMap<String, Arc<Instance>>>,
+    pub(super) running: Arc<tokio::sync::Mutex<BTreeMap<String, Arc<Instance>>>>,
     health: parking_lot::Mutex<BTreeMap<String, InstanceHealth>>,
     /// One reconcile at a time.
-    reconciling: tokio::sync::Mutex<()>,
+    reconciling: Arc<tokio::sync::Mutex<()>>,
+    /// When true, provider maps are owned by coordinated extension activation.
+    coordinated: std::sync::atomic::AtomicBool,
+    activation: std::sync::OnceLock<Arc<crate::extension_activation::ExtensionActivation>>,
+    extension_secrets: std::sync::OnceLock<Arc<crate::extension_secrets::ExtensionSecrets>>,
     /// Set once its first reconcile has run: what waits for the
     /// instances the config names to be up (tsk915).
     reconciled: tokio::sync::watch::Sender<bool>,
@@ -1352,9 +1573,12 @@ impl ProviderRegistry {
             me: me.clone(),
             bus: Arc::downgrade(bus),
             hosts,
-            running: tokio::sync::Mutex::new(BTreeMap::new()),
+            running: Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
             health: parking_lot::Mutex::new(BTreeMap::new()),
-            reconciling: tokio::sync::Mutex::new(()),
+            reconciling: Arc::new(tokio::sync::Mutex::new(())),
+            coordinated: std::sync::atomic::AtomicBool::new(false),
+            activation: std::sync::OnceLock::new(),
+            extension_secrets: std::sync::OnceLock::new(),
             reconciled: tokio::sync::watch::Sender::new(false),
             disables: parking_lot::Mutex::new(BTreeMap::new()),
             global: parking_lot::Mutex::new(global),
@@ -1367,6 +1591,35 @@ impl ProviderRegistry {
 
     pub async fn get(&self, instance: &str) -> Option<Arc<Instance>> {
         self.running.lock().await.get(instance).cloned()
+    }
+
+    pub(crate) fn adopt_extension_secrets(
+        &self,
+        secrets: Arc<crate::extension_secrets::ExtensionSecrets>,
+    ) {
+        self.extension_secrets
+            .set(secrets)
+            .unwrap_or_else(|_| panic!("extension secret service is already installed"));
+    }
+
+    /// Transfer live provider map publication to extension activation.
+    pub(crate) fn adopt_activation(
+        &self,
+        activation: Arc<crate::extension_activation::ExtensionActivation>,
+    ) -> Result<(), DomainError> {
+        let installed = self.activation.get_or_init(|| activation.clone());
+        if !Arc::ptr_eq(installed, &activation) {
+            return Err(DomainError::Invalid(
+                "provider registry already belongs to another activation boundary".into(),
+            ));
+        }
+        self.coordinated
+            .store(true, std::sync::atomic::Ordering::Release);
+        Ok(())
+    }
+
+    fn is_coordinated(&self) -> bool {
+        self.coordinated.load(std::sync::atomic::Ordering::Acquire)
     }
 
     pub fn health(&self, instance: &str) -> Option<InstanceHealth> {
@@ -1392,29 +1645,41 @@ impl ProviderRegistry {
     /// provider's default instance. `Err` says what's missing and how to
     /// fix it.
     pub(crate) fn resolve(&self, instance: &str) -> Result<Resolved, String> {
-        let provider = self
-            .instances_config()
+        let configured = self.scoped_instances();
+        let (scope, provider) = configured
             .get(instance)
-            .and_then(|c| c.provider.clone());
-        self.resolve_as(instance, provider.as_deref())
+            .map(|(scope, config)| (*scope, config.provider.as_deref()))
+            .unwrap_or((Scope::Project, None));
+        Self::resolve_in(&self.extensions(), instance, provider, scope)
+            .map_err(|why| format!("`{instance}`: {why}"))
     }
 
     /// [`Self::resolve`] for an instance of `provider` (none: the one
     /// whose id the instance has), whatever the config says.
     fn resolve_as(&self, instance: &str, provider: Option<&str>) -> Result<Resolved, String> {
-        self.resolve_inner(instance, provider)
+        let configured = self.scoped_instances();
+        let scope = configured
+            .get(instance)
+            .map_or(Scope::Project, |(scope, _)| *scope);
+        Self::resolve_in(&self.extensions(), instance, provider, scope)
             .map_err(|why| format!("`{instance}`: {why}"))
     }
 
-    fn resolve_inner(&self, instance: &str, provider: Option<&str>) -> Result<Resolved, String> {
+    fn resolve_in(
+        extensions: &[Extension],
+        instance: &str,
+        provider: Option<&str>,
+        scope: Scope,
+    ) -> Result<Resolved, String> {
         let (ext_name, id) = instance
             .split_once('/')
             .filter(|(e, i)| !e.is_empty() && !i.is_empty())
             .ok_or_else(|| "an instance is `<extension>/<instance id>`".to_string())?;
-        let extensions = self.extensions();
         let ext = extensions
             .iter()
-            .find(|e| e.enabled && e.name == ext_name)
+            .find(|e| e.name == ext_name && e.origin == "bundled")
+            .or_else(|| extensions.iter().find(|e| e.name == ext_name))
+            .filter(|e| e.enabled)
             .ok_or_else(|| format!("no enabled extension `{ext_name}`"))?;
         let wanted = provider.unwrap_or(id);
         let declared: Vec<&str> = ext.providers.iter().map(|p| p.id.as_str()).collect();
@@ -1443,7 +1708,7 @@ impl ProviderRegistry {
             ext: ext.clone(),
             spec: spec.clone(),
             id: id.to_string(),
-            scope: self.scope_of(instance).0,
+            scope,
         })
     }
 
@@ -1457,8 +1722,27 @@ impl ProviderRegistry {
     pub(super) fn instances_config(
         &self,
     ) -> BTreeMap<String, oxplow_config::ExtensionInstanceConfig> {
-        let mut all = self.global_instances();
-        all.extend(self.project_instances());
+        self.scoped_instances()
+            .into_iter()
+            .map(|(name, (_, config))| (name, config))
+            .collect()
+    }
+
+    /// Capture config and credential scope together. A project override must
+    /// never combine its provider/config with a later global credential scope.
+    fn scoped_instances(
+        &self,
+    ) -> BTreeMap<String, (Scope, oxplow_config::ExtensionInstanceConfig)> {
+        let mut all: BTreeMap<_, _> = self
+            .global_instances()
+            .into_iter()
+            .map(|(name, config)| (name, (Scope::Global, config)))
+            .collect();
+        all.extend(
+            self.project_instances()
+                .into_iter()
+                .map(|(name, config)| (name, (Scope::Project, config))),
+        );
         all
     }
 
@@ -1628,12 +1912,19 @@ impl ProviderRegistry {
                 .credentials
                 .iter()
                 .map(|c| {
-                    let account = crate::collector_runner::instance_credential_account(
-                        credential_scope(&self.deps, scope),
-                        &ext.name,
-                        id,
-                        &c.name,
-                    );
+                    let account = match &c.secret_ref {
+                        Some(reference) => crate::extension_secrets::account(
+                            &self.deps.project,
+                            &ext.name,
+                            reference,
+                        ),
+                        None => crate::collector_runner::instance_credential_account(
+                            credential_scope(&self.deps, scope),
+                            &ext.name,
+                            id,
+                            &c.name,
+                        ),
+                    };
                     let secrets = self.deps.secrets.as_ref();
                     let sign_in = c.oauth.as_ref().map(|_| oauth::state(secrets, &account));
                     InstanceCredential {
@@ -1735,6 +2026,10 @@ impl ProviderRegistry {
 
     /// Make the running instances match the project's config.
     pub async fn reconcile(&self) {
+        if self.is_coordinated() {
+            self.deps.catalog.changed();
+            return;
+        }
         self.reconcile_pass().await;
         self.reconciled.send_replace(true);
     }
@@ -1748,21 +2043,24 @@ impl ProviderRegistry {
     async fn reconcile_pass(&self) {
         let _one = self.reconciling.lock().await;
         let seen = self.global_mtime();
-        let configured = self.instances_config();
+        let configured = self.scoped_instances();
+        let extensions = self.extensions();
         self.global.lock().reconciled_at = seen;
         let running: Vec<String> = self.running.lock().await.keys().cloned().collect();
         for name in running {
-            if !configured.get(&name).is_some_and(|c| c.enabled) {
+            if !configured.get(&name).is_some_and(|(_, c)| c.enabled) {
                 self.stop(&name).await;
             }
         }
-        for (name, cfg) in configured {
+        for (name, (scope, cfg)) in configured {
             let Resolved {
                 ext,
                 spec,
                 id,
                 scope,
-            } = match self.resolve(&name) {
+            } = match Self::resolve_in(&extensions, &name, cfg.provider.as_deref(), scope)
+                .map_err(|why| format!("`{name}`: {why}"))
+            {
                 Ok(resolved) => resolved,
                 Err(reason) => {
                     self.stop(&name).await;
@@ -1858,8 +2156,73 @@ impl ProviderRegistry {
         scope: Scope,
         config: Value,
     ) -> Result<Arc<Instance>, HostError> {
+        let snapshot = self.deps.catalog.snapshot(&self.deps.project_dir);
+        self.instance_in_snapshot(&snapshot, ext, spec, id, scope, config)
+            .await
+    }
+
+    /// Construct an instance using the exact catalog snapshot that selected
+    /// its declaration. Candidate generation staging must not silently capture
+    /// ownership from a newer raw catalog load.
+    pub(super) async fn instance_in_snapshot(
+        &self,
+        snapshot: &crate::extension_catalog::CatalogSnapshot,
+        ext: &Extension,
+        spec: &ProviderSpec,
+        id: &str,
+        scope: Scope,
+        config: Value,
+    ) -> Result<Arc<Instance>, HostError> {
         let name = spec::instance_name(&ext.name, id);
         let declared = copy_approved(&self.deps, ext, spec).await?.declared;
+        let unchanged = self
+            .deps
+            .catalog
+            .snapshot(&self.deps.project_dir)
+            .source_generation()
+            == snapshot.source_generation();
+        // Checks of unpublished candidates may start a process, but cannot
+        // acquire private state under an active installation's identity.
+        let state = snapshot
+            .extensions()
+            .iter()
+            .find(|current| current.name == ext.name && current.origin == "bundled")
+            .or_else(|| {
+                snapshot
+                    .extensions()
+                    .iter()
+                    .find(|current| current.name == ext.name)
+            })
+            .filter(|current| {
+                unchanged && *current == ext && current.enabled && current.providers.contains(spec)
+            })
+            .map(|_| {
+                (
+                    crate::extension_state::StateSource::new(
+                        crate::extension_state::StateHost::new(
+                            self.deps.catalog.clone(),
+                            self.deps.project_dir.clone(),
+                        ),
+                        self.deps.db.clone(),
+                    ),
+                    crate::extension_configuration::ConfigurationSource::new(
+                        crate::extension_configuration::ConfigurationHost::new(
+                            self.deps.catalog.clone(),
+                            self.deps.project_dir.clone(),
+                        ),
+                        self.deps.db.clone(),
+                    ),
+                    oxplow_domain::run::ContributionRef {
+                        id: oxplow_domain::contribution::ContributionId::new(
+                            &ext.name,
+                            oxplow_domain::contribution::ContributionKind::Provider,
+                            &spec.id,
+                        ),
+                        version: ext.version.clone(),
+                        generation: Some(snapshot.generation().to_string()),
+                    },
+                )
+            });
         Ok(Arc::new_cyclic(|this| Instance {
             name,
             id: id.to_string(),
@@ -1871,13 +2234,18 @@ impl ProviderRegistry {
             deps: self.deps.clone(),
             registry: self.me.clone(),
             live: tokio::sync::Mutex::new(None),
-            stopped: std::sync::atomic::AtomicBool::new(false),
+            stopped: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            admitted: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             starting: tokio::sync::Mutex::new(()),
             renewed_at: parking_lot::Mutex::new(BTreeMap::new()),
             failed_keys: parking_lot::Mutex::new(std::collections::VecDeque::new()),
             not_before: parking_lot::Mutex::new(None),
             reading: parking_lot::Mutex::new(std::collections::HashMap::new()),
-            host_calls: host::HostCalls::new(spec.needs.clone(), self.deps.db.clone()),
+            host_calls: host::HostCalls::new(
+                spec.needs.clone(),
+                self.deps.db.clone(),
+                state.clone(),
+            ),
             this: this.clone(),
             announced: parking_lot::Mutex::new(None),
         }))
@@ -1920,6 +2288,12 @@ impl ProviderRegistry {
         config: Value,
     ) -> Result<(), HostError> {
         let name = spec::instance_name(&ext.name, id);
+        if self.is_coordinated() {
+            return Err(HostError::Failed {
+                name,
+                message: "provider changes must use the extension configuration coordinator".into(),
+            });
+        }
         let refuse = |message: String| HostError::Failed {
             name: name.clone(),
             message,
@@ -1969,12 +2343,20 @@ impl ProviderRegistry {
                 )));
             }
         }
+        let capability = self
+            .host_of(&instance)
+            .and_then(|host| host.prepare(&instance))
+            .map_err(&refused)?;
         self.set_state(&name, InstanceState::Checking);
         match instance.start().await {
             Ok(live) => {
-                instance.supervise(live.conn.peer.clone());
+                let peer = live.conn.peer.clone();
                 *instance.live.lock().await = Some(live);
-                self.admit(instance, epoch).await.map_err(&refuse)?;
+                if let Err(error) = self.admit(instance.clone(), epoch, capability).await {
+                    instance.discard_unpublished().await;
+                    return Err(refuse(error));
+                }
+                instance.supervise(peer);
                 {
                     let mut health = self.health.lock();
                     let h = health
@@ -2005,7 +2387,10 @@ impl ProviderRegistry {
             // It may come up: enabled and failing, its next call restarts
             // it with backoff.
             Err(e @ HostError::Failed { .. }) => {
-                self.admit(instance.clone(), epoch).await.map_err(&refuse)?;
+                if let Err(error) = self.admit(instance.clone(), epoch, capability).await {
+                    instance.discard_unpublished().await;
+                    return Err(refuse(error));
+                }
                 self.failed(&name, Some(&instance), e.to_string()).await;
                 Ok(())
             }
@@ -2024,13 +2409,29 @@ impl ProviderRegistry {
     /// Register a started `instance` and count it running — unless it
     /// was disabled since its start began (`epoch`): the disable wins.
     /// Under the `running` lock, which a disable takes too.
-    async fn admit(&self, instance: Arc<Instance>, epoch: u64) -> Result<(), String> {
+    async fn admit(
+        &self,
+        instance: Arc<Instance>,
+        epoch: u64,
+        capability: PreparedProviderCapability,
+    ) -> Result<(), String> {
         let mut running = self.running.lock().await;
         if self.disable_epoch(&instance.name) != epoch {
             return Err(format!("`{}` was disabled while it started", instance.name));
         }
-        let features = self.host_of(&instance)?.admit(&instance)?;
+        if running.contains_key(&instance.name)
+            || self.hosts.values().any(|host| host.has(&instance.id))
+        {
+            return Err(format!(
+                "`{}` acquired another provider while it started",
+                instance.name
+            ));
+        }
+        let features = capability.publish();
         self.publish(&instance, features).await;
+        instance
+            .admitted
+            .store(true, std::sync::atomic::Ordering::Release);
         running.insert(instance.name.clone(), instance);
         Ok(())
     }
@@ -2170,7 +2571,21 @@ impl ProviderRegistry {
     /// Stop `instance`: its commands and capability provider go, and its
     /// process dies. `false` when it wasn't running.
     pub async fn stop(&self, instance: &str) -> bool {
-        let Some(running) = self.running.lock().await.remove(instance) else {
+        let running = {
+            let mut instances = self.running.lock().await;
+            if self.is_coordinated() {
+                let Some(current) = instances.get(instance) else {
+                    return false;
+                };
+                if current.is_stopped() {
+                    return false;
+                }
+                self.halt_locked(&mut instances, instance)
+            } else {
+                instances.remove(instance)
+            }
+        };
+        let Some(running) = running else {
             return false;
         };
         self.tear_down(running).await;
@@ -2180,15 +2595,30 @@ impl ProviderRegistry {
     /// Stop every running instance at once, each process shut down the
     /// orderly way: what the daemon does before it exits.
     pub async fn shutdown_all(&self) {
-        let all: Vec<Arc<Instance>> = std::mem::take(&mut *self.running.lock().await)
-            .into_values()
-            .collect();
+        let coordinated = self.is_coordinated();
+        let all: Vec<Arc<Instance>> = {
+            let mut running = self.running.lock().await;
+            if coordinated {
+                let names: Vec<_> = running.keys().cloned().collect();
+                names
+                    .iter()
+                    .filter_map(|name| self.halt_locked(&mut running, name))
+                    .collect()
+            } else {
+                std::mem::take(&mut *running).into_values().collect()
+            }
+        };
         let mut stopping = tokio::task::JoinSet::new();
         for running in all {
             let me = self.me.clone();
             stopping.spawn(async move {
                 if let Some(registry) = me.upgrade() {
-                    registry.tear_down(running).await;
+                    if coordinated {
+                        let ended = running.live.lock().await.take();
+                        running.end(ended).await;
+                    } else {
+                        registry.tear_down(running).await;
+                    }
                 }
             });
         }
@@ -2197,6 +2627,18 @@ impl ProviderRegistry {
 
     /// Unregister a stopped instance and end its process.
     async fn tear_down(&self, running: Arc<Instance>) {
+        if self.is_coordinated() {
+            running
+                .stopped
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            running
+                .admitted
+                .store(false, std::sync::atomic::Ordering::Release);
+            self.deps.catalog.changed();
+            let ended = running.live.lock().await.take();
+            running.end(ended).await;
+            return;
+        }
         if let Ok(host) = self.host_of(&running) {
             host.retire(&running.id);
         }
@@ -2288,7 +2730,7 @@ impl ProviderRegistry {
                 Err(e) => {
                     return Err(CommandError::Failed {
                         message: e.to_string(),
-                    })
+                    });
                 }
             }
         }
@@ -2639,6 +3081,11 @@ impl ProviderRegistry {
         value: Option<&str>,
     ) -> Result<(), DomainError> {
         let (account, decl, _) = self.credential(instance, name)?;
+        if decl.secret_ref.is_some() {
+            return Err(DomainError::Invalid(
+                "manage this credential through its host secret reference".into(),
+            ));
+        }
         if decl.oauth.is_some() && value.is_some() {
             return Err(DomainError::Invalid(format!(
                 "`{name}` is a credential you sign in for (Settings → Integrations → Sign \
@@ -2672,6 +3119,34 @@ impl ProviderRegistry {
             }
         }
         self.stop(instance).await;
+        self.reconcile().await;
+    }
+
+    /// Human secret rotation/revocation stops every admitted consumer of the
+    /// reference before reconciling. Instances never retain old authority.
+    pub async fn extension_secret_changed(
+        &self,
+        extension: &str,
+        reference: &oxplow_domain::extension_secret::SecretRef,
+    ) {
+        let names: Vec<_> = self
+            .running
+            .lock()
+            .await
+            .iter()
+            .filter(|(_, instance)| {
+                instance.ext.name == extension
+                    && instance
+                        .spec
+                        .credentials
+                        .iter()
+                        .any(|credential| credential.secret_ref.as_ref() == Some(reference))
+            })
+            .map(|(name, _)| name.clone())
+            .collect();
+        for name in names {
+            self.stop(&name).await;
+        }
         self.reconcile().await;
     }
 
@@ -2718,7 +3193,7 @@ impl ProviderRegistry {
                     None => {
                         return Err(DomainError::Invalid(format!(
                             "set `{secret}` first: `{name}`'s sign-in needs it"
-                        )))
+                        )));
                     }
                 }
             }
@@ -3097,7 +3572,11 @@ impl ProviderRegistry {
         if !is_running(&running, made_by) {
             return None;
         }
-        running.remove(&made_by.name)
+        if self.is_coordinated() {
+            self.halt_locked(&mut running, &made_by.name)
+        } else {
+            running.remove(&made_by.name)
+        }
     }
 
     /// A start or call failed: count it ([`crate::contribution_health`]); the
@@ -3190,7 +3669,18 @@ impl ProviderRegistry {
             .lock()
             .entry(instance.to_string())
             .or_default() += 1;
-        running.remove(instance)
+        if self.is_coordinated() {
+            let current = running.get(instance)?.clone();
+            current
+                .stopped
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            current
+                .admitted
+                .store(false, std::sync::atomic::Ordering::Release);
+            Some(current)
+        } else {
+            running.remove(instance)
+        }
     }
 
     /// End what [`Self::halt_locked`] took, and show why.

@@ -111,7 +111,7 @@ saying so (`oxplow_ai::config::DROPPED_ROLES`; project.yaml's
 ## Client
 
 - **The interface** is `oxplow_ai::client::ModelProvider` (`kind`, `title`,
-  `default_base_url`, `complete`, `decide`, `test`), called with a
+  `default_base_url`, `discover`, `complete`, `complete_typed`, `decide`, `test`), called with a
   `ProviderInstance { id, base_url, key }` and a `CompleteRequest` /
   `DecideRequest`. `decide` defaults to a JSON prompt on `complete`
   (`decide_via_chat`); `test` to a one-word completion. `ModelProviders` is
@@ -121,6 +121,65 @@ saying so (`oxplow_ai::config::DROPPED_ROLES`; project.yaml's
   stay in `oxplow-ai`: the `Http` POST helper (`post_with` for headers
   named at run time) and its error mapping, `parse_answers`,
   `decide_via_chat`.
+- **Typed model contract (V1).** `capabilities::CapabilitySnapshotV1`
+  reports per-model text, image, tool-calling and streaming support as
+  `unknown`, `supported` or `unsupported`. Missing limits and token counts
+  are unknown (`None`); a present zero is known zero. `discover` is metadata
+  only and its default for existing providers reports unknown without
+  making a completion or sending credentials. Capability names are not
+  guessed from model names. Typed requests and responses use ordered
+  `parts::MessageV1` / `PartV1` values and carry `schemaVersion: 1`.
+  Image parts contain an opaque host-owned asset reference and media type,
+  never a path, URL or inline bytes; resolving the asset belongs to the host
+  transport. Tool definitions are separate from tool-call/result parts.
+  The additive `complete_typed` default adapts only system messages followed
+  by one user text message to `complete`, preserving their text. V1
+  envelopes reject other schema versions during deserialization, and the
+  adapter checks Rust-built requests before calling a provider. It rejects
+  image and tool content, tool declarations and conversation shapes it
+  cannot preserve before calling the provider. `UnsupportedFeature` carries
+  whether support is unknown (images/tools on a legacy provider) or
+  unsupported by the text adapter (conversation shapes it cannot preserve).
+  Providers with native transport may override it. Because legacy replies
+  carry neither a finish reason nor usage provenance, the adapter returns
+  unknown for both; positive legacy token counts are preserved, with
+  non-positive sentinel counts left unknown. Native typed providers may
+  report observed or estimated usage. New typed usage has
+  optional input/output counts and an explicit `unknown`, `observed` or
+  `estimated` source; legacy `Completion` and `Decision` token fields remain
+  unchanged.
+- **Discovery from extension hosts.** Collectors declare `ai.discover` and
+  call `ai_capabilities(role = "main")` for the selected model or
+  `ai_models(role = "main")` for its provider's declared catalog. This service
+  needs no paid-call approval and is usable in pure previews. Both resolve
+  the role through `AiService` without reading the keychain; providers receive
+  an instance with no key. They record no `ai_call` or AI usage. The host
+  checks versions and model identities and rechecks run authority while
+  waiting and before returning. Other hosts must supply an AI source through
+  the shared router or report that discovery is unavailable.
+  `ModelCatalogV1` distinguishes unknown from a known empty catalog and
+  rejects unresolved or duplicate model identities. Existing providers
+  return an unknown catalog. Scripted providers may declare `config.models`
+  as V1 capability snapshots; discovery reads that data without executing
+  `request`/`response`, checking credentials or contacting an endpoint.
+  Missing models/features/limits remain unknown. Capability metadata is
+  refreshed when the provider registry is refreshed, like its script.
+- **Typed collector completion.** `ai_complete(request, role = "main")`
+  is an `ai.compute` builtin and requires the same approval and live run
+  checks as the text helpers. Its request is `{schemaVersion: 1, messages,
+  tools?}`; the host binds the model from the role and refuses a supplied
+  `model`. Unknown fields or versions fail instead of dropping semantics.
+  `AiCompute::complete_typed` records and caches the full request and response
+  under the role's provider/model binding. `AiService::complete_typed_as`
+  refuses a request for a different model and known unsupported features
+  before fetching a key. Optional usage counts and their provenance remain
+  in `ai_call.response` and `ai_result.output`; legacy numeric aggregates
+  include only observed usage on this path, using their historical zero
+  sentinel for missing/non-observed values. Estimates never become observed
+  usage, and known zero remains distinct from missing in the typed payload.
+  Tool calls/results are ordered data and do not execute a tool automatically.
+  Image input/output is currently refused at the app boundary because there
+  is no authorized asset resolver; no reference is treated as a path or URL.
 - **Scripted providers.** Every model provider is a Starlark script an
   extension declares — oxplow's own too: `oxplow-foundation`'s
   `implementations:` name `providers/{anthropic,openai_compatible,openrouter,typesafe}.star`
@@ -130,7 +189,7 @@ saying so (`oxplow_ai::config::DROPPED_ROLES`; project.yaml's
   `entry` isn't `oxplow:<name>` is a script — for `ai_provider` only —
   read and checked at load (`implementations::script_decl`: the file
   exists, defines `request` and `response`, and `config` is `{ baseUrl?,
-  ops? }`), carried as `Source::Script { entry, tree, script }`.
+  ops?, models? }`), carried as `Source::Script { entry, tree, script }`.
   - **The contract.** `request(x)` — `{ op: complete, model, system,
     prompt, json }` or `{ op: decide, model, state, questions }` (oxplow's
     question shapes) — returns `{ path, headers?, body }`, or `None` for a
@@ -139,6 +198,24 @@ saying so (`oxplow_ai::config::DROPPED_ROLES`; project.yaml's
     (oxplow's answer shapes, a noul as `probability`; parsed by
     `parse_answers`) or `{ error }`. `usage` is `{ input, output }`. Both
     are pure and sandboxed (`run_starlark_fn`, 5 s each).
+    With `ops: [completeTyped]` (or alongside the legacy ops), `request`
+    receives `{op: completeTyped, model, request}` with the complete V1
+    envelope; `response` receives `{op: completeTyped, model, body}` and
+    returns a full V1 typed response, including usage provenance and finish
+    reason. The same credential substitution, consent and transport rules
+    apply. Without that opt-in, typed completion uses the conservative legacy
+    text adapter. The shipped Anthropic and OpenAI-compatible mappings opt into
+    `completeTyped` alongside legacy completion. They preserve conversation
+    history, tool definitions and tool calls/results, optional observed usage
+    (zero is retained) and finish categories. Image assets still require a host
+    resolver and are refused. Anthropic requires initial text-only system
+    messages, object tool inputs and results before user text. OpenAI chat
+    requires result-only tool messages and refuses text after a tool call in an
+    assistant message, since that transport separates content from calls.
+    Unsupported response blocks fail instead of disappearing. Neither mapping
+    executes a returned tool. OpenRouter/TypeSafe keep their legacy mappings.
+    Transport contracts: [OpenAI chat](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)
+    and [Anthropic tool calls](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls).
   - **The host does the call.** `path` is relative to the instance's base
     URL (its `baseUrl`, else the declaration's), so a call never leaves
     that host — no `network:` grant is needed. `{{key}}` in a header or the
@@ -148,7 +225,8 @@ saying so (`oxplow_ai::config::DROPPED_ROLES`; project.yaml's
     host maps 401/403 → `Auth`, 429 → `RateLimited`, other non-2xx →
     `Http`.
   - **`ops`** lists what it answers natively: `complete` (the default)
-    and `decide`. Without `decide`, a typed question is asked as a chat
+    and `decide`, plus optional `completeTyped`. Without `decide`, a typed
+    question is asked as a chat
     (`decide_via_chat`); one with only `decide` (TypeSafe) can't complete,
     and its connection `test` asks a yes/no question. A script that
     decides natively but not for every model (OpenRouter: only `jev`
@@ -371,3 +449,42 @@ one signal), `test_ai_provider`.
 - Roles: pick a provider and model per role; "Not assigned" clears it.
 - Recent Calls: the last 7 days of `v_ai_call` by role and caller, read
   with `query_sql`, the same path lenses use.
+
+## Host transport and live consent
+
+The shared `Http` client refuses redirects; a provider request cannot carry
+credentials or content to a redirected destination. Transport errors strip
+URL details, including query values used by key placeholders. Scripted AI
+mappings see placeholders, never the provider key: the host substitutes only
+in transport paths/headers. Routing/proxy header overrides are refused, and
+exact credential echoes in JSON responses/error bodies are redacted before
+mapping scripts see them. A last approval check runs after request mapping
+and immediately before HTTP. Script approval is pinned to the loaded version;
+a changed/reapproved script does not lend its approval to the old mapping.
+Collector AI calls recheck their parent run before each request, poll live
+authority while waiting and discard responses after cancellation/revocation.
+Dropping a request future cannot retract a request already sent.
+
+### AI runtime reader ownership
+
+Boot adopts the shared extension activation boundary into AiService. Completion,
+decision, connection checks and discovery pin before provider lookup; recorded
+computations retain that scope through cache lookup, invocation and result
+attribution. Nested calls reuse the reader. Settings ingress uses the async
+pinned listing; the synchronous helper remains for standalone callers.
+
+Each computation captures one key-free effective AI configuration, shared by
+nested calls on that service. A role change while awaiting a provider therefore
+cannot label the returned result with a different model's cache identity.
+Credentials and consent are still fetched/checked by their host and are never
+part of the captured configuration. Script worker oracles re-enter with their
+RunContext pin before discovery/computation; this avoids a second fair-lock
+reader deadlocking behind a waiting generation writer. Typed role binding is
+resolved inside that same scope.
+
+Typed AI jobs accept a strict role-based envelope (one MiB, depth 64), checked
+before recursive JSON serialization or typed deserialization. The host binds
+the model when dispatching, and records the full typed result under the same
+captured configuration as the cache key. Anthropic observed input counts include
+uncached input plus reported cache reads/creation; missing input remains unknown.
+See [Anthropic token accounting](https://platform.claude.com/docs/en/build-with-claude/prompt-caching).

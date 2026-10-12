@@ -146,7 +146,7 @@ fn choose_agent(
             return Err(invalid(
                 "/kind",
                 "an action session has no implementation yet",
-            ))
+            ));
         }
         k if k != natural => {
             return Err(invalid(
@@ -160,7 +160,7 @@ fn choose_agent(
                         "a terminal harness, not ACP"
                     }
                 ),
-            ))
+            ));
         }
         _ => {}
     }

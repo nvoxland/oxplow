@@ -18,6 +18,9 @@
 //! loop (`models_changed.rs`, the one maker of `MetricSamplesChanged`), not
 //! here.
 
+mod generation;
+pub(crate) use generation::PreparedMetricCatalog;
+
 use oxplow_domain::run::{Mode, RunContext};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -87,6 +90,7 @@ pub struct FactCollector {
     /// catalog alone governs those).
     pub facts: Vec<String>,
     pub runtime: CollectorRuntime,
+    pub execution: oxplow_domain::grant::ExecutionTier,
     /// Its script or program, relative to its owner's folder; `None` for a
     /// built-in (the script is embedded).
     pub entry: Option<String>,
@@ -114,12 +118,13 @@ impl FactCollector {
             trigger: spec.trigger.clone(),
             facts: spec.facts.clone(),
             runtime: spec.runtime,
+            execution: spec.execution,
             entry: spec.entry.clone(),
             report: spec.report.clone(),
             input: spec.input.clone(),
             after: spec.after.clone(),
             whole_tree: false,
-            needs: spec.service_needs(),
+            needs: crate::services::collector_needs(spec, None),
         })
     }
 
@@ -143,6 +148,7 @@ impl FactCollector {
             },
             facts: Vec::new(),
             runtime: CollectorRuntime::Starlark,
+            execution: Default::default(),
             entry: None,
             report: None,
             input: None,
@@ -219,11 +225,16 @@ pub enum FactRun {
 /// (`resolved_specs`, run on every snapshot event) don't
 /// re-read + re-parse these files each time (tsk17). Project config stays read
 /// fresh from the in-memory `RwLock` — only the *disk* loads are cached.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct GlobalCatalog {
     metrics: Vec<MetricEntry>,
     measures: Vec<MeasureEntry>,
     dimensions: Vec<DimensionEntry>,
+}
+
+struct PublishedMetricInputs {
+    config: OxplowConfig,
+    global: GlobalCatalog,
 }
 
 #[derive(Clone)]
@@ -258,6 +269,7 @@ pub struct MetricsService {
     /// before, minus the per-event disk read). `Arc` so clones of the service
     /// share one cache (and its invalidations).
     global_catalog: Arc<std::sync::Mutex<Option<GlobalCatalog>>>,
+    published_inputs: Arc<parking_lot::Mutex<Option<Arc<PublishedMetricInputs>>>>,
     /// The loaded-extensions cache shared with `Services`; a fresh one
     /// for a bare `MetricsService` in tests.
     extensions_cache: Arc<crate::extension_catalog::ExtensionCatalog>,
@@ -427,6 +439,7 @@ impl MetricsService {
             fact_store: None,
             background_tasks: None,
             global_catalog: Arc::new(std::sync::Mutex::new(None)),
+            published_inputs: Arc::default(),
             snapshot_captures: None,
             extensions_cache,
             entity_captures: Arc::new(std::sync::Mutex::new(HashMap::new())),
@@ -508,6 +521,10 @@ impl MetricsService {
     /// first use (tsk17). The hot read paths call this instead of re-reading the
     /// four global YAML dirs every time.
     fn with_global_catalog<R>(&self, f: impl FnOnce(&GlobalCatalog) -> R) -> R {
+        let published = self.published_inputs.lock().clone();
+        if let Some(published) = published {
+            return f(&published.global);
+        }
         let mut guard = self
             .global_catalog
             .lock()
@@ -533,6 +550,14 @@ impl MetricsService {
             .global_catalog
             .lock()
             .unwrap_or_else(|p| p.into_inner()) = None;
+    }
+
+    fn read_metric_config(&self) -> OxplowConfig {
+        self.published_inputs
+            .lock()
+            .clone()
+            .map(|inputs| inputs.config.clone())
+            .unwrap_or_else(|| crate::config_service::read_config(&self.config))
     }
 
     /// What enabled extensions contribute to the metric catalog, per
@@ -572,11 +597,7 @@ impl MetricsService {
 
     /// The four scopes metric resolution reads (see [`MetricLayers`]).
     fn metric_layers(&self) -> MetricLayers {
-        let mut project = self
-            .config
-            .read()
-            .map(|c| c.metrics.clone())
-            .unwrap_or_default();
+        let mut project = self.read_metric_config().metrics;
         // The default-on built-ins (tsk1034) are used unless the project
         // mentions them (its own `use:` or an `enabled: false` marker).
         let mentioned: std::collections::HashSet<String> = project
@@ -648,15 +669,11 @@ impl MetricsService {
             .map(FactCollector::builtin)
             .collect();
         let project: Vec<FactCollector> = self
-            .config
-            .read()
-            .map(|c| {
-                c.collectors
-                    .iter()
-                    .filter_map(|s| FactCollector::from_spec(oxplow_config::collectors::PROJECT, s))
-                    .collect()
-            })
-            .unwrap_or_default();
+            .read_metric_config()
+            .collectors
+            .iter()
+            .filter_map(|spec| FactCollector::from_spec(oxplow_config::collectors::PROJECT, spec))
+            .collect();
         let mut out: Vec<FactCollector> = Vec::new();
         for c in builtin
             .into_iter()
@@ -692,6 +709,14 @@ impl MetricsService {
     /// The dimension `promote` flag (a generated column + index) is honored by a
     /// later `promote_dimension` step; this seeds the catalog row only.
     pub async fn seed_catalog(&self) -> (usize, usize) {
+        if self
+            .run_log
+            .as_ref()
+            .is_some_and(|log| log.layer.has_activation())
+        {
+            // Production declarations publish through the generation owner.
+            return (0, 0);
+        }
         let Some(facts) = self.fact_store.as_ref() else {
             return (0, 0);
         };
@@ -977,17 +1002,32 @@ impl MetricsService {
     /// 4. every other seeded spec — installed extension metrics not covered
     ///    above. Also `toggleable: false`.
     pub async fn catalog(&self) -> Vec<MetricCatalogEntry> {
+        match &self.run_log {
+            Some(log) => log
+                .layer
+                .read_generation(self.catalog_unpinned())
+                .await
+                .unwrap_or_default(),
+            None => self.catalog_unpinned().await,
+        }
+    }
+
+    async fn catalog_unpinned(&self) -> Vec<MetricCatalogEntry> {
+        let specs = match &self.fact_store {
+            Some(facts) => facts.list_specs().await.unwrap_or_default(),
+            None => vec![],
+        };
+        self.catalog_with_specs(specs)
+    }
+
+    fn catalog_with_specs(&self, specs: Vec<oxplow_db::MetricSpec>) -> Vec<MetricCatalogEntry> {
         let resolved = self.resolved_specs();
         let by_key: std::collections::HashMap<&str, &_> =
             resolved.iter().map(|m| (m.key.as_str(), m)).collect();
         // Per-key config enabled state (tsk31): `None` = no entry, `Some(_)` = an
         // explicit flag. Producers/extensions are default-ON (a disable marker turns
         // them off); built-in gauges are default-OFF (a `use:` turns them on).
-        let cfg_metrics = self
-            .config
-            .read()
-            .map(|c| c.metrics.clone())
-            .unwrap_or_default();
+        let cfg_metrics = self.read_metric_config().metrics;
         let config_state = |key: &str| -> Option<bool> {
             cfg_metrics
                 .iter()
@@ -1082,26 +1122,22 @@ impl MetricsService {
         // in the spec catalog not covered above. Best-effort: a store read
         // error just yields the set
         // assembled so far.
-        if let Some(facts) = self.fact_store.as_ref() {
-            if let Ok(specs) = facts.list_specs().await {
-                for s in specs {
-                    if seen.insert(s.key.clone()) {
-                        out.push(MetricCatalogEntry {
-                            key: s.key.clone(),
-                            title: s.title.clone(),
-                            kind: s.display_kind.clone(),
-                            language: s.language.clone(),
-                            scope: s.scope.clone(),
-                            enabled: config_state(&s.key) != Some(false),
-                            target: s.target,
-                            // No config trigger for a producer-seeded metric; it
-                            // runs on its producer's own cadence.
-                            trigger: "auto".to_string(),
-                            toggleable: true,
-                            category: s.category.clone(),
-                        });
-                    }
-                }
+        for s in specs {
+            if seen.insert(s.key.clone()) {
+                out.push(MetricCatalogEntry {
+                    key: s.key.clone(),
+                    title: s.title.clone(),
+                    kind: s.display_kind.clone(),
+                    language: s.language.clone(),
+                    scope: s.scope.clone(),
+                    enabled: config_state(&s.key) != Some(false),
+                    target: s.target,
+                    // No config trigger for a producer-seeded metric; it
+                    // runs on its producer's own cadence.
+                    trigger: "auto".to_string(),
+                    toggleable: true,
+                    category: s.category.clone(),
+                });
             }
         }
         out.sort_by(|a, b| a.key.cmp(&b.key));
@@ -1501,6 +1537,14 @@ impl MetricsService {
     /// every state entity metric. What a config change (`config.metrics`)
     /// and an extension change (the catalog's signal) run.
     pub async fn reseed(&self) {
+        if let Some(log) = self
+            .run_log
+            .as_ref()
+            .filter(|log| log.layer.has_activation())
+        {
+            log.layer.request_activation();
+            return;
+        }
         self.invalidate_global_catalog();
         self.seed_catalog().await;
         self.capture_entity_states(true).await;
@@ -1977,6 +2021,24 @@ impl MetricsService {
         stream: Option<StreamId>,
         run: &RunContext,
     ) -> Result<usize, String> {
+        let operation = self.run_collector_by_key_unpinned(owner, key, stream, run);
+        match &self.run_log {
+            Some(log) => log
+                .layer
+                .read_in(run, operation)
+                .await
+                .map_err(|error| error.to_string())?,
+            None => operation.await,
+        }
+    }
+
+    async fn run_collector_by_key_unpinned(
+        &self,
+        owner: &str,
+        key: &str,
+        stream: Option<StreamId>,
+        run: &RunContext,
+    ) -> Result<usize, String> {
         let metric = self
             .fact_collectors()
             .into_iter()
@@ -2199,31 +2261,46 @@ impl MetricsService {
             }
             CollectorRuntime::Jaq => FactRunner::Jaq(script()?),
             CollectorRuntime::Exec => {
+                c.execution.require_external()?;
+                if c.owner != oxplow_config::collectors::PROJECT {
+                    return Err("external extension fact collectors have no credential/environment host; use a contained script or a project collector".into());
+                }
                 // A project collector's program comes from the repo: it runs
                 // only once a person approved it on this machine (tsk331).
-                use crate::exec_consent::{may_run, needs_approval, ProgramKind};
+                use crate::exec_consent::{needs_approval, project_collector_program, ProgramKind};
                 let entry = c.entry.as_deref().unwrap_or_default();
-                if !may_run(
-                    &self.approvals,
-                    &self.project_dir,
+                let program = project_collector_program(
                     ProgramKind::Collector,
                     &c.key,
                     entry,
                     &[],
-                ) {
+                    c.execution,
+                );
+                let gate = crate::exec_consent::script_gate(
+                    self.approvals.clone(),
+                    self.project_dir.clone(),
+                    program.clone(),
+                );
+                if gate().is_err() {
                     return Err(needs_approval(ProgramKind::Collector, &c.key, entry));
                 }
-                FactRunner::Exec(vec![self
-                    .project_dir
-                    .join(entry)
-                    .to_string_lossy()
-                    .into_owned()])
+                let code = crate::approved_code::project_collector(
+                    self.approvals.clone(),
+                    self.project_dir.clone(),
+                    program,
+                )?;
+                FactRunner::Exec(
+                    vec![code.entry.to_string_lossy().into_owned()],
+                    c.execution,
+                    code.gate,
+                    code.location,
+                )
             }
             CollectorRuntime::Read => {
                 return Err(format!(
                     "collector `{}` reads a provider; it records no facts",
                     c.key
-                ))
+                ));
             }
         })
     }
@@ -2248,11 +2325,20 @@ impl MetricsService {
             ));
         }
         let runner = self.fact_runner(&collector)?;
-        let run = RunContext::core(Actor::System, Mode::Pure);
+        let parent = RunContext::core(Actor::System, Mode::Pure);
+        let run = self.collector_run_in(&collector, &parent, Mode::Pure);
+        let run = self.pin_fact_script(&collector, &runner, run);
         let given = self
             .given(&collector, &runner, &run, Arc::new(files))
             .await?;
         let layer = self.run_log.as_ref().map(|l| l.layer.clone());
+        let run = match &layer {
+            Some(layer) => layer
+                .pin_run(&run)
+                .await
+                .map_err(|error| error.to_string())?,
+            None => run,
+        };
         let facts = tokio::task::spawn_blocking(move || runner.run(&input, given, layer, &run))
             .await
             .map_err(|e| format!("task failed: {e}"))??;
@@ -2273,16 +2359,21 @@ impl MetricsService {
     /// approval covers its extension's files), the project's under
     /// Programs.
     fn approved_to_ask(&self, c: &FactCollector) -> bool {
-        use crate::exec_consent::{may_run, ProgramKind};
+        use crate::exec_consent::ProgramKind;
         if c.owner == oxplow_config::collectors::PROJECT {
-            return may_run(
-                &self.approvals,
-                &self.project_dir,
+            let program = crate::exec_consent::project_collector_program(
                 ProgramKind::Collector,
                 &c.key,
                 c.entry.as_deref().unwrap_or_default(),
                 &[],
+                c.execution,
             );
+            return crate::exec_consent::script_gate(
+                self.approvals.clone(),
+                self.project_dir.clone(),
+                program,
+            )()
+            .is_ok();
         }
         let root = &self.project_dir;
         self.extensions_cache
@@ -2303,10 +2394,57 @@ impl MetricsService {
     /// are core's own work), and deciding what it does against what it
     /// declares — or, once a person approved it, their grant.
     fn collector_run(&self, gauge: &FactCollector, parent: &RunContext) -> RunContext {
+        self.collector_run_in(gauge, parent, Mode::External)
+    }
+
+    fn collector_run_in(
+        &self,
+        gauge: &FactCollector,
+        parent: &RunContext,
+        mode: Mode,
+    ) -> RunContext {
         let root = &self.project_dir;
         let extensions = self.extensions_cache.get(root);
         let Some(ext) = extensions.iter().find(|e| e.name == gauge.owner) else {
-            return parent.child(None, Mode::External);
+            let mut run = parent.child(None, mode);
+            if gauge.owner == oxplow_config::collectors::PROJECT {
+                let program = crate::exec_consent::project_collector_program(
+                    crate::exec_consent::ProgramKind::Collector,
+                    &gauge.key,
+                    gauge.entry.as_deref().unwrap_or_default(),
+                    &[],
+                    gauge.execution,
+                );
+                let guarded = gauge.runtime == CollectorRuntime::Exec
+                    || collector_script_text(gauge, root)
+                        .is_some_and(|text| oxplow_script::ai::calls_ai(&text));
+                let approved = guarded
+                    && crate::exec_consent::script_gate(
+                        self.approvals.clone(),
+                        root.clone(),
+                        program.clone(),
+                    )()
+                    .is_ok();
+                let mut request = crate::grants::script_request(&gauge.needs);
+                request.execution = gauge.execution;
+                if gauge.runtime == CollectorRuntime::Exec {
+                    request.program = gauge.entry.clone();
+                }
+                run = run.authorized(crate::grants::authority(
+                    &self.approvals,
+                    &program.key(),
+                    approved,
+                    request,
+                ));
+                if guarded {
+                    run = run.guarded(crate::exec_consent::script_gate(
+                        self.approvals.clone(),
+                        root.clone(),
+                        program,
+                    ));
+                }
+            }
+            return run;
         };
         let run = parent.child(
             Some(crate::run_context::contribution(
@@ -2316,7 +2454,7 @@ impl MetricsService {
                 oxplow_domain::contribution::ContributionKind::Collector,
                 &gauge.key,
             )),
-            Mode::External,
+            mode,
         );
         let Some(spec) = ext.collectors.iter().find(|s| s.id == gauge.key) else {
             return run;
@@ -2331,6 +2469,54 @@ impl MetricsService {
             approved,
             crate::grants::collector_request(spec, &gauge.needs),
         ))
+        .guarded({
+            let dir = root.join(&ext.path);
+            let spec = spec.clone();
+            let hash = crate::collector_runner::approval_hash(&dir, &spec).ok();
+            let gate = self.approvals.pinned_gate(
+                format!("{}/{}", gauge.owner, gauge.key),
+                hash.clone().unwrap_or_default(),
+            );
+            std::sync::Arc::new(move || {
+                if !approved {
+                    return Ok(());
+                }
+                gate()?;
+                if hash.as_ref().is_some_and(|h| {
+                    crate::collector_runner::approval_hash(&dir, &spec)
+                        .is_ok_and(|current| current == *h)
+                }) {
+                    Ok(())
+                } else {
+                    Err("collector changed after approval".into())
+                }
+            })
+        })
+    }
+
+    /// Bind the loaded text too: a newly approved file cannot authorize an
+    /// older cached script. The comparison is inherited by model/read calls.
+    fn pin_fact_script(
+        &self,
+        gauge: &FactCollector,
+        runner: &FactRunner,
+        run: RunContext,
+    ) -> RunContext {
+        let loaded = match runner {
+            FactRunner::Starlark(text) | FactRunner::Jaq(text) if !gauge.is_builtin() => {
+                text.clone()
+            }
+            _ => return run,
+        };
+        let gauge = gauge.clone();
+        let root = self.project_dir.clone();
+        run.guarded(Arc::new(move || {
+            if collector_script_text(&gauge, &root).is_some_and(|text| text == loaded) {
+                Ok(())
+            } else {
+                Err("the loaded fact script differs from its current version; reload it".into())
+            }
+        }))
     }
 
     /// Run one fact collector: build its runner and run it with the
@@ -2366,26 +2552,39 @@ impl MetricsService {
         files: Arc<HashMap<String, String>>,
     ) -> FactRun {
         let source = collector_source(gauge);
-        let this_run = self.collector_run(gauge, &ctx.run);
+        let this_run = self.pin_fact_script(gauge, &runner, self.collector_run(gauge, &ctx.run));
         let started = std::time::Instant::now();
-        let outcome = match self.fact_input(gauge, ctx).await {
+        let outcome = match self.fact_input(gauge, ctx, &this_run).await {
             Err(e) => Err(e),
             Ok(input) => match self.given(gauge, &runner, &this_run, files).await {
                 Err(e) => Err(e),
                 Ok(given) => {
                     let run = this_run.clone();
                     let layer = self.run_log.as_ref().map(|l| l.layer.clone());
+                    let run = match &layer {
+                        Some(layer) => layer.pin_run(&run).await.map_err(|error| error.to_string()),
+                        None => Ok(run),
+                    };
                     // A tree collector scans the WHOLE tree (hundreds of files,
                     // tree-sitter each): the 5 s default sized for report parsers
                     // silently timed out the broad-query ones on every full-tree
                     // run (tsk47). They run detached under `spawn_blocking`, so a
                     // generous ceiling costs nothing and still catches a runaway.
-                    tokio::task::spawn_blocking(move || runner.run(&input, given, layer, &run))
+                    match run {
+                        Ok(run) => tokio::task::spawn_blocking(move || {
+                            runner.run(&input, given, layer, &run)
+                        })
                         .await
-                        .unwrap_or_else(|e| Err(format!("task failed: {e}")))
+                        .unwrap_or_else(|e| Err(format!("task failed: {e}"))),
+                        Err(error) => Err(error),
+                    }
                 }
             },
         };
+        let outcome = outcome.and_then(|facts| {
+            this_run.check_authority()?;
+            Ok(facts)
+        });
         // Facts the ingest would refuse fail the run here, with why (tsk986).
         let outcome = match outcome {
             Ok(gauge_facts) => match self.refused_facts(gauge, &gauge_facts).await {
@@ -2461,13 +2660,15 @@ impl MetricsService {
         &self,
         c: &FactCollector,
         ctx: &CollectorRunContext,
+        run: &RunContext,
     ) -> Result<serde_json::Value, String> {
         let mut input = serde_json::Map::new();
         if let Some(report) = &c.report {
             // A report that isn't there yet is empty text, not a failure: the
             // script decides (a tool that hasn't run).
+            run.check_authority()?;
             let text =
-                std::fs::read_to_string(self.project_dir.join(&report.path)).unwrap_or_default();
+                crate::services::project_file(&self.project_dir, &report.path)?.unwrap_or_default();
             input.insert(
                 "report".into(),
                 oxplow_script::parse_report(&report.format, &text)
@@ -2499,7 +2700,7 @@ impl MetricsService {
                     thread_id: ctx.thread_id,
                 },
             );
-            crate::collector_runner::input_rows(&log.layer, &c.key, sql, params)
+            crate::collector_runner::input_rows_for_run(&log.layer, &c.key, sql, params, Some(run))
                 .await?
                 .into_input(&mut input);
         }
@@ -3351,7 +3552,12 @@ enum FactRunner {
     Starlark(String),
     Jaq(String),
     /// A project's approved program: `argv`, the input as JSON on stdin.
-    Exec(Vec<String>),
+    Exec(
+        Vec<String>,
+        oxplow_domain::grant::ExecutionTier,
+        crate::exec_consent::Gate,
+        oxplow_script::runtime::ExecLocation,
+    ),
 }
 
 impl FactRunner {
@@ -3367,8 +3573,9 @@ impl FactRunner {
         run: &RunContext,
     ) -> Result<Vec<CollectedFact>, String> {
         use oxplow_script::facts_of;
-        use oxplow_script::runtime::run_exec;
+        use oxplow_script::runtime::run_exec_authorized_at;
         use oxplow_script::workers::{shared, ScriptRun};
+        run.check_authority()?;
         let budget = Budget::with_timeout(FACT_COLLECTOR_TIMEOUT);
         let script = |script_run: ScriptRun<'_>| {
             shared()
@@ -3383,20 +3590,47 @@ impl FactRunner {
                 let needs = given.needs.clone();
                 let handle = tokio::runtime::Handle::current();
                 let read = Box::new(|q: oxplow_db::SqlQuery| match &layer {
-                    Some(layer) => handle.block_on(layer.run(q)),
+                    Some(layer) => handle.block_on(layer.run_in(run, q)),
                     None => Err(oxplow_domain::DomainError::Invariant(
                         "no semantic layer to read here".into(),
                     )),
                 });
-                let mut calls = crate::scope_calls::Calls::new(run, &needs, read);
+                let mut calls = crate::scope_calls::Calls::new(run, &needs, read)
+                    .with_state_source(
+                        layer.as_ref().and_then(|layer| layer.state_source()),
+                        &handle,
+                    )
+                    .with_jobs_source(
+                        layer.as_ref().and_then(|layer| layer.jobs_source()),
+                        &handle,
+                    )
+                    .with_configuration_source(
+                        layer
+                            .as_ref()
+                            .and_then(|layer| layer.configuration_source()),
+                        &handle,
+                    );
                 let mut serve = |id: &str, args: serde_json::Value| calls.serve(id, args);
                 script(given.onto(ScriptRun::starlark(&text, input.clone()), Some(&mut serve)))
             }
             FactRunner::Jaq(text) => script(ScriptRun::jaq(&text, input.clone())),
-            FactRunner::Exec(argv) => run_exec(&budget, &argv, &input.to_string()),
+            FactRunner::Exec(argv, execution, gate, location) => run_exec_authorized_at(
+                &budget,
+                &argv,
+                &input.to_string(),
+                execution,
+                &|| {
+                    run.check_authority()?;
+                    gate()
+                },
+                Some(&location),
+            ),
         }
-        .and_then(facts_of)
         .map_err(|e| e.to_string())
+        .and_then(|value| {
+            run.check_authority()?;
+            facts_of(value).map_err(|e| e.to_string())
+        })
     }
 }
 
@@ -3412,7 +3646,7 @@ fn collector_script_text(gauge: &FactCollector, root: &Path) -> Option<String> {
     }
     let entry = gauge.entry.as_deref()?;
     if gauge.owner == oxplow_config::collectors::PROJECT {
-        return std::fs::read_to_string(root.join(entry)).ok();
+        return crate::services::project_file(root, entry).ok().flatten();
     }
     crate::extensions::read_extension_file(root, &gauge.owner, entry)
 }
@@ -4372,6 +4606,7 @@ mod tests {
             },
             facts,
             runtime: CollectorRuntime::Starlark,
+            execution: Default::default(),
             entry: Some(entry_file.into()),
             report: None,
             input: None,
@@ -6423,7 +6658,7 @@ def transform(input):
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         std::fs::write(
             oxplow_config::config_path(dir.path()),
-            "measures:\n  - { key: repo.n, title: N }\ncollectors:\n  - { id: repo.count, runtime: exec, entry: tools/count.sh, facts: [repo.n] }\n",
+            "measures:\n  - { key: repo.n, title: N }\ncollectors:\n  - { id: repo.count, runtime: exec, execution: broader, entry: tools/count.sh, facts: [repo.n] }\n",
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();

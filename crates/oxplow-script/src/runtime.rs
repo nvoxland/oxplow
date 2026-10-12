@@ -525,19 +525,95 @@ pub(crate) fn run_starlark_inner(
 /// kind's JSON output. Unlike the in-process tiers this can do I/O, so callers
 /// tag it lower-trust.
 pub fn run_exec(budget: &Budget, argv: &[String], content: &str) -> Result<Value, CollectError> {
-    use std::io::{Read, Write};
+    run_exec_authorized(
+        budget,
+        argv,
+        content,
+        oxplow_domain::grant::ExecutionTier::Restricted,
+        &|| Ok(()),
+    )
+}
+
+/// External execution under an explicit tier and a live host authority check.
+pub fn run_exec_authorized(
+    budget: &Budget,
+    argv: &[String],
+    content: &str,
+    execution: oxplow_domain::grant::ExecutionTier,
+    check: &dyn Fn() -> Result<(), String>,
+) -> Result<Value, CollectError> {
+    run_exec_authorized_at(budget, argv, content, execution, check, None)
+}
+
+/// Host-owned code location. The caller keeps its approved copy alive through
+/// its authority guard; project data lives at a separate, explicit path.
+#[derive(Debug, Clone)]
+pub struct ExecLocation {
+    pub directory: std::path::PathBuf,
+    pub project: std::path::PathBuf,
+}
+
+/// Run from the host's verified code copy under the same live authority.
+pub fn run_exec_authorized_at(
+    budget: &Budget,
+    argv: &[String],
+    content: &str,
+    execution: oxplow_domain::grant::ExecutionTier,
+    check: &dyn Fn() -> Result<(), String>,
+    location: Option<&ExecLocation>,
+) -> Result<Value, CollectError> {
+    execution.require_external().map_err(CollectError::Exec)?;
+    check().map_err(CollectError::Exec)?;
+    use std::io::Read;
     use std::process::{Command, Stdio};
 
     let (program, args) = argv
         .split_first()
         .ok_or_else(|| CollectError::Exec("empty exec argv".into()))?;
-    let mut child = Command::new(program)
+    let mut command = Command::new(program);
+    command
         .args(args)
+        .env_clear()
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(location) = location {
+        command
+            .current_dir(&location.directory)
+            .env("OXPLOW_PROJECT_DIR", &location.project)
+            .env("OXPLOW_CODE_DIR", &location.directory);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    check().map_err(CollectError::Exec)?;
+    let mut child = command
         .spawn()
         .map_err(|e| CollectError::Exec(format!("spawn {program}: {e}")))?;
+
+    struct Group(Option<u32>);
+    impl Group {
+        fn stop(&mut self) {
+            let pid = self.0.take();
+            #[cfg(not(unix))]
+            let _ = pid;
+            #[cfg(unix)]
+            if let Some(pid) = pid.and_then(|p| i32::try_from(p).ok()).filter(|p| *p > 0) {
+                // SAFETY: the host created this child's process group.
+                unsafe {
+                    libc::kill(-pid, libc::SIGKILL);
+                }
+            }
+        }
+    }
+    impl Drop for Group {
+        fn drop(&mut self) {
+            self.stop();
+        }
+    }
+    let mut group = Group(Some(child.id()));
 
     // Every pipe gets its own thread (tsk161). Writing the whole report to
     // stdin and only THEN calling `wait_with_output` deadlocks any streaming
@@ -548,40 +624,39 @@ pub fn run_exec(budget: &Budget, argv: &[String], content: &str) -> Result<Value
     // The stdin write needs a thread of its own too: a child that never reads
     // stdin blocks the writer regardless of how diligently we drain stdout, and
     // the caller must stay free to enforce the deadline below.
-    let mut stdin = child.stdin.take();
-    let mut stdout = child.stdout.take();
-    let mut stderr = child.stderr.take();
+    let stdin = child.stdin.take();
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let deadline = std::time::Instant::now() + budget.timeout;
     let payload = content.to_string();
-    let writer = std::thread::spawn(move || {
-        if let Some(si) = stdin.as_mut() {
-            // A broken pipe here is expected when we kill an overrunning child,
-            // and a child that legitimately ignores its input isn't an error
-            // either — the exit status is what decides success.
-            let _ = si.write_all(payload.as_bytes());
-        }
-        drop(stdin); // close → EOF for the child
+    let writer = std::thread::spawn(move || match stdin {
+        Some(pipe) => crate::exec_io::write(pipe, payload.as_bytes(), deadline),
+        None => Ok(()),
     });
-    fn drain<R: Read + Send + 'static>(pipe: Option<R>) -> std::thread::JoinHandle<Vec<u8>> {
-        std::thread::spawn(move || {
-            let mut buf = Vec::new();
-            if let Some(mut p) = pipe {
-                let _ = p.read_to_end(&mut buf);
-            }
-            buf
+    fn drain<R: Read + crate::exec_io::Pipe + Send + 'static>(
+        pipe: Option<R>,
+        deadline: std::time::Instant,
+    ) -> std::thread::JoinHandle<Result<Vec<u8>, String>> {
+        std::thread::spawn(move || match pipe {
+            Some(pipe) => crate::exec_io::read(pipe, 64 * 1024 * 1024, deadline),
+            None => Ok(Vec::new()),
         })
     }
-    let out_thread = drain(stdout.take());
-    let err_thread = drain(stderr.take());
+    let out_thread = drain(stdout, deadline);
+    let err_thread = drain(stderr, deadline);
 
-    // Unlike the in-process tiers — where an overrunning script can only be
-    // abandoned, never stopped — a child process can actually be killed, so
-    // exec gets a real enforced ceiling rather than a detached thread.
-    let deadline = std::time::Instant::now() + budget.timeout;
     let status = loop {
+        if let Err(reason) = check() {
+            group.stop();
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(CollectError::Exec(reason));
+        }
         match child.try_wait() {
             Ok(Some(s)) => break Some(s),
             Ok(None) => {
                 if std::time::Instant::now() >= deadline {
+                    group.stop();
                     let _ = child.kill();
                     let _ = child.wait();
                     break None;
@@ -589,16 +664,36 @@ pub fn run_exec(budget: &Budget, argv: &[String], content: &str) -> Result<Value
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
             Err(e) => {
+                group.stop();
                 let _ = child.kill();
+                let _ = child.wait();
                 return Err(CollectError::Exec(e.to_string()));
             }
         }
     };
 
-    let stdout_bytes = out_thread.join().unwrap_or_default();
-    let stderr_bytes = err_thread.join().unwrap_or_default();
+    group.stop();
+    let stdout_result = out_thread
+        .join()
+        .unwrap_or_else(|_| Err("output drain panicked".into()));
+    let stderr_result = err_thread
+        .join()
+        .unwrap_or_else(|_| Err("error drain panicked".into()));
     let _ = writer.join();
+    if status.is_none() {
+        return Err(CollectError::Exec(format!(
+            "{program} exceeded the {}s budget and was killed",
+            budget.timeout.as_secs()
+        )));
+    }
+    let stdout_bytes = stdout_result.map_err(CollectError::Exec)?;
+    let stderr_bytes = stderr_result.map_err(CollectError::Exec)?;
 
+    if stdout_bytes.len() > 64 * 1024 * 1024 || stderr_bytes.len() > 64 * 1024 * 1024 {
+        return Err(CollectError::Exec(
+            "external collector output exceeded 64 MiB".into(),
+        ));
+    }
     let Some(status) = status else {
         return Err(CollectError::Exec(format!(
             "{program} exceeded the {}s budget and was killed",
@@ -613,6 +708,7 @@ pub fn run_exec(budget: &Budget, argv: &[String], content: &str) -> Result<Value
             stderr.trim()
         )));
     }
+    check().map_err(CollectError::Exec)?;
     serde_json::from_slice(&stdout_bytes).map_err(|e| CollectError::Shape(e.to_string()))
 }
 
@@ -894,7 +990,14 @@ mod tests {
         assert!(payload.len() > 1_000_000, "payload {} bytes", payload.len());
 
         let argv = vec!["cat".to_string()];
-        let out = run_exec(&budget, &argv, &payload).expect("cat round-trips the payload");
+        let out = run_exec_authorized(
+            &budget,
+            &argv,
+            &payload,
+            oxplow_domain::grant::ExecutionTier::Broader,
+            &|| Ok(()),
+        )
+        .expect("cat round-trips the payload");
         assert_eq!(
             out.get("pad").and_then(|p| p.as_array()).map(Vec::len),
             Some(500_000),
@@ -909,7 +1012,14 @@ mod tests {
         let budget = Budget::with_timeout(std::time::Duration::from_millis(200));
         let argv = vec!["sleep".to_string(), "30".to_string()];
         let started = std::time::Instant::now();
-        let err = run_exec(&budget, &argv, "{}").expect_err("must not wait for the sleep");
+        let err = run_exec_authorized(
+            &budget,
+            &argv,
+            "{}",
+            oxplow_domain::grant::ExecutionTier::Broader,
+            &|| Ok(()),
+        )
+        .expect_err("must not wait for the sleep");
         assert!(
             matches!(&err, CollectError::Exec(m) if m.contains("budget")),
             "got {err:?}"
@@ -929,7 +1039,14 @@ mod tests {
             "-c".to_string(),
             "echo boom >&2; exit 3".to_string(),
         ];
-        let err = run_exec(&budget, &argv, "{}").expect_err("non-zero exit is an error");
+        let err = run_exec_authorized(
+            &budget,
+            &argv,
+            "{}",
+            oxplow_domain::grant::ExecutionTier::Broader,
+            &|| Ok(()),
+        )
+        .expect_err("non-zero exit is an error");
         assert!(
             matches!(&err, CollectError::Exec(m) if m.contains("boom")),
             "stderr must reach the caller: {err:?}"

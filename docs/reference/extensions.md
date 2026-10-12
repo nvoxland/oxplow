@@ -77,6 +77,99 @@ intent:
   (alphabetically) keeps it and the other gets a load error naming
   both.
 
+### Public imports and exports
+
+Export a contribution explicitly, using its canonical ID and a positive
+integer contract version:
+
+```yaml
+exports:
+  - contribution: review-data/model/items
+    version: 1
+    visibility: stable
+```
+
+The consumer chooses a local binding:
+
+```yaml
+imports:
+  - id: review_items
+    contribution: review-data/model/items
+    version: 1
+    optional: true
+import_guards:
+  - contribution: review-ui/collector/summarize
+    imports: [review_items]
+```
+
+A model or lens reads that binding with
+`SELECT * FROM import_ref('review_items')`. SQL references infer their own
+guard. An unavailable optional binding withholds the referring contribution;
+independent contributions remain usable. Explicit guards can name models,
+lenses, collectors, commands, effects, advisories, skills or providers. Their
+exports and dependent mounts are withheld too. Missing required imports and
+dependency cycles block the extension with source-located errors.
+
+Versions must match exactly. A model or event export must use its native
+contract version. Package `version` and host `engine` are separate.
+Visibility defaults to `private`, which other extensions cannot import.
+`experimental` exports accept private consumers; `stable` exports accept either
+sharing mode. Experimental kinds cannot declare stable exports, and shared
+packages cannot expose experimental exports. Import targets resolve by canonical
+ID; published reference metadata is returned only after resolution.
+
+Imports grant no SQL, network, command or other authority. Existing foreign-event
+subscriptions retain their behavior. There is no general extension service-call
+surface in this contract. Authoring checks and change review resolve the candidate
+alongside current project dependencies. A required consumer broken by an update
+is reported before installation replaces files. Review can inspect a disabled
+package without enabling it; update commands still honor configuration disabling.
+Both impact sides use current dependencies. Coherent runtime generation
+activation is still in progress.
+
+### Configuration declarations
+
+The loader validates a versioned settings declaration. Storage of overrides and
+extension host access are still under development.
+
+```yaml
+configuration:
+  version: 1
+  schema:
+    type: object
+    properties:
+      label: {type: string}
+      pageSize: {type: integer, minimum: 1, maximum: 100}
+    required: [label]
+    additionalProperties: false
+  defaults:
+    pageSize: 20
+```
+
+`version` is a positive settings schema version. Defaults can omit required
+object fields; resolved settings must satisfy the whole schema. Arrays are
+complete replacement values, so their objects must include required fields.
+Branch constraints such as `anyOf` still apply to defaults as written. Schema
+`default` annotations do not supply values.
+
+Schema compilation is offline. Diagnostics contain locations and error codes,
+with values omitted. Use non-secret settings only: credentials belong to the
+host's secret service. Settings declarations grant no permissions.
+
+Host secret references are identity-only objects:
+`{schemaVersion: 1, id: "<UUIDv7 returned by the host>"}`. A person supplies the
+value through the host's settings API; reads return only whether it is set.
+References can be stored as non-secret settings, and copying them to another
+extension or project does not copy access.
+
+The first supported consumer is a remote MCP HTTP provider. Declare
+`auth: OXPLOW_MCP_BEARER` in `adapter.mcp`, and a credential with
+`name: OXPLOW_MCP_BEARER` and `secretRef: <the reference object>`. A person must
+approve that exact provider declaration. The shipped HTTP transport sends the
+bearer; extension scripts cannot read its value. References are refused for
+package programs, stdio servers and OAuth credentials. A human settings form
+for managing references is not implemented yet.
+
 ### What it can declare
 
 <!-- kinds:begin (generated from oxplow_domain::contribution::KINDS; bless with OXPLOW_BLESS=1) -->
@@ -90,6 +183,7 @@ intent:
 | `event_types` | its own namespace's event types | stable |  |
 | `ref_kinds` | kinds of thing a ref can name | stable |  |
 | `commands` | commands on oxplow's command bus | stable | below |
+| `jobs` | durable host operations scheduled by an extension | stable |  |
 | `effects` | scripts that react to logged events | stable | below |
 | `advisories` | guidance queries for the coding agent | stable |  |
 | `skills` | skills and slash commands for the coding agent | stable |  |
@@ -124,14 +218,27 @@ collectors:
 <!-- services:begin (generated from oxplow_domain::service::SERVICES; bless with OXPLOW_BLESS=1) -->
 | `needs` | What it gives | Builtins | Approval | In a script that composes |
 |---|---|---|---|---|
+| `jobs.read` | Read this extension's durable job status and result: `scope("jobs.read", {id})`. | `scope` | none | yes |
+| `extension_config.read` | Read resolved defaults, project and personal settings with their provenance: `scope("extension_config.read", {})`. | `scope` | none | yes |
+| `state.read` | Read this extension's workflow state or cache: `scope("state.read", {scope, area})` returns a snapshot or null. | `scope` | none | yes |
 | `sql.read` | Read-only SQL over the published models (`v_*`): `scope("sql.read", {sql, params?, page?})` returns every row, or one page. | `scope` | none | yes |
 | `tree.read` | The files of the snapshot the run is anchored to, with their syntax, metrics and duplicate blocks. | `files`, `source_files`, `duplicate_blocks` | none | yes |
-| `ai.compute` | Model calls on your AI provider: classify, score, summarize, extract. Each answer is recorded, so the same question on the same text costs one call. | `ai_classify`, `ai_score`, `ai_summarize`, `ai_extract` | yours | no |
+| `ai.compute` | Model calls on your AI provider: classify, score, summarize, extract, typed completion. Each answer is recorded, so the same question on the same text costs one call. | `ai_classify`, `ai_score`, `ai_summarize`, `ai_extract`, `ai_complete` | yours | no |
+| `ai.discover` | Declared model identities, features and limits; no credentials or paid probes. | `ai_capabilities`, `ai_models` | none | yes |
 <!-- services:end -->
 
 - A fact collector reads the tree without declaring it, and a
-  collector whose script calls an `ai_*` builtin asks a model without
+  collector whose script calls a model builtin asks a model without
   declaring it. Everything else is declared.
+- Declare `needs: [ai.discover]` to read `ai_capabilities(role = "main")`
+  or `ai_models(role = "main")` in a collector. Missing metadata is unknown.
+  Discovery reads no keys, makes no paid calls and works in pure previews.
+- `ai_complete({"schemaVersion": 1, "messages": [...]}, role = "main")`
+  sends ordered text or tool parts through the configured role. The host
+  chooses the model; supplying `model` is an error. Image parts are currently
+  refused. Providers may opt into `completeTyped` transport; legacy adapters
+  accept only the conversation shape they can preserve. The response includes
+  optional token counts and whether usage is observed, estimated or unknown.
 - A script that uses a service it doesn't declare doesn't load: `check`
   says which builtin and which `needs` entry fixes it.
 - A command's, an effect's or an effort policy's script composes
@@ -205,6 +312,39 @@ commands:
   ran, taking `{{result.<field>}}` from its result.
 - A mistake in `ui` is a load error naming the field, not a menu entry
   that never shows.
+
+### Jobs
+
+Declare a durable job and expose its host operations through native commands:
+
+```yaml
+jobs:
+  - id: summary
+    description: Summarize a review
+    version: 1
+    operation: ai.complete_typed
+    needs: [ai.compute]
+    replay: never
+commands:
+  - { name: summary.start, summary: Start a summary, scope: jobs.write, op: enqueue, invokers: { human: true, agent: true, lens: true } }
+  - { name: summary.cancel, summary: Cancel a summary, scope: jobs.write, op: cancel, invokers: { human: true, agent: true, lens: true } }
+  - { name: summary.status, summary: Read a summary, scope: jobs.read, op: snapshot, invokers: { human: true, agent: true, lens: true } }
+```
+
+`enqueue` takes `{job, intentKey, request}`. For this operation, `request`
+is `{schemaVersion: 1, role, messages, tools?}`; the host chooses the model
+for the role. The request is private and limited to 1 MiB and 64 nesting
+levels. `cancel` and `snapshot` take `{id}`. The returned job ID is the
+one to use for either call. The host records intent before a worker starts,
+and a person approves each job declaration in Settings -> Data -> Programs
+before it can spend an AI provider key. `replay` defaults to `never`; an
+interrupted attempt is not retried automatically.
+
+A script declaring `needs: [jobs.read]` can call
+`scope("jobs.read", {"id": job_id})` for its extension's result. The
+`contribution.job.completed` event carries the job ID and outcome, with no
+request or result body; read the result through `jobs.read`. An agent or
+effect that composes `enqueue` does not acquire the job's AI permission.
 
 ### Effects
 

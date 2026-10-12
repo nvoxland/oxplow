@@ -19,6 +19,7 @@ pub mod agent_status_derive;
 pub mod ai_calls;
 pub mod ai_compute;
 pub mod ai_service;
+pub(crate) mod approved_code;
 pub mod assets;
 pub mod attribution;
 pub mod background_task;
@@ -72,13 +73,26 @@ pub mod event_pump;
 mod event_view_tests;
 pub mod events;
 pub mod exec_consent;
+pub mod extension_activation;
 pub mod extension_catalog;
 pub mod extension_commands;
+pub mod extension_configuration;
 pub mod extension_event_types;
+pub mod extension_generation;
 pub mod extension_impact;
+pub mod extension_job_ai;
+pub mod extension_job_authority;
+pub mod extension_job_dispatch;
+pub mod extension_job_operations;
+pub mod extension_job_scheduler;
+pub mod extension_jobs;
 pub mod extension_models;
 pub mod extension_ref_kinds;
+pub mod extension_runtime_adapters;
+pub mod extension_secrets;
+pub mod extension_state;
 pub mod extensions;
+pub mod external_process;
 pub mod file_ref_version;
 pub mod followup;
 pub mod grants;
@@ -520,6 +534,11 @@ pub struct Services {
     /// Loaded extensions per worktree root, reloaded when a file under
     /// `oxplow/extensions/` or the project config changes.
     pub extension_catalog: Arc<extension_catalog::ExtensionCatalog>,
+    pub jobs: Arc<extension_jobs::ExtensionJobs>,
+    pub extension_secrets: Arc<extension_secrets::ExtensionSecrets>,
+    /// Shared publication and reader boundary. Boot adopts it after publishing
+    /// a repairable baseline; standalone Services keep legacy fixture behavior.
+    pub extension_activation: Arc<extension_activation::ExtensionActivation>,
     /// Custom components' bundles as their frames loaded them, by version
     /// (tsk984): what the daemon serves a frame, and what its invoke names.
     pub component_bundles: Arc<component_bundles::ComponentBundles>,
@@ -702,13 +721,88 @@ pub struct Services {
 }
 
 impl Services {
+    /// Runtime metadata must use the same reader boundary as lens execution.
+    pub async fn lens_definition(
+        &self,
+        root: &std::path::Path,
+        id: &str,
+    ) -> Result<extensions::Lens, oxplow_domain::DomainError> {
+        self.sql
+            .read_generation(async { self.extension_catalog.find_lens(root, id) })
+            .await?
+    }
+
     /// The extensions under `root` as listed: loaded, with what the
     /// primary worktree's model compile and vocabulary refused added to
     /// each one's errors.
     pub async fn listed_extensions(&self, root: &std::path::Path) -> Vec<extensions::Extension> {
-        let loaded = self.extension_catalog.get(root).to_vec();
-        let loaded = self.extension_models.with_health(root, loaded).await;
-        self.vocabulary_service.with_health(root, loaded).await
+        match self
+            .sql
+            .read_generation(async {
+                let active = self.extension_catalog.get(root).to_vec();
+                let active_names: std::collections::BTreeSet<_> = active
+                    .iter()
+                    .map(|extension| extension.name.clone())
+                    .collect();
+                let mut loaded = self.extension_models.with_health(root, active).await;
+                loaded = self.vocabulary_service.with_health(root, loaded).await;
+
+                let primary = root == self.layout.project_dir;
+                let problems = primary.then(|| self.extension_activation.problems());
+                if let Some(problems) = &problems {
+                    for extension in &mut loaded {
+                        if let Some(errors) = problems.get(&extension.name) {
+                            extension.errors.extend(errors.iter().cloned());
+                        }
+                        if let Some(errors) = problems.get("<host>") {
+                            extension.errors.extend(errors.iter().cloned());
+                        }
+                    }
+                }
+
+                // Keep changed candidate owners visible for repair without
+                // exposing their new runtime contributions before publication.
+                for candidate in self
+                    .extension_catalog
+                    .snapshot(root)
+                    .extensions()
+                    .iter()
+                    .filter(|candidate| !active_names.contains(&candidate.name))
+                {
+                    let mut pending = candidate.clone();
+                    pending.enabled = false;
+                    extensions::clear_contributions(&mut pending);
+                    pending.errors.push(
+                        "candidate changes are not active until extension activation succeeds"
+                            .into(),
+                    );
+                    if let Some(problems) = &problems {
+                        if let Some(errors) = problems.get(&pending.name) {
+                            pending.errors.extend(errors.iter().cloned());
+                        }
+                        if let Some(errors) = problems.get("<host>") {
+                            pending.errors.extend(errors.iter().cloned());
+                        }
+                    }
+                    loaded.push(pending);
+                }
+                loaded
+            })
+            .await
+        {
+            Ok(loaded) => loaded,
+            Err(_) => {
+                let mut unavailable = self.extension_catalog.get(root).to_vec();
+                for extension in &mut unavailable {
+                    extension.enabled = false;
+                    extensions::clear_contributions(extension);
+                    extension
+                        .errors
+                        .push("extension activation is unavailable".into());
+                }
+                unavailable
+            }
+        }
     }
 
     /// Reading and restoring captured files (`snapshot_files`).
@@ -773,6 +867,16 @@ impl Services {
         secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
     ) -> Result<Self, AppInitError> {
         ensure_state_dir(&layout.state_dir)?;
+        let recovery = extensions::candidates::recover_installations(&layout.project_dir)
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
+        if recovery.scanned != 0 {
+            info!(
+                restored = recovery.restored,
+                cleaned = recovery.cleaned,
+                preserved = recovery.preserved,
+                "extension install recovery finished"
+            );
+        }
 
         let config = oxplow_config::load_project_config(&layout.project_dir)?;
         info!(project = %layout.project_dir.display(), agents = ?config.agents, "config loaded");
@@ -1076,10 +1180,29 @@ impl Services {
         let extension_catalog = Arc::new(extension_catalog::ExtensionCatalog::for_project(
             &layout.project_dir,
         ));
+        let extension_secrets = Arc::new(extension_secrets::ExtensionSecrets::new(
+            extension_catalog.clone(),
+            &layout.project_dir,
+            machine.secrets.clone(),
+            sql.clone(),
+        ));
+        let jobs = Arc::new(extension_jobs::ExtensionJobs::new(
+            extension_jobs::JobsDependencies {
+                db: db.clone(),
+                catalog: extension_catalog.clone(),
+                root: layout.project_dir.clone(),
+                ai: ai_compute.clone(),
+                approvals: approvals.clone(),
+                threads: thread_store.clone(),
+                vocabulary: vocabulary.clone(),
+                sql: sql.clone(),
+            },
+        ));
         // A query's result says which collectors feed what it read and how
         // they stand, and the catalog generation it ran against.
         let feeds = Arc::new(collection_coverage::Feeds::default());
         let sql = sql.with_collection(sql_gateway::Collection {
+            jobs: jobs.clone(),
             feeds: feeds.clone(),
             db: db.clone(),
             catalog: extension_catalog.clone(),
@@ -1210,6 +1333,15 @@ impl Services {
                 agent_policy.clone(),
                 event_pump.clone(),
             )
+            .with_state_host(extension_state::StateHost::new(
+                extension_catalog.clone(),
+                layout.project_dir.clone(),
+            ))
+            .with_jobs_host(jobs.clone())
+            .with_configuration_host(extension_configuration::ConfigurationHost::new(
+                extension_catalog.clone(),
+                layout.project_dir.clone(),
+            ))
             // Only a stream's writer thread may change state; an unknown
             // thread may not.
             .with_write_gate({
@@ -1437,6 +1569,7 @@ impl Services {
                 }),
             ],
         );
+        providers.adopt_extension_secrets(extension_secrets.clone());
         // An extension's provider commands run on its instances.
         commands.set_provider_router({
             let router: Arc<dyn commands::ProviderRouter> = providers.clone();
@@ -1566,6 +1699,19 @@ impl Services {
         // over these operations (`commands/ops.rs`).
         for op in commands::bookmark::ops()
             .into_iter()
+            .chain(commands::extension_jobs::ops(jobs.clone()))
+            .chain(commands::extension_state::ops(
+                extension_state::StateHost::new(
+                    extension_catalog.clone(),
+                    layout.project_dir.clone(),
+                ),
+            ))
+            .chain(commands::extension_configuration::ops(
+                extension_configuration::ConfigurationHost::new(
+                    extension_catalog.clone(),
+                    layout.project_dir.clone(),
+                ),
+            ))
             .chain(commands::effect::ops(effect_services.clone()))
             .chain(client_host::ops(&client_host))
             .chain([commands::file::save_op(workspace_files.clone())])
@@ -1639,6 +1785,8 @@ impl Services {
             deps: advisory_deps,
         }));
         Ok(Self {
+            extension_activation: Arc::new(extension_activation::ExtensionActivation::new()),
+            jobs,
             config: config_arc,
             config_applied,
             db,
@@ -1662,6 +1810,7 @@ impl Services {
             extension_models,
             vocabulary_service,
             extension_catalog,
+            extension_secrets,
             component_bundles: Arc::new(component_bundles::ComponentBundles::new()),
             extension_commands,
             effect_services,
@@ -2105,6 +2254,9 @@ mod tests {
                 "efforts.write/update",
                 // Anyone else than a person only in its own stream, and as
                 // a write, from its writer thread.
+                "extension_config.read/inspect",
+                "extension_config.read/snapshot",
+                "extension_config.write/compare_exchange",
                 "files.write/save",
                 "knowledge.write/add_comment",
                 "knowledge.write/add_note",
@@ -2121,6 +2273,8 @@ mod tests {
                 "metrics.write/rebuild",
                 "metrics.write/record",
                 "providers.sync/sync",
+                "state.read/snapshot",
+                "state.write/compare_exchange",
                 "streams.write/rename",
                 // An agent's in its own thread (`client_host`).
                 "tabs.write/close",

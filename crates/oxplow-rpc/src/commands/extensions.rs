@@ -30,6 +30,56 @@ pub async fn list_extensions(svc: &Services) -> Result<Vec<Extension>, IpcError>
     Ok(svc.listed_extensions(root(svc)).await)
 }
 
+/// Human settings ingress: secrets go directly to the keychain. This has no
+/// command-bus, extension-service or MCP route, and returns identity only.
+pub async fn save_extension_secret(
+    svc: &Services,
+    extension: String,
+    reference: Option<oxplow_domain::extension_secret::SecretRef>,
+    value: String,
+) -> Result<oxplow_domain::extension_secret::SecretRef, IpcError> {
+    let reference = svc
+        .extension_secrets
+        .save(&extension, reference, &value)
+        .await?;
+    secret_changed(svc, extension, reference.clone()).await?;
+    Ok(reference)
+}
+
+pub async fn extension_secret_is_set(
+    svc: &Services,
+    extension: String,
+    reference: oxplow_domain::extension_secret::SecretRef,
+) -> Result<bool, IpcError> {
+    Ok(svc.extension_secrets.is_set(&extension, &reference).await?)
+}
+
+pub async fn revoke_extension_secret(
+    svc: &Services,
+    extension: String,
+    reference: oxplow_domain::extension_secret::SecretRef,
+) -> Result<(), IpcError> {
+    svc.extension_secrets.revoke(&extension, &reference)?;
+    secret_changed(svc, extension, reference).await?;
+    Ok(())
+}
+
+async fn secret_changed(
+    svc: &Services,
+    extension: String,
+    reference: oxplow_domain::extension_secret::SecretRef,
+) -> Result<(), IpcError> {
+    let providers = svc.providers.clone();
+    // Dropping the RPC cannot drop cleanup after the keychain mutation.
+    tokio::spawn(async move {
+        providers
+            .extension_secret_changed(&extension, &reference)
+            .await;
+    })
+    .await
+    .map_err(|_| IpcError::internal("extension secret consumers could not be refreshed"))
+}
+
 /// A service a script may be given, as a person reads it
 /// (`oxplow_domain::service::SERVICES`, the table every reader uses).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
@@ -59,7 +109,7 @@ pub async fn list_services(_svc: &Services) -> Result<Vec<ServiceListing>, IpcEr
 
 /// One lens by `<extension>/<slug>`.
 pub async fn get_lens(svc: &Services, id: String) -> Result<Lens, IpcError> {
-    Ok(svc.extension_catalog.find_lens(root(svc), &id)?)
+    Ok(svc.lens_definition(root(svc), &id).await?)
 }
 
 /// Run a lens with optional param overrides; returns the rows the lens
@@ -174,6 +224,7 @@ pub async fn run_component_query(
     asset: String,
     params: Option<BTreeMap<String, SqlCell>>,
     stream_id: Option<String>,
+    version: String,
 ) -> Result<LensRun, IpcError> {
     let root = root(svc);
     let ctx = context(svc, stream_id.as_deref()).await;
@@ -184,6 +235,7 @@ pub async fn run_component_query(
         &asset,
         params.unwrap_or_default(),
         &ctx,
+        &version,
     )
     .await?)
 }
@@ -192,11 +244,7 @@ pub async fn run_component_query(
 /// its frame (tsk984): the version the daemon serves it at
 /// (`/components/v/<version>/`) and the frame invokes with.
 pub async fn load_component(svc: &Services, id: String) -> Result<String, IpcError> {
-    Ok(oxplow_app::lens_actions::load_component(
-        svc,
-        root(svc),
-        &id,
-    )?)
+    Ok(oxplow_app::lens_actions::load_component_pinned(svc, root(svc), &id).await?)
 }
 
 /// A custom component's frame invokes one of its declared commands, as the
@@ -300,7 +348,7 @@ pub async fn set_extension_enabled(
     }
     let value = (!disabled.is_empty()).then(|| serde_json::json!({ "disabled": disabled }));
     crate::commands::config::set_key(svc, "extensions", value).await?;
-    Ok(svc.extension_catalog.get(root(svc)).to_vec())
+    Ok(svc.listed_extensions(root(svc)).await)
 }
 
 /// What installing (`git_url`) or updating (`name`) an extension would

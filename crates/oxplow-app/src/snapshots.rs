@@ -147,15 +147,28 @@ fn policy_of(entry: &str) -> Option<ContentPolicy> {
     }
 }
 
-/// Register the snapshot built-ins `declared` names, and core's own
-/// default (`oxplow`, which keeps every version: it is always there, a
-/// required capability's fallback).
-pub fn register_built_ins(
-    registry: &SnapshotRegistry,
+/// Snapshot providers prepared from one extension declaration snapshot.
+/// Constructing this candidate does not change the active registries.
+pub struct PreparedSnapshots {
+    providers: Vec<Arc<dyn SnapshotProvider>>,
+}
+
+impl PreparedSnapshots {
+    /// Publish these declarations into the provider and capture registries.
+    /// Applying the active policy remains the activation coordinator's job.
+    pub fn publish(self, registry: &SnapshotRegistry, captures: &SnapshotCaptureRegistry) {
+        captures.set_serves(self.providers.iter().map(|p| p.id().to_string()));
+        registry.set_declared(self.providers);
+    }
+}
+
+/// Prepare the snapshot built-ins `declared` names, and core's own default
+/// (`oxplow`, which keeps every version). This performs no registry writes.
+pub fn prepare_built_ins(
     declared: &[Implementation],
     captures: &SnapshotCaptureRegistry,
     files: &SnapshotFiles,
-) {
+) -> PreparedSnapshots {
     let core_default = oxplow_domain::capability::spec(CAPABILITY)
         .map(|s| s.default)
         .unwrap_or_default();
@@ -167,8 +180,8 @@ pub fn register_built_ins(
             files: files.clone(),
         })
     };
-    let mut all = vec![built(core_default, ContentPolicy::Keep)];
-    all.extend(
+    let mut providers = vec![built(core_default, ContentPolicy::Keep)];
+    providers.extend(
         declared
             .iter()
             .filter(|i| i.capability == CAPABILITY)
@@ -177,15 +190,39 @@ pub fn register_built_ins(
                 _ => None,
             }),
     );
-    captures.set_serves(all.iter().map(|p| p.id().to_string()));
-    registry.set_declared(all);
+    PreparedSnapshots { providers }
+}
+
+/// Register the snapshot built-ins `declared` names, and core's own
+/// default (`oxplow`, which keeps every version: it is always there, a
+/// required capability's fallback).
+pub fn register_built_ins(
+    registry: &SnapshotRegistry,
+    declared: &[Implementation],
+    captures: &SnapshotCaptureRegistry,
+    files: &SnapshotFiles,
+) {
+    prepare_built_ins(declared, captures, files).publish(registry, captures);
 }
 
 /// Set every stream's capture policy to what the active implementation
 /// keeps, and idle the captures while it's one they don't serve (a
 /// provider process, which marks the worktree itself).
 pub fn apply_active_policy(registry: &SnapshotRegistry, captures: &SnapshotCaptureRegistry) {
-    let active = registry.active();
+    apply_policy(captures, registry.active());
+}
+
+/// Apply the policy for an already selected provider without consulting the
+/// registry's live active-selection callback.
+pub(crate) fn apply_selected_policy(
+    registry: &SnapshotRegistry,
+    captures: &SnapshotCaptureRegistry,
+    id: &str,
+) {
+    apply_policy(captures, registry.get(id));
+}
+
+fn apply_policy(captures: &SnapshotCaptureRegistry, active: Option<Arc<dyn SnapshotProvider>>) {
     let policy = match &active {
         Some(p) if !p.contents() => ContentPolicy::HashesOnly,
         _ => ContentPolicy::Keep,

@@ -172,6 +172,15 @@ pub async fn run_due(
     svc: &crate::Services,
     now: oxplow_domain::Timestamp,
 ) -> Result<usize, oxplow_domain::DomainError> {
+    svc.sql
+        .read_generation(run_due_in_generation(svc, now))
+        .await?
+}
+
+async fn run_due_in_generation(
+    svc: &crate::Services,
+    now: oxplow_domain::Timestamp,
+) -> Result<usize, oxplow_domain::DomainError> {
     let pending = svc.collector_store.list_pending().await?;
     if pending.is_empty() {
         return Ok(0);

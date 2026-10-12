@@ -1,0 +1,59 @@
+{
+  "$defs": {
+    "CommandOutcome": {
+      "description": "How a command run ended.",
+      "enum": [
+        "ok",
+        "denied",
+        "invalid",
+        "error"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A fenced job completion. Result/request values remain private job data;\nconsumers read them through their contribution's authorized job service.",
+  "properties": {
+    "attempt": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "contribution": {
+      "type": "string"
+    },
+    "fence": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "job_id": {
+      "type": "string"
+    },
+    "outcome": {
+      "$ref": "#/$defs/CommandOutcome"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "version": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "job_id",
+    "contribution",
+    "run_id",
+    "attempt",
+    "fence",
+    "outcome"
+  ],
+  "title": "ContributionJobCompletedV1",
+  "type": "object"
+}

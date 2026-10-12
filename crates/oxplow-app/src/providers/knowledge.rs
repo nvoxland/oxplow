@@ -27,7 +27,7 @@ use oxplow_domain::knowledge::{Kept, KnowledgeProvider, KnowledgeRegistry, PageC
 use oxplow_domain::{CommandError, DomainError, InputValidator};
 use serde_json::{json, Value};
 
-use super::registry::{CapabilityHost, Instance};
+use super::registry::{CapabilityHost, Instance, PreparedProviderCapability};
 
 /// The knowledge side of the host: a started instance is a store in
 /// `Services.knowledge`, under its id.
@@ -46,7 +46,7 @@ impl CapabilityHost for KnowledgeHost {
         self.0.has(id)
     }
 
-    fn admit(&self, instance: &Arc<Instance>) -> Result<Value, String> {
+    fn prepare(&self, instance: &Arc<Instance>) -> Result<PreparedProviderCapability, String> {
         let declared = &instance.declared;
         let features = declared
             .capabilities
@@ -69,11 +69,14 @@ impl CapabilityHost for KnowledgeHost {
                 .map_err(|e| format!("verb `{}`: {e}", verb.name))?;
             verbs.insert(verb.name, input);
         }
-        self.0.register(Arc::new(ExternalKnowledge {
+        let adapter = Arc::new(ExternalKnowledge {
             instance: instance.clone(),
             verbs,
-        }));
-        Ok(features)
+        });
+        let registry = self.0.clone();
+        Ok(PreparedProviderCapability::new(features, move || {
+            registry.register(adapter);
+        }))
     }
 
     fn retire(&self, id: &str) {

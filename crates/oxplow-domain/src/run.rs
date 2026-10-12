@@ -7,6 +7,7 @@
 //! which can narrow the budget but never change who runs or what was
 //! granted. What the run doesn't have is `None`, never made up.
 
+use std::any::Any;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -179,6 +180,28 @@ pub struct Authority {
     pub enforcement: crate::grant::Enforcement,
 }
 
+/// A host-owned live check, inherited by nested work without exposing it
+/// to extension code. It rechecks consent/version at sensitive calls.
+#[derive(Clone)]
+pub struct AuthorityGuard(Arc<dyn Fn() -> Result<(), String> + Send + Sync>);
+
+impl std::fmt::Debug for AuthorityGuard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("AuthorityGuard")
+    }
+}
+
+/// Opaque host-owned lifetime pin. Possessing this value grants no authority;
+/// the host must validate its concrete type and owning boundary before use.
+#[derive(Clone)]
+struct HostGenerationPin(Arc<dyn Any + Send + Sync>);
+
+impl std::fmt::Debug for HostGenerationPin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HostGenerationPin")
+    }
+}
+
 /// Which contribution a run belongs to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContributionRef {
@@ -240,6 +263,8 @@ pub struct RunContext {
     trace: Arc<ScopeTrace>,
     usage: Arc<std::sync::Mutex<Usage>>,
     authority: Option<Arc<Authority>>,
+    authority_guard: Option<AuthorityGuard>,
+    host_generation: Option<HostGenerationPin>,
     decided: Arc<std::sync::Mutex<Vec<crate::grant::Decided>>>,
 }
 
@@ -261,6 +286,8 @@ impl RunContext {
             trace: Arc::new(ScopeTrace::default()),
             usage: Arc::default(),
             authority: None,
+            authority_guard: None,
+            host_generation: None,
             decided: Arc::default(),
         }
     }
@@ -273,6 +300,33 @@ impl RunContext {
     /// A contribution's run, for `actor`.
     pub fn contribution(contribution: ContributionRef, actor: Actor, mode: Mode) -> Self {
         Self::new(actor, Some(contribution), mode)
+    }
+
+    /// Fresh host job execution. Persisted scheduling context supplies
+    /// attribution only: actor, cancellation, authority and budgets are new.
+    /// No service is authorized until the dispatcher attaches live authority.
+    pub fn job(
+        contribution: ContributionRef,
+        identity: &crate::extension_job_context::JobExecutionIdentity,
+        provenance: &crate::extension_job_context::JobInvocationContext,
+    ) -> Result<Self, crate::extension_job_context::JobContextError> {
+        provenance.validate()?;
+        let actor = Actor::job(
+            identity,
+            provenance.anchors().thread_id,
+            provenance.anchors().stream_id,
+        );
+        let mut run = Self::contribution(contribution, actor, Mode::External)
+            .anchored(provenance.anchors().clone())
+            .about(provenance.subject().to_vec())
+            .authorized(Authority {
+                declared: crate::grant::GrantRequest::default(),
+                grant: None,
+                enforcement: crate::grant::Enforcement { hosts: false },
+            });
+        run.parent = Some(provenance.originating_run_id().clone());
+        run.cause = provenance.cause().cloned();
+        Ok(run)
     }
 
     /// Caused by `event` (its trigger).
@@ -306,6 +360,90 @@ impl RunContext {
         self
     }
 
+    pub fn guarded(mut self, check: Arc<dyn Fn() -> Result<(), String> + Send + Sync>) -> Self {
+        self.authority_guard = Some(match self.authority_guard.take() {
+            None => AuthorityGuard(check),
+            Some(previous) => AuthorityGuard(Arc::new(move || {
+                (previous.0)()?;
+                check()
+            })),
+        });
+        self
+    }
+
+    /// Attach an opaque host-owned generation pin to this live run.
+    ///
+    /// The pin may keep a host reader alive while this context, a child, or
+    /// spawned work retains it. It grants no authority; the host must
+    /// downcast and validate the pin at its owning boundary. Fresh contexts,
+    /// including jobs, do not inherit pins.
+    pub fn with_host_generation<T: Any + Send + Sync>(mut self, pin: Arc<T>) -> Self {
+        self.host_generation = Some(HostGenerationPin(pin));
+        self
+    }
+
+    /// Read a host-owned generation pin of `T`. The caller must validate
+    /// that the pin belongs to its own host boundary; this is not authority.
+    pub fn host_generation<T: Any + Send + Sync>(&self) -> Option<&T> {
+        self.host_generation
+            .as_ref()?
+            .0
+            .as_ref()
+            .downcast_ref::<T>()
+    }
+
+    /// A bounded SQL grant needs a policy at preparation, before any rows
+    /// are evaluated. Legacy `sql.read` explicitly grants the whole layer.
+    pub fn has_model_bounds(&self) -> bool {
+        self.authority.as_ref().is_some_and(|a| {
+            !a.grant
+                .as_ref()
+                .map_or(&a.declared, |g| &g.request)
+                .scopes
+                .contains("sql.read")
+        })
+    }
+
+    pub fn has_path_bounds(&self) -> bool {
+        self.authority.as_ref().is_some_and(|a| {
+            !a.grant
+                .as_ref()
+                .map_or(&a.declared, |g| &g.request)
+                .scopes
+                .contains("tree.read")
+        })
+    }
+
+    /// Filtering a captured tree is not an attempted read of every
+    /// excluded file. Record service use, without a denial per hidden path.
+    pub fn permits_path(&self, path: &str) -> bool {
+        crate::service::valid_path(path)
+            && self.authority.as_ref().is_none_or(|a| {
+                matches!(
+                    crate::grant::decide(
+                        &crate::grant::Need::Path(path.into()),
+                        a.grant.as_ref(),
+                        &a.declared,
+                        a.enforcement
+                    ),
+                    crate::grant::Decision::Allowed
+                )
+            })
+    }
+
+    pub fn check_authority(&self) -> Result<(), String> {
+        if self.cancel.is_cancelled() {
+            return Err("the run was cancelled".into());
+        }
+        if let Some(guard) = &self.authority_guard {
+            if let Err(reason) = (guard.0)() {
+                self.cancel.cancel();
+                return Err(reason);
+            }
+        }
+        Ok(())
+    }
+
     /// Within `budget`.
     pub fn within(mut self, budget: Budget) -> Self {
         self.budget = budget;
@@ -318,6 +456,9 @@ impl RunContext {
     pub fn under(mut self, parent: &RunContext) -> Self {
         self.parent = Some(parent.run.clone());
         self.cancel = parent.cancel.clone();
+        if let Some(guard) = &parent.authority_guard {
+            self = self.guarded(guard.0.clone());
+        }
         self
     }
 
@@ -363,6 +504,8 @@ impl RunContext {
             trace: Arc::new(ScopeTrace::default()),
             usage,
             authority,
+            authority_guard: self.authority_guard.clone(),
+            host_generation: self.host_generation.clone(),
             decided,
         }
     }
@@ -382,6 +525,18 @@ impl RunContext {
     /// The extension it belongs to.
     pub fn extension(&self) -> Option<&str> {
         self.contribution.as_ref().map(|c| c.id.extension.as_str())
+    }
+
+    /// Whether a host attached an explicit declaration for this scope.
+    /// Core's unrestricted context is not an extension service declaration.
+    pub fn declares_scope(&self, scope: &str) -> bool {
+        self.authority.as_ref().is_some_and(|authority| {
+            authority
+                .declared
+                .scopes
+                .iter()
+                .any(|need| crate::service::need_scope(need) == scope)
+        })
     }
 
     pub fn actor(&self) -> &Actor {
@@ -447,9 +602,14 @@ impl RunContext {
     /// Decide `need` against its authority and record it. A run with no
     /// authority (core's own work) is allowed what it does.
     pub fn decide(&self, need: crate::grant::Need) -> crate::grant::Decision {
-        let decision = match &self.authority {
-            Some(a) => crate::grant::decide(&need, a.grant.as_ref(), &a.declared, a.enforcement),
-            None => crate::grant::Decision::Allowed,
+        let decision = match self.check_authority() {
+            Err(reason) => crate::grant::Decision::Denied(reason),
+            Ok(()) => match &self.authority {
+                Some(a) => {
+                    crate::grant::decide(&need, a.grant.as_ref(), &a.declared, a.enforcement)
+                }
+                None => crate::grant::Decision::Allowed,
+            },
         };
         if self.authority.is_some() {
             self.decided

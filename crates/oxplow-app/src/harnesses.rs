@@ -4,6 +4,11 @@
 //! declaration gives — the key an agent session's `harness` names. Many are
 //! registered at once, the way collectors are.
 
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use oxplow_domain::agent::acp_adapter::AcpAdapter;
+use oxplow_domain::agent::harness::AgentHarness;
 use oxplow_domain::agent::registry::{AcpAdapterRegistry, HarnessRegistry};
 
 use crate::capabilities::{Implementation, Source};
@@ -11,16 +16,30 @@ use crate::capabilities::{Implementation, Source};
 /// Register the harnesses `declared` names (the project's extensions'
 /// `implementations:`), in declaration order, and nothing else.
 pub fn register_built_ins(registry: &HarnessRegistry, declared: &[Implementation]) {
-    registry.set_declared(
-        declared
-            .iter()
-            .filter(|i| i.capability == "agent_harness")
-            .filter_map(|i| match i.source {
-                Source::BuiltIn(entry) => oxplow_harnesses::built_in(entry, &i.id, &i.title),
-                _ => None,
-            })
-            .collect(),
-    );
+    prepare_built_ins(declared).publish(registry);
+}
+
+/// Harnesses prepared from one declaration snapshot, without registry writes.
+pub struct PreparedHarnesses {
+    harnesses: Vec<Arc<dyn AgentHarness>>,
+}
+
+impl PreparedHarnesses {
+    pub fn publish(self, registry: &HarnessRegistry) {
+        registry.set_declared(self.harnesses);
+    }
+}
+
+pub fn prepare_built_ins(declared: &[Implementation]) -> PreparedHarnesses {
+    let harnesses = declared
+        .iter()
+        .filter(|i| i.capability == "agent_harness")
+        .filter_map(|i| match i.source {
+            Source::BuiltIn(entry) => oxplow_harnesses::built_in(entry, &i.id, &i.title),
+            _ => None,
+        })
+        .collect();
+    PreparedHarnesses { harnesses }
 }
 
 /// One registered harness, as the session picker and Settings see it.
@@ -85,23 +104,79 @@ pub fn listing(registry: &HarnessRegistry, agents: &[String]) -> Vec<HarnessList
 /// config doesn't hold is left out (logged); the loader checked it against
 /// the built-in's schema already.
 pub fn register_acp_adapters(registry: &AcpAdapterRegistry, declared: &[Implementation]) {
-    let adapters = declared
-        .iter()
-        .filter(|i| i.capability == "acp_adapter")
-        .filter_map(|i| match i.source {
+    let (adapters, errors) = build_acp_adapters(declared);
+    for (id, diagnostic) in errors {
+        if diagnostic == "ACP adapter config is invalid" {
+            tracing::warn!(adapter = %id, %diagnostic, "an ACP adapter's config doesn't hold");
+        }
+    }
+    adapters.publish(registry);
+}
+
+/// ACP adapters prepared from one declaration snapshot.
+pub struct PreparedAcpAdapters {
+    adapters: Vec<AcpAdapter>,
+}
+
+impl PreparedAcpAdapters {
+    pub fn publish(self, registry: &AcpAdapterRegistry) {
+        registry.set(self.adapters);
+    }
+}
+
+/// Prepare all declared ACP adapters, failing the candidate if any entry
+/// cannot be built. Diagnostics are fixed and do not include config values.
+pub fn prepare_acp_adapters(
+    declared: &[Implementation],
+) -> Result<PreparedAcpAdapters, BTreeMap<String, String>> {
+    let (adapters, errors) = build_acp_adapters(declared);
+    if errors.is_empty() {
+        Ok(adapters)
+    } else {
+        Err(errors)
+    }
+}
+
+fn build_acp_adapters(
+    declared: &[Implementation],
+) -> (PreparedAcpAdapters, BTreeMap<String, String>) {
+    let mut adapters = Vec::new();
+    let mut errors = BTreeMap::new();
+    for implementation in declared.iter().filter(|i| i.capability == "acp_adapter") {
+        let adapter = match &implementation.source {
             Source::BuiltIn(entry) => {
-                match oxplow_harnesses::acp_adapter(entry, &i.id, &i.title, &i.config)? {
-                    Ok(adapter) => Some(adapter),
-                    Err(error) => {
-                        tracing::warn!(adapter = %i.id, %error, "an ACP adapter's config doesn't hold");
+                match oxplow_harnesses::acp_adapter(
+                    entry,
+                    &implementation.id,
+                    &implementation.title,
+                    &implementation.config,
+                ) {
+                    Some(Ok(adapter)) => Some(adapter),
+                    Some(Err(_)) => {
+                        errors.insert(
+                            implementation.id.clone(),
+                            "ACP adapter config is invalid".into(),
+                        );
+                        None
+                    }
+                    None => {
+                        errors.insert(
+                            implementation.id.clone(),
+                            "ACP adapter entry is unsupported".into(),
+                        );
                         None
                     }
                 }
             }
+            // External implementations are prepared by the provider owner,
+            // rather than constructed as native adapters here.
             _ => None,
-        })
-        .collect();
-    registry.set(adapters);
+        };
+        if let Some(adapter) = adapter {
+            adapters.push(adapter);
+        }
+    }
+    (PreparedAcpAdapters { adapters }, errors)
 }
 
 #[cfg(test)]

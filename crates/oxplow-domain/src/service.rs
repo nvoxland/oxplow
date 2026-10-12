@@ -27,8 +27,43 @@ pub struct ServiceSpec {
 
 const ALL: &[Mode] = &[Mode::Pure, Mode::Transactional, Mode::External];
 
+/// Services multiplexed by the `scope` builtin. The SQL service owns the
+/// builtin's legacy metadata; each call checks its actual declared service.
+pub const CALLABLE: &[&str] = &[
+    "sql.read",
+    "state.read",
+    "extension_config.read",
+    "jobs.read",
+];
+
 /// Every service, by scope.
 pub const SERVICES: &[ServiceSpec] = &[
+    ServiceSpec {
+        scope: "jobs.read",
+        title: "Read recorded job results",
+        summary: "Read this extension's durable job status and result: scope(\"jobs.read\", {id}).",
+        builtins: &[],
+        approval: false,
+        modes: ALL,
+    },
+    ServiceSpec {
+        scope: "extension_config.read",
+        title: "Read resolved extension configuration",
+        summary: "Read the resolved defaults, project and personal settings with their provenance: \
+                  `scope(\"extension_config.read\", {})`.",
+        builtins: &[],
+        approval: false,
+        modes: ALL,
+    },
+    ServiceSpec {
+        scope: "state.read",
+        title: "Read private extension state",
+        summary: "Read this extension's workflow state or cache: \
+                  `scope(\"state.read\", {scope, area})` returns a snapshot or null.",
+        builtins: &[],
+        approval: false,
+        modes: ALL,
+    },
     ServiceSpec {
         scope: "sql.read",
         title: "Read the semantic layer",
@@ -50,18 +85,65 @@ pub const SERVICES: &[ServiceSpec] = &[
     ServiceSpec {
         scope: "ai.compute",
         title: "Ask a model",
-        summary: "Model calls on your AI provider: classify, score, summarize, extract. \
+        summary: "Model calls on your AI provider: classify, score, summarize, extract, typed completion. \
                   Each answer is recorded, so the same question on the same text costs \
                   one call.",
-        builtins: &["ai_classify", "ai_score", "ai_summarize", "ai_extract"],
+        builtins: &[
+            "ai_classify",
+            "ai_score",
+            "ai_summarize",
+            "ai_extract",
+            "ai_complete",
+        ],
         approval: true,
         modes: &[Mode::External],
+    },
+    ServiceSpec {
+        scope: "ai.discover",
+        title: "Discover model capabilities",
+        summary: "Declared model identities, features and limits; no credentials or paid probes.",
+        builtins: &["ai_capabilities", "ai_models"],
+        approval: false,
+        modes: ALL,
     },
 ];
 
 /// The service `scope`, if it is one.
 pub fn service(scope: &str) -> Option<&'static ServiceSpec> {
-    SERVICES.iter().find(|s| s.scope == scope)
+    SERVICES.iter().find(|s| s.scope == need_scope(scope))
+}
+
+/// A bounded read declaration, or an ordinary service name. Qualifiers
+/// are exact model names or relative file/directory paths, never SQL or globs.
+pub fn need_scope(need: &str) -> &str {
+    match need.split_once(':') {
+        Some(("sql.read", model)) if valid_model(model) => "sql.read",
+        Some(("tree.read", path)) if valid_path(path) => "tree.read",
+        _ => need,
+    }
+}
+
+pub fn declares(needs: &[String], scope: &str) -> bool {
+    needs.iter().any(|need| need_scope(need) == scope)
+}
+
+fn valid_model(model: &str) -> bool {
+    model.starts_with("v_")
+        && model.len() > 2
+        && model
+            .bytes()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_')
+}
+
+/// Portable repo-relative paths. A trailing slash denotes a directory.
+pub fn valid_path(path: &str) -> bool {
+    !path.is_empty()
+        && !path.starts_with('/')
+        && !path.contains(['\\', '\0', ':'])
+        && path
+            .trim_end_matches('/')
+            .split('/')
+            .all(|p| !p.is_empty() && p != "." && p != "..")
 }
 
 /// The service that provides builtin `name`, if one does.

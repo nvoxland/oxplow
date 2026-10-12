@@ -516,7 +516,7 @@ pub fn check_against(schema: &str, value: &serde_json::Value, what: &str) -> Res
 /// [`crate::scope`]), a capability (`work_items`), or one of its
 /// features (`snapshots.contents`), as core declares them.
 pub fn check_need(need: &str) -> Result<(), String> {
-    if crate::scope::scope(need).is_some() {
+    if crate::scope::scope(crate::service::need_scope(need)).is_some() {
         return Ok(());
     }
     let (id, feature) = match need.split_once('.') {

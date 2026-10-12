@@ -34,8 +34,48 @@ The registry records each command's **source** (`core`,
 `extension:<name>`; `CommandBus::source_of`) and each
 namespace's **holder** (`namespace_owner`: `oxplow`, or the one source
 holding it). `register` is core's (under `oxplow`); `register_namespace(ns,
-source, commands)` registers a source's commands all-or-nothing;
-`unregister_source` removes one source's (an extension disabled, an
+source, commands)` registers a source's commands all-or-nothing. Duplicate
+IDs within the submitted batch are rejected before mutation. For replacement,
+`replace_namespace` delegates to `replace_namespaces`: an atomic list of
+`NamespaceCommands` (namespace, source, prepared commands). Each source appears
+once. Every replaced source is removed from a cloned registry before any new
+batch is validated, so participating sources can exchange namespaces, IDs or
+shortcuts. Unmentioned sources remain intact. The final registry swaps under
+one write lock; any rejection preserves every prior command and holder. An
+empty command set removes its source. Commands already resolved keep their Arc
+handlers. This boundary covers the command registry, not SQL models or the other
+extension registries. `prepare_namespaces` validates a candidate off the active
+registry lock; `publish_namespaces` accepts it only on the exact registry used
+for preparation. Every successful registration/replacement/removal advances an
+allocation identity retained by candidates, avoiding revision wraparound and ABA.
+An intervening mutation or publication on another bus returns Unavailable and
+leaves the active registry intact. Publication remains an in-memory operation,
+not a DB commit boundary.
+
+The native generation coordinator can reserve a checked command candidate and
+its extension owner metadata before SQL commit, then apply the replacement while
+retaining both locks through the remaining generation maps. Standalone command
+publication retains the existing optimistic checks. Boot adopts the shared
+generation reader boundary before extension consumers or requests are exposed.
+`CommandBus::with_activation` provides the optional ingress boundary: a pin is
+attached before command lookup and retained through the entire pipeline, including
+prepared effect commands, compositions and post-commit projections. A standalone
+bus retains its previous behavior. Production Services adopt the same boundary
+as the SQL gateway and provider registry during boot.
+
+Live extension reconciliation now stages every enabled replacement together from
+one CatalogSnapshot and publishes one fenced registry candidate. Load errors in
+an enabled non-required extension reject the batch; partially parsed command
+lists do not replace prior handlers. Namespace/shortcut validation spans all
+sources. Explicit disabled/removed sources are withdrawn first, independently
+of accepting new code, and captured command contexts have a live owner check so
+already-routed handlers cannot preserve that authority. Catalog changes during
+staging also reject publication. The reconciler yields and restages up to three
+times for publication races; persistent contention leaves diagnostics until
+another reconciliation. These rules preserve command handlers, not a coherent
+DB/vocabulary/provider/UI activation in standalone use. Production boot retires
+this separate reconciler in favor of the shared generation coordinator and
+committed runtime catalog; raw filesystem snapshots remain authoring inputs. `unregister_source` removes one source's (an extension disabled, an
 external provider stopped), freeing a namespace left empty. Migration V26 rewrote
 history (audit, proposals, `command.*` payloads) from the old two-part
 ids. A command declares (`oxplow_domain::commands::CommandSpec`):
@@ -55,6 +95,15 @@ ids. A command declares (`oxplow_domain::commands::CommandSpec`):
 `Actor` is who runs it: `Human`, `Agent { thread_id, stream_id }`,
 `Lens { lens_id, on_behalf_of }`, `System`. Its `source()` (`human`,
 `agent:thr3`, `lens:acme/x`) is what the event and audit record.
+
+`Actor::Job` is host-derived from a validated job/attempt/fence identity. It
+has its own source, carries the trusted provenance thread/stream for gates and
+is confined to that stream. It cannot confirm or create a proposal. Its separate
+`Invoker::Job` is refused by every existing `Invokers` declaration, including
+`ALL`; no generic command admission is widened. A lens wrapping a Job retains
+Job admission and its thread/stream confinement rather than acquiring Lens rights. Trusted registered job operations
+use their own execution surface. Writer-bound commands from gated actors now
+fail closed when the actor lacks a thread, rather than passing an absent gate.
 
 ## Offering a command to a person
 
@@ -136,6 +185,10 @@ is no other command list in the app.
 
 ## Scopes
 
+Command composers reject every `tree.read` declaration, including qualified
+file/directory bounds. They execute inside a database transaction; captured
+tree reads belong to effect or collector contexts outside that transaction.
+
 What a handler may do beyond composing other commands is a **scope**:
 an OAuth-style permission named `<resource>.<action>`, declared by core
 with an **access** (`oxplow_domain::scope`: `SCOPES`;
@@ -144,6 +197,27 @@ with an **access** (`oxplow_domain::scope`: `SCOPES`;
 `snapshots` — a project picks an implementation of.)
 Every command — core's and any extension's — reaches them the same way,
 so oxplow's own commands can do nothing an extension's can't.
+
+Composed children capture their own RunContext during routing, alongside the
+retained command handler. A registered contribution factory supplies that child's
+identity, package version, generation and declared authority; a command without
+one inherits the caller in a new child context. Nested composers run pure under
+their own contribution, transactional leaves use transactional mode, and external
+steps use their own context for provider invocation. Cancellation and host live
+guards remain inherited. Check authority before composition and again before
+each child executes; a later registry replacement cannot relabel a retained
+handler. Native scope operations also include their implicit backing scope in
+the captured declaration. This prevents namespace services from mistaking the
+parent composer's extension for the child command's owner. Parent audit and event
+atomicity are unchanged; this does not implement generation-wide reader pinning.
+
+The native `state.read/snapshot` operation reads its owning contribution's private
+namespace from the command's connection. Its scope/area input contains no owner
+selector and its read access leaves no payload in command audit or SQL models.
+`StateHost` also supplies a trusted write helper for an already-audited TxCtx,
+with live checks and CAS savepoint rollback. There is no public state write
+operation yet: private input/result/proposal handling must precede that surface.
+See [extensions.md](./extensions.md) "Private state host boundary".
 
 | Access | Does | Audited | An agent's run |
 |---|---|---|---|
@@ -163,9 +237,12 @@ commits with the run; the file is written after it commits), while
 (each commits in its own service's transaction).
 Two more scopes are services a script uses through builtins rather than
 `scope(…)` — `tree.read` and `ai.compute` ([extensions.md](./extensions.md)
-"Services"). A command's script uses `sql.read` only: it composes, so no
-model, and it composes inside the bus's transaction, so no tree
-(`scope_calls::check_command_need`, at load). The one a script calls by `scope(…)` is **`sql.read`** — `{ sql, params? }`, one read-only
+"Services"). A command's script may read SQL or its owning extension's private state: it
+composes, so no model calls, and it composes inside the bus's transaction, so
+no tree (`scope_calls::check_command_need`, at load). The callable services are
+**`sql.read`** and **`state.read`**; state takes `{scope, area}` and returns
+null or `{stamp, values}` on the routing connection, with identity and live
+authority checked by StateHost. It never enters the semantic layer. SQL takes `{ sql, params? }`, one read-only
 statement over the published models (`v_*`), its `:name`s bound from
 `params`, at most `SQL_READ_ROW_CAP` (1000) rows, answered as a list of
 row objects (`semantic_layer::read_on` under the `query_sql`
@@ -372,7 +449,7 @@ skipping.
    agent's session too, `session_id`, V40 — input,
    outcome, the handler's `result` — V114, so a run's answer, such as a
    merge's conflicts, stays readable after the fact — inverse, and the
-   scopes it called, "Scopes"), `command.executed@2` in the event log
+   scopes it called, "Scopes"), `command.executed@3` in the event log
    pointing at the audit row, the handler's domain events (with `cause` =
    the executed event, and the actor's thread/stream/agent session —
    `Actor::anchors()` —
@@ -439,7 +516,8 @@ with no stream reaches no worktree). Its source is
 `actor_kind = 'effect'` (V147 rebuilds `command_audit`'s CHECK, keeping
 proposals' `audit_id`), carried by `command.executed@2` and
 `command.proposed@2` — v1 plus `effect` in `ActorKind`, upcast as is; the
-v1 schemas keep the frozen `ActorKindV1`. An effect's reaction runs
+v1 schemas keep the frozen `ActorKindV1`; v2 schemas keep `ActorKindV2`.
+Current `command.executed@3` adds the dedicated `job` actor kind. An effect's reaction runs
 through `CommandBus::run_effect` (P8.D10) with `RunOrigin::Effect`, the
 fourth origin beside a call, an undo and an approval: like those, its
 record (`effect_run` + `effect.result@2`) lands in the run's transaction,
@@ -508,7 +586,8 @@ each call's **own** `invokers`, the agent policy (with the parent's
 composite never widens what its children allow; a call anywhere in the
 tree that asks makes the parent ask (`Preview { command: <parent>,
 destructive }`) unless the run was confirmed. Then every handler runs on
-the parent's `TxCtx` one level deeper (`TxCtx.depth`); routing refuses a
+the parent's transaction one level deeper (`TxCtx.depth`), with its own
+captured child RunContext; routing refuses a
 composite more than `MAX_NESTING` (8) deep ("does a command compose
 itself?") instead of recursing until the stack overflows. The parent has
 the **one audit row** and `command.executed` (children are not audited
@@ -924,3 +1003,36 @@ declared over them with `register_declared`.
 6. Tests: the input schema rejection names the field; the invoker and
    confirmation rules hold; the audit row and `command.executed` share
    the transaction; undo applies the inverse.
+
+## Private operation inputs
+
+An operation's `with_unrecorded` fields are represented by omitted-byte metadata
+in audit. The reserved `*` marker withholds the entire input, including non-object
+inputs, and counts JSON bytes without allocating a serialized payload. Private
+state CAS uses this for values, returns only a stamp and has no inverse payload.
+
+Composition captures private descendants from the routed command tree. Its
+invocation-local spec then withholds the entire parent input, since arbitrary
+composers can derive a private child from any field. This never changes the live
+registry, schema, grants or handler. Step success/failure metadata respects each
+child's recording policy; private failure diagnostics are replaced with fixed
+messages in stored audit/run history. Early failed composites conservatively
+withhold their input before descendants are known. The caller still receives the
+actual error.
+
+Proposals retain replayable inputs in a public model. A private-input call or
+composition needing confirmation is therefore refused before proposal storage
+or dry run. A person can make a direct confirmed invocation; unconfirmed calls
+can still run where ordinary command admission and grants permit them. Private
+data read and intentionally returned/emitted by extension code is governed by
+that extension's own explicit output contract; input redaction does not sanitize
+arbitrary extension-authored outputs.
+
+Declared jobs expose native `jobs.write/enqueue`, `jobs.write/cancel` and
+`jobs.read/snapshot` operations for extension-owned command declarations. Intent
+and provenance commit in the audited transaction; request content is
+`unrecorded`, including parent composition/proposal handling. Model work is
+performed later outside SQL under the job's current approval and exact registry
+owner. `jobs.read` is also a read-only scope service for composers and workers;
+it returns owned status/results and never the original request. See
+[extensions.md](./extensions.md) for declaration/input shapes and lifecycle.

@@ -18,13 +18,31 @@ impl CommandBus {
         error: Option<String>,
     ) {
         let actor = run.actor();
+        let private_input = spec.atomicity == oxplow_domain::Atomicity::Dispatch
+            || spec
+                .unrecorded
+                .iter()
+                .any(|field| field == "*" || input.get(field).is_some());
+        // Schema/handler diagnostics can quote rejected values. Preserve the
+        // actual error for the caller, but never copy it into public history.
+        let error = if private_input {
+            error.map(|_| "command with private input was rejected".into())
+        } else {
+            error
+        };
         let row = NewCommandAudit {
             command: spec.id.clone(),
             actor_kind: actor.kind(),
             actor_id: actor.id(),
             thread_id: actor.thread_id(),
             session_id: actor.session_id(),
-            input: spec.recorded_input(input),
+            // Before a failed composite is fully routed, private descendants
+            // may be unknown. Its original input cannot safely be recorded.
+            input: if spec.atomicity == oxplow_domain::Atomicity::Dispatch {
+                super::steps::private_composite_spec(spec).recorded_input(input)
+            } else {
+                spec.recorded_input(input)
+            },
             outcome,
             error,
             result: None,
@@ -236,6 +254,15 @@ pub(super) fn record_tx(
         scopes,
     } = executed;
     let actor = run.actor();
+    let failed = if spec
+        .unrecorded
+        .iter()
+        .any(|field| field == "*" || input.get(field).is_some())
+    {
+        failed.map(|_| "command with private input failed".into())
+    } else {
+        failed
+    };
     // A run that failed partway (a composite's steps, some landed) is
     // recorded with what landed, as an error.
     let outcome = if failed.is_some() {
@@ -277,7 +304,7 @@ pub(super) fn record_tx(
     )?;
     let mut executed = Envelope::typed::<CommandExecuted>(
         actor.source(),
-        &CommandExecutedV2 {
+        &CommandExecutedV3 {
             command: spec.id.clone(),
             actor_kind: actor.kind(),
             actor_id: actor.id(),

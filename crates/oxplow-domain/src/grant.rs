@@ -16,6 +16,42 @@ use serde::{Deserialize, Serialize};
 
 use crate::time::Timestamp;
 
+/// An external process has the person's authority unless the host can
+/// actually confine it. The broader tier requires explicit declaration
+/// and approval; existing program approval does not imply that opt-in.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    specta::Type,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionTier {
+    #[default]
+    Restricted,
+    Broader,
+}
+
+impl ExecutionTier {
+    pub fn is_restricted(&self) -> bool {
+        *self == Self::Restricted
+    }
+
+    pub fn require_external(self) -> Result<(), String> {
+        match self {
+            Self::Broader if cfg!(unix) => Ok(()),
+            Self::Broader => Err("broader external execution is unavailable on this platform: owned process cleanup is not supported".into()),
+            Self::Restricted => Err("restricted external execution is unavailable on this platform: file, socket and child-process authority is not fully confined; explicitly declare execution: broader and approve that broader access to run this program".into()),
+        }
+    }
+}
+
 /// What a contribution asks to do.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GrantRequest {
@@ -35,6 +71,8 @@ pub struct GrantRequest {
     pub env: BTreeSet<String>,
     /// The commands it may run with its viewer's rights (a component).
     pub commands: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "ExecutionTier::is_restricted")]
+    pub execution: ExecutionTier,
 }
 
 impl GrantRequest {
@@ -53,7 +91,24 @@ impl GrantRequest {
                 .map(|w| format!("{label} {w}"))
                 .collect::<Vec<_>>()
         };
-        out.extend(more("calls", &self.scopes, &granted.scopes));
+        out.extend(
+            self.scopes
+                .iter()
+                .filter(|need| {
+                    !granted.scopes.iter().any(|have| {
+                        have == *need
+                            || (crate::service::need_scope(need) != need.as_str()
+                                && have == crate::service::need_scope(need))
+                            || (need
+                                .strip_prefix("tree.read:")
+                                .zip(have.strip_prefix("tree.read:"))
+                                .is_some_and(|(want, prefix)| {
+                                    prefix.ends_with('/') && want.starts_with(prefix)
+                                }))
+                    })
+                })
+                .map(|need| format!("calls {need}")),
+        );
         out.extend(more("reaches", &self.hosts, &granted.hosts));
         out.extend(more(
             "reads credential",
@@ -66,6 +121,9 @@ impl GrantRequest {
             if let Some(p) = &self.program {
                 out.push(format!("runs {p}"));
             }
+        }
+        if self.execution == ExecutionTier::Broader && granted.execution != self.execution {
+            out.push("runs with the person's broader file, socket and process authority".into());
         }
         out
     }
@@ -100,6 +158,10 @@ impl Grant {
 #[serde(tag = "need", content = "name", rename_all = "snake_case")]
 pub enum Need {
     Scope(String),
+    /// A published model, including a derived model's inputs.
+    Model(String),
+    /// One portable path from the captured tree.
+    Path(String),
     Program(String),
     Host(String),
     Credential(String),
@@ -133,8 +195,8 @@ pub struct Decided {
 /// machine: the one table the decisions and the review both read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Enforcement {
-    /// Network egress is confined to the granted hosts (macOS's
-    /// `sandbox-exec` with the egress proxy).
+    /// Whether all network paths are confined to the granted hosts.
+    /// A direct-network sandbox alone cannot rule out local brokers.
     pub hosts: bool,
 }
 
@@ -169,13 +231,30 @@ pub fn decide(
     }
     let allowed = grant.map_or(declared, |g| &g.request);
     let within = match need {
-        Need::Scope(s) => allowed.scopes.contains(s),
+        Need::Scope(s) => allowed
+            .scopes
+            .iter()
+            .any(|n| crate::service::need_scope(n) == s),
+        Need::Model(model) => {
+            allowed.scopes.contains("sql.read")
+                || allowed.scopes.contains(&format!("sql.read:{model}"))
+        }
+        Need::Path(path) => {
+            crate::service::valid_path(path)
+                && (allowed.scopes.contains("tree.read")
+                    || allowed.scopes.iter().any(|n| {
+                        n.strip_prefix("tree.read:").is_some_and(|p| {
+                            crate::service::valid_path(p)
+                                && (p == path || (p.ends_with('/') && path.starts_with(p)))
+                        })
+                    }))
+        }
         Need::Program(p) => allowed.program.as_deref() == Some(p.as_str()),
         Need::Host(h) => allowed.hosts.iter().any(|pattern| host_matches(pattern, h)),
         Need::Credential(c) => allowed.credentials.contains(c),
         Need::Env(e) => allowed.env.contains(e),
         Need::Command(c) => allowed.commands.contains(c),
-        Need::Files => allowed.program.is_some(),
+        Need::Files => allowed.program.is_some() && allowed.execution == ExecutionTier::Broader,
     };
     if !within {
         return Decision::Denied(match grant {
@@ -205,6 +284,7 @@ mod tests {
         GrantRequest {
             scopes: ["sql.read".to_string()].into(),
             program: Some("bin/sync.sh".into()),
+            execution: ExecutionTier::Broader,
             hosts: [
                 "api.github.com".to_string(),
                 "*.githubusercontent.com".to_string(),

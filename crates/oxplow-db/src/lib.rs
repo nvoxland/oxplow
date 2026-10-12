@@ -30,7 +30,10 @@ pub mod event_content_store;
 pub mod event_log_store;
 pub mod event_retention;
 pub mod event_type_store;
+pub mod extension_config_store;
+pub mod extension_job_store;
 pub mod extension_run_store;
+pub mod extension_state_store;
 mod fact_chain;
 pub mod fact_store;
 pub mod git_store;
@@ -90,7 +93,9 @@ pub use contribution_health_store::{
 pub use dashboard_store::{
     Dashboard, DashboardItem, DashboardWithItems, NewDashboardItem, SqliteDashboardStore,
 };
-pub use database::{map_sql_err, string_to_ts, ts_to_string, Database, DbInitError, TxError};
+pub use database::{
+    map_sql_err, string_to_ts, ts_to_string, Database, DbInitError, PublicationTransaction, TxError,
+};
 pub use diagnostic_store::{DiagnosticRow, SqliteDiagnosticStore};
 pub use effort_evidence_store::EffortObservation;
 pub use effort_evidence_store::SqliteEffortEvidenceStore;

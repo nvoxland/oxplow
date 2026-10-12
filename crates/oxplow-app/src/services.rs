@@ -60,7 +60,7 @@ impl Sources {
 pub struct Given {
     pub tree: Option<Tree>,
     pub ai: Option<Arc<dyn oxplow_script::AiOracle>>,
-    /// Its `scope(…)` calls are served (`sql.read`), each decided as it
+    /// Its `scope(…)` calls are served, each decided as it
     /// is called against `needs` (`scope_calls::Calls`).
     pub scopes: bool,
     /// What the script declares, and its kind implies.
@@ -106,6 +106,7 @@ pub struct Wanted {
     /// The builtin that wants the tree, a model.
     tree: Option<&'static str>,
     ai: Option<&'static str>,
+    ai_discover: Option<&'static str>,
     scopes: bool,
     needs: Vec<String>,
 }
@@ -113,7 +114,7 @@ pub struct Wanted {
 /// Decide each service Starlark `script` uses on `run`: refused when the
 /// run's mode can't use it, when `needs` (what it declares, and what its
 /// kind implies) doesn't name it, or when its authority denies it. A
-/// `sql.read` call is decided as it's made (`scope_calls::Calls`); the
+/// Callable scope services are decided as each call is made (`scope_calls::Calls`); the
 /// others here, recorded on the run either way.
 pub fn decide(run: &RunContext, script: &str, needs: &[String]) -> Result<Wanted, String> {
     let mut wanted = Wanted {
@@ -124,9 +125,12 @@ pub fn decide(run: &RunContext, script: &str, needs: &[String]) -> Result<Wanted
         let service =
             oxplow_domain::service::service_of_builtin(builtin).expect("a service builtin");
         let scope = service.scope;
-        let declared = needs.iter().any(|n| n == scope);
-        if scope == "sql.read" {
-            if !declared {
+        let declared = oxplow_domain::service::declares(needs, scope);
+        if builtin == "scope" {
+            if !oxplow_domain::service::CALLABLE
+                .iter()
+                .any(|scope| oxplow_domain::service::declares(needs, scope))
+            {
                 return Err(oxplow_domain::service::undeclared(builtin));
             }
             wanted.scopes = true;
@@ -135,6 +139,7 @@ pub fn decide(run: &RunContext, script: &str, needs: &[String]) -> Result<Wanted
         let slot = match scope {
             "tree.read" => &mut wanted.tree,
             "ai.compute" => &mut wanted.ai,
+            "ai.discover" => &mut wanted.ai_discover,
             other => unreachable!("a service without a host: {other}"),
         };
         if slot.is_some() {
@@ -161,23 +166,42 @@ pub fn decide(run: &RunContext, script: &str, needs: &[String]) -> Result<Wanted
 impl Wanted {
     /// The hosts for what it may use, built from `sources` for `run`.
     pub async fn build(self, run: &RunContext, sources: &Sources) -> Result<Given, String> {
+        run.check_authority()?;
         let tree = match (self.tree, &sources.tree) {
             (None, _) => None,
             (Some(_), Some(Trees::Fixed(tree))) => Some(tree.clone()),
             (Some(_), Some(Trees::From(source))) => Some(source.tree(run.anchors()).await?),
             (Some(builtin), None) => return Err(unavailable(builtin, "tree.read")),
         };
-        let ai: Option<Arc<dyn oxplow_script::AiOracle>> = match (self.ai, &sources.ai) {
-            (None, _) => None,
-            (Some(_), Some((compute, caller))) => {
-                Some(Arc::new(crate::ai_compute::CollectorOracle::new(
-                    compute.clone(),
-                    caller.clone(),
-                    run.clone(),
-                )))
+        let tree = tree.map(|tree| {
+            if run.has_path_bounds() {
+                Arc::new(
+                    tree.iter()
+                        .filter(|(path, _)| run.permits_path(path))
+                        .map(|(path, text)| (path.clone(), text.clone()))
+                        .collect(),
+                )
+            } else {
+                tree
             }
-            (Some(builtin), None) => return Err(unavailable(builtin, "ai.compute")),
+        });
+        let ai_scope = if self.ai.is_some() {
+            "ai.compute"
+        } else {
+            "ai.discover"
         };
+        let ai: Option<Arc<dyn oxplow_script::AiOracle>> =
+            match (self.ai.or(self.ai_discover), &sources.ai) {
+                (None, _) => None,
+                (Some(_), Some((compute, caller))) => {
+                    Some(Arc::new(crate::ai_compute::CollectorOracle::new(
+                        compute.clone(),
+                        caller.clone(),
+                        run.clone(),
+                    )))
+                }
+                (Some(builtin), None) => return Err(unavailable(builtin, ai_scope)),
+            };
         Ok(Given {
             tree,
             ai,
@@ -193,6 +217,9 @@ impl Wanted {
         }
         if let Some(builtin) = self.ai {
             return Err(unavailable(builtin, "ai.compute"));
+        }
+        if let Some(builtin) = self.ai_discover {
+            return Err(unavailable(builtin, "ai.discover"));
         }
         Ok(Given {
             scopes: self.scopes,
@@ -226,11 +253,23 @@ pub fn check_uses(
     may: impl Fn(&str) -> Result<(), String>,
 ) -> Result<(), String> {
     for builtin in oxplow_script::uses::builtins_used(script) {
+        if builtin == "scope" {
+            let declared: Vec<_> = oxplow_domain::service::CALLABLE
+                .iter()
+                .filter(|scope| oxplow_domain::service::declares(needs, scope))
+                .collect();
+            if !declared.is_empty() {
+                for scope in declared {
+                    may(scope).map_err(|e| format!("uses `{builtin}()`: {e}"))?;
+                }
+                continue;
+            }
+        }
         let scope = oxplow_domain::service::service_of_builtin(builtin)
             .expect("a service builtin")
             .scope;
         may(scope).map_err(|e| format!("uses `{builtin}()`: {e}"))?;
-        if !needs.iter().any(|n| n == scope) {
+        if !oxplow_domain::service::declares(needs, scope) {
             return Err(format!(
                 "uses `{builtin}()` without `{scope}` in its `needs` — fix: add `{scope}` to \
                  `needs`"
@@ -286,15 +325,28 @@ pub fn of_extension(
     let mut out = Vec::new();
     let mut push =
         |script: String, entry: &str, text: &str, declared: &[String], needs: &[String]| {
-            let used = oxplow_script::uses::services_used(text);
+            let mut used = oxplow_script::uses::services_used(text);
+            if oxplow_script::uses::builtins_used(text).contains("scope") {
+                let declared_callable: Vec<_> = oxplow_domain::service::CALLABLE
+                    .iter()
+                    .filter(|scope| oxplow_domain::service::declares(needs, scope))
+                    .copied()
+                    .collect();
+                if !declared_callable.is_empty() {
+                    used.remove("sql.read");
+                    used.extend(declared_callable);
+                }
+            }
             let services = oxplow_domain::service::SERVICES
                 .iter()
-                .filter(|s| used.contains(s.scope) || needs.iter().any(|n| n == s.scope))
+                .filter(|s| {
+                    used.contains(s.scope) || oxplow_domain::service::declares(needs, s.scope)
+                })
                 .map(|s| ServiceUse {
                     scope: s.scope.to_string(),
-                    declared: if declared.iter().any(|n| n == s.scope) {
+                    declared: if oxplow_domain::service::declares(declared, s.scope) {
                         Declared::Declared
-                    } else if needs.iter().any(|n| n == s.scope) {
+                    } else if oxplow_domain::service::declares(needs, s.scope) {
                         Declared::Implied
                     } else {
                         Declared::Undeclared
@@ -369,6 +421,9 @@ pub fn collector_needs(
     script: Option<&str>,
 ) -> Vec<String> {
     let mut needs = spec.service_needs();
+    if spec.input.is_some() && !oxplow_domain::service::declares(&needs, "sql.read") {
+        needs.push("sql.read".into());
+    }
     let entity = spec.facts.is_empty()
         && spec.runtime == oxplow_config::collectors::CollectorRuntime::Starlark;
     if entity
@@ -378,6 +433,26 @@ pub fn collector_needs(
         needs.push("ai.compute".into());
     }
     needs
+}
+
+/// Read an explicitly configured project input without following links out
+/// of its checkout. This is a host input, not a script filesystem service.
+pub(crate) fn project_file(root: &std::path::Path, rel: &str) -> Result<Option<String>, String> {
+    if !oxplow_domain::service::valid_path(rel) {
+        return Err("project file path must be relative without traversal".into());
+    }
+    let base = root.canonicalize().map_err(|e| e.to_string())?;
+    let path = match root.join(rel).canonicalize() {
+        Ok(path) => path,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e.to_string()),
+    };
+    if !path.starts_with(base) {
+        return Err("project input resolves outside its checkout".into());
+    }
+    std::fs::read_to_string(path)
+        .map(Some)
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

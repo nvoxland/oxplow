@@ -626,8 +626,9 @@ export async function runComponentQuery(
   asset: string,
   params: Record<string, SqlCell>,
   streamId: string | null,
+  version: string,
 ): Promise<LensRun> {
-  return unwrap(await commands.runComponentQuery(id, asset, params, streamId));
+  return unwrap(await commands.runComponentQuery(id, asset, params, streamId, version));
 }
 
 /** Load the `custom` lens `id`'s component bundle as it is now, for its

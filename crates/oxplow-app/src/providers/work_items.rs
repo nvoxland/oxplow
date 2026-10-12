@@ -47,11 +47,17 @@ impl CapabilityHost for WorkItemsHost {
         self.0.get(id).is_ok()
     }
 
-    fn admit(&self, instance: &Arc<Instance>) -> Result<Value, String> {
+    fn prepare(
+        &self,
+        instance: &Arc<Instance>,
+    ) -> Result<super::registry::PreparedProviderCapability, String> {
         let provider = ExternalWorkItems::provider(instance)?;
         let features = serde_json::to_value(provider.features).map_err(|e| e.to_string())?;
-        self.0.register(provider);
-        Ok(features)
+        let registry = self.0.clone();
+        Ok(super::registry::PreparedProviderCapability::new(
+            features,
+            move || registry.register(provider),
+        ))
     }
 
     fn retire(&self, id: &str) {

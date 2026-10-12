@@ -25,14 +25,14 @@ pub fn contribution(
     ContributionRef {
         id: ContributionId::new(&ext.name, kind, local),
         version: ext.version.clone(),
-        generation: Some(catalog.generation(root)),
+        generation: Some(catalog.runtime_snapshot(root).generation().to_string()),
     }
 }
 
 /// The catalog generation `root` is served at now: what a run checks it
 /// was built against.
 pub fn current_generation(catalog: &ExtensionCatalog, root: &Path) -> String {
-    catalog.generation(root)
+    catalog.runtime_snapshot(root).generation().to_string()
 }
 
 /// A run reacting to `event`: caused by it, anchored where it happened,
@@ -87,7 +87,13 @@ pub fn for_policy(
     };
     let run = match ext {
         Some(ext) => RunContext::contribution(
-            contribution(catalog, root, ext, ContributionKind::Implementation, id),
+            contribution(
+                catalog,
+                root,
+                ext,
+                ContributionKind::Implementation,
+                &oxplow_domain::contribution::implementation_local("effort_policy", id),
+            ),
             actor,
             Mode::External,
         ),

@@ -38,7 +38,10 @@ impl CapabilityHost for EffortPolicyHost {
         self.0.has(id)
     }
 
-    fn admit(&self, instance: &Arc<Instance>) -> Result<Value, String> {
+    fn prepare(
+        &self,
+        instance: &Arc<Instance>,
+    ) -> Result<super::registry::PreparedProviderCapability, String> {
         let declared = &instance.declared;
         let react = declared
             .commands
@@ -54,11 +57,15 @@ impl CapabilityHost for EffortPolicyHost {
             .map(|c| c.features.clone())
             .filter(|f| !f.is_null())
             .unwrap_or_else(|| json!({}));
-        self.0.register(Arc::new(ExternalEffortPolicy {
+        let policy = Arc::new(ExternalEffortPolicy {
             instance: instance.clone(),
             input,
-        }));
-        Ok(features)
+        });
+        let registry = self.0.clone();
+        Ok(super::registry::PreparedProviderCapability::new(
+            features,
+            move || registry.register(policy),
+        ))
     }
 
     fn retire(&self, id: &str) {

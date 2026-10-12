@@ -124,6 +124,7 @@ pub(super) fn author_of(actor: &Actor) -> &'static str {
         Actor::Lens { on_behalf_of, .. } => author_of(on_behalf_of),
         Actor::System => "system",
         Actor::Effect { .. } => "effect",
+        Actor::Job { .. } => "job",
     }
 }
 
@@ -244,7 +245,7 @@ pub fn update_op() -> Op {
                     return Err(invalid(
                         "/quote",
                         "a relink names both `quote` and `selectors_json` (and `orphaned` only with them)",
-                    ))
+                    ));
                 }
             };
             let mut events = Vec::new();

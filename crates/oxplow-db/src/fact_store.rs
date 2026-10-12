@@ -65,7 +65,7 @@ pub struct Measure {
 }
 
 /// Write-side input for [`SqliteFactStore::upsert_measure`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct NewMeasure {
     pub key: String,
     pub title: String,
@@ -154,7 +154,7 @@ pub struct Dimension {
     pub entity_json: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct NewDimension {
     pub key: String,
     pub label: String,
@@ -248,7 +248,7 @@ pub struct MetricSpec {
 
 /// Write-side input for [`SqliteFactStore::upsert_spec`]. Build with
 /// [`NewMetricSpec::base`] then override fields.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct NewMetricSpec {
     pub key: String,
     pub title: String,
@@ -483,6 +483,177 @@ fn row_to_capture(row: &rusqlite::Row<'_>) -> rusqlite::Result<MetricCapture> {
         scan_kind: row.get(20)?,
         turn_id: row.get(21)?,
     })
+}
+
+/// Compose catalog publication in a caller-owned transaction.
+pub fn upsert_measure_tx(
+    tx: &rusqlite::Transaction<'_>,
+    m: &NewMeasure,
+) -> Result<i64, DomainError> {
+    // A `capture_scope` change swaps the cube's BUILD RULE (state
+    // fold vs per-capture GROUP BY), so rows built under the old
+    // rule must not survive to be served — invalidate that
+    // measure's cube in the same transaction (tsk103 review).
+    // Change-detected, never unconditional: `seed_catalog`
+    // re-upserts every measure at boot (the tsk100 lesson).
+    let prior_scope: Option<String> = tx
+        .query_row(
+            "SELECT capture_scope FROM measure WHERE key = ?1",
+            params![m.key],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(map_sql_err)?;
+    let now = ts_to_string(Timestamp::now());
+    let (scope, extension) = stored_scope(&m.scope);
+    tx.execute(
+        "INSERT INTO measure
+           (key, title, unit, subject_kind, temporal_semantics, capture_scope,
+            scope, description, created_at, updated_at, extension)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?10)
+         ON CONFLICT(key) DO UPDATE SET
+            title=excluded.title, unit=excluded.unit,
+            subject_kind=excluded.subject_kind,
+            temporal_semantics=excluded.temporal_semantics,
+            capture_scope=excluded.capture_scope,
+            scope=excluded.scope, extension=excluded.extension,
+            description=excluded.description, updated_at=excluded.updated_at",
+        params![
+            m.key,
+            m.title,
+            m.unit,
+            m.subject_kind,
+            m.temporal_semantics,
+            m.capture_scope,
+            scope,
+            m.description,
+            now,
+            extension,
+        ],
+    )
+    .map_err(map_sql_err)?;
+    let id: i64 = tx
+        .query_row(
+            "SELECT id FROM measure WHERE key = ?1",
+            params![m.key],
+            |r| r.get(0),
+        )
+        .map_err(map_sql_err)?;
+    if prior_scope.is_some_and(|p| p != m.capture_scope) {
+        for sql in [
+            "DELETE FROM metric_cube WHERE measure_id = ?1",
+            "DELETE FROM metric_live_fact WHERE measure_id = ?1",
+            "DELETE FROM metric_cube_state WHERE measure_id = ?1",
+        ] {
+            tx.execute(sql, params![id]).map_err(map_sql_err)?;
+        }
+        // Fence any build in flight (tsk103).
+        tx.execute("UPDATE metric_cube_epoch SET epoch = epoch + 1", [])
+            .map_err(map_sql_err)?;
+    }
+    Ok(id)
+}
+
+/// Compose catalog publication in a caller-owned transaction.
+pub fn upsert_dimension_tx(
+    tx: &rusqlite::Transaction<'_>,
+    d: &NewDimension,
+) -> Result<(), DomainError> {
+    let (scope, extension) = stored_scope(&d.scope);
+    let prior: Option<bool> = tx
+        .query_row(
+            "SELECT promoted FROM dimension WHERE key = ?1",
+            params![d.key],
+            |r| r.get::<_, i64>(0).map(|v| v != 0),
+        )
+        .optional()
+        .map_err(map_sql_err)?;
+    tx.execute(
+        "INSERT INTO dimension (key, label, value_type, subject_kind, vocabulary_json, scope, promoted, entity_json, extension)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+         ON CONFLICT(key) DO UPDATE SET
+            label=excluded.label, value_type=excluded.value_type,
+            subject_kind=excluded.subject_kind,
+            vocabulary_json=excluded.vocabulary_json, scope=excluded.scope,
+            promoted=excluded.promoted, entity_json=excluded.entity_json,
+            extension=excluded.extension",
+        params![d.key, d.label, d.value_type, d.subject_kind, d.vocabulary_json, scope, d.promoted, d.entity_json, extension],
+    )
+    .map_err(map_sql_err)?;
+    let grain_changed = match prior {
+        Some(was) => was != d.promoted,
+        None => d.promoted,
+    };
+    if grain_changed {
+        for sql in [
+            "DELETE FROM metric_cube",
+            "DELETE FROM metric_live_fact",
+            "DELETE FROM metric_cube_state",
+            // Fence any build in flight (tsk103).
+            "UPDATE metric_cube_epoch SET epoch = epoch + 1",
+        ] {
+            tx.execute(sql, []).map_err(map_sql_err)?;
+        }
+    }
+    Ok(())
+}
+
+/// Compose catalog publication in a caller-owned transaction.
+pub fn upsert_spec_tx(
+    tx: &rusqlite::Transaction<'_>,
+    s: &NewMetricSpec,
+) -> Result<i64, DomainError> {
+    let now = ts_to_string(Timestamp::now());
+    let (scope, extension) = stored_scope(&s.scope);
+    tx.execute(
+        "INSERT INTO metric_spec
+           (key, title, unit, source_measure, aggregation, filter_json, formula,
+            sliceable_dims_json, direction, target, warn_at, fail_at, description,
+            category, language, scope, display_kind, created_at, updated_at, extension,
+            entity_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
+                 ?16, ?17, ?18, ?18, ?19, ?20)
+         ON CONFLICT(key) DO UPDATE SET
+            title=excluded.title, unit=excluded.unit,
+            source_measure=excluded.source_measure, aggregation=excluded.aggregation,
+            filter_json=excluded.filter_json, formula=excluded.formula,
+            sliceable_dims_json=excluded.sliceable_dims_json,
+            direction=excluded.direction, target=excluded.target,
+            warn_at=excluded.warn_at, fail_at=excluded.fail_at,
+            description=excluded.description, category=excluded.category,
+            language=excluded.language, scope=excluded.scope,
+            extension=excluded.extension, entity_json=excluded.entity_json,
+            display_kind=excluded.display_kind, updated_at=excluded.updated_at",
+        params![
+            s.key,
+            s.title,
+            s.unit,
+            s.source_measure,
+            s.aggregation,
+            s.filter_json,
+            s.formula,
+            s.sliceable_dims_json,
+            s.direction,
+            s.target,
+            s.warn_at,
+            s.fail_at,
+            s.description,
+            s.category,
+            s.language,
+            scope,
+            s.display_kind,
+            now,
+            extension,
+            s.entity_json,
+        ],
+    )
+    .map_err(map_sql_err)?;
+    tx.query_row(
+        "SELECT id FROM metric_spec WHERE key = ?1",
+        params![s.key],
+        |r| r.get(0),
+    )
+    .map_err(map_sql_err)
 }
 
 /// The measure `key`, read on the caller's connection.
@@ -1290,70 +1461,7 @@ impl SqliteFactStore {
     /// preserved across updates.
     pub async fn upsert_measure(&self, m: NewMeasure) -> Result<i64, DomainError> {
         self.db
-            .transaction(move |tx| {
-                // A `capture_scope` change swaps the cube's BUILD RULE (state
-                // fold vs per-capture GROUP BY), so rows built under the old
-                // rule must not survive to be served — invalidate that
-                // measure's cube in the same transaction (tsk103 review).
-                // Change-detected, never unconditional: `seed_catalog`
-                // re-upserts every measure at boot (the tsk100 lesson).
-                let prior_scope: Option<String> = tx
-                    .query_row(
-                        "SELECT capture_scope FROM measure WHERE key = ?1",
-                        params![m.key],
-                        |r| r.get(0),
-                    )
-                    .optional()
-                    .map_err(map_sql_err)?;
-                let now = ts_to_string(Timestamp::now());
-                let (scope, extension) = stored_scope(&m.scope);
-                tx.execute(
-                    "INSERT INTO measure
-                       (key, title, unit, subject_kind, temporal_semantics, capture_scope,
-                        scope, description, created_at, updated_at, extension)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?10)
-                     ON CONFLICT(key) DO UPDATE SET
-                        title=excluded.title, unit=excluded.unit,
-                        subject_kind=excluded.subject_kind,
-                        temporal_semantics=excluded.temporal_semantics,
-                        capture_scope=excluded.capture_scope,
-                        scope=excluded.scope, extension=excluded.extension,
-                        description=excluded.description, updated_at=excluded.updated_at",
-                    params![
-                        m.key,
-                        m.title,
-                        m.unit,
-                        m.subject_kind,
-                        m.temporal_semantics,
-                        m.capture_scope,
-                        scope,
-                        m.description,
-                        now,
-                        extension,
-                    ],
-                )
-                .map_err(map_sql_err)?;
-                let id: i64 = tx
-                    .query_row(
-                        "SELECT id FROM measure WHERE key = ?1",
-                        params![m.key],
-                        |r| r.get(0),
-                    )
-                    .map_err(map_sql_err)?;
-                if prior_scope.is_some_and(|p| p != m.capture_scope) {
-                    for sql in [
-                        "DELETE FROM metric_cube WHERE measure_id = ?1",
-                        "DELETE FROM metric_live_fact WHERE measure_id = ?1",
-                        "DELETE FROM metric_cube_state WHERE measure_id = ?1",
-                    ] {
-                        tx.execute(sql, params![id]).map_err(map_sql_err)?;
-                    }
-                    // Fence any build in flight (tsk103).
-                    tx.execute("UPDATE metric_cube_epoch SET epoch = epoch + 1", [])
-                        .map_err(map_sql_err)?;
-                }
-                Ok(id)
-            })
+            .transaction(move |tx| upsert_measure_tx(tx, &m))
             .await
     }
 
@@ -1386,45 +1494,7 @@ impl SqliteFactStore {
     /// may have carried the key in `dims_json` before the catalog knew it.
     pub async fn upsert_dimension(&self, d: NewDimension) -> Result<(), DomainError> {
         self.db
-            .transaction(move |tx| {
-                let (scope, extension) = stored_scope(&d.scope);
-                let prior: Option<bool> = tx
-                    .query_row(
-                        "SELECT promoted FROM dimension WHERE key = ?1",
-                        params![d.key],
-                        |r| r.get::<_, i64>(0).map(|v| v != 0),
-                    )
-                    .optional()
-                    .map_err(map_sql_err)?;
-                tx.execute(
-                    "INSERT INTO dimension (key, label, value_type, subject_kind, vocabulary_json, scope, promoted, entity_json, extension)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-                     ON CONFLICT(key) DO UPDATE SET
-                        label=excluded.label, value_type=excluded.value_type,
-                        subject_kind=excluded.subject_kind,
-                        vocabulary_json=excluded.vocabulary_json, scope=excluded.scope,
-                        promoted=excluded.promoted, entity_json=excluded.entity_json,
-                        extension=excluded.extension",
-                    params![d.key, d.label, d.value_type, d.subject_kind, d.vocabulary_json, scope, d.promoted, d.entity_json, extension],
-                )
-                .map_err(map_sql_err)?;
-                let grain_changed = match prior {
-                    Some(was) => was != d.promoted,
-                    None => d.promoted,
-                };
-                if grain_changed {
-                    for sql in [
-                        "DELETE FROM metric_cube",
-                        "DELETE FROM metric_live_fact",
-                        "DELETE FROM metric_cube_state",
-                        // Fence any build in flight (tsk103).
-                        "UPDATE metric_cube_epoch SET epoch = epoch + 1",
-                    ] {
-                        tx.execute(sql, []).map_err(map_sql_err)?;
-                    }
-                }
-                Ok(())
-            })
+            .transaction(move |tx| upsert_dimension_tx(tx, &d))
             .await
     }
 
@@ -1442,59 +1512,7 @@ impl SqliteFactStore {
     /// Insert or update (by `key`) a metric spec; returns its row id. `created_at`
     /// is preserved across updates.
     pub async fn upsert_spec(&self, s: NewMetricSpec) -> Result<i64, DomainError> {
-        self.db
-            .call(move |conn| {
-                let now = ts_to_string(Timestamp::now());
-                let (scope, extension) = stored_scope(&s.scope);
-                conn.execute(
-                    "INSERT INTO metric_spec
-                       (key, title, unit, source_measure, aggregation, filter_json, formula,
-                        sliceable_dims_json, direction, target, warn_at, fail_at, description,
-                        category, language, scope, display_kind, created_at, updated_at, extension,
-                        entity_json)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-                             ?16, ?17, ?18, ?18, ?19, ?20)
-                     ON CONFLICT(key) DO UPDATE SET
-                        title=excluded.title, unit=excluded.unit,
-                        source_measure=excluded.source_measure, aggregation=excluded.aggregation,
-                        filter_json=excluded.filter_json, formula=excluded.formula,
-                        sliceable_dims_json=excluded.sliceable_dims_json,
-                        direction=excluded.direction, target=excluded.target,
-                        warn_at=excluded.warn_at, fail_at=excluded.fail_at,
-                        description=excluded.description, category=excluded.category,
-                        language=excluded.language, scope=excluded.scope,
-                        extension=excluded.extension, entity_json=excluded.entity_json,
-                        display_kind=excluded.display_kind, updated_at=excluded.updated_at",
-                    params![
-                        s.key,
-                        s.title,
-                        s.unit,
-                        s.source_measure,
-                        s.aggregation,
-                        s.filter_json,
-                        s.formula,
-                        s.sliceable_dims_json,
-                        s.direction,
-                        s.target,
-                        s.warn_at,
-                        s.fail_at,
-                        s.description,
-                        s.category,
-                        s.language,
-                        scope,
-                        s.display_kind,
-                        now,
-                        extension,
-                        s.entity_json,
-                    ],
-                )?;
-                conn.query_row(
-                    "SELECT id FROM metric_spec WHERE key = ?1",
-                    params![s.key],
-                    |r| r.get(0),
-                )
-            })
-            .await
+        self.db.transaction(move |tx| upsert_spec_tx(tx, &s)).await
     }
 
     pub async fn get_spec(&self, key: &str) -> Result<Option<MetricSpec>, DomainError> {

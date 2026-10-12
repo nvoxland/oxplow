@@ -85,6 +85,240 @@ they drift (`OXPLOW_BLESS=1` rewrites it). The inventory and plan behind
 all this are the foundation roadmap's "Normalize contribution
 descriptors".
 
+**Public imports and exports.** The pure validator is `extensions/imports.rs`;
+`extensions/public_contracts.rs` normalizes manifest declarations, binds public
+model references and withholds contributions before catalog publication.
+Exports are explicit opt-in. A stable contribution kind or a legacy alias
+does not make a contribution public.
+
+- Targets use canonical `ContributionId` (`<extension>/<kind>/<local>`).
+  An import has a consumer-local binding name, a positive integer contract
+  version and required/optional status. Binding names are lowercase letters,
+  digits, dashes and underscores, starting with a letter and ending with a
+  letter or digit. Aliases and internal names never resolve a target.
+- Package `version` is release SemVer; `engine` is host compatibility;
+  an export's positive integer version is its individual contract. Imports
+  require exact equality. A model/event export cannot relabel its native
+  descriptor version. An export must name its owner's declared contribution.
+- Export visibility is `private` by default (not importable), `experimental`
+  (private consumers only), or `stable` (private/shared consumers). Kind
+  stability is a ceiling: an experimental kind cannot be exported stable.
+  A shared producer cannot expose experimental exports; an explicitly
+  private contract can stay internal to a shared package.
+- Missing, disabled, inaccessible or incompatible required targets block
+  the consumer. Optional equivalents remain explicitly unavailable with
+  warnings. Malformed declarations, zero versions, duplicate local bindings,
+  self-imports and ambiguous exports are errors even when optional. There is
+  no catalog-order winner for duplicate identities.
+- A blocked producer cannot supply a binding. Required failure propagates
+  to consumers to a fixed point; optional bindings become unavailable.
+  Disabled consumers do not impose activation dependencies. Among otherwise
+  eligible enabled candidates, reject every strongly connected cycle,
+  including available optional edges, with a deterministic path and errors
+  at each participating import; propagate these failures too. Remaining
+  candidates activate dependencies first, with lexical tie-breaking.
+- Imports express compatibility, never permissions, subscriptions or event
+  conversion. Existing foreign-event subscriptions and upcasts stay intact.
+  The host exposes public references and gates contributions that use an
+  unavailable optional binding before catalog publication. The validator neither
+  rewrites SQL nor invents a dynamic extension service/RPC surface.
+
+The normalized validator takes all candidates (name, enabled/shared flags,
+declared contribution versions, exports and imports with `DeclaredAt` sources)
+and returns resolved binding states, blocked extension names, activation order
+and source-located diagnostics. It is deterministic and does no I/O.
+
+Manifest declarations are `exports: [{contribution, version, visibility}]`,
+`imports: [{id, contribution, version, optional}]` and
+`import_guards: [{contribution, imports: [binding]}]`. Guards name this
+extension's models, lenses, collectors, commands, effects, advisories, skills
+or providers. A guard's bindings must be declared and nonempty; unknown or
+duplicate names are errors. Models and lenses can read a public model with
+`import_ref('binding')`; tokenized calls infer a guard automatically. Strings,
+comments and qualified function names are untouched. A model's binding becomes
+an ordinary `ref('<producer>/<model>')`, retaining lineage and native contract
+checks; a lens's becomes its quoted published view. SQL grants still apply.
+
+The loader validates declarations and optional guards before legacy global-name
+collision pruning can hide duplicate identities or let a withheld contribution
+reserve a global name. Host manifest checks (including engine compatibility)
+also block candidates with explicit public contracts and their required
+consumers; an invalid candidate never reserves global names. Resolve imports,
+withhold guarded contributions, remove mounts that
+refer to absent lenses/models/pages/providers, withdraw their exports, and
+resolve again until no contribution is removed. Repeat resolution after global
+collision checks, then bind SQL and publish. Removal is monotonic within a
+load; a later reload starts from the source declarations. This also withdraws
+gated exports from downstream consumers without blocking independent
+contributions. Stable slot identities retain their original manifest indexes.
+Disabled and blocked candidates are cleared after dependency resolution.
+
+`Extension.publicContracts` exposes declarations, withheld identities, resolved
+binding states, published references and an activation index. The index orders
+dependencies before consumers. Boot activation publishes runtime registries for
+one catalog snapshot; the descriptor index itself remains source metadata. A
+blocked extension's lookup reports its contract errors,
+distinct from configuration disabling. Other contribution kinds expose their
+published reference metadata; imports add no dynamic service-call surface.
+Authoring checks and impact review now build a read-only candidate catalog
+from fresh source declarations, replace only the candidate's matching origin,
+and resolve imports and guards before compiling the overlay. This snapshot
+supplies all enabled models and entity stubs; it does not reuse active views or
+publish registries. Previously active consumers blocked by the candidate report
+errors on that candidate, while unrelated existing failures are not attributed
+to it. Model compilation also reports errors from declared transitive consumers.
+Disabled packages can be inspected without changing enablement or authority.
+
+Both impact sides resolve against current project dependencies, rather than a
+complete historical dependency catalog. The installed side reads its own raw
+source even if its active contributions were cleared. Review and installation
+reject contract regressions before replacing files; source lookup allows a
+contract-blocked package to review a repairing update. Explicit configuration
+disabling still applies to update operations. Rejected project folders using
+reserved bundled names remain diagnostics only and cannot block the bundled
+package's public identity. Runtime generation activation is integrated; import
+withdrawal and activation behavior still need runtime validation. No runtime tests
+were added or run in this slice.
+
+## Namespaced configuration declarations
+
+`configuration:` in manifest v2 declares non-secret settings as
+`{version, schema, defaults}`. The version is a positive integer distinct from
+package, engine and public contract versions. The JSON Schema must declare an
+object root; defaults are an object and default to `{}`. Unknown declaration
+keys and explicit `configuration: null` are invalid. The loader retains only
+validated declarations in `Extension.configuration`; errors remain source
+located. The existing top-level `config:` key is still invalid. Provider
+instance configuration remains its own contract.
+
+`extensions/config_schema.rs` compiles with an explicitly offline retriever:
+no HTTP or filesystem schema retrieval, including when another dependency
+enables retrieval features. Schema/default inputs are bounded to 1 MiB serialized
+JSON and 64 nesting levels. Serialization counts bytes without allocating an
+unbounded duplicate. Diagnostics contain a JSON pointer and a built-in keyword
+or fixed error code, never library error text, enum choices, unexpected-property
+lists or offending values. At most 32 violations plus a truncation marker are
+returned, sorted and deduplicated.
+
+Defaults are fragments of objects that higher layers can complete. Direct
+`required` and `minProperties` errors on mergeable objects defer to final resolved
+validation. Arrays replace whole values, so required fields inside their objects
+are checked even in defaults. All other schema constraints apply to defaults as
+written; branch constraints such as `anyOf`/`oneOf` are not solved by inventing
+hypothetical user values. Authors must provide defaults satisfying those branch
+constraints. Final resolved validation defers no constraints. JSON Schema
+`default` annotations do not insert values; use the declaration's `defaults`.
+
+`extensions/config.rs` supplies pure resolution: recursively merge objects in
+`defaults < project < personal` order; arrays, scalars and explicit null replace
+subtrees. Missing layers inherit; a present null layer fails the object-root
+requirement. Empty overriding objects merge without clearing lower fields.
+Reset/unset is removal of a stored override, never a magic JSON sentinel. Origins
+are per effective leaf JSON pointer, with arrays atomic, empty objects as leaves
+and correct `~`/`/` escaping. Replaced subtrees lose stale origins. Merge/schema
+validation share a bounded byte counter and nesting check; merging avoids
+redundant object clones and origin removal uses the BTreeMap's prefix range.
+
+`ConfigurationFile::resolve` connects that resolver to the offline schema adapter:
+validate partial defaults and the final resolved object using the policy above,
+map only pointer/code diagnostics into layer-local issues, and return no resolved
+values on failure. Invalid namespace input is omitted from its diagnostic. The
+resolver caps, sorts and deduplicates issues; the schema adapter's cap remains
+smaller. There is no permissive fallback, external retrieval or secret lookup.
+
+### Private configuration services
+
+`extension_configuration::ConfigurationHost` loads the owning extension's
+manifest defaults and private Project/Personal override rows, resolves them in
+that order, validates the effective schema and reports per-leaf origins.
+`extension_config.read` is distinct from core app-settings `config.read`.
+Native operations are `snapshot` (effective values, origins and layer stamps)
+and `inspect` (stamps only, including old schema versions). Scripts declare
+`needs: [extension_config.read]` and call
+`scope("extension_config.read", {})`. Composers read their existing connection;
+effects, collectors and provider host calls use an owned DB read per call.
+Provider identity is captured at construction, as for private state. No
+extension/owner selector, SQL, credentials or authority comes from settings.
+
+A native `scope: extension_config.write`, `op: compare_exchange` takes
+`schema_version` and optional `project`/`personal` objects, each containing
+`expected` (exact prior stamp or null for creation) and `values` (object
+fragment). The host validates the complete candidate before either CAS mutation.
+Both layers can be replaced atomically for an explicit schema migration. An
+untouched layer must already use the current manifest version; reads of old
+versions fail closed. `inspect` supplies the old stamps needed for migration.
+Version decrease is refused. Failure rolls back both layers; storage errors
+abort the outer audited command transaction. No migration script or external
+wait executes inside that transaction. Writes return stamps and omit both
+layer inputs from audit; private compositions/proposals follow the state rules.
+
+Reset uses an empty override object at a newer revision, retaining stale-token
+rejection. Disable/uninstall retain local rows for explicit recovery/reinstall;
+access is refused while the owner is disabled, missing, stale or revoked.
+Both scopes live in the local project's database, with no global identity lookup.
+Raw secrets do not belong in defaults, schema or overrides. Host-owned secret
+slots/references are still pending; this service resolves non-secret settings
+only. Draft persistence migrations have not been executed.
+
+## Private state host boundary
+
+`extension_state.rs` supplies `StateHost`, bound by the host to the primary
+project, over the caller's already-owned connection. Requests select only
+`scope: project|personal` and `area: state|cache`; they cannot select an extension,
+project path, SQL, run identity or grants. The host requires a valid contribution,
+an explicit `state.read` or `state.write` declaration, allowed live authority,
+the current catalog generation/package version and an enabled descriptor. Core's
+unrestricted context without a declaration is refused. Imports do not select
+another namespace. Revoked, disabled, removed, stale or undeclared owners fail
+with fixed diagnostics before payload access.
+
+Native commands may declare `scope: state.read`, `op: snapshot` to read their own
+namespace. This read returns null when absent or `{stamp, values}` when present;
+it has read access and its result is not copied into command audit. State remains absent from
+SQL models. Scripts may declare `needs: [state.read]` and call
+`scope("state.read", {"scope": "project", "area": "state"})`; collectors, fact
+collectors, effects and policies use a separate owned read for each call, with
+no transaction held while their worker waits. Command composers use the routing
+connection. The shared `scope` builtin accepts declared callable services
+and checks the actual service on every call; declaring state access does not
+imply SQL access. Service listings report declared callable services as potential
+uses when a script names or aliases `scope`, rather than inferring every dynamic
+call argument.
+
+Provider `host/call` serves the same state read using the provider contribution
+identity captured from an exact enabled catalog declaration at instance creation,
+with the catalog generation unchanged across approved-copy preparation,
+not the invoking command's extension or a protocol-supplied owner. Calls require
+a registered in-flight invocation and recheck its live consent gate. Candidate
+checks without an exact active declaration acquire no state reader. Successful
+state reads contribute to the invoking run's scope trace. An unchanged provider
+instance with an old catalog generation is conservatively refused; active
+generation coordination must reconcile its lifetime. Examples may supply typed
+state answers; they never fall back to real state without a valid owner and
+configured host. Bare CLI/fixture SQL gateways have no state reader.
+
+The synchronous write helper accepts an existing
+audited TxCtx, refuses a pure run or an unaudited/autocommit connection, and
+publishes fenced CAS in a savepoint. Live checks run before and after both reads
+and writes; rejected publication rolls back its state mutation. Storage errors
+must abort the outer transaction. Extensions can declare `scope: state.write`,
+`op: compare_exchange`; the native operation takes scope/area, expected stamp,
+schema_version and a complete values object, returns only its new stamp, and
+records values as an omitted-byte count. Reset uses an empty values object at a
+new revision; it does not delete/recreate the namespace. No inverse stores old
+private values. Nested compositions inherit private-input recording and child
+metadata is redacted. Calls that require confirmation cannot retain these inputs
+in a public proposal; a person must invoke them directly with confirmation.
+Migrations, lifecycle cleanup and host secret services remain unfinished. Raw
+secrets do not belong in state payloads.
+
+Current-generation checks use the filesystem catalog, including its stat walk;
+they are conservative on any catalog change. This does not pin DB/runtime
+registries or keep state access usable under a retained last-good handler after
+a rejected candidate. The coherent activation coordinator must adopt the host
+boundary with its active-generation identity. No runtime validation has run for
+these state adapters.
+
 > **Status: built (epic tsk275; host finished in tsk278).**
 > - **Current:**
 >   - loading project extensions and their lenses from
@@ -156,7 +390,16 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   [performance.md](./performance.md)). `find_lens`, `run_lens`,
   `validate_extension`, `list_data_entities` and the advisory/metric/source
   readers all take the catalog; `load_extensions` itself is the cache's
-  loader and the write paths' direct read.
+  loader and the write paths' direct read. Hidden folders directly under
+  `oxplow/extensions/` are excluded from both loading and fingerprinting, so
+  installation staging does not identify a new catalog. Hidden files within
+  a declared extension remain fingerprinted. `ExtensionCatalog::snapshot`
+  returns immutable declarations with their load fingerprint identity. Retaining
+  it preserves that identity across cache reloads; `generation(root)` still
+  observes current files for candidate staleness checks. The raw `snapshot`
+  remains an authoring/candidate view; runtime readers use `runtime_snapshot`
+  for the last committed catalog plus immediate disable/removal revocation.
+  Neither API pins the filesystem itself.
 - **Params.** Values are bound as `:name` (`SemanticLayer::query_sql_named`).
   Supplied values override defaults. An unknown param name is an `Invalid`
   error, so a typo can't silently fall back to a default. A param with no
@@ -351,16 +594,25 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       load errors.
     - The repo is cloned inside `.oxplow/tmp/`, because workspace
       isolation forbids writing outside the project.
-    - It's validated, then copied without `.git` into
-      `oxplow/extensions/<name>/`. Symlinks are skipped, since they could
-      point outside the extension.
+    - It's validated, then copied without `.git` into a hidden staging
+      directory under `oxplow/extensions/`, on the destination filesystem.
+      `source.yaml` is written there and the copied candidate is revalidated
+      against the project catalog before replacing anything. Symlinks are
+      skipped, since they could point outside the extension.
     - The origin is recorded in `source.yaml` (`git`, `gitRef`, `sha`).
       The loader surfaces it as `Extension.source`.
     - Installing never overwrites an existing folder, and a name must be
       lowercase letters, digits and single dashes.
     - `oxplow.extension.update { name, reviewed_sha }` re-clones from the recorded source. The old
-      folder is replaced only after the new clone validates, and only for
-      git-installed extensions.
+      folder is replaced only after the staged copy validates, and only for
+      git-installed extensions. Candidate check and publication are serialized
+      within the process. Publication renames the installed folder into the
+      staging directory, then renames the complete candidate into place. A
+      failed second rename restores the old folder; if restoration also fails,
+      retain the backup and report its path rather than deleting it. Cleanup
+      failure after successful publication is a warning, not a failed update.
+      The two renames still have a visibility gap and no startup crash recovery;
+      they do not coordinate DB models or runtime registry activation.
     - Installing is a write tool on MCP. The skill says to do it only when
       the user asks, and to offer to commit the result.
     - Installing runs nothing. An exec source, a Starlark one that calls
@@ -1817,6 +2069,14 @@ its scope trace.
   run that ran them, named for the collector), provider invokes (on the
   wire as `InvokeParams.context`; `host/call`s are answered only inside
   a registered run) and knowledge, snapshot and harness verbs.
+- **Composed commands keep child ownership.** Routing captures each child's
+  registered contribution factory with its retained handler. Nested composers,
+  transactional leaves and external steps receive that child's context, not
+  the parent extension's namespace or declaration. Transactional leaves narrow
+  their mode; all children inherit cancellation and live guards. Native scope
+  operations capture their implicit backing scope in declared authority.
+  Routing and dispatch check run authority. This is handler attribution, not
+  a coordinated DB/catalog activation or a new per-child command audit.
 - **Every contribution's run is recorded once** (`extension_run`,
   `v_extension_run`; [data-model.md](./data-model.md) "extension_run"):
   its identity, actor, anchors, cause, outcome, cost (`cpu_ms`,
@@ -1848,7 +2108,8 @@ uses):
 |---|---|---|---|
 | `sql.read` | `scope("sql.read", …)` | no | any |
 | `tree.read` | `files`, `source_files`, `duplicate_blocks` | no | any |
-| `ai.compute` | `ai_classify`, `ai_score`, `ai_summarize`, `ai_extract` | a person's | external only |
+| `ai.compute` | `ai_classify`, `ai_score`, `ai_summarize`, `ai_extract`, `ai_complete` | a person's | external only |
+| `ai.discover` | `ai_capabilities`, `ai_models` | no | any, when the host supplies AI metadata |
 
 - **Who may declare what** (checked at load): a Starlark collector's
   `needs:` any service (`check_declared`; another runtime has no
@@ -1863,7 +2124,8 @@ uses):
   `sql.read`).
 - **What a kind implies:** a Starlark fact collector reads its tree
   (`CollectorSpec::service_needs` adds `tree.read`); an entity collector
-  whose script names an `ai_*` builtin uses `ai.compute`. A collector's
+  whose script names a model-calling builtin uses `ai.compute`. Discovery
+  builtins require an explicit `ai.discover` declaration. A collector's
   descriptor lists declared ∪ implied.
 - **What a script uses** is read from its syntax
   (`oxplow_script::uses::services_used`, which `calls_ai` is a view of),
@@ -1914,10 +2176,16 @@ uses):
   (`Calls::serve`), not twice. A caller with nothing to give (a command;
   a dry run, which is pure) says the service isn't available there. The
   worker gets the result as its host set (`Given::onto`).
-- **Approval** stays the host's: a script that names an `ai_*` builtin
+- **Approval** stays the host's: a script that names a model-calling builtin
   runs only once a person approved it — an entity collector
   (`check_approved`), a fact collector (`MetricsService::approved_to_ask`:
   an extension's in Settings → Data, the project's under Programs).
+  Metadata-only discovery does not spend a key or require that approval;
+  it still checks the declaration and live run authority. It never accesses
+  credentials or probes a model. See [ai-providers.md](./ai-providers.md).
+  Contained entity and fact collectors also pin their loaded script text to
+  the current entry; an approval for changed code cannot authorize older
+  cached text at a subsequent service call or final result.
 
 ## Grants
 
@@ -1926,7 +2194,7 @@ approved; a **decision** is what a run was allowed (`oxplow_domain::grant`,
 `grants.rs`).
 
 - **The request.** `GrantRequest { scopes, program, hosts, credentials,
-  env, commands }`, derived from the declaration: an exec collector's
+  env, commands, execution }`, derived from the declaration: an exec collector's
   entry, `network`, `credentials` and `env`; a collector's services
   (`services::collector_needs`: declared ∪ implied, `ai.compute` among
   them for a model-calling script — a model is a scope, not a flag); a
@@ -1953,16 +2221,70 @@ approved; a **decision** is what a run was allowed (`oxplow_domain::grant`,
   credential its grant doesn't name is never read from the keychain; a
   script's services (`scope` `tree.read` / `ai.compute`, by the router).
   A denied need stops what asked for it.
-  `Enforcement { hosts }` is the one table of what this machine holds:
-  egress is confined only under macOS's sandbox, and a program's files
-  never are — those decisions are `unenforced`, and `grants::gaps` says
-  the same on Programs rows and in a review's grant line ("not held
-  here: …").
+  `Enforcement { hosts }` is the one table of what this machine holds.
+  Broader process file/network decisions remain `unenforced`: macOS's
+  proxy and direct-network sandbox do not prevent local brokers or file
+  access. `grants::gaps` reports this in Programs and review grant lines.
+- **Bounded reads.** `sql.read:v_work_item` names an exact published
+  model; use multiple needs for multiple models. SQLite preparation checks
+  the query's models and transitive registered `ref` inputs, including
+  materialized models, before evaluating rows. Bare `sql.read` preserves
+  the explicit whole-layer grant. Bounded queries cannot currently use
+  `metric_grid` / `metric_findings` because their host precomputation has
+  no model authority contract; query granted published models instead.
+  `tree.read:src/main.rs` names a captured file; `tree.read:src/` names a
+  directory. Absolute paths, traversal, backslashes and globs are refused.
+  The host filters its captured tree before giving it to a script; these
+  needs do not grant raw filesystem access. Bare `tree.read` grants the
+  whole captured tree.
+  Manifest validation, capability availability, command script checks and grant
+  request construction recognize the validated service prefix while preserving
+  the original qualifier. Transactional command composers still refuse bounded
+  tree reads because their tree service is unavailable inside the transaction.
+- **External execution.** Collectors and providers default to
+  `execution: restricted`. Full file/socket/child-process confinement is
+  not available, so restricted execution fails closed on every platform.
+  `execution: broader` requires a new approval hash and explicitly grants
+  the person's file, socket and process authority. It is supported on Unix
+  with owned process-group cleanup; other platforms refuse it. Ordinary
+  children are killed on completion, timeout, cancellation or revocation.
+  A broader process can escape its group; cleanup is not confinement.
+  Pipe I/O also has a deadline, so escaped children cannot leave host
+  drain/writer threads blocked indefinitely.
+  Broader environment/credential delivery is deliberately process-readable;
+  contained script services never receive keychain values.
+  Entity collector programs run from a private per-run copy, verified against
+  the approved declaration and code hash before launch and during execution.
+  Their working directory and `OXPLOW_EXTENSION_DIR` name that copy, so helpers
+  load the approved code. The complete copied folder is limited to 500 files
+  and 16 MiB, including its manifest and lenses; oversized folders fail before
+  launch. Entries under normally excluded metadata paths are hashed explicitly
+  and need renewed approval. Copy preparation rejects symlinks and special
+  files; the copy is removed when the run releases it. Original-tree edits or
+  copy changes stop the run under the live authority policy.
+  Disk extension reads also refuse special files and files larger than 16 MiB;
+  Unix opens refuse a final symlink and avoid blocking on replacement FIFOs.
+  Project fact programs and report parsers use the same bounded copy helper,
+  with their project-relative code layout preserved. Their guard owns the copy;
+  `OXPLOW_CODE_DIR` names its root and `OXPLOW_PROJECT_DIR` names the original
+  checkout for their approved broader data access.
+- **Collector previews.** A preview stores no rows, but receives the same
+  contribution authority and pinned live consent as an ordinary entity
+  collector run. Previewing cannot bypass declared model/path access or
+  continue an AI/program call after its approval changes.
 - **Revoking** removes the approval ([architecture.md](./architecture.md)
-  "A repo's config never runs a program without consent").
-- **Not yet:** per-model grants for `sql.read`, confining a program's
-  files, and a per-run limit on model calls (left out, 2026-10-10) —
-  the next roadmap item, "Enforce scoped grants".
+  "A repo's config never runs a program without consent"). Host-owned
+  `RunContext::guarded` checks pin the approved version, compose through
+  nested runs and recheck before sensitive calls/publication. Replacement
+  approval cannot authorize an already loaded old script. External hosts
+  poll live consent with 100 ms between checks; entity collector processes
+  use 25 ms and report/fact programs 10 ms between checks. In-flight AI futures are dropped and their results discarded.
+  This cannot undo an external side effect already performed.
+- **Component authority.** Query messages carry the loaded bundle version.
+  Asset and command allowlists come from that immutable bundle; adding
+  manifest permissions cannot widen a running frame. Asset declarations
+  are included in component approval hashes.
+- **Not yet:** OS confinement and model call-count/monetary budgets.
 
 ## The event envelope
 
@@ -2463,7 +2785,7 @@ A run is the registered `oxplow.command.sequence` — its spec and compiled inpu
 schema, shared (`Command::with_handler`) — over what the script composed
 (calls, and its own events through `own_events`), run by
 `CommandBus::run_effect` as `Actor::Effect` with
-`RunOrigin::Effect(key)`: its `command.executed@2` is caused by the
+`RunOrigin::Effect(key)`: its `command.executed@3` is caused by the
 triggering event, and the reaction's `effect_run` row and
 `effect.result@4 { effect, event, outcome, reason?, proposal?, attempt,
 origin }` (caused by that run) land **in the run's transaction**; with a step outside it, a
@@ -2744,7 +3066,14 @@ merge), the `config.extensions` reactor for the `extensions` key
 (enabling or disabling). The extension models, the provider registry and
 the metric catalog follow the same signal; a namespace something else
 already holds (a provider) is refused and kept as the extension's
-`problem`. A launcher `{ command }` entry may name one.
+`problem`. Replacement is prepared against a cloned command registry and
+published with one write-lock swap; rejection keeps the previous command batch.
+Missing/disabled sources are removed. Registration tracks namespace, declarations,
+package version and catalog identity, so provenance changes rebuild the batch
+without requiring a script change. Each handler captures version and generation
+from the same `CatalogSnapshot` as its declarations; a retained handler never
+looks up a newer candidate's identity when invoked. Other registries and SQL
+models still refresh independently. A launcher `{ command }` entry may name one.
 
 ## Contributing metrics (current)
 
@@ -3318,3 +3647,345 @@ available to every extension:
   `force` (metrics.md "Pacing"), so an expensive collector runs
   once a burst settles or the project is idle — never losing a skipped
   snapshot's files — with `v_pending_run` saying it's updating.
+
+Extension disk readers refuse absolute/traversing paths and symlinked folders
+or path segments for source, bytes, directory listings and component bundle
+metadata. Project fact inputs resolve under their checkout; symlinks outside
+that checkout are refused before reading content. These host checks do not
+provide OS confinement for an explicitly approved broader process.
+
+## Command candidate publication
+
+Extension commands now stage as one enabled-source batch from a CatalogSnapshot.
+Enabled non-required declarations with load errors reject the candidate, even
+when their loader retained some valid commands. Building handlers does not
+publish or execute them. Registry preparation validates all namespaces, IDs and
+shortcuts; publication checks the original registry allocation identity and the
+current catalog fingerprint. Any intervening registration/removal/replacement
+requires restaging. Reconciliation yields and retries publication races up to
+three times; persistent contention records diagnostics.
+
+Rejected candidates retain previous command handlers for the remaining owners.
+Disabled or removed sources are withdrawn independently, and captured command
+RunContexts recheck that their owner is still enabled before execution. The
+standalone command boundary remains separately usable; boot publishes its
+candidate with model views, vocabulary, providers and UI metadata through the
+generation coordinator. Runtime lookup uses the active catalog rather than
+promoting current filesystem declarations. State hosts still enforce their
+namespace and revision checks.
+
+## Database generation candidates
+
+`VocabularyService::prepare` freezes enabled vocabulary declarations and the
+host work item recognizer from a CatalogSnapshot without writing or swapping.
+Enabled load errors reject preparation. `PreparedVocabulary::replace_tx` uses
+a savepoint and rejects the complete set on any event/ref/subscription or
+recognizer diagnostic, restoring event contracts, retention and ref-kind rows.
+A changed recorded event schema and a shared wikilink prefix are candidate
+errors; strict candidates do not publish the legacy reactor's partial result.
+
+`PreparedExtensionDatabase` captures models, vocabulary and enabled contribution
+descriptors from the same snapshot. Its transaction helper calls strict model
+and vocabulary replacement and contribution restatement inside a surrounding
+savepoint: any diagnostic or storage failure restores the whole candidate.
+`prepare_with_capabilities` also includes prepared capability rows and switch
+events, rejecting mismatched catalog identities. Vocabulary then uses the
+candidate's planned work list recognizer rather than the old live selection.
+It returns a vocabulary for publication only after the outer transaction commits.
+Storage or rollback errors require the caller to abort; logical diagnostics stay
+separate from retryable contention. This helper executes no external work.
+
+The boot activation coordinator now uses these APIs with command, provider,
+capability, adapter, collection-feed and component-bundle candidates. The old
+capability, command, provider, model and vocabulary boot writers have been
+retired from this path; config/entity-triggered model work is routed through the
+coordinator. CapabilityRegistry holds core, declarations and external-instance metadata
+under one lock. Each read resolves selection, features, hidden command namespaces,
+recognition and database rows from one captured state. Candidate preparation
+copies that state, replaces declarations without registering adapters, and derives
+all candidate selections/rows from it. Publication checks an allocation identity
+and the supplied host config's resolved choices/provenance before a single swap;
+intervening mutations, another registry or changed choices require restaging.
+Candidate publication fences config and catalog identity. Capability reads use
+the active catalog's immediate disable/removal overlay and the config choices
+captured with the last committed capability candidate; staging remains based on
+the frozen candidate state. External instance metadata is captured; process and
+adapter lifetimes are staged by the separate provider/runtime-adapter owners.
+
+## Durable job store boundary
+
+`extension_job_store.rs` supplies private intent, fenced lifecycle and attempt/
+observation persistence. Ownership and replay policy remain host-derived;
+arguments supply neither. Duplicate contribution/intent compares exact immutable
+owner/version/generation/contract/operation/invoker/request, and retains the
+original scheduling RunId. A changed delivery conflicts instead of dispatching
+new work. Transition helpers require a transaction, CAS the old lifecycle and
+revision, and restore attempt changes on any rejection; rollback failures must
+abort the outer transaction. Async wrappers retry only storage contention.
+
+History reads paginate by attempt or observation time/id within row and payload
+budgets. Restart listings use updated-time/id cursors and omit request data,
+including a separate queued-intent scan. Late evidence can only append against
+an original attempt/fence; it cannot change current success or publish through
+a new handler. The store starts no workers and conveys no authority. The public
+author path and dispatcher use it through separate host-owned services. The host
+must persist enough trusted actor/anchors/cause context to resume; an
+invoker label and originating RunId alone cannot reconstruct authority.
+
+## Durable job invocation provenance
+
+Restart context is a dedicated private versioned record, not reconstructed from
+extension_run or an invoker label. Its strict scheduling Actor includes lens
+on_behalf_of and agent session/thread/stream identity; anchors, canonical subjects
+and cause remain explicit. Context is bounded, unknown nested fields reject, and
+actor/anchor identities must agree. Grants/approval/guard/cancel/credentials and
+job argument JSON cannot supply or replace these fields. Pure domain types and
+atomic backend intent/context persistence are implemented. Duplicate delivery
+must preserve scheduling provenance; missing context is never reconstructed from
+telemetry or backfilled from a redelivery. Public scheduling and dispatch now
+use this context. Migration execution has not been validated.
+
+Host execution identity is the job and attempt/fence. `Actor::job` derives a
+dedicated actor from that validated identity; its separate invoker is refused by
+all existing generic bus declarations. Jobs cannot confirm or create proposals.
+`RunContext::job` creates a new run/cancel/budget with no granted services and
+links the originating run as provenance, without inheriting its actor/authority.
+Only the host authority resolver attaches current declarations/approvals and
+live guards. The immutable operation registry binds the full owner/package/
+generation/contract and operation, retains replay policy, and pins the handler.
+JobWork validates that run actor, attempt, anchors, subjects, cause and parent
+agree with its private provenance. Its `job:<id>:<operation>` idempotency key
+stays stable across attempts and comes from the host, never request JSON.
+
+`JobAuthorityHost` rechecks exact current descriptors, declared scope bounds,
+current thread/stream and writer state, and requires current approval for paid
+AI. Its grant resolver is a trusted host integration, not a persisted grant.
+Publication checks current thread state on the caller's DB connection along
+with live ownership/consent. The initial operation surface accepts declared
+host services; raw process authority needs a separate consent adapter. The
+typed AI operation uses current Programs consent and a bounded startup scheduler.
+Draft migrations have not been executed.
+Absent validated restart context or exact retained operation code makes a job
+undispatchable. Current active-generation and live-grant checks still apply;
+scheduling provenance is not authority. Provider cancel/timeout alone cannot
+assert stopped execution.
+
+Provider resolution captures config/provider choice with project/global credential
+scope in one merged mapping, and uses one catalog declaration snapshot per
+reconcile pass. A disabled bundled owner cannot be shadowed by a project namesake.
+These checks preserve owner/scope identity during preparation; they do not
+coordinate provider process/adaptor publication with the other registries.
+
+## Prepared native runtime adapters
+
+`PreparedRuntimeAdapters` captures one CatalogSnapshot and constructs declared
+work-item, harness, effort-policy, ACP, knowledge, snapshot and model-provider
+maps without changing running registries. It rejects enabled load errors and
+strict ACP/AI factory failures before any map publication. Script/gate objects
+are constructed but no process, handshake, network call or paid probe runs.
+External adapters/processes remain the provider lifecycle owner's work.
+
+Each adapter subsystem exposes prepare/publish; legacy register helpers retain
+their previous behavior, including partial factory skipping where applicable.
+The boot coordinator publishes the prepared aggregate under the shared activation
+fence, with compatible SQL and command readers. Capability and command
+reservations are held across the commit and map swaps. A required-bundled core
+baseline is active before strict full activation: baseline failure prevents the
+daemon from serving; full-candidate rejection retains the baseline or last good
+generation. The active catalog is separate from raw candidate loads. Its
+`source_generation` preserves the raw fingerprint, while the core baseline has a
+distinct `core:<source_generation>` runtime identity. Runtime catalog reads use
+the committed snapshot and apply immediate explicit-disable and missing-folder
+revocation without loading edited declarations.
+
+`ExtensionActivation::activate` now joins the prepared database, commands,
+capabilities, native and external adapters, vocabulary, collection feeds and
+component bundles under one owned reader/writer boundary. External processes
+start and validate before SQL publication; the running-map reservation is acquired
+before the DB permit, then held through commit and adapter swaps. Retired processes
+shut down, successful startup health is recorded and initial sync is queued after
+the publication transaction and reader boundary are released. Command owner metadata, command handlers, host config
+and capability state are reserved on the blocking worker before commit and held
+through all map swaps. Wiki/snapshot follow policies use the candidate's captured
+selection, avoiding recursive capability/config reads while those locks are held.
+Precommit rejection retains the previous active snapshot. A panic during commit
+or publication leaves this boundary unavailable until host recovery. Cancelling
+the async caller does not release the worker's writer while it can still commit.
+
+`GenerationPin` is host-only and conveys no authority. RunContext can retain an
+opaque pin across spawned host work; child contexts inherit it and fresh jobs do
+not. Nested reader scopes reuse their pin so a waiting fair-lock writer cannot
+deadlock a parent query. SQL and command entrypoints pin before query materialize
+or command lookup; lens/effect/event-consumer paths use the same reader scope, and
+host workers carry the concrete pin in RunContext. Task-local scopes alone do not
+propagate into spawned tasks. Provider host-call registration is cancellation-safe
+across candidate publication. Native/background and synchronous metadata
+entrypoints still need a complete audit. Metric declaration rows now join the
+publication transaction; state-value recapture remains a post-publication reader. The renderer receives the published metadata change signal;
+raw filesystem changes continue to trigger candidate preparation. Standalone
+instances retain their legacy behavior.
+
+Custom component preparation reads immutable bundle bytes on a blocking worker,
+with at most 64 bundles and 128 MiB in a candidate. Publication swaps the whole
+active bundle map without rereading files. Active bytes remain available independently
+of the sixteen-entry history used by previous frames. A retained frame from a
+different activated generation must reload before invoking a query or command;
+standalone/authoring roots retain legacy loading. This check requires the owning
+runtime reader scope for atomicity with command or query execution.
+
+## One-attempt durable job dispatch
+
+`ExtensionJobDispatcher::run_one` is integrated as a host helper. It reads a
+bounded intent/context, finds an exact immutable operation registration and
+checks its replay policy, resolves fresh authority, CAS claims, then resolves
+authority again before starting work. The worker future and cancellation waits
+run outside transactions. Metadata polls do not select private requests.
+Thirty-second leases renew every ten seconds; supervision polls every 250 ms
+and requests cancellation after sixty seconds, with a five-second grace.
+Any exit signals the run cancellation token. Only trusted actual stop evidence
+can confirm cancellation. No automatic operation retry is introduced.
+
+Completion uses a transaction/savepoint with live owner/grant and current
+thread/stream and applicable actor-policy checks before and after the fenced result transition.
+Stale/revoked/expired completions append original-attempt evidence, never publish
+through another generation. Logical conflicts are bounded retries; storage
+contention preserves its storage classification. Ambiguous outcomes recover
+only after lease expiry, never as stopped. Waiting for expiry is bounded by
+monotonic time: clock rollback cannot hold a dispatcher slot indefinitely; an
+Interrupted dispatcher return can leave the durable row awaiting expiry recovery.
+Terminal aggregate rows are immutable, including late cancellation requests.
+Public scheduling, owned result reads, a concrete AI grant resolver and bounded
+startup scheduling now use this dispatcher. Runtime restart and cancellation
+validation remain pending.
+
+### Runtime ingress and entity refresh
+
+Extension listings enter the same generation scope as commands and SQL. A failed
+candidate adds owner diagnostics to the committed metadata; newly discovered
+packages remain visible for repair with all runtime contributions cleared.
+Clearing rejection diagnostics emits a runtime change signal. Candidate bundle
+and owner catalog publication precede external-provider admission under the
+writer, so callback live checks cannot mistake a just-admitted owner for the
+previous generation. Callback registrations use a drop guard: cancellation
+releases retained run contexts and their generation pins. Explicit stop, disable,
+removal and changed credential scope deny admitted callback authority immediately.
+
+Collector scheduling and fact-collector lookup retain a reader before selecting
+declarations. A carried RunContext pin can re-enter a reader on another task
+without acquiring a second fair-lock reader behind a waiting writer. Entity-run
+notifications compare the current entity view/version/SQL/column/key contracts
+with the signature captured in the publication transaction. Data-only runs do
+not restart providers; changed entity schemas request one coherent candidate.
+Provider initial sync and entity-state metric recapture do not themselves emit
+collector-run completion events.
+
+JobAuthorityHost accepts this project's trusted activation owner. Dispatch takes
+a fresh reader before durable lookup/claim, resolves live ownership/grants and
+attaches the pin to the newly host-derived execution RunContext. Persisted
+provenance never contains that pin. The reader remains through execution and
+fenced publication, and worker service calls re-enter with it. Bounded restart
+recovery pages advance over already-interrupted rows, CAS-fence expired running
+attempts and expose counts/cursors only. Recovery proves interruption; it does
+not prove stop or replay an operation. The first concrete operation, grant
+resolver and boot scheduler are described below.
+
+## Declared durable job author path
+
+A stable `jobs:` declaration names a local id, description, positive operation
+contract version, `operation: ai.complete_typed`, exactly `needs: [ai.compute]`,
+and `replay: never | idempotent` (default never). At most 128 jobs belong to one
+package. The descriptor is `<extension>/job/<id>`, with native contract version
+enforced for public exports. Import guards can withhold a job; initial scheduling
+resolves only a job in the calling contribution's own package.
+
+Declare native commands over `jobs.write/enqueue`, `jobs.write/cancel` and
+`jobs.read/snapshot`. Enqueue input is `{job, intentKey, request}`; the request is
+`{schemaVersion:1, role, messages, tools?}` with no model, endpoint or credential.
+Intent and original provenance commit together, and the private request field
+is omitted from audits and parent compositions/proposals. Queue capacity is
+1024 queued/running jobs per project and 256 per package; exact duplicates remain
+valid at capacity. Owner, generation, operation/replay and contract metadata are
+derived by the host, not accepted in the request. Result/cancel inputs are `{id}`
+and require current caller ownership; confined actors cannot reach another
+stream's jobs. Result reads preserve original job/version attribution and never
+return original request data.
+
+Pure commands/effects continue composing intent commands; they never acquire
+AI execution merely by scheduling. A declared job has its own Programs approval
+over the reviewed manifest and declaration. Every dispatch resolves current
+owner and consent into a fresh Job RunContext. The operation runs outside SQL,
+under the configured role and current provider approval; it has no raw process
+or automatic tool execution. Role binding, cache lookup and result attribution
+share a captured key-free AI configuration.
+
+The published registry joins PreparedRuntimeAdapters. Boot starts one bounded
+scheduler after coherent readiness: four dispatch slots, metadata pages of 64,
+one-second polling and five-second failure backoff. Mid-page capacity preserves
+the next unread cursor so unapproved early jobs cannot starve later ones.
+Expired attempts become interrupted; no automatic replay is performed. Shutdown
+interrupts scans and cancels workers, preserving uncertainty until recovery.
+Dropping HTTP work cannot prove remote execution stopped.
+
+A successful fenced completion appends `contribution.job.completed@1` in the
+same transaction, with job identity, original contribution/version, execution
+run and attempt fence, outcome and original anchors/cause. Requests/results stay
+out of that event. Consumers declare `jobs.read` and use
+`scope("jobs.read", {id})` to fetch an owned result before composing their next
+commands. Transactional composers use their existing connection; worker readers
+re-enter their retained generation. Jobs still need runtime validation, and
+the drafted persistence migrations have not been executed in this workspace.
+
+## Host-owned secret references
+
+`oxplow-domain/src/extension_secret.rs` defines a strict version-1 identity:
+`{schemaVersion:1,id:<canonical UUIDv7>}`. It contains no owner, path, keychain
+account, secret bytes or authority. References may appear in state/config;
+values remain in the machine keychain under the primary project and current
+owning extension. Copying team configuration cannot approve use or read another
+namespace. Disabled/uninstalled owners cannot save or inspect a reference;
+explicit human revocation can delete a retained keychain value after uninstall.
+
+`ExtensionSecrets` has human settings ingress only: save/rotate returns a
+reference, inspection returns presence, revocation returns no value. The RPC
+methods are `save_extension_secret`, `extension_secret_is_set` and
+`revoke_extension_secret`; no native command, script service or MCP route exists.
+Secret bytes and keychain error details are never returned or audited. Values
+are bounded to 16 KiB. This backend ingress has no new settings form yet.
+
+The first trusted consumer is a remote MCP HTTP provider using the shipped
+adapter. Its bearer credential must be named `OXPLOW_MCP_BEARER` and carry
+`secretRef`; references are refused for package executables, stdio servers,
+OAuth credentials and other environment variable names. The fixed name avoids
+process environment control variables. The reference identity, endpoint and
+declaration participate in program approval. The host checks exact current
+owner/consent before and after keychain resolution and gives bytes only to the
+shipped HTTP transport; mapping scripts get no secret reader. Redirects are
+disabled in that transport. References remain project-local even for globally
+configured provider instances.
+
+Processes capture a host reference revision at admission. Save/revoke invalidates
+that revision synchronously, refusing further sensitive callbacks and causing
+the existing process revocation watcher to stop old execution. Consumer cleanup
+is detached from the settings RPC's lifetime, then requests coordinated
+reconciliation. Keychain mutation failure also invalidates old consumers; it
+does not claim deletion succeeded. Runtime isolation/revocation checks remain
+pending.
+
+## Interrupted installation recovery
+
+`extensions/candidates.rs` owns a shared in-process install/recovery lock and a
+bounded, versioned marker inside hidden `.ext-publish-*` staging. Publication
+syncs copied regular files and directory entries before moving the old target.
+It restores or retains the prior copy on failure. The two directory renames
+are filesystem staging; they do not themselves publish runtime authority.
+
+`Services::boot` recovers before loading configuration or constructing the
+catalog. Recovery scans at most 4096 parent entries and 128 staging folders,
+reads markers up to 256 bytes, checks names and plain directory/file shapes and
+refuses repo-controlled symlink parents. A missing target with a known prior
+copy is restored and synced. An unpublished first-install candidate is discarded,
+never activated automatically. Unknown entries, malformed markers and ambiguous
+target-plus-backup states are retained with a fixed warning, so recovery cannot
+delete the only identified prior copy. Unix uses directory sync; other platforms
+retain ordinary filesystem semantics. The lock is process-local; adversarial
+cross-process filesystem races and crash injection remain validation gaps.

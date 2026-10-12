@@ -172,6 +172,25 @@ pub struct ManifestV2 {
     #[schemars(required)]
     pub intent: Option<IntentFile>,
 
+    /// Explicit versioned contracts offered to other extensions.
+    #[serde(default)]
+    pub exports: Vec<super::public_contracts::ExportFile>,
+    /// Consumer-local bindings to canonical public contributions.
+    #[serde(default)]
+    pub imports: Vec<super::public_contracts::ImportFile>,
+    /// Contributions to withhold when one of these bindings is unavailable.
+    #[serde(default)]
+    pub import_guards: Vec<super::public_contracts::ImportGuardFile>,
+
+    /// Versioned non-secret settings schema and partial defaults. Read raw so
+    /// declaration errors never format configuration values into diagnostics.
+    #[serde(default, deserialize_with = "present_configuration")]
+    #[schemars(
+        with = "super::config_schema::ConfigurationFile",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub configuration: Option<Value>,
+
     // ---- stable kinds ----
     /// SQL models: each with `models/<name>.sql`, published as
     /// `v_<extension>_<name>`.
@@ -200,6 +219,10 @@ pub struct ManifestV2 {
     #[serde(default)]
     #[schemars(with = "Option<Vec<crate::extension_commands::CommandFile>>")]
     pub commands: Option<Value>,
+    /// Durable host operations that an extension may schedule.
+    #[serde(default)]
+    #[schemars(with = "Option<Vec<super::jobs::JobFile>>")]
+    pub jobs: Option<Value>,
     /// Full pages, each showing one of its lenses.
     #[serde(default)]
     #[schemars(with = "Option<Vec<super::PageFile>>")]
@@ -258,6 +281,7 @@ pub const STABLE_KINDS: &[&str] = &[
     "dimensions",
     "collectors",
     "commands",
+    "jobs",
     "lenses",
     "pages",
     "panels",
@@ -485,12 +509,60 @@ pub fn current_engine() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
+// An absent declaration is optional; an explicitly present null is invalid.
+fn present_configuration<'de, D>(deserializer: D) -> Result<Option<Value>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Value::deserialize(deserializer).map(Some)
+}
+
+/// Parse and validate settings without echoing raw YAML/JSON in errors.
+/// Required fields deferred in partial defaults are checked on final resolution.
+pub fn configuration_of(
+    m: &ManifestV2,
+    file: &str,
+    text: &str,
+) -> (Option<super::config_schema::ConfigurationFile>, Vec<String>) {
+    let Some(raw) = &m.configuration else {
+        return (None, Vec::new());
+    };
+    let line = key_line(text, "configuration");
+    let parsed = serde_yaml::from_value::<super::config_schema::ConfigurationFile>(raw.clone());
+    let declaration = match parsed {
+        Ok(declaration) => declaration,
+        Err(_) => {
+            return (
+                None,
+                vec![at(file, line, "configuration: invalid_declaration")],
+            )
+        }
+    };
+    match declaration.prepare() {
+        Ok(_) => (Some(declaration), Vec::new()),
+        Err(issues) => (
+            None,
+            issues
+                .into_iter()
+                .map(|issue| {
+                    at(
+                        file,
+                        line,
+                        format!("configuration: {} at {}", issue.code, issue.pointer),
+                    )
+                })
+                .collect(),
+        ),
+    }
+}
+
 /// Problems with a manifest's own shape and lifecycle (not its
 /// cross-references, which need the loaded lenses). `file` is how the
 /// manifest is named in messages; `text` its source, for lines.
 pub fn check(m: &ManifestV2, file: &str, text: &str, bundled: bool) -> (Vec<String>, Vec<String>) {
     let mut errors = Vec::new();
     let mut warnings = Vec::new();
+    errors.extend(configuration_of(m, file, text).1);
     if m.manifest != CURRENT {
         errors.push(at(
             file,

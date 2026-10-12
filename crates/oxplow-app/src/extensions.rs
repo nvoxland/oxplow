@@ -16,11 +16,17 @@ use oxplow_db::{SqlCell, SqlQueryResult};
 use oxplow_domain::DomainError;
 use serde::{Deserialize, Serialize};
 
+pub(crate) mod candidates;
+pub mod config;
+pub mod config_schema;
 pub mod custom_components;
 pub mod decorators;
 pub mod descriptors;
 pub mod implementations;
+pub mod imports;
+pub mod jobs;
 pub mod manifest_v2;
+pub mod public_contracts;
 pub mod replacements;
 pub mod schema;
 pub mod skills;
@@ -1059,8 +1065,8 @@ pub struct Extension {
     pub origin: String,
     /// What it adds to the core UI (`ui:`).
     pub ui: ExtensionUi,
-    /// False when `.oxplow/project.yaml` disables it; a disabled
-    /// extension has no lenses, slots, sources or advisories.
+    /// False when configuration disables it or public contracts block it;
+    /// an inactive extension contributes nothing to the runtime catalog.
     pub enabled: bool,
     /// Guidance for the coding agent (valid ones; invalid ones are in `errors`).
     pub advisories: Vec<Advisory>,
@@ -1085,11 +1091,18 @@ pub struct Extension {
     /// Commands it registers on the bus, each a Starlark script composing
     /// core commands (P6b; valid ones — invalid ones are in `errors`).
     pub commands: Vec<crate::extension_commands::ExtensionCommand>,
+    /// Durable host operations declared by this extension.
+    pub jobs: Vec<jobs::JobDecl>,
     /// Its `version:` (semver), when it declares one; required to share.
     pub version: Option<String>,
     /// Its contributions as descriptors (`extensions::descriptors`): the
     /// kinds that have moved onto them so far.
     pub contributions: Vec<oxplow_domain::contribution::Descriptor>,
+    /// Validated non-secret settings declaration, not resolved values or grants.
+    #[serde(default)]
+    pub configuration: Option<config_schema::ConfigurationFile>,
+    #[serde(default)]
+    pub public_contracts: public_contracts::PublicContracts,
 }
 
 /// What an extension adds to the core UI (`ui:` in its manifest).
@@ -1162,6 +1175,13 @@ pub fn load_extensions(root: &Path) -> Vec<Extension> {
 /// what's disabled — a stream's working copy read under the main
 /// worktree's `project.yaml`.
 pub fn load_extensions_in(root: &Path, project: &Path) -> Vec<Extension> {
+    resolve_catalog(
+        load_sources(root),
+        &oxplow_config::disabled_extensions(project),
+    )
+}
+
+pub(super) fn load_sources(root: &Path) -> Vec<Extension> {
     let mut out: Vec<Extension> = crate::bundled_extensions::BUNDLED
         .iter()
         .map(|b| {
@@ -1185,6 +1205,7 @@ pub fn load_extensions_in(root: &Path, project: &Path) -> Vec<Extension> {
             let rel = format!("{EXTENSIONS_DIR}/{n}");
             if crate::bundled_extensions::is_reserved(&n) {
                 out.push(Extension {
+                    enabled: false,
                     errors: vec![format!(
                         "{rel}: the name `{n}` is reserved for an extension that ships with oxplow; rename the folder"
                     )],
@@ -1195,6 +1216,11 @@ pub fn load_extensions_in(root: &Path, project: &Path) -> Vec<Extension> {
             out.push(load_one(&Disk(root.join(&rel)), &n, &rel, "project"));
         }
     }
+    out.sort_by(|a, b| a.name.cmp(&b.name).then(a.origin.cmp(&b.origin)));
+    out
+}
+
+pub(super) fn resolve_catalog(mut out: Vec<Extension>, disabled: &[String]) -> Vec<Extension> {
     out.sort_by(|a, b| a.name.cmp(&b.name).then(a.origin.cmp(&b.origin)));
     // A grid's child in ANOTHER extension resolves here, once every
     // extension is loaded; a missing one is an error and the grid is
@@ -1217,15 +1243,46 @@ pub fn load_extensions_in(root: &Path, project: &Path) -> Vec<Extension> {
             }
         }
         ext.lenses.retain(|l| !bad.contains(&l.id));
+        ext.contributions.retain(|descriptor| {
+            descriptor.id.kind != oxplow_domain::contribution::ContributionKind::Lens
+                || ext
+                    .lenses
+                    .iter()
+                    .any(|lens| lens.slug == descriptor.id.local)
+        });
     }
-    let disabled = oxplow_config::disabled_extensions(project);
     let mut out: Vec<Extension> = out
         .into_iter()
-        .map(|e| apply_disabled(e, &disabled))
+        .map(|mut e| {
+            if disabled.iter().any(|name| name == &e.name)
+                && !crate::bundled_extensions::is_required(&e.name)
+            {
+                e.enabled = false;
+            }
+            e
+        })
         .collect();
+    public_contracts::stage(&mut out);
     crate::extension_commands::refuse_shared_namespaces(&mut out);
+    for ext in &mut out {
+        ext.contributions.retain(|descriptor| {
+            descriptor.id.kind != oxplow_domain::contribution::ContributionKind::Command
+                || ext
+                    .commands
+                    .iter()
+                    .any(|command| descriptor.global.as_deref() == Some(&command.name))
+        });
+    }
     descriptors::check_catalog(&mut out);
-    out
+    public_contracts::activate(&mut out);
+    out.into_iter()
+        .map(|mut ext| {
+            if ext.public_contracts.blocked {
+                clear_contributions(&mut ext);
+            }
+            apply_disabled(ext, disabled)
+        })
+        .collect()
 }
 
 /// A `measures:` / `metrics:` block as typed entries.
@@ -1246,7 +1303,10 @@ pub fn load_project_extension(root: &Path, name: &str) -> Extension {
 /// A file inside extension `name` (bundled or in `oxplow/extensions/`),
 /// e.g. a collector's script. `None` when there's no such extension or file.
 pub fn read_extension_file(root: &Path, name: &str, rel: &str) -> Option<String> {
-    if rel.split('/').any(|seg| seg == "..") {
+    if !oxplow_domain::service::valid_path(rel)
+        || !oxplow_domain::service::valid_path(name)
+        || name.contains('/')
+    {
         return None;
     }
     if let Some(b) = crate::bundled_extensions::BUNDLED
@@ -1299,9 +1359,34 @@ pub(crate) trait ExtensionFiles {
 
 pub(crate) struct Disk(pub(crate) std::path::PathBuf);
 
+impl Disk {
+    fn checked_path(&self, rel: &str) -> std::io::Result<std::path::PathBuf> {
+        if !rel.is_empty() && !oxplow_domain::service::valid_path(rel) {
+            return Err(std::io::Error::other(
+                "extension path must be relative without traversal",
+            ));
+        }
+        let mut path = self.0.clone();
+        if std::fs::symlink_metadata(&path)?.file_type().is_symlink() {
+            return Err(std::io::Error::other("extension folder is a symlink"));
+        }
+        for segment in rel
+            .trim_end_matches('/')
+            .split('/')
+            .filter(|s| !s.is_empty())
+        {
+            path.push(segment);
+            if std::fs::symlink_metadata(&path)?.file_type().is_symlink() {
+                return Err(std::io::Error::other("extension path contains a symlink"));
+            }
+        }
+        Ok(path)
+    }
+}
+
 impl ExtensionFiles for Disk {
     fn read(&self, rel: &str) -> Option<String> {
-        std::fs::read_to_string(self.0.join(rel)).ok()
+        String::from_utf8(self.bytes(rel).ok()?).ok()
     }
     fn paths(&self) -> std::io::Result<Vec<String>> {
         let mut out = Vec::new();
@@ -1314,6 +1399,12 @@ impl ExtensionFiles for Disk {
                     entry.path().display()
                 )));
             }
+            if !entry.file_type().is_file() && !entry.file_type().is_dir() {
+                return Err(std::io::Error::other(format!(
+                    "{} is not a regular file or directory",
+                    entry.path().display()
+                )));
+            }
             if entry.file_type().is_file() && entry.file_name() != ".DS_Store" {
                 let rel = entry.path().strip_prefix(&self.0).unwrap_or(entry.path());
                 out.push(rel.to_string_lossy().into_owned());
@@ -1322,10 +1413,36 @@ impl ExtensionFiles for Disk {
         Ok(out)
     }
     fn bytes(&self, rel: &str) -> std::io::Result<Vec<u8>> {
-        std::fs::read(self.0.join(rel))
+        use std::io::Read;
+
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+        }
+        let file = options.open(self.checked_path(rel)?)?;
+        if !file.metadata()?.is_file() {
+            return Err(std::io::Error::other(
+                "extension path is not a regular file",
+            ));
+        }
+        let mut bytes = Vec::new();
+        file.take(crate::exec_consent::TREE_MAX_BYTES + 1)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() as u64 > crate::exec_consent::TREE_MAX_BYTES {
+            return Err(std::io::Error::other(
+                "extension file exceeds the 16 MiB limit",
+            ));
+        }
+        Ok(bytes)
     }
     fn list(&self, dir: &str) -> Vec<String> {
-        std::fs::read_dir(self.0.join(dir))
+        let Ok(path) = self.checked_path(dir) else {
+            return Vec::new();
+        };
+        std::fs::read_dir(path)
             .map(|entries| {
                 entries
                     .filter_map(Result::ok)
@@ -1335,7 +1452,10 @@ impl ExtensionFiles for Disk {
             .unwrap_or_default()
     }
     fn bundle_stat(&self, rel: &str) -> custom_components::BundleLook {
-        match custom_components::stat_bundle(&self.0.join(rel)) {
+        let Ok(path) = self.checked_path(rel) else {
+            return custom_components::BundleLook::Absent;
+        };
+        match custom_components::stat_bundle(&path) {
             Some(stat) => custom_components::BundleLook::Found(stat),
             None => custom_components::BundleLook::Absent,
         }
@@ -1531,7 +1651,7 @@ pub async fn impact_between(
     layer: &crate::sql_gateway::SqlGateway,
     catalog: &crate::extension_catalog::ExtensionCatalog,
     root: &Path,
-    before: Option<ReviewSide<'_>>,
+    mut before: Option<ReviewSide<'_>>,
     after: &mut ReviewSide<'_>,
     commands: CommandSchemas<'_>,
 ) -> crate::extension_impact::ImpactReport {
@@ -1544,8 +1664,8 @@ pub async fn impact_between(
         Some(commands),
     )
     .await;
-    let prepared_before = match &before {
-        Some(b) => Some(read_side(layer, catalog, root, &b.extension).await),
+    let prepared_before = match &mut before {
+        Some(b) => Some(read_side(layer, catalog, root, &mut b.extension).await),
         None => None,
     };
     let no_runs = LensRuns::new();
@@ -1690,8 +1810,11 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         panels: Vec::new(),
         pages: Vec::new(),
         commands: Vec::new(),
+        jobs: Vec::new(),
         version: None,
         contributions: Vec::new(),
+        configuration: None,
+        public_contracts: Default::default(),
     }
 }
 
@@ -1758,7 +1881,14 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     ext.sharing = m.sharing;
     ext.intent = manifest_v2::intent_of(&m, &file, &manifest).0;
     ext.description = m.description.clone();
+    ext.configuration = manifest_v2::configuration_of(&m, &file, &manifest).0;
+    public_contracts::load(&mut ext, &m, &manifest, &file);
     let (errors, warnings) = manifest_v2::check(&m, &file, &manifest, origin == "bundled");
+    if !errors.is_empty()
+        && (!m.exports.is_empty() || !m.imports.is_empty() || !m.import_guards.is_empty())
+    {
+        ext.public_contracts.invalid = true;
+    }
     ext.errors.extend(errors);
     ext.warnings.extend(warnings);
     let panel_files = m.panels.clone();
@@ -1949,6 +2079,11 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 &provider_ops,
             );
             ext.commands = commands;
+            ext.errors.extend(errors);
+        }
+        if let Some(v) = &m.jobs {
+            let (jobs, errors) = jobs::parse_jobs(v, &file, &manifest);
+            ext.jobs = jobs;
             ext.errors.extend(errors);
         }
         if let Some(v) = &m.custom_components {
@@ -2338,6 +2473,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     }
     ext.contributions = descriptors::describe(&ext);
     descriptors::check_ids(&mut ext);
+    public_contracts::prepare(&mut ext);
     ext
 }
 
@@ -2681,26 +2817,33 @@ fn apply_disabled(mut ext: Extension, disabled: &[String]) -> Extension {
     if disabled.iter().any(|d| d == &ext.name) && !crate::bundled_extensions::is_required(&ext.name)
     {
         ext.enabled = false;
-        ext.lenses.clear();
-        ext.ui = ExtensionUi::default();
-        ext.collectors.clear();
-        ext.providers.clear();
-        ext.custom_components.clear();
-        ext.event_types = Default::default();
-        ext.ref_kinds.clear();
-        ext.effects.clear();
-        ext.implementations.clear();
-        ext.advisories.clear();
-        ext.measures.clear();
-        ext.dimensions.clear();
-        ext.metrics.clear();
-        ext.models.clear();
-        ext.panels.clear();
-        ext.pages.clear();
-        ext.commands.clear();
-        ext.contributions.clear();
+        clear_contributions(&mut ext);
     }
     ext
+}
+
+pub(super) fn clear_contributions(ext: &mut Extension) {
+    ext.lenses.clear();
+    ext.ui = ExtensionUi::default();
+    ext.collectors.clear();
+    ext.providers.clear();
+    ext.custom_components.clear();
+    ext.event_types = Default::default();
+    ext.ref_kinds.clear();
+    ext.effects.clear();
+    ext.implementations.clear();
+    ext.skills.clear();
+    ext.subscriptions.clear();
+    ext.advisories.clear();
+    ext.measures.clear();
+    ext.dimensions.clear();
+    ext.metrics.clear();
+    ext.models.clear();
+    ext.panels.clear();
+    ext.pages.clear();
+    ext.commands.clear();
+    ext.jobs.clear();
+    ext.contributions.clear();
 }
 
 pub(crate) fn disabled_error(name: &str) -> DomainError {
@@ -2800,6 +2943,19 @@ pub async fn run_spec(
 }
 
 pub async fn run_lens(
+    layer: &crate::sql_gateway::SqlGateway,
+    catalog: &crate::extension_catalog::ExtensionCatalog,
+    root: &Path,
+    id: &str,
+    params: BTreeMap<String, SqlCell>,
+    ctx: &LensContext,
+) -> Result<LensRun, DomainError> {
+    layer
+        .read_generation(async { run_lens_unpinned(layer, catalog, root, id, params, ctx).await })
+        .await?
+}
+
+async fn run_lens_unpinned(
     layer: &crate::sql_gateway::SqlGateway,
     catalog: &crate::extension_catalog::ExtensionCatalog,
     root: &Path,
@@ -3053,7 +3209,20 @@ pub async fn validate_extension(
     name: &str,
     commands: Option<CommandSchemas<'_>>,
 ) -> Result<Extension, DomainError> {
-    let mut ext = catalog.named(root, name)?;
+    if oxplow_config::disabled_extensions(catalog.project_of(root))
+        .iter()
+        .any(|disabled| disabled == name)
+        && !crate::bundled_extensions::is_required(name)
+    {
+        return Err(disabled_error(name));
+    }
+    let mut declared = load_sources(root);
+    let index = declared
+        .iter()
+        .position(|ext| ext.name == name && ext.origin == "bundled")
+        .or_else(|| declared.iter().position(|ext| ext.name == name))
+        .ok_or(DomainError::NotFound)?;
+    let mut ext = declared.swap_remove(index);
     let path = ext.path.clone();
     let read = |rel: &str| files_at(root, &path).ok().and_then(|f| f.read(rel));
     prepare(layer, catalog, root, &mut ext, &read, commands).await;
@@ -3174,35 +3343,42 @@ pub struct Prepared {
 /// extensions' — and what's wrong with them.
 async fn model_overlay(
     layer: &crate::sql_gateway::SqlGateway,
-    catalog: &crate::extension_catalog::ExtensionCatalog,
-    root: &Path,
-    ext: &Extension,
+    candidate: &candidates::CandidateCatalog,
 ) -> (Vec<oxplow_db::TempView>, Vec<String>) {
-    let others: Vec<Extension> = catalog
-        .get(root)
+    let models = candidate
+        .extensions
         .iter()
-        .filter(|e| e.enabled && e.name != ext.name)
-        .cloned()
-        .collect();
-    let models: Vec<oxplow_db::models::ExtensionModels> = others
-        .iter()
-        .chain(std::iter::once(ext))
-        .filter(|e| !e.models.is_empty())
-        .map(|e| oxplow_db::models::ExtensionModels {
-            extension: e.name.clone(),
-            sources: e.models.clone(),
+        .filter(|ext| ext.enabled && !ext.models.is_empty())
+        .map(|ext| oxplow_db::models::ExtensionModels {
+            extension: ext.name.clone(),
+            sources: ext.models.clone(),
         })
         .collect();
-    let stubs: Vec<oxplow_db::models::EntityStub> = others
+    let stubs = candidate
+        .extensions
         .iter()
-        .chain(std::iter::once(ext))
+        .filter(|ext| ext.enabled)
         .flat_map(entity_stubs)
         .collect();
     match layer.check_extension_models(models, stubs).await {
-        Ok(mut checked) => (
-            checked.views,
-            checked.errors.remove(&ext.name).unwrap_or_default(),
-        ),
+        Ok(checked) => {
+            let target = &candidate.candidate().name;
+            let errors = checked
+                .errors
+                .into_iter()
+                .filter(|(owner, _)| candidate.dependents.contains(owner))
+                .flat_map(|(owner, errors)| {
+                    errors.into_iter().map(move |error| {
+                        if &owner == target {
+                            error
+                        } else {
+                            format!("consumer `{owner}`: {error}")
+                        }
+                    })
+                })
+                .collect();
+            (checked.views, errors)
+        }
         Err(e) => (Vec::new(), vec![format!("models: {e}")]),
     }
 }
@@ -3214,9 +3390,11 @@ async fn read_side(
     layer: &crate::sql_gateway::SqlGateway,
     catalog: &crate::extension_catalog::ExtensionCatalog,
     root: &Path,
-    ext: &Extension,
+    ext: &mut Extension,
 ) -> Prepared {
-    let (overlay, _) = model_overlay(layer, catalog, root, ext).await;
+    let candidate = catalog.candidate(root, ext.clone());
+    *ext = candidate.candidate().clone();
+    let (overlay, _) = model_overlay(layer, &candidate).await;
     let lenses = run_lenses(&layer.with_overlay(overlay.clone()), ext).await;
     Prepared { lenses, overlay }
 }
@@ -3234,8 +3412,10 @@ async fn prepare(
     read: &(dyn Fn(&str) -> Option<String> + Sync),
     commands: Option<CommandSchemas<'_>>,
 ) -> Prepared {
+    let candidate = catalog.candidate(root, ext.clone());
+    *ext = candidate.candidate().clone();
     check_components(ext, read, commands);
-    let (overlay, errors) = model_overlay(layer, catalog, root, ext).await;
+    let (overlay, errors) = model_overlay(layer, &candidate).await;
     ext.errors.extend(errors);
     let layer = &layer.with_overlay(overlay.clone());
     crate::extension_commands::check_extension_commands(layer, ext, commands).await;
@@ -3379,14 +3559,12 @@ pub async fn review_extension(
             .await
             .map_err(|e| DomainError::Storage(format!("extension review: {e}")))??
     };
-    let mut extension = fetched.load();
+    let mut extension = catalog.candidate(root, fetched.load()).into_candidate();
     let load_errors = extension.errors.len();
     let installed: Option<Extension> = replacing.and_then(|name| {
-        catalog
-            .get(root)
-            .iter()
+        load_sources(root)
+            .into_iter()
             .find(|e| e.name == name && e.origin == "project")
-            .cloned()
     });
     let name = extension.name.clone();
     let read_installed = |rel: &str| read_extension_file(root, &name, rel);
@@ -3513,6 +3691,12 @@ fn load_fresh(root: &Path, project: &Path, name: &str) -> Result<Extension, Doma
         .or_else(|| all.iter().find(|e| e.name == name))
         .ok_or(DomainError::NotFound)?;
     if !ext.enabled {
+        if ext.public_contracts.blocked {
+            return Err(DomainError::Invalid(format!(
+                "extension `{name}` cannot activate because its public contracts are invalid or unavailable: {}",
+                ext.errors.join("; ")
+            )));
+        }
         return Err(disabled_error(name));
     }
     Ok(ext.clone())
@@ -3524,7 +3708,20 @@ fn installed_source(
     project: &Path,
     name: &str,
 ) -> Result<ExtensionSource, DomainError> {
-    load_fresh(root, project, name)?.source.ok_or_else(|| {
+    if oxplow_config::disabled_extensions(project)
+        .iter()
+        .any(|disabled| disabled == name)
+        && !crate::bundled_extensions::is_required(name)
+    {
+        return Err(disabled_error(name));
+    }
+    // Broken contracts must not prevent reviewing an update that repairs
+    // them. Source metadata does not execute contributions or grant access.
+    let ext = load_sources(root)
+        .into_iter()
+        .find(|ext| ext.name == name && ext.origin == "project")
+        .ok_or(DomainError::NotFound)?;
+    ext.source.ok_or_else(|| {
         DomainError::Invalid(format!(
             "extension `{name}` wasn't installed from git (no {SOURCE_FILE}); edit it in place instead"
         ))
@@ -3642,8 +3839,8 @@ fn fetch(
 }
 
 /// Clone, check it's the reviewed commit and loads cleanly, then copy
-/// into place. The old folder of an update is removed only after all
-/// that, so a failed update changes nothing.
+/// into a staging directory before replacing the installed folder. A
+/// failed publication restores the old folder or retains its backup.
 fn install_from_git(
     root: &Path,
     project: &Path,
@@ -3653,8 +3850,10 @@ fn install_from_git(
     reviewed_sha: &str,
 ) -> Result<Extension, DomainError> {
     let invalid = |m: String| DomainError::Invalid(m);
-    let storage = |e: std::io::Error| DomainError::Storage(format!("extension install: {e}"));
     let fetched = fetch(root, git_url, git_ref, replacing)?;
+    // Serialize candidate checks and publication by this process. Otherwise
+    // two concurrent installs could each validate against the old catalog.
+    let _publication = candidates::INSTALL_LOCK.lock();
     let name = fetched.name.clone();
     if fetched.sha != reviewed_sha {
         return Err(invalid(format!(
@@ -3662,25 +3861,13 @@ fn install_from_git(
             &fetched.sha[..fetched.sha.len().min(12)]
         )));
     }
-    let loaded = fetched.load();
+    let loaded = candidates::build(root, project, fetched.load()).into_candidate();
     if !loaded.errors.is_empty() {
         return Err(invalid(format!(
             "extension `{name}` has errors, so it wasn't installed: {}",
             loaded.errors.join("; ")
         )));
     }
-
-    let target = root.join(EXTENSIONS_DIR).join(&name);
-    match (target.exists(), replacing) {
-        (true, None) => {
-            return Err(invalid(format!(
-                "extension `{name}` is already installed at {EXTENSIONS_DIR}/{name}; use update_extension"
-            )))
-        }
-        (true, Some(_)) => std::fs::remove_dir_all(&target).map_err(storage)?,
-        (false, _) => {}
-    }
-    copy_tree_without_git(&fetched.clone, &target).map_err(storage)?;
 
     let source = ExtensionSource {
         git: git_url.to_string(),
@@ -3689,15 +3876,134 @@ fn install_from_git(
     };
     let yaml = serde_yaml::to_string(&source)
         .map_err(|e| DomainError::Storage(format!("extension install: {e}")))?;
-    std::fs::write(target.join(SOURCE_FILE), yaml).map_err(storage)?;
+    publish_install(
+        root,
+        project,
+        &name,
+        &fetched.clone,
+        &yaml,
+        replacing.is_some(),
+    )?;
     Ok(load_fresh(root, project, &name)
         .unwrap_or_else(|_| empty_extension(&name, &format!("{EXTENSIONS_DIR}/{name}"), "project")))
+}
+
+/// Stage on the destination filesystem so publication uses renames. The
+/// two renames stage files; coordinated runtime activation remains separate.
+fn publish_install(
+    root: &Path,
+    project: &Path,
+    name: &str,
+    from: &Path,
+    source_yaml: &str,
+    replacing: bool,
+) -> Result<(), DomainError> {
+    let storage =
+        |error: std::io::Error| DomainError::Storage(format!("extension install: {error}"));
+    let parent = candidates::install_parent(root, true)
+        .map_err(storage)?
+        .expect("creating an install parent returns its path");
+    let target = parent.join(name);
+    let exists = match std::fs::symlink_metadata(&target) {
+        Ok(metadata) if metadata.file_type().is_dir() => true,
+        Ok(_) => {
+            return Err(DomainError::Invalid(
+                "extension target is not a plain directory".into(),
+            ))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => return Err(storage(error)),
+    };
+    if exists && !replacing {
+        return Err(DomainError::Invalid(
+            format!("extension `{name}` is already installed at {EXTENSIONS_DIR}/{name}; use update_extension"),
+        ));
+    }
+    let staged = tempfile::Builder::new()
+        .prefix(".ext-publish-")
+        .tempdir_in(&parent)
+        .map_err(storage)?;
+    let candidate = staged.path().join("candidate");
+    copy_tree_without_git(from, &candidate).map_err(storage)?;
+    std::fs::write(candidate.join(SOURCE_FILE), source_yaml).map_err(storage)?;
+    std::fs::File::open(candidate.join(SOURCE_FILE))
+        .and_then(|file| file.sync_all())
+        .map_err(storage)?;
+    // Validate the copy that will actually be published, rather than
+    // assuming it is identical to the earlier fetched candidate.
+    let loaded = load_one(
+        &Disk(candidate.clone()),
+        name,
+        &format!("{EXTENSIONS_DIR}/{name}"),
+        "project",
+    );
+    let loaded = candidates::build(root, project, loaded).into_candidate();
+    if !loaded.errors.is_empty() {
+        return Err(DomainError::Invalid(format!(
+            "staged extension `{name}` has errors, so it wasn't installed: {}",
+            loaded.errors.join("; ")
+        )));
+    }
+    candidates::sync_dir(&candidate).map_err(storage)?;
+    candidates::write_install_marker(staged.path(), name, replacing).map_err(storage)?;
+    candidates::sync_dir(&parent).map_err(storage)?;
+    let previous = staged.path().join("previous");
+    if exists {
+        std::fs::rename(&target, &previous).map_err(storage)?;
+        if let Err(error) =
+            candidates::sync_dir(staged.path()).and_then(|()| candidates::sync_dir(&parent))
+        {
+            // Keep the staging directory even if immediate restoration
+            // fails: it may contain the only known prior copy.
+            let _ = std::fs::rename(&previous, &target);
+            let _retained = staged.keep();
+            return Err(storage(error));
+        }
+    }
+    if let Err(error) = std::fs::rename(&candidate, &target) {
+        if exists {
+            if let Err(rollback) = std::fs::rename(&previous, &target) {
+                // TempDir must not delete the only remaining installed copy.
+                let retained = staged.keep();
+                return Err(DomainError::Storage(format!(
+                    "couldn't publish extension `{name}`: {error}; couldn't restore it: {rollback}; previous copy retained at {}",
+                    retained.join("previous").display()
+                )));
+            }
+            if let Err(sync_error) =
+                candidates::sync_dir(staged.path()).and_then(|()| candidates::sync_dir(&parent))
+            {
+                let _retained = staged.keep();
+                return Err(storage(sync_error));
+            }
+        }
+        return Err(storage(error));
+    }
+    if let Err(error) =
+        candidates::sync_dir(staged.path()).and_then(|()| candidates::sync_dir(&parent))
+    {
+        // The new target is published. Retain its old backup so startup
+        // recovery can classify this state after a crash.
+        let _retained = staged.keep();
+        tracing::warn!(extension = name, %error, "published extension; rename sync failed");
+        return Ok(());
+    }
+    // Publication succeeded. Failure to remove the old backup is cleanup,
+    // not an installation failure that could invite an unsafe retry.
+    if let Err(error) = staged.close() {
+        tracing::warn!(extension = name, %error, "published extension; staging cleanup failed");
+    }
+    if let Err(error) = candidates::sync_dir(&parent) {
+        tracing::warn!(extension = name, %error, "published extension; cleanup sync failed");
+    }
+    Ok(())
 }
 
 /// Copy regular files and directories from `from` to `to`, skipping
 /// `.git` and anything that isn't a plain file or directory (symlinks
 /// could point outside the extension).
 fn copy_tree_without_git(from: &Path, to: &Path) -> std::io::Result<()> {
+    let mut directories = Vec::new();
     for entry in walkdir::WalkDir::new(from)
         .into_iter()
         .filter_entry(|e| e.file_name() != ".git")
@@ -3711,9 +4017,14 @@ fn copy_tree_without_git(from: &Path, to: &Path) -> std::io::Result<()> {
         let ft = entry.file_type();
         if ft.is_dir() {
             std::fs::create_dir_all(&dest)?;
+            directories.push(dest);
         } else if ft.is_file() {
             std::fs::copy(entry.path(), &dest)?;
+            std::fs::File::open(&dest)?.sync_all()?;
         }
+    }
+    for directory in directories.into_iter().rev() {
+        candidates::sync_dir(&directory)?;
     }
     Ok(())
 }
