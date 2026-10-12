@@ -120,7 +120,7 @@ impl SqliteEffortEvidenceStore {
                         rusqlite::params![
                             effort_id, d.key, d.title, d.unit, d.direction, d.kind, d.category, d.language, d.agg,
                             d.baseline, d.current, d.delta, i64::from(d.changed), d.attributed_files, d.sample_count,
-                            d.target, d.warn_at, d.fail_at, d.crossing, d.latest_run_id, at
+                            d.target, d.warn_at, d.fail_at, d.crossing, d.latest_capture_id, at
                         ],
                     )
                     .map_err(map_sql_err)?;
@@ -250,7 +250,7 @@ mod tests {
             warn_at: Some(2.0),
             fail_at: None,
             crossing: crossing.map(str::to_string),
-            latest_run_id: Some(9),
+            latest_capture_id: Some(9),
         }
     }
 

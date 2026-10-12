@@ -1038,9 +1038,8 @@ pub struct EffortMetricDelta {
     /// `warn` | `fail` when `current` (the repo-total headline for gauges) sits
     /// in that zone, interpreted via `direction`; else `None`.
     pub crossing: Option<String>,
-    /// The latest contributing CAPTURE (the capture is the run, T-E1), for
-    /// the findings drill-in. Field name kept for wire compatibility.
-    pub latest_run_id: Option<i64>,
+    /// The latest contributing capture, for the findings drill-in.
+    pub latest_capture_id: Option<i64>,
 }
 
 /// This is what the aggregation engine and reads consume.

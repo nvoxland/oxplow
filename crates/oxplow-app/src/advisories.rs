@@ -1159,7 +1159,7 @@ mod tests {
             warn_at: Some(5.0),
             fail_at: Some(10.0),
             crossing: crossing.map(str::to_string),
-            latest_run_id: None,
+            latest_capture_id: None,
         }
     }
 
