@@ -1832,7 +1832,6 @@ export type CollectorSpec = {
 	id: string,
 	doc: string,
 	runtime: CollectorRuntime,
-	execution?: ExecutionTier,
 	/**
 	 *  The program or script, relative to its owner's folder (the
 	 *  extension's, or the project's); absent for `read`.
@@ -2790,13 +2789,6 @@ export type EventTypes = {
 	 */
 	retention: EventRetention | null,
 };
-
-/**
- *  An external process has the person's authority unless the host can
- *  actually confine it. The broader tier requires explicit declaration
- *  and approval; existing program approval does not imply that opt-in.
- */
-export type ExecutionTier = "restricted" | "broader";
 
 export type ExportDeclaration = {
 	contribution: ContributionId,
@@ -5191,7 +5183,6 @@ export type ProgramKind =
 
 // A program the project's config would run.
 export type ProjectProgram = {
-	execution?: ExecutionTier,
 	kind: ProgramKind,
 	/**
 	 *  The capability it implements (a provider): what approving it lets
@@ -5380,7 +5371,6 @@ export type ProviderSpec = {
 	credentials?: CredentialDecl[],
 	// Hosts it may reach (enforced where the OS can).
 	network?: string[],
-	execution?: ExecutionTier,
 	// The checked-in `InitializeResult` (JSON), relative to the folder.
 	declarations: string,
 	/**

@@ -1918,7 +1918,7 @@ mod tests {
                 capability: CAPABILITY.into(),
                 id: "vault".into(),
                 title: "Vault".into(),
-                extension: Some("vault".into()),
+                extension: None,
                 source: crate::capabilities::Source::External,
                 features: json!({}),
                 fields: json!([]),

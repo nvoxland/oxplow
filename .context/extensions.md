@@ -3827,8 +3827,9 @@ propagate into spawned tasks. Provider host-call registration is cancellation-sa
 across candidate publication. Native/background and synchronous metadata
 entrypoints still need a complete audit. Metric declaration rows now join the
 publication transaction; state-value recapture remains a post-publication reader. The renderer receives the published metadata change signal;
-raw filesystem changes continue to trigger candidate preparation. Standalone
-instances retain their legacy behavior.
+raw filesystem changes continue to trigger candidate preparation. Until the first
+generation is activated (`ExtensionActivation::is_active`), every reader serves the
+current load.
 
 Custom component preparation reads immutable bundle bytes on a blocking worker,
 with at most 64 bundles and 128 MiB in a candidate. Publication swaps the whole

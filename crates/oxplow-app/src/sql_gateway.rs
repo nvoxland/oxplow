@@ -25,11 +25,9 @@ pub struct SqlGateway {
     overlay: std::sync::Arc<Vec<TempView>>,
     /// What a result's `coverage` and `generation` come from.
     collection: Option<std::sync::Arc<Collection>>,
-    /// Optional project activation boundary. Standalone gateways (including
-    /// fixtures and candidate checks) retain their existing behavior.
-    activation: std::sync::Arc<
-        std::sync::OnceLock<std::sync::Arc<crate::extension_activation::ExtensionActivation>>,
-    >,
+    /// The project's activation boundary. A gateway built alone has its own,
+    /// which nothing has activated: it serves the current load.
+    activation: std::sync::Arc<crate::extension_activation::ExtensionActivation>,
     /// The event types the log speaks (the app's; core's unless set):
     /// what a review reads logged events through.
     vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
@@ -54,7 +52,7 @@ impl SqlGateway {
             watermarks: None,
             overlay: std::sync::Arc::new(Vec::new()),
             collection: None,
-            activation: std::sync::Arc::new(std::sync::OnceLock::new()),
+            activation: std::sync::Arc::new(crate::extension_activation::ExtensionActivation::new()),
             vocabulary: oxplow_domain::vocabulary::VocabularyHandle::core(),
         }
     }
@@ -75,39 +73,22 @@ impl SqlGateway {
         self
     }
 
-    /// Pin queries to the project's active extension generation.
+    /// Pin queries to the project's extension generation: the boundary the
+    /// project's other services share. Set before the gateway is cloned.
     pub fn with_activation(
-        self,
+        mut self,
         activation: std::sync::Arc<crate::extension_activation::ExtensionActivation>,
-    ) -> Result<Self, DomainError> {
-        self.adopt_activation(activation)?;
-        Ok(self)
-    }
-
-    /// Adopt the project's shared activation boundary. Gateways cloned before
-    /// boot (including metric gateways) observe the same adoption.
-    pub(crate) fn adopt_activation(
-        &self,
-        activation: std::sync::Arc<crate::extension_activation::ExtensionActivation>,
-    ) -> Result<(), DomainError> {
-        let adopted = self.activation.get_or_init(|| activation.clone());
-        if std::sync::Arc::ptr_eq(adopted, &activation) {
-            Ok(())
-        } else {
-            Err(DomainError::Invalid(
-                "SQL gateway already belongs to another extension activation".into(),
-            ))
-        }
+    ) -> Self {
+        self.activation = activation;
+        self
     }
 
     pub(crate) fn has_activation(&self) -> bool {
-        self.activation.get().is_some()
+        self.activation.is_active()
     }
 
     pub(crate) fn request_activation(&self) {
-        if let Some(activation) = self.activation.get() {
-            activation.request();
-        }
+        self.activation.request();
     }
 
     /// Re-enter a retained run's reader scope before looking up declarations.
@@ -116,16 +97,11 @@ impl SqlGateway {
         run: &oxplow_domain::run::RunContext,
         future: F,
     ) -> Result<F::Output, DomainError> {
-        match self.activation.get() {
-            Some(activation) => {
-                let run = activation.pin_run(run).await?;
-                let pin = run
-                    .host_generation::<crate::extension_activation::GenerationPin>()
-                    .expect("pinned gateway context");
-                activation.read_pinned(pin, future).await
-            }
-            None => Ok(future.await),
-        }
+        let run = self.activation.pin_run(run).await?;
+        let pin = run
+            .host_generation::<crate::extension_activation::GenerationPin>()
+            .expect("pinned gateway context");
+        self.activation.read_pinned(pin, future).await
     }
 
     /// Retain this gateway's generation before looking up declarations or
@@ -135,20 +111,14 @@ impl SqlGateway {
         &self,
         future: F,
     ) -> Result<F::Output, DomainError> {
-        match self.activation.get() {
-            Some(activation) => activation.read(future).await,
-            None => Ok(future.await),
-        }
+        self.activation.read(future).await
     }
 
     pub(crate) async fn pin_run(
         &self,
         run: &oxplow_domain::run::RunContext,
     ) -> Result<oxplow_domain::run::RunContext, DomainError> {
-        match self.activation.get() {
-            Some(activation) => activation.pin_run(run).await,
-            None => Ok(run.clone()),
-        }
+        self.activation.pin_run(run).await
     }
 
     /// Spawned/script worker calls must re-enter using the retained host pin;
@@ -158,16 +128,13 @@ impl SqlGateway {
         run: &oxplow_domain::run::RunContext,
         query: SqlQuery,
     ) -> Result<SqlQueryResult, DomainError> {
-        if let Some(activation) = self.activation.get() {
-            let run = activation.pin_run(run).await?;
-            let pin = run
-                .host_generation::<crate::extension_activation::GenerationPin>()
-                .expect("pinned gateway context");
-            return activation
-                .read_pinned(pin, self.run_unpinned(query))
-                .await?;
-        }
-        self.run_unpinned(query).await
+        let run = self.activation.pin_run(run).await?;
+        let pin = run
+            .host_generation::<crate::extension_activation::GenerationPin>()
+            .expect("pinned gateway context");
+        self.activation
+            .read_pinned(pin, self.run_unpinned(query))
+            .await?
     }
 
     /// A separate private state reader for script hosts sharing this project's
@@ -242,10 +209,7 @@ impl SqlGateway {
     /// computed first, before any connection is taken, and runs against
     /// them as temp tables.
     pub async fn run(&self, query: SqlQuery) -> Result<SqlQueryResult, DomainError> {
-        if let Some(activation) = self.activation.get() {
-            return activation.read(self.run_unpinned(query)).await?;
-        }
-        self.run_unpinned(query).await
+        self.activation.read(self.run_unpinned(query)).await?
     }
 
     async fn run_unpinned(&self, mut query: SqlQuery) -> Result<SqlQueryResult, DomainError> {
@@ -270,16 +234,14 @@ impl SqlGateway {
             out.coverage = c.feeds.coverage(&c.db, &out.reads.models).await?;
             out.generation = Some(
                 self.activation
-                    .get()
-                    .and_then(|activation| activation.current_pin())
-                    .map(|pin| pin.generation().to_string())
+                    .current_pin()
+                    .and_then(|pin| pin.generation().map(str::to_string))
                     .unwrap_or_else(|| c.catalog.generation(&c.root)),
             );
         } else if let Some(generation) = self
             .activation
-            .get()
-            .and_then(|activation| activation.current_pin())
-            .map(|pin| pin.generation().to_string())
+            .current_pin()
+            .and_then(|pin| pin.generation().map(str::to_string))
         {
             out.generation = Some(generation);
         }
@@ -341,10 +303,7 @@ impl SqlGateway {
     /// Check a query compiles as a read, without running it; say what it
     /// would read.
     pub async fn check(&self, sql: &str) -> Result<Reads, DomainError> {
-        if let Some(activation) = self.activation.get() {
-            return activation.read(self.check_unpinned(sql)).await?;
-        }
-        self.check_unpinned(sql).await
+        self.activation.read(self.check_unpinned(sql)).await?
     }
 
     async fn check_unpinned(&self, sql: &str) -> Result<Reads, DomainError> {
@@ -375,12 +334,9 @@ impl SqlGateway {
         types: Vec<String>,
         limit: usize,
     ) -> Result<Vec<oxplow_domain::StoredEvent>, DomainError> {
-        if let Some(activation) = self.activation.get() {
-            return activation
-                .read(self.recent_events_unpinned(types, limit))
-                .await?;
-        }
-        self.recent_events_unpinned(types, limit).await
+        self.activation
+            .read(self.recent_events_unpinned(types, limit))
+            .await?
     }
 
     async fn recent_events_unpinned(
@@ -398,10 +354,7 @@ impl SqlGateway {
 
     /// The name of every view in the database.
     pub async fn view_names(&self) -> Result<std::collections::HashSet<String>, DomainError> {
-        if let Some(activation) = self.activation.get() {
-            return activation.read(self.view_names_unpinned()).await?;
-        }
-        self.view_names_unpinned().await
+        self.activation.read(self.view_names_unpinned()).await?
     }
 
     async fn view_names_unpinned(&self) -> Result<std::collections::HashSet<String>, DomainError> {

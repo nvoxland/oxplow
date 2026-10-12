@@ -36,15 +36,14 @@ impl std::fmt::Debug for GenerationPin {
 }
 
 impl GenerationPin {
-    pub fn snapshot(&self) -> &Arc<CatalogSnapshot> {
-        self.state
-            .active
-            .as_ref()
-            .expect("validated generation pin")
+    /// The activated catalog, or `None` before the first activation: the
+    /// boundary then serves the current load.
+    pub fn snapshot(&self) -> Option<&Arc<CatalogSnapshot>> {
+        self.state.active.as_ref()
     }
 
-    pub fn generation(&self) -> &str {
-        self.snapshot().generation()
+    pub fn generation(&self) -> Option<&str> {
+        self.snapshot().map(|snapshot| snapshot.generation())
     }
 }
 
@@ -61,12 +60,21 @@ pub struct ExtensionActivation {
     activating: tokio::sync::Mutex<()>,
     requested: tokio::sync::Notify,
     spawned: std::sync::atomic::AtomicBool,
+    /// Set once the first generation is published; before it the boundary
+    /// serves the current load.
+    activated: std::sync::atomic::AtomicBool,
     problems: parking_lot::Mutex<VocabularyErrors>,
 }
 
 impl ExtensionActivation {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Whether a generation has been published: the owner of command,
+    /// provider and model publication from then on.
+    pub fn is_active(&self) -> bool {
+        self.activated.load(std::sync::atomic::Ordering::Acquire)
     }
 
     pub fn request(&self) {
@@ -103,17 +111,6 @@ impl ExtensionActivation {
                 "required extension baseline could not activate".into(),
             ));
         }
-        svc.sql.adopt_activation(svc.extension_activation.clone())?;
-        svc.ai.adopt_activation(svc.extension_activation.clone())?;
-        svc.commands
-            .adopt_activation(svc.extension_activation.clone())
-            .map_err(|_| DomainError::Invalid("command activation adoption failed".into()))?;
-        svc.capabilities.adopt_catalog(
-            svc.extension_catalog.clone(),
-            svc.layout.project_dir.clone(),
-        )?;
-        svc.providers
-            .adopt_activation(svc.extension_activation.clone())?;
         match self.activate(svc.clone()).await {
             Ok(_) => self.problems.lock().clear(),
             Err(error) => self.record_failure(&svc, error),
@@ -207,7 +204,7 @@ impl ExtensionActivation {
             return Ok(pin);
         }
         let state = self.state.clone().read_owned().await;
-        if state.unavailable || state.active.is_none() {
+        if state.unavailable {
             return Err(DomainError::Invalid(
                 "extension activation is unavailable".into(),
             ));
@@ -454,6 +451,9 @@ impl ExtensionActivation {
                     &svc, &knowledge, &snapshots,
                 );
                 boundary.active = Some(published.clone());
+                svc.extension_activation
+                    .activated
+                    .store(true, std::sync::atomic::Ordering::Release);
                 boundary.entities = entities;
                 boundary.unavailable = false;
                 Ok((published.clone(), retired))

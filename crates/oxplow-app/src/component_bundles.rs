@@ -220,8 +220,9 @@ impl ComponentBundles {
     }
 
     /// Old frames can still read retained bytes, but invoking against a later
-    /// activated catalog requires reloading. Standalone roots retain legacy
-    /// behavior until their host adopts generation publication.
+    /// activated catalog requires reloading. A root with no activated
+    /// bundle set (nothing activated yet, or another project's) has no
+    /// generation to compare, so its frames stay current.
     pub fn is_current(&self, root: &Path, bundle: &BundleSnapshot) -> bool {
         let active = self.active.lock();
         match active.as_ref().filter(|active| active.root == root) {

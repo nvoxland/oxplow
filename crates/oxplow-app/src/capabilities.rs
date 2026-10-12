@@ -22,7 +22,7 @@
 //! `v_capability_provider`.
 
 use std::collections::BTreeSet;
-use std::sync::{Arc, OnceLock, RwLock};
+use std::sync::{Arc, RwLock};
 
 use oxplow_config::OxplowConfig;
 use oxplow_db::capability_store::{list_tx, reset_tx};
@@ -484,12 +484,16 @@ pub struct CapabilityRegistry {
     state: RwLock<RegistryState>,
     /// What `capability.switched` is validated against.
     vocabulary: VocabularyHandle,
-    /// Optional runtime owner filter. This does not change the frozen
-    /// registry state or candidate preparation.
-    catalog: OnceLock<(
+    /// The project's catalog: the runtime owner filter. A registry built
+    /// alone belongs to no project and offers everything it holds. This does
+    /// not change the frozen registry state or candidate preparation.
+    catalog: Option<(
         Arc<crate::extension_catalog::ExtensionCatalog>,
         std::path::PathBuf,
     )>,
+    /// The project's activation boundary; its published config applies once
+    /// a generation has been activated.
+    activation: Arc<crate::extension_activation::ExtensionActivation>,
 }
 
 /// Frozen capability declarations, selections and database rows for one catalog
@@ -622,7 +626,8 @@ impl CapabilityRegistry {
                 revision: Arc::new(()),
             }),
             vocabulary,
-            catalog: OnceLock::new(),
+            catalog: None,
+            activation: Arc::new(crate::extension_activation::ExtensionActivation::new()),
         }
     }
 
@@ -773,22 +778,16 @@ impl CapabilityRegistry {
         })
     }
 
-    /// Bind live reads to one project's active catalog. Re-adopting the same
-    /// catalog/root is harmless; sharing this registry across projects is not.
-    pub(crate) fn adopt_catalog(
-        &self,
+    /// Bind live reads to one project's catalog and activation boundary.
+    pub(crate) fn with_project(
+        mut self,
         catalog: Arc<crate::extension_catalog::ExtensionCatalog>,
         root: std::path::PathBuf,
-    ) -> Result<(), DomainError> {
-        let (adopted_catalog, adopted_root) =
-            self.catalog.get_or_init(|| (catalog.clone(), root.clone()));
-        if Arc::ptr_eq(adopted_catalog, &catalog) && *adopted_root == root {
-            Ok(())
-        } else {
-            Err(DomainError::Invalid(
-                "capability registry already belongs to another extension catalog".into(),
-            ))
-        }
+        activation: Arc<crate::extension_activation::ExtensionActivation>,
+    ) -> Self {
+        self.catalog = Some((catalog, root));
+        self.activation = activation;
+        self
     }
 
     /// Every currently available implementation, core's first. After catalog
@@ -800,7 +799,7 @@ impl CapabilityRegistry {
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .implementations();
-        let Some((catalog, root)) = self.catalog.get() else {
+        let Some((catalog, root)) = &self.catalog else {
             return implementations;
         };
         let snapshot = catalog.runtime_snapshot(root);
@@ -953,7 +952,7 @@ impl CapabilityRegistry {
     }
 
     fn read_effective_config(&self, fallback: &OxplowConfig) -> Arc<OxplowConfig> {
-        if self.catalog.get().is_some() {
+        if self.activation.is_active() {
             if let Some(config) = self
                 .state
                 .read()
@@ -1266,7 +1265,7 @@ impl crate::event_pump::AsyncEventConsumer for AgentTextRefresh {
         if let Some(svc) = self.services.upgrade() {
             refresh_agent_text(&svc).await;
             // The vocabulary reads the active list's ids.
-            if svc.capabilities.catalog.get().is_none() {
+            if !svc.extension_activation.is_active() {
                 svc.vocabulary_service.sync().await?;
             }
         }
@@ -1808,7 +1807,7 @@ mod tests {
                 capability: "work_items".into(),
                 id: "plain".into(),
                 title: "plain".into(),
-                extension: Some("tracker".into()),
+                extension: None,
                 source: Source::External,
                 features: serde_json::json!({ "comments": false, "links": true, "ordering": true }),
                 fields: serde_json::Value::Array(Vec::new()),

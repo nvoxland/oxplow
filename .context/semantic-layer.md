@@ -1266,18 +1266,19 @@ semantic read contract.
 
 ## Generation reader boundary
 
-`SqlGateway` can share the project's activation boundary with all of its clones,
-including metric gateways constructed before boot. Boot adopts it after staging
-the required-bundled baseline. `run`, `check`, `recent_events` and `view_names`
+`SqlGateway::with_activation` gives the gateway and all of its clones the
+project's activation boundary, including metric gateways constructed before
+boot (a gateway built alone has its own, never activated). The first
+activation is the required-bundled baseline staged at boot. `run`, `check`, `recent_events` and `view_names`
 hold a reader pin through their complete operation; nested metric materialization
 inherits the task-local pin rather than reacquiring the fair lock. Results report
 the pinned generation, not a later filesystem fingerprint. Candidate model
-validation stays outside the active reader scope, and standalone gateways retain
-their legacy behavior. Other synchronous metadata and native/background entrypoints
+validation stays outside the active reader scope, and a gateway whose boundary has
+not activated a generation serves the current load. Other synchronous metadata and native/background entrypoints
 still need an audit for complete reader coverage.
 
 Entity collector completion requests coordinated reactivation only when the
 registered entity schema differs from the signature captured with the active
 generation (view, version, SQL, columns and key). Ordinary data changes keep the
-published runtime and provider processes. Standalone model consumers retain
-their legacy fingerprinted compilation path.
+published runtime and provider processes. Until a generation is activated,
+model consumers compile against the current fingerprint.
