@@ -2043,7 +2043,7 @@ mod tests {
         let added = providers_diff(&[], &[by_url("https://mcp.example.com/mcp")]);
         assert_eq!(
             provider_phrases(&added[0])[0],
-            "added — runs oxplow's MCP adapter against https://mcp.example.com/mcp · reaches mcp.example.com · reads NOTES_TOKEN (sent to the server as its bearer token)"
+            "added — runs oxplow's MCP adapter against https://mcp.example.com/mcp · reaches mcp.example.com · reads NOTES_TOKEN (sent to the server as its bearer token) · not held here: network isn't confined to the granted hosts on this OS"
         );
         let moved = providers_diff(
             &[by_url("https://mcp.example.com/mcp")],

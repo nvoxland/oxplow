@@ -916,11 +916,11 @@ mod tests {
         );
     }
 
-    /// Two extensions that make one namespace and declare different types
-    /// share a retention window and a prefix no registry entry settles:
-    /// neither registers.
+    /// `acme_pr` would share `acme-pr`'s namespace, but an extension's name
+    /// is lowercase letters, digits and single dashes: the second is refused
+    /// at its name, so one namespace never has two owners.
     #[tokio::test]
-    async fn two_extensions_sharing_a_namespace_both_fail() {
+    async fn a_name_that_would_share_a_namespace_is_refused_at_the_name() {
         let f = crate::test_fixtures::services_with_effort().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
@@ -945,16 +945,23 @@ mod tests {
         );
         svc.vocabulary_service.sync().await.unwrap();
         let listed = svc.listed_extensions(&root).await;
-        for name in ["acme-pr", "acme_pr"] {
-            let errors = &listed.iter().find(|e| e.name == name).unwrap().errors;
-            assert!(
-                errors
-                    .iter()
-                    .any(|e| e.contains("also") && e.contains("namespace")),
-                "{name}: {errors:?}"
-            );
-        }
-        assert!(!svc.vocabulary.current().is_registered("acme_pr.merged", 1));
+        let errors = |name: &str| {
+            listed
+                .iter()
+                .find(|e| e.name == name)
+                .unwrap()
+                .errors
+                .clone()
+        };
+        assert!(errors("acme-pr").is_empty(), "{:?}", errors("acme-pr"));
+        assert!(
+            errors("acme_pr")
+                .iter()
+                .any(|e| e.contains("isn't an extension name")),
+            "{:?}",
+            errors("acme_pr")
+        );
+        assert!(svc.vocabulary.current().is_registered("acme_pr.merged", 1));
         assert!(!svc.vocabulary.current().is_registered("acme_pr.closed", 1));
     }
 

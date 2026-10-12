@@ -173,7 +173,7 @@ function baseRow(p: ProjectProgram): BaseRow {
       showsSource: bundled,
     };
   }
-  if (String(p.kind) === "job") {
+  if (p.kind === "job") {
     return {
       key: `job:${p.name}`,
       label: `Job ${p.name}`,

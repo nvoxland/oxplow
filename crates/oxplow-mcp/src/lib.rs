@@ -4256,7 +4256,18 @@ mod tests {
             .iter()
             .map(|s| s["scope"].as_str().unwrap())
             .collect();
-        assert_eq!(scopes, ["sql.read", "tree.read", "ai.compute"]);
+        assert_eq!(
+            scopes,
+            [
+                "jobs.read",
+                "extension_config.read",
+                "state.read",
+                "sql.read",
+                "tree.read",
+                "ai.compute",
+                "ai.discover"
+            ]
+        );
     }
 
     #[tokio::test]

@@ -1452,10 +1452,13 @@ impl ExtensionFiles for Disk {
             .unwrap_or_default()
     }
     fn bundle_stat(&self, rel: &str) -> custom_components::BundleLook {
-        let Ok(path) = self.checked_path(rel) else {
+        // `stat_bundle` never follows a symlink and reports one (the folder
+        // itself included), so a symlinked bundle says so rather than
+        // looking absent; only the path's shape is checked here.
+        if !oxplow_domain::service::valid_path(rel) {
             return custom_components::BundleLook::Absent;
-        };
-        match custom_components::stat_bundle(&path) {
+        }
+        match custom_components::stat_bundle(&self.0.join(rel)) {
             Some(stat) => custom_components::BundleLook::Found(stat),
             None => custom_components::BundleLook::Absent,
         }

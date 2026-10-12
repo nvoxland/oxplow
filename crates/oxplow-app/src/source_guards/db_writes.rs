@@ -7,7 +7,8 @@
 //!
 //! A function writes when its body runs a statement that changes the
 //! database (`execute`, `execute_batch`, `commit`) or opens a write
-//! transaction (`transaction`, `rehearse`), or calls a function of
+//! transaction (`transaction`, `rehearse`, or `transaction_with_behavior`
+//! with an immediate or exclusive behavior), or calls a function of
 //! oxplow-db that writes: its own type's methods (`self.f`, `Self::f`), a
 //! type's (`Type::f`), a free function by name. A trait method writes when
 //! one of oxplow-db's implementations of it does. `Database::read` only
@@ -56,7 +57,18 @@ struct Calls {
 
 impl<'ast> Visit<'ast> for Calls {
     fn visit_expr_method_call(&mut self, m: &'ast syn::ExprMethodCall) {
-        let name = m.method.to_string();
+        let mut name = m.method.to_string();
+        // A deferred transaction is a read's; an immediate or exclusive one
+        // takes the write lock.
+        if name == "transaction_with_behavior" {
+            let locks = m.args.iter().any(|a| {
+                matches!(a, syn::Expr::Path(p) if p.path.segments.last()
+                    .is_some_and(|s| s.ident == "Immediate" || s.ident == "Exclusive"))
+            });
+            if locks {
+                name = "transaction".into();
+            }
+        }
         match &*m.receiver {
             syn::Expr::Path(p) if p.path.is_ident("self") => self.own.insert(name),
             _ => self.method.insert(name),
