@@ -16,6 +16,8 @@ let extensions: unknown[] = [];
 /** The active work-items provider's extension (null: oxplow's own). */
 let activeExtension: string | null = null;
 let off: string[] = [];
+/** The person's choice among replacements of an unbound target. */
+let chosen: Record<string, string> = {};
 let lensFails: string | null = null;
 /** How long each next active-provider read takes to answer (ms). */
 const providerDelays: number[] = [];
@@ -37,7 +39,10 @@ mock.module("../api.js", () => ({
     listeners.add(l);
     return () => listeners.delete(l);
   },
-  effectiveConfig: async () => [{ key: "replacementsOff", value: off }],
+  effectiveConfig: async () => [
+    { key: "replacementsOff", value: off },
+    { key: "replacements", value: chosen },
+  ],
   querySql: async (sql: string) => {
     if (!sql.includes("v_capability_provider")) {
       return { columns: [], rows: [], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} };
@@ -90,7 +95,7 @@ const replacing = (name: string) => ({
     commands: [],
     decorators: [],
     replacements: [
-      { id: `${name}/work_item.board`, extension: name, target: "work_item.board", capability: "work_items", lensId: `${name}/board`, label: "board" },
+      { id: `${name}/work_item.board`, extension: name, target: "work_item.board", capability: "work_items", boundToProvider: true, lensId: `${name}/board`, label: "board" },
     ],
   },
   lenses: [
@@ -107,6 +112,7 @@ beforeEach(() => {
   extensions = [];
   activeExtension = null;
   off = [];
+  chosen = {};
   lensFails = null;
   lensViz = "table";
   providerDelays.length = 0;
@@ -121,6 +127,7 @@ afterEach(() => {
   extensions = [];
   activeExtension = null;
   off = [];
+  chosen = {};
   lensFails = null;
 });
 
@@ -220,3 +227,49 @@ test("an older active-provider read answering late doesn't win", async () => {
   expect(view.container.querySelector('[data-testid^="replacement-"]')).toBeNull();
 });
 
+
+/** Extension `name`, drawing the history graph (a target no provider binds). */
+const graphing = (name: string) => ({
+  name,
+  enabled: true,
+  ui: {
+    slots: [],
+    commands: [],
+    decorators: [],
+    replacements: [
+      { id: `${name}/vcs.history.graph`, extension: name, target: "vcs.history.graph", capability: "vcs", boundToProvider: false, lensId: `${name}/graph`, label: "history graph" },
+    ],
+  },
+  lenses: [
+    { id: `${name}/graph`, params: ["head_sha", "reveal_sha", "limit"].map((p) => ({ name: p, label: null, default: null })) },
+  ],
+});
+const GRAPH_PROPS = { head_sha: "abc", reveal_sha: null, limit: 500 };
+const graph = () => (
+  <Replaceable target="vcs.history.graph" props={GRAPH_PROPS} streamId="str1" fallback={<div data-testid="core-list">oxplow's list</div>} />
+);
+
+// A target core owns isn't bound to a provider: the one extension
+// replacing it shows (no provider read), several show only the one the
+// person chose, and none chosen keeps oxplow's own.
+test("an unbound target shows its one replacement, or the person's choice among several", async () => {
+  extensions = [graphing("oxplow-bundled")];
+  const one = render(graph());
+  await waitFor(() => expect(one.getByTestId("replacement-vcs.history.graph").textContent).toContain("replaced by oxplow-bundled"));
+  expect(lensRuns).toEqual([["oxplow-bundled/graph", GRAPH_PROPS]]);
+  cleanup();
+
+  extensions = [graphing("oxplow-bundled"), graphing("lanes")];
+  lensRuns.length = 0;
+  const several = render(graph());
+  await waitFor(() => expect(several.getByTestId("core-list")).toBeTruthy());
+  expect(lensRuns).toEqual([]);
+
+  chosen = { "vcs.history.graph": "lanes" };
+  emit({ kind: "configChanged" });
+  await waitFor(() => expect(several.getByTestId("replacement-vcs.history.graph").textContent).toContain("replaced by lanes"));
+
+  off = ["vcs.history.graph"];
+  emit({ kind: "configChanged" });
+  await waitFor(() => expect(several.getByTestId("core-list")).toBeTruthy());
+});

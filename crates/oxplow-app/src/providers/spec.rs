@@ -1,5 +1,4 @@
-//! The `providers:` kind of `extension.yaml` (experimental: private
-//! extensions only): a program that implements a capability over the
+//! The `providers:` kind of `extension.yaml`: a program that implements a capability over the
 //! provider protocol.
 //!
 //! ```yaml

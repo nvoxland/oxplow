@@ -308,7 +308,7 @@ welded to collection.
 >
 > `per-path` today: `oxplow.ast_hit`, `oxplow.complexity`, `oxplow.fn_length`,
 > `oxplow.parameter_count`, `oxplow.todo` (+ any project measure a snapshot collector
-> records per-file facts on — `oxplow.metric.scaffold` sets it automatically). Validated in
+> records per-file facts on — the scaffolded metric extension sets it). Validated in
 > config + `CaptureScope::parse`, deliberately **NOT** a DB CHECK: the
 > `temporal_semantics` CHECK is exactly why adding a value *there* would need a
 > `measure` table rebuild, which fires `fact.measure_id ON DELETE CASCADE` and wipes
@@ -862,7 +862,10 @@ NOT a store method — it lives in `metric_engine::aggregate_facts`.
   refuses a bare key to slice or filter by (`series_in_stream` →
   `bare_dimension`, tsk989), naming the conformed one — a bare key would
   read nothing, an empty slice that looks like no data — and the built-in
-  metrics declare only conformed keys. Project config
+  metrics declare only conformed keys. A namespaced key a `dimensions:` entry
+  doesn't declare is not refused: it is recorded and slices like a declared
+  one, and the entry only names it in `v_dimension`
+  (`a_namespaced_dimension_key_need_not_be_declared_to_slice`). Project config
   refuses one in `sliceableDims` or
   `filter.dimEq` (`subject`, the raw-subject pseudo-dimension, aside). V166
   renamed stored bare `language` facts and specs' bare dims, dropped the
@@ -1324,10 +1327,21 @@ reached through `run_command`, audited like every command):
   (`fact_store::record_facts_tx`); after commit it clears the fact memo
   (the change loop announces `MetricSamplesChanged` for the measure).
 - `oxplow.metric.rebuild { force }` — `BestEffort` over
-  `MetricsService::rebuild_baseline`, the whole-tree baseline boot runs.
-- `oxplow.metric.scaffold { key, title?, language?, glob? }` — a `Read`: the
-  starter collector script and the config entries, which the agent adds with
-  `oxplow.config.set` (`collectors` is person-only, so that step asks the person).
+  `MetricsService::rebuild_baseline`, the whole-tree baseline boot runs. Its
+  `BaselineReport` carries `excluded: [{ path, reason }]`: the snapshot files
+  the collectors were not given, `oversize` (over `snapshotMaxFileBytes`, or
+  stored by stat only), `binary` (a NUL byte) or `unreadable`
+  (`file_map_from_rows` builds a `Corpus` of the text and what it left out; a
+  sweep logs a warning naming them and `SweepReport.excluded` carries them).
+  **A per-path metric reads an excluded path as rescanned clean** — it is in
+  the snapshot's scanned set, so its old fact is superseded by the empty
+  restatement — which is why the exclusion is reported rather than silent.
+  Oversize files can also be listed from `v_snapshot_file` (`storage`).
+- `oxplow.metric.scaffold { name, language?, glob?, origin? }` — a `Read`: the
+  files of a code metric extension (`{ name, dir, files: [{ path, content }] }`),
+  which the agent writes with its own tools; then `extension check` and
+  `extension test`. Refused for an existing folder, a bad or reserved name,
+  or a language with no starter sample.
 
 Running one fact collector now is **`oxplow.collector.sync { owner, id }`** (the
 one manual run for every collector; `metric.run` is deleted) — it reaches
@@ -1837,22 +1851,18 @@ The mechanics behind those controls (unchanged by tsk117):
   in `.oxplow/project.yaml`. **Trigger is inherent to the definition** —
   `resolve_one` reads it from the definition (like `compute`) and a `use:`
   entry can't override it (tsk290).
-- **`oxplow.metric.scaffold` (a command since P4.8; a template since tsk391)** returns the
-  **trio** (measure + collector + metric) and a starter fact-returning Starlark stub,
-  and **writes nothing**: `MetricsService::metric_scaffold` → `MetricScaffold {
-  scriptPath: oxplow/collectors/<slug>.star, script, projectYaml }`, the entries a
-  `measures:` entry (`<key>.count`, per-path), a `collectors:` entry (id `<key>`,
-  starlark, `trigger: { on: [snapshot.taken] }`, `facts: [<key>.count]`) and a
-  `metrics:` spec (`<key>`, `sum` over the measure), rendered by
-  `oxplow_config::entries_yaml`. The agent writes the script with its own
-  tools and adds the entries through `oxplow.config.set` (`collectors` is person-only,
-  so the person confirms); the `config.metrics` reactor reseeds. It used to write the files itself
-  (and had a `global` scope writing the global config dir), which let a
-  read-only thread change the repo and always wrote to the primary worktree.
-  Global metrics are authored by hand in the global config dir (there are no
-  global collectors). The runner reads a collector's `entry` from its
-  owner's folder (`collector_script_text`: the project dir, the extension's
-  folder, or the embedded script for a built-in).
+- **`oxplow.metric.scaffold` (a command since P4.8; a template since tsk391; now the
+  metric extension)** returns the files of a private extension (see
+  "Authoring surface"): `MetricsService::metric_scaffold` → `MetricScaffold {
+  name, dir, files: [{ path, content }] }`, the same
+  `metric_scaffold::extension_files` the SDK's `Kind::Metric` writes, and
+  **writes nothing**. The agent writes the files with its own tools (the
+  write guard and its worktree apply) and the catalog reseeds when the
+  extension loads. It no longer edits `.oxplow/project.yaml` and has no
+  `gauge` wording or default. Global metrics are authored by hand in the
+  global config dir (there are no global collectors). The runner reads a
+  collector's `entry` from its owner's folder (`collector_script_text`: the
+  project dir, the extension's folder, or the embedded script for a built-in).
 
 Metrics are also surfaced **organically off the Metrics pages** (tsk250): the
 effort review (`DiffViewPage`'s `effort.review.details` slot) shows the oxplow-bundled
@@ -1882,7 +1892,40 @@ Token and page analytics are oxplow-bundled lenses (`usage`) over
 
 ## Authoring surface (the four config blocks — epic tsk12, E)
 
-A project (or the user-global library) declares metrics in YAML — no Rust per
+**A code metric is an extension (current).** `oxplow extension new metric
+<name> [--language rust] [--glob '**/*.rs']` (or the `oxplow.metric.scaffold`
+command, which returns the same files for the agent to write — one template,
+`metric_scaffold::extension_files`) makes a private extension under
+`oxplow/extensions/<name>/` with all four blocks, namespaced `<ns>.*` (the
+name with `_` for `-`):
+
+- `measures:` one per-path (`captureScope: per-path`), semi-additive measure on
+  files, `<ns>.complex_functions` — per-path because a snapshot's collector
+  rescans only the files it changed, semi-additive because the latest
+  count is the answer;
+- `collectors:` `<ns>.scan`, Starlark, `trigger: { on: [snapshot.taken] }`,
+  over `source_files()` + `code_metrics()` (the starter counts each
+  file's functions over `LIMIT`, records one fact per file with the worst
+  function's `line` and `dims: { <ns>.area: <top folder> }`; a clean file
+  records nothing, and rescanning it supersedes its old fact);
+- `dimensions:` `<ns>.area`, which the facts' `dims` use and the metric slices by;
+- `metrics:` `<ns>.complex_functions`, `sum`, `lower-better`,
+  `displayKind: findings` (its facts are located), `sliceableDims: [<ns>.area]`;
+- a Code launcher lens over `metric_findings('<ns>.complex_functions')`
+  whose `path` column links `file` at the `line` column, and an intent
+  example + `fixtures/basic.yaml` in the fact-collector form `extension
+  test` runs (`input: { collector, files: {path: text} }`, `expect: {
+  facts: [...] }`, each fact compared on the keys the expectation names).
+
+It checks with no warnings and tests clean as written
+(`crates/oxplow-sdk/tests/just_works.rs`), and the whole loop — capture,
+carry-forward across a delta, slicing by area, the lens rows, the refusals
+and an oversized file — is held by `metrics_authoring_tests.rs` in
+`oxplow-app`. Edit the collector, the fixture and the lens; the
+project-config path below is for a metric that is the project's own
+(e.g. a report-derived or `exec` collector).
+
+A project (or the user-global library) can also declare metrics in YAML — no Rust per
 metric. The substrate is dimensional, so authoring splits into **four orthogonal
 blocks** (matching the real cardinality): `measures:` (fact TYPEs) ← `collectors:`
 (fact PRODUCERs — a collector with `facts:`) → facts → `metrics:` (read SPECs),
@@ -2025,11 +2068,12 @@ materialized for Claude/Codex/opencode) — "make a metric that counts TODOs" �
 the measure+collector+metric trio + script + verification (`oxplow.collector.sync`
 runs it now), no oxplow-team involvement.
 The skill's fast path is the **`oxplow.metric.scaffold` command** (P4.8) →
-`MetricsService::metric_scaffold`, which returns that trio (measure `<key>.count`,
-collector `<key>`, metric `<key>`) + a starter fact-returning script under
-`oxplow/collectors/` as a template the agent writes and adapts (tsk391), adding
-the entries through `oxplow.config.set`; or the agent hand-authors the four blocks the
-same way.
+`MetricsService::metric_scaffold`, which returns the metric extension's files
+(measure, collector, dimension, metric, lens, fixture; "Authoring surface")
+as a template the agent writes and adapts; `oxplow extension check` and
+`extension test` verify it before `oxplow.collector.sync` runs it. A metric
+that is the project's own (a report-derived or `exec` collector) is
+hand-authored in the four blocks of `.oxplow/project.yaml`.
 
 ## Targets & feedback (advise-only, P5/tsk220)
 

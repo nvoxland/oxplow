@@ -70,11 +70,19 @@ pub async fn activate_with_problems(
     svc: &Arc<crate::Services>,
 ) -> crate::vocabulary_reactor::VocabularyErrors {
     use oxplow_db::TxError;
-    match svc.extension_activation.activate(svc.clone()).await {
-        Ok(_) => svc.extension_activation.problems(),
-        // A rejected candidate: the previous generation stays, and why.
-        Err(TxError::Aborted(problems)) => problems,
-        Err(error) => panic!("activation failed: {error:?}"),
+    // A candidate overtaken by a change made while it was prepared (a
+    // stop, an approval) is rejected whole; the generation owner takes
+    // the next pass for the change that overtook it, so this does too.
+    let mut attempts = 0;
+    loop {
+        attempts += 1;
+        match svc.extension_activation.activate(svc.clone()).await {
+            Ok(_) => return svc.extension_activation.problems(),
+            // A rejected candidate: the previous generation stays, and why.
+            Err(TxError::Aborted(problems)) if problems.contains_key("<host>") && attempts < 3 => {}
+            Err(TxError::Aborted(problems)) => return problems,
+            Err(error) => panic!("activation failed: {error:?}"),
+        }
     }
 }
 
@@ -284,23 +292,8 @@ pub async fn new_thread(
 /// the shipped ones too — as a person does in Settings → Data → Programs,
 /// so a test's model calls go out.
 pub fn approve_ai_providers(svc: &crate::Services) {
-    let project = svc.layout.project_dir.clone();
-    let config = svc.config.read().unwrap().clone();
-    let extensions = svc.extension_catalog.get(&project);
-    for p in crate::exec_consent::list(&svc.approvals, &project, &config, &extensions) {
-        if p.kind == crate::exec_consent::ProgramKind::AiProvider {
-            crate::exec_consent::approve_program(
-                &svc.approvals,
-                &project,
-                &config,
-                &extensions,
-                p.kind,
-                &p.name,
-                p.version.as_deref().expect("a version to approve"),
-            )
-            .expect("approved");
-        }
-    }
+    crate::exec_consent::approve_every(svc, crate::exec_consent::ProgramKind::AiProvider)
+        .expect("approved");
 }
 
 /// A tool hook's call as the hook route maps it (`AgentHarness::tool_use`

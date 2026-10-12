@@ -57,6 +57,15 @@ impl SqlGateway {
         }
     }
 
+    /// A gateway over `db` that reads metrics too (`metric_grid()`,
+    /// `metric_findings()`) from the facts in `db`: what a check dry-runs a
+    /// metric's lens on, outside a running oxplow.
+    pub fn with_metrics(db: Database) -> Self {
+        let engine =
+            crate::metric_engine::MetricEngine::new(oxplow_db::SqliteFactStore::new(db.clone()));
+        Self::new(db).with_engine(engine)
+    }
+
     /// Speak `vocabulary` (the app's).
     pub fn with_vocabulary(
         mut self,

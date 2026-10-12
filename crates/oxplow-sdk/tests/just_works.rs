@@ -143,6 +143,53 @@ async fn a_scaffolded_collector_checks_before_its_first_sync_and_runs() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_scaffolded_metric_checks_tests_and_declares_its_blocks() {
+    let dir = project().await;
+    scaffolded(dir.path(), "metric", "complex-fns").await;
+    // Its fixture runs the collector over a corpus and expects the facts.
+    assert!(tested(dir.path(), "complex-fns")
+        .await
+        .contains(&"example basic".to_string()));
+    let svc = booted(dir.path()).await;
+    let ext = loaded(&svc, dir.path(), "complex-fns");
+
+    // One per-path measure on files, namespaced under the extension.
+    let [measure] = ext.measures.as_slice() else {
+        panic!("one measure: {:?}", ext.measures)
+    };
+    let key = measure.key.as_deref().unwrap();
+    assert!(key.starts_with("complex_fns."), "{key}");
+    assert_eq!(measure.subject_kind.as_deref(), Some("file"));
+    assert_eq!(measure.capture_scope.as_deref(), Some("per-path"));
+    assert_eq!(measure.temporal_semantics.as_deref(), Some("semi-additive"));
+    // The area dimension the collector tags its facts with, declared.
+    let [dimension] = ext.dimensions.as_slice() else {
+        panic!("one dimension: {:?}", ext.dimensions)
+    };
+    assert_eq!(dimension.key.as_deref(), Some("complex_fns.area"));
+    // The headline metric aggregates the measure.
+    let [metric] = ext.metrics.as_slice() else {
+        panic!("one metric: {:?}", ext.metrics)
+    };
+    assert_eq!(metric.source_measure.as_deref(), Some(key));
+    assert_eq!(metric.display_kind.as_deref(), Some("findings"));
+    // A Starlark fact collector on snapshot.taken over that measure.
+    let [collector] = ext.collectors.as_slice() else {
+        panic!("one collector: {:?}", ext.collectors)
+    };
+    assert_eq!(collector.facts, vec![key.to_string()]);
+    // A launcher lens whose rows link to the file and line.
+    let lens = &ext.lenses[0];
+    let link = lens
+        .columns
+        .iter()
+        .find_map(|c| c.link.as_ref())
+        .expect("a linked column");
+    assert_eq!(link.kind, oxplow_app::extensions::LensLinkKind::File);
+    assert_eq!(link.line.as_deref(), Some("line"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_scaffolded_command_checks_tests_and_runs_through_the_bus() {
     let dir = project().await;
     scaffolded(dir.path(), "command", "add-note").await;

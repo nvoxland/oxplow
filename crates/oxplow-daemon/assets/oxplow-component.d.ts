@@ -37,8 +37,9 @@ export interface OxplowComponent {
    *  `DENIED` until a person approves the component in Settings → Data →
    *  Programs). */
   invoke(command: string, input?: unknown): Promise<unknown>;
-  /** Open one of oxplow's pages. Rejects with an {@link OxplowError}. */
-  navigate(ref: string): Promise<null>;
+  /** Open one of oxplow's pages, in a new tab with `{ newTab: true }`.
+   *  Rejects with an {@link OxplowError}. */
+  navigate(ref: string, options?: { newTab?: boolean }): Promise<null>;
   /** Set each theme token on the document's root, where the kit's
    *  stylesheet (`/component-lib/oxplow-kit.css`) reads them. */
   applyTheme(doc?: Document): void;

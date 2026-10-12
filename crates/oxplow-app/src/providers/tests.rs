@@ -1632,10 +1632,12 @@ async fn approving_updated_declarations_restarts_the_instance() {
         serde_json::to_string_pretty(&oxplow_provider_fake::bad_declarations()).unwrap(),
     )
     .unwrap();
-    approve(&fx, &extension(&project)).await;
+    // The approval is recorded, then the registry is told (it re-baselines
+    // what the running instance was enabled with) before a generation
+    // starts the instance on the new declarations.
+    approve_without_activating(&fx, &extension(&project));
     fx.svc.providers.approved(INSTANCE).await;
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
-
     let running = fx.svc.providers.get(INSTANCE).await.expect("running");
     assert_eq!(running.declared, oxplow_provider_fake::bad_declarations());
     assert_eq!(

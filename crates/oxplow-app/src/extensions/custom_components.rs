@@ -5,8 +5,9 @@
 //! it may invoke (`commands`). It renders and queries without approval;
 //! one that declares `commands` is a program a person approves before its
 //! `invoke` runs them with their rights (tsk960), at the version of the
-//! bundle it loaded (tsk984). A bundled extension can't declare one: its
-//! bundle is never served.
+//! bundle it loaded (tsk984). A bundled extension's component runs the same
+//! way: its bundle is served from the embedded files, hashed and approved
+//! like a project's.
 //!
 //! ```yaml
 //! custom_components:
@@ -160,28 +161,14 @@ pub const LIB_SCRIPT: &str = "/component-lib/oxplow-component.js";
 /// ([`page_problems`]) — the one page a frame shows, since a nested frame
 /// is refused and navigating away ends the component — read through
 /// `read`, the files of the extension under check (tsk994: a candidate
-/// under review, a revision, or the folder on disk); and any component in
-/// an extension that comes with oxplow, whose bundle is never served. A
-/// page `read` can't find (a revision's tree rarely holds a built bundle)
+/// under review, a revision, the folder on disk, or a bundled extension's
+/// embedded files). A page `read` can't find (a revision's tree rarely holds a built bundle)
 /// is skipped: loading says when a bundle has no `index.html`.
 pub fn bundle_problems(
     ext: &super::Extension,
     read: &dyn Fn(&str) -> Option<String>,
 ) -> Vec<String> {
     let dir = ext.path.trim_end_matches('/');
-    if ext.origin == "bundled" {
-        return ext
-            .custom_components
-            .iter()
-            .map(|c| {
-                format!(
-                    "{dir}/extension.yaml: custom component `{}`: an extension that comes with \
-                     oxplow can't declare one — its bundle is never served",
-                    c.id
-                )
-            })
-            .collect();
-    }
     let mut out = Vec::new();
     for c in &ext.custom_components {
         let rel = format!("{}/index.html", c.bundle.trim_end_matches('/'));
@@ -798,11 +785,10 @@ mod tests {
         assert_eq!(bundle_problems(&ext, &missing), Vec::<String>::new());
     }
 
-    /// tsk961: the check reports a bundle's page problems at the page, and
-    /// a component in an extension that comes with oxplow — the daemon
-    /// never serves a bundled extension's bundle.
+    /// tsk961: the check reports a bundle's page problems at the page —
+    /// a bundled extension's as a project's: they share one runtime.
     #[tokio::test]
-    async fn a_bundles_pages_and_a_bundled_component_are_checked() {
+    async fn a_bundles_pages_are_checked_whatever_its_origin() {
         let d = tempfile::tempdir().unwrap();
         load(d.path(), "private", "  - { id: burndown }\n");
         write(
@@ -823,12 +809,13 @@ mod tests {
         assert!(errs.contains("doesn't load the client library"), "{errs}");
         let mut ext = load(d.path(), "private", "  - { id: burndown }\n");
         ext.origin = "bundled".into();
-        assert!(
-            bundle_problems(&ext, &|_: &str| None)
-                .join("\n")
-                .contains("comes with oxplow"),
-            "{ext:?}"
-        );
+        let page = |rel: &str| {
+            (rel == "components/burndown/index.html")
+                .then(|| "<!doctype html><script>render()</script>".to_string())
+        };
+        let problems = bundle_problems(&ext, &page).join("\n");
+        assert!(problems.contains("an inline <script>"), "{problems}");
+        assert!(!problems.contains("comes with oxplow"), "{problems}");
     }
 
     #[test]

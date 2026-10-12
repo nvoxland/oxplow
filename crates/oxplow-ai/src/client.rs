@@ -151,15 +151,17 @@ pub trait ModelProvider: Send + Sync {
     /// must (`baseUrl`).
     fn default_base_url(&self) -> Option<&str>;
     /// Enumerate locally available metadata. This must not make paid probes
-    /// or use credentials; older providers have no known catalog.
+    /// or use credentials; a provider that only supports text completion and
+    /// decide has no known catalog.
     async fn discover_models(
         &self,
         _instance: &ProviderInstance<'_>,
     ) -> Result<ModelCatalogV1, AiError> {
         Ok(ModelCatalogV1::unknown())
     }
-    /// Discover metadata without making a model call. Older providers return
-    /// an unknown snapshot and never probe a potentially billable endpoint.
+    /// Discover metadata without making a model call. A provider that only
+    /// supports text completion and decide returns an unknown snapshot and
+    /// never probes a potentially billable endpoint.
     async fn discover(
         &self,
         _instance: &ProviderInstance<'_>,
@@ -441,15 +443,17 @@ pub struct UnknownProviderKind {
     pub registered: Vec<String>,
 }
 
-/// The model providers the project's extensions declare, by kind. Cloning
+/// The model providers the project's extensions declare, by kind, and the
+/// few the host registers itself (a preview's fixture model). Cloning
 /// shares them.
 #[derive(Clone, Default)]
 pub struct ModelProviders {
     providers: Arc<RwLock<BTreeMap<String, Arc<dyn ModelProvider>>>>,
+    host: Arc<RwLock<BTreeMap<String, Arc<dyn ModelProvider>>>>,
 }
 
 impl ModelProviders {
-    /// Replace what's registered.
+    /// Replace what the extensions register; the host's kinds stay.
     pub fn set(&self, providers: Vec<Arc<dyn ModelProvider>>) {
         *self.providers.write().unwrap_or_else(|e| e.into_inner()) = providers
             .into_iter()
@@ -457,25 +461,47 @@ impl ModelProviders {
             .collect();
     }
 
+    /// Register a kind the host provides, which no activation replaces.
+    pub fn register_host(&self, provider: Arc<dyn ModelProvider>) {
+        self.host
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(provider.kind().to_string(), provider);
+    }
+
     /// Every registered kind, sorted.
     pub fn kinds(&self) -> Vec<String> {
-        self.providers
+        let mut kinds: Vec<String> = self
+            .providers
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .keys()
+            .chain(self.host.read().unwrap_or_else(|e| e.into_inner()).keys())
             .cloned()
-            .collect()
+            .collect();
+        kinds.sort();
+        kinds.dedup();
+        kinds
     }
 
     pub fn get(&self, kind: &str) -> Result<Arc<dyn ModelProvider>, UnknownProviderKind> {
-        let providers = self.providers.read().unwrap_or_else(|e| e.into_inner());
-        providers
+        let found = self
+            .providers
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
             .get(kind)
             .cloned()
-            .ok_or_else(|| UnknownProviderKind {
-                kind: kind.to_string(),
-                registered: providers.keys().cloned().collect(),
-            })
+            .or_else(|| {
+                self.host
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(kind)
+                    .cloned()
+            });
+        found.ok_or_else(|| UnknownProviderKind {
+            kind: kind.to_string(),
+            registered: self.kinds(),
+        })
     }
 }
 
@@ -621,6 +647,21 @@ mod tests {
         );
     }
 
+    /// A kind the host registers (a preview's fixture model) isn't the
+    /// extensions' to replace: an activation's `set` keeps it.
+    #[test]
+    fn a_host_kind_outlives_what_extensions_register() {
+        let r = ModelProviders::default();
+        r.register_host(Arc::new(crate::fixture::FixtureModel::new(vec![
+            "hi".into()
+        ])));
+        r.set(vec![Arc::new(Echo)]);
+        assert_eq!(r.kinds(), ["echo", "fixture"]);
+        assert_eq!(r.get("fixture").unwrap().kind(), "fixture");
+        r.set(Vec::new());
+        assert_eq!(r.kinds(), ["fixture"]);
+    }
+
     #[test]
     fn an_instances_base_url_overrides_the_default() {
         assert_eq!(instance().base_url_or("https://x/v1/"), "https://x/v1");
@@ -630,7 +671,7 @@ mod tests {
         };
         assert_eq!(custom.base_url_or("https://x"), "http://h:1/v1");
     }
-    /// A legacy text provider that keeps what it was asked and counts calls.
+    /// A text-only provider that keeps what it was asked and counts calls.
     struct Recorder {
         calls: std::sync::Mutex<Vec<(Option<String>, String, String)>>,
         reply: Completion,
@@ -694,7 +735,7 @@ mod tests {
     /// A provider with no discovery reports unknown, never a guess, and
     /// asks nothing of the model to do it.
     #[tokio::test]
-    async fn a_legacy_provider_discovers_unknown_without_a_call() {
+    async fn a_text_only_provider_discovers_unknown_without_a_call() {
         let p = Recorder::new(1, 1);
         let snap = p
             .discover(&instance(), "claude-looks-capable")
@@ -710,9 +751,9 @@ mod tests {
     }
 
     /// System text and one user message become the text call; their text
-    /// is kept, and legacy replies carry no finish reason or usage source.
+    /// is kept, and text-only replies carry no finish reason or usage source.
     #[tokio::test]
-    async fn typed_text_runs_over_the_legacy_text_path() {
+    async fn typed_text_runs_over_the_text_path() {
         let p = Recorder::new(12, 4);
         let req = typed(vec![
             msg(MessageRoleV1::System, vec![text("be "), text("brief")]),
@@ -737,9 +778,9 @@ mod tests {
         );
     }
 
-    /// The legacy zero sentinel means "not reported", not a known zero.
+    /// The text path's zero sentinel means "not reported", not a known zero.
     #[tokio::test]
-    async fn legacy_sentinel_counts_stay_unknown() {
+    async fn text_path_sentinel_counts_stay_unknown() {
         let p = Recorder::new(0, -1);
         let req = typed(vec![msg(MessageRoleV1::User, vec![text("q")])]);
         let r = p.complete_typed(&instance(), &req).await.unwrap();

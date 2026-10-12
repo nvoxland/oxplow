@@ -107,7 +107,8 @@ impl CapabilitySnapshotV1 {
         check_v1("capability snapshot", self.schema_version)
     }
 
-    /// A conservative snapshot for an older provider that has no discovery.
+    /// A conservative snapshot for a provider that only supports text completion and decide, so has no
+    /// discovery.
     pub fn unknown(model: &str) -> Self {
         Self {
             schema_version: 1,

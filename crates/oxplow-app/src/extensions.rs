@@ -1035,23 +1035,21 @@ pub struct Extension {
     pub source: Option<ExtensionSource>,
     /// Declared collectors (valid ones; invalid ones are in `errors`).
     pub collectors: Vec<oxplow_config::collectors::CollectorSpec>,
-    /// Declared providers (experimental: a private extension's only;
-    /// valid ones — invalid ones are in `errors`).
+    /// Declared providers (valid ones — invalid ones are in `errors`).
     pub providers: Vec<crate::providers::ProviderSpec>,
-    /// Web components its `custom` lenses render, sandboxed (experimental:
-    /// a private extension's only; valid ones).
+    /// Web components its `custom` lenses render, sandboxed (valid ones).
     pub custom_components: Vec<custom_components::CustomComponent>,
-    /// Event types it declares (experimental: a private extension's only;
-    /// valid ones — the vocabulary registers them, `vocabulary_reactor`).
+    /// Event types it declares (valid ones — the vocabulary registers
+    /// them, `vocabulary_reactor`).
     pub event_types: crate::extension_event_types::EventTypes,
-    /// Ref kinds it declares (experimental: a private extension's only;
-    /// valid ones — the vocabulary registers them, `vocabulary_reactor`).
+    /// Ref kinds it declares (valid ones — the vocabulary registers
+    /// them, `vocabulary_reactor`).
     pub ref_kinds: Vec<crate::extension_ref_kinds::RefKindDecl>,
-    /// Effects it declares (experimental: a private extension's only;
-    /// valid ones — each runs only once a person approves it, `effects`).
+    /// Effects it declares (valid ones — each runs only once a person
+    /// approves it, `effects`).
     pub effects: Vec<crate::effects::EffectDecl>,
-    /// The capability implementations it declares (stable:
-    /// `implementations:`, each a built-in of core's).
+    /// The capability implementations it declares (`implementations:`,
+    /// each a built-in of core's).
     pub implementations: Vec<implementations::ImplementationDecl>,
     /// Skills and slash commands it gives the coding agent (`skills:`;
     /// valid ones — invalid ones are in `errors`).
@@ -1114,8 +1112,7 @@ pub struct ExtensionUi {
     /// Labels from its models on core refs (valid ones).
     pub decorators: Vec<decorators::UiDecorator>,
     /// Lenses that take the place of a core sub-component while its
-    /// provider is the capability's active one (experimental: a private
-    /// extension's only; valid ones).
+    /// provider is the capability's active one (valid ones).
     pub replacements: Vec<replacements::UiReplacement>,
 }
 
@@ -1323,19 +1320,27 @@ pub fn read_extension_file(root: &Path, name: &str, rel: &str) -> Option<String>
 /// `project_dir/path` on disk — one resolver, so what an approval covers is
 /// read the same way wherever the extension lives (tsk953).
 pub(crate) fn files_at(project_dir: &Path, path: &str) -> std::io::Result<Box<dyn ExtensionFiles>> {
-    match path.strip_prefix("bundled:") {
-        Some(name) => crate::bundled_extensions::BUNDLED
-            .iter()
-            .find(|b| b.name == name.trim_end_matches('/'))
-            .map(|b| Box::new(Embedded(b)) as Box<dyn ExtensionFiles>)
-            .ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    format!("no bundled extension `{name}`"),
-                )
-            }),
-        None => Ok(Box::new(Disk(project_dir.join(path)))),
-    }
+    let Some(rest) = path.strip_prefix("bundled:") else {
+        return Ok(Box::new(Disk(project_dir.join(path))));
+    };
+    // `bundled:<name>` is the extension; `bundled:<name>/<folder>` one of
+    // its folders (a component's bundle), as a path on disk would be.
+    let rest = rest.trim_end_matches('/');
+    let (name, folder) = rest.split_once('/').unwrap_or((rest, ""));
+    let ext = crate::bundled_extensions::find(name).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("no bundled extension `{name}`"),
+        )
+    })?;
+    Ok(if folder.is_empty() {
+        Box::new(Embedded(ext))
+    } else {
+        Box::new(EmbeddedDir {
+            ext,
+            prefix: format!("{folder}/"),
+        })
+    })
 }
 
 /// Where an extension's files come from: a folder on disk, a bundled
@@ -1696,18 +1701,15 @@ pub(crate) struct Embedded(pub(crate) &'static crate::bundled_extensions::Bundle
 
 impl ExtensionFiles for Embedded {
     fn read(&self, rel: &str) -> Option<String> {
-        self.0
-            .files
-            .iter()
-            .find(|(p, _)| *p == rel)
-            .map(|(_, c)| (*c).to_string())
+        self.0.file(rel).map(str::to_string)
     }
     fn paths(&self) -> std::io::Result<Vec<String>> {
         Ok(self.0.files.iter().map(|(p, _)| (*p).to_string()).collect())
     }
     fn bytes(&self, rel: &str) -> std::io::Result<Vec<u8>> {
-        self.read(rel)
-            .map(String::into_bytes)
+        self.0
+            .bytes(rel)
+            .map(<[u8]>::to_vec)
             .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, rel.to_string()))
     }
     fn list(&self, dir: &str) -> Vec<String> {
@@ -1720,9 +1722,62 @@ impl ExtensionFiles for Embedded {
             .map(str::to_string)
             .collect()
     }
-    /// A bundled extension is shared: it has no custom components.
-    fn bundle_stat(&self, _rel: &str) -> custom_components::BundleLook {
-        custom_components::BundleLook::Absent
+    /// From the embedded paths, as a folder's is from the disk. Every file
+    /// it ships is here, so a bundle with none is absent, not unknown.
+    fn bundle_stat(&self, rel: &str) -> custom_components::BundleLook {
+        match custom_components::look_in_paths(rel, self.0.files.iter().map(|(p, b)| (*p, b.len())))
+        {
+            custom_components::BundleLook::Unknown => custom_components::BundleLook::Absent,
+            found => found,
+        }
+    }
+}
+
+/// One folder of a bundled extension (`bundled:<name>/<folder>`): its
+/// files by path inside the folder, as [`Disk`] gives a folder's.
+pub(crate) struct EmbeddedDir {
+    ext: &'static crate::bundled_extensions::BundledExtension,
+    /// `<folder>/`.
+    prefix: String,
+}
+
+impl EmbeddedDir {
+    fn inner(&self) -> impl Iterator<Item = (&'static str, &'static [u8])> + '_ {
+        self.ext
+            .files
+            .iter()
+            .filter_map(|(p, b)| p.strip_prefix(self.prefix.as_str()).map(|rel| (rel, *b)))
+    }
+}
+
+impl ExtensionFiles for EmbeddedDir {
+    fn read(&self, rel: &str) -> Option<String> {
+        self.ext
+            .file(&format!("{}{rel}", self.prefix))
+            .map(str::to_string)
+    }
+    fn paths(&self) -> std::io::Result<Vec<String>> {
+        Ok(self.inner().map(|(p, _)| p.to_string()).collect())
+    }
+    fn bytes(&self, rel: &str) -> std::io::Result<Vec<u8>> {
+        self.ext
+            .bytes(&format!("{}{rel}", self.prefix))
+            .map(<[u8]>::to_vec)
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, rel.to_string()))
+    }
+    fn list(&self, dir: &str) -> Vec<String> {
+        let prefix = format!("{dir}/");
+        self.inner()
+            .filter_map(|(p, _)| p.strip_prefix(prefix.as_str()))
+            .filter(|rest| !rest.contains('/'))
+            .map(str::to_string)
+            .collect()
+    }
+    fn bundle_stat(&self, rel: &str) -> custom_components::BundleLook {
+        match custom_components::look_in_paths(rel, self.inner().map(|(p, b)| (p, b.len()))) {
+            custom_components::BundleLook::Unknown => custom_components::BundleLook::Absent,
+            found => found,
+        }
     }
 }
 
@@ -1896,11 +1951,8 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     ext.warnings.extend(warnings);
     let panel_files = m.panels.clone();
     let decorator_files = m.ui.decorators.clone();
-    // An experimental kind: a shared manifest's is refused by `check`.
-    let replacement_files =
-        m.ui.replacements
-            .clone()
-            .filter(|_| m.sharing == Sharing::Private);
+    // A stable kind: a shared extension's load too.
+    let replacement_files = m.ui.replacements.clone();
     let page_files = m.pages.clone();
     // A stable kind (P10): a shared extension's load too.
     let ref_kind_files = m.ref_kinds.clone();
@@ -1917,7 +1969,6 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             ext.event_types = declared;
             ext.errors.extend(errors);
         }
-        // An experimental kind: a shared manifest's is refused by `check`.
         // After `event_types`: an effect may react to its own types — and
         // to another extension's (P9.D1), which resolves when that one is
         // here (`subscriptions`).
@@ -3389,6 +3440,25 @@ async fn model_overlay(
 /// A version as a review reads it: its lenses rendered on its own models'
 /// overlay, nothing checked — the earlier side of a review is what it was,
 /// not a candidate (tsk791).
+/// The temp views a lens of extension `name` under `root` reads through:
+/// its models and the other enabled extensions' — and their collectors'
+/// entities, empty, where none is published — compiled as `check` does
+/// and published nowhere. So an author's lens over a model they haven't
+/// published yet (a worktree's, or before the next activation) answers
+/// rather than "no such table". Empty when the extension doesn't load.
+pub async fn lens_overlay(
+    layer: &crate::sql_gateway::SqlGateway,
+    catalog: &crate::extension_catalog::ExtensionCatalog,
+    root: &Path,
+    name: &str,
+) -> Vec<oxplow_db::TempView> {
+    let Ok(ext) = catalog.named(root, name) else {
+        return Vec::new();
+    };
+    let candidate = catalog.candidate(root, ext);
+    model_overlay(layer, &candidate).await.0
+}
+
 async fn read_side(
     layer: &crate::sql_gateway::SqlGateway,
     catalog: &crate::extension_catalog::ExtensionCatalog,
@@ -4382,6 +4452,47 @@ pub fn scaffold_manifest(m: &ManifestScaffold<'_>) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// A bundled extension's files are bytes, so a component's assets
+    /// ship with oxplow as they are; its bundle is found from the embedded
+    /// paths as a folder's is from the disk.
+    #[test]
+    fn an_embedded_extension_holds_a_component_bundle() {
+        static FILES: &[(&str, &[u8])] = &[
+            ("extension.yaml", b"manifest: 2\nname: e\n"),
+            ("components/c/index.html", b"<!doctype html>"),
+            (
+                "components/c/logo.png",
+                &[0x89, b'P', b'N', b'G', 0xff, 0x00],
+            ),
+        ];
+        static EXT: crate::bundled_extensions::BundledExtension =
+            crate::bundled_extensions::BundledExtension {
+                name: "e",
+                files: FILES,
+                required: false,
+            };
+        let files = Embedded(&EXT);
+        assert_eq!(
+            files.bytes("components/c/logo.png").unwrap(),
+            vec![0x89, b'P', b'N', b'G', 0xff, 0x00]
+        );
+        assert_eq!(files.read("components/c/logo.png"), None, "not text");
+        assert_eq!(
+            files.read("extension.yaml").as_deref(),
+            Some("manifest: 2\nname: e\n")
+        );
+        let custom_components::BundleLook::Found(stat) = files.bundle_stat("components/c") else {
+            panic!("{:?}", files.bundle_stat("components/c"));
+        };
+        assert!(stat.has_index);
+        assert_eq!((stat.files, stat.bytes), (2, 21));
+        assert_eq!(
+            files.bundle_stat("components/none"),
+            custom_components::BundleLook::Absent,
+            "every embedded file is known: a missing bundle is absent"
+        );
+    }
 
     /// A malformed list entry is reported on its own line — the shape
     /// error too, which has no name to find it by — in every list block.
@@ -5817,28 +5928,6 @@ empty: No items.
         );
         assert_eq!(e.sharing, Sharing::Private);
         assert_eq!(e.intent.as_ref().unwrap().purpose, "Review agent work");
-    }
-
-    #[test]
-    fn a_shared_manifest_may_not_use_an_experimental_kind() {
-        let dir = tempfile::tempdir().unwrap();
-        let manifest = "manifest: 2\nname: review\nsharing: shared\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: x\n  examples: [{ name: a }]\nui:\n  replacements: []\n";
-        write(
-            dir.path(),
-            "oxplow/extensions/review/extension.yaml",
-            manifest,
-        );
-        let e = only(dir.path(), "review");
-        let err = e
-            .errors
-            .iter()
-            .find(|m| m.contains("`ui.replacements` is experimental"))
-            .unwrap_or_else(|| panic!("{:?}", e.errors));
-        assert!(
-            err.starts_with("oxplow/extensions/review/extension.yaml:10:"),
-            "{err}"
-        );
-        assert_eq!(e.sharing, Sharing::Shared);
     }
 
     #[test]

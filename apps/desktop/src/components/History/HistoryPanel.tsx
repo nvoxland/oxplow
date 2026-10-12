@@ -2,12 +2,14 @@ import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Stream } from "../../api.js";
 import { vcsHead } from "../../api.js";
-import { NO_READS, useRerunOnChange } from "../../lens/lensRerun.js";
+import { NO_READS, readsOf, useRerunOnChange } from "../../lens/lensRerun.js";
 import { logUi } from "../../logger.js";
 import { vcsRevOf } from "../../revision.js";
+import type { TabRef } from "../../tabs/tabState.js";
 import type { RevisionInfo } from "../../tauri-bridge/generated/bindings.js";
 import { readHistory, type History } from "../../vcsHistory.js";
-import { CommitGraphTable, indexRefsBySha } from "./CommitGraphTable.js";
+import { Replaceable } from "../Replaceable.js";
+import { CommitList, indexRefsBySha } from "./CommitList.js";
 
 interface Props {
   stream: Stream | null;
@@ -17,38 +19,96 @@ interface Props {
    * (no longer an inline detail pane on this panel).
    */
   onSelectCommit?(sha: string, opts?: { newTab?: boolean }): void;
+  /** Where a replacement's links go (the history graph opens commits). */
+  onOpenPage?(ref: TabRef, opts?: { newTab?: boolean }): void;
   /** Optional sha to scroll into view (e.g. when arriving from blame). */
   revealSha?: { sha: string; token: number } | null;
 }
 
+/** How many commits the history shows. */
+const LIMIT = 500;
+
 /**
- * The stream's history: `v_commit` walked from the stream's head (through
- * the models — `.context/vcs.md`), re-read whenever a model it read
- * changes (the commit indexer runs on every ref move).
+ * The stream's history: oxplow's own is a plain commit list
+ * ([`CommitHistory`]); an extension may draw it instead — the
+ * `vcs.history.graph` replacement, which oxplow-bundled's lane graph
+ * fills — given the stream's head, the commit to reveal and the limit.
+ * The head is read again whenever the commits or branches change.
  */
-export function HistoryPanel({ stream, onSelectCommit, revealSha }: Props) {
-  const [log, setLog] = useState<(History & { currentBranch: string | null }) | null>(null);
+export function HistoryPanel({ stream, onSelectCommit, onOpenPage, revealSha }: Props) {
+  const streamId = stream?.id ?? null;
+  const [head, setHead] = useState<{ streamId: string; sha: string | null; branch: string | null } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const loadHead = useCallback(async () => {
+    if (!streamId) return;
+    try {
+      const h = await vcsHead(streamId);
+      setHead({ streamId, sha: vcsRevOf(h.revision), branch: h.branch });
+      setError(null);
+    } catch (err) {
+      logUi("warn", "history head read failed", { error: String(err) });
+      setError(String(err));
+    }
+  }, [streamId]);
+  useEffect(() => {
+    void loadHead();
+  }, [loadHead]);
+  useRerunOnChange(readsOf("v_commit", "v_branch"), () => void loadHead());
+
+  if (!stream) {
+    return <div style={{ padding: 12, color: "var(--muted)", fontSize: "var(--text-xs)" }}>No stream selected.</div>;
+  }
+  if (error) return <div style={{ padding: 12, color: "#ff6b6b", fontSize: "var(--text-xs)" }}>{error}</div>;
+  const current = head !== null && head.streamId === streamId ? head : null;
+  if (current === null) return null;
+  return (
+    <Replaceable
+      target="vcs.history.graph"
+      props={{ head_sha: current.sha, reveal_sha: revealSha?.sha ?? null, limit: LIMIT }}
+      streamId={streamId}
+      onOpenPage={onOpenPage}
+      fallback={
+        <CommitHistory
+          head={current.sha}
+          currentBranch={current.branch}
+          onSelectCommit={onSelectCommit}
+          revealSha={revealSha}
+        />
+      }
+    />
+  );
+}
+
+/**
+ * oxplow's own history: the commits from `head` as a plain list, with a
+ * text, author and branch filter. Re-read whenever a model it read changes
+ * (the commit indexer runs on every ref move).
+ */
+function CommitHistory({
+  head,
+  currentBranch,
+  onSelectCommit,
+  revealSha,
+}: {
+  head: string | null;
+  currentBranch: string | null;
+  onSelectCommit?(sha: string, opts?: { newTab?: boolean }): void;
+  revealSha?: { sha: string; token: number } | null;
+}) {
+  const [log, setLog] = useState<History | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [author, setAuthor] = useState("");
   const [branch, setBranch] = useState("");
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
-  const limit = 500;
-  const streamId = stream?.id ?? null;
 
   const load = useCallback(
     async (silent: boolean) => {
-      if (!streamId) {
-        setLog(null);
-        return;
-      }
       if (!silent) setLoading(true);
       setError(null);
       try {
-        const head = await vcsHead(streamId);
-        const history = await readHistory(vcsRevOf(head.revision), limit);
-        setLog({ ...history, currentBranch: head.branch });
+        setLog(await readHistory(head, LIMIT));
       } catch (err) {
         logUi("warn", "history read failed", { error: String(err) });
         setError(String(err));
@@ -56,7 +116,7 @@ export function HistoryPanel({ stream, onSelectCommit, revealSha }: Props) {
         setLoading(false);
       }
     },
-    [streamId],
+    [head],
   );
 
   useEffect(() => {
@@ -134,14 +194,12 @@ export function HistoryPanel({ stream, onSelectCommit, revealSha }: Props) {
       <div style={listStyle}>
         {error ? (
           <div style={{ padding: 12, color: "#ff6b6b", fontSize: "var(--text-xs)" }}>{error}</div>
-        ) : !stream ? (
-          <div style={{ padding: 12, color: "var(--muted)", fontSize: "var(--text-xs)" }}>No stream selected.</div>
         ) : !log ? null : (
-          <CommitGraphTable
+          <CommitList
             commits={visibleCommits}
             branchHeadsBySha={refIndex.branchHeadsBySha}
             tagsBySha={refIndex.tagsBySha}
-            currentBranch={log.currentBranch}
+            currentBranch={currentBranch}
             selectedSha={revealSha?.sha ?? null}
             matches={matches}
             onSelect={(sha, opts) => onSelectCommit?.(sha, opts)}

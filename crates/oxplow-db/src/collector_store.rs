@@ -298,6 +298,29 @@ pub fn write_rows_tx(
     Ok(counts)
 }
 
+/// Create each entity in `entities` that has no view yet, empty — what a
+/// declared entity is before its collector first runs. One that exists is
+/// left exactly as it is: its rows are the collector's.
+pub fn ensure_entities_tx(
+    tx: &rusqlite::Transaction<'_>,
+    entities: &[EntityTable],
+) -> Result<(), DomainError> {
+    for t in entities {
+        validate_table(t)?;
+        let exists: bool = tx
+            .query_row(
+                "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE name = ?1)",
+                [&t.view],
+                |r| r.get(0),
+            )
+            .map_err(map_sql_err)?;
+        if !exists {
+            write_entity(tx, t, &EntityWrite::Replace(Vec::new()))?;
+        }
+    }
+    Ok(())
+}
+
 const RUN_SELECT: &str =
     "SELECT owner, id, status, last_run_at, error, row_counts_json, cursor_json, last_event_id,
             run_id

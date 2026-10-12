@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { formatTimestamp, indexRefsBySha } from "./CommitGraphTable.js";
+import { formatTimestamp, indexRefsBySha } from "./CommitList.js";
 
 describe("formatTimestamp", () => {
   test("renders an ISO date as YYYY-MM-DD HH:MM in local time", () => {

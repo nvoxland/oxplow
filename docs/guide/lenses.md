@@ -306,13 +306,13 @@ with no `commands` needs no approval.
 A command that needs confirmation is confirmed by you in oxplow, not
 inside the frame.
 
-## Replacing the Board (experimental)
+## Replacing the Board
 
-A private extension that brings an external work-items provider can put its own
+An extension that brings an external work-items provider can put its own
 lens where the Board's cards are:
 
 ```yaml
-# extension.yaml (sharing: private)
+# extension.yaml
 ui:
   replacements:
     - { target: work_item.board, lens: board }

@@ -687,7 +687,21 @@ Prerequisites: Stage and activate one coherent extension generation; Own and dis
 
 #### Test agent-authored collection, metrics and dimensions end to end
 
-Status: planned.
+Status: done. `oxplow extension new metric` and `oxplow.metric.scaffold`
+are one template (`oxplow_app::metric_scaffold`): a private extension with
+a per-path measure, a Starlark fact collector over `source_files()` +
+`code_metrics()`, the `<ns>.area` dimension, the metric and a lens linking
+`file` refs, with a fixture `extension test` runs. `metrics_authoring_tests`
+(`oxplow-app`) takes it from the scaffold through activation, a baseline
+capture, a delta capture that carries untouched files forward, slicing by
+area and a dimension filter, the lens rows' file and line refs, the
+documented refusals (bare dimension key, fact outside `facts:`, undefined
+measure) and a run that reports the oversize and binary files it left out
+(`BaselineReport.excluded`, `SweepReport.excluded`). `check` now dry-runs a
+lens reading `metric_grid()` / `metric_findings()`. Not exercised: joining
+the facts with another entity in the lens, and a stale-input case beyond
+the fingerprint re-baseline. The old `metric_scaffold` project-config path,
+`entries_yaml` and the gauge wording are gone.
 
 Scope: Update the old gauge authoring task to the current collector/fact/measure/metric/dimension model. Exercise files, AST queries and code metrics through the public authoring path, then join the resulting data with another entity and present it in a lens with reference drill-down.
 

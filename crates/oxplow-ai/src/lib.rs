@@ -4,5 +4,6 @@
 pub mod capabilities;
 pub mod client;
 pub mod config;
+pub mod fixture;
 pub mod parts;
 pub mod secrets;

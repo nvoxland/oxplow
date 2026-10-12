@@ -4,10 +4,11 @@
 //! reserved. See `.context/extensions.md`.
 
 /// One bundled extension: its name and its files as
-/// `(path inside the extension folder, contents)`.
+/// `(path inside the extension folder, bytes)` — bytes, so a custom
+/// component's assets ship as they are.
 pub struct BundledExtension {
     pub name: &'static str,
-    pub files: &'static [(&'static str, &'static str)],
+    pub files: &'static [(&'static str, &'static [u8])],
     /// oxplow itself relies on it (`oxplow-foundation`, its own
     /// commands): it can't be disabled, and its commands are registered
     /// when services are built rather than by the reconciler.
@@ -15,8 +16,14 @@ pub struct BundledExtension {
 }
 
 impl BundledExtension {
-    /// The file at `path` in it.
+    /// The file at `path` in it, as text; `None` when it isn't there or
+    /// isn't UTF-8.
     pub fn file(&self, path: &str) -> Option<&'static str> {
+        self.bytes(path).and_then(|b| std::str::from_utf8(b).ok())
+    }
+
+    /// The file at `path` in it.
+    pub fn bytes(&self, path: &str) -> Option<&'static [u8]> {
         self.files.iter().find(|(p, _)| *p == path).map(|(_, f)| *f)
     }
 }
@@ -25,7 +32,7 @@ macro_rules! ext_file {
     ($ext:literal, $path:literal) => {
         (
             $path,
-            include_str!(concat!("../../../extensions/", $ext, "/", $path)),
+            include_bytes!(concat!("../../../extensions/", $ext, "/", $path)) as &[u8],
         )
     };
 }
@@ -49,6 +56,9 @@ pub const BUNDLED: &[BundledExtension] = &[
         files: &[
             ext_file!("oxplow-bundled", "README.md"),
             ext_file!("oxplow-bundled", "collectors/effort_churn.star"),
+            ext_file!("oxplow-bundled", "components/history-graph/app.css"),
+            ext_file!("oxplow-bundled", "components/history-graph/app.js"),
+            ext_file!("oxplow-bundled", "components/history-graph/index.html"),
             ext_file!("oxplow-bundled", "commands/work-next.md"),
             ext_file!("oxplow-bundled", "effects/verify_unchecked.star"),
             ext_file!("oxplow-bundled", "event_types/accepted.v1.json"),
@@ -88,6 +98,7 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-bundled", "lenses/findings.yaml"),
             ext_file!("oxplow-bundled", "lenses/go-to-bookmarks.yaml"),
             ext_file!("oxplow-bundled", "lenses/go-to.yaml"),
+            ext_file!("oxplow-bundled", "lenses/history-graph.yaml"),
             ext_file!("oxplow-bundled", "lenses/inferred-decisions.yaml"),
             ext_file!("oxplow-bundled", "lenses/page-visits-by-day.yaml"),
             ext_file!("oxplow-bundled", "lenses/planning.yaml"),

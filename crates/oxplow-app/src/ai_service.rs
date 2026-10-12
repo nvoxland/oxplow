@@ -1421,6 +1421,50 @@ mod tests {
         assert_eq!(summarize.binding.as_ref().unwrap().model, "small");
     }
 
+    /// A preview's fixture model is a host kind: a role bound to it
+    /// answers from its replies with no key, no approval and nothing sent,
+    /// and an activation doesn't take it away.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_role_on_the_fixture_model_answers_from_its_replies() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::test_fixtures::init_git_repo(dir.path());
+        let svc = crate::Services::in_memory(dir.path()).await.unwrap();
+        svc.ai
+            .providers()
+            .register_host(Arc::new(oxplow_ai::fixture::FixtureModel::new(vec![
+                "a fixture answer".into(),
+            ])));
+        svc.ai
+            .save_provider(
+                ProviderConfig {
+                    id: "fixture".into(),
+                    kind: oxplow_ai::fixture::KIND.into(),
+                    base_url: None,
+                },
+                None,
+            )
+            .unwrap();
+        svc.ai
+            .set_role(
+                Role::Summarize,
+                Some(RoleBinding {
+                    provider: "fixture".into(),
+                    model: "m".into(),
+                }),
+            )
+            .unwrap();
+        svc.extension_activation
+            .activate(svc.clone())
+            .await
+            .unwrap();
+        let out = svc
+            .ai
+            .complete(Role::Summarize, "t", None, "hi", false)
+            .await
+            .unwrap();
+        assert_eq!(out.text, "a fixture answer");
+    }
+
     #[tokio::test]
     async fn testing_a_jev_provider_asks_a_typed_question() {
         let (base, _) = mock(
@@ -2277,7 +2321,7 @@ def response(x):
 
     /// The text helpers and the typed call share one provider and one
     /// record; a typed text call over a text-only provider keeps the
-    /// legacy usage as unknown-provenance counts.
+    /// text-path usage as unknown-provenance counts.
     #[tokio::test]
     async fn text_helpers_and_the_typed_call_share_the_path() {
         let reply = json!({"choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": "hello"}}],

@@ -1,6 +1,6 @@
 //! `contribution` (V47): every enabled extension's contributions, as their
 //! descriptors say (`oxplow_domain::contribution`). Restated whole by the
-//! app on each catalog change (`oxplow_app::capabilities::refresh`); read
+//! app on each catalog change (each generation); read
 //! as `v_contribution`.
 
 use oxplow_domain::contribution::Descriptor;
@@ -23,9 +23,9 @@ pub fn reset_tx(
     let mut stmt = conn
         .prepare(
             "INSERT OR REPLACE INTO contribution
-               (id, extension, kind, local, origin, version, stability, contract_version,
+               (id, extension, kind, local, origin, version, contract_version,
                 runs_on_json, needs_json, after_json, global_name, aliases_json, file, line)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         )
         .map_err(map_sql_err)?;
     for d in descriptors {
@@ -36,10 +36,6 @@ pub fn reset_tx(
             d.id.local,
             d.owner.origin,
             d.owner.version,
-            match d.stability {
-                oxplow_domain::contribution::Stability::Stable => "stable",
-                oxplow_domain::contribution::Stability::Experimental => "experimental",
-            },
             d.contract_version,
             json(&d.trigger),
             json(&d.needs),
@@ -109,5 +105,27 @@ mod tests {
                 Some("1.0.0".to_string())
             )]
         );
+    }
+
+    /// Every kind is stable, so neither the table nor its model carries a
+    /// per-kind stability.
+    #[tokio::test]
+    async fn the_table_and_its_model_have_no_stability_column() {
+        let db = Database::in_memory();
+        let (table, view): (Vec<String>, Vec<String>) = db
+            .call(|c| {
+                let cols = |sql: &str| -> rusqlite::Result<Vec<String>> {
+                    c.prepare(sql)?.query_map([], |r| r.get(1))?.collect()
+                };
+                Ok((
+                    cols("PRAGMA table_info(contribution)")?,
+                    cols("PRAGMA table_info(v_contribution)")?,
+                ))
+            })
+            .await
+            .unwrap();
+        assert!(table.contains(&"contract_version".to_string()), "{table:?}");
+        assert!(view.contains(&"contract_version".to_string()), "{view:?}");
+        assert!(!table.iter().chain(&view).any(|c| c == "stability"));
     }
 }

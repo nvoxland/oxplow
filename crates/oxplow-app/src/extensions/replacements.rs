@@ -1,6 +1,6 @@
-//! `ui.replacements` (experimental — a private extension only; P9.A1,
-//! `.context/extensions.md` → "Replacements"): a lens that takes the
-//! place of a named core sub-component ([`oxplow_domain::replaceable`]).
+//! `ui.replacements` (P9.A1, stable; `.context/extensions.md` →
+//! "Replacements"): a lens that takes the place of a named core
+//! sub-component ([`oxplow_domain::replaceable`]).
 //!
 //! ```yaml
 //! ui:
@@ -9,10 +9,11 @@
 //! ```
 //!
 //! Checked here: the target exists, the lens is the extension's and
-//! declares every prop of the target's contract, and the extension brings
-//! a provider of the target's capability. *Which* provider is active is
-//! decided when the component renders (`v_capability_provider.active`
-//! changes without a reload), so that rule is the renderer's.
+//! declares every prop of the target's contract, and — for a target bound
+//! to its capability's provider — the extension brings a provider of it.
+//! *Which* replacement renders is decided when the component renders (the
+//! active provider changes without a reload; the person's choice for an
+//! unbound target is config), so that rule is the renderer's.
 
 use serde::{Deserialize, Serialize};
 
@@ -29,9 +30,11 @@ pub struct UiReplacement {
     pub extension: String,
     /// The core sub-component it replaces (`work_item.board`).
     pub target: String,
-    /// The capability whose active provider must be this extension's for
-    /// it to render.
+    /// The capability the target belongs to.
     pub capability: String,
+    /// Only while this extension's provider is the deciding one does it
+    /// render; otherwise the person's choice among candidates decides.
+    pub bound_to_provider: bool,
     /// The lens that renders instead, given the target's props.
     pub lens_id: String,
     /// What a person calls the target (`board`), from its table.
@@ -105,7 +108,7 @@ pub fn parse_replacements(
                         missing.join(", "),
                         t.target
                     ))
-                } else if !capabilities.iter().any(|c| c == t.capability) {
+                } else if t.bound_to_provider && !capabilities.iter().any(|c| c == t.capability) {
                     Some(format!(
                         "only an extension that brings a `{}` provider may replace `{}` \
                          (`providers:`); it shows while that provider is the active one",
@@ -130,6 +133,7 @@ pub fn parse_replacements(
             extension: extension.to_string(),
             target: t.target.to_string(),
             capability: t.capability.to_string(),
+            bound_to_provider: t.bound_to_provider,
             lens_id: l.id.clone(),
             label: t.label.to_string(),
         });
@@ -188,6 +192,11 @@ mod tests {
             "oxplow/extensions/tracker/lenses/state.yaml",
             "title: State\nparams: [{ name: ref }]\nquery: SELECT :ref AS ref\n",
         );
+        write(
+            d.path(),
+            "oxplow/extensions/tracker/lenses/graph.yaml",
+            "title: Graph\nparams: [{ name: head_sha }, { name: reveal_sha }, { name: limit }]\nquery: SELECT :head_sha AS sha\n",
+        );
         load_extensions(d.path())
             .into_iter()
             .find(|e| e.name == "tracker")
@@ -224,12 +233,13 @@ mod tests {
                 capability: "work_items".into(),
                 lens_id: "tracker/board".into(),
                 label: "board".into(),
+                bound_to_provider: true,
             }]
         );
         for (entry, says) in [
             (
-                "{ target: vcs.history.graph, lens: board }",
-                "isn't a replaceable component (work_item.board, work_item.detail.state)",
+                "{ target: vcs.conflict.resolver, lens: board }",
+                "isn't a replaceable component (work_item.board, work_item.detail.state, vcs.history.graph)",
             ),
             (
                 "{ target: work_item.board, lens: nope }",
@@ -321,20 +331,38 @@ mod tests {
         assert_eq!(ext.ui.replacements.len(), 1);
     }
 
+    /// A target core owns (its capability's implementation is oxplow's
+    /// own, `vcs`) isn't bound to a provider: any extension — a shared
+    /// one, oxplow-bundled — may replace it, and the person chooses among
+    /// several (`replacements:`).
     #[test]
-    fn a_shared_extension_may_not_declare_replacements() {
+    fn an_unbound_target_needs_no_provider_and_a_shared_extension_may_replace_it() {
         let ext = load(
             "shared",
             "",
+            "    - { target: vcs.history.graph, lens: graph }\n",
+        );
+        assert_eq!(said(&ext), "");
+        assert_eq!(
+            ext.ui
+                .replacements
+                .iter()
+                .map(|r| (r.target.as_str(), r.bound_to_provider))
+                .collect::<Vec<_>>(),
+            vec![("vcs.history.graph", false)]
+        );
+    }
+
+    /// Replacements are stable: a shared extension may declare one; a
+    /// bound target still needs its provider.
+    #[test]
+    fn a_shared_extension_may_declare_replacements() {
+        let ext = load(
+            "shared",
+            PROVIDER,
             "    - { target: work_item.board, lens: board }\n",
         );
-        assert!(
-            ext.errors
-                .join("\n")
-                .contains("`ui.replacements` is experimental"),
-            "{:?}",
-            ext.errors
-        );
-        assert!(ext.ui.replacements.is_empty());
+        assert_eq!(said(&ext), "");
+        assert_eq!(ext.ui.replacements.len(), 1);
     }
 }

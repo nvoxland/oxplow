@@ -1,6 +1,6 @@
 //! What every extension contribution carries, whatever its kind
 //! (`.context/extensions.md` "Contributions"): one [`Descriptor`], with a
-//! stable [`ContributionId`], its owner, its stability, how it's invoked
+//! stable [`ContributionId`], its owner, how it's invoked
 //! and what it needs. The [`Registry`] of a catalog's descriptors is what
 //! loading checks against (names, collisions, needs) and what discovery
 //! lists, so each kind doesn't restate those rules.
@@ -95,14 +95,6 @@ pub enum ContributionKind {
     CustomComponent,
 }
 
-/// Whether a contract is permanent API.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "snake_case")]
-pub enum Stability {
-    Stable,
-    Experimental,
-}
-
 /// What a kind is, as one table: what the reference doc, the loader and
 /// discovery read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,7 +107,6 @@ pub struct KindSpec {
     pub title: &'static str,
     /// What it adds, in a line (the reference's table).
     pub summary: &'static str,
-    pub stability: Stability,
     /// Whether its local id may be dotted.
     pub dotted: bool,
     /// Whether two extensions may each declare the same global name of it
@@ -129,7 +120,6 @@ const fn spec(
     key: &'static str,
     title: &'static str,
     summary: &'static str,
-    stability: Stability,
     dotted: bool,
     shares_names: bool,
 ) -> KindSpec {
@@ -138,13 +128,10 @@ const fn spec(
         key,
         title,
         summary,
-        stability,
         dotted,
         shares_names,
     }
 }
-
-use Stability::{Experimental, Stable};
 
 /// Every kind, in the order the reference lists them.
 pub const KINDS: &[KindSpec] = &[
@@ -153,7 +140,6 @@ pub const KINDS: &[KindSpec] = &[
         "models",
         "Model",
         "SQL views over oxplow's models, published as `v_<ext>_<name>`",
-        Stable,
         false,
         false,
     ),
@@ -162,7 +148,6 @@ pub const KINDS: &[KindSpec] = &[
         "measures",
         "Measure",
         "what a metric's facts measure",
-        Stable,
         true,
         false,
     ),
@@ -171,7 +156,6 @@ pub const KINDS: &[KindSpec] = &[
         "metrics",
         "Metric",
         "a number tracked over a measure",
-        Stable,
         true,
         false,
     ),
@@ -180,7 +164,6 @@ pub const KINDS: &[KindSpec] = &[
         "dimensions",
         "Dimension",
         "a way to slice metrics",
-        Stable,
         true,
         false,
     ),
@@ -189,7 +172,6 @@ pub const KINDS: &[KindSpec] = &[
         "collectors",
         "Collector",
         "outside data brought in as entities, or facts for metrics",
-        Stable,
         true,
         false,
     ),
@@ -198,7 +180,6 @@ pub const KINDS: &[KindSpec] = &[
         "event_types",
         "Event type",
         "its own namespace's event types",
-        Stable,
         true,
         false,
     ),
@@ -207,7 +188,6 @@ pub const KINDS: &[KindSpec] = &[
         "ref_kinds",
         "Ref kind",
         "kinds of thing a ref can name",
-        Stable,
         false,
         false,
     ),
@@ -216,7 +196,6 @@ pub const KINDS: &[KindSpec] = &[
         "commands",
         "Command",
         "commands on oxplow's command bus",
-        Stable,
         true,
         false,
     ),
@@ -225,7 +204,6 @@ pub const KINDS: &[KindSpec] = &[
         "jobs",
         "Job",
         "durable host operations scheduled by an extension",
-        Stable,
         false,
         false,
     ),
@@ -234,7 +212,6 @@ pub const KINDS: &[KindSpec] = &[
         "effects",
         "Effect",
         "scripts that react to logged events",
-        Stable,
         false,
         false,
     ),
@@ -243,7 +220,6 @@ pub const KINDS: &[KindSpec] = &[
         "advisories",
         "Advisory",
         "guidance queries for the coding agent",
-        Stable,
         false,
         false,
     ),
@@ -252,7 +228,6 @@ pub const KINDS: &[KindSpec] = &[
         "skills",
         "Skill",
         "skills and slash commands for the coding agent",
-        Stable,
         false,
         false,
     ),
@@ -261,7 +236,6 @@ pub const KINDS: &[KindSpec] = &[
         "implementations",
         "Implementation",
         "an implementation of a capability: a built-in, or an AI provider or effort policy written as a script",
-        Stable,
         true,
         false,
     ),
@@ -270,7 +244,6 @@ pub const KINDS: &[KindSpec] = &[
         "providers",
         "Provider",
         "an external program implementing a capability, such as the work list",
-        Stable,
         false,
         false,
     ),
@@ -279,7 +252,6 @@ pub const KINDS: &[KindSpec] = &[
         "lenses",
         "Lens",
         "a page or panel over a SQL query",
-        Stable,
         false,
         false,
     ),
@@ -288,7 +260,6 @@ pub const KINDS: &[KindSpec] = &[
         "pages",
         "Page",
         "where its lenses show as pages",
-        Stable,
         false,
         false,
     ),
@@ -297,7 +268,6 @@ pub const KINDS: &[KindSpec] = &[
         "panels",
         "Panel",
         "where its lenses show as panels",
-        Stable,
         false,
         false,
     ),
@@ -306,7 +276,6 @@ pub const KINDS: &[KindSpec] = &[
         "ui.slots",
         "Slot mount",
         "a lens mounted into a core page",
-        Stable,
         true,
         true,
     ),
@@ -315,7 +284,6 @@ pub const KINDS: &[KindSpec] = &[
         "ui.decorators",
         "Decorator",
         "labels on core refs",
-        Stable,
         false,
         true,
     ),
@@ -323,8 +291,7 @@ pub const KINDS: &[KindSpec] = &[
         ContributionKind::Replacement,
         "ui.replacements",
         "Replacement",
-        "a lens in place of a core component (private extensions only)",
-        Experimental,
+        "a lens in place of a core component",
         true,
         false,
     ),
@@ -333,7 +300,6 @@ pub const KINDS: &[KindSpec] = &[
         "custom_components",
         "Custom component",
         "sandboxed HTML components for `viz: custom` lenses",
-        Stable,
         false,
         false,
     ),
@@ -508,7 +474,6 @@ pub struct DeclaredAt {
 pub struct Descriptor {
     pub id: ContributionId,
     pub owner: Owner,
-    pub stability: Stability,
     /// The contract's own version (a model's, an event type's), when it
     /// has one.
     pub contract_version: Option<u32>,
@@ -528,10 +493,10 @@ pub struct Descriptor {
 }
 
 impl Descriptor {
-    /// A descriptor with the kind's stability and nothing else known.
+    /// A descriptor with nothing known beyond its identity, owner, trigger
+    /// and source.
     pub fn new(id: ContributionId, owner: Owner, trigger: RunsOn, source: DeclaredAt) -> Self {
         Descriptor {
-            stability: id.kind.spec().stability,
             id,
             owner,
             contract_version: None,

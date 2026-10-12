@@ -1117,14 +1117,10 @@ the stream may file, edit, start and finish tasks and open efforts
 claim on the worktree — see "Agent policy" below). Per-harness plumbing
 and the rule live in [commands.md](./commands.md).
 
-`buildTaskMcpTools` (`crates/oxplow-mcp/src/lib.rs`) registers the agent's
-tool surface. Internally each `ToolDef.name` carries an `oxplow__`
-prefix (historical), but `crates/oxplow-mcp/src/lib.rs` strips that prefix at the
-`tools/list` boundary via `exposedToolName` so the harness sees clean
-names like `run_command`. With the harness's own `mcp__oxplow__`
-namespace on top, the agent calls `mcp__oxplow__run_command` —
-not the legacy `mcp__oxplow__oxplow__run_command`. The long form
-still resolves on `tools/call` for back-compat.
+`crates/oxplow-mcp/src/lib.rs` registers the agent's tool surface under
+plain names like `run_command`. With the harness's own `mcp__oxplow__`
+namespace on top, the agent calls `mcp__oxplow__run_command`; no other
+spelling of a tool name is accepted.
 
 **Tools read the interface.** No MCP tool belongs to one implementation:
 the work-item tools (`list_work_items`, `get_work_item`,

@@ -27,7 +27,7 @@
       "default": ""
     },
     "sharing": {
-      "description": "`private` (the default: this project, experimental kinds allowed)\nor `shared` (stable kinds only, `engine` required).",
+      "description": "`private` (the default: this project) or `shared` (`engine`\nrequired).",
       "default": "private",
       "allOf": [
         {
@@ -322,7 +322,7 @@
   ],
   "definitions": {
     "Sharing": {
-      "description": "Who the extension is for. Explicit and checked: a shared extension\n(committed for a team, installed from git, bundled) may use stable\nkinds only and must name the engine it targets.",
+      "description": "Who the extension is for. Explicit and checked: a shared extension\n(committed for a team, installed from git, bundled) must name the\nengine it targets and its own version.",
       "type": "string",
       "enum": [
         "private",
@@ -1004,7 +1004,7 @@
       "type": "object",
       "properties": {
         "op": {
-          "description": "`add` | `sub` | `mul` | `div` (`ratio` aliases `div`).",
+          "description": "`add` | `sub` | `mul` | `div`.",
           "type": "string"
         },
         "left": {
@@ -2062,7 +2062,7 @@
       ]
     },
     "UiBlock": {
-      "description": "`ui:` — everything an extension adds to the core UI: lenses mounted\ninto core pages (`slots`), decorations on core refs (`decorators`) and\nreplaced sub-components (`replacements`, experimental). Its commands\nmeet a person through their own `ui` (`commands:`).",
+      "description": "`ui:` — everything an extension adds to the core UI: lenses mounted\ninto core pages (`slots`), decorations on core refs (`decorators`) and\nreplaced sub-components (`replacements`). Its commands\nmeet a person through their own `ui` (`commands:`).",
       "type": "object",
       "properties": {
         "slots": {
@@ -2085,7 +2085,7 @@
           "default": null
         },
         "replacements": {
-          "description": "Experimental (a private extension only): a lens in place of a\nnamed core component.",
+          "description": "A lens in place of a named core component.",
           "type": [
             "array",
             "null"

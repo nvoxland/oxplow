@@ -1,7 +1,7 @@
-//! The core sub-components an extension may replace (`ui.replacements`,
-//! experimental; `.context/extensions.md` "Replacements"): each a named
-//! target of one capability with a **props contract** — the params its
-//! replacement lens gets, and must declare, instead of any host state.
+//! The core sub-components an extension may replace (`ui.replacements`;
+//! `.context/extensions.md` "Replacements"): each a named target of one
+//! capability with a **props contract** — the params its replacement lens
+//! gets, and must declare, instead of any host state.
 //! (The viewer's stream isn't a prop: any lens declaring `stream_id` gets
 //! it, as everywhere.)
 //! Whole pages are never replaceable.
@@ -14,10 +14,14 @@
 pub struct Replaceable {
     /// Its name: `<capability's noun>.<component>`.
     pub target: &'static str,
-    /// The capability whose provider's extension may replace it: the
-    /// provider of the thing the component shows when it shows one (a
-    /// work item's), else the capability's **active** provider.
+    /// The capability it belongs to.
     pub capability: &'static str,
+    /// Whether only the extension of a provider of `capability` may
+    /// replace it — the provider of the thing it shows (a work item's),
+    /// else the capability's **active** one. An unbound target (one core
+    /// owns, as the history graph) may be replaced by any extension; the
+    /// person chooses among several (`replacements:`).
+    pub bound_to_provider: bool,
     /// What the replacement is given, by name; its lens declares each.
     pub props: &'static [&'static str],
     /// What a person calls it ("board"): the one name the UI shows it by.
@@ -32,6 +36,7 @@ pub const REPLACEABLE: &[Replaceable] = &[
     Replaceable {
         target: "work_item.board",
         capability: "work_items",
+        bound_to_provider: true,
         props: &["scope", "thread_id"],
         label: "board",
     },
@@ -42,8 +47,20 @@ pub const REPLACEABLE: &[Replaceable] = &[
     Replaceable {
         target: "work_item.detail.state",
         capability: "work_items",
+        bound_to_provider: true,
         props: &["ref"],
         label: "state control",
+    },
+    // The commit history's graph (`GitHistoryPage`, the Git dashboard):
+    // `head_sha` the stream's head, `reveal_sha` a commit to scroll to and
+    // mark (or null), `limit` how many commits. Core's own is a plain
+    // list; the graph is oxplow-bundled's component.
+    Replaceable {
+        target: "vcs.history.graph",
+        capability: "vcs",
+        bound_to_provider: false,
+        props: &["head_sha", "reveal_sha", "limit"],
+        label: "history graph",
     },
 ];
 

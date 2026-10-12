@@ -31,11 +31,11 @@ built at load from the kind's typed declaration
 (`extensions::descriptors::describe`, `Extension.contributions`): a
 stable id `<extension>/<kind>/<local>` (`ContributionId`; one grammar for
 `local`, dots only for the kinds whose ids are dotted), its owner
-(extension, origin and the extension's `version:`), the kind's stability,
+(extension, origin and the extension's `version:`),
 how it runs (`RunsOn`), its needs and `after`, the **global name** it
 takes in a space extensions share (a metric key, a fact collector's id)
 and the public forms it already had (`aliases`). The kinds' table
-(`contribution::KINDS`: manifest key, title, stability, whether two
+(`contribution::KINDS`: manifest key, title, whether two
 extensions may share a name) is the one place those facts live.
 
 At load, `check_ids` turns an id that breaks the grammar into a load
@@ -101,8 +101,7 @@ does not make a contribution public.
   require exact equality. A model/event export cannot relabel its native
   descriptor version. An export must name its owner's declared contribution.
 - Export visibility is `private` by default (not importable), `experimental`
-  (private consumers only), or `stable` (private/shared consumers). Kind
-  stability is a ceiling: an experimental kind cannot be exported stable.
+  (private consumers only), or `stable` (private/shared consumers).
   A shared producer cannot expose experimental exports; an explicitly
   private contract can stay internal to a shared package.
 - Missing, disabled, inaccessible or incompatible required targets block
@@ -998,7 +997,7 @@ intent:                  # required
   origin: effort:eff42   # the thread/effort ref that created it, or null
   examples:              # inputs → expected outputs; fixtures for `extension test`
     - { name: …, input: {…}, expect: … }
-# stable kinds (permanent API)
+# kinds
 measures:    [...]   # same schema as .oxplow/project.yaml
 metrics:     [...]   # `key:` definitions; sourceMeasure must be declared here or oxplow.*
 dimensions:  [...]
@@ -1009,7 +1008,7 @@ ui:                  # what it adds to the core UI (a command's own `ui:` puts i
   slots:             # lenses mounted into core pages; see "Slots"
     - { slot: effort.review.details, lens: change-review }
   decorators: …      # labels from its models on core refs (stable since P10; see "Decorators")
-  replacements: …    # experimental: a lens in place of a named core component (see "Replacements")
+  replacements: …    # a lens in place of a named core component (see "Replacements")
 advisories:  [...]   # see "Advisories"
 models:     [...]   # SQL models: ModelDecl entries + models/<name>.sql → v_<ext>_<name>; `key: [cols]`; `materialize: on_change | { every: 1h } | { incremental: <col> }` stores one (semantic-layer.md "Extension models", "Materialized models")
 pages: …  panels: …  # see "Panels" and "Pages"
@@ -1021,7 +1020,6 @@ skills: …           # skills and slash commands for the coding agent
 providers: [...]    # external providers over the provider protocol — a program, or an MCP server behind oxplow's adapter (providers.md)
 effects: …          # scripts reacting to logged events by composing commands (see "Effects")
 custom_components: …   # sandboxed components for `viz: custom` lenses (see "Custom components")
-# experimental — a PRIVATE extension only: ui.replacements (above)
 ```
 
 Lenses aren't listed here: every `lenses/*.yaml` file in the folder is
@@ -1029,12 +1027,9 @@ loaded. A lens gets into the launcher through its own `launcher.category`
 (or stays out with `hidden: true`).
 
 **Private vs shared.** `sharing: private` is the usual case (this
-project, this person, agent-built): experimental kinds allowed, fast
-evolution. `sharing: shared` (committed for a team, installed from git,
-bundled — bundled *must* be shared) is held to the strict lifecycle:
-stable kinds only, `engine` declared and satisfied. Using an
-experimental kind in a shared extension is an error naming the key and
-its line.
+project, this person, agent-built). `sharing: shared` (committed for a
+team, installed from git, bundled — bundled *must* be shared) must
+declare `engine` (satisfied by this oxplow) and its own `version`.
 
 **What the loader checks** (`Extension.errors` / `Extension.warnings`):
 - shape: unknown keys, `manifest` version, `intent` present and
@@ -1107,6 +1102,20 @@ and one calling MCP read identical `file:line: what — fix` lines.
   - `collector` — a Starlark collector `items` over `v_work_item` declaring
     entity `item`, a model `open_items` over `ref('item')` and a lens over
     the model; its example runs the collector over fixture rows;
+  - `metric` — a code metric, built by `oxplow_app::metric_scaffold::
+    extension_files` (the one template: `oxplow.metric.scaffold` hands the
+    same files to the agent to write). `--language` (default `rust`; the
+    ones with a sample: rust, typescript, javascript, python, go, c, cpp)
+    and `--glob` (`*` and `**` only; default the language's files) go
+    through `scaffold_with` and `MetricStarter`. It declares a per-path,
+    semi-additive `<ns>.complex_functions` measure on files, the
+    `<ns>.area` dimension (the top folder), a Starlark collector `<ns>.scan`
+    on `snapshot.taken` (`source_files()` + `code_metrics()`: one fact per
+    file with functions over `LIMIT`, carrying the worst function's line
+    and `dims: {<ns>.area}`), the `sum` metric (`lower-better`, sliced by
+    the area) and a Code launcher lens over `metric_findings()` whose
+    `path` column links `file` at the `line` column. Its example runs the
+    collector over a two-folder fixture corpus and expects the facts;
   - `command` — `commands: [note]` whose `handlers/note.star` composes
     `oxplow.work_item.comment`, with an example and a `ui` about
     `work_item`; its intent example dry-runs it;
@@ -1145,8 +1154,13 @@ and one calling MCP read identical `file:line: what — fix` lines.
   a Starlark collector's script must parse and define `transform`, an
   error at the collector's line) plus `extensions::validate_extension`'s
   dry run — **always** (P7.C6): on `layer` (the project's database,
-  read-only), else on a fresh `Database::in_memory()` (`DryRun::{Project,
-  EmptyDatabase}`). The dry run first compiles, in a rolled-back read,
+  read-only), else on the throwaway oxplow's empty in-memory one, which
+  has the extension's models and metrics seeded so a lens may read
+  `metric_grid()` / `metric_findings()` (`DryRun::{Project,
+  EmptyDatabase}`; the CLI's project layer is `SqlGateway::with_metrics`,
+  so those functions resolve there too — a metric not yet seeded in that
+  database is `no metric … (see v_metric_spec)` until the app has loaded
+  the extension). The dry run first compiles, in a rolled-back read,
   the extension's models beside the other enabled extensions' (P4.9 —
   resolution, lineage, and the contract, so a changed contract at a
   published version fails here before it publishes) over **empty
@@ -1369,7 +1383,7 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
 - `viz`: `table`, `list`, `number`, `markdown`, `bar`, `line`, `treemap`,
   `grid` (child lenses, `children`), `tree`, `timeline`, `detail`,
   `steps`, `hunks`, `form` (`form: { command, defaults? }`; no `query`
-  needed) or — experimental, private only — `custom` (`custom: {
+  needed) or `custom` (`custom: {
   component, props? }`, one of the extension's `custom_components`; see
   "Custom components"). Each component names the columns it draws from in
   its own block: `chart` (`x`, `y`, `series`, `label`, `size`, `group`),
@@ -1476,46 +1490,57 @@ they live under `ui:`.
 
 The launcher isn't a slot: a lens lists itself with `launcher.category`.
 
-## Replacements (experimental)
+## Replacements
 
-`ui.replacements` (a private extension only; P9.A1,
+`ui.replacements` (P9.A1, stable since oxplow-bundled's history graph;
 `extensions/replacements.rs`) puts a **lens in place of a named core
 sub-component** — never a whole page:
 
 ```yaml
 ui:
   replacements:
-    - { target: work_item.board, lens: board }
+    - { target: vcs.history.graph, lens: history-graph }
 ```
 
 The targets are one table, `oxplow_domain::replaceable::REPLACEABLE`:
-each a `target`, the `capability` it belongs to, and its **props
-contract** — the params the replacement lens is given instead of any
-host state.
+each a `target`, the `capability` it belongs to, whether it is **bound to
+a provider**, and its **props contract** — the params the replacement
+lens is given instead of any host state.
 
-| Target | Core component | Capability | Props |
-|---|---|---|---|
-| `work_item.board` | the Board's columns of cards (`WorkBoard`) | `work_items` | `scope` (`thread` / `backlog` / `all`), `thread_id` (the thread when `scope` is `thread`, else null) |
-| `work_item.detail.state` | a work item's State (`WorkItemPage`'s rail; P10) — never its Move To, which stays oxplow's canonical states, so a replacement can't strand an item (tsk919) | `work_items` | `ref` (the item) |
+| Target | Core component | Capability | Bound | Props |
+|---|---|---|---|---|
+| `work_item.board` | the Board's columns of cards (`WorkBoard`) | `work_items` | yes | `scope` (`thread` / `backlog` / `all`), `thread_id` (the thread when `scope` is `thread`, else null) |
+| `work_item.detail.state` | a work item's State (`WorkItemPage`'s rail; P10) — never its Move To, which stays oxplow's canonical states, so a replacement can't strand an item (tsk919) | `work_items` | yes | `ref` (the item) |
+| `vcs.history.graph` | Git History's commits (`HistoryPanel`): oxplow's own is a plain list (`CommitList`) | `vcs` | no | `head_sha` (the stream's head), `reveal_sha` (a commit to scroll to and mark, or null), `limit` |
 
-The history graph and the conflict resolver §11.2 names wait for a
-provider that needs them. Every target has a label a person reads
-— its `label` in the same table ("board", "state control"), carried on
-each `UiReplacement` so the desktop names it from there (tsk935; no
-second list to keep in step). A state control replacement lists the
-tracker's own states, each with **Move Here** (`oxplow.work_item.transition` with
+**Bound or not.** A bound target shows a provider's thing, so only the
+extension of the deciding provider replaces it (below). An unbound target
+is one core owns — `vcs` is oxplow's own implementation, with no provider
+row (`v_capability_provider.extension` NULL) — so any extension may
+replace it, a shared or bundled one included. With one enabled extension
+replacing it, that one shows; with several, the one the person chose —
+`replacements: { <target>: <extension> }`, a person-only project key
+validated against the table (an unbound target only: a bound one's
+provider decides); several and no choice keeps oxplow's own.
+
+Every target has a label a person reads — its `label` in the same table
+("board", "state control", "history graph"), carried on each
+`UiReplacement` so the desktop names it from there (tsk935; no second
+list to keep in step). A state control replacement lists the tracker's
+own states, each with **Move Here** (`oxplow.work_item.transition` with
 the `native_state`); oxplow's Move To stays beside it: the canonical
 states every provider takes.
 
 **At load** (`parse_replacements`, errors at the entry's line): the
 target is in the table; the lens is one of the extension's and declares
 **every** prop (a slot's lens declares at least one; a replacement takes
-the whole contract — a Board that ignores `scope` isn't the Board); the
-extension brings a provider of the target's capability (`providers:`);
-a target is replaced once per extension. The viewer's stream isn't a
-prop: a lens that declares `stream_id` gets it, as everywhere. Valid ones are
-`Extension.ui.replacements` (`UiReplacement { id: <ext>/<target>,
-extension, target, capability, lensId }`).
+the whole contract — a Board that ignores `scope` isn't the Board); for a
+bound target, the extension brings a provider of the target's capability
+(`providers:`); a target is replaced once per extension. The viewer's
+stream isn't a prop: a lens that declares `stream_id` gets it, as
+everywhere. Valid ones are `Extension.ui.replacements` (`UiReplacement {
+id: <ext>/<target>, extension, target, capability, boundToProvider,
+lensId, label }`).
 
 **A person can turn one off**: the project key `replacementsOff:
 [work_item.board]` (person-only, like `activeProviders` — it decides
@@ -1529,20 +1554,21 @@ under the active-provider chooser, each with "Always use oxplow's own
 A core page wraps the component: `<Replaceable target props streamId
 fallback={<WorkBoard …/>}>` (`BoardPage`). `useReplacement` reads the
 enabled extensions' replacements of the target and, only when one
-exists, the capability's providers (`v_capability_provider`, re-read
-when it changes) and `replacementsOff` (re-read on `configChanged`):
-- **only the deciding provider's extension replaces** — the candidate
-  whose `extension` is that provider's row's. A component showing one
-  provider's thing passes it (`<Replaceable provider={item.provider}>`
-  on `work_item.detail.state`): the **item's own provider** decides,
-  whichever is active, so another provider's item never gets a lens
-  that sends this one's states (tsk918). A component showing the
-  capability as a whole (the Board) passes none: the **active** row
-  decides, here and not at load, since the active provider changes
-  with `activeProviders` and no reload. Either way there is one
-  candidate;
+exists, what decides it:
+- **bound**: only the deciding provider's extension replaces — the
+  candidate whose `extension` is that provider's row's. A component
+  showing one provider's thing passes it (`<Replaceable
+  provider={item.provider}>` on `work_item.detail.state`): the **item's
+  own provider** decides, whichever is active, so another provider's item
+  never gets a lens that sends this one's states (tsk918). A component
+  showing the capability as a whole (the Board) passes none: the
+  **active** row decides, here and not at load, since the active provider
+  changes with `activeProviders` and no reload;
+- **unbound**: the person's choice (`replacements`), or the only
+  candidate; no provider is read;
 - no candidate, a deciding provider no extension brings (oxplow's own),
-  or the target turned off → `fallback`, untouched;
+  several unbound candidates and no choice, or the target turned off →
+  `fallback`, untouched;
 - chosen → its lens runs with the props it declares (`childParams`) and
   renders through `LensResultView` (the one render path: kit, or `viz:
   custom` with its sandbox and "custom" badge) under a **"replaced by
@@ -1569,13 +1595,25 @@ its text rendering is the lens's; agents read work items from
 with every enhancement off (no `replacement-*`), and with two extensions
 replacing it shows that only the active provider's does; a work item's
 state control, with two extensions replacing it, shows the item's own
-provider's, not the active one's.
+provider's, not the active one's; Git History shows the plain list, and
+oxplow-bundled's graph when it replaces it.
 
-No example declares one now. The first was Linear's board and state
-lenses, removed with the Linear provider (2026-10-05): a team's tracker
-isn't a backend ([providers.md](./providers.md) "Which trackers are
-backends"). The likely first real one is a beads backend's ready-work
-board.
+**The first real one: the history graph.** oxplow-bundled's
+`history-graph` component (`components/history-graph/`, classic scripts
+on the client library and the kit) draws the stream's commits as `git log
+--graph` does — a lane per line of descent, a dot per commit — from its
+hidden lens `history-graph` (a recursive walk of `v_commit` from
+`:head_sha`, with local branch and tag labels from `v_branch` / `v_tag`).
+Its text, author and branch filters are its own and only dim or hide rows,
+so typing never re-runs the lens; the host re-runs it when a commit lands
+or a ref moves (its reads). A row opens `commit:<sha>`; a Cmd/Ctrl-click
+opens it in a new tab (`navigate(ref, { newTab: true })`, bridge protocol
+3). The commit page's prev/next siblings, which oxplow's list passes, a
+component can't pass. It declares no commands, so it isn't a program to
+approve. Core keeps no lane code: `CommitList` (the fallback, and the Git
+dashboard's recent commits with their stats) is a plain list.
+`lens/historyGraph.test.ts` runs the bundle's own script against its page
+— lanes, merge lanes, child-before-parent order, filters, reveal, Cmd-click.
 
 ## Reviewing by impact
 
@@ -1802,9 +1840,9 @@ component's own code may not. A component that declares no commands
 only shows and reads, and isn't a program.
 
 **What runs is what was approved** (tsk984). Before it shows a frame the
-host loads the component's bundle (`load_component`, from the worktree
-of the stream the lens is shown in — never the primary's for a stream
-that's gone) into `Services::component_bundles`
+host loads the component's bundle (`load_component`, from the main
+worktree, as the lens itself is: the RPCs read the project's extensions
+whatever the stream) into `Services::component_bundles`
 (`component_bundles.rs`): every file of the folder, read once, keyed by
 its **version** — the component's approval hash over exactly those files
 and its commands (`ProjectProgram::component_hash`, the same function
@@ -1818,6 +1856,29 @@ read as served — the extension's path joined with the manifest's
 `bundle` — so a spelling that differs from the disk's only in case still
 covers every file. The snapshots kept are the 16 newest; an older
 frame's invoke is refused with "reload its lens".
+
+**A hot update reaches a mounted frame.** Activation stages every
+enabled extension's bundles into the generation it publishes
+(`PreparedComponentBundles`), each stamped with that generation; a frame
+whose snapshot belongs to a generation that is no longer active has its
+`query` and `invoke` refused with "reload its lens". The host loads the
+bundle again on every `extensionsChanged` (sent after an activation
+publishes, `CustomComponentViz`): the same version keeps the frame it
+has, a new one mounts a new frame — and that version acts only once a
+person approves its code; the old approval doesn't carry over
+(`an_activated_edit_needs_a_reload_and_its_own_approval`).
+
+**Bundled and project components share one runtime.** A bundled
+extension's files are embedded as bytes (`bundled_extensions.rs`,
+`include_bytes!`), so its component's assets ship as they are; its
+bundle is found from the embedded paths (`Embedded::bundle_stat`),
+staged, hashed (the same `component_hash` over `bundled:<name>/…`),
+served at `/components/v/<version>/` under the same CSP, and — when it
+declares `commands` — listed on Programs and approved like a project's.
+What still differs by origin, none of it about components: a bundled
+advisory needs no approval, the `oxplow` command namespace is reserved
+for bundled extensions, and a bundled extension's name wins a clash with
+a project one's.
 
 ```yaml
 custom_components:
@@ -1943,8 +2004,8 @@ Programs. The host's own re-run (`onUpdate`, at the lens's params) is
 asked again with a selected filter rather than drawn over it; a pull
 request whose dates can't be read is left out and counted in a note,
 never blanking the rest; a rejected `connect()` is said in the status
-(tsk1008) — a component author's model for each. The loader no longer limits components to private extensions
-(a bundled one is still an error: its bundle is never served). The
+(tsk1008) — a component author's model for each. The loader no longer limits components to private extensions,
+nor to project ones. The
 browser suite's `specs/components/pr-lifetimes.spec.ts` runs it in
 Chromium **and WebKit** (the engines of browser mode and the macOS
 window; the suite's one WebKit project): the frame loads, the filters
@@ -1985,8 +2046,8 @@ component — and it is read from the **version under check**: the
 candidate of a review (`ReviewSide::read`), the folder on disk for a
 plain check. A version without the built page (a revision's tree) has
 nothing to lint; loading reports a bundle with no `index.html`. A
-component in an extension that comes with oxplow is an error too: the
-daemon never serves a bundled extension's bundle. The scan is a
+bundled extension's pages are linted from its embedded files, the same
+way. The scan is a
 start-tag reader, comments skipped and raw-text elements (`script`,
 `style`, `textarea`, `title`) read to their close, not a full HTML
 parser.
@@ -2034,8 +2095,6 @@ each claim and decision an acceptance took unchecked (any makes it
 forced). Retention keeps envelopes and an extension's payloads go after 30
 days at most, so a verdict a decorator shows must not live in its
 payload. It shows; it never acts.
-`STABLE_KINDS` lists `ui.decorators`; a shared extension may declare
-them.
 
 ## The run context
 
@@ -2395,12 +2454,12 @@ timeline carries who decided what, and another extension can react to it
 promise is already built: a published `type@v` is a contract
 (`event_type_contract` refuses a changed schema — stronger than a
 model's drift warning), a new shape is a new version with an upcast, and
-a removed type's rows stay readable. `STABLE_KINDS` lists it;
-`EXPERIMENTAL_KINDS` keeps only `ui.replacements` (`ui.decorators` and
-`ref_kinds` were promoted in P10, "Decorators" and "Ref kinds";
-`effects` and `custom_components` in P11, below and "Custom
-components"; `providers` once the provider host was). `ManifestV2::experimental_kinds_used` reads the
-table, so promoting a kind is moving it from one table to the other.
+a removed type's rows stay readable. It was promoted to a stable kind
+on that evidence; every kind is stable now (`ui.decorators` and
+`ref_kinds` in P10, "Decorators" and "Ref kinds"; `effects` and
+`custom_components` in P11, below and "Custom components";
+`ui.replacements` with oxplow-bundled's history graph; `providers` once
+the provider host was), so a kind carries no stability.
 
 **`effects` is stable** (P11, tsk956), on the evidence rule: a bundled
 extension acts with one. oxplow-bundled's **`verify-unchecked`** reacts to
@@ -3499,8 +3558,8 @@ tool list stable no matter how many extensions are installed.
 - **No scaffold tools (decided).** A scaffold tool would write project
   files outside the write guard and the caller's worktree. The skill carries the templates instead, and humans have
   Save as Lens in Explore Data. The same rule holds for metrics:
-  the `oxplow.metric.scaffold` command returns a template the agent writes itself
-  (tsk391).
+  the `oxplow.metric.scaffold` command returns the metric extension's files for
+  the agent to write itself.
 - `validate_extension(name)` returns load errors, schema errors and a dry
   run of every lens query, so the agent can check its work without the UI.
 - `list_extensions`, `list_collectors`, `run_collector(owner, id)`
@@ -3561,6 +3620,7 @@ What moves out of core, and what it becomes:
 | Fact collectors (`oxplow/collectors/*.star`, idiom `.star`; gauges until P7.B3) | extensions can declare fact collectors (tsk311); the built-in catalog stays core as the opt-in standard library |
 | Metric-threshold nudges | **done:** the `threshold-crossed` advisory (with `metric-deltas`) |
 | Usage / page analytics / token pages, `ThreadTokenTotal`, `EffortTokenUsage` | **done:** the `usage` grid; `task-tokens` (`work_item.detail.body` slot) and `thread-tokens` (`thread.plan.header` slot) |
+| Git History's commit graph | **done:** the `history-graph` component, replacing core's plain `CommitList` (`vcs.history.graph`) |
 | Local history dashboard | stays core (snapshots are substrate); the `recent-snapshots` lens in `review` covers the at-a-glance view |
 | Effort metrics block, effort coverage page, tests-run and nudge blocks | **done:** `effort.review.details` slot lenses `effort-tests` (grid: coverage, untested files, test runs, failed tests, analysis findings), `effort-metric-deltas`, `effort-nudges` |
 | Rail panels: Comments, Work, Uncommitted, Go To | **done:** Go To (`go-to`, the thread's bookmarks then its recent or most visited pages through the `mode` choice param, `go-to-bookmarks` collapsed — needing bookmarks as project data (`v_bookmark`), lens param `options` and page-kind icons; the rail has no core panels left); Comments (`comments`, a panel `open`ing the inbox) and Work (`work` grouped over the `thread_work` model, which also lists the thread's unlinked efforts — open under In progress, closed under Finished, whose header opens the `thread-activity` lens of the thread's turns by effort — `work-line` collapsed, `work-count`, the `clear_finished` command + `finished_cleared` model); and Uncommitted (`uncommitted`, a tree over the working change's stage-one file list, which change analysis now keeps current on every move). Only the UI moves: stores, commands and views stay core. What Work needed and lenses lacked became general features, listed under "Added for extraction" — the pattern for any panel an extension builds |
@@ -3696,7 +3756,13 @@ A changed recorded event schema and a shared wikilink prefix are candidate
 errors; a candidate never publishes a partial result.
 
 `PreparedExtensionDatabase` captures models, vocabulary and enabled contribution
-descriptors from the same snapshot. Its transaction helper calls strict model
+descriptors from the same snapshot, and every entity the enabled collectors
+declare: its transaction first creates each entity that has no view yet, empty
+(`collector_store::ensure_entities_tx`; one that exists keeps its rows — they
+are the collector's), so a model over an entity compiles before the collector
+first runs. Without it an extension whose model reads its own collector's
+entity is held back forever, its collector never active to fill the entity
+(`the_documented_examples_activate`: the github example). Its transaction helper calls strict model
 and vocabulary replacement and contribution restatement inside a surrounding
 savepoint: any diagnostic or storage failure restores the whole candidate.
 `prepare_with_capabilities` also includes prepared capability rows and switch

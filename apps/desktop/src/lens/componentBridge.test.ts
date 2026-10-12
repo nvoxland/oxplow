@@ -20,7 +20,11 @@ test("frame messages parse into the three requests and ready; anything else is r
   });
   expect(parseFrameMessage({ id: "3", method: "navigate", ref: "work_item:oxplow:tsk1" })).toEqual({
     type: "request",
-    request: { id: "3", method: "navigate", ref: "work_item:oxplow:tsk1" },
+    request: { id: "3", method: "navigate", ref: "work_item:oxplow:tsk1", newTab: false },
+  });
+  expect(parseFrameMessage({ id: "4", method: "navigate", ref: "commit:abc", newTab: true })).toEqual({
+    type: "request",
+    request: { id: "4", method: "navigate", ref: "commit:abc", newTab: true },
   });
   for (const bad of [
     null,
@@ -53,13 +57,13 @@ test("theme tokens come from the root's custom properties", () => {
 });
 
 // tsk961: `init` carries the theme's tokens; the kit is a stylesheet the
-// bundle links from the daemon. Dropping `kitCss` changed `init`'s shape,
-// so the protocol is 2.
-test("init carries the run, props and tokens, at protocol 2", () => {
+// bundle links from the daemon. Dropping `kitCss` made the protocol 2;
+// `navigate`'s `newTab` (a Cmd-click in a component) made it 3.
+test("init carries the run, props and tokens, at protocol 3", () => {
   const r = { lens: { id: "x/b", custom: { component: "b", props: { a: 1 } } }, params: {}, result: { columns: [], rows: [], truncated: false } } as unknown as LensRun;
   expect(initMessage(r, { "--accent": "#08f" })).toEqual({
     type: "init",
-    protocol: 2,
+    protocol: 3,
     run: r,
     props: { a: 1 },
     tokens: { "--accent": "#08f" },
@@ -84,8 +88,8 @@ function harness(deps: Partial<Parameters<typeof createBridgeHost>[1]> = {}) {
       if (!confirmed) throw new IpcCallError("needs confirmation", "NEEDS_CONFIRMATION");
       return { result: null, audit_id: 1, event_id: null, inverse: null };
     },
-    navigate: (ref) => {
-      calls.push(["navigate", ref]);
+    navigate: (ref, opts) => {
+      calls.push(["navigate", ref, opts]);
       return true;
     },
     confirm: async () => true,
@@ -128,11 +132,16 @@ test("an invoke that asks is confirmed in the host, then runs confirmed; decline
 test("navigate opens the ref; a malformed request is answered with an error when it has an id", async () => {
   const h = harness();
   h.send({ id: "n1", method: "navigate", ref: "work_item:oxplow:tsk1" });
+  h.send({ id: "n2", method: "navigate", ref: "commit:abc", newTab: true });
   h.send({ id: "b1", method: "exec" });
   await h.settle();
-  expect(h.calls).toEqual([["navigate", "work_item:oxplow:tsk1"]]);
+  expect(h.calls).toEqual([
+    ["navigate", "work_item:oxplow:tsk1", { newTab: false }],
+    ["navigate", "commit:abc", { newTab: true }],
+  ]);
   expect(h.received).toEqual([
     { id: "n1", ok: true, result: null },
+    { id: "n2", ok: true, result: null },
     { id: "b1", ok: false, error: { code: "BAD_REQUEST", message: "Not a query, invoke or navigate request." } },
   ]);
   h.channel.port1.close();

@@ -84,8 +84,7 @@ See [DEV.md](DEV.md) for building and running from source and
 
 ## Status
 
-Oxplow is early and actively evolving. Contribution kinds have explicit
-stable or experimental status; broader extension compatibility,
+Oxplow is early and actively evolving. Broader extension compatibility,
 execution containment, and authoring ergonomics are still being improved.
 Database migrations are the forward path for stored data. The next work
 is specified in the [foundation roadmap](.context/foundation-roadmap.md).

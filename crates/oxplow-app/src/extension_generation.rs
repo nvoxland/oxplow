@@ -12,6 +12,9 @@ use crate::vocabulary_reactor::{PreparedVocabulary, VocabularyErrors, Vocabulary
 /// Database declarations copied from one catalog snapshot. No external code
 /// runs during preparation, and nothing is published by constructing this.
 pub struct PreparedExtensionDatabase {
+    /// Declared entities, created empty when absent so models over them
+    /// compile before their collectors first run.
+    entities: Vec<oxplow_db::collector_store::EntityTable>,
     models: Vec<ExtensionModels>,
     vocabulary: PreparedVocabulary,
     contributions: Vec<oxplow_domain::contribution::Descriptor>,
@@ -68,6 +71,7 @@ impl PreparedExtensionDatabase {
             .flat_map(|extension| extension.contributions.iter().cloned())
             .collect();
         Self {
+            entities: crate::collector_runner::declared_entity_tables(snapshot.extensions()),
             models,
             vocabulary,
             contributions,
@@ -96,6 +100,7 @@ impl PreparedExtensionDatabase {
         tx.execute_batch("SAVEPOINT candidate_extension_database")
             .map_err(oxplow_db::map_sql_err)?;
         let result = (|| {
+            oxplow_db::collector_store::ensure_entities_tx(tx, &self.entities)?;
             models::replace_extensions(tx, &self.models)?;
             let vocabulary = self.vocabulary.replace_tx(tx, now)?;
             oxplow_db::contribution_store::reset_tx(tx, &self.contributions)?;

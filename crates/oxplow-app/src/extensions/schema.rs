@@ -111,7 +111,8 @@ mod tests {
         let lens = lens_schema();
         let mut checked = 0;
         for ext in crate::bundled_extensions::BUNDLED {
-            for (path, text) in ext.files {
+            for (path, _) in ext.files {
+                let text = ext.file(path).expect("a manifest or lens is text");
                 let schema = if *path == "extension.yaml" {
                     &manifest
                 } else if path.starts_with("lenses/") && path.ends_with(".yaml") {

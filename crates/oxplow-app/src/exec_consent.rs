@@ -1213,6 +1213,41 @@ pub fn revoke_program(
     Ok(())
 }
 
+/// Approve every listed program of `kind` as it is now — what a person
+/// does by approving each on Settings → Data, done by a host that is its
+/// own person: a throwaway preview (`oxplow extension test`) and tests.
+/// Returns the names it approved.
+pub fn approve_every(svc: &crate::Services, kind: ProgramKind) -> Result<Vec<String>, String> {
+    let project = svc.layout.project_dir.clone();
+    let config = svc
+        .config
+        .read()
+        .map_err(|_| "the configuration is unavailable".to_string())?
+        .clone();
+    let extensions = svc.extension_catalog.get(&project);
+    let mut approved = Vec::new();
+    for p in list(&svc.approvals, &project, &config, &extensions)
+        .into_iter()
+        .filter(|p| p.kind == kind)
+    {
+        let version = p
+            .version
+            .clone()
+            .ok_or_else(|| format!("`{}` has no version to approve", p.name))?;
+        approve_program(
+            &svc.approvals,
+            &project,
+            &config,
+            &extensions,
+            kind,
+            &p.name,
+            &version,
+        )?;
+        approved.push(p.name);
+    }
+    Ok(approved)
+}
+
 /// Approve the project program `kind`/`name` as it is now. Only a person
 /// calls this (the Settings → Data button).
 ///
@@ -1378,7 +1413,13 @@ mod tests {
         let leak = |files: Vec<(&'static str, &'static str)>| -> &'static crate::bundled_extensions::BundledExtension {
             Box::leak(Box::new(crate::bundled_extensions::BundledExtension {
                 name: "acme",
-                files: Box::leak(files.into_boxed_slice()),
+                files: Box::leak(
+                    files
+                        .into_iter()
+                        .map(|(p, t)| (p, t.as_bytes()))
+                        .collect::<Vec<_>>()
+                        .into_boxed_slice(),
+                ),
                 required: false,
             }))
         };

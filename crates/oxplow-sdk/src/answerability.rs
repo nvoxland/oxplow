@@ -206,11 +206,11 @@ pub fn names(text: &str, name: &str) -> bool {
 /// What the check needs from its host.
 pub struct Checker<'a> {
     /// A skill's (or an extension file's) text by name.
-    pub skill_text: &'a dyn Fn(&str) -> Option<String>,
+    pub skill_text: &'a (dyn Fn(&str) -> Option<String> + Sync),
     /// Where the SQL runs; `None` skips running it (a warning).
     pub sql: Option<&'a SqlGateway>,
     /// A command's input schema by name.
-    pub command_schema: &'a dyn Fn(&str) -> Option<Value>,
+    pub command_schema: &'a (dyn Fn(&str) -> Option<Value> + Sync),
 }
 
 /// What checking a file found: `<file>: question N (…): what — fix`
@@ -313,7 +313,7 @@ pub async fn check(file: &str, questions: &[Question], c: &Checker<'_>) -> Check
 pub async fn live(
     file: &str,
     questions: &[Question],
-    skill_text: &dyn Fn(&str) -> Option<String>,
+    skill_text: &(dyn Fn(&str) -> Option<String> + Sync),
     catalog: &[String],
     ai: &AiService,
 ) -> Vec<String> {
@@ -474,12 +474,7 @@ mod tests {
         let command = |name: &str| svc.commands.spec(name).map(|s| s.input_schema);
         let mut asked = 0;
         for b in oxplow_app::bundled_extensions::BUNDLED {
-            let file_of = |name: &str| {
-                b.files
-                    .iter()
-                    .find(|(p, _)| *p == name)
-                    .map(|(_, text)| text.to_string())
-            };
+            let file_of = |name: &str| b.file(name).map(str::to_string);
             let Some(yaml) = file_of("questions.yaml") else {
                 continue;
             };

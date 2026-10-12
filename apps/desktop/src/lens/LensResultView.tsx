@@ -99,7 +99,7 @@ export function LensResultView(props: LensResultViewProps) {
 interface LensResultViewProps {
   run: LensRun;
   /** Where links go; without it they navigate through the route context. */
-  onOpenPage?(ref: TabRef): void;
+  onOpenPage?(ref: TabRef, opts?: { newTab?: boolean }): void;
   maxRows?: number;
   streamId?: string | null;
   /** Small inline rendering for strips (a number as plain text). */

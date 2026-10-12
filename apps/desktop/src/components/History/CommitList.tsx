@@ -2,28 +2,13 @@ import type { MutableRefObject } from "react";
 import { useMemo } from "react";
 import type { RevisionInfo } from "../../tauri-bridge/generated/bindings.js";
 import type { History } from "../../vcsHistory.js";
-import { layoutCommits, type GraphRow } from "./layout.js";
 import { useRouteDispatch } from "../../tabs/RouteLink.js";
 import { gitCommitRef } from "../../tabs/pageRefs.js";
 import type { NavSiblingEntry } from "../../tabs/PageNavigationContext.js";
 import { RefBadge } from "../RefBadge.js";
 import { EmptyState } from "../Prompts/EmptyState.js";
 
-const BRANCH_COLORS = [
-  "#4a9eff",
-  "#86efac",
-  "#e5a06a",
-  "#c4b5fd",
-  "#f472b6",
-  "#fcd34d",
-  "#60d394",
-  "#f87171",
-];
-
 const ROW_HEIGHT = 36;
-const LANE_WIDTH = 14;
-const NODE_RADIUS = 4;
-const GRAPH_PAD = 8;
 
 export interface CommitStats {
   filesAdded: number;
@@ -33,7 +18,7 @@ export interface CommitStats {
   deletions: number;
 }
 
-export interface CommitGraphTableProps {
+export interface CommitListProps {
   commits: RevisionInfo[];
   branchHeadsBySha: Map<string, string[]>;
   tagsBySha: Map<string, string[]>;
@@ -49,13 +34,14 @@ export interface CommitGraphTableProps {
 }
 
 /**
- * The git-log graph + row table — branch/merge dots and lines on the
- * left, sha + ref badges + subject + author + relative date on the
- * right. Pure presentation against a pre-filtered commit list. Both
- * `HistoryPanel` and `GitDashboardPage` use this; the dashboard
- * passes `commits.slice(0, 5)` and no matches set.
+ * Commits as a plain list — sha + ref badges + subject + author + date,
+ * newest first. Provider-neutral: no lanes (oxplow-bundled's
+ * `history-graph` component draws those, replacing this on Git History —
+ * the `vcs.history.graph` replacement). Pure presentation against a
+ * pre-filtered commit list; `GitDashboardPage` passes its recent commits
+ * and their stats.
  */
-export function CommitGraphTable({
+export function CommitList({
   commits,
   branchHeadsBySha,
   tagsBySha,
@@ -65,25 +51,19 @@ export function CommitGraphTable({
   statsBySha,
   onSelect,
   rowRefs,
-}: CommitGraphTableProps) {
-  const layout = useMemo(() => layoutCommits(commits), [commits]);
-  const graphWidth = Math.max(
-    GRAPH_PAD * 2 + LANE_WIDTH * Math.max(1, layout.totalColumns),
-    GRAPH_PAD * 2 + LANE_WIDTH,
-  );
-
-  // Sibling-list for prev/next navigation. Built from the visible
-  // commits so the destination GitCommitPage gets up/down buttons that
-  // step through the same list the user clicked from.
+}: CommitListProps) {
+  // Sibling-list for prev/next navigation: the destination GitCommitPage
+  // steps through the same list the user clicked from.
   const siblingEntries: NavSiblingEntry[] = useMemo(
-    () => layout.rows.map((row) => ({
-      ref: gitCommitRef(row.commit.id),
-      label: `${row.commit.id.slice(0, 7)} ${row.commit.subject ?? ""}`.trim(),
-    })),
-    [layout.rows],
+    () =>
+      commits.map((commit) => ({
+        ref: gitCommitRef(commit.id),
+        label: `${commit.id.slice(0, 7)} ${commit.subject ?? ""}`.trim(),
+      })),
+    [commits],
   );
 
-  if (layout.rows.length === 0) {
+  if (commits.length === 0) {
     return (
       <div style={{ padding: 12 }}>
         <EmptyState testId="history-empty" title="No commits" text="This branch has no history yet." />
@@ -92,9 +72,9 @@ export function CommitGraphTable({
   }
 
   return (
-    <div data-testid="commit-graph-table">
-      {layout.rows.map((row, idx) => {
-        const sha = row.commit.id;
+    <div data-testid="commit-list">
+      {commits.map((commit, idx) => {
+        const sha = commit.id;
         const matched = !matches || matches.has(sha);
         return (
           <div
@@ -107,8 +87,7 @@ export function CommitGraphTable({
           >
             <CommitRowDispatcher
               sha={sha}
-              row={row}
-              graphWidth={graphWidth}
+              commit={commit}
               selected={selectedSha === sha}
               matched={matched}
               branchHeads={branchHeadsBySha.get(sha) ?? []}
@@ -132,8 +111,7 @@ export function CommitGraphTable({
  */
 function CommitRowDispatcher({
   sha,
-  row,
-  graphWidth,
+  commit,
   selected,
   matched,
   branchHeads,
@@ -144,8 +122,7 @@ function CommitRowDispatcher({
   onSelect,
 }: {
   sha: string;
-  row: GraphRow;
-  graphWidth: number;
+  commit: RevisionInfo;
   selected: boolean;
   matched: boolean;
   branchHeads: string[];
@@ -161,8 +138,7 @@ function CommitRowDispatcher({
   });
   return (
     <CommitRow
-      row={row}
-      graphWidth={graphWidth}
+      commit={commit}
       selected={selected}
       matched={matched}
       branchHeads={branchHeads}
@@ -198,8 +174,7 @@ export function indexRefsBySha(history: Pick<History, "branchHeads" | "tags"> | 
 }
 
 function CommitRow({
-  row,
-  graphWidth,
+  commit,
   selected,
   matched,
   branchHeads,
@@ -208,8 +183,7 @@ function CommitRow({
   stats,
   onClick,
 }: {
-  row: GraphRow;
-  graphWidth: number;
+  commit: RevisionInfo;
   selected: boolean;
   matched: boolean;
   branchHeads: string[];
@@ -218,56 +192,15 @@ function CommitRow({
   stats: CommitStats | null;
   onClick(e: { metaKey: boolean; ctrlKey: boolean; button: number }): void;
 }) {
-  const mid = ROW_HEIGHT / 2;
-  const colX = (k: number) => GRAPH_PAD + k * LANE_WIDTH + LANE_WIDTH / 2;
-
-  const lines: Array<{ x1: number; y1: number; x2: number; y2: number; color: string; key: string }> = [];
-
-  for (let k = 0; k < row.incoming.length; k++) {
-    const sha = row.incoming[k];
-    if (!sha) continue;
-    const color = BRANCH_COLORS[k % BRANCH_COLORS.length]!;
-    if (k === row.column) {
-      if (row.fromAbove) lines.push({ x1: colX(k), y1: 0, x2: colX(k), y2: mid, color, key: `in-${k}` });
-    } else {
-      lines.push({ x1: colX(k), y1: 0, x2: colX(k), y2: ROW_HEIGHT, color, key: `in-${k}` });
-    }
-  }
-
-  for (let k = 0; k < row.outgoing.length; k++) {
-    const sha = row.outgoing[k];
-    if (!sha) continue;
-    const incomingSame = row.incoming[k] === sha;
-    if (incomingSame && k !== row.column) continue;
-    const color = BRANCH_COLORS[k % BRANCH_COLORS.length]!;
-    if (k === row.column) {
-      lines.push({ x1: colX(k), y1: mid, x2: colX(k), y2: ROW_HEIGHT, color, key: `out-${k}` });
-    }
-  }
-
-  for (const edge of row.parentEdges) {
-    const color = BRANCH_COLORS[edge.toCol % BRANCH_COLORS.length]!;
-    if (edge.toCol === row.column) continue;
-    lines.push({
-      x1: colX(row.column),
-      y1: mid,
-      x2: colX(edge.toCol),
-      y2: ROW_HEIGHT,
-      color,
-      key: `edge-${edge.toCol}-${edge.sha}`,
-    });
-  }
-
-  const nodeColor = BRANCH_COLORS[row.column % BRANCH_COLORS.length]!;
-  const date = formatTimestamp(row.commit.time);
+  const date = formatTimestamp(commit.time);
 
   return (
     <div
       onClick={onClick}
-      data-testid="commit-graph-row"
-      data-sha={row.commit.id}
+      data-testid="commit-list-row"
+      data-sha={commit.id}
       data-ref-kind="commit"
-      data-ref-id={row.commit.id}
+      data-ref-id={commit.id}
       style={{
         display: "flex",
         alignItems: "center",
@@ -279,33 +212,15 @@ function CommitRow({
         lineHeight: 1,
         whiteSpace: "nowrap",
         overflow: "hidden",
+        paddingLeft: 8,
       }}
     >
-      <svg width={graphWidth} height={ROW_HEIGHT} style={{ flexShrink: 0 }}>
-        {lines.map((line) => (
-          <line
-            key={line.key}
-            x1={line.x1}
-            y1={line.y1}
-            x2={line.x2}
-            y2={line.y2}
-            stroke={line.color}
-            strokeWidth={1.5}
-            strokeLinecap="round"
-          />
-        ))}
-        <circle
-          cx={colX(row.column)}
-          cy={mid}
-          r={NODE_RADIUS}
-          fill={selected ? "#fff" : nodeColor}
-          stroke={nodeColor}
-          strokeWidth={1.5}
-        />
-      </svg>
+      <span style={{ fontFamily: "var(--mono, monospace)", color: "var(--muted)", fontSize: 11, flexShrink: 0, marginRight: 8 }}>
+        {commit.id.slice(0, 7)}
+      </span>
       <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0, paddingRight: 8 }}>
         <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", userSelect: "text" }}>
-          {row.commit.subject}
+          {commit.subject}
         </span>
         {branchHeads.map((name) => (
           <RefBadge key={`b-${name}`} label={name} tone={name === currentBranch ? "current" : "branch"} />
@@ -314,11 +229,11 @@ function CommitRow({
           <RefBadge key={`t-${name}`} label={name} tone="tag" />
         ))}
         <span style={{ color: "var(--muted)", flexShrink: 0, fontSize: 11 }}>
-          {row.commit.author}
+          {commit.author}
         </span>
         {stats ? (
           <span
-            data-testid="commit-graph-row-stats"
+            data-testid="commit-list-row-stats"
             style={{
               flexShrink: 0,
               fontSize: 11,
@@ -339,7 +254,7 @@ function CommitRow({
         ) : null}
         <span
           style={{ color: "var(--muted)", flexShrink: 0, fontSize: 11, minWidth: 132, textAlign: "right" }}
-          title={`${row.commit.time}\n${row.commit.id}`}
+          title={`${commit.time}\n${commit.id}`}
         >
           {date}
         </span>

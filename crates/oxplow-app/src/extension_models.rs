@@ -151,6 +151,57 @@ mod tests {
             .is_err());
     }
 
+    /// An author's lens over a model nobody published yet answers through
+    /// the overlay — what MCP `run_lens` reads through — where a plain run
+    /// says the view isn't there.
+    #[tokio::test]
+    async fn a_lens_over_an_unpublished_model_answers_through_its_overlay() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let svc = &f.svc;
+        // An author's worktree: its extensions aren't the activated
+        // project's, so nothing of them is published.
+        let authoring = tempfile::tempdir().unwrap();
+        let root = authoring.path().to_path_buf();
+        write(
+            &root,
+            "oxplow/extensions/late/extension.yaml",
+            "manifest: 2\nname: late\nintent:\n  purpose: x\nmodels:\n  - name: counted\n    version: 1\n    description: The work items.\n    columns:\n      - { name: ref, type: TEXT, doc: Work item ref. }\n",
+        );
+        write(
+            &root,
+            "oxplow/extensions/late/models/counted.sql",
+            "SELECT ref FROM ref('work_item')",
+        );
+        write(
+            &root,
+            "oxplow/extensions/late/lenses/counted.yaml",
+            "title: Counted\nquery: SELECT count(*) AS n FROM v_late_counted\n",
+        );
+        let ctx = crate::extensions::LensContext::default();
+        let run = |layer: crate::sql_gateway::SqlGateway| {
+            let catalog = &svc.extension_catalog;
+            let root = root.clone();
+            let ctx = ctx.clone();
+            async move {
+                crate::extensions::run_lens(
+                    &layer,
+                    catalog,
+                    &root,
+                    "late/counted",
+                    Default::default(),
+                    &ctx,
+                )
+                .await
+            }
+        };
+        let plain = run(svc.sql.clone()).await.unwrap_err().to_string();
+        assert!(plain.contains("v_late_counted"), "{plain}");
+        let overlay =
+            crate::extensions::lens_overlay(&svc.sql, &svc.extension_catalog, &root, "late").await;
+        let answered = run(svc.sql.with_overlay(overlay)).await.unwrap();
+        assert_eq!(answered.result.rows.len(), 1);
+    }
+
     /// P4.9 (tsk494): `validate_extension` (what `oxplow extension check`
     /// runs) catches a breaking change at a published version before it
     /// is published, and an extension's `source()` of a core table.

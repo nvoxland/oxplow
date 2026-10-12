@@ -3183,7 +3183,7 @@ impl CollectionService {
                     changed,
                     attributed_files: None,
                     sample_count: kept,
-                    latest_run_id: current_cap,
+                    latest_capture_id: current_cap,
                     crossing,
                 },
             ));
@@ -3216,7 +3216,7 @@ impl CollectionService {
                 changed,
                 attributed_files: Some(attributed),
                 sample_count: kept,
-                latest_run_id: current_cap,
+                latest_capture_id: current_cap,
                 crossing,
             },
         ))
@@ -3362,7 +3362,7 @@ impl CollectionService {
                     changed: true,
                     attributed_files: None,
                     sample_count: facts.len() as i64,
-                    latest_run_id: latest,
+                    latest_capture_id: latest,
                     crossing,
                 },
             ));
@@ -3382,7 +3382,7 @@ impl CollectionService {
                 changed,
                 attributed_files: None,
                 sample_count: facts.len() as i64,
-                latest_run_id: latest,
+                latest_capture_id: latest,
                 crossing,
             },
         ))
@@ -3443,7 +3443,7 @@ impl CollectionService {
                 changed,
                 attributed_files: None,
                 sample_count: derived.len() as i64,
-                latest_run_id: latest_cap,
+                latest_capture_id: latest_cap,
                 crossing,
             },
         ))
@@ -3576,13 +3576,12 @@ struct DeltaCalc {
     changed: bool,
     attributed_files: Option<i64>,
     sample_count: i64,
-    latest_run_id: Option<i64>,
+    latest_capture_id: Option<i64>,
     crossing: Option<String>,
 }
 
 /// Build an effort-metric row from a metric SPEC + the computed `DeltaCalc`.
-/// `kind` ← the spec's `display_kind`; the `latest_run_id` field carries a
-/// capture id (epic tsk12, T-D/T-E1).
+/// `kind` ← the spec's `display_kind`.
 fn effort_delta_row_spec(
     spec: &oxplow_db::MetricSpec,
     c: DeltaCalc,
@@ -3606,7 +3605,7 @@ fn effort_delta_row_spec(
         warn_at: spec.warn_at,
         fail_at: spec.fail_at,
         crossing: c.crossing,
-        latest_run_id: c.latest_run_id,
+        latest_capture_id: c.latest_capture_id,
     }
 }
 

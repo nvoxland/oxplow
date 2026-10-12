@@ -9,11 +9,12 @@
 import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 
-import { invokeComponentCommand, loadComponent, recordUsage, runComponentQuery } from "../api.js";
+import { invokeComponentCommand, loadComponent, recordUsage, runComponentQuery, subscribeOxplowEvents } from "../api.js";
 import { CommandConfirm } from "../components/CommandConfirm.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { remoteBaseUrl } from "../tauri-bridge/transport.js";
 import type { LensRun } from "../tauri-bridge/generated/bindings.js";
+import { lensDefinitionChanged } from "./lensRerun.js";
 import {
   componentBundleUrl,
   componentNavigationTarget,
@@ -35,7 +36,7 @@ export function CustomComponentViz({
 }: {
   run: LensRun;
   streamId: string | null;
-  onOpenPage?(ref: TabRef): void;
+  onOpenPage?(ref: TabRef, opts?: { newTab?: boolean }): void;
   /** The lens's table: shown when the component can't be. */
   fallback: ReactNode;
   /** Told why when the component can't be shown — and then it shows
@@ -53,9 +54,18 @@ export function CustomComponentViz({
   const lensId = run.lens.id;
   // The bundle its frame runs, loaded for the lens (from the main
   // worktree, whatever the stream): the daemon serves the frame that
-  // snapshot, by its version, and the frame invokes with it.
+  // snapshot, by its version, and the frame invokes with it. Loaded again
+  // when the activated extensions change — a hot update: a new version
+  // mounts a new frame, the same one keeps the frame it has.
   const loadKey = base && component ? lensId : null;
   const [loaded, setLoaded] = useState<{ key: string; version?: string; error?: string } | null>(null);
+  const [activations, setActivations] = useState(0);
+  useEffect(() => {
+    if (loadKey === null) return;
+    return subscribeOxplowEvents((event) => {
+      if (lensDefinitionChanged(event as Record<string, unknown>)) setActivations((n) => n + 1);
+    });
+  }, [loadKey]);
   useEffect(() => {
     if (loadKey === null) return;
     let live = true;
@@ -70,9 +80,9 @@ export function CustomComponentViz({
     return () => {
       live = false;
     };
-    // `loadKey` names the lens it loads for.
+    // `loadKey` names the lens it loads for; `activations` loads it again.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadKey]);
+  }, [loadKey, activations]);
   const current = loaded?.key === loadKey ? loaded : null;
   const version = current?.version ?? null;
   const src = base && version ? componentBundleUrl(base, version) : null;
@@ -111,7 +121,7 @@ export function CustomComponentViz({
     );
   }
   return (
-    <div data-testid="custom-component" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+    <div data-testid="custom-component" style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minHeight: 0 }}>
       <span data-testid="custom-component-badge" style={badgeStyle} title={`${run.lens.extension}'s own component, sandboxed`}>
         custom
       </span>
@@ -152,7 +162,7 @@ function ComponentFrame({
   component: string;
   run: LensRun;
   streamId: string | null;
-  onOpenPage?(ref: TabRef): void;
+  onOpenPage?(ref: TabRef, opts?: { newTab?: boolean }): void;
   readyTimeoutMs: number;
   onFail(reason: string): void;
   onReady?(): void;
@@ -210,9 +220,9 @@ function ComponentFrame({
             throw e;
           }
         },
-        navigate: (ref) => {
+        navigate: (ref, opts) => {
           const tab = componentNavigationTarget(ref);
-          if (tab) onOpenPage?.(tab);
+          if (tab) onOpenPage?.(tab, opts);
           return tab !== null;
         },
         confirm: (command) => new Promise<boolean>((answer) => setAsking({ command, answer })),
@@ -275,5 +285,7 @@ const badgeStyle: CSSProperties = {
   border: "1px solid var(--border-subtle)",
   color: "var(--text-secondary)",
 };
-const frameStyle: CSSProperties = { width: "100%", minHeight: 240, border: "1px solid var(--border-subtle)", borderRadius: 4 };
+// It grows to fill a page that gives it room (a replaced history), and is
+// never shorter than a card's worth.
+const frameStyle: CSSProperties = { width: "100%", flex: 1, minHeight: 240, border: "1px solid var(--border-subtle)", borderRadius: 4 };
 const noteStyle: CSSProperties = { color: "var(--text-secondary)", fontSize: "var(--text-xs)", marginBottom: 4 };
