@@ -87,6 +87,8 @@ pub mod extension_job_operations;
 pub mod extension_job_scheduler;
 pub mod extension_jobs;
 pub mod extension_models;
+#[cfg(test)]
+mod extension_private_state_tests;
 pub mod extension_ref_kinds;
 pub mod extension_runtime_adapters;
 pub mod extension_secrets;
@@ -1933,6 +1935,24 @@ impl Services {
         secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
         host_env: providers::host::HostEnv,
     ) -> Result<Self, AppInitError> {
+        Self::on_machine_with_database(
+            project_dir,
+            global_dir,
+            secrets,
+            host_env,
+            Database::in_memory(),
+        )
+    }
+
+    /// [`Self::in_memory_on_machine`] over a database the caller opened: a
+    /// test's file, reopened to see what survives a restart.
+    pub(crate) fn on_machine_with_database(
+        project_dir: impl Into<PathBuf>,
+        global_dir: PathBuf,
+        secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
+        host_env: providers::host::HostEnv,
+        db: Database,
+    ) -> Result<Self, AppInitError> {
         let project_dir = project_dir.into();
         let state_dir = project_dir.join(".oxplow");
         ensure_state_dir(&state_dir)?;
@@ -1959,7 +1979,7 @@ impl Services {
             lsp_request_timeout: std::time::Duration::from_secs(2),
             host_env,
         };
-        Self::build(layout, config, Database::in_memory(), machine)
+        Self::build(layout, config, db, machine)
     }
 
     /// Reload `.oxplow/project.yaml` from disk into the in-memory config, re-apply

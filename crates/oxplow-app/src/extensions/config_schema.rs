@@ -209,3 +209,103 @@ fn violation(code: &str) -> SchemaViolation {
 fn bounded_json(value: &Value) -> Result<(), SchemaViolation> {
     super::config::check_json_limits(value).map_err(violation)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn declaration() -> ConfigurationFile {
+        serde_json::from_value(json!({
+            "version": 1,
+            "schema": {
+                "type": "object",
+                "required": ["limit"],
+                "additionalProperties": false,
+                "properties": {
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                    "mode": {"enum": ["fast", "safe-hunter2"]}
+                }
+            },
+            "defaults": {"limit": 10}
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_declaration_resolves_layers_against_its_schema() {
+        let declaration = declaration();
+        assert!(declaration.prepare().is_ok());
+        let resolved = declaration
+            .resolve(
+                "alpha",
+                Some(&json!({"limit": 20})),
+                Some(&json!({"mode": "fast"})),
+            )
+            .unwrap();
+        assert_eq!(resolved.values, json!({"limit": 20, "mode": "fast"}));
+    }
+
+    #[test]
+    fn a_value_failing_the_schema_yields_value_free_issues() {
+        let declaration = declaration();
+        for (project, personal) in [
+            (json!({"limit": "hunter2"}), json!({})),
+            (json!({"limit": 1000}), json!({})),
+            (json!({}), json!({"mode": "nope-hunter2"})),
+            (json!({"unexpected-hunter2": 1}), json!({})),
+        ] {
+            let issues = declaration
+                .resolve("alpha", Some(&project), Some(&personal))
+                .expect_err("the schema refuses it");
+            assert!(!issues.is_empty());
+            let text = format!("{issues:?}");
+            assert!(
+                !text.contains("hunter2") && !text.contains("1000"),
+                "{text}"
+            );
+            assert!(issues.iter().all(|issue| !issue.code.is_empty()));
+        }
+    }
+
+    #[test]
+    fn required_fields_are_checked_on_the_resolved_object() {
+        let mut declaration = declaration();
+        declaration.defaults = json!({});
+        // Defaults alone are a fragment: fine to declare, not to resolve.
+        assert!(declaration.prepare().is_ok());
+        assert!(declaration.resolve("alpha", None, None).is_err());
+        assert!(declaration
+            .resolve("alpha", Some(&json!({"limit": 5})), None)
+            .is_ok());
+    }
+
+    #[test]
+    fn a_bad_declaration_is_refused_when_prepared() {
+        let mut declaration = declaration();
+        declaration.version = 0;
+        assert!(declaration.prepare().is_err());
+
+        let mut declaration = self::declaration();
+        declaration.schema = json!({"type": "string"});
+        assert!(declaration.prepare().is_err());
+
+        let mut declaration = self::declaration();
+        declaration.defaults = json!({"limit": 1000});
+        assert!(declaration.prepare().is_err());
+    }
+
+    #[test]
+    fn a_schema_cannot_fetch_anything() {
+        let mut declaration = declaration();
+        declaration.schema = json!({
+            "type": "object",
+            "properties": {"x": {"$ref": "https://example.invalid/schema.json"}}
+        });
+        let issues = declaration
+            .prepare()
+            .err()
+            .expect("an external ref is refused");
+        assert!(!format!("{issues:?}").contains("example.invalid"));
+    }
+}

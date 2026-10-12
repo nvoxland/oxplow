@@ -258,7 +258,7 @@ access is refused while the owner is disabled, missing, stale or revoked.
 Both scopes live in the local project's database, with no global identity lookup.
 Raw secrets do not belong in defaults, schema or overrides. Host-owned secret
 slots/references are still pending; this service resolves non-secret settings
-only. Draft persistence migrations have not been executed.
+only.
 
 ## Private state host boundary
 
@@ -316,8 +316,11 @@ Current-generation checks use the filesystem catalog, including its stat walk;
 they are conservative on any catalog change. This does not pin DB/runtime
 registries or keep state access usable under a retained last-good handler after
 a rejected candidate. The coherent activation coordinator must adopt the host
-boundary with its active-generation identity. No runtime validation has run for
-these state adapters.
+boundary with its active-generation identity. Working-path tests cover the
+stores, resolution and schema adapters, the secret reference and host, and the
+command-bus path end to end (`extension_private_state_tests.rs`: write/read,
+owner isolation, disable keeps rows, precedence, value-free refusals, restart
+over a database file); adversarial and concurrency coverage is still to do.
 
 > **Status: built (epic tsk275; host finished in tsk278).**
 > - **Current:**

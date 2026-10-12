@@ -211,3 +211,304 @@ fn map_state_tx_error(error: TxError<StateError>) -> StateError {
         TxError::Aborted(abort) => abort,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oxplow_domain::extension_state::{
+        Scope, MAX_KEYS, MAX_KEY_BYTES, MAX_SNAPSHOT_BYTES, MAX_VALUE_DEPTH,
+    };
+    use serde_json::json;
+
+    fn store() -> SqliteExtensionStateStore {
+        SqliteExtensionStateStore::new(Database::in_memory())
+    }
+
+    fn ns(extension: &str, scope: Scope, area: Area) -> Namespace {
+        Namespace {
+            extension: extension.into(),
+            scope,
+            area,
+        }
+    }
+
+    fn values(pairs: &[(&str, serde_json::Value)]) -> BTreeMap<String, serde_json::Value> {
+        pairs
+            .iter()
+            .map(|(key, value)| ((*key).to_string(), value.clone()))
+            .collect()
+    }
+
+    fn invalid(result: Result<Snapshot, StateError>) -> String {
+        match result {
+            Err(StateError::Invalid(message)) => message,
+            other => panic!("expected an Invalid refusal, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_namespace_snapshot_writes_and_reads_back() {
+        let store = store();
+        let space = ns("notes", Scope::Project, Area::State);
+        assert!(store.snapshot(space.clone()).await.unwrap().is_none());
+
+        let written = store
+            .compare_exchange(
+                space.clone(),
+                None,
+                3,
+                values(&[("cursor", json!({"page": 4})), ("seen", json!([1, 2]))]),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            written.stamp,
+            Stamp {
+                schema_version: 3,
+                revision: 1
+            }
+        );
+
+        let read = store.snapshot(space.clone()).await.unwrap().unwrap();
+        assert_eq!(read, written);
+
+        // The update replaces the whole namespace and bumps the revision.
+        let next = store
+            .compare_exchange(
+                space.clone(),
+                Some(read.stamp),
+                3,
+                values(&[("n", json!(1))]),
+            )
+            .await
+            .unwrap();
+        assert_eq!(next.stamp.revision, 2);
+        let read = store.snapshot(space).await.unwrap().unwrap();
+        assert_eq!(read.values, values(&[("n", json!(1))]));
+    }
+
+    #[tokio::test]
+    async fn scopes_areas_and_extensions_are_separate_namespaces() {
+        let store = store();
+        for (extension, scope, area, marker) in [
+            ("alpha", Scope::Project, Area::State, 1),
+            ("alpha", Scope::Personal, Area::State, 2),
+            ("alpha", Scope::Project, Area::Cache, 3),
+            ("beta", Scope::Project, Area::State, 4),
+        ] {
+            store
+                .compare_exchange(
+                    ns(extension, scope, area),
+                    None,
+                    1,
+                    values(&[("m", json!(marker))]),
+                )
+                .await
+                .unwrap();
+        }
+        let read = |extension, scope, area| {
+            let store = store.clone();
+            async move {
+                store
+                    .snapshot(ns(extension, scope, area))
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .values["m"]
+                    .clone()
+            }
+        };
+        assert_eq!(read("alpha", Scope::Project, Area::State).await, json!(1));
+        assert_eq!(read("alpha", Scope::Personal, Area::State).await, json!(2));
+        assert_eq!(read("alpha", Scope::Project, Area::Cache).await, json!(3));
+        assert_eq!(read("beta", Scope::Project, Area::State).await, json!(4));
+    }
+
+    #[tokio::test]
+    async fn a_stale_stamp_is_refused_and_leaves_the_namespace_untouched() {
+        let store = store();
+        let space = ns("notes", Scope::Project, Area::State);
+        let first = store
+            .compare_exchange(space.clone(), None, 1, values(&[("a", json!(1))]))
+            .await
+            .unwrap();
+        let second = store
+            .compare_exchange(
+                space.clone(),
+                Some(first.stamp),
+                1,
+                values(&[("a", json!(2))]),
+            )
+            .await
+            .unwrap();
+
+        // Writing from the first stamp again is stale.
+        match store
+            .compare_exchange(
+                space.clone(),
+                Some(first.stamp),
+                1,
+                values(&[("a", json!(9))]),
+            )
+            .await
+        {
+            Err(StateError::Conflict { actual }) => assert_eq!(actual, Some(second.stamp)),
+            other => panic!("expected a conflict, got {other:?}"),
+        }
+        // Creating over an existing namespace conflicts too.
+        match store
+            .compare_exchange(space.clone(), None, 1, values(&[("a", json!(9))]))
+            .await
+        {
+            Err(StateError::Conflict { actual }) => assert_eq!(actual, Some(second.stamp)),
+            other => panic!("expected a conflict, got {other:?}"),
+        }
+        // Updating an absent namespace conflicts with `actual: None`.
+        let absent = ns("other", Scope::Project, Area::State);
+        match store
+            .compare_exchange(absent, Some(first.stamp), 1, BTreeMap::new())
+            .await
+        {
+            Err(StateError::Conflict { actual }) => assert_eq!(actual, None),
+            other => panic!("expected a conflict, got {other:?}"),
+        }
+        let read = store.snapshot(space).await.unwrap().unwrap();
+        assert_eq!(read, second);
+    }
+
+    #[tokio::test]
+    async fn the_schema_version_never_moves_backwards() {
+        let store = store();
+        let space = ns("notes", Scope::Project, Area::State);
+        let first = store
+            .compare_exchange(space.clone(), None, 2, BTreeMap::new())
+            .await
+            .unwrap();
+        invalid(
+            store
+                .compare_exchange(space.clone(), Some(first.stamp), 1, BTreeMap::new())
+                .await,
+        );
+        let forward = store
+            .compare_exchange(space, Some(first.stamp), 5, BTreeMap::new())
+            .await
+            .unwrap();
+        assert_eq!(forward.stamp.schema_version, 5);
+    }
+
+    #[tokio::test]
+    async fn keys_bytes_and_nesting_are_bounded() {
+        let store = store();
+        let space = ns("notes", Scope::Project, Area::State);
+        let write = |values| {
+            let store = store.clone();
+            let space = space.clone();
+            async move { store.compare_exchange(space, None, 1, values).await }
+        };
+
+        // Key shape: lowercase start/end, lowercase/digit/dot/dash/underscore inside.
+        for bad in ["", "Upper", "1starts-digit", "ends-", "has space", "ünï"] {
+            invalid(write(values(&[(bad, json!(1))])).await);
+        }
+        invalid(write(values(&[(&"a".repeat(MAX_KEY_BYTES + 1), json!(1))])).await);
+        // The boundary itself is fine.
+        write(values(&[(&"a".repeat(MAX_KEY_BYTES), json!(1))]))
+            .await
+            .unwrap();
+        let space = ns("notes", Scope::Personal, Area::State);
+        let store2 = store.clone();
+        let write_ok = |values| {
+            let store = store2.clone();
+            let space = space.clone();
+            async move { store.compare_exchange(space, None, 1, values).await }
+        };
+
+        // Key count.
+        let many: BTreeMap<_, _> = (0..=MAX_KEYS)
+            .map(|n| (format!("k{n}"), json!(0)))
+            .collect();
+        invalid(write_ok(many).await);
+
+        // Serialized bytes.
+        invalid(write_ok(values(&[("blob", json!("x".repeat(MAX_SNAPSHOT_BYTES)))])).await);
+
+        // Nesting.
+        let mut deep = json!(1);
+        for _ in 0..=MAX_VALUE_DEPTH {
+            deep = json!([deep]);
+        }
+        invalid(write_ok(values(&[("deep", deep)])).await);
+
+        // Version and stamp bounds.
+        invalid(
+            store
+                .compare_exchange(
+                    ns("x", Scope::Project, Area::State),
+                    None,
+                    0,
+                    BTreeMap::new(),
+                )
+                .await,
+        );
+        invalid(
+            store
+                .compare_exchange(
+                    ns("x", Scope::Project, Area::State),
+                    Some(Stamp {
+                        schema_version: 1,
+                        revision: 0,
+                    }),
+                    1,
+                    BTreeMap::new(),
+                )
+                .await,
+        );
+        // An invalid extension name never reaches the table.
+        invalid(
+            store
+                .compare_exchange(
+                    ns("Not Valid", Scope::Project, Area::State),
+                    None,
+                    1,
+                    BTreeMap::new(),
+                )
+                .await,
+        );
+        assert!(store
+            .snapshot(ns("Not Valid", Scope::Project, Area::State))
+            .await
+            .is_err());
+
+        // None of the refused writes left a row behind.
+        assert!(store
+            .snapshot(ns("notes", Scope::Personal, Area::State))
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn state_survives_reopening_the_same_database_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("local.sqlite");
+        let space = ns("notes", Scope::Project, Area::State);
+        let stamp = {
+            let store = SqliteExtensionStateStore::new(Database::open(&path).unwrap());
+            store
+                .compare_exchange(space.clone(), None, 2, values(&[("kept", json!("yes"))]))
+                .await
+                .unwrap()
+                .stamp
+        };
+        let store = SqliteExtensionStateStore::new(Database::open(&path).unwrap());
+        let read = store.snapshot(space.clone()).await.unwrap().unwrap();
+        assert_eq!(read.stamp, stamp);
+        assert_eq!(read.values, values(&[("kept", json!("yes"))]));
+        // And it keeps accepting writes from the persisted stamp.
+        let next = store
+            .compare_exchange(space, Some(stamp), 2, BTreeMap::new())
+            .await
+            .unwrap();
+        assert_eq!(next.stamp.revision, stamp.revision + 1);
+    }
+}

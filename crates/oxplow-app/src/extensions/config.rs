@@ -310,3 +310,116 @@ fn sort_issues(mut issues: Vec<ConfigIssue>) -> Vec<ConfigIssue> {
     issues.truncate(MAX_CONFIG_ISSUES);
     issues
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn resolve(
+        defaults: serde_json::Value,
+        project: Option<serde_json::Value>,
+        personal: Option<serde_json::Value>,
+    ) -> Result<ResolvedConfig, Vec<ConfigIssue>> {
+        resolve_extension_config(
+            "alpha",
+            &defaults,
+            project.as_ref(),
+            personal.as_ref(),
+            |_, _| Vec::new(),
+        )
+    }
+
+    #[test]
+    fn precedence_is_defaults_then_project_then_personal() {
+        let resolved = resolve(
+            json!({"a": 1, "b": 1, "c": 1, "nested": {"x": 1, "y": 1}}),
+            Some(json!({"b": 2, "c": 2, "nested": {"x": 2}})),
+            Some(json!({"c": 3})),
+        )
+        .unwrap();
+        assert_eq!(
+            resolved.values,
+            json!({"a": 1, "b": 2, "c": 3, "nested": {"x": 2, "y": 1}})
+        );
+        let origin = |pointer: &str| resolved.origins[pointer];
+        assert_eq!(origin("/a"), ConfigLayer::Defaults);
+        assert_eq!(origin("/b"), ConfigLayer::Project);
+        assert_eq!(origin("/c"), ConfigLayer::Personal);
+        assert_eq!(origin("/nested/x"), ConfigLayer::Project);
+        assert_eq!(origin("/nested/y"), ConfigLayer::Defaults);
+    }
+
+    #[test]
+    fn arrays_and_scalars_replace_and_missing_layers_inherit() {
+        let resolved = resolve(
+            json!({"list": [1, 2, 3], "name": "d", "obj": {"k": 1}}),
+            None,
+            Some(json!({"list": [9], "obj": {}})),
+        )
+        .unwrap();
+        assert_eq!(
+            resolved.values,
+            json!({"list": [9], "name": "d", "obj": {"k": 1}}),
+            "an empty overriding object merges without clearing"
+        );
+        assert_eq!(resolved.origins["/list"], ConfigLayer::Personal);
+        assert_eq!(resolved.origins["/name"], ConfigLayer::Defaults);
+    }
+
+    #[test]
+    fn a_layer_must_be_an_object_and_no_values_come_back_on_failure() {
+        for layer in [json!(null), json!([1]), json!("s"), json!(5)] {
+            let issues = resolve(json!({"a": 1}), Some(layer), None).unwrap_err();
+            assert_eq!(issues[0].layer, ConfigLayer::Project);
+            assert_eq!(issues[0].code, "object_required");
+        }
+    }
+
+    #[test]
+    fn validation_failures_carry_a_pointer_and_code_never_the_value() {
+        let result = resolve_extension_config(
+            "alpha",
+            &json!({}),
+            Some(&json!({"token": "hunter2"})),
+            None,
+            |layer, _| {
+                if layer == ConfigLayer::Resolved {
+                    vec![ConfigViolation {
+                        pointer: "/token".into(),
+                        code: "type".into(),
+                    }]
+                } else {
+                    Vec::new()
+                }
+            },
+        );
+        let issues = result.unwrap_err();
+        assert_eq!(
+            issues,
+            vec![ConfigIssue {
+                extension: "alpha".into(),
+                layer: ConfigLayer::Resolved,
+                pointer: "/token".into(),
+                code: "type".into(),
+            }]
+        );
+        assert!(!format!("{issues:?}").contains("hunter2"));
+    }
+
+    #[test]
+    fn an_invalid_namespace_is_refused_without_naming_it() {
+        let issues =
+            resolve_extension_config("Not Valid!", &json!({}), None, None, |_, _| Vec::new())
+                .unwrap_err();
+        assert_eq!(issues[0].code, "invalid_namespace");
+        assert!(issues[0].extension.is_empty());
+    }
+
+    #[test]
+    fn pointers_escape_slashes_and_tildes() {
+        let resolved = resolve(json!({"a/b": 1, "c~d": 2}), None, None).unwrap();
+        assert_eq!(resolved.origins["/a~1b"], ConfigLayer::Defaults);
+        assert_eq!(resolved.origins["/c~0d"], ConfigLayer::Defaults);
+    }
+}
