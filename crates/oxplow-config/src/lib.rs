@@ -205,7 +205,7 @@ pub struct FilterConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Default, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FormulaConfig {
-    /// `add` | `sub` | `mul` | `div` (`ratio` aliases `div`).
+    /// `add` | `sub` | `mul` | `div`.
     pub op: String,
     /// The left operand metric key.
     pub left: String,
@@ -2477,8 +2477,8 @@ fn is_entity_name(s: &str) -> bool {
         && s.chars()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
 }
-/// Formula binary ops a `metrics:` spec may declare (`ratio` aliases `div`).
-const METRIC_FORMULA_OPS: &[&str] = &["add", "sub", "mul", "div", "ratio"];
+/// Formula binary ops a `metrics:` spec may declare.
+const METRIC_FORMULA_OPS: &[&str] = &["add", "sub", "mul", "div"];
 /// Catalog groupings a `metrics:` spec may declare.
 const METRIC_CATEGORIES: &[&str] = &[
     "operational",
@@ -5028,6 +5028,24 @@ metrics:
         assert_eq!(f.left, "acme.bug_count");
         assert_eq!(f.right, "acme.kloc");
         assert!(cfg.metrics[0].source_measure.is_none());
+    }
+
+    #[test]
+    fn formula_op_is_one_of_add_sub_mul_div() {
+        for op in ["add", "sub", "mul", "div"] {
+            assert!(
+                load_from_yaml(&format!(
+                    "metrics:\n  - key: a.b\n    formula: {{ op: {op}, left: a.c, right: a.d }}\n"
+                ))
+                .is_ok(),
+                "{op}"
+            );
+        }
+        // `div` is the only ratio primitive; there is no alias for it.
+        assert!(load_from_yaml(
+            "metrics:\n  - key: a.b\n    formula: { op: ratio, left: a.c, right: a.d }\n"
+        )
+        .is_err());
     }
 
     #[test]

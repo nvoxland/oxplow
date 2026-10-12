@@ -3407,7 +3407,7 @@ export type FormStart = {
  *  (`div` is the ratio primitive: bugs-per-KLOC, cost-per-token).
  */
 export type FormulaConfig = {
-	// `add` | `sub` | `mul` | `div` (`ratio` aliases `div`).
+	// `add` | `sub` | `mul` | `div`.
 	op: string,
 	// The left operand metric key.
 	left: string,

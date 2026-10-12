@@ -1004,7 +1004,7 @@
       "type": "object",
       "properties": {
         "op": {
-          "description": "`add` | `sub` | `mul` | `div` (`ratio` aliases `div`).",
+          "description": "`add` | `sub` | `mul` | `div`.",
           "type": "string"
         },
         "left": {
