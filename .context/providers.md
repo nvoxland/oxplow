@@ -1394,20 +1394,19 @@ blocked stdin reader).
 
 ## External execution authority
 
-Providers, including MCP adapters, default to `execution: restricted` and
-refuse launch because full OS confinement is unavailable. On Unix, a manifest
-may explicitly declare `execution: broader`; a new approval covers that
-additional file/socket/process authority. On other platforms it also fails
-closed. Network declarations plus the macOS egress proxy limit direct network
-paths but do not promise confinement against local brokers or broader code.
+Providers, including MCP adapters, run with the person's file, network
+and process authority; the approval says so and oxplow doesn't confine them
+(there is no execution tier, and confinement is shelved until real OS
+confinement exists). Network declarations plus the macOS egress proxy limit
+direct network paths but do not promise confinement against local brokers or
+other code.
 
 The host launches the verified private approval copy and pins consent to its
 hash. `host/call` rechecks that gate and applies model/path service needs to
 the registered run. A connection monitor checks consent every 100 ms and
 kills its owned process group when revoked or changed. Shutdown, natural exit
 and dropped connections clean up ordinary children and disarm group tracking;
-processes deliberately escaping a broader group have the explicitly approved
-broader authority. Changing a working-tree script does not change the frozen
+processes deliberately escaping the group keep the person's authority. Changing a working-tree script does not change the frozen
 provider that is already running.
 
 Copy preparation uses the same bounded regular-file copier as collectors:

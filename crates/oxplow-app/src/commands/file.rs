@@ -220,7 +220,7 @@ mod tests {
         };
         let effect = Actor::Effect {
             effect: "acme/save".into(),
-            thread_id: None,
+            thread_id: Some(fx.thread),
             stream_id: None,
         };
         for actor in [elsewhere, effect] {

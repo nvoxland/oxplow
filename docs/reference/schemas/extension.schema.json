@@ -1214,14 +1214,6 @@
           },
           "default": []
         },
-        "execution": {
-          "default": "restricted",
-          "allOf": [
-            {
-              "$ref": "#/definitions/ExecutionTier"
-            }
-          ]
-        },
         "needs": {
           "description": "The services its script uses beyond what its kind implies (a\nStarlark collector's).",
           "type": "array",
@@ -1491,14 +1483,6 @@
           "type": "string",
           "const": "upsert"
         }
-      ]
-    },
-    "ExecutionTier": {
-      "description": "An external process has the person's authority unless the host can\nactually confine it. The broader tier requires explicit declaration\nand approval; existing program approval does not imply that opt-in.",
-      "type": "string",
-      "enum": [
-        "restricted",
-        "broader"
       ]
     },
     "RawEntity": {
@@ -2597,14 +2581,6 @@
             "type": "string"
           },
           "default": []
-        },
-        "execution": {
-          "default": "restricted",
-          "allOf": [
-            {
-              "$ref": "#/definitions/ExecutionTier"
-            }
-          ]
         },
         "declarations": {
           "description": "The checked-in `InitializeResult` (JSON), relative to the folder.",

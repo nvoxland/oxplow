@@ -2194,7 +2194,7 @@ approved; a **decision** is what a run was allowed (`oxplow_domain::grant`,
 `grants.rs`).
 
 - **The request.** `GrantRequest { scopes, program, hosts, credentials,
-  env, commands, execution }`, derived from the declaration: an exec collector's
+  env, commands }`, derived from the declaration: an exec collector's
   entry, `network`, `credentials` and `env`; a collector's services
   (`services::collector_needs`: declared ∪ implied, `ai.compute` among
   them for a model-calling script — a model is a scope, not a flag); a
@@ -2222,7 +2222,7 @@ approved; a **decision** is what a run was allowed (`oxplow_domain::grant`,
   script's services (`scope` `tree.read` / `ai.compute`, by the router).
   A denied need stops what asked for it.
   `Enforcement { hosts }` is the one table of what this machine holds.
-  Broader process file/network decisions remain `unenforced`: macOS's
+  A program's file and network decisions remain `unenforced`: macOS's
   proxy and direct-network sandbox do not prevent local brokers or file
   access. `grants::gaps` reports this in Programs and review grant lines.
 - **Bounded reads.** `sql.read:v_work_item` names an exact published
@@ -2241,17 +2241,22 @@ approved; a **decision** is what a run was allowed (`oxplow_domain::grant`,
   request construction recognize the validated service prefix while preserving
   the original qualifier. Transactional command composers still refuse bounded
   tree reads because their tree service is unavailable inside the transaction.
-- **External execution.** Collectors and providers default to
-  `execution: restricted`. Full file/socket/child-process confinement is
-  not available, so restricted execution fails closed on every platform.
-  `execution: broader` requires a new approval hash and explicitly grants
-  the person's file, socket and process authority. It is supported on Unix
-  with owned process-group cleanup; other platforms refuse it. Ordinary
-  children are killed on completion, timeout, cancellation or revocation.
-  A broader process can escape its group; cleanup is not confinement.
+- **External execution.** Every external program (an exec collector, a
+  project fact program, a report parser, an external provider, a harness
+  or MCP stdio server) runs with the person's file, network and process
+  authority. Nothing declares that, and the approval says so plainly: a
+  program "runs with your file, network and process authority; oxplow
+  cleans up its processes but doesn't confine it". Confining external
+  processes is shelved (the owner's decision); a confinement tier is
+  deferred until real OS confinement exists, and there is no `execution:`
+  key (a manifest still declaring it is a load error). A program's file and
+  network decisions stay `unenforced`. What oxplow does do is cleanup, not
+  confinement: on Unix each program runs in an owned process group, killed
+  on completion, timeout, cancellation or revocation. A process can escape
+  its group. Platforms without owned-group cleanup just run the program.
   Pipe I/O also has a deadline, so escaped children cannot leave host
   drain/writer threads blocked indefinitely.
-  Broader environment/credential delivery is deliberately process-readable;
+  Environment/credential delivery is deliberately process-readable;
   contained script services never receive keychain values.
   Entity collector programs run from a private per-run copy, verified against
   the approved declaration and code hash before launch and during execution.
@@ -2267,7 +2272,7 @@ approved; a **decision** is what a run was allowed (`oxplow_domain::grant`,
   Project fact programs and report parsers use the same bounded copy helper,
   with their project-relative code layout preserved. Their guard owns the copy;
   `OXPLOW_CODE_DIR` names its root and `OXPLOW_PROJECT_DIR` names the original
-  checkout for their approved broader data access.
+  checkout for their approved data access.
 - **Collector previews.** A preview stores no rows, but receives the same
   contribution authority and pinned live consent as an ordinary entity
   collector run. Previewing cannot bypass declared model/path access or
@@ -3652,7 +3657,7 @@ Extension disk readers refuse absolute/traversing paths and symlinked folders
 or path segments for source, bytes, directory listings and component bundle
 metadata. Project fact inputs resolve under their checkout; symlinks outside
 that checkout are refused before reading content. These host checks do not
-provide OS confinement for an explicitly approved broader process.
+provide OS confinement for an approved external program.
 
 ## Command candidate publication
 

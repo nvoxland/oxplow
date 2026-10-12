@@ -192,7 +192,6 @@ fn decl_of(
 pub fn effect_program(ext: &Extension, decl: &EffectDecl) -> ProjectProgram {
     let dir = ext.path.trim_end_matches('/');
     ProjectProgram {
-        execution: Default::default(),
         kind: ProgramKind::Effect,
         capability: None,
         name: decl.name(),

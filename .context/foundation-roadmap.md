@@ -301,9 +301,14 @@ Prerequisites: Normalize contribution descriptors and public extension terminolo
 
 #### Enforce scoped grants across hosts and external execution
 
-Status: in progress. Model/path bounds, live consent, explicit external
-execution tiers and pinned component authority are implemented; adversarial
-runtime validation and remaining host integration are still required.
+Status: in progress. Model/path bounds, live consent and pinned component
+authority are implemented; adversarial runtime validation and remaining host
+integration are still required. External-process confinement is shelved by
+the owner: a plan for later, not pursued now. Today every external program
+runs with the person's authority, the approval says so, and oxplow only cleans
+up its processes (Unix process groups, approved-code copies, revocation
+watches). The plan text below stays as the design for when real OS
+confinement is taken up.
 
 Scope: Apply approved authority at host-service calls and semantic reads, external process launch, AI-provider network/credential access and component command bridges. Raw external processes need OS confinement or an explicitly consented broader-authority tier; a declaration alone cannot constrain them. Keep supported-platform enforcement explicit.
 

@@ -14,7 +14,7 @@ use crate::exec_consent::{ApprovalStore, ProgramKind, ProjectProgram};
 pub fn enforcement() -> Enforcement {
     Enforcement {
         // The network sandbox still permits local brokers/sockets. A
-        // broader process's destinations are not fully confined by it.
+        // program's destinations are not fully confined by it.
         hosts: false,
     }
 }
@@ -36,7 +36,6 @@ pub fn collector_request(spec: &CollectorSpec, needs: &[String]) -> GrantRequest
     GrantRequest {
         scopes: scopes(needs),
         program: runs_program.then(|| spec.entry.clone().unwrap_or_default()),
-        execution: spec.execution,
         hosts: spec.network.iter().cloned().collect(),
         credentials: spec.credentials.iter().cloned().collect(),
         env: spec.env.iter().cloned().collect(),
@@ -61,7 +60,6 @@ pub fn program_request(p: &ProjectProgram) -> GrantRequest {
     );
     GrantRequest {
         scopes: scopes(&p.scopes),
-        execution: p.execution,
         program: runs_program.then(|| p.program.clone()),
         hosts: p.network.iter().cloned().collect(),
         credentials: p.credentials.iter().cloned().collect(),
@@ -82,9 +80,6 @@ pub fn gaps(request: &GrantRequest) -> Vec<String> {
     let here = enforcement();
     let mut out = Vec::new();
     if request.program.is_some() {
-        if request.execution == oxplow_domain::grant::ExecutionTier::Restricted {
-            out.push("restricted external execution is unavailable on this platform".into());
-        }
         if let Some(why) = here.gap(&oxplow_domain::grant::Need::Files) {
             out.push(why.to_string());
         }

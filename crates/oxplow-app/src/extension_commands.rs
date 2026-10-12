@@ -677,6 +677,45 @@ pub fn own_events(
         .collect()
 }
 
+/// An emitted event about an effort happened on that effort's thread: it
+/// carries the thread, its stream and the effort as anchors, so an effect
+/// reacting to it runs for that thread. One that already names a thread, or
+/// is about no effort, is left as it is.
+fn anchor_to_efforts(
+    conn: &rusqlite::Connection,
+    mut events: Vec<oxplow_domain::Envelope>,
+) -> Result<Vec<oxplow_domain::Envelope>, oxplow_domain::CommandError> {
+    use rusqlite::OptionalExtension as _;
+    for event in &mut events {
+        if event.anchors.thread_id.is_some() {
+            continue;
+        }
+        let Some(effort) = event
+            .subject
+            .iter()
+            .find_map(|r| oxplow_domain::refs::build::effort_of_ref(r))
+        else {
+            continue;
+        };
+        let thread: Option<i64> = conn
+            .query_row(
+                "SELECT thread_id FROM effort WHERE id = ?1",
+                [effort.value()],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(oxplow_db::map_sql_err)?;
+        if let Some(thread) = thread {
+            event.anchors = oxplow_db::event_log_store::anchors_for_thread_tx(
+                conn,
+                oxplow_domain::ThreadId::new(thread),
+            )?;
+            event.anchors.effort_id = Some(effort);
+        }
+    }
+    Ok(events)
+}
+
 /// What a command's script decided.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Composed {
@@ -853,7 +892,10 @@ pub fn extension_command(
                 } => Ok(Composition {
                     calls,
                     result,
-                    events: own_events(&vocabulary.current(), &extension, &source, events)?,
+                    events: anchor_to_efforts(
+                        conn,
+                        own_events(&vocabulary.current(), &extension, &source, events)?,
+                    )?,
                 }),
                 Composed::Refused(message) => Err(CommandError::Invalid {
                     field: None,
@@ -1824,14 +1866,22 @@ mod tests {
     }
 
     /// Two enabled extensions that map to one namespace are both refused;
-    /// a disabled one doesn't count.
+    /// a disabled one doesn't count. (Extension names are dashes and
+    /// letters, so the second claims `a_b` with an explicit `namespace:`.)
     #[test]
     fn a_namespace_is_one_extensions() {
         let d = tempfile::tempdir().unwrap();
         let files = [("handlers/finish_review.star", HANDLER)];
         write_ext(d.path(), "a-b", GOOD, &files);
-        write_ext(d.path(), "a_b", GOOD, &files);
-        for name in ["a-b", "a_b"] {
+        write_ext(d.path(), "ab", GOOD, &files);
+        let manifest = d.path().join("oxplow/extensions/ab/extension.yaml");
+        let text = std::fs::read_to_string(&manifest).unwrap();
+        std::fs::write(
+            &manifest,
+            text.replace("name: ab\n", "name: ab\nnamespace: a_b\n"),
+        )
+        .unwrap();
+        for name in ["a-b", "ab"] {
             let ext = project(d.path(), name);
             assert!(
                 ext.errors
@@ -1845,7 +1895,7 @@ mod tests {
         write(
             d.path(),
             ".oxplow/project.yaml",
-            "extensions:\n  disabled: [a_b]\n",
+            "extensions:\n  disabled: [ab]\n",
         );
         let ext = project(d.path(), "a-b");
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
@@ -1938,6 +1988,10 @@ mod tests {
             "{errs}"
         );
 
+        // Reconcile is all-or-nothing: an enabled extension with an error
+        // (`held`) rejects the whole candidate, so drop it before `mine`
+        // can register.
+        std::fs::remove_dir_all(root.join("oxplow/extensions/held")).unwrap();
         write_ext(root, "mine", GOOD, &files);
         fx.svc.extension_commands.reconcile().await;
         assert_eq!(
@@ -2293,7 +2347,7 @@ mod tests {
     /// operations oxplow's commands are backed by: nothing about
     /// oxplow's is special. Its spec is the operation's (schema, undo,
     /// access), the scope among its needs; one naming an operation
-    /// that isn't there isn't registered, its problem said.
+    /// that isn't there is rejected (the old command stays), its problem said.
     #[tokio::test(flavor = "multi_thread")]
     async fn an_extension_declares_a_command_over_an_operation() {
         let fx = crate::test_fixtures::services_with_effort().await;
@@ -2328,9 +2382,12 @@ mod tests {
             .unwrap();
         assert_eq!(out.result["scope"], json!("project"));
 
+        // A replacement that doesn't stage is rejected whole: the old
+        // command stays as it was, and the problem is reported.
         star("erase");
         fx.svc.extension_commands.reconcile().await;
-        assert!(fx.svc.commands.spec("acme.page.star").is_none());
+        let kept = fx.svc.commands.spec("acme.page.star").expect("kept");
+        assert_eq!(kept, spec);
         let problem = fx.svc.extension_commands.problem("acme").unwrap();
         assert!(problem.contains("has no op `erase`"), "{problem}");
     }

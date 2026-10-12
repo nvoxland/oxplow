@@ -392,12 +392,7 @@ pub fn approval_hash(ext_dir: &Path, spec: &CollectorSpec) -> std::io::Result<St
     };
     // Its whole declaration: what it reads (`input`), when it runs, what
     // it writes — a changed one asks again, as a changed script does.
-    let mut declared = serde_json::to_string(spec).map_err(std::io::Error::other)?;
-    if spec.execution.is_restricted() {
-        // Preserve the pre-tier declaration hash. This exact token occurs
-        // only as a field, never inside an escaped JSON string value.
-        declared = declared.replacen("\"execution\":\"restricted\",", "", 1);
-    }
+    let declared = serde_json::to_string(spec).map_err(std::io::Error::other)?;
     let mut text = format!(
         "tree:{tree}\nentry:{}\nenv:{}\ncredentials:{}\nnetwork:{}\ndeclared:{declared}",
         entry,
@@ -515,7 +510,6 @@ pub fn exec_collector(
     egress: &Egress,
     input: &serde_json::Value,
 ) -> Result<ScriptOutput, String> {
-    spec.execution.require_external()?;
     run.check_authority()?;
     let bytes = serde_json::to_vec(input).map_err(|e| e.to_string())?;
     let (timeout, cancel) = (run.budget().timeout, run.cancel());
@@ -2188,7 +2182,6 @@ async fn exec_approved(
     run: &RunContext,
     approved_hash: &str,
 ) -> Result<ScriptOutput, String> {
-    spec.execution.require_external()?;
     let dir = ext_dir.to_path_buf();
     let (input, run) = (
         input.clone(),
@@ -2426,7 +2419,7 @@ pub(crate) mod tests {
 
     fn spec(entry: &str, env: &[&str]) -> CollectorSpec {
         let yaml = format!(
-            "- id: gh\n  runtime: exec\n  execution: broader\n  entry: {entry}\n  env: [{}]\n  entities:\n    - name: pr\n      key: number\n      columns: {{ number: int, title: text, score: real, draft: bool, opened_at: time }}\n",
+            "- id: gh\n  runtime: exec\n  entry: {entry}\n  env: [{}]\n  entities:\n    - name: pr\n      key: number\n      columns: {{ number: int, title: text, score: real, draft: bool, opened_at: time }}\n",
             env.join(", ")
         );
         let (s, e) = parse_collectors("my-gh", &serde_yaml::from_str(&yaml).unwrap(), &|_| true);
@@ -2627,7 +2620,7 @@ pub(crate) mod tests {
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: my-gh\nintent:\n  purpose: test\ncollectors:\n  - id: gh\n    runtime: exec\n    execution: broader\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int, title: text } }\n",
+            "manifest: 2\nname: my-gh\nintent:\n  purpose: test\ncollectors:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int, title: text } }\n",
         )
         .unwrap();
         script(
@@ -2815,7 +2808,7 @@ pub(crate) mod tests {
             std::fs::create_dir_all(&ext).unwrap();
             std::fs::write(
                 ext.join("extension.yaml"),
-                format!("manifest: 2\nname: {name}\nintent:\n  purpose: test\ncollectors:\n  - id: s\n    runtime: exec\n    execution: broader\n    entry: sync.sh\n    credentials: [TOKEN]\n    entities:\n      - {{ name: row, key: id, columns: {{ id: int, token: text }} }}\n"),
+                format!("manifest: 2\nname: {name}\nintent:\n  purpose: test\ncollectors:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    credentials: [TOKEN]\n    entities:\n      - {{ name: row, key: id, columns: {{ id: int, token: text }} }}\n"),
             )
             .unwrap();
             script(
@@ -3394,7 +3387,7 @@ pub(crate) mod tests {
         extension(
             root.path(),
             "work",
-            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT ref, title, json_extract(native, '$.priority') AS priority FROM v_work_item WHERE state = 'todo'\"\n    entities:\n      - { name: hot, key: ref, columns: { ref: text, title: text } }\n  - id: sh\n    runtime: exec\n    execution: broader\n    entry: sync.sh\n    entities:\n      - { name: raw, key: id, columns: { id: int } }\n",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT ref, title, json_extract(native, '$.priority') AS priority FROM v_work_item WHERE state = 'todo'\"\n    entities:\n      - { name: hot, key: ref, columns: { ref: text, title: text } }\n  - id: sh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: raw, key: id, columns: { id: int } }\n",
             &[(
                 "hot.star",
                 "def transform(input):\n    return {\"entities\": {\"hot\": [{\"ref\": r[\"ref\"], \"title\": r[\"title\"]} for r in input[\"rows\"] if r[\"priority\"] == \"high\"]}}\n",
@@ -3464,7 +3457,7 @@ pub(crate) mod tests {
         extension(
             root.path(),
             "inc",
-            "manifest: 2\nname: inc\nintent:\n  purpose: test\ncollectors:\n  - id: s\n    runtime: exec\n    execution: broader\n    entry: sync.sh\n    sync: upsert\n    entities:\n      - { name: item, key: id, columns: { id: int, title: text } }\n      - { name: other, key: id, columns: { id: int } }\n",
+            "manifest: 2\nname: inc\nintent:\n  purpose: test\ncollectors:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    sync: upsert\n    entities:\n      - { name: item, key: id, columns: { id: int, title: text } }\n      - { name: other, key: id, columns: { id: int } }\n",
             &[],
         );
         let ext = root.path().join("oxplow/extensions/inc");
@@ -3596,7 +3589,7 @@ pub(crate) mod tests {
         extension(
             root.path(),
             "net",
-            "manifest: 2\nname: net\nintent:\n  purpose: test\ncollectors:\n  - id: s\n    runtime: exec\n    execution: broader\n    entry: sync.sh\n    network: [localhost]\n    entities:\n      - { name: r, key: id, columns: { id: int, declared: text, undeclared: text, direct: text } }\n",
+            "manifest: 2\nname: net\nintent:\n  purpose: test\ncollectors:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    network: [localhost]\n    entities:\n      - { name: r, key: id, columns: { id: int, declared: text, undeclared: text, direct: text } }\n",
             &[],
         );
         let ext = root.path().join("oxplow/extensions/net");
@@ -3705,7 +3698,7 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: my-gh\nintent:\n  purpose: test\ncollectors:\n  - id: gh\n    runtime: exec\n    execution: broader\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int } }\n",
+            "manifest: 2\nname: my-gh\nintent:\n  purpose: test\ncollectors:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int } }\n",
         )
         .unwrap();
         script(

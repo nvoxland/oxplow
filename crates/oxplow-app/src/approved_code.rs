@@ -1,4 +1,4 @@
-//! Bounded private code copies for explicitly approved broader programs.
+//! Bounded private code copies for approved external programs.
 //! Working-tree edits cannot substitute the entry or its relative helpers.
 
 use std::path::{Path, PathBuf};
@@ -21,7 +21,6 @@ pub(crate) fn project_collector(
     root: PathBuf,
     program: ProjectProgram,
 ) -> Result<ProjectCode, String> {
-    program.execution.require_external()?;
     if program.kind != ProgramKind::Collector
         || !program.args.is_empty()
         || program.remote

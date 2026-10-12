@@ -87,8 +87,6 @@ pub struct ProviderSpec {
     /// Hosts it may reach (enforced where the OS can).
     #[serde(default)]
     pub network: Vec<String>,
-    #[serde(default)]
-    pub execution: oxplow_domain::grant::ExecutionTier,
     /// The checked-in `InitializeResult` (JSON), relative to the folder.
     pub declarations: String,
     /// What a work list's own ids look like (a regex matched whole:

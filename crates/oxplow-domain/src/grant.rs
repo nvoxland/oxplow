@@ -16,42 +16,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::time::Timestamp;
 
-/// An external process has the person's authority unless the host can
-/// actually confine it. The broader tier requires explicit declaration
-/// and approval; existing program approval does not imply that opt-in.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    specta::Type,
-    schemars::JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum ExecutionTier {
-    #[default]
-    Restricted,
-    Broader,
-}
-
-impl ExecutionTier {
-    pub fn is_restricted(&self) -> bool {
-        *self == Self::Restricted
-    }
-
-    pub fn require_external(self) -> Result<(), String> {
-        match self {
-            Self::Broader if cfg!(unix) => Ok(()),
-            Self::Broader => Err("broader external execution is unavailable on this platform: owned process cleanup is not supported".into()),
-            Self::Restricted => Err("restricted external execution is unavailable on this platform: file, socket and child-process authority is not fully confined; explicitly declare execution: broader and approve that broader access to run this program".into()),
-        }
-    }
-}
-
 /// What a contribution asks to do.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GrantRequest {
@@ -71,8 +35,6 @@ pub struct GrantRequest {
     pub env: BTreeSet<String>,
     /// The commands it may run with its viewer's rights (a component).
     pub commands: BTreeSet<String>,
-    #[serde(default, skip_serializing_if = "ExecutionTier::is_restricted")]
-    pub execution: ExecutionTier,
 }
 
 impl GrantRequest {
@@ -121,9 +83,6 @@ impl GrantRequest {
             if let Some(p) = &self.program {
                 out.push(format!("runs {p}"));
             }
-        }
-        if self.execution == ExecutionTier::Broader && granted.execution != self.execution {
-            out.push("runs with the person's broader file, socket and process authority".into());
         }
         out
     }
@@ -208,7 +167,7 @@ impl Enforcement {
                 Some("network isn't confined to the granted hosts on this OS")
             }
             Need::Files => {
-                Some("a program reads and writes files as you; oxplow doesn't confine it")
+                Some("a program runs with your file, network and process authority; oxplow cleans up its processes but doesn't confine it")
             }
             _ => None,
         }
@@ -254,7 +213,7 @@ pub fn decide(
         Need::Credential(c) => allowed.credentials.contains(c),
         Need::Env(e) => allowed.env.contains(e),
         Need::Command(c) => allowed.commands.contains(c),
-        Need::Files => allowed.program.is_some() && allowed.execution == ExecutionTier::Broader,
+        Need::Files => allowed.program.is_some(),
     };
     if !within {
         return Decision::Denied(match grant {
@@ -284,7 +243,6 @@ mod tests {
         GrantRequest {
             scopes: ["sql.read".to_string()].into(),
             program: Some("bin/sync.sh".into()),
-            execution: ExecutionTier::Broader,
             hosts: [
                 "api.github.com".to_string(),
                 "*.githubusercontent.com".to_string(),
@@ -346,9 +304,26 @@ mod tests {
             ),
             Decision::Unenforced(_)
         ));
+        match decide(&Need::Files, Some(&g), &GrantRequest::default(), MAC) {
+            Decision::Unenforced(why) => {
+                assert!(why.contains("file, network and process authority"), "{why}");
+                assert!(why.contains("doesn't confine"), "{why}");
+            }
+            other => panic!("a program's files are unenforced, got {other:?}"),
+        }
+        // No program, no files.
+        let none = GrantRequest {
+            program: None,
+            ..request()
+        };
         assert!(matches!(
-            decide(&Need::Files, Some(&g), &GrantRequest::default(), MAC),
-            Decision::Unenforced(_)
+            decide(
+                &Need::Files,
+                Some(&granted(none)),
+                &GrantRequest::default(),
+                MAC
+            ),
+            Decision::Denied(_)
         ));
     }
 

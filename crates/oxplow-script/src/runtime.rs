@@ -525,24 +525,17 @@ pub(crate) fn run_starlark_inner(
 /// kind's JSON output. Unlike the in-process tiers this can do I/O, so callers
 /// tag it lower-trust.
 pub fn run_exec(budget: &Budget, argv: &[String], content: &str) -> Result<Value, CollectError> {
-    run_exec_authorized(
-        budget,
-        argv,
-        content,
-        oxplow_domain::grant::ExecutionTier::Restricted,
-        &|| Ok(()),
-    )
+    run_exec_authorized(budget, argv, content, &|| Ok(()))
 }
 
-/// External execution under an explicit tier and a live host authority check.
+/// External execution under a live host authority check.
 pub fn run_exec_authorized(
     budget: &Budget,
     argv: &[String],
     content: &str,
-    execution: oxplow_domain::grant::ExecutionTier,
     check: &dyn Fn() -> Result<(), String>,
 ) -> Result<Value, CollectError> {
-    run_exec_authorized_at(budget, argv, content, execution, check, None)
+    run_exec_authorized_at(budget, argv, content, check, None)
 }
 
 /// Host-owned code location. The caller keeps its approved copy alive through
@@ -558,11 +551,9 @@ pub fn run_exec_authorized_at(
     budget: &Budget,
     argv: &[String],
     content: &str,
-    execution: oxplow_domain::grant::ExecutionTier,
     check: &dyn Fn() -> Result<(), String>,
     location: Option<&ExecLocation>,
 ) -> Result<Value, CollectError> {
-    execution.require_external().map_err(CollectError::Exec)?;
     check().map_err(CollectError::Exec)?;
     use std::io::Read;
     use std::process::{Command, Stdio};
@@ -990,14 +981,8 @@ mod tests {
         assert!(payload.len() > 1_000_000, "payload {} bytes", payload.len());
 
         let argv = vec!["cat".to_string()];
-        let out = run_exec_authorized(
-            &budget,
-            &argv,
-            &payload,
-            oxplow_domain::grant::ExecutionTier::Broader,
-            &|| Ok(()),
-        )
-        .expect("cat round-trips the payload");
+        let out = run_exec_authorized(&budget, &argv, &payload, &|| Ok(()))
+            .expect("cat round-trips the payload");
         assert_eq!(
             out.get("pad").and_then(|p| p.as_array()).map(Vec::len),
             Some(500_000),
@@ -1012,14 +997,8 @@ mod tests {
         let budget = Budget::with_timeout(std::time::Duration::from_millis(200));
         let argv = vec!["sleep".to_string(), "30".to_string()];
         let started = std::time::Instant::now();
-        let err = run_exec_authorized(
-            &budget,
-            &argv,
-            "{}",
-            oxplow_domain::grant::ExecutionTier::Broader,
-            &|| Ok(()),
-        )
-        .expect_err("must not wait for the sleep");
+        let err = run_exec_authorized(&budget, &argv, "{}", &|| Ok(()))
+            .expect_err("must not wait for the sleep");
         assert!(
             matches!(&err, CollectError::Exec(m) if m.contains("budget")),
             "got {err:?}"
@@ -1039,14 +1018,8 @@ mod tests {
             "-c".to_string(),
             "echo boom >&2; exit 3".to_string(),
         ];
-        let err = run_exec_authorized(
-            &budget,
-            &argv,
-            "{}",
-            oxplow_domain::grant::ExecutionTier::Broader,
-            &|| Ok(()),
-        )
-        .expect_err("non-zero exit is an error");
+        let err = run_exec_authorized(&budget, &argv, "{}", &|| Ok(()))
+            .expect_err("non-zero exit is an error");
         assert!(
             matches!(&err, CollectError::Exec(m) if m.contains("boom")),
             "stderr must reach the caller: {err:?}"

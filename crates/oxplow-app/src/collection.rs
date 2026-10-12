@@ -748,16 +748,7 @@ impl CollectionService {
             .unwrap_or_else(|| root.join(entry));
         if spec.runtime == oxplow_config::collectors::CollectorRuntime::Exec {
             use crate::exec_consent::{needs_approval, project_collector_program, ProgramKind};
-            spec.execution
-                .require_external()
-                .map_err(ParserProblem::Broken)?;
-            let program = project_collector_program(
-                ProgramKind::Collector,
-                &spec.id,
-                entry,
-                &[],
-                spec.execution,
-            );
+            let program = project_collector_program(ProgramKind::Collector, &spec.id, entry, &[]);
             let gate = crate::exec_consent::script_gate(
                 self.approvals.clone(),
                 root.to_path_buf(),
@@ -773,13 +764,7 @@ impl CollectionService {
             let code = crate::approved_code::project_collector(
                 self.approvals.clone(),
                 root.to_path_buf(),
-                project_collector_program(
-                    ProgramKind::Collector,
-                    &spec.id,
-                    entry,
-                    &[],
-                    spec.execution,
-                ),
+                project_collector_program(ProgramKind::Collector, &spec.id, entry, &[]),
             )
             .map_err(ParserProblem::Broken)?;
             return Ok(Collector::exec(
@@ -789,7 +774,6 @@ impl CollectionService {
             )
             .with_exec_location(code.location)
             .with_authority(
-                spec.execution,
                 oxplow_domain::run::RunContext::core(
                     oxplow_domain::Actor::System,
                     oxplow_domain::run::Mode::External,
@@ -6922,7 +6906,7 @@ mod tests {
             std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
             std::fs::write(dir.join("out.txt"), "whatever the tool wrote").unwrap();
             let value: serde_yaml::Value = serde_yaml::from_str(
-                "- { id: tests.parse, records: tests, runtime: exec, execution: broader, entry: tools/parse.sh, report: { path: out.txt }, trigger: { on_run: test } }",
+                "- { id: tests.parse, records: tests, runtime: exec, entry: tools/parse.sh, report: { path: out.txt }, trigger: { on_run: test } }",
             )
             .unwrap();
             let (specs, errors) = oxplow_config::collectors::parse_collectors(
@@ -7001,7 +6985,7 @@ mod tests {
             std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
             std::fs::write(dir.join("out.txt"), "whatever the tool wrote").unwrap();
             let value: serde_yaml::Value = serde_yaml::from_str(
-                "- { id: tests.parse, records: tests, runtime: exec, execution: broader, entry: tools/parse.sh, report: { path: out.txt }, trigger: { on_run: test } }",
+                "- { id: tests.parse, records: tests, runtime: exec, entry: tools/parse.sh, report: { path: out.txt }, trigger: { on_run: test } }",
             )
             .unwrap();
             let (specs, errors) = oxplow_config::collectors::parse_collectors(

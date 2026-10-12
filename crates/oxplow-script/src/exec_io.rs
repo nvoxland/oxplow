@@ -1,4 +1,4 @@
-//! Deadline-bound pipe I/O. A broader process can leave inherited pipes
+//! Deadline-bound pipe I/O. An external process can leave inherited pipes
 //! open outside its group; that must not keep host drain threads alive.
 
 use std::io::{Read, Write};

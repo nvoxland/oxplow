@@ -312,8 +312,6 @@ pub enum ProgramKind {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectProgram {
-    #[serde(default)]
-    pub execution: oxplow_domain::grant::ExecutionTier,
     pub kind: ProgramKind,
     /// The capability it implements (a provider): what approving it lets
     /// it do (an agent harness launches the person's agent sessions).
@@ -499,10 +497,6 @@ impl ProjectProgram {
             h.update([8u8]);
             h.update(c.as_bytes());
         }
-        if self.execution == oxplow_domain::grant::ExecutionTier::Broader {
-            h.update([9u8]);
-            h.update(b"broader file, socket and process authority");
-        }
         Ok(hex::encode(h.finalize()))
     }
 }
@@ -633,7 +627,6 @@ pub(crate) fn files_hash(
 /// What an approval of a program covers: its content and its args.
 pub fn program_hash(project_dir: &Path, program: &str, args: &[String]) -> std::io::Result<String> {
     ProjectProgram {
-        execution: Default::default(),
         kind: ProgramKind::Collector,
         capability: None,
         name: String::new(),
@@ -665,7 +658,7 @@ pub fn may_run(
     program: &str,
     args: &[String],
 ) -> bool {
-    let p = project_collector_program(kind, name, program, args, Default::default());
+    let p = project_collector_program(kind, name, program, args);
     approved_now(store, project_dir, &p)
 }
 
@@ -674,10 +667,8 @@ pub fn project_collector_program(
     name: &str,
     program: &str,
     args: &[String],
-    execution: oxplow_domain::grant::ExecutionTier,
 ) -> ProjectProgram {
     ProjectProgram {
-        execution,
         kind,
         capability: None,
         name: name.to_string(),
@@ -716,7 +707,6 @@ pub fn ai_provider_program(
 ) -> ProjectProgram {
     let tree = tree.trim_end_matches('/');
     ProjectProgram {
-        execution: Default::default(),
         kind: ProgramKind::AiProvider,
         capability: None,
         name: format!("{extension}/{id}"),
@@ -755,7 +745,6 @@ fn approved_at(store: &ApprovalStore, project_dir: &Path, cwd: &Path, p: &Projec
 /// programs and never need approval.
 pub fn acp_program(agent: &oxplow_config::AcpAgentConfig) -> ProjectProgram {
     ProjectProgram {
-        execution: Default::default(),
         kind: ProgramKind::AcpAgent,
         capability: None,
         name: agent.name.clone(),
@@ -784,7 +773,6 @@ pub fn acp_program(agent: &oxplow_config::AcpAgentConfig) -> ProjectProgram {
 pub fn advisory_program(ext: &crate::extensions::Extension) -> ProjectProgram {
     let text = |v: serde_json::Value| v.as_str().unwrap_or_default().to_string();
     ProjectProgram {
-        execution: Default::default(),
         kind: ProgramKind::Advisories,
         capability: None,
         name: ext.name.clone(),
@@ -855,7 +843,6 @@ pub fn provider_program(
     };
     let remote = spec.is_remote();
     ProjectProgram {
-        execution: spec.execution,
         kind: ProgramKind::Provider,
         capability: Some(spec.capability.clone()),
         name: spec.approval_name(&ext.name),
@@ -892,7 +879,6 @@ pub fn component_program(
 ) -> ProjectProgram {
     let dir = ext.path.trim_end_matches('/');
     ProjectProgram {
-        execution: Default::default(),
         kind: ProgramKind::Component,
         capability: None,
         name: format!("{}/{}", ext.name, component.id),
@@ -925,7 +911,6 @@ pub fn job_program(
     job: &crate::extensions::jobs::JobDecl,
 ) -> ProjectProgram {
     ProjectProgram {
-        execution: Default::default(),
         kind: ProgramKind::Job,
         capability: None,
         name: format!("{}/{}", ext.name, job.id),
@@ -1038,7 +1023,6 @@ pub fn effort_policy_program(
 ) -> ProjectProgram {
     let tree = tree.trim_end_matches('/');
     ProjectProgram {
-        execution: Default::default(),
         kind: ProgramKind::EffortPolicy,
         capability: None,
         name: format!("{extension}/{id}"),
@@ -1087,10 +1071,9 @@ pub fn list(
     extensions: &[crate::extensions::Extension],
 ) -> Vec<ProjectProgram> {
     let mut out = Vec::new();
-    let mut push = |kind, name: &str, program: Option<&str>, args: &[String], execution| {
+    let mut push = |kind, name: &str, program: Option<&str>, args: &[String]| {
         let Some(program) = program else { return };
         out.push(ProjectProgram {
-            execution,
             kind,
             capability: None,
             name: name.to_string(),
@@ -1112,13 +1095,7 @@ pub fn list(
     };
     for c in &config.collectors {
         if c.runtime == oxplow_config::collectors::CollectorRuntime::Exec {
-            push(
-                ProgramKind::Collector,
-                &c.id,
-                c.entry.as_deref(),
-                &[],
-                c.execution,
-            );
+            push(ProgramKind::Collector, &c.id, c.entry.as_deref(), &[]);
         }
     }
     out.extend(config.acp_agents.iter().map(acp_program));
@@ -1331,7 +1308,6 @@ mod tests {
         );
         // An effect program in a bundled extension has a version to approve.
         let program = ProjectProgram {
-            execution: Default::default(),
             kind: ProgramKind::Effect,
             capability: None,
             name: "oxplow-bundled/x".into(),
@@ -1359,7 +1335,6 @@ mod tests {
     fn a_programs_source_is_read_where_it_lives() {
         let dir = tempfile::tempdir().unwrap();
         let bundled = ProjectProgram {
-            execution: Default::default(),
             kind: ProgramKind::Effect,
             capability: None,
             name: "oxplow-bundled/x".into(),
@@ -1713,7 +1688,10 @@ mod tests {
         let approved = row(&st);
         assert!(approved.approved && approved.granted_at.is_some());
         assert!(
-            approved.unenforced.iter().any(|g| g.contains("files")),
+            approved
+                .unenforced
+                .iter()
+                .any(|g| g.contains("file, network and process authority")),
             "{:?}",
             approved.unenforced
         );

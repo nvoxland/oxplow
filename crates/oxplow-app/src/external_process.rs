@@ -1,6 +1,7 @@
-//! Owned process groups for approved broader execution. Restricted
-//! confinement is unavailable; a group bounds ordinary child cleanup,
-//! not the authority of a process explicitly allowed to escape it.
+//! Owned process groups for approved external programs. This is cleanup,
+//! not confinement: a group bounds ordinary child cleanup, not the
+//! authority of a process that escapes it. Platforms without groups just
+//! run the program.
 
 #[derive(Debug, Clone)]
 pub struct ProcessGroup {

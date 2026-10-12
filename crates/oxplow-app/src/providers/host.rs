@@ -183,7 +183,6 @@ pub async fn spawn(launch: &Launch) -> Result<Spawned, HostError> {
         name: launch.name.clone(),
         message,
     };
-    launch.spec.execution.require_external().map_err(&failed)?;
     if launch.spec.credentials.iter().any(|credential| {
         credential.secret_ref.is_some() && !launch.spec.is_host_secret_bearer(credential)
     }) {

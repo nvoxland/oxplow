@@ -576,12 +576,6 @@ impl Instance {
         refused: Option<(&str, &str)>,
     ) -> Result<Live, (HostError, Option<CheckRefusal>)> {
         let plain = |e: HostError| (e, None);
-        self.spec.execution.require_external().map_err(|message| {
-            plain(HostError::Failed {
-                name: self.name.clone(),
-                message,
-            })
-        })?;
         let copy = copy_approved(&self.deps, &self.ext, &self.spec)
             .await
             .map_err(plain)?;

@@ -307,7 +307,6 @@ pub struct Collector {
     runtime: CollectorRuntime,
     runner: Runner,
     budget: Budget,
-    execution: oxplow_domain::grant::ExecutionTier,
     authority: Option<oxplow_domain::run::RunContext>,
     location: Option<runtime::ExecLocation>,
 }
@@ -325,7 +324,6 @@ impl Collector {
             runtime,
             runner,
             budget: Budget::default(),
-            execution: Default::default(),
             authority: None,
             location: None,
         }
@@ -417,13 +415,8 @@ impl Collector {
         )
     }
 
-    /// Pin the external execution grant and its live host authority.
-    pub fn with_authority(
-        mut self,
-        execution: oxplow_domain::grant::ExecutionTier,
-        run: oxplow_domain::run::RunContext,
-    ) -> Self {
-        self.execution = execution;
+    /// Pin the live host authority an external run checks.
+    pub fn with_authority(mut self, run: oxplow_domain::run::RunContext) -> Self {
         self.authority = Some(run);
         self
     }
@@ -478,7 +471,6 @@ impl Collector {
                     &self.budget,
                     argv,
                     content,
-                    self.execution,
                     &|| run.check_authority(),
                     self.location.as_ref(),
                 )?;
@@ -860,7 +852,6 @@ def transform(input):
     fn exec_collector_round_trips_stdin_to_stdout() {
         // `cat` echoes the (already kind-shaped) JSON from stdin to stdout.
         let c = Collector::exec("e", CollectorKind::Test, ["cat"]).with_authority(
-            oxplow_domain::grant::ExecutionTier::Broader,
             oxplow_domain::run::RunContext::core(
                 oxplow_domain::Actor::System,
                 oxplow_domain::run::Mode::External,

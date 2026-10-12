@@ -358,8 +358,6 @@ pub struct CollectorSpec {
     pub id: String,
     pub doc: String,
     pub runtime: CollectorRuntime,
-    #[serde(default)]
-    pub execution: oxplow_domain::grant::ExecutionTier,
     /// The program or script, relative to its owner's folder (the
     /// extension's, or the project's); absent for `read`.
     pub entry: Option<String>,
@@ -550,8 +548,6 @@ pub struct RawCollector {
     credentials: Vec<String>,
     #[serde(default)]
     network: Vec<String>,
-    #[serde(default)]
-    execution: oxplow_domain::grant::ExecutionTier,
     /// The services its script uses beyond what its kind implies (a
     /// Starlark collector's).
     #[serde(default)]
@@ -1193,7 +1189,6 @@ fn validate(
         oxplow_domain::service::check_declared(need).map_err(&ctx)?;
     }
     Ok(CollectorSpec {
-        execution: raw.execution,
         id,
         doc: raw.doc,
         runtime,
@@ -1377,7 +1372,6 @@ fn validate_report_collector(
         (runtime, format)
     };
     Ok(CollectorSpec {
-        execution: raw.execution,
         id,
         doc: raw.doc,
         runtime,

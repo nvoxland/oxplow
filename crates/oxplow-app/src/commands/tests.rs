@@ -333,14 +333,52 @@ async fn an_effect_is_held_to_its_events_threads_writer_gate() {
     )
     .await
     .unwrap();
-    bus.run(
-        &on(None),
-        "oxplow.kv.set",
-        json!({"k": "b", "v": "1"}),
-        false,
+    // An effect with no thread can't be held to a writer gate, so a
+    // writer-bound command is refused outright.
+    let err = bus
+        .run(
+            &on(None),
+            "oxplow.kv.set",
+            json!({"k": "b", "v": "1"}),
+            false,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, CommandError::Denied { reason }
+            if reason.contains("requires the actor's thread")),
+        "{err:?}"
+    );
+    assert_eq!(kv_value(&db, "b").await, None);
+}
+
+/// A job with no thread is denied a writer-bound command. Today the
+/// invoker floor already refuses every job (jobs have no generic command
+/// surface), ahead of the thread rule that backs it up.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_job_without_a_thread_is_denied_a_writer_bound_command() {
+    let (db, bus) = bus();
+    bus.register(
+        Command::new(
+            kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Never),
+            kv_set(),
+        )
+        .unwrap(),
     )
-    .await
     .unwrap();
+    let job = Actor::Job {
+        job_id: "acme/sync".into(),
+        attempt: 1,
+        fence: 1,
+        thread_id: None,
+        stream_id: None,
+    };
+    let err = bus
+        .run(&job, "oxplow.kv.set", json!({"k": "a", "v": "1"}), false)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
+    assert_eq!(kv_value(&db, "a").await, None);
 }
 
 /// A composite carries step 3's answer to its children: a thread that
@@ -2404,7 +2442,7 @@ async fn declining_writes_only_the_decision() {
 fn effect() -> Actor {
     Actor::Effect {
         effect: "acme/notify".into(),
-        thread_id: None,
+        thread_id: Some(ThreadId::new(8)),
         stream_id: None,
     }
 }

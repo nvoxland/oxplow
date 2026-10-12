@@ -90,7 +90,6 @@ pub struct FactCollector {
     /// catalog alone governs those).
     pub facts: Vec<String>,
     pub runtime: CollectorRuntime,
-    pub execution: oxplow_domain::grant::ExecutionTier,
     /// Its script or program, relative to its owner's folder; `None` for a
     /// built-in (the script is embedded).
     pub entry: Option<String>,
@@ -118,7 +117,6 @@ impl FactCollector {
             trigger: spec.trigger.clone(),
             facts: spec.facts.clone(),
             runtime: spec.runtime,
-            execution: spec.execution,
             entry: spec.entry.clone(),
             report: spec.report.clone(),
             input: spec.input.clone(),
@@ -148,7 +146,6 @@ impl FactCollector {
             },
             facts: Vec::new(),
             runtime: CollectorRuntime::Starlark,
-            execution: Default::default(),
             entry: None,
             report: None,
             input: None,
@@ -2261,7 +2258,6 @@ impl MetricsService {
             }
             CollectorRuntime::Jaq => FactRunner::Jaq(script()?),
             CollectorRuntime::Exec => {
-                c.execution.require_external()?;
                 if c.owner != oxplow_config::collectors::PROJECT {
                     return Err("external extension fact collectors have no credential/environment host; use a contained script or a project collector".into());
                 }
@@ -2269,13 +2265,7 @@ impl MetricsService {
                 // only once a person approved it on this machine (tsk331).
                 use crate::exec_consent::{needs_approval, project_collector_program, ProgramKind};
                 let entry = c.entry.as_deref().unwrap_or_default();
-                let program = project_collector_program(
-                    ProgramKind::Collector,
-                    &c.key,
-                    entry,
-                    &[],
-                    c.execution,
-                );
+                let program = project_collector_program(ProgramKind::Collector, &c.key, entry, &[]);
                 let gate = crate::exec_consent::script_gate(
                     self.approvals.clone(),
                     self.project_dir.clone(),
@@ -2291,7 +2281,6 @@ impl MetricsService {
                 )?;
                 FactRunner::Exec(
                     vec![code.entry.to_string_lossy().into_owned()],
-                    c.execution,
                     code.gate,
                     code.location,
                 )
@@ -2366,7 +2355,6 @@ impl MetricsService {
                 &c.key,
                 c.entry.as_deref().unwrap_or_default(),
                 &[],
-                c.execution,
             );
             return crate::exec_consent::script_gate(
                 self.approvals.clone(),
@@ -2413,7 +2401,6 @@ impl MetricsService {
                     &gauge.key,
                     gauge.entry.as_deref().unwrap_or_default(),
                     &[],
-                    gauge.execution,
                 );
                 let guarded = gauge.runtime == CollectorRuntime::Exec
                     || collector_script_text(gauge, root)
@@ -2426,7 +2413,6 @@ impl MetricsService {
                     )()
                     .is_ok();
                 let mut request = crate::grants::script_request(&gauge.needs);
-                request.execution = gauge.execution;
                 if gauge.runtime == CollectorRuntime::Exec {
                     request.program = gauge.entry.clone();
                 }
@@ -3554,7 +3540,6 @@ enum FactRunner {
     /// A project's approved program: `argv`, the input as JSON on stdin.
     Exec(
         Vec<String>,
-        oxplow_domain::grant::ExecutionTier,
         crate::exec_consent::Gate,
         oxplow_script::runtime::ExecLocation,
     ),
@@ -3614,11 +3599,10 @@ impl FactRunner {
                 script(given.onto(ScriptRun::starlark(&text, input.clone()), Some(&mut serve)))
             }
             FactRunner::Jaq(text) => script(ScriptRun::jaq(&text, input.clone())),
-            FactRunner::Exec(argv, execution, gate, location) => run_exec_authorized_at(
+            FactRunner::Exec(argv, gate, location) => run_exec_authorized_at(
                 &budget,
                 &argv,
                 &input.to_string(),
-                execution,
                 &|| {
                     run.check_authority()?;
                     gate()
@@ -4606,7 +4590,6 @@ mod tests {
             },
             facts,
             runtime: CollectorRuntime::Starlark,
-            execution: Default::default(),
             entry: Some(entry_file.into()),
             report: None,
             input: None,
@@ -6658,7 +6641,7 @@ def transform(input):
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         std::fs::write(
             oxplow_config::config_path(dir.path()),
-            "measures:\n  - { key: repo.n, title: N }\ncollectors:\n  - { id: repo.count, runtime: exec, execution: broader, entry: tools/count.sh, facts: [repo.n] }\n",
+            "measures:\n  - { key: repo.n, title: N }\ncollectors:\n  - { id: repo.count, runtime: exec, entry: tools/count.sh, facts: [repo.n] }\n",
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();

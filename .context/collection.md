@@ -721,15 +721,15 @@ by hand) is how this fact collector runs.
 
 ## Authority for external report parsers
 
-Project `exec` parsers must explicitly declare `execution: broader` and obtain
-a new Programs approval on Unix. The default restricted tier fails closed
-until full OS confinement exists. The parser carries a host-owned live consent
+Project `exec` parsers need a Programs approval; they run with the
+person's file, network and process authority, which oxplow doesn't confine
+(there is no execution tier). The parser carries a host-owned live consent
 guard, checked at launch, every 10 ms and before returning output. Execution
 clears inherited environment, drains capped output and kills ordinary process
-children on exit, cancellation or deadline. Contained/bundled parsers retain
-their existing execution behavior. Low-level `Collector::exec` requires
-`with_authority`; the old unguarded `runtime::run_exec` refuses restricted
-execution. Project fact programs use the same controlled runtime. External
+children on exit, cancellation or deadline (Unix owned process groups; other
+platforms just run it). Contained/bundled parsers retain their existing
+execution behavior. Low-level `Collector::exec` requires `with_authority`.
+Project fact programs use the same controlled runtime. External
 extension fact programs lack a credential/environment host and are refused
 explicitly; use contained scripts or project programs.
 
@@ -738,7 +738,7 @@ against the exact approved program hash. An entry in a subdirectory copies
 that directory and its helpers; a root-level entry copies only its approved
 file. The private root is the process working directory, preserving the
 project-relative layout of copied code. `OXPLOW_PROJECT_DIR` identifies the
-original checkout for explicitly approved broader data access;
+original checkout for approved data access;
 `OXPLOW_CODE_DIR` identifies the private code root. Live guards recheck consent,
 the original code and the private copy; the copy lives through the guard and
 is removed when its last owner is released. Copying is limited to 500 files
