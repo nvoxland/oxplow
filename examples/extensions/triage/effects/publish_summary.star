@@ -9,8 +9,8 @@ def transform(x):
     if payload["outcome"] != "ok":
         return {"skip": "the summary didn't complete"}
     job = scope("jobs.read", {"id": payload["job_id"]})
-    result = job.get("result") or {}
-    text = "".join([p.get("text", "") for p in result.get("parts", []) if p.get("type") == "text"])
+    answer = (job.get("result") or {}).get("value") or {}
+    text = "".join([p.get("text", "") for p in answer.get("parts", []) if p.get("type") == "text"])
     if not text.strip():
         return {"skip": "the model answered nothing"}
     return {"commands": [{

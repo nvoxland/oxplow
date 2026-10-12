@@ -2013,13 +2013,16 @@ impl MetricsService {
     /// Run `owner`'s fact collector `spec` over `files` (path → content)
     /// with `input` — an example's fixture — recording nothing: what `oxplow
     /// extension test` runs for a fact collector's example (tsk1047). The facts
-    /// as JSON, a whole-number value as an integer.
+    /// as JSON, a whole-number value as an integer. `mode` is what the run
+    /// may do: `Pure` refuses a model call, `External` lets an approved one
+    /// through (the SDK's throwaway answers it from the fixture model).
     pub async fn preview_fact_collector(
         &self,
         owner: &str,
         spec: &oxplow_config::collectors::CollectorSpec,
         files: HashMap<String, String>,
         input: serde_json::Value,
+        mode: Mode,
     ) -> Result<Vec<serde_json::Value>, String> {
         let collector = FactCollector::from_spec(owner, spec)
             .ok_or_else(|| format!("collector `{}` declares no `facts:`", spec.id))?;
@@ -2030,8 +2033,8 @@ impl MetricsService {
             ));
         }
         let runner = self.fact_runner(&collector)?;
-        let parent = RunContext::core(Actor::System, Mode::Pure);
-        let run = self.collector_run_in(&collector, &parent, Mode::Pure);
+        let parent = RunContext::core(Actor::System, mode);
+        let run = self.collector_run_in(&collector, &parent, mode);
         let run = self.pin_fact_script(&collector, &runner, run);
         let given = self
             .given(&collector, &runner, &run, Arc::new(files))

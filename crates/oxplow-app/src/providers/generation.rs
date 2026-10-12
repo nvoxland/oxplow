@@ -25,11 +25,14 @@ struct Staged {
     /// yet): it is published without a connection, failing, and its next
     /// call restarts it with backoff.
     start_failure: Option<String>,
+    /// The running instance carried over unchanged: its process is the
+    /// generation's too, so nothing of it is stopped if this isn't published.
+    reused: bool,
 }
 
 impl Drop for Staged {
     fn drop(&mut self) {
-        if self.published {
+        if self.published || self.reused {
             return;
         }
         self.instance
@@ -320,6 +323,21 @@ impl ProviderRegistry {
                     continue;
                 }
             };
+            // A running instance this generation doesn't change keeps its
+            // process: the same program, config, approval and declarations.
+            let unchanged = base.get(name).filter(|current| {
+                !current.is_stopped()
+                    && current.scope == instance.scope
+                    && current.config == instance.config
+                    && current.spec == instance.spec
+                    && same_extension(&current.ext, &instance.ext)
+                    && current.declared == instance.declared
+                    && current.is_connected()
+            });
+            let (instance, reused) = match unchanged {
+                Some(current) => (current.clone(), true),
+                None => (instance, false),
+            };
             let capability = match self
                 .host_of(&instance)
                 .and_then(|host| host.prepare(&instance))
@@ -330,6 +348,18 @@ impl ProviderRegistry {
                     continue;
                 }
             };
+            if reused {
+                staged.push(Staged {
+                    instance,
+                    capability: Some(capability),
+                    live: None,
+                    epoch,
+                    published: false,
+                    start_failure: None,
+                    reused: true,
+                });
+                continue;
+            }
             self.set_state(name, InstanceState::Checking);
             match instance.start().await {
                 Ok(live) => staged.push(Staged {
@@ -339,6 +369,7 @@ impl ProviderRegistry {
                     epoch,
                     published: false,
                     start_failure: None,
+                    reused: false,
                 }),
                 // It may come up: enabled and failing, its next call
                 // restarts it with backoff.
@@ -349,6 +380,7 @@ impl ProviderRegistry {
                     epoch,
                     published: false,
                     start_failure: Some(e.to_string()),
+                    reused: false,
                 }),
                 Err(e) => {
                     instance.discard_unpublished().await;
@@ -467,9 +499,13 @@ impl ProviderGenerationReservation<'_> {
     /// caller commits its database transaction.
     pub fn validate_live(&self) -> Result<(), VocabularyErrors> {
         for staged in &self.prepared.staged {
-            let connected = match &staged.live {
-                Some(live) => !live.conn.peer.is_closed(),
-                None => staged.start_failure.is_some(),
+            let connected = if staged.reused {
+                !staged.instance.is_stopped() && staged.instance.is_connected()
+            } else {
+                match &staged.live {
+                    Some(live) => !live.conn.peer.is_closed(),
+                    None => staged.start_failure.is_some(),
+                }
             };
             let valid = connected && staged.instance.host_calls.authority_current();
             if !valid {
@@ -520,7 +556,17 @@ impl ProviderGenerationReservation<'_> {
         self.withdraw_maps();
         let old = std::mem::take(&mut **self.running);
         let mut retired = Vec::with_capacity(old.len());
+        let kept: BTreeSet<String> = self
+            .prepared
+            .staged
+            .iter()
+            .filter(|staged| staged.reused)
+            .map(|staged| staged.instance.name.clone())
+            .collect();
         for instance in old.into_values() {
+            if kept.contains(&instance.name) {
+                continue;
+            }
             instance
                 .stopped
                 .store(true, std::sync::atomic::Ordering::Release);
@@ -538,6 +584,12 @@ impl ProviderGenerationReservation<'_> {
         for staged in &mut self.prepared.staged {
             if let Some(capability) = staged.capability.take() {
                 capability.publish();
+            }
+            if staged.reused {
+                self.running
+                    .insert(staged.instance.name.clone(), staged.instance.clone());
+                staged.published = true;
+                continue;
             }
             let peer = staged.live.as_ref().map(|live| live.conn.peer.clone());
             let mut live = staged
@@ -572,7 +624,7 @@ impl ProviderGenerationReservation<'_> {
                 .prepared
                 .staged
                 .iter()
-                .filter(|staged| staged.start_failure.is_none())
+                .filter(|staged| staged.start_failure.is_none() && !staged.reused)
                 .map(|staged| staged.instance.clone())
                 .collect(),
             start_failures: self
@@ -591,8 +643,16 @@ impl ProviderGenerationReservation<'_> {
     }
 }
 
+/// The same extension as far as a running provider is concerned: its place
+/// among the other extensions (the order they activate in) is not part of it.
+fn same_extension(a: &crate::extensions::Extension, b: &crate::extensions::Extension) -> bool {
+    let mut b = b.clone();
+    b.public_contracts.activation_index = a.public_contracts.activation_index;
+    *a == b
+}
+
 async fn cleanup(staged: &mut Vec<Staged>) {
-    for candidate in staged.iter_mut() {
+    for candidate in staged.iter_mut().filter(|candidate| !candidate.reused) {
         candidate
             .instance
             .stopped

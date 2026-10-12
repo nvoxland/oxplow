@@ -1,9 +1,12 @@
-# Runs once a person approved the collector: it asks a model.
+# The collector asks a model once approved; `extension test` approves it in
+# its throwaway and the fixture model answers.
 input:
   collector: todos
   files:
     src/lib.rs: "// TODO: the cache never expires\nfn a() {}\n"
+  model:
+    replies: ['{"answers": {"label": {"type": "choice", "choice": "bug"}}}']
 expect:
   facts:
     - { measure: triage.open_items }
-    - { measure: triage.todos, path: src/lib.rs, line: 1 }
+    - { measure: triage.todos, path: src/lib.rs, line: 1, rule: bug }

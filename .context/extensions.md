@@ -1224,7 +1224,10 @@ and one calling MCP read identical `file:line: what — fix` lines.
   state }], commands }`, read from `v_effect_run` and `command.executed`),
   a job (`{ job, intentKey, request }`: through the extension's commands
   over `jobs.write/enqueue` and `jobs.read/snapshot`, approved there —
-  `expect: { state, result? }`), a component (`{ component, queries?,
+  `expect: { state, result? }`; naming `effects`, `commands` or `pages`
+  also approves its effects and delivers the `contribution.job.completed`
+  the job logs, asked in a thread: the effects that reacted, the commands
+  they ran and which of the named wiki refs now exist), a component (`{ component, queries?,
   invokes? }`: `load_component`, `run_component_query`,
   `invoke_component_command` as its frame would — `expect: { queries:
   [{ rows }], invokes: [{ ok, refused? }] }`), and the dry runs that
@@ -1309,8 +1312,12 @@ job and component forms are in "The SDK"):
   n | $any } }` — a derived collector runs over `rows` (standing in for
   its `input` query, `preview_collector(…, event, rows)`) and `event`
   (the event an `on:` collector reacts to, as the envelope), storing nothing, its
-  rows typed against the declaration; an exec collector's example is a
-  warning, not run (it needs a person's approval);
+  rows typed against the declaration; a collector that calls a model
+  (`ai.compute`) is approved in the throwaway and runs against the fixture
+  model (`model: { replies }`, in the form the role expects, e.g. `{ answers:
+  { label: { type: choice, choice } } }` for `ai_classify`); an exec or
+  provider-reading collector's example is a warning, not run (it needs a
+  person's approval);
 - `input: { collector: <id>, files: { <path>: <text> } }`, `expect: {
   facts: [...] }` — a **fact** collector (one with `facts:`) runs over
   `files` as its tree (`MetricsService::preview_fact_collector`, its other
