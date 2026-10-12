@@ -1170,7 +1170,10 @@ async fn reading_the_approved_copy_waits_for_a_start_replacing_it() {
         .svc
         .layout
         .project_dir
-        .join(".oxplow/global-config/provider-copies");
+        .join(".oxplow/global-config/provider-copies")
+        .join(crate::collector_runner::project_key(
+            &fx.svc.layout.project_dir,
+        ));
     let spec = ext.providers[0].clone();
     let read = {
         let (copies, ext, spec) = (copies.clone(), ext.clone(), spec.clone());
@@ -5021,17 +5024,25 @@ async fn with_effect(hooks: &str, script: &str) -> TaskEffortFixture {
 /// The effect's script: one write to the fake.
 const FILE_ON_FAKE: &str = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"from effect\"}}]}\n";
 
-/// Move the fixture's task to done (what the effect reacts to) and let
-/// the effect react.
-async fn react(fx: &TaskEffortFixture) -> oxplow_domain::StoredEvent {
+/// The fixture's task moved to done, anchored to its thread as the command
+/// that makes it would be: an effect reacting runs for that thread.
+fn done_envelope(fx: &TaskEffortFixture) -> oxplow_domain::Envelope {
     use oxplow_domain::events::schema::{WorkItemStateChanged, WorkItemStateChangedV1};
-    let env = oxplow_domain::Envelope::typed::<WorkItemStateChanged>(
+    let mut env = oxplow_domain::Envelope::typed::<WorkItemStateChanged>(
         "human",
         &WorkItemStateChangedV1 {
             work_item: oxplow_tasks::work_item_ref(fx.task),
             to: oxplow_domain::work_items::CanonicalState::Done,
         },
     );
+    env.anchors.thread_id = Some(fx.thread);
+    env
+}
+
+/// Move the fixture's task to done (what the effect reacts to) and let
+/// the effect react.
+async fn react(fx: &TaskEffortFixture) -> oxplow_domain::StoredEvent {
+    let env = done_envelope(fx);
     let id = env.id.clone();
     fx.svc.event_log_store.append(env).await.unwrap();
     let ev = fx.svc.event_log_store.get(id).await.unwrap().unwrap();
@@ -5267,16 +5278,9 @@ async fn a_rate_limited_reaction_waits_as_asked() {
 /// by themselves, but the run doesn't press on into the outage.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_backfill_stops_after_three_failures_even_while_they_retry() {
-    use oxplow_domain::events::schema::{WorkItemStateChanged, WorkItemStateChangedV1};
     let fx = with_effect("", FILE_ON_FAKE).await;
     for _ in 0..5 {
-        let env = oxplow_domain::Envelope::typed::<WorkItemStateChanged>(
-            "human",
-            &WorkItemStateChangedV1 {
-                work_item: oxplow_tasks::work_item_ref(fx.task),
-                to: oxplow_domain::work_items::CanonicalState::Done,
-            },
-        );
+        let env = done_envelope(&fx);
         fx.svc.event_log_store.append(env).await.unwrap();
     }
     // Approved again past them: they are the past a backfill reacts to.
@@ -5308,17 +5312,10 @@ async fn a_backfill_stops_after_three_failures_even_while_they_retry() {
 /// itself, as a live one is, and lands once.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_backfill_attempt_whose_reply_was_lost_is_sent_again() {
-    use oxplow_domain::events::schema::{WorkItemStateChanged, WorkItemStateChangedV1};
     let fx = with_effect("", FILE_ON_FAKE).await;
     fx.svc
         .event_log_store
-        .append(oxplow_domain::Envelope::typed::<WorkItemStateChanged>(
-            "human",
-            &WorkItemStateChangedV1 {
-                work_item: oxplow_tasks::work_item_ref(fx.task),
-                to: oxplow_domain::work_items::CanonicalState::Done,
-            },
-        ))
+        .append(done_envelope(&fx))
         .await
         .unwrap();
     crate::effects::approved(&fx.svc.db, &format!("{EXT}/file"))
@@ -5392,14 +5389,7 @@ where
     F: FnOnce(std::sync::Arc<crate::Services>, oxplow_domain::StoredEvent) -> Fut,
     Fut: std::future::Future<Output = ()> + Send + 'static,
 {
-    use oxplow_domain::events::schema::{WorkItemStateChanged, WorkItemStateChangedV1};
-    let env = oxplow_domain::Envelope::typed::<WorkItemStateChanged>(
-        "human",
-        &WorkItemStateChangedV1 {
-            work_item: oxplow_tasks::work_item_ref(fx.task),
-            to: oxplow_domain::work_items::CanonicalState::Done,
-        },
-    );
+    let env = done_envelope(fx);
     let id = env.id.clone();
     fx.svc.event_log_store.append(env).await.unwrap();
     let ev = fx.svc.event_log_store.get(id).await.unwrap().unwrap();

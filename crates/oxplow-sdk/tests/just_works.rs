@@ -198,6 +198,8 @@ async fn a_scaffolded_effect_checks_tests_and_once_approved_reacts() {
     oxplow_app::effects::approved(&svc.db, &decl.name())
         .await
         .unwrap();
+    svc.streams.ensure_primary().await.unwrap();
+    let thread = oxplow_domain::ThreadId::new(1);
     let human = oxplow_domain::Actor::Human;
     let task = svc
         .commands
@@ -220,8 +222,11 @@ async fn a_scaffolded_effect_checks_tests_and_once_approved_reacts() {
         .await
         .unwrap();
     let consumer = EffectTriggers::new(std::sync::Arc::downgrade(&svc));
-    for e in svc.event_log_store.read_after(0, 10_000).await.unwrap() {
+    for mut e in svc.event_log_store.read_after(0, 10_000).await.unwrap() {
         if consumer.handles(&e.envelope.event_type) {
+            // An effect runs for its event's thread; the person's command
+            // carries none, so anchor the event to the project's thread.
+            e.envelope.anchors.thread_id = Some(thread);
             consumer.handle(&e).await.unwrap();
         }
     }

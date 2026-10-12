@@ -1181,13 +1181,14 @@ impl CommandBus {
             return activation
                 .read_pinned(
                     &pin,
-                    self.lookup_and_run(&run, name, input, confirmed, origin),
+                    Box::pin(self.lookup_and_run(&run, name, input, confirmed, origin)),
                 )
                 .await
                 .map_err(CommandError::from)?;
         }
-        self.lookup_and_run(run, name, input, confirmed, origin)
-            .await
+        // Boxed: a command's run is a large future, and an effect or a
+        // provider call nests runs, which overflows a debug thread's stack.
+        Box::pin(self.lookup_and_run(run, name, input, confirmed, origin)).await
     }
 
     async fn lookup_and_run(

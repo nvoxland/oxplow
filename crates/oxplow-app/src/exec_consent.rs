@@ -261,7 +261,7 @@ fn canonical(p: &Path) -> std::path::PathBuf {
 }
 
 /// `<home>/approvals/<sha256 of the canonical project path>.json`.
-fn approvals_file(home: &Path, project_dir: &Path) -> std::path::PathBuf {
+pub(crate) fn approvals_file(home: &Path, project_dir: &Path) -> std::path::PathBuf {
     use sha2::{Digest, Sha256};
     let digest = Sha256::digest(canonical(project_dir).to_string_lossy().as_bytes());
     home.join("approvals")

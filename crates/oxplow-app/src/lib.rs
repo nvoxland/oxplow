@@ -1931,10 +1931,12 @@ impl Services {
         let machine = MachineEnv {
             secrets,
             config_dir: Some(global_dir.clone()),
-            approvals_file: Some(global_dir.join("approvals.json")),
+            approvals_file: Some(exec_consent::approvals_file(&global_dir, &project_dir)),
             // A test's failing provider restarts at once.
             provider_backoff: std::time::Duration::ZERO,
-            provider_copies: global_dir.join("provider-copies"),
+            provider_copies: global_dir
+                .join("provider-copies")
+                .join(collector_runner::project_key(&project_dir)),
             // A test's hung provider fails fast.
             provider_call_timeout: std::time::Duration::from_secs(2),
             provider_shutdown_grace: std::time::Duration::from_secs(1),

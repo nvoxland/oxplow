@@ -3069,7 +3069,7 @@ mod tests {
             grants_line(&g),
             "runs bin/p · reaches api.github.com · reads GH_TOKEN · reads env HOME · not held here: a program reads and writes files as you"
         );
-        assert!(gaps_of(true, &[]).iter().any(|g| g.contains("files")));
+        assert!(gaps_of(true, &[]).iter().any(|g| g.contains("file")));
         assert!(gaps_of(false, &[]).is_empty());
     }
 

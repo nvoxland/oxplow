@@ -818,7 +818,7 @@ async fn auto_retry_due_pinned_impl(
     // One row's error is that row's (tsk932): logged, and the rest go on —
     // it is tried again on the next tick.
     for (key, due_at) in due {
-        match retry_one(svc, &health, &key, &due_at, now_ms).await {
+        match Box::pin(retry_one(svc, &health, &key, &due_at, now_ms)).await {
             Ok(true) => sent += 1,
             Ok(false) => {}
             Err(error) => tracing::warn!(
@@ -891,7 +891,18 @@ async fn retry_one(
         return Ok(false);
     };
     let started = std::time::Instant::now();
-    let reacted = run_reaction(svc, &ext, &decl, true, &event, ReactionOrigin::Auto, None).await?;
+    // Boxed: a reaction is a large future, which a retry loop would otherwise
+    // nest in its own frame.
+    let reacted = Box::pin(run_reaction(
+        svc,
+        &ext,
+        &decl,
+        true,
+        &event,
+        ReactionOrigin::Auto,
+        None,
+    ))
+    .await?;
     count(health, &decl, &reacted, started.elapsed()).await;
     Ok(!matches!(reacted, Reacted::Nothing | Reacted::NotResent(_)))
 }

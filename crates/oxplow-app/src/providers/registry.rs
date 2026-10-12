@@ -2341,7 +2341,11 @@ impl ProviderRegistry {
             .host_of(&instance)
             .and_then(|host| host.prepare(&instance))
             .map_err(&refused)?;
-        self.set_state(&name, InstanceState::Checking);
+        // Not over a disable that came in while this start was preparing:
+        // the disable's state stands, and `admit` refuses the start.
+        if self.disable_epoch(&name) == epoch {
+            self.set_state(&name, InstanceState::Checking);
+        }
         match instance.start().await {
             Ok(live) => {
                 let peer = live.conn.peer.clone();

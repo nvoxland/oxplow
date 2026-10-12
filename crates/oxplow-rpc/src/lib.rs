@@ -111,7 +111,9 @@ macro_rules! rpc_dispatch {
                         let Args { $( $cfield ),* } = serde_json::from_value(args).map_err(|e| {
                             $crate::IpcError::invalid(format!("bad args for {name}: {e}"))
                         })?;
-                        let out = $ccore(ctx $(, $cfield )*).await?;
+                        // Boxed, like each arm: dispatch holds one arm's future at a
+                        // time, so none may size the whole state machine.
+                        let out = Box::pin($ccore(ctx $(, $cfield )*)).await?;
                         serde_json::to_value(out).map_err(|e| {
                             $crate::IpcError::internal(format!("serialize result of {name}: {e}"))
                         })
@@ -127,7 +129,7 @@ macro_rules! rpc_dispatch {
                         let Args { $( $field ),* } = serde_json::from_value(args).map_err(|e| {
                             $crate::IpcError::invalid(format!("bad args for {name}: {e}"))
                         })?;
-                        let out = $core(ctx.services.as_ref() $(, $field )*).await?;
+                        let out = Box::pin($core(ctx.services.as_ref() $(, $field )*)).await?;
                         serde_json::to_value(out).map_err(|e| {
                             $crate::IpcError::internal(format!("serialize result of {name}: {e}"))
                         })
@@ -147,7 +149,7 @@ macro_rules! rpc_dispatch {
                         // declared return type to the core's actual one, so a
                         // wrong row is a compile error rather than a silently
                         // wrong TS binding.
-                        let out: $gret = $gcore(ctx.services.as_ref() $(, $gfield )*).await?;
+                        let out: $gret = Box::pin($gcore(ctx.services.as_ref() $(, $gfield )*)).await?;
                         serde_json::to_value(out).map_err(|e| {
                             $crate::IpcError::internal(format!("serialize result of {name}: {e}"))
                         })
