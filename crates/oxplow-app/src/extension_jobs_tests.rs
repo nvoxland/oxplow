@@ -50,14 +50,22 @@ fn project() -> tempfile::TempDir {
     dir
 }
 
+/// An OpenAI-compatible model that streams "hello" (a job's rounds stream).
 async fn model() -> (String, oxplow_ai_fake::Seen) {
-    oxplow_ai_fake::mock(
+    let event = |v: Value| format!("data: {v}\n\n");
+    let (base, seen, _) = oxplow_ai_fake::mock_sse(
         "/chat/completions",
-        200,
-        json!({"choices": [{"message": {"role": "assistant", "content": "hello"}, "finish_reason": "stop"}],
-               "usage": {"prompt_tokens": 10, "completion_tokens": 5}}),
+        vec![
+            event(json!({"choices": [{"index": 0, "delta": {"role": "assistant", "content": "hel"}}]})),
+            event(json!({"choices": [{"index": 0, "delta": {"content": "lo"}, "finish_reason": "stop"}]})),
+            event(json!({"choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 5}})),
+            "data: [DONE]\n\n".into(),
+        ],
+        Duration::from_millis(5),
+        Duration::ZERO,
     )
-    .await
+    .await;
+    (base, seen)
 }
 
 fn configure(svc: &crate::Services, base: String) {
