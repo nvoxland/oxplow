@@ -78,7 +78,9 @@ impl CatalogSnapshot {
         let mut held = BTreeMap::<String, Vec<String>>::new();
         let mut admitted: Vec<Extension> = Vec::with_capacity(self.extensions.len());
         for extension in self.extensions.iter() {
-            if !extension.enabled
+            // A contract-blocked extension is cleared to `enabled: false` by
+            // the load, so it is told apart from a configured-off one here.
+            if (!extension.enabled && !extension.public_contracts.blocked)
                 || crate::bundled_extensions::is_required(&extension.name)
                 || can_load(extension)
             {

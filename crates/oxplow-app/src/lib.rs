@@ -82,6 +82,8 @@ pub mod extension_generation;
 pub mod extension_impact;
 pub mod extension_job_ai;
 pub mod extension_job_authority;
+#[cfg(test)]
+mod extension_imports_tests;
 pub mod extension_job_dispatch;
 pub mod extension_job_operations;
 pub mod extension_job_scheduler;

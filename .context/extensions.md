@@ -177,8 +177,12 @@ contract-blocked package to review a repairing update. Explicit configuration
 disabling still applies to update operations. Rejected project folders using
 reserved bundled names remain diagnostics only and cannot block the bundled
 package's public identity. Runtime generation activation is integrated; import
-withdrawal and activation behavior still need runtime validation. No runtime tests
-were added or run in this slice.
+withdrawal and activation behavior are covered end to end by
+`extension_imports_tests.rs` (compatible, mismatched, missing, optional,
+cyclic, private/experimental, producer disabled, and an update that would break
+a consumer). A contract-blocked extension is cleared to `enabled: false` by the
+load, so `CatalogSnapshot::admitted` holds it by `public_contracts.blocked`,
+not by `enabled`.
 
 ## Namespaced configuration declarations
 
