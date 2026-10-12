@@ -271,7 +271,9 @@ pub struct ManifestV2 {
 }
 
 /// The kinds a shared extension may not use, with the key each rides on.
-pub const EXPERIMENTAL_KINDS: &[&str] = &["ui.replacements"];
+/// None today: `ui.replacements` was the last, promoted when
+/// oxplow-bundled's history graph became its shared use.
+pub const EXPERIMENTAL_KINDS: &[&str] = &[];
 
 /// The stable kinds (permanent API), by manifest key.
 pub const STABLE_KINDS: &[&str] = &[
@@ -288,6 +290,7 @@ pub const STABLE_KINDS: &[&str] = &[
     "providers",
     "ui.slots",
     "ui.decorators",
+    "ui.replacements",
     "ref_kinds",
     "implementations",
     "skills",
@@ -308,14 +311,12 @@ impl ManifestV2 {
     }
 
     /// Whether the manifest writes the experimental kind `kind`. Every
-    /// kind in [`EXPERIMENTAL_KINDS`] has its arm — the partition test
-    /// writes each and expects each back — so promoting one is moving it
-    /// between the tables, nothing more.
+    /// kind in [`EXPERIMENTAL_KINDS`] has its arm here — the partition
+    /// test writes each and expects each back — so promoting one is moving
+    /// it between the tables and dropping its arm. There are none today.
     fn writes(&self, kind: &str) -> bool {
-        match kind {
-            "ui.replacements" => self.ui.replacements.is_some(),
-            _ => false,
-        }
+        let _ = (self, kind);
+        false
     }
 }
 
@@ -737,10 +738,8 @@ mod tests {
             "{errors:?}"
         );
         assert!(
-            errors
-                .iter()
-                .any(|e| e.contains("`ui.replacements` is experimental")),
-            "{errors:?}"
+            !errors.iter().any(|e| e.contains("experimental")),
+            "replacements are stable: {errors:?}"
         );
         let text = "manifest: 2\nname: acme\nsharing: shared\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: x\n  examples: [{ name: a }]\n";
         let (errors, warnings) = check(&parse(text), "e/extension.yaml", text, true);
@@ -819,6 +818,17 @@ mod tests {
             !STABLE_KINDS.iter().any(|k| EXPERIMENTAL_KINDS.contains(k)),
             "a kind is stable or experimental, not both"
         );
+    }
+
+    /// `ui.replacements` is stable — oxplow-bundled's history graph is its
+    /// bundled, shared use — so a shared extension may declare one.
+    #[test]
+    fn replacements_is_stable_and_the_tables_partition_the_kinds() {
+        let text = "manifest: 2\nname: acme\nsharing: shared\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: x\n  examples: [{ name: a }]\nui:\n  replacements: []\n";
+        let (errors, _) = check(&parse(text), "e/extension.yaml", text, false);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert!(STABLE_KINDS.contains(&"ui.replacements"));
+        assert!(!EXPERIMENTAL_KINDS.contains(&"ui.replacements"));
     }
 
     /// P10 (K1): `ui.decorators` is stable — oxplow-bundled's verdict

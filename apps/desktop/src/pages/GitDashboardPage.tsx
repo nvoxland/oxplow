@@ -33,7 +33,7 @@ import { recordOpError } from "../components/opErrorsStore.js";
 import { awaitGitOp, opErrorOf } from "../git-op.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { Card, cardLinkButton } from "../components/Card.js";
-import { CommitGraphTable, indexRefsBySha, type CommitStats } from "../components/History/CommitGraphTable.js";
+import { CommitList, indexRefsBySha, type CommitStats } from "../components/History/CommitList.js";
 import { FileStatusCountsForSummary } from "../components/FileStatusCounts.js";
 
 export interface GitDashboardPageProps {
@@ -653,7 +653,7 @@ function RecentCommitsCard({
           prompts={["What's uncommitted right now, and what should go in the first commit?"]}
         />
       ) : (
-        <CommitGraphTable
+        <CommitList
           commits={log.commits}
           branchHeadsBySha={refIndex.branchHeadsBySha}
           tagsBySha={refIndex.tagsBySha}
@@ -1171,7 +1171,7 @@ function PairwiseDiffPane({
       ) : commits.length === 0 ? (
         <div style={subtle}>No commits ahead.</div>
       ) : (
-        <CommitGraphTable
+        <CommitList
           commits={commits}
           branchHeadsBySha={EMPTY_REF_MAP}
           tagsBySha={EMPTY_REF_MAP}

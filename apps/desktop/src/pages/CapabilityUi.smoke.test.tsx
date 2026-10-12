@@ -69,6 +69,7 @@ mock.module("../api.js", () => ({
   ...realApi,
   listExtensions: viaBindings("listExtensions"),
   listPersonCommands: viaBindings("listPersonCommands"),
+  effectiveConfig: viaBindings("effectiveConfig"),
   querySql: (sql: string, params: unknown[] = [], limit: number | null = null, raw = false) =>
     viaBindings("querySql")(sql, params, limit, raw),
   runLens: viaBindings("runLens"),
@@ -157,6 +158,7 @@ test("an extension's mounts reach the uncommitted strip and the history side col
         ],
         commands: [],
         decorators: [],
+        replacements: [],
       },
       lenses: ["x/status", "x/history"].map((id) => ({ id, params: [{ name: "stream_id", label: null, default: null }] })),
     },
@@ -171,6 +173,48 @@ test("an extension's mounts reach the uncommitted strip and the history side col
   await waitFor(() => expect(history.getByTestId("vcs.history.sidebar-nothing-found").textContent).toContain("Mounted"));
 });
 
+
+// Git History's commits are oxplow's plain list with every enhancement
+// off; oxplow-bundled's graph replaces it (a target no provider binds),
+// given the stream's head, the commit to reveal and the limit.
+test("Git History's list is replaced by the one extension drawing the graph", async () => {
+  extensions = [
+    {
+      name: "oxplow-bundled",
+      enabled: true,
+      ui: {
+        slots: [],
+        commands: [],
+        decorators: [],
+        replacements: [
+          {
+            id: "oxplow-bundled/vcs.history.graph",
+            extension: "oxplow-bundled",
+            target: "vcs.history.graph",
+            capability: "vcs",
+            boundToProvider: false,
+            lensId: "oxplow-bundled/history-graph",
+            label: "history graph",
+          },
+        ],
+      },
+      lenses: [
+        {
+          id: "oxplow-bundled/history-graph",
+          params: ["stream_id", "head_sha", "reveal_sha", "limit"].map((name) => ({ name, label: null, default: null })),
+        },
+      ],
+    },
+  ];
+  const history = mount("page:git-history", <GitHistoryPage stream={STREAM} onOpenPage={() => {}} />);
+  await waitFor(() =>
+    expect(history.getByTestId("replacement-vcs.history.graph").textContent).toContain("replaced by oxplow-bundled"),
+  );
+  expect(history.queryByTestId("commit-list")).toBeNull();
+  expect(lensRuns).toEqual([
+    ["oxplow-bundled/history-graph", { head_sha: "a".repeat(40), reveal_sha: null, limit: 500 }],
+  ]);
+});
 
 // P9.A2: a file diff's header strip — plain with nothing mounted; a
 // mounted lens gets the path and the two revisions it declares.
@@ -188,7 +232,7 @@ test("the file diff's header strip is plain, and a mount gets the file and its r
     {
       name: "x",
       enabled: true,
-      ui: { slots: [{ slot: "diff.file.header", lensId: "x/co" }], commands: [], decorators: [] },
+      ui: { slots: [{ slot: "diff.file.header", lensId: "x/co" }], commands: [], decorators: [], replacements: [] },
       lenses: [{ id: "x/co", params: ["path", "left_revision", "right_revision"].map((name) => ({ name, label: null, default: null })) }],
     },
   ];
@@ -209,7 +253,7 @@ test("the active provider's extension replaces the Board; another's doesn't", as
       slots: [],
       commands: [],
       decorators: [],
-      replacements: [{ id: `${name}/work_item.board`, extension: name, target: "work_item.board", capability: "work_items", lensId: `${name}/board`, label: "board" }],
+      replacements: [{ id: `${name}/work_item.board`, extension: name, target: "work_item.board", capability: "work_items", boundToProvider: true, lensId: `${name}/board`, label: "board" }],
     },
     lenses: [{ id: `${name}/board`, params: ["scope", "thread_id"].map((p) => ({ name: p, label: null, default: null })) }],
   });
@@ -265,7 +309,7 @@ test("a work item's own provider's extension replaces its state control, not the
       commands: [],
       decorators: [],
       replacements: [
-        { id: `${name}/work_item.detail.state`, extension: name, target: "work_item.detail.state", capability: "work_items", lensId: `${name}/state`, label: "state control" },
+        { id: `${name}/work_item.detail.state`, extension: name, target: "work_item.detail.state", capability: "work_items", boundToProvider: true, lensId: `${name}/state`, label: "state control" },
       ],
     },
     lenses: [{ id: `${name}/state`, params: [{ name: "ref", label: null, default: null }] }],

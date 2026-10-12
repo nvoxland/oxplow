@@ -2279,6 +2279,44 @@ pub async fn publish_declared_empty(
         .await
 }
 
+/// Every entity the enabled `extensions`' collectors declare, as the table
+/// it is stored in: what activation creates (empty, once) so the models
+/// over an entity compile before its collector first runs.
+pub(crate) fn declared_entity_tables(
+    extensions: &[crate::extensions::Extension],
+) -> Vec<EntityTable> {
+    extensions
+        .iter()
+        .filter(|e| e.enabled)
+        .flat_map(|ext| {
+            ext.collectors.iter().flat_map(move |spec| {
+                spec.entities
+                    .iter()
+                    .map(move |entity| entity_table(&ext.name, entity))
+            })
+        })
+        .collect()
+}
+
+fn entity_table(owner: &str, entity: &EntityDecl) -> EntityTable {
+    EntityTable {
+        extension: owner.to_string(),
+        entity: entity.name.clone(),
+        view: entity.view.clone(),
+        key: entity.key.clone(),
+        description: entity_description(owner, entity),
+        columns: entity
+            .columns
+            .iter()
+            .map(|c| oxplow_db::EntityColumn {
+                name: c.name.clone(),
+                stored: stored(c.col_type),
+                doc: c.doc.clone(),
+            })
+            .collect(),
+    }
+}
+
 fn plan_writes(
     owner: &str,
     spec: &CollectorSpec,
@@ -2304,25 +2342,7 @@ fn plan_writes(
                 }
             }
         };
-        writes.push((
-            EntityTable {
-                extension: owner.to_string(),
-                entity: entity.name.clone(),
-                view: entity.view.clone(),
-                key: entity.key.clone(),
-                description: entity_description(owner, entity),
-                columns: entity
-                    .columns
-                    .iter()
-                    .map(|c| oxplow_db::EntityColumn {
-                        name: c.name.clone(),
-                        stored: stored(c.col_type),
-                        doc: c.doc.clone(),
-                    })
-                    .collect(),
-            },
-            write,
-        ));
+        writes.push((entity_table(owner, entity), write));
     }
     Ok(writes)
 }

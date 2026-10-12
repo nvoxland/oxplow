@@ -1323,19 +1323,27 @@ pub fn read_extension_file(root: &Path, name: &str, rel: &str) -> Option<String>
 /// `project_dir/path` on disk — one resolver, so what an approval covers is
 /// read the same way wherever the extension lives (tsk953).
 pub(crate) fn files_at(project_dir: &Path, path: &str) -> std::io::Result<Box<dyn ExtensionFiles>> {
-    match path.strip_prefix("bundled:") {
-        Some(name) => crate::bundled_extensions::BUNDLED
-            .iter()
-            .find(|b| b.name == name.trim_end_matches('/'))
-            .map(|b| Box::new(Embedded(b)) as Box<dyn ExtensionFiles>)
-            .ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    format!("no bundled extension `{name}`"),
-                )
-            }),
-        None => Ok(Box::new(Disk(project_dir.join(path)))),
-    }
+    let Some(rest) = path.strip_prefix("bundled:") else {
+        return Ok(Box::new(Disk(project_dir.join(path))));
+    };
+    // `bundled:<name>` is the extension; `bundled:<name>/<folder>` one of
+    // its folders (a component's bundle), as a path on disk would be.
+    let rest = rest.trim_end_matches('/');
+    let (name, folder) = rest.split_once('/').unwrap_or((rest, ""));
+    let ext = crate::bundled_extensions::find(name).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("no bundled extension `{name}`"),
+        )
+    })?;
+    Ok(if folder.is_empty() {
+        Box::new(Embedded(ext))
+    } else {
+        Box::new(EmbeddedDir {
+            ext,
+            prefix: format!("{folder}/"),
+        })
+    })
 }
 
 /// Where an extension's files come from: a folder on disk, a bundled
@@ -1728,6 +1736,54 @@ impl ExtensionFiles for Embedded {
     }
 }
 
+/// One folder of a bundled extension (`bundled:<name>/<folder>`): its
+/// files by path inside the folder, as [`Disk`] gives a folder's.
+pub(crate) struct EmbeddedDir {
+    ext: &'static crate::bundled_extensions::BundledExtension,
+    /// `<folder>/`.
+    prefix: String,
+}
+
+impl EmbeddedDir {
+    fn inner(&self) -> impl Iterator<Item = (&'static str, &'static [u8])> + '_ {
+        self.ext
+            .files
+            .iter()
+            .filter_map(|(p, b)| p.strip_prefix(self.prefix.as_str()).map(|rel| (rel, *b)))
+    }
+}
+
+impl ExtensionFiles for EmbeddedDir {
+    fn read(&self, rel: &str) -> Option<String> {
+        self.ext
+            .file(&format!("{}{rel}", self.prefix))
+            .map(str::to_string)
+    }
+    fn paths(&self) -> std::io::Result<Vec<String>> {
+        Ok(self.inner().map(|(p, _)| p.to_string()).collect())
+    }
+    fn bytes(&self, rel: &str) -> std::io::Result<Vec<u8>> {
+        self.ext
+            .bytes(&format!("{}{rel}", self.prefix))
+            .map(<[u8]>::to_vec)
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, rel.to_string()))
+    }
+    fn list(&self, dir: &str) -> Vec<String> {
+        let prefix = format!("{dir}/");
+        self.inner()
+            .filter_map(|(p, _)| p.strip_prefix(prefix.as_str()))
+            .filter(|rest| !rest.contains('/'))
+            .map(str::to_string)
+            .collect()
+    }
+    fn bundle_stat(&self, rel: &str) -> custom_components::BundleLook {
+        match custom_components::look_in_paths(rel, self.inner().map(|(p, b)| (p, b.len()))) {
+            custom_components::BundleLook::Unknown => custom_components::BundleLook::Absent,
+            found => found,
+        }
+    }
+}
+
 /// An effect's or collector's `on:` naming an event type of another
 /// extension's namespace (P9.D1). The type's name is the dependency —
 /// there is no `depends:` key, as a model's `ref('<ext>/<name>')` has
@@ -1898,11 +1954,8 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     ext.warnings.extend(warnings);
     let panel_files = m.panels.clone();
     let decorator_files = m.ui.decorators.clone();
-    // An experimental kind: a shared manifest's is refused by `check`.
-    let replacement_files =
-        m.ui.replacements
-            .clone()
-            .filter(|_| m.sharing == Sharing::Private);
+    // A stable kind: a shared extension's load too.
+    let replacement_files = m.ui.replacements.clone();
     let page_files = m.pages.clone();
     // A stable kind (P10): a shared extension's load too.
     let ref_kind_files = m.ref_kinds.clone();
@@ -5860,28 +5913,6 @@ empty: No items.
         );
         assert_eq!(e.sharing, Sharing::Private);
         assert_eq!(e.intent.as_ref().unwrap().purpose, "Review agent work");
-    }
-
-    #[test]
-    fn a_shared_manifest_may_not_use_an_experimental_kind() {
-        let dir = tempfile::tempdir().unwrap();
-        let manifest = "manifest: 2\nname: review\nsharing: shared\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: x\n  examples: [{ name: a }]\nui:\n  replacements: []\n";
-        write(
-            dir.path(),
-            "oxplow/extensions/review/extension.yaml",
-            manifest,
-        );
-        let e = only(dir.path(), "review");
-        let err = e
-            .errors
-            .iter()
-            .find(|m| m.contains("`ui.replacements` is experimental"))
-            .unwrap_or_else(|| panic!("{:?}", e.errors));
-        assert!(
-            err.starts_with("oxplow/extensions/review/extension.yaml:10:"),
-            "{err}"
-        );
-        assert_eq!(e.sharing, Sharing::Shared);
     }
 
     #[test]

@@ -560,6 +560,7 @@ mod tests {
                 extension: "tracker".into(),
                 target: "work_item.board".into(),
                 capability: "work_items".into(),
+                bound_to_provider: true,
                 lens_id: "tracker/board".into(),
                 label: "board".into(),
             });
@@ -571,10 +572,7 @@ mod tests {
         assert_eq!(d.id.problem(), None);
         assert_eq!(d.aliases, vec!["tracker/work_item.board"]);
         assert_eq!((d.trigger.clone(), d.global.clone()), (RunsOn::Mount, None));
-        assert_eq!(
-            d.stability,
-            oxplow_domain::contribution::Stability::Experimental
-        );
+        assert_eq!(d.stability, oxplow_domain::contribution::Stability::Stable);
     }
 
     /// Two extensions claiming one event type and one ref kind: the first

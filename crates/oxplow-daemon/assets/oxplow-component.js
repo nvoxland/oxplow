@@ -25,7 +25,7 @@
   "use strict";
 
   // The protocol this library speaks; `init` says which one the host does.
-  const PROTOCOL = 2;
+  const PROTOCOL = 3;
 
   function component(port, init) {
     let next = 0;
@@ -80,8 +80,10 @@
       // Run a command this component declares in `commands`, as the person
       // looking at it; one that asks is confirmed by them, in oxplow.
       invoke: (command, input) => call({ method: "invoke", command, input: input === undefined ? {} : input }),
-      // Open one of oxplow's pages (`work_item:oxplow:tsk42`).
-      navigate: (ref) => call({ method: "navigate", ref }),
+      // Open one of oxplow's pages (`work_item:oxplow:tsk42`); `{ newTab:
+      // true }` opens it in a new tab (a Cmd-click).
+      navigate: (ref, options) =>
+        call({ method: "navigate", ref, newTab: !!(options && options.newTab) }),
       // Adopt oxplow's theme: set each token on the document's root, where
       // the kit's stylesheet (and your own CSS) reads them.
       applyTheme(doc) {

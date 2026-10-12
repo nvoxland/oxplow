@@ -37,6 +37,7 @@ pub const HUMAN_ONLY_KEYS: &[&str] = &[
     "extensionInstances",
     "activeProviders",
     "replacementsOff",
+    "replacements",
     "eventRetention",
     "scripts",
     "ai",

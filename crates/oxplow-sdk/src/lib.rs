@@ -1563,7 +1563,7 @@ mod tests {
         write(
             dir.path(),
             "oxplow/extensions/team/extension.yaml",
-            "manifest: 2\nname: team\nsharing: shared\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: x\n  examples: [{ name: a }]\nui:\n  replacements: []\n",
+            "manifest: 2\nname: team\nsharing: shared\nengine: \">=99.0\"\nversion: 0.1.0\nintent:\n  purpose: x\n  examples: [{ name: a }]\n",
         );
         let report = check(
             dir.path(),
@@ -1578,9 +1578,7 @@ mod tests {
         assert!(!report.ok);
         let text = render_findings(&report, Format::Text);
         assert!(
-            text.contains(
-                "error: oxplow/extensions/team/extension.yaml:10: `ui.replacements` is experimental"
-            ),
+            text.contains("error: oxplow/extensions/team/extension.yaml:4: needs oxplow >=99.0"),
             "{text}"
         );
         assert!(text.contains("team: 1 error, 0 warnings"), "{text}");

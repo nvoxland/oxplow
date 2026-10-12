@@ -25,12 +25,13 @@ import type { CommandOutcome, LensRun, SqlCell } from "../tauri-bridge/generated
 /// The protocol above, by number: bumped when a message's shape changes,
 /// with the served library (`crates/oxplow-daemon/assets/`). 2: `init`
 /// lost `kitCss` — the kit is a stylesheet the bundle links (tsk961).
-export const BRIDGE_PROTOCOL = 2;
+/// 3: `navigate` carries `newTab` (a Cmd-click in a component).
+export const BRIDGE_PROTOCOL = 3;
 
 export type BridgeRequest =
   | { id: string; method: "query"; asset: string; params: Record<string, SqlCell> }
   | { id: string; method: "invoke"; command: string; input: unknown }
-  | { id: string; method: "navigate"; ref: string };
+  | { id: string; method: "navigate"; ref: string; newTab: boolean };
 
 export type FrameMessage = { type: "ready" } | { type: "request"; request: BridgeRequest };
 
@@ -55,7 +56,8 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
       return { type: "request", request: { id: m.id, method: "invoke", command: m.command, input: m.input ?? {} } };
     case "navigate":
       if (typeof m.ref !== "string") return null;
-      return { type: "request", request: { id: m.id, method: "navigate", ref: m.ref } };
+      if (m.newTab !== undefined && typeof m.newTab !== "boolean") return null;
+      return { type: "request", request: { id: m.id, method: "navigate", ref: m.ref, newTab: m.newTab === true } };
     default:
       return null;
   }
@@ -101,9 +103,9 @@ export interface BridgeDeps {
   query(asset: string, params: Record<string, SqlCell>): Promise<LensRun>;
   /** Run a declared command as the lens for the person. */
   invoke(command: string, input: unknown, confirmed: boolean): Promise<CommandOutcome>;
-  /** Open `ref`'s page; false when it isn't one a component may open
-   *  (`componentNavigationTarget`). */
-  navigate(ref: string): boolean;
+  /** Open `ref`'s page, in a new tab when asked; false when it isn't one
+   *  a component may open (`componentNavigationTarget`). */
+  navigate(ref: string, opts: { newTab: boolean }): boolean;
   /** Ask the person, in the host, to confirm `command`. */
   confirm(command: string): Promise<boolean>;
   onReady(): void;
@@ -168,7 +170,7 @@ export function createBridgeHost(
         }
         return;
       case "navigate":
-        if (deps.navigate(r.ref)) reply(r.id, null);
+        if (deps.navigate(r.ref, { newTab: r.newTab })) reply(r.id, null);
         else fail(r.id, "INVALID", "A component may open oxplow's pages only.");
     }
   };

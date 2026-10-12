@@ -1496,46 +1496,57 @@ they live under `ui:`.
 
 The launcher isn't a slot: a lens lists itself with `launcher.category`.
 
-## Replacements (experimental)
+## Replacements
 
-`ui.replacements` (a private extension only; P9.A1,
+`ui.replacements` (P9.A1, stable since oxplow-bundled's history graph;
 `extensions/replacements.rs`) puts a **lens in place of a named core
 sub-component** — never a whole page:
 
 ```yaml
 ui:
   replacements:
-    - { target: work_item.board, lens: board }
+    - { target: vcs.history.graph, lens: history-graph }
 ```
 
 The targets are one table, `oxplow_domain::replaceable::REPLACEABLE`:
-each a `target`, the `capability` it belongs to, and its **props
-contract** — the params the replacement lens is given instead of any
-host state.
+each a `target`, the `capability` it belongs to, whether it is **bound to
+a provider**, and its **props contract** — the params the replacement
+lens is given instead of any host state.
 
-| Target | Core component | Capability | Props |
-|---|---|---|---|
-| `work_item.board` | the Board's columns of cards (`WorkBoard`) | `work_items` | `scope` (`thread` / `backlog` / `all`), `thread_id` (the thread when `scope` is `thread`, else null) |
-| `work_item.detail.state` | a work item's State (`WorkItemPage`'s rail; P10) — never its Move To, which stays oxplow's canonical states, so a replacement can't strand an item (tsk919) | `work_items` | `ref` (the item) |
+| Target | Core component | Capability | Bound | Props |
+|---|---|---|---|---|
+| `work_item.board` | the Board's columns of cards (`WorkBoard`) | `work_items` | yes | `scope` (`thread` / `backlog` / `all`), `thread_id` (the thread when `scope` is `thread`, else null) |
+| `work_item.detail.state` | a work item's State (`WorkItemPage`'s rail; P10) — never its Move To, which stays oxplow's canonical states, so a replacement can't strand an item (tsk919) | `work_items` | yes | `ref` (the item) |
+| `vcs.history.graph` | Git History's commits (`HistoryPanel`): oxplow's own is a plain list (`CommitList`) | `vcs` | no | `head_sha` (the stream's head), `reveal_sha` (a commit to scroll to and mark, or null), `limit` |
 
-The history graph and the conflict resolver §11.2 names wait for a
-provider that needs them. Every target has a label a person reads
-— its `label` in the same table ("board", "state control"), carried on
-each `UiReplacement` so the desktop names it from there (tsk935; no
-second list to keep in step). A state control replacement lists the
-tracker's own states, each with **Move Here** (`oxplow.work_item.transition` with
+**Bound or not.** A bound target shows a provider's thing, so only the
+extension of the deciding provider replaces it (below). An unbound target
+is one core owns — `vcs` is oxplow's own implementation, with no provider
+row (`v_capability_provider.extension` NULL) — so any extension may
+replace it, a shared or bundled one included. With one enabled extension
+replacing it, that one shows; with several, the one the person chose —
+`replacements: { <target>: <extension> }`, a person-only project key
+validated against the table (an unbound target only: a bound one's
+provider decides); several and no choice keeps oxplow's own.
+
+Every target has a label a person reads — its `label` in the same table
+("board", "state control", "history graph"), carried on each
+`UiReplacement` so the desktop names it from there (tsk935; no second
+list to keep in step). A state control replacement lists the tracker's
+own states, each with **Move Here** (`oxplow.work_item.transition` with
 the `native_state`); oxplow's Move To stays beside it: the canonical
 states every provider takes.
 
 **At load** (`parse_replacements`, errors at the entry's line): the
 target is in the table; the lens is one of the extension's and declares
 **every** prop (a slot's lens declares at least one; a replacement takes
-the whole contract — a Board that ignores `scope` isn't the Board); the
-extension brings a provider of the target's capability (`providers:`);
-a target is replaced once per extension. The viewer's stream isn't a
-prop: a lens that declares `stream_id` gets it, as everywhere. Valid ones are
-`Extension.ui.replacements` (`UiReplacement { id: <ext>/<target>,
-extension, target, capability, lensId }`).
+the whole contract — a Board that ignores `scope` isn't the Board); for a
+bound target, the extension brings a provider of the target's capability
+(`providers:`); a target is replaced once per extension. The viewer's
+stream isn't a prop: a lens that declares `stream_id` gets it, as
+everywhere. Valid ones are `Extension.ui.replacements` (`UiReplacement {
+id: <ext>/<target>, extension, target, capability, boundToProvider,
+lensId, label }`).
 
 **A person can turn one off**: the project key `replacementsOff:
 [work_item.board]` (person-only, like `activeProviders` — it decides
@@ -1549,20 +1560,21 @@ under the active-provider chooser, each with "Always use oxplow's own
 A core page wraps the component: `<Replaceable target props streamId
 fallback={<WorkBoard …/>}>` (`BoardPage`). `useReplacement` reads the
 enabled extensions' replacements of the target and, only when one
-exists, the capability's providers (`v_capability_provider`, re-read
-when it changes) and `replacementsOff` (re-read on `configChanged`):
-- **only the deciding provider's extension replaces** — the candidate
-  whose `extension` is that provider's row's. A component showing one
-  provider's thing passes it (`<Replaceable provider={item.provider}>`
-  on `work_item.detail.state`): the **item's own provider** decides,
-  whichever is active, so another provider's item never gets a lens
-  that sends this one's states (tsk918). A component showing the
-  capability as a whole (the Board) passes none: the **active** row
-  decides, here and not at load, since the active provider changes
-  with `activeProviders` and no reload. Either way there is one
-  candidate;
+exists, what decides it:
+- **bound**: only the deciding provider's extension replaces — the
+  candidate whose `extension` is that provider's row's. A component
+  showing one provider's thing passes it (`<Replaceable
+  provider={item.provider}>` on `work_item.detail.state`): the **item's
+  own provider** decides, whichever is active, so another provider's item
+  never gets a lens that sends this one's states (tsk918). A component
+  showing the capability as a whole (the Board) passes none: the
+  **active** row decides, here and not at load, since the active provider
+  changes with `activeProviders` and no reload;
+- **unbound**: the person's choice (`replacements`), or the only
+  candidate; no provider is read;
 - no candidate, a deciding provider no extension brings (oxplow's own),
-  or the target turned off → `fallback`, untouched;
+  several unbound candidates and no choice, or the target turned off →
+  `fallback`, untouched;
 - chosen → its lens runs with the props it declares (`childParams`) and
   renders through `LensResultView` (the one render path: kit, or `viz:
   custom` with its sandbox and "custom" badge) under a **"replaced by
@@ -1589,13 +1601,25 @@ its text rendering is the lens's; agents read work items from
 with every enhancement off (no `replacement-*`), and with two extensions
 replacing it shows that only the active provider's does; a work item's
 state control, with two extensions replacing it, shows the item's own
-provider's, not the active one's.
+provider's, not the active one's; Git History shows the plain list, and
+oxplow-bundled's graph when it replaces it.
 
-No example declares one now. The first was Linear's board and state
-lenses, removed with the Linear provider (2026-10-05): a team's tracker
-isn't a backend ([providers.md](./providers.md) "Which trackers are
-backends"). The likely first real one is a beads backend's ready-work
-board.
+**The first real one: the history graph.** oxplow-bundled's
+`history-graph` component (`components/history-graph/`, classic scripts
+on the client library and the kit) draws the stream's commits as `git log
+--graph` does — a lane per line of descent, a dot per commit — from its
+hidden lens `history-graph` (a recursive walk of `v_commit` from
+`:head_sha`, with local branch and tag labels from `v_branch` / `v_tag`).
+Its text, author and branch filters are its own and only dim or hide rows,
+so typing never re-runs the lens; the host re-runs it when a commit lands
+or a ref moves (its reads). A row opens `commit:<sha>`; a Cmd/Ctrl-click
+opens it in a new tab (`navigate(ref, { newTab: true })`, bridge protocol
+3). The commit page's prev/next siblings, which oxplow's list passes, a
+component can't pass. It declares no commands, so it isn't a program to
+approve. Core keeps no lane code: `CommitList` (the fallback, and the Git
+dashboard's recent commits with their stats) is a plain list.
+`lens/historyGraph.test.ts` runs the bundle's own script against its page
+— lanes, merge lanes, child-before-parent order, filters, reveal, Cmd-click.
 
 ## Reviewing by impact
 
@@ -3604,6 +3628,7 @@ What moves out of core, and what it becomes:
 | Fact collectors (`oxplow/collectors/*.star`, idiom `.star`; gauges until P7.B3) | extensions can declare fact collectors (tsk311); the built-in catalog stays core as the opt-in standard library |
 | Metric-threshold nudges | **done:** the `threshold-crossed` advisory (with `metric-deltas`) |
 | Usage / page analytics / token pages, `ThreadTokenTotal`, `EffortTokenUsage` | **done:** the `usage` grid; `task-tokens` (`work_item.detail.body` slot) and `thread-tokens` (`thread.plan.header` slot) |
+| Git History's commit graph | **done:** the `history-graph` component, replacing core's plain `CommitList` (`vcs.history.graph`) |
 | Local history dashboard | stays core (snapshots are substrate); the `recent-snapshots` lens in `review` covers the at-a-glance view |
 | Effort metrics block, effort coverage page, tests-run and nudge blocks | **done:** `effort.review.details` slot lenses `effort-tests` (grid: coverage, untested files, test runs, failed tests, analysis findings), `effort-metric-deltas`, `effort-nudges` |
 | Rail panels: Comments, Work, Uncommitted, Go To | **done:** Go To (`go-to`, the thread's bookmarks then its recent or most visited pages through the `mode` choice param, `go-to-bookmarks` collapsed — needing bookmarks as project data (`v_bookmark`), lens param `options` and page-kind icons; the rail has no core panels left); Comments (`comments`, a panel `open`ing the inbox) and Work (`work` grouped over the `thread_work` model, which also lists the thread's unlinked efforts — open under In progress, closed under Finished, whose header opens the `thread-activity` lens of the thread's turns by effort — `work-line` collapsed, `work-count`, the `clear_finished` command + `finished_cleared` model); and Uncommitted (`uncommitted`, a tree over the working change's stage-one file list, which change analysis now keeps current on every move). Only the UI moves: stores, commands and views stay core. What Work needed and lenses lacked became general features, listed under "Added for extraction" — the pattern for any panel an extension builds |
@@ -3739,7 +3764,13 @@ A changed recorded event schema and a shared wikilink prefix are candidate
 errors; strict candidates do not publish the legacy reactor's partial result.
 
 `PreparedExtensionDatabase` captures models, vocabulary and enabled contribution
-descriptors from the same snapshot. Its transaction helper calls strict model
+descriptors from the same snapshot, and every entity the enabled collectors
+declare: its transaction first creates each entity that has no view yet, empty
+(`collector_store::ensure_entities_tx`; one that exists keeps its rows — they
+are the collector's), so a model over an entity compiles before the collector
+first runs. Without it an extension whose model reads its own collector's
+entity is held back forever, its collector never active to fill the entity
+(`the_documented_examples_activate`: the github example). Its transaction helper calls strict model
 and vocabulary replacement and contribution restatement inside a surrounding
 savepoint: any diagnostic or storage failure restores the whole candidate.
 `prepare_with_capabilities` also includes prepared capability rows and switch

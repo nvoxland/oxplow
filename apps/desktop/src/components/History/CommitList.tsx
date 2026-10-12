@@ -233,7 +233,7 @@ function CommitRow({
         </span>
         {stats ? (
           <span
-            data-testid="commit-graph-row-stats"
+            data-testid="commit-list-row-stats"
             style={{
               flexShrink: 0,
               fontSize: 11,

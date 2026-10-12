@@ -46,6 +46,7 @@ export function GitHistoryPage({ stream, onOpenPage, revealSha }: GitHistoryPage
           stream={stream}
           revealSha={revealSha}
           onSelectCommit={(sha, opts) => onOpenPage(gitCommitRef(sha), opts)}
+          onOpenPage={onOpenPage}
         />
       </div>
     </Page>

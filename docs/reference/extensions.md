@@ -194,7 +194,7 @@ for managing references is not implemented yet.
 | `panels` | where its lenses show as panels | stable |  |
 | `ui.slots` | a lens mounted into a core page | stable |  |
 | `ui.decorators` | labels on core refs | stable |  |
-| `ui.replacements` | a lens in place of a core component (private extensions only) | experimental |  |
+| `ui.replacements` | a lens in place of a core component | stable |  |
 | `custom_components` | sandboxed HTML components for `viz: custom` lenses | stable |  |
 <!-- kinds:end -->
 

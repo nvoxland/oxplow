@@ -66,10 +66,17 @@ ui:
     - { slot: effort.review.details, lens: session-files }
     - { slot: effort.review.details, lens: context-read }
     - { slot: effort.review.details, lens: review-prompt }
+  # Git History's commits drawn as a graph, in place of oxplow's plain
+  # list (`vcs.history.graph`, a target no provider binds). It only shows
+  # and opens commits, so it isn't a program to approve.
+  replacements:
+    - { target: vcs.history.graph, lens: history-graph }
   # The verdict where the effort is shown: it shows; it never acts.
   decorators:
     - { model: verdict, kind: effort, placement: ref-chip, label: label, color: color }
     - { model: verdict, kind: effort, placement: row-badge, label: label, color: color }
+custom_components:
+  - { id: history-graph, title: History graph }
 panels:
   - { id: go-to, title: Go To, icon: compass, scope: thread, body: go-to, collapsed: go-to-bookmarks, open: 'page:dashboard?variant=visits' }
   - { id: waiting, title: Waiting on You, icon: bell, scope: project, body: waiting-on-me, badge: waiting-on-me }

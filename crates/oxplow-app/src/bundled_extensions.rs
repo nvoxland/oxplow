@@ -56,6 +56,9 @@ pub const BUNDLED: &[BundledExtension] = &[
         files: &[
             ext_file!("oxplow-bundled", "README.md"),
             ext_file!("oxplow-bundled", "collectors/effort_churn.star"),
+            ext_file!("oxplow-bundled", "components/history-graph/app.css"),
+            ext_file!("oxplow-bundled", "components/history-graph/app.js"),
+            ext_file!("oxplow-bundled", "components/history-graph/index.html"),
             ext_file!("oxplow-bundled", "commands/work-next.md"),
             ext_file!("oxplow-bundled", "effects/verify_unchecked.star"),
             ext_file!("oxplow-bundled", "event_types/accepted.v1.json"),
@@ -95,6 +98,7 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-bundled", "lenses/findings.yaml"),
             ext_file!("oxplow-bundled", "lenses/go-to-bookmarks.yaml"),
             ext_file!("oxplow-bundled", "lenses/go-to.yaml"),
+            ext_file!("oxplow-bundled", "lenses/history-graph.yaml"),
             ext_file!("oxplow-bundled", "lenses/inferred-decisions.yaml"),
             ext_file!("oxplow-bundled", "lenses/page-visits-by-day.yaml"),
             ext_file!("oxplow-bundled", "lenses/planning.yaml"),

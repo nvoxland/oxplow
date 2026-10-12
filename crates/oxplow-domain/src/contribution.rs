@@ -144,7 +144,7 @@ const fn spec(
     }
 }
 
-use Stability::{Experimental, Stable};
+use Stability::Stable;
 
 /// Every kind, in the order the reference lists them.
 pub const KINDS: &[KindSpec] = &[
@@ -323,8 +323,8 @@ pub const KINDS: &[KindSpec] = &[
         ContributionKind::Replacement,
         "ui.replacements",
         "Replacement",
-        "a lens in place of a core component (private extensions only)",
-        Experimental,
+        "a lens in place of a core component",
+        Stable,
         true,
         false,
     ),

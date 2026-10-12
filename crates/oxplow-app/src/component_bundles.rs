@@ -323,3 +323,54 @@ pub(crate) fn read_bundle(
     }
     Ok(BundleFiles(files))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// oxplow-bundled's history graph is a component like a project's:
+    /// its bundle is read from the embedded files, hashed by the one
+    /// approval hash, staged by activation's preparation and served from
+    /// the snapshot.
+    #[test]
+    fn a_bundled_component_is_staged_and_served_from_its_embedded_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let catalog = crate::extension_catalog::ExtensionCatalog::new();
+        let snapshot = catalog.snapshot(dir.path());
+        let ext = snapshot
+            .extensions()
+            .iter()
+            .find(|e| e.name == "oxplow-bundled")
+            .expect("bundled")
+            .clone();
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        let component = ext
+            .custom_components
+            .iter()
+            .find(|c| c.id == "history-graph")
+            .expect("declared")
+            .clone();
+
+        let bundle = build_snapshot(dir.path(), &ext, &component, None).expect("built");
+        let shipped = crate::bundled_extensions::find("oxplow-bundled").unwrap();
+        assert_eq!(
+            bundle.file("").unwrap(),
+            shipped
+                .bytes("components/history-graph/index.html")
+                .unwrap()
+        );
+        assert_eq!(
+            bundle.file("app.js").unwrap(),
+            shipped.bytes("components/history-graph/app.js").unwrap()
+        );
+        let program = component_program(&ext, &component);
+        assert_eq!(program.hash(dir.path()).unwrap(), bundle.version);
+
+        let prepared = PreparedComponentBundles::prepare(dir.path(), &snapshot).expect("staged");
+        let registry = ComponentBundles::new();
+        prepared.publish(&registry);
+        let loaded = registry.load(dir.path(), &ext, &component).expect("loaded");
+        assert_eq!(loaded.version, bundle.version);
+        assert!(registry.get(&bundle.version).is_some());
+    }
+}

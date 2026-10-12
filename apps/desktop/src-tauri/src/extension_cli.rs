@@ -385,21 +385,19 @@ mod tests {
     }
 
     #[test]
-    fn shared_with_an_experimental_kind_exits_one_with_file_and_line() {
+    fn a_lifecycle_error_exits_one_with_file_and_line() {
         let dir = tempfile::tempdir().unwrap();
         let folder = dir.path().join("oxplow/extensions/team");
         std::fs::create_dir_all(&folder).unwrap();
         std::fs::write(
             folder.join("extension.yaml"),
-            "manifest: 2\nname: team\nsharing: shared\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: x\n  examples: [{ name: a }]\nui:\n  replacements: []\n",
+            "manifest: 2\nname: team\nsharing: shared\nengine: \">=99.0\"\nversion: 0.1.0\nintent:\n  purpose: x\n  examples: [{ name: a }]\n",
         )
         .unwrap();
         let (code, out, _) = cli(&["check", folder.to_str().unwrap()]);
         assert_eq!(code, 1);
         assert!(
-            out.contains(
-                "error: oxplow/extensions/team/extension.yaml:10: `ui.replacements` is experimental"
-            ),
+            out.contains("error: oxplow/extensions/team/extension.yaml:4: needs oxplow >=99.0"),
             "{out}"
         );
         assert!(out.contains("team: 1 error, 0 warnings"), "{out}");

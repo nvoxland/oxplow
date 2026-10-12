@@ -742,6 +742,12 @@ pub struct OxplowConfig {
     /// even when the active provider's extension replaces it.
     #[serde(rename = "replacementsOff")]
     pub replacements_off: std::collections::BTreeSet<String>,
+    /// The person's choice among extensions replacing a target no provider
+    /// binds (`replacements: { vcs.history.graph: oxplow-bundled }`): with
+    /// one candidate it is chosen anyway; with several and no choice,
+    /// oxplow's own shows.
+    #[serde(rename = "replacements")]
+    pub replacements: std::collections::BTreeMap<String, String>,
     /// How long this project keeps each event namespace's payloads and
     /// large content (`eventRetention: { agent: { payloadDays,
     /// contentDays } }`), over core's defaults; an extension's namespace is
@@ -966,6 +972,9 @@ struct RawConfig {
     /// Core components that stay oxplow's own, by target: `[work_item.board]`. Listed, an extension's replacement of it (the active provider's `ui.replacements`) isn't shown.
     #[serde(rename = "replacementsOff", default)]
     replacements_off: Option<Vec<String>>,
+    /// Which extension replaces a target no provider binds, by target: `{ vcs.history.graph: oxplow-bundled }`. With one extension replacing it, that one shows without a choice; with several and none chosen, oxplow's own shows.
+    #[serde(rename = "replacements", default)]
+    replacements: Option<std::collections::BTreeMap<String, String>>,
     /// How long each event namespace's payloads and large content are kept, in days: `{ agent: { payloadDays: 60, contentDays: 14 } }`, over core's defaults (agent 30/14; test, code, collector, effect 90/30). An extension's namespace is kept no longer than its window; core state (snapshot, vcs, effort, …) is kept whole.
     #[serde(rename = "eventRetention", default)]
     event_retention: Option<
@@ -1589,6 +1598,11 @@ pub fn config_entries(config: &OxplowConfig, fallback_name: &str) -> Vec<ConfigE
         !config.replacements_off.is_empty(),
     );
     put(
+        "replacements",
+        to_yaml(&config.replacements),
+        !config.replacements.is_empty(),
+    );
+    put(
         "eventRetention",
         to_yaml(&config.event_retention),
         !config.event_retention.is_empty(),
@@ -1698,6 +1712,7 @@ fn default_config(project_name: String) -> OxplowConfig {
         personal_active_providers: std::collections::BTreeMap::new(),
         personal_new_thread_session: None,
         replacements_off: std::collections::BTreeSet::new(),
+        replacements: std::collections::BTreeMap::new(),
         event_retention: std::collections::BTreeMap::new(),
         ai_roles: Default::default(),
         extensions_disabled: Vec::new(),
@@ -1977,6 +1992,30 @@ fn validate_replacements_off(
     Ok(raw.into_iter().collect())
 }
 
+/// Validate `replacements:`: each target replaceable and unbound — a bound
+/// one's provider decides, there is nothing to choose.
+fn validate_replacements(
+    raw: std::collections::BTreeMap<String, String>,
+) -> Result<std::collections::BTreeMap<String, String>, ConfigError> {
+    for target in raw.keys() {
+        match oxplow_domain::replaceable::replaceable(target) {
+            None => {
+                return Err(ConfigError::Invalid(format!(
+                    "replacements: `{target}` isn't a replaceable component ({})",
+                    oxplow_domain::replaceable::targets()
+                )))
+            }
+            Some(t) if t.bound_to_provider => {
+                return Err(ConfigError::Invalid(format!(
+                    "replacements: `{target}` isn't chosen: its provider's extension replaces it"
+                )))
+            }
+            Some(_) => {}
+        }
+    }
+    Ok(raw)
+}
+
 /// Validate `eventRetention:`: a namespace each — never core state, which
 /// is kept whole — at windows of at least a day.
 fn validate_event_retention(
@@ -2196,6 +2235,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         validate_extension_instances(raw.extension_instances.unwrap_or_default())?;
     let active_providers = validate_active_providers(raw.active_providers.unwrap_or_default())?;
     let replacements_off = validate_replacements_off(raw.replacements_off.unwrap_or_default())?;
+    let replacements = validate_replacements(raw.replacements.unwrap_or_default())?;
     let event_retention = validate_event_retention(raw.event_retention.unwrap_or_default())?;
 
     let lsp_servers = match raw.lsp.and_then(|l| l.servers) {
@@ -2268,6 +2308,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         personal_active_providers: std::collections::BTreeMap::new(),
         personal_new_thread_session: None,
         replacements_off,
+        replacements,
         event_retention,
         ai_roles: validate_ai_roles(raw.ai)?,
         extensions_disabled: raw.extensions.map(|b| b.disabled).unwrap_or_default(),
@@ -3614,6 +3655,43 @@ mod tests {
         assert!(crate::keys::HUMAN_ONLY_KEYS.contains(&"eventRetention"));
     }
 
+    /// `replacements` is the person's choice among several extensions
+    /// replacing a target no provider binds (`vcs.history.graph`); a bound
+    /// target's provider decides, so choosing for one is an error, as is
+    /// an unknown target.
+    #[test]
+    fn replacements_chooses_an_extension_for_an_unbound_target() {
+        let parse = |yaml: &str| parse_project_config(serde_yaml::from_str(yaml).unwrap(), "demo");
+        let config = parse("replacements: { vcs.history.graph: oxplow-bundled }\n").unwrap();
+        assert_eq!(
+            config
+                .replacements
+                .get("vcs.history.graph")
+                .map(String::as_str),
+            Some("oxplow-bundled")
+        );
+        let doc = render_project_config(&config, "demo");
+        let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc)).unwrap();
+        assert!(
+            yaml.contains("replacements:\n  vcs.history.graph: oxplow-bundled"),
+            "{yaml}"
+        );
+        let bound = parse("replacements: { work_item.board: beads }\n").unwrap_err();
+        assert!(
+            bound
+                .to_string()
+                .contains("its provider's extension replaces it"),
+            "{bound}"
+        );
+        let unknown = parse("replacements: { vcs.conflict.resolver: x }\n").unwrap_err();
+        assert!(
+            unknown.to_string().contains("vcs.history.graph"),
+            "{unknown}"
+        );
+        assert!(parse("agents: [claude]\n").unwrap().replacements.is_empty());
+        assert!(crate::keys::HUMAN_ONLY_KEYS.contains(&"replacements"));
+    }
+
     /// P9.A1: `replacementsOff` names core components a replacement may
     /// not take over; an unknown target is an error listing the real ones.
     #[test]
@@ -3630,7 +3708,7 @@ mod tests {
             yaml.contains("replacementsOff:\n- work_item.board"),
             "{yaml}"
         );
-        let err = parse("replacementsOff: [vcs.history.graph]\n").unwrap_err();
+        let err = parse("replacementsOff: [vcs.conflict.resolver]\n").unwrap_err();
         assert!(
             err.to_string().contains("work_item.board"),
             "lists what can be: {err}"

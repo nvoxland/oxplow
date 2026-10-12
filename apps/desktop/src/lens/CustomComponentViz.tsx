@@ -36,7 +36,7 @@ export function CustomComponentViz({
 }: {
   run: LensRun;
   streamId: string | null;
-  onOpenPage?(ref: TabRef): void;
+  onOpenPage?(ref: TabRef, opts?: { newTab?: boolean }): void;
   /** The lens's table: shown when the component can't be. */
   fallback: ReactNode;
   /** Told why when the component can't be shown — and then it shows
@@ -121,7 +121,7 @@ export function CustomComponentViz({
     );
   }
   return (
-    <div data-testid="custom-component" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+    <div data-testid="custom-component" style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minHeight: 0 }}>
       <span data-testid="custom-component-badge" style={badgeStyle} title={`${run.lens.extension}'s own component, sandboxed`}>
         custom
       </span>
@@ -162,7 +162,7 @@ function ComponentFrame({
   component: string;
   run: LensRun;
   streamId: string | null;
-  onOpenPage?(ref: TabRef): void;
+  onOpenPage?(ref: TabRef, opts?: { newTab?: boolean }): void;
   readyTimeoutMs: number;
   onFail(reason: string): void;
   onReady?(): void;
@@ -220,9 +220,9 @@ function ComponentFrame({
             throw e;
           }
         },
-        navigate: (ref) => {
+        navigate: (ref, opts) => {
           const tab = componentNavigationTarget(ref);
-          if (tab) onOpenPage?.(tab);
+          if (tab) onOpenPage?.(tab, opts);
           return tab !== null;
         },
         confirm: (command) => new Promise<boolean>((answer) => setAsking({ command, answer })),
@@ -285,5 +285,7 @@ const badgeStyle: CSSProperties = {
   border: "1px solid var(--border-subtle)",
   color: "var(--text-secondary)",
 };
-const frameStyle: CSSProperties = { width: "100%", minHeight: 240, border: "1px solid var(--border-subtle)", borderRadius: 4 };
+// It grows to fill a page that gives it room (a replaced history), and is
+// never shorter than a card's worth.
+const frameStyle: CSSProperties = { width: "100%", flex: 1, minHeight: 240, border: "1px solid var(--border-subtle)", borderRadius: 4 };
 const noteStyle: CSSProperties = { color: "var(--text-secondary)", fontSize: "var(--text-xs)", marginBottom: 4 };

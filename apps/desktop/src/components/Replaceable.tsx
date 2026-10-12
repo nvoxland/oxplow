@@ -32,7 +32,7 @@ export function Replaceable({
   provider?: string | null;
   /** Oxplow's own component. */
   fallback: ReactNode;
-  onOpenPage?(ref: TabRef): void;
+  onOpenPage?(ref: TabRef, opts?: { newTab?: boolean }): void;
 }) {
   const r = useReplacement(target, props, streamId, provider);
   if (r.state === "pending") return null;

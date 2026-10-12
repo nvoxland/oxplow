@@ -13,7 +13,11 @@ test("a committed change shows its hunk", async ({ page, daemon }) => {
   git("commit", "-q", "-m", "Add the emu file");
   await page.goto("/");
   await openFromLauncher(page, "Git History");
-  await page.getByTestId("commit-graph-row").filter({ hasText: "Add the emu file" }).click();
+  // Git History is oxplow-bundled's graph, in its sandboxed frame.
+  await page
+    .frameLocator('[data-testid="custom-component-frame"]')
+    .locator(".row", { hasText: "Add the emu file" })
+    .click();
   await expect(page.getByTestId("page-git-commit")).toBeVisible();
   // Its Change Analysis lenses read their extension's models (tsk977):
   // once the slot has rendered its runs, none failed.

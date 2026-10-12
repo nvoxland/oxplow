@@ -191,3 +191,42 @@ async fn a_model_that_does_not_compile_holds_back_only_its_extension() {
     assert!(answer(&svc, "late").await.is_err(), "late isn't active");
     assert!(problems(&svc).contains("late"), "{}", problems(&svc));
 }
+
+/// The documented examples activate in a project as they are, every one
+/// of them, with nothing held back.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_documented_examples_activate() {
+    let dir = tempfile::tempdir().unwrap();
+    crate::test_fixtures::init_git_repo(dir.path());
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions");
+    for entry in std::fs::read_dir(&examples).unwrap() {
+        let from = entry.unwrap().path();
+        let to = dir
+            .path()
+            .join("oxplow/extensions")
+            .join(from.file_name().unwrap());
+        for file in walkdir::WalkDir::new(&from)
+            .into_iter()
+            .filter_map(Result::ok)
+        {
+            if file.file_type().is_file() {
+                let target = to.join(file.path().strip_prefix(&from).unwrap());
+                std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+                std::fs::copy(file.path(), target).unwrap();
+            }
+        }
+    }
+    let svc = Arc::new(crate::Services::in_memory(dir.path()).unwrap());
+    svc.extension_activation
+        .activate(svc.clone())
+        .await
+        .expect("activates");
+    assert_eq!(problems(&svc), "{}");
+    let active = svc.extension_catalog.get(dir.path());
+    for name in ["github", "triage", "prompt-efforts"] {
+        assert!(
+            active.iter().any(|e| e.name == name && e.enabled),
+            "{name} is active"
+        );
+    }
+}

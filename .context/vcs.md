@@ -199,7 +199,11 @@ head (`vcsHead`), re-run on `modelsChanged` (`useRerunOnChange`), and
 put in `topoOrder` — every child before its parents, else newest first:
 commit times are whole seconds and clocks skew, so a time order can list
 a rebase's parent before its child and break the graph's lanes (tsk565;
-the dashboard finds the head commit by sha, not as the first row); the
+the dashboard finds the head commit by sha, not as the first row). Git
+History's own view is that plain list (`CommitList`); the lane graph is
+oxplow-bundled's `history-graph` component, replacing it through
+`vcs.history.graph` (`.context/extensions.md` "Replacements"), whose lens
+runs the same walk and whose script does the same `topoOrder`; the
 branch picker, compare list and new-stream form read `v_branch` /
 `v_tag`. `v_branch.stream_id` is the stream whose workspace has the
 branch checked out, read from that workspace's head at each refresh —

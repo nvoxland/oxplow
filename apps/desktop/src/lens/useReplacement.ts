@@ -10,6 +10,11 @@
  * capability's **active provider** decides — `v_capability_provider.active`,
  * which changes with `activeProviders` and no reload, so the choice is
  * made here, not at load. Either way there is one candidate.
+ *
+ * A target core owns (`boundToProvider: false`, the history graph) has no
+ * deciding provider: the one extension replacing it shows; among several,
+ * the one the person chose (`replacements: { <target>: <extension> }`);
+ * several and no choice keeps oxplow's own.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -39,11 +44,19 @@ export type Replacement =
   /** The replacement couldn't load: oxplow's own, and why. */
   | { state: "failed"; replacement: UiReplacement; message: string };
 
-/** The targets the person turned replacements off for (`replacementsOff`). */
-async function readReplacementsOff(): Promise<string[]> {
+/** What the person said: the targets turned off (`replacementsOff`) and
+ *  the extension chosen for a target no provider binds (`replacements`). */
+async function readChoices(): Promise<{ off: string[]; chosen: Record<string, string> }> {
   const settings = await effectiveConfig();
-  const value = settings.find((s) => s.key === "replacementsOff")?.value;
-  return Array.isArray(value) ? value.map(String) : [];
+  const off = settings.find((s) => s.key === "replacementsOff")?.value;
+  const chosen = settings.find((s) => s.key === "replacements")?.value;
+  return {
+    off: Array.isArray(off) ? off.map(String) : [],
+    chosen:
+      chosen !== null && typeof chosen === "object" && !Array.isArray(chosen)
+        ? Object.fromEntries(Object.entries(chosen as Record<string, unknown>).map(([k, v]) => [k, String(v)]))
+        : {},
+  };
 }
 
 export function useReplacement(
@@ -59,17 +72,19 @@ export function useReplacement(
     .flatMap((e) => e.ui.replacements)
     .filter((r) => r.target === target);
   const capability = candidates[0]?.capability ?? null;
+  const bound = candidates[0]?.boundToProvider ?? true;
 
   // The deciding provider's extension (`null`: one no extension brings),
-  // and the targets turned off; `undefined` while not read.
+  // and the person's choices; `undefined` while not read. An unbound
+  // target reads no provider.
   const [owner, setOwner] = useState<string | null | undefined>(undefined);
   const [providerReads, setProviderReads] = useState<Reads>(NO_READS);
-  const [off, setOff] = useState<string[] | undefined>(undefined);
+  const [choices, setChoices] = useState<{ off: string[]; chosen: Record<string, string> } | undefined>(undefined);
   // Reads overlap (one per change): the newest one asked decides, however
   // they resolve (tsk857).
   const providersSeq = useRef(0);
   const readProviders = useCallback(async () => {
-    if (capability === null) return;
+    if (capability === null || !bound) return;
     const mine = ++providersSeq.current;
     try {
       const out = await readCapabilityProviders(capability);
@@ -81,12 +96,12 @@ export function useReplacement(
       // Unknown whose it is: oxplow's own is always right to show.
       if (providersSeq.current === mine) setOwner(null);
     }
-  }, [capability, provider]);
+  }, [capability, provider, bound]);
   const readOff = useCallback(async () => {
     try {
-      setOff(await readReplacementsOff());
+      setChoices(await readChoices());
     } catch {
-      setOff([]);
+      setChoices({ off: [], chosen: {} });
     }
   }, []);
   useEffect(() => {
@@ -98,10 +113,14 @@ export function useReplacement(
     });
   }, [capability, readProviders, readOff]);
 
+  // Bound: the deciding provider's extension. Unbound: the person's
+  // choice, or the only candidate.
+  const decider = bound ? owner : (choices?.chosen[target] ?? (candidates.length === 1 ? candidates[0].extension : null));
+  const known = choices !== undefined && (!bound || owner !== undefined);
   const chosen =
-    owner === undefined || off === undefined || owner === null || off.includes(target)
+    !known || decider === null || decider === undefined || choices.off.includes(target)
       ? null
-      : (candidates.find((c) => c.extension === owner) ?? null);
+      : (candidates.find((c) => c.extension === decider) ?? null);
   const lens = chosen === null ? null : ((exts ?? []).flatMap((e) => e.lenses).find((l) => l.id === chosen.lensId) ?? null);
 
   const [ran, setRan] = useState<{ id: string; key: string; run: LensRun | null; error: string | null } | null>(null);
@@ -150,7 +169,7 @@ export function useReplacement(
 
   if (exts === null) return { state: "pending" };
   if (candidates.length === 0) return { state: "core" };
-  if (owner === undefined || off === undefined) return { state: "pending" };
+  if (!known) return { state: "pending" };
   if (chosen === null) return { state: "core" };
   if (lens === null) return { state: "failed", replacement: chosen, message: `its lens ${chosen.lensId} didn't load` };
   if (ran === null || ran.key !== runKey) return { state: "pending" };

@@ -95,6 +95,26 @@ test("query, invoke and navigate resolve with the host's replies", async () => {
   h.close();
 });
 
+test("navigate can ask for a new tab", async () => {
+  const opened: Array<[string, unknown]> = [];
+  const h = harness({
+    navigate: (ref, opts) => {
+      opened.push([ref, opts]);
+      return true;
+    },
+  });
+  const connecting = connect({ target: h.frame });
+  h.init();
+  const c = await connecting;
+  await c.navigate("commit:abc", { newTab: true });
+  await c.navigate("commit:def");
+  expect(opened).toEqual([
+    ["commit:abc", { newTab: true }],
+    ["commit:def", { newTab: false }],
+  ]);
+  h.close();
+});
+
 test("a refused request rejects with the host's code and message", async () => {
   const h = harness({
     invoke: async () => {

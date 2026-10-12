@@ -4906,6 +4906,13 @@ export type OxplowConfig = {
 	 */
 	replacementsOff: string[],
 	/**
+	 *  The person's choice among extensions replacing a target no provider
+	 *  binds (`replacements: { vcs.history.graph: oxplow-bundled }`): with
+	 *  one candidate it is chosen anyway; with several and no choice,
+	 *  oxplow's own shows.
+	 */
+	replacements: { [key in string]: string },
+	/**
 	 *  How long this project keeps each event namespace's payloads and
 	 *  large content (`eventRetention: { agent: { payloadDays,
 	 *  contentDays } }`), over core's defaults; an extension's namespace is
@@ -6267,11 +6274,13 @@ export type UiReplacement = {
 	extension: string,
 	// The core sub-component it replaces (`work_item.board`).
 	target: string,
-	/**
-	 *  The capability whose active provider must be this extension's for
-	 *  it to render.
-	 */
+	// The capability the target belongs to.
 	capability: string,
+	/**
+	 *  Only while this extension's provider is the deciding one does it
+	 *  render; otherwise the person's choice among candidates decides.
+	 */
+	boundToProvider: boolean,
 	// The lens that renders instead, given the target's props.
 	lensId: string,
 	// What a person calls the target (`board`), from its table.
