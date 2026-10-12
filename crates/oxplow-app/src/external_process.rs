@@ -80,3 +80,120 @@ impl Drop for RevocationWatch {
         self.0.abort();
     }
 }
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    /// A shell that starts a long-lived child of its own, notes its pid in
+    /// `pidfile`, and waits for it.
+    fn shell_with_child(pidfile: &std::path::Path) -> std::process::Child {
+        let mut command = Command::new("sh");
+        command
+            .arg("-c")
+            .arg(format!("sleep 300 & echo $! > {}; wait", pidfile.display()))
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        ProcessGroup::prepare(&mut command);
+        command.spawn().expect("sh starts")
+    }
+
+    fn pid_of(pidfile: &std::path::Path) -> i32 {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Some(pid) = std::fs::read_to_string(pidfile)
+                .ok()
+                .and_then(|text| text.trim().parse().ok())
+            {
+                return pid;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the shell never wrote its child's pid"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    fn alive(pid: i32) -> bool {
+        // SAFETY: signal 0 only probes whether the process exists.
+        unsafe { libc::kill(pid, 0) == 0 }
+    }
+
+    fn gone_soon(pid: i32) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            if !alive(pid) {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        false
+    }
+
+    #[test]
+    fn stopping_the_group_reaps_the_program_and_its_children() {
+        let dir = tempfile::tempdir().unwrap();
+        let pidfile = dir.path().join("pid");
+        let mut shell = shell_with_child(&pidfile);
+        let group = ProcessGroup::new(shell.id());
+        let grandchild = pid_of(&pidfile);
+        assert!(alive(grandchild));
+
+        group.stop();
+        let _ = shell.wait();
+        assert!(
+            gone_soon(grandchild),
+            "the child of the program outlived its group"
+        );
+        // Stopping again is harmless.
+        group.stop();
+    }
+
+    #[test]
+    fn dropping_the_group_and_a_failed_consent_check_also_reap_it() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // Drop.
+        let pidfile = dir.path().join("dropped");
+        let mut shell = shell_with_child(&pidfile);
+        let group = ProcessGroup::new(shell.id());
+        let grandchild = pid_of(&pidfile);
+        drop(group);
+        let _ = shell.wait();
+        assert!(gone_soon(grandchild));
+
+        // A revoked approval, seen by the watch, stops the whole group.
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+        let pidfile = dir.path().join("revoked");
+        let mut shell = shell_with_child(&pidfile);
+        let group = ProcessGroup::new(shell.id());
+        let grandchild = pid_of(&pidfile);
+        let approved = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let gate: crate::exec_consent::Gate = {
+            let approved = approved.clone();
+            std::sync::Arc::new(move || {
+                if approved.load(std::sync::atomic::Ordering::Acquire) {
+                    Ok(())
+                } else {
+                    Err("revoked".into())
+                }
+            })
+        };
+        let watch = runtime.block_on(async { RevocationWatch::start(group, gate) });
+        assert!(alive(grandchild), "approved: left running");
+        approved.store(false, std::sync::atomic::Ordering::Release);
+        assert!(
+            gone_soon(grandchild),
+            "revocation stops the group within the poll interval"
+        );
+        let _ = shell.wait();
+        drop(watch);
+    }
+}

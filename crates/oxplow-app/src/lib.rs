@@ -81,6 +81,8 @@ pub mod extension_commands;
 pub mod extension_configuration;
 pub mod extension_event_types;
 pub mod extension_generation;
+#[cfg(test)]
+mod extension_grants_tests;
 pub mod extension_impact;
 #[cfg(test)]
 mod extension_imports_tests;
