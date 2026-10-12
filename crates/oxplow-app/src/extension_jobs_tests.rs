@@ -98,25 +98,11 @@ async fn start(svc: &Arc<crate::Services>, approve_jobs: bool) {
 }
 
 fn approve(svc: &crate::Services, kind: crate::exec_consent::ProgramKind) {
-    let project = svc.layout.project_dir.clone();
-    let config = svc.config.read().unwrap().clone();
-    let extensions = svc.extension_catalog.get(&project);
-    let programs = crate::exec_consent::list(&svc.approvals, &project, &config, &extensions);
-    let mut approved = 0;
-    for p in programs.into_iter().filter(|p| p.kind == kind) {
-        crate::exec_consent::approve_program(
-            &svc.approvals,
-            &project,
-            &config,
-            &extensions,
-            p.kind,
-            &p.name,
-            p.version.as_deref().expect("a version to approve"),
-        )
-        .expect("approved");
-        approved += 1;
-    }
-    assert!(approved > 0, "a {kind:?} program is listed to approve");
+    let approved = crate::exec_consent::approve_every(svc, kind).expect("approved");
+    assert!(
+        !approved.is_empty(),
+        "a {kind:?} program is listed to approve"
+    );
 }
 
 async fn run(fx: &Fixture, command: &str, input: Value) -> Value {

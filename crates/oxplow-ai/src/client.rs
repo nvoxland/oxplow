@@ -441,15 +441,17 @@ pub struct UnknownProviderKind {
     pub registered: Vec<String>,
 }
 
-/// The model providers the project's extensions declare, by kind. Cloning
+/// The model providers the project's extensions declare, by kind, and the
+/// few the host registers itself (a preview's fixture model). Cloning
 /// shares them.
 #[derive(Clone, Default)]
 pub struct ModelProviders {
     providers: Arc<RwLock<BTreeMap<String, Arc<dyn ModelProvider>>>>,
+    host: Arc<RwLock<BTreeMap<String, Arc<dyn ModelProvider>>>>,
 }
 
 impl ModelProviders {
-    /// Replace what's registered.
+    /// Replace what the extensions register; the host's kinds stay.
     pub fn set(&self, providers: Vec<Arc<dyn ModelProvider>>) {
         *self.providers.write().unwrap_or_else(|e| e.into_inner()) = providers
             .into_iter()
@@ -457,25 +459,47 @@ impl ModelProviders {
             .collect();
     }
 
+    /// Register a kind the host provides, which no activation replaces.
+    pub fn register_host(&self, provider: Arc<dyn ModelProvider>) {
+        self.host
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(provider.kind().to_string(), provider);
+    }
+
     /// Every registered kind, sorted.
     pub fn kinds(&self) -> Vec<String> {
-        self.providers
+        let mut kinds: Vec<String> = self
+            .providers
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .keys()
+            .chain(self.host.read().unwrap_or_else(|e| e.into_inner()).keys())
             .cloned()
-            .collect()
+            .collect();
+        kinds.sort();
+        kinds.dedup();
+        kinds
     }
 
     pub fn get(&self, kind: &str) -> Result<Arc<dyn ModelProvider>, UnknownProviderKind> {
-        let providers = self.providers.read().unwrap_or_else(|e| e.into_inner());
-        providers
+        let found = self
+            .providers
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
             .get(kind)
             .cloned()
-            .ok_or_else(|| UnknownProviderKind {
-                kind: kind.to_string(),
-                registered: providers.keys().cloned().collect(),
-            })
+            .or_else(|| {
+                self.host
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(kind)
+                    .cloned()
+            });
+        found.ok_or_else(|| UnknownProviderKind {
+            kind: kind.to_string(),
+            registered: self.kinds(),
+        })
     }
 }
 
@@ -619,6 +643,21 @@ mod tests {
                 registered: vec!["echo".into()]
             }
         );
+    }
+
+    /// A kind the host registers (a preview's fixture model) isn't the
+    /// extensions' to replace: an activation's `set` keeps it.
+    #[test]
+    fn a_host_kind_outlives_what_extensions_register() {
+        let r = ModelProviders::default();
+        r.register_host(Arc::new(crate::fixture::FixtureModel::new(vec![
+            "hi".into()
+        ])));
+        r.set(vec![Arc::new(Echo)]);
+        assert_eq!(r.kinds(), ["echo", "fixture"]);
+        assert_eq!(r.get("fixture").unwrap().kind(), "fixture");
+        r.set(Vec::new());
+        assert_eq!(r.kinds(), ["fixture"]);
     }
 
     #[test]

@@ -236,23 +236,8 @@ pub async fn new_thread(
 /// the shipped ones too — as a person does in Settings → Data → Programs,
 /// so a test's model calls go out.
 pub fn approve_ai_providers(svc: &crate::Services) {
-    let project = svc.layout.project_dir.clone();
-    let config = svc.config.read().unwrap().clone();
-    let extensions = svc.extension_catalog.get(&project);
-    for p in crate::exec_consent::list(&svc.approvals, &project, &config, &extensions) {
-        if p.kind == crate::exec_consent::ProgramKind::AiProvider {
-            crate::exec_consent::approve_program(
-                &svc.approvals,
-                &project,
-                &config,
-                &extensions,
-                p.kind,
-                &p.name,
-                p.version.as_deref().expect("a version to approve"),
-            )
-            .expect("approved");
-        }
-    }
+    crate::exec_consent::approve_every(svc, crate::exec_consent::ProgramKind::AiProvider)
+        .expect("approved");
 }
 
 /// A tool hook's call as the hook route maps it (`AgentHarness::tool_use`
