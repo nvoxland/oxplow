@@ -1107,6 +1107,20 @@ and one calling MCP read identical `file:line: what — fix` lines.
   - `collector` — a Starlark collector `items` over `v_work_item` declaring
     entity `item`, a model `open_items` over `ref('item')` and a lens over
     the model; its example runs the collector over fixture rows;
+  - `metric` — a code metric, built by `oxplow_app::metric_scaffold::
+    extension_files` (the one template: `oxplow.metric.scaffold` hands the
+    same files to the agent to write). `--language` (default `rust`; the
+    ones with a sample: rust, typescript, javascript, python, go, c, cpp)
+    and `--glob` (`*` and `**` only; default the language's files) go
+    through `scaffold_with` and `MetricStarter`. It declares a per-path,
+    semi-additive `<ns>.complex_functions` measure on files, the
+    `<ns>.area` dimension (the top folder), a Starlark collector `<ns>.scan`
+    on `snapshot.taken` (`source_files()` + `code_metrics()`: one fact per
+    file with functions over `LIMIT`, carrying the worst function's line
+    and `dims: {<ns>.area}`), the `sum` metric (`lower-better`, sliced by
+    the area) and a Code launcher lens over `metric_findings()` whose
+    `path` column links `file` at the `line` column. Its example runs the
+    collector over a two-folder fixture corpus and expects the facts;
   - `command` — `commands: [note]` whose `handlers/note.star` composes
     `oxplow.work_item.comment`, with an example and a `ui` about
     `work_item`; its intent example dry-runs it;
@@ -1145,8 +1159,13 @@ and one calling MCP read identical `file:line: what — fix` lines.
   a Starlark collector's script must parse and define `transform`, an
   error at the collector's line) plus `extensions::validate_extension`'s
   dry run — **always** (P7.C6): on `layer` (the project's database,
-  read-only), else on a fresh `Database::in_memory()` (`DryRun::{Project,
-  EmptyDatabase}`). The dry run first compiles, in a rolled-back read,
+  read-only), else on the throwaway oxplow's empty in-memory one, which
+  has the extension's models and metrics seeded so a lens may read
+  `metric_grid()` / `metric_findings()` (`DryRun::{Project,
+  EmptyDatabase}`; the CLI's project layer is `SqlGateway::with_metrics`,
+  so those functions resolve there too — a metric not yet seeded in that
+  database is `no metric … (see v_metric_spec)` until the app has loaded
+  the extension). The dry run first compiles, in a rolled-back read,
   the extension's models beside the other enabled extensions' (P4.9 —
   resolution, lineage, and the contract, so a changed contract at a
   published version fails here before it publishes) over **empty

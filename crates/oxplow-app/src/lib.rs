@@ -127,6 +127,7 @@ pub mod metric_cube;
 pub mod metric_engine;
 pub mod metric_findings;
 pub mod metric_grid;
+pub mod metric_scaffold;
 pub mod metric_visibility;
 pub mod metrics_service;
 pub mod models_changed;

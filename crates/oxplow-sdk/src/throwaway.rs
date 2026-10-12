@@ -44,6 +44,9 @@ impl Host {
             .await
             .map_err(|e| e.to_string())?;
         svc.extension_commands.reconcile().await;
+        // Their measures and metrics, so a lens reading `metric_grid()` or
+        // `metric_findings()` resolves its metric.
+        svc.metrics.seed_catalog().await;
         Ok(Host {
             _dir: dir,
             root,

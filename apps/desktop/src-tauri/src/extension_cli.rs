@@ -14,14 +14,18 @@ use oxplow_sdk::{Format, Kind};
 
 const USAGE: &str = "\
 usage:
-  oxplow extension new <lens|extension|provider|collector|command|effect|component|policy|advisory|skill|page|panel> <name> [--origin <ref>] [--capability <cap>] [--root <dir>]
+  oxplow extension new <lens|extension|provider|collector|metric|command|effect|component|policy|advisory|skill|page|panel> <name> [--origin <ref>] [--capability <cap>] [--language <lang>] [--glob <glob>] [--root <dir>]
       scaffold oxplow/extensions/<name>/ with a v2 manifest, an intent
       (--origin = the effort/thread ref that asked for it), one example
       and its fixture, and the kind's starter: a lens with a row action; a
       provider of --capability (work_items, the default, effort_policy,
       agent_harness, snapshots or knowledge)
       with its contract's declarations, a stub program and test config; a Starlark
-      collector with a model and a lens over it; a command composing core
+      collector with a model and a lens over it; a code metric (--language,
+      default rust, over --glob, default the language's files): a per-path
+      measure, a collector counting each file's functions over a complexity
+      limit, its area dimension, the metric and a lens linking to the file
+      and line; a command composing core
       commands; an effect reacting to an event; a custom component with
       its lens and bundle; an effort policy script; an advisory; a skill;
       a page or a panel over a lens. Each checks clean
@@ -89,6 +93,9 @@ struct Parsed {
     origin: Option<String>,
     /// `new provider --capability`: the capability it implements.
     capability: Option<String>,
+    /// `new metric --language` / `--glob`: what it scans.
+    language: Option<String>,
+    glob: Option<String>,
     root: Option<PathBuf>,
     json: bool,
     bless: bool,
@@ -104,6 +111,8 @@ fn parse(args: &[String]) -> Result<Parsed, Failure> {
         positional: Vec::new(),
         origin: None,
         capability: None,
+        language: None,
+        glob: None,
         root: None,
         json: false,
         bless: false,
@@ -125,6 +134,20 @@ fn parse(args: &[String]) -> Result<Parsed, Failure> {
                 p.capability = Some(
                     it.next()
                         .ok_or_else(|| Failure::Usage("--capability needs a capability".into()))?
+                        .clone(),
+                )
+            }
+            "--language" => {
+                p.language = Some(
+                    it.next()
+                        .ok_or_else(|| Failure::Usage("--language needs a language".into()))?
+                        .clone(),
+                )
+            }
+            "--glob" => {
+                p.glob = Some(
+                    it.next()
+                        .ok_or_else(|| Failure::Usage("--glob needs a glob".into()))?
                         .clone(),
                 )
             }
@@ -182,7 +205,15 @@ fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Resul
                 .next()
                 .ok_or_else(|| Failure::Usage("new needs a name".into()))?;
             let root = p.root.clone().unwrap_or_else(cwd);
-            let made = oxplow_sdk::scaffold(&root, kind, name, p.origin.as_deref())?;
+            if kind != Kind::Metric && (p.language.is_some() || p.glob.is_some()) {
+                return Err(Failure::Usage(
+                    "--language and --glob are a metric's: `new metric <name> --language rust --glob '**/*.rs'`"
+                        .into(),
+                ));
+            }
+            let starter = oxplow_sdk::MetricStarter::new(p.language.as_deref(), p.glob.as_deref())
+                .map_err(Failure::Usage)?;
+            let made = oxplow_sdk::scaffold_with(&root, kind, name, p.origin.as_deref(), &starter)?;
             let _ = writeln!(out, "created {}", made.dir);
             for f in &made.files {
                 let _ = writeln!(out, "  {f}");
@@ -215,7 +246,7 @@ fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Resul
                     }
                 }
             });
-            let layer = db.map(oxplow_app::sql_gateway::SqlGateway::new);
+            let layer = db.map(oxplow_app::sql_gateway::SqlGateway::with_metrics);
             // No running oxplow to ask which commands exist: the check
             // starts a throwaway one, and its impact review uses the same.
             let against = (p.impact || p.against.is_some())
@@ -485,6 +516,47 @@ mod tests {
         ]);
         assert_eq!(code, 2, "{err}");
         assert!(err.contains("--capability"), "{err}");
+    }
+
+    /// `new metric` takes the language and files it scans; the flags are a
+    /// metric's alone.
+    #[test]
+    fn new_metric_takes_a_language_and_glob() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_str().unwrap();
+        let (code, _, err) = cli(&[
+            "new",
+            "metric",
+            "busy-ts",
+            "--language",
+            "typescript",
+            "--glob",
+            "web/**/*.ts",
+            "--root",
+            root,
+        ]);
+        assert_eq!(code, 0, "{err}");
+        let script = std::fs::read_to_string(
+            dir.path()
+                .join("oxplow/extensions/busy-ts/collectors/complex_functions.star"),
+        )
+        .unwrap();
+        assert!(script.contains("LANGUAGE = \"typescript\""), "{script}");
+        assert!(script.contains("GLOB = \"web/**/*.ts\""), "{script}");
+        let (code, _, err) = cli(&[
+            "new",
+            "metric",
+            "odd",
+            "--glob",
+            "**/*.{rs,toml}",
+            "--root",
+            root,
+        ]);
+        assert_eq!(code, 2, "{err}");
+        assert!(err.contains("`*` and `**` only"), "{err}");
+        let (code, _, err) = cli(&["new", "lens", "demo", "--glob", "**/*.rs", "--root", root]);
+        assert_eq!(code, 2, "{err}");
+        assert!(err.contains("a metric's"), "{err}");
     }
 
     /// `check` must never migrate or write the project's database, and an

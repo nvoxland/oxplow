@@ -19,6 +19,10 @@ failure after your edit is yours:
 - `lens` — a lens over open tasks with a row action (Start);
 - `collector` — a Starlark collector of an entity, a model over it
   (`ref('item')`) and a lens over the model;
+- `metric` — a code metric: a per-path measure, a Starlark collector
+  counting each file's functions over a complexity limit, the dimension
+  its facts carry, the headline metric and a lens linking to the file and
+  line (`--language`, `--glob`; the `oxplow-metrics` skill teaches it);
 - `command` — a command whose script comments on a work item, on a work
   item's Commands menu;
 - `provider` — an external provider's declarations and a stub program

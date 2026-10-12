@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 
 use oxplow_app::extension_catalog::ExtensionCatalog;
 use oxplow_app::extensions::{self, Extension, EXTENSIONS_DIR};
+pub use oxplow_app::metric_scaffold::MetricStarter;
 use oxplow_app::sql_gateway::SqlGateway;
 use oxplow_domain::contribution::ContributionKind;
 use oxplow_domain::DomainError;
@@ -52,6 +53,10 @@ pub enum Kind {
     /// A derived (Starlark) collector of an entity, a model over it and a
     /// lens over the model.
     Collector,
+    /// A code metric: a per-path measure, a Starlark fact collector over the
+    /// snapshot's files, the dimension its facts carry, the headline metric
+    /// and a lens whose rows link to the file and line.
+    Metric,
     /// A command whose script composes core commands, on a work item's
     /// Commands menu.
     Command,
@@ -78,7 +83,7 @@ pub enum Kind {
 }
 
 impl Kind {
-    pub const NAMES: &'static str = "`lens`, `extension`, `provider`, `collector`, `command`, `effect`, `component`, `policy`, `advisory`, `skill`, `page` or `panel`";
+    pub const NAMES: &'static str = "`lens`, `extension`, `provider`, `collector`, `metric`, `command`, `effect`, `component`, `policy`, `advisory`, `skill`, `page` or `panel`";
 
     pub fn parse(s: &str) -> Option<Kind> {
         match s {
@@ -88,6 +93,7 @@ impl Kind {
                 capability: "work_items",
             }),
             "collector" => Some(Kind::Collector),
+            "metric" => Some(Kind::Metric),
             "command" => Some(Kind::Command),
             "effect" => Some(Kind::Effect),
             "component" => Some(Kind::Component),
@@ -143,6 +149,19 @@ pub fn scaffold(
     name: &str,
     origin: Option<&str>,
 ) -> Result<Scaffolded, SdkError> {
+    scaffold_with(root, kind, name, origin, &MetricStarter::default())
+}
+
+/// [`scaffold`], with the language and files a `Kind::Metric` scans
+/// (`extension new metric <name> --language … --glob …`); every other kind
+/// ignores `metric`.
+pub fn scaffold_with(
+    root: &Path,
+    kind: Kind,
+    name: &str,
+    origin: Option<&str>,
+    metric: &MetricStarter,
+) -> Result<Scaffolded, SdkError> {
     if !oxplow_domain::contribution::valid_extension_name(name) {
         return Err(SdkError::Invalid(format!(
             "`{name}` must start with a letter and be lowercase letters, digits and single dashes (e.g. `review-notes`)"
@@ -162,6 +181,24 @@ pub fn scaffold(
         return Err(SdkError::Invalid(format!(
             "{rel_dir} already exists; pick another name or edit it in place"
         )));
+    }
+    if kind == Kind::Metric {
+        // The metric extension is one template, shared with the
+        // `oxplow.metric.scaffold` command.
+        let mut files = Vec::new();
+        for file in oxplow_app::metric_scaffold::extension_files(name, origin, metric) {
+            let path = root.join(&file.path);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(path, file.content)?;
+            files.push(file.path);
+        }
+        return Ok(Scaffolded {
+            name: name.to_string(),
+            dir: rel_dir,
+            files,
+        });
     }
     let mut files = Vec::new();
     let mut write = |rel: &str, body: String| -> Result<(), SdkError> {
@@ -205,6 +242,7 @@ pub fn scaffold(
             "one item per work item that isn't done",
             Some("{ entities: { item: 1 } }".to_string()),
         ),
+        Kind::Metric => unreachable!("a metric is written from its template above"),
         Kind::Command => (
             format!("{{ command: {ns}.notes.add, input: {{ ref: \"work_item:oxplow:tsk1\" }} }}"),
             "a comment on the work item",
@@ -372,7 +410,7 @@ pub fn scaffold(
             panel = ContributionKind::Panel.spec().title.to_lowercase(),
             title = title_case(name)
         )),
-        Kind::Lens | Kind::Extension => {}
+        Kind::Lens | Kind::Extension | Kind::Metric => {}
     }
     write(&format!("{rel_dir}/extension.yaml"), manifest)?;
     if let Some(expect) = fixture_expect {
@@ -612,7 +650,7 @@ def transform(x):
 "#
             .to_string(),
         )?,
-        Kind::Extension | Kind::Advisory => {}
+        Kind::Extension | Kind::Advisory | Kind::Metric => {}
     }
     Ok(Scaffolded {
         name: name.to_string(),
@@ -975,11 +1013,14 @@ pub async fn check(
         host.as_ref()
             .map(|h| h.svc.commands.as_ref() as extensions::CommandSchemas<'_>)
     });
+    // No project database: the throwaway oxplow's, which is empty but has
+    // the extension's models and metrics (a lens may read both).
     let empty;
-    let (layer, dry_run) = match layer {
-        Some(layer) => (layer, DryRun::Project),
-        None => {
-            empty = SqlGateway::new(oxplow_db::Database::in_memory());
+    let (layer, dry_run) = match (layer, host.as_ref()) {
+        (Some(layer), _) => (layer, DryRun::Project),
+        (None, Some(host)) => (&host.svc.sql, DryRun::EmptyDatabase),
+        (None, None) => {
+            empty = SqlGateway::with_metrics(oxplow_db::Database::in_memory());
             (&empty, DryRun::EmptyDatabase)
         }
     };
@@ -1199,6 +1240,7 @@ mod tests {
             Kind::provider("snapshots").unwrap(),
             Kind::provider("knowledge").unwrap(),
             Kind::Collector,
+            Kind::Metric,
             Kind::Command,
             Kind::Effect,
             Kind::Component,
