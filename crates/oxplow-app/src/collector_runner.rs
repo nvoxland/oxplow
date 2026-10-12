@@ -722,7 +722,7 @@ pub async fn derive_collector(
                 &spec.id,
                 sql,
                 anchor_params(event, Anchored::default()),
-                Some(&run),
+                &run,
             )
             .await?
         }
@@ -951,22 +951,15 @@ pub fn anchor_params(event: Option<&EventView>, known: Anchored) -> Vec<(String,
 /// A collector's `input` rows: its read-only `sql` with `params` bound, as
 /// objects, and — when it declares a `limit` — whether they were all of
 /// them. Without a limit, more than the row cap fails rather than handing
-/// over a partial set.
-pub async fn input_rows(
-    layer: &crate::sql_gateway::SqlGateway,
-    id: &str,
-    input: &oxplow_config::collectors::CollectorInput,
-    params: Vec<(String, SqlCell)>,
-) -> Result<InputRows, String> {
-    input_rows_for_run(layer, id, input, params, None).await
-}
-
+/// over a partial set. Runs under `run`'s authority: the `sql.read` grant
+/// decides, the query is bounded to the run's reach, and the authority is
+/// checked again once it returns.
 pub(crate) async fn input_rows_for_run(
     layer: &crate::sql_gateway::SqlGateway,
     id: &str,
     input: &oxplow_config::collectors::CollectorInput,
     params: Vec<(String, SqlCell)>,
-    run: Option<&RunContext>,
+    run: &RunContext,
 ) -> Result<InputRows, String> {
     const _: () = assert!(
         oxplow_config::collectors::MAX_INPUT_ROWS <= oxplow_db::semantic_layer::MAX_ROW_LIMIT
@@ -977,22 +970,17 @@ pub(crate) async fn input_rows_for_run(
     let mut query = oxplow_db::semantic_layer::SqlQuery::new(&input.sql)
         .named(params)
         .limit(Some(limit));
-    if let Some(run) = run {
-        match run.decide_service("sql.read") {
-            oxplow_domain::grant::Decision::Allowed => (),
-            oxplow_domain::grant::Decision::Denied(reason)
-            | oxplow_domain::grant::Decision::Unenforced(reason) => return Err(reason),
-        }
-        crate::grants::bound_query(run, &mut query);
+    match run.decide_service("sql.read") {
+        oxplow_domain::grant::Decision::Allowed => (),
+        oxplow_domain::grant::Decision::Denied(reason)
+        | oxplow_domain::grant::Decision::Unenforced(reason) => return Err(reason),
     }
-    let out = match run {
-        Some(run) => layer.run_in(run, query).await,
-        None => layer.run(query).await,
-    }
-    .map_err(|e| format!("collector `{id}` input: {e}"))?;
-    if let Some(run) = run {
-        run.check_authority()?;
-    }
+    crate::grants::bound_query(run, &mut query);
+    let out = layer
+        .run_in(run, query)
+        .await
+        .map_err(|e| format!("collector `{id}` input: {e}"))?;
+    run.check_authority()?;
     if out.truncated && input.limit.is_none() {
         return Err(format!(
             "collector `{id}` input returned more than {limit} rows; narrow it, or declare \

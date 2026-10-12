@@ -2739,7 +2739,7 @@ impl MetricsService {
                     thread_id: ctx.thread_id,
                 },
             );
-            crate::collector_runner::input_rows_for_run(&log.layer, &c.key, sql, params, Some(run))
+            crate::collector_runner::input_rows_for_run(&log.layer, &c.key, sql, params, run)
                 .await?
                 .into_input(&mut input);
         }
