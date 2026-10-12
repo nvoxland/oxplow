@@ -162,7 +162,7 @@ async fn a_scaffolded_metric_checks_tests_and_declares_its_blocks() {
         panic!("one metric: {:?}", ext.metrics)
     };
     assert_eq!(metric.source_measure.as_deref(), Some(key));
-    assert_eq!(metric.display_kind, None, "no gauge presentation");
+    assert_eq!(metric.display_kind.as_deref(), Some("findings"));
     // A Starlark fact collector on snapshot.taken over that measure.
     let [collector] = ext.collectors.as_slice() else {
         panic!("one collector: {:?}", ext.collectors)

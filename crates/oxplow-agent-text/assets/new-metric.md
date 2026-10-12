@@ -1,5 +1,5 @@
 ---
-description: Author an oxplow metric — a durable, chartable number tracked over time (count of X, complexity, bundle size, …). Scaffolds the .oxplow/project.yaml measure+collector+metric trio + script and verifies it.
+description: Author an oxplow metric — a durable, chartable number tracked over time (count of X, complexity, bundle size, …). Scaffolds a private extension (measure + collector + dimension + metric + lens) and verifies it.
 ---
 
 Author a metric so oxplow tracks a number over time and charts it on the
@@ -22,80 +22,85 @@ count, high-complexity functions, `any` usage, …), just turn it on with the
 `oxplow.metric.enable` command (`run_command`):
 `{ "keys": ["oxplow.rust.unsafe_blocks"], "enabled": true }`.
 
-## 3. Otherwise define the trio (measure + collector + metric)
+## 3. Otherwise scaffold a metric extension
 
-Fastest path — the **`oxplow.metric.scaffold` command** (`run_command`). It writes
-nothing: it returns a starter collector script and the measure + collector + metric
-trio as a `.oxplow/project.yaml` snippet.
+A metric you author is a private **extension** under
+`oxplow/extensions/<name>/`: it declares the measure, the collector, the
+dimension its facts carry, the metric and a lens that links to the files,
+and it has a fixture that proves the collector. Scaffold it with the
+**`oxplow.metric.scaffold` command** (`run_command`), which writes nothing and
+returns the files:
 
 ```
-oxplow.metric.scaffold { key: "repo.todo_count", title: "TODO comments", language: "rust" }
-→ { "scriptPath": "oxplow/collectors/repo_todo_count.star", "script": "…", "projectYaml": "measures: …" }
+oxplow.metric.scaffold { name: "complex-fns", language: "rust", glob: "src/**/*.rs", origin: "<your effort ref>" }
+→ { "name": "complex-fns", "dir": "oxplow/extensions/complex-fns",
+    "files": [ { "path": "oxplow/extensions/complex-fns/extension.yaml", "content": "…" }, … ] }
 ```
 
-1. Write `script` at `scriptPath`, changed to compute what the user
-   actually asked for (the starter just counts TODO/FIXME per file; it can
-   call `files(glob)` / `ast_query(text, language, sexpr)` /
-   `code_metrics(text, language)`).
-2. Add each entry with `oxplow.config.set` (`run_command`): `oxplow.config.get` the
-   `measures` / `collectors` / `metrics` list, append the new entry, and set the
-   list back. `collectors` is person-only (a collector runs a program), so that
-   `oxplow.config.set` asks the person to confirm. The catalog reseeds on the change.
+(From a terminal, `oxplow extension new metric complex-fns --language rust
+--glob 'src/**/*.rs' --origin <ref>` writes the same files.) Write each file
+with your file tools, then change them into what the user asked for:
 
-Then jump to **Verify**.
+- `collectors/complex_functions.star` — the starter counts each file's
+  functions over a complexity `LIMIT` with `source_files()` and
+  `code_metrics()`, and records **one fact per file** (`value`, `path`, the
+  worst function's `line`, and `dims: { <ns>.area: <top folder> }`). Change
+  what it counts; keep one atomic fact per subject, never a total.
+- `extension.yaml` — the `measures:`, `dimensions:`, `collectors:` and
+  `metrics:` blocks (namespaced `<ns>.*`, the name with `_` for `-`); set
+  `direction`, `target`/`warnAt`/`failAt`, and write the `description` and
+  `intent.purpose` TODOs.
+- `fixtures/basic.yaml` and the intent example — a small corpus
+  (`files: { path: text }`) and the facts it must produce. Change them with
+  the script; they are the proof the collector is right.
+- `lenses/<name>.yaml` — a launcher lens over `metric_findings('<metric>')`
+  whose `path` column links to the file at the `line` column.
 
-The trio (namespaced — `oxplow.*` is reserved) and its collector script under
-`oxplow/collectors/` look like this:
+The trio in `extension.yaml` looks like this (all of it is generated):
 
 ```yaml
 measures:
-  - key: repo.todo_count           # the fact TYPE
+  - key: complex_fns.complex_functions   # the fact TYPE
     subjectKind: file
     unit: count
+    temporalSemantics: semi-additive     # the latest count is the answer
+    captureScope: per-path               # a snapshot rescans only the files it changed
+dimensions:
+  - key: complex_fns.area                # the slice axis the facts' dims use
 collectors:
-  - id: repo.todo                  # the PRODUCER
-    doc: TODO comment scan
+  - id: complex_fns.scan                 # the PRODUCER
     runtime: starlark
-    entry: oxplow/collectors/todo.star
+    entry: collectors/complex_functions.star
     trigger: { on: [snapshot.taken] }
-    facts: [repo.todo_count]       # the measures it may record
+    facts: [complex_fns.complex_functions]
 metrics:
-  - key: repo.todo_count           # the SPEC
-    title: "TODO comments"
-    sourceMeasure: repo.todo_count
+  - key: complex_fns.complex_functions   # the SPEC
+    sourceMeasure: complex_fns.complex_functions
     aggregation: sum
     direction: lower-better
-    unit: count
+    displayKind: findings
+    sliceableDims: [complex_fns.area]
 ```
 
-```python
-# oxplow/collectors/todo.star — one per-file FACT (not a baked total)
-def transform(input):
-    facts = []
-    for f in files("**/*.rs"):
-        c = 0
-        for cm in ast_query(f["text"], "rust", "[(line_comment) (block_comment)] @c"):
-            c += len(regex_find(r"(?i)\b(TODO|FIXME)\b", cm["text"]))
-        if c > 0:
-            facts.append({"measure": "repo.todo_count", "value": c,
-                          "subject": "file:" + f["path"], "path": f["path"]})
-    return {"facts": facts}
-```
-
-The collector returns `{ "facts": [ { "measure", "value", "subject"?, "path"?, "dims"? } ] }`
-— one atomic fact per subject; the `metrics:` spec (`aggregation: sum`) re-adds
-them. Read the `oxplow-metrics` skill for the four-block model, the full builtin
-surface (`files`/`ast_query`/`code_metrics`/`regex_find`/…) and the report-derived
-+ exec patterns. The bundled scripts in
-`crates/oxplow-script/src/metrics/<lang>/` are copy-paste
-templates.
+Read the `oxplow-metrics` skill for the four-block model, the full builtin
+surface (`files`/`ast_query`/`code_metrics`/`regex_find`/…) and when a
+project-level `exec` or report-derived collector is the right home instead.
+The bundled scripts in `crates/oxplow-script/src/metrics/<lang>/` are
+copy-paste templates.
 
 ## 4. Verify
 
-1. `oxplow.collector.sync { owner: "project", id: "repo.todo" }` (`run_command`) —
-   runs the collector now, returns the `facts` count.
-2. `query_sql`: `SELECT bucket, MEASURE('repo.todo_count') FROM metric_grid('day')`
-   — confirm the value.
-3. It now appears on the Metrics page automatically.
+1. `oxplow extension check <name>` — no errors and no warnings (or
+   `validate_extension`). It dry-runs the lens, so a bad query shows here.
+2. `oxplow extension test <name>` — the collector runs over the fixture's
+   files and must return the facts the example expects.
+3. Once the extension loads, `oxplow.collector.sync { owner: "<name>", id:
+   "<ns>.scan" }` (`run_command`) runs the collector now and returns the
+   `facts` count.
+4. `query_sql`: `SELECT bucket, MEASURE('<ns>.complex_functions') FROM
+   metric_grid('day')` — confirm the value; slice it with `metric_grid('day',
+   '<ns>.area')`.
+5. It appears on the Metrics page automatically, and the lens in the launcher
+   (Code).
 
-Leave the `.oxplow/project.yaml` + script diffs for the user to review (committed files).
+Leave the new extension folder for the user to review (committed files).

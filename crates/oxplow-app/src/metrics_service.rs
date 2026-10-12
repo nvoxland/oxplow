@@ -1224,105 +1224,50 @@ impl MetricsService {
         }
     }
 
-    /// A new collector-backed metric, as a template (epic tsk12, E; tsk391):
-    /// a starter Starlark collector script plus the **trio** that wires it
-    /// up — a `measures:` entry (`<key>.count`, the fact type it records), a
-    /// `collectors:` entry (`<key>`, the producer) and a `metrics:` spec
-    /// (`<key>`, a `sum` over that measure) as a `.oxplow/project.yaml`
-    /// snippet. Writes nothing: the agent writes the script and merges the
-    /// snippet with its own file tools, so the write guard and its
-    /// worktree apply (the extensions "no scaffold tools" rule). A config
-    /// change reseeds the catalog once they land.
+    /// A new code metric, as a template: the files of a private extension
+    /// (`crate::metric_scaffold`, the same template `oxplow extension new
+    /// metric` writes) — a per-path measure, a Starlark fact collector, the
+    /// dimension its facts carry, the metric and a lens that links to the
+    /// file and line, with an example and its fixture. Writes nothing: the
+    /// agent writes the files with its own tools, so the write guard and
+    /// its worktree apply (the extensions "no scaffold tools" rule). The
+    /// catalog reseeds once the extension loads.
     pub fn metric_scaffold(
         &self,
-        key: &str,
-        title: Option<String>,
+        name: &str,
+        origin: Option<String>,
         language: Option<String>,
         glob: Option<String>,
     ) -> Result<MetricScaffold, String> {
-        let key = key.trim();
-        if key.is_empty() || !key.contains('.') {
-            return Err("key must be namespaced, e.g. acme.my_metric".to_string());
+        let name = name.trim();
+        if !oxplow_domain::contribution::valid_extension_name(name) {
+            return Err(format!(
+                "`{name}` must start with a letter and be lowercase letters, digits and single dashes (e.g. `complex-fns`)"
+            ));
         }
-        if key.starts_with("oxplow.") {
-            return Err("`oxplow.` is reserved for built-in metrics".to_string());
+        if oxplow_domain::contribution::reserved_name(name) {
+            return Err(format!("`{name}` is reserved for oxplow's own extensions"));
         }
-        {
-            let cfg = self
-                .config
-                .read()
-                .map_err(|_| "config lock poisoned".to_string())?;
-            if cfg.metrics.iter().any(|e| e.key.as_deref() == Some(key))
-                || cfg.collectors.iter().any(|c| c.id == key)
-            {
-                return Err(format!(
-                    "metric `{key}` already exists in .oxplow/project.yaml"
-                ));
-            }
+        if let Some(origin) = origin.as_deref() {
+            oxplow_domain::refs::grammar::CanonicalRef::parse(origin).map_err(|e| {
+                format!(
+                    "origin `{origin}` is not a canonical ref (`effort:eff42`, `thread:thr3`): {}",
+                    e.reason()
+                )
+            })?;
         }
-        let glob = glob
-            .filter(|g| !g.is_empty())
-            .unwrap_or_else(|| "**/*".into());
-        let language = language.filter(|l| !l.is_empty());
-        let slug = slugify(key);
-        let measure_key = format!("{key}.count");
-        let title = title.filter(|t| !t.is_empty());
-        let script = starter_collector_script(key, &measure_key, &glob, language.as_deref());
-        let script_path = format!("oxplow/collectors/{slug}.star");
-
-        // The `<key>.count` measure the gauge emits (per-file counts). A scaffolded
-        // gauge is snapshot-triggered and emits per-FILE facts over a delta, so it
-        // is `per-path` by construction (tsk41) — otherwise its metric would read as
-        // "only the files in the last commit". Scaffolding it correctly by default
-        // is what stops the original bug from being re-introduced by every new gauge.
-        let measure = MeasureEntry {
-            key: Some(measure_key.clone()),
-            title: Some(format!("{key} (per-file count)")),
-            unit: Some("count".to_string()),
-            subject_kind: Some("file".to_string()),
-            temporal_semantics: Some("semi-additive".to_string()),
-            capture_scope: Some("per-path".to_string()),
-            description: None,
-        };
-        // The collector (producer) — records `<key>.count` facts on every
-        // snapshot.
-        let mut collector = serde_yaml::Mapping::new();
-        collector.insert("id".into(), key.into());
-        if let Some(t) = &title {
-            collector.insert("doc".into(), t.as_str().into());
+        let dir = format!("{}/{name}", crate::extensions::EXTENSIONS_DIR);
+        if self.project_dir.join(&dir).exists() {
+            return Err(format!(
+                "{dir} already exists; pick another name or edit it in place"
+            ));
         }
-        collector.insert("runtime".into(), "starlark".into());
-        collector.insert("entry".into(), script_path.as_str().into());
-        let mut trigger = serde_yaml::Mapping::new();
-        trigger.insert(
-            "on".into(),
-            serde_yaml::Value::Sequence(vec![SNAPSHOT_TAKEN.into()]),
-        );
-        collector.insert("trigger".into(), serde_yaml::Value::Mapping(trigger));
-        collector.insert(
-            "facts".into(),
-            serde_yaml::Value::Sequence(vec![measure_key.as_str().into()]),
-        );
-        // The metric (spec) — a `sum` over the measure's facts.
-        let metric = MetricEntry {
-            key: Some(key.to_string()),
-            title,
-            source_measure: Some(measure_key.clone()),
-            aggregation: Some("sum".to_string()),
-            display_kind: Some("gauge".to_string()),
-            language,
-            ..Default::default()
-        };
-
+        let starter =
+            crate::metric_scaffold::MetricStarter::new(language.as_deref(), glob.as_deref())?;
         Ok(MetricScaffold {
-            key: key.to_string(),
-            project_yaml: oxplow_config::entries_yaml(
-                &[measure],
-                &[serde_yaml::Value::Mapping(collector)],
-                &[metric],
-            ),
-            script_path,
-            script,
+            name: name.to_string(),
+            dir,
+            files: crate::metric_scaffold::extension_files(name, origin.as_deref(), &starter),
         })
     }
 
@@ -3480,57 +3425,15 @@ fn builtin_ast_specs() -> Vec<NewMetricSpec> {
     ]
 }
 
-/// A filesystem-safe slug from a namespaced key (non-alphanumerics → `_`), for
-/// naming the global scaffold's `<slug>.yaml` / `<slug>.star` files.
-/// What [`MetricsService::metric_scaffold`] hands the agent to write.
+/// What [`MetricsService::metric_scaffold`] hands the agent to write: the
+/// extension's files, each with its project-relative path.
 #[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct MetricScaffold {
-    pub key: String,
-    /// Where the script goes, project-relative.
-    pub script_path: String,
-    /// The starter collector script.
-    pub script: String,
-    /// `measures:` / `collectors:` / `metrics:` entries to merge into
-    /// `.oxplow/project.yaml` (appending to lists already there).
-    pub project_yaml: String,
-}
-
-fn slugify(key: &str) -> String {
-    key.chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-        .collect()
-}
-
-/// The starter Starlark gauge from [`MetricsService::metric_scaffold`]. A
-/// working tree-derived gauge that emits one per-file `<measure>` FACT per
-/// matched file (TODO/FIXME count) — the metric spec (`sum` over `<measure>`)
-/// charts it. Emits facts only (no baked sample), the clean substrate model
-/// (epic tsk12); an `ast_query` example is in a comment for the author.
-fn starter_collector_script(
-    key: &str,
-    measure: &str,
-    glob: &str,
-    language: Option<&str>,
-) -> String {
-    let lang = language.unwrap_or("rust");
-    format!(
-        "# {key} — a tree-derived gauge. Reads the snapshot via files() and (optionally)\n\
-         # the AST via ast_query(); deterministic (no I/O) so facts are `observed`.\n\
-         #\n\
-         # Emits one per-file fact on the `{measure}` measure (count of TODO/FIXME).\n\
-         # To count an AST node instead, e.g.:\n\
-         #   c = len(ast_query(f[\"text\"], \"{lang}\", \"(identifier) @x\"))\n\
-         def transform(input):\n    \
-             facts = []\n    \
-             for f in files(\"{glob}\"):\n        \
-                 c = len(regex_find(r\"(?i)\\b(TODO|FIXME)\\b\", f[\"text\"]))\n        \
-                 if c > 0:\n            \
-                     facts.append({{\"measure\": \"{measure}\", \"value\": c, \
-             \"subject\": \"file:\" + f[\"path\"], \"path\": f[\"path\"], \
-             \"dims\": {{\"oxplow.language\": \"{lang}\"}}}})\n    \
-             return {{\"facts\": facts}}\n"
-    )
+    /// The extension's name.
+    pub name: String,
+    /// Its folder, project-relative.
+    pub dir: String,
+    pub files: Vec<crate::metric_scaffold::ScaffoldFile>,
 }
 
 /// What runs a fact collector.
@@ -6943,8 +6846,8 @@ def transform(input):
     }
 
     /// A metric scaffold writes nothing: the agent writes the returned
-    /// script and pastes the entries with its own tools, under the write
-    /// guard. Done that way, the metric seeds.
+    /// files with its own tools, under the write guard. Done that way, the
+    /// extension's metric seeds, with its dimension and collector.
     #[tokio::test]
     async fn metric_scaffold_is_a_template_that_seeds_once_written() {
         let (svc, dir) = fixture().await;
@@ -6953,22 +6856,33 @@ def transform(input):
         let t = svc
             .metrics
             .metric_scaffold(
-                "acme.todo_density",
-                Some("TODO density".to_string()),
+                "complex-fns",
+                Some("thread:thr1".to_string()),
                 Some("rust".to_string()),
-                Some("**/*.rs".to_string()),
+                Some("src/**/*.rs".to_string()),
             )
             .unwrap();
-        assert_eq!(t.script_path, "oxplow/collectors/acme_todo_density.star");
-        assert!(t.script.contains("def transform(input):"), "{}", t.script);
-        assert!(t.script.contains("files(\"**/*.rs\")"), "{}", t.script);
-        assert!(t.script.contains("acme.todo_density.count"), "{}", t.script);
-        assert!(
-            t.project_yaml.contains("acme_todo_density.star"),
-            "{}",
-            t.project_yaml
+        assert_eq!(t.name, "complex-fns");
+        assert_eq!(t.dir, "oxplow/extensions/complex-fns");
+        let paths: Vec<&str> = t.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            [
+                "oxplow/extensions/complex-fns/extension.yaml",
+                "oxplow/extensions/complex-fns/collectors/complex_functions.star",
+                "oxplow/extensions/complex-fns/lenses/complex-fns.yaml",
+                "oxplow/extensions/complex-fns/fixtures/basic.yaml",
+            ]
         );
-        assert!(!dir.path().join(&t.script_path).exists(), "nothing written");
+        let script = &t.files[1].content;
+        assert!(script.contains("GLOB = \"src/**/*.rs\""), "{script}");
+        assert!(script.contains("complex_fns.complex_functions"), "{script}");
+        assert!(
+            t.files[0].content.contains("origin: thread:thr1"),
+            "{}",
+            t.files[0].content
+        );
+        assert!(!dir.path().join(&t.dir).exists(), "nothing written");
         assert_eq!(
             std::fs::read_to_string(oxplow_config::config_path(dir.path())).ok(),
             config_before,
@@ -6976,31 +6890,47 @@ def transform(input):
         );
 
         // What the agent does with it.
-        let script = dir.path().join(&t.script_path);
-        std::fs::create_dir_all(script.parent().unwrap()).unwrap();
-        std::fs::write(&script, &t.script).unwrap();
-        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
-        std::fs::write(oxplow_config::config_path(dir.path()), &t.project_yaml).unwrap();
-        svc.reload_config_from_disk().unwrap();
+        for f in &t.files {
+            let path = dir.path().join(&f.path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, &f.content).unwrap();
+        }
         svc.metrics.seed_catalog().await;
         let spec = svc
             .fact_store
-            .get_spec("acme.todo_density")
+            .get_spec("complex_fns.complex_functions")
             .await
             .unwrap()
             .expect("scaffolded spec seeds once written");
-        assert_eq!(spec.display_kind, "gauge");
-        assert_eq!(spec.scope, "project");
+        assert_eq!(spec.scope, "extension:complex-fns");
+        assert_eq!(spec.display_kind, "findings");
+        let measure = svc
+            .fact_store
+            .get_measure("complex_fns.complex_functions")
+            .await
+            .unwrap()
+            .expect("its measure");
+        assert_eq!(measure.capture_scope, "per-path");
+        assert!(svc
+            .metrics
+            .fact_collectors()
+            .iter()
+            .any(|c| c.key == "complex_fns.scan" && c.owner == "complex-fns"));
 
-        // An existing key and the reserved namespace are refused.
-        assert!(svc
-            .metrics
-            .metric_scaffold("acme.todo_density", None, None, None)
-            .is_err());
-        assert!(svc
-            .metrics
-            .metric_scaffold("oxplow.nope", None, None, None)
-            .is_err());
+        // An existing extension, a bad name, a reserved one and a language
+        // with no sample are refused.
+        for (name, language, says) in [
+            ("complex-fns", None, "already exists"),
+            ("Bad Name", None, "lowercase"),
+            ("oxplow", None, "reserved"),
+            ("fresh", Some("java"), "no starter sample"),
+        ] {
+            let err = svc
+                .metrics
+                .metric_scaffold(name, None, language.map(String::from), None)
+                .unwrap_err();
+            assert!(err.contains(says), "{name}: {err}");
+        }
     }
 
     #[tokio::test]

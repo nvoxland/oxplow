@@ -1,6 +1,6 @@
 ---
 name: oxplow-metrics
-description: Author and read oxplow metrics — durable, BI-reportable numbers tracked over time (LOC, unsafe blocks, bundle size, TODO count, complexity, …). Loads when the user asks to "make/add/track a metric", "count X over time", "chart X", "set a target on X", or "measure X in the codebase". Teaches the four config blocks in .oxplow/project.yaml (measures / collectors / metrics / dimensions), the fact-collector script surface (files/ast_query/code_metrics), oxplow.collector.sync and the metric.* commands, and reading metrics in SQL with metric_grid().
+description: Author and read oxplow metrics — durable, BI-reportable numbers tracked over time (LOC, unsafe blocks, bundle size, TODO count, complexity, …). Loads when the user asks to "make/add/track a metric", "count X over time", "chart X", "set a target on X", or "measure X in the codebase". Teaches the metric extension (oxplow extension new metric / oxplow.metric.scaffold), the four blocks it declares (measures / collectors / metrics / dimensions), the fact-collector script surface (files/source_files/ast_query/code_metrics), oxplow.collector.sync and the metric.* commands, and reading metrics in SQL with metric_grid().
 ---
 
 # Authoring oxplow metrics
@@ -14,7 +14,8 @@ team — the authoring surface is public config + a small script.
 
 ## The four blocks
 
-`.oxplow/project.yaml` has four orthogonal metric blocks, mirroring the substrate:
+An extension's `extension.yaml` (a code metric you author) or `.oxplow/project.yaml`
+has four orthogonal metric blocks, mirroring the substrate:
 
 | block | what it declares | cardinality |
 |---|---|---|
@@ -50,44 +51,75 @@ metrics:
 
 `oxplow.*` is reserved for built-ins — a project may `use:` one but not `key:`-define under it.
 
-## Step 2 — a new metric: declare the trio (measure + collector + metric)
+## Step 2 — a new metric: scaffold a metric extension
 
-The fastest path is the `oxplow.metric.scaffold` command (`run_command`). It writes
-nothing: it returns a starter collector script (`scriptPath`, under
-`oxplow/collectors/<slug>.star`, and `script`) and the three entries
-(`projectYaml`). Write the script with your file tools, then add each entry
-with `oxplow.config.set` (`run_command`): read the list with `oxplow.config.get
-{ "key": "measures" }`, append, and set it back — the same for `collectors` and
-`metrics`. A collector runs a program, so `collectors` is a person-only key:
-your `oxplow.config.set` on it asks the person to confirm. The trio looks like this:
+A metric you author is a private **extension**. Get it from the
+`oxplow.metric.scaffold` command (`run_command`), which writes nothing and
+returns the files (`oxplow extension new metric <name> [--language rust]
+[--glob '**/*.rs'] [--origin <your effort ref>]` writes the same ones from a
+terminal):
+
+```
+oxplow.metric.scaffold { "name": "complex-fns", "language": "rust", "glob": "src/**/*.rs", "origin": "<your effort ref>" }
+→ { "name": "complex-fns", "dir": "oxplow/extensions/complex-fns", "files": [ { "path", "content" }, … ] }
+```
+
+Write each file with your file tools (the write guard applies), then change
+them into the metric the user asked for. The extension declares all four
+blocks, namespaced `<ns>.*` (the name with `_` for `-`), a launcher lens and
+a fixture that proves the collector:
+
+| file | what it is |
+|---|---|
+| `extension.yaml` | `measures:` (one per-path, semi-additive measure on files), `dimensions:` (`<ns>.area`), `collectors:` (a Starlark one on `snapshot.taken`), `metrics:` (the `sum`, `lower-better`, `displayKind: findings`), and the `intent` with its example |
+| `collectors/complex_functions.star` | counts each file's functions over a complexity `LIMIT` (`source_files()` + `code_metrics()`) and records **one fact per file**: `value`, `path`, the worst function's `line`, `dims: { <ns>.area: <top folder> }` |
+| `lenses/<name>.yaml` | a Code launcher lens over `metric_findings('<metric>')`; its `path` column links `file` at the `line` column |
+| `fixtures/basic.yaml` | the example as a fixture: `input: { collector, files: { path: text } }`, `expect: { facts: [...] }` |
+
+Change the collector to what the user asked for and **change the fixture with
+it** (a small corpus and the exact facts it yields); `extension test` runs the
+collector over the fixture and fails when the facts differ, so it is the proof.
+`oxplow extension check <name>` must report no errors and no warnings. The
+blocks look like this:
 
 ```yaml
 measures:
-  - key: repo.todo_count            # the fact TYPE (per-file counts)
+  - key: acme.todo_count            # the fact TYPE (per-file counts)
     subjectKind: file
     unit: count
     temporalSemantics: semi-additive  # additivity OVER TIME (see below)
+    captureScope: per-path            # a snapshot rescans only the files it changed
+
+dimensions:
+  - key: acme.area                  # a slice axis your facts' dims use
+    label: Area
 
 collectors:
-  - id: repo.todo                   # the PRODUCER
+  - id: acme.todo                   # the PRODUCER
     doc: TODO comment scan
     runtime: starlark
-    entry: oxplow/collectors/todo.star
+    entry: collectors/todo.star     # relative to the extension
     trigger: { on: [snapshot.taken] }   # runs after each snapshot that recorded files
-    facts: [repo.todo_count]        # declare-to-collect: it may only record these
+    facts: [acme.todo_count]        # declare-to-collect: it may only record these
 
 metrics:
-  - key: repo.todo_count            # the SPEC (the chartable metric)
+  - key: acme.todo_count            # the SPEC (the chartable metric)
     title: "TODO comments"
-    sourceMeasure: repo.todo_count
+    sourceMeasure: acme.todo_count
     aggregation: sum                # combine the per-file facts WITHIN a capture
     direction: lower-better
     unit: count
-    displayKind: gauge
-    sliceableDims: [oxplow.language]
+    displayKind: findings           # located facts: the drill-in lists the files
+    sliceableDims: [acme.area]
 ```
 
-Namespace every key `<vendor>.<id>` (e.g. `repo.todo_count`, `acme.bundle_size`).
+The same four blocks work in `.oxplow/project.yaml` (a project's own metric,
+e.g. a report-derived or `exec` collector — add each entry with
+`oxplow.config.set`; `collectors` is person-only, so that asks the person to
+confirm) with the collector `entry` project-relative under `oxplow/collectors/`.
+Prefer the extension for a code metric: it carries its fixture and lens.
+
+Namespace every key (`<extension namespace>.<id>`, or `<vendor>.<id>` in the project's config: `repo.todo_count`, `acme.bundle_size`).
 
 ### `measures:` fields
 
@@ -95,6 +127,7 @@ Namespace every key `<vendor>.<id>` (e.g. `repo.todo_count`, `acme.bundle_size`)
 |---|---|
 | `key` | namespaced fact-type id (required) |
 | `subjectKind` | what each fact is about: `file` \| `symbol` \| `test` \| `model` … |
+| `captureScope` | what ONE capture restates: `complete` (default; a whole population, e.g. a report) or `per-path` (only the paths in its snapshot; the fold keeps each path's latest fact, so a snapshot collector's per-file facts stay a repo-wide total while only changed files are rescanned). Set `per-path` on any measure a `snapshot.taken` collector records per-file facts on |
 | `unit` | `count` \| `%` \| `ms` \| `kb` \| `usd` … |
 | `temporalSemantics` | additivity **over time**: `additive` (SUM across captures — events/tokens), `semi-additive` (take the LAST capture — stocks/counts + level ratios like coverage, default), `non-additive` (re-derive Σnum/Σden across all captures — accumulating ratios) |
 
@@ -212,31 +245,47 @@ copy-paste templates — each emits per-item facts.
 
 ## Step 4 — scope
 
-- **Project** (default): `.oxplow/project.yaml` + scripts under
-  `oxplow/collectors/` (checked into the repo, shared with the team).
-- **Extension**: an extension's `extension.yaml` declares its own `collectors:`
-  (its fact collectors are sandboxed — starlark or jaq).
+- **Extension** (the default for a code metric you author): the extension's
+  `extension.yaml` declares its own measures, dimensions, collectors and
+  metrics (its fact collectors are sandboxed — starlark or jaq).
+- **Project**: `.oxplow/project.yaml` + scripts under `oxplow/collectors/`
+  (checked into the repo, shared with the team) — for a collector that must be
+  an approved `exec` program, or a report-derived one.
 - **User-global** (cross-project): `*.yaml` files under the user's global config
   dir — a `measures/`, `metrics/` and `dimensions/` folder — hot-reloaded.
   Global measures are active in every project automatically; a global *metric*
   is enabled per-project with a `use:`. There are no global collectors.
 
-Precedence is **project > global > built-in** by key.
+Precedence is **project > global > built-in** by key; an extension's metrics are
+on unless the project mentions the key.
 
 ## Step 5 — verify
 
-1. **Run the collector now:** the `oxplow.collector.sync` command,
-   `{ "owner": "project", "id": "repo.todo" }` — runs it against the latest
-   snapshot and records its facts; returns the `facts` count. `oxplow.metric.rebuild`
+1. **Check and test the extension:** `oxplow extension check <name>` (no
+   errors, no warnings; it dry-runs the lens) and `oxplow extension test
+   <name>` (the collector over the fixture returns the expected facts).
+2. **Run the collector now:** the `oxplow.collector.sync` command,
+   `{ "owner": "<extension name>", "id": "<ns>.scan" }` (`owner: "project"` for
+   a project collector) — runs it against the latest snapshot and records its
+   facts; returns the `facts` count. `oxplow.metric.rebuild`
    (`{ "force": true }` to redo everything) runs every snapshot collector's
    whole-tree baseline.
-2. **Read the metric back** with `query_sql` and the metric function:
+3. **Read the metric back** with `query_sql` and the metric function; slice it
+   by your dimension:
 
    ```sql
-   SELECT bucket, MEASURE('repo.todo_count') FROM metric_grid('day')
+   SELECT bucket, MEASURE('acme.todo_count') FROM metric_grid('day')
+   SELECT bucket, "acme.area", MEASURE('acme.todo_count') FROM metric_grid('day', 'acme.area')
    ```
 
-3. The metric appears on the **Metrics** page automatically — no UI code.
+4. The metric appears on the **Metrics** page automatically — no UI code — and
+   its lens in the launcher.
+
+If the run fails the error says why: a fact on a measure the collector doesn't
+list in `facts:` or no measure defines ("declare it in `measures:`"), or a
+`dims` key that isn't namespaced ("isn't namespaced: … `<namespace>.<key>`").
+Files over `snapshot_max_file_bytes` and binary files are not given to
+collectors; the sweep reports them as excluded files.
 
 **Reading metrics.** Metrics are read in SQL. `metric_grid(bucket[, dim])`
 is a grid of time buckets (`day`, `week`, `month`, or `capture` for one row

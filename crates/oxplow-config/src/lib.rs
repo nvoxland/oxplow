@@ -1630,27 +1630,6 @@ pub fn write_global_metrics_file(path: &Path, entries: &[MetricEntry]) -> Result
     Ok(())
 }
 
-/// `measures:` / `collectors:` / `metrics:` entries as a
-/// `.oxplow/project.yaml` snippet (empty lists omitted), each entry minimal
-/// as the writer makes it. What a scaffold hands an agent to merge into the
-/// file itself (tsk391). A collector is given as the YAML it's declared as.
-pub fn entries_yaml(
-    measures: &[MeasureEntry],
-    collectors: &[serde_yaml::Value],
-    metrics: &[MetricEntry],
-) -> String {
-    let mut doc = serde_yaml::Mapping::new();
-    let mut put = |key: &str, seq: Vec<serde_yaml::Value>| {
-        if !seq.is_empty() {
-            doc.insert(key.into(), serde_yaml::Value::Sequence(seq));
-        }
-    };
-    put("measures", measures.iter().map(minimal_yaml).collect());
-    put("collectors", collectors.to_vec());
-    put("metrics", metrics.iter().map(minimal_yaml).collect());
-    serde_yaml::to_string(&doc).unwrap_or_default()
-}
-
 /// One config entry as a minimal YAML mapping: its serde form (the very
 /// keys [`load_project_config`] reads) without unset values (null, empty
 /// lists and maps), so a hand-edited block stays minimal across UI-driven
@@ -3868,39 +3847,6 @@ mod tests {
             back.extension_instances["acme/github"].config,
             serde_json::json!({ "pollMinutes": 5, "ratio": 0.5 })
         );
-    }
-
-    /// A scaffold's entries render as a `project.yaml` snippet that loads
-    /// back to the same entries (tsk391): the agent pastes it in.
-    #[test]
-    fn entries_yaml_loads_back() {
-        let measure = MeasureEntry {
-            key: Some("acme.x.count".into()),
-            capture_scope: Some("per-path".into()),
-            ..Default::default()
-        };
-        let metric = MetricEntry {
-            key: Some("acme.x".into()),
-            source_measure: Some("acme.x.count".into()),
-            aggregation: Some("sum".into()),
-            ..Default::default()
-        };
-        let collector: serde_yaml::Value = serde_yaml::from_str(
-            "{ id: acme.x, runtime: starlark, entry: oxplow/collectors/acme_x.star, trigger: { on: [snapshot.taken] }, facts: [acme.x.count] }",
-        )
-        .unwrap();
-        let yaml = entries_yaml(
-            std::slice::from_ref(&measure),
-            std::slice::from_ref(&collector),
-            std::slice::from_ref(&metric),
-        );
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
-        std::fs::write(config_path(dir.path()), &yaml).unwrap();
-        let cfg = load_project_config(dir.path()).unwrap();
-        assert_eq!(cfg.measures, vec![measure], "{yaml}");
-        assert_eq!(cfg.collectors[0].id, "acme.x");
-        assert_eq!(cfg.metrics, vec![metric]);
     }
 
     #[test]

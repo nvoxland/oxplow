@@ -9,8 +9,9 @@
 //!   drives snapshot captures and collector scripts — systems the bus
 //!   doesn't own — so it is `External`. One collector runs now through
 //!   `oxplow.collector.sync`.
-//! - `oxplow.metric.scaffold` returns a starter collector and the config entries
-//!   for a new metric; it writes nothing.
+//! - `oxplow.metric.scaffold` returns the files of a new code metric
+//!   extension (the template `oxplow extension new metric` writes); it
+//!   writes nothing.
 //!
 //! `metric.enable { keys, enabled }` switches metrics on or off in this
 //! project's `.oxplow/project.yaml`. Which edit that is depends on the
@@ -82,17 +83,21 @@ pub struct RebuildInput {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ScaffoldInput {
-    /// Namespaced key (`acme.todo_density`); `oxplow.` is reserved.
-    pub key: String,
-    /// Display title (defaults from the key).
-    #[serde(default)]
-    pub title: Option<String>,
-    /// Language tag for the starter gauge and the metric's slice.
+    /// The extension's name: lowercase letters, digits and single dashes
+    /// (`complex-fns`); its keys are namespaced under it (`complex_fns.*`).
+    pub name: String,
+    /// The language whose functions it counts (default `rust`; with a
+    /// sample: rust, typescript, javascript, python, go, c, cpp).
     #[serde(default)]
     pub language: Option<String>,
-    /// Glob the starter gauge sweeps (default `**/*`).
+    /// Glob of the files it reads, `*` and `**` only (default: the
+    /// language's files).
     #[serde(default)]
     pub glob: Option<String>,
+    /// The thread or effort ref that asked for it, recorded as the
+    /// extension's `intent.origin`.
+    #[serde(default)]
+    pub origin: Option<String>,
 }
 
 /// What `metric.*` runs against.
@@ -299,8 +304,8 @@ pub fn ops(target: MetricTarget) -> Vec<Op> {
             Handler::Tx(Arc::new(move |_ctx: &TxCtx<'_>, input| {
                 let input: ScaffoldInput = parse(input)?;
                 let scaffold = metrics
-                    .metric_scaffold(&input.key, input.title, input.language, input.glob)
-                    .map_err(|message| invalid("/key", message))?;
+                    .metric_scaffold(&input.name, input.origin, input.language, input.glob)
+                    .map_err(|message| invalid("/name", message))?;
                 Ok(HandlerOutput {
                     result: serde_json::to_value(scaffold).expect("scaffold serializes"),
                     ..HandlerOutput::default()
@@ -692,26 +697,30 @@ mod tests {
         );
     }
 
-    /// `oxplow.metric.scaffold` is a read: a template, and nothing written; the
-    /// reserved namespace is refused.
+    /// `oxplow.metric.scaffold` is a read: the metric extension's files, and
+    /// nothing written; a reserved name is refused.
     #[tokio::test]
-    async fn scaffold_returns_a_template_and_writes_nothing() {
+    async fn scaffold_returns_the_extension_and_writes_nothing() {
         let (svc, dir) = services().await;
         let out = run(
             &svc,
             SCAFFOLD,
-            json!({ "key": "acme.todo_density", "title": "TODO density" }),
+            json!({ "name": "complex-fns", "language": "typescript" }),
         )
         .await
         .unwrap();
-        assert_eq!(
-            out["scriptPath"],
-            "oxplow/collectors/acme_todo_density.star"
-        );
-        assert!(out["script"].as_str().unwrap().contains("def transform"));
-        assert!(out["projectYaml"].as_str().unwrap().contains("collectors:"));
-        assert!(!dir.path().join("oxplow/collectors").exists());
-        let err = run(&svc, SCAFFOLD, json!({ "key": "oxplow.nope" }))
+        assert_eq!(out["name"], "complex-fns");
+        assert_eq!(out["dir"], "oxplow/extensions/complex-fns");
+        let files = out["files"].as_array().unwrap();
+        assert!(files.iter().any(
+            |f| f["path"] == "oxplow/extensions/complex-fns/extension.yaml"
+                && f["content"].as_str().unwrap().contains("collectors:")
+        ));
+        assert!(files
+            .iter()
+            .any(|f| f["content"].as_str().unwrap().contains("def transform")));
+        assert!(!dir.path().join("oxplow/extensions").exists());
+        let err = run(&svc, SCAFFOLD, json!({ "name": "oxplow" }))
             .await
             .unwrap_err();
         assert!(err.to_string().contains("reserved"), "{err}");

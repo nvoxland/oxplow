@@ -3542,8 +3542,8 @@ tool list stable no matter how many extensions are installed.
 - **No scaffold tools (decided).** A scaffold tool would write project
   files outside the write guard and the caller's worktree. The skill carries the templates instead, and humans have
   Save as Lens in Explore Data. The same rule holds for metrics:
-  the `oxplow.metric.scaffold` command returns a template the agent writes itself
-  (tsk391).
+  the `oxplow.metric.scaffold` command returns the metric extension's files for
+  the agent to write itself.
 - `validate_extension(name)` returns load errors, schema errors and a dry
   run of every lens query, so the agent can check its work without the UI.
 - `list_extensions`, `list_collectors`, `run_collector(owner, id)`

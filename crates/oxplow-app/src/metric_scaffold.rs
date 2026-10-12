@@ -202,6 +202,7 @@ pub fn extension_files(
          \x20   aggregation: sum\n\
          \x20   direction: lower-better\n\
          \x20   unit: count\n\
+         \x20   displayKind: findings  # its facts are located, so the drill-in lists the files\n\
          \x20   sliceableDims: [{area}]\n"
     ));
     let lens = format!(
@@ -359,7 +360,7 @@ impl Sample {
 
 /// A source file in `language` defining each `(name, branches)` function
 /// with that many `if` branches; the line each function starts on.
-fn source(language: Language, functions: &[(&str, usize)]) -> (String, Vec<usize>) {
+pub(crate) fn source(language: Language, functions: &[(&str, usize)]) -> (String, Vec<usize>) {
     let mut lines: Vec<String> = Vec::new();
     let mut starts = Vec::new();
     for (name, branches) in functions {
