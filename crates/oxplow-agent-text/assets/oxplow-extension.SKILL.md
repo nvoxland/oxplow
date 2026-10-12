@@ -124,7 +124,7 @@ new one for a new area.
 manifest: 2
 name: review            # must equal the folder name
 description: Lenses for reviewing agent work
-sharing: private        # private is the default; `shared` = for the team, stable kinds only + `engine`
+sharing: private        # private is the default; `shared` = for the team, `engine` + `version` required
 intent:                 # required: what it is for, and how to know it works
   purpose: Show what is waiting on the reviewer in this stream
   origin: effort:eff42  # the effort you are working under, or null
@@ -349,7 +349,7 @@ names the file and line and says what to change.
 1. `validate_extension(name, stream_id)` (MCP), or `oxplow extension check
    <name>` from the worktree, is the same check and the same report:
    - manifest errors (YAML, unknown keys, a name/folder mismatch, a
-     missing `intent`, an experimental kind in a `shared` extension, a
+     missing `intent`, a `shared` extension without `engine` or `version`, a
      Starlark collector script that doesn't parse or define `transform`);
    - cross-references that don't resolve (a slot mount naming a lens
      that doesn't exist, a link kind nobody registered, a command that

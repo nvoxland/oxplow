@@ -2,9 +2,7 @@
 //!
 //! A v2 manifest declares every contribution as data, carries the
 //! extension's **intent**, says whether it is **private** or **shared**, and
-//! names the kinds it uses; unknown keys are errors. Kinds have a
-//! lifecycle: the stable ones are permanent API, the experimental ones
-//! may appear only in a private extension. A manifest without
+//! names the kinds it uses; unknown keys are errors. A manifest without
 //! `manifest: 2` doesn't load.
 //!
 //! This module parses and checks the manifest's own shape and
@@ -19,8 +17,8 @@ use serde_yaml::Value;
 pub const CURRENT: u32 = 2;
 
 /// Who the extension is for. Explicit and checked: a shared extension
-/// (committed for a team, installed from git, bundled) may use stable
-/// kinds only and must name the engine it targets.
+/// (committed for a team, installed from git, bundled) must name the
+/// engine it targets and its own version.
 #[derive(
     Debug,
     Clone,
@@ -108,7 +106,7 @@ pub struct SlotMount {
 
 /// `ui:` — everything an extension adds to the core UI: lenses mounted
 /// into core pages (`slots`), decorations on core refs (`decorators`) and
-/// replaced sub-components (`replacements`, experimental). Its commands
+/// replaced sub-components (`replacements`). Its commands
 /// meet a person through their own `ui` (`commands:`).
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -122,8 +120,7 @@ pub struct UiBlock {
     #[serde(default)]
     #[schemars(with = "Option<Vec<super::decorators::DecoratorFile>>")]
     pub decorators: Option<Value>,
-    /// Experimental (a private extension only): a lens in place of a
-    /// named core component.
+    /// A lens in place of a named core component.
     #[serde(default)]
     #[schemars(with = "Option<Vec<super::replacements::ReplacementFile>>")]
     pub replacements: Option<Value>,
@@ -154,8 +151,8 @@ pub struct ManifestV2 {
     pub namespace: Option<String>,
     #[serde(default)]
     pub description: String,
-    /// `private` (the default: this project, experimental kinds allowed)
-    /// or `shared` (stable kinds only, `engine` required).
+    /// `private` (the default: this project) or `shared` (`engine`
+    /// required).
     #[serde(default)]
     pub sharing: Sharing,
     /// The oxplow version range it targets, `>=MAJOR.MINOR[.PATCH]`.
@@ -191,7 +188,7 @@ pub struct ManifestV2 {
     )]
     pub configuration: Option<Value>,
 
-    // ---- stable kinds ----
+    // ---- kinds ----
     /// SQL models: each with `models/<name>.sql`, published as
     /// `v_<extension>_<name>`.
     #[serde(default)]
@@ -268,56 +265,6 @@ pub struct ManifestV2 {
     #[serde(default)]
     #[schemars(with = "Option<Vec<super::custom_components::ComponentFile>>")]
     pub custom_components: Option<Value>,
-}
-
-/// The kinds a shared extension may not use, with the key each rides on.
-/// None today: `ui.replacements` was the last, promoted when
-/// oxplow-bundled's history graph became its shared use.
-pub const EXPERIMENTAL_KINDS: &[&str] = &[];
-
-/// The stable kinds (permanent API), by manifest key.
-pub const STABLE_KINDS: &[&str] = &[
-    "models",
-    "measures",
-    "metrics",
-    "dimensions",
-    "collectors",
-    "commands",
-    "jobs",
-    "lenses",
-    "pages",
-    "panels",
-    "providers",
-    "ui.slots",
-    "ui.decorators",
-    "ui.replacements",
-    "ref_kinds",
-    "implementations",
-    "skills",
-    "advisories",
-    "event_types",
-    "effects",
-    "custom_components",
-];
-
-impl ManifestV2 {
-    /// The experimental kinds this manifest uses.
-    pub fn experimental_kinds_used(&self) -> Vec<&'static str> {
-        EXPERIMENTAL_KINDS
-            .iter()
-            .copied()
-            .filter(|kind| self.writes(kind))
-            .collect()
-    }
-
-    /// Whether the manifest writes the experimental kind `kind`. Every
-    /// kind in [`EXPERIMENTAL_KINDS`] has its arm here — the partition
-    /// test writes each and expects each back — so promoting one is moving
-    /// it between the tables and dropping its arm. There are none today.
-    fn writes(&self, kind: &str) -> bool {
-        let _ = (self, kind);
-        false
-    }
 }
 
 /// The 1-based line of a top-level `key:` in a YAML document, for
@@ -647,16 +594,6 @@ pub fn check(m: &ManifestV2, file: &str, text: &str, bundled: bool) -> (Vec<Stri
                 Err(e) => errors.push(at(file, key_line(text, "engine"), e)),
             },
         }
-        for kind in m.experimental_kinds_used() {
-            errors.push(at(
-                file,
-                kind_line(text, kind),
-                format!(
-                    "`{kind}` is experimental: a shared extension may use stable kinds only ({})",
-                    STABLE_KINDS.join(", ")
-                ),
-            ));
-        }
     } else if let Some(engine) = &m.engine {
         if let Err(e) = engine_check(engine, current_engine()) {
             errors.push(at(file, key_line(text, "engine"), e));
@@ -730,16 +667,12 @@ mod tests {
     }
 
     #[test]
-    fn shared_needs_engine_and_stable_kinds_only_with_file_line() {
+    fn shared_needs_engine_and_version() {
         let text = "manifest: 2\nname: acme\nsharing: shared\nintent:\n  purpose: x\n  examples: [{ name: a }]\nui:\n  replacements: []\n";
         let (errors, _) = check(&parse(text), "e/extension.yaml", text, false);
         assert!(
             errors.iter().any(|e| e.contains("must declare `engine")),
             "{errors:?}"
-        );
-        assert!(
-            !errors.iter().any(|e| e.contains("experimental")),
-            "replacements are stable: {errors:?}"
         );
         let text = "manifest: 2\nname: acme\nsharing: shared\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: x\n  examples: [{ name: a }]\n";
         let (errors, warnings) = check(&parse(text), "e/extension.yaml", text, true);
@@ -760,90 +693,6 @@ mod tests {
         assert!(
             errors.iter().any(|e| e.contains("needs oxplow >=99.0")),
             "{errors:?}"
-        );
-    }
-
-    /// P9.D6: `event_types` is a stable kind — a shared extension may
-    /// declare its own event types (oxplow-bundled's verdict is the one
-    /// that earned it) — while the kinds still experimental stay closed
-    /// to it. Every kind is in exactly one of the two tables.
-    #[test]
-    fn event_types_is_stable_and_the_tables_partition_the_kinds() {
-        let text = "manifest: 2\nname: acme\nsharing: shared\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: x\n  examples: [{ name: a }]\nevent_types:\n  types: []\n";
-        let (errors, _) = check(&parse(text), "e/extension.yaml", text, false);
-        assert!(errors.is_empty(), "{errors:?}");
-        assert!(STABLE_KINDS.contains(&"event_types"));
-        assert!(
-            !STABLE_KINDS.iter().any(|k| EXPERIMENTAL_KINDS.contains(k)),
-            "a kind is stable or experimental, not both"
-        );
-        // A manifest using every experimental kind uses exactly those.
-        let all = "manifest: 2\nname: acme\nintent: { purpose: x, examples: [{ name: a }] }\nproviders: []\nref_kinds: []\nevent_types: { types: [] }\nui:\n  decorators: []\n  replacements: []\n";
-        let mut used = parse(all).experimental_kinds_used();
-        used.sort();
-        let mut experimental = EXPERIMENTAL_KINDS.to_vec();
-        experimental.sort();
-        assert_eq!(used, experimental);
-        assert!(STABLE_KINDS.contains(&"providers"));
-    }
-
-    /// P11 (tsk956): `effects` is stable — oxplow-bundled's follow-up is its
-    /// bundled, shared use, approved like any effect — so a shared
-    /// extension may declare effects; the tables still partition the kinds.
-    #[test]
-    fn effects_is_stable_and_the_tables_partition_the_kinds() {
-        let text = "manifest: 2\nname: acme\nsharing: shared\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: x\n  examples: [{ name: a }]\neffects: []\n";
-        let (errors, _) = check(&parse(text), "e/extension.yaml", text, false);
-        assert!(errors.is_empty(), "{errors:?}");
-        assert!(STABLE_KINDS.contains(&"effects"));
-        assert!(!EXPERIMENTAL_KINDS.contains(&"effects"));
-        assert!(
-            !STABLE_KINDS.iter().any(|k| EXPERIMENTAL_KINDS.contains(k)),
-            "a kind is stable or experimental, not both"
-        );
-    }
-
-    /// P11 (tsk962): `custom_components` is stable — the github example's
-    /// PR lifetimes is its shared use, a component that acts being a
-    /// program a person approves — so a shared extension may declare one;
-    /// the tables still partition the kinds.
-    #[test]
-    fn custom_components_is_stable_and_the_tables_partition_the_kinds() {
-        let text = "manifest: 2\nname: acme\nsharing: shared\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: x\n  examples: [{ name: a }]\ncustom_components: []\n";
-        let (errors, _) = check(&parse(text), "e/extension.yaml", text, false);
-        assert!(errors.is_empty(), "{errors:?}");
-        assert!(STABLE_KINDS.contains(&"custom_components"));
-        assert!(!EXPERIMENTAL_KINDS.contains(&"custom_components"));
-        assert!(
-            !STABLE_KINDS.iter().any(|k| EXPERIMENTAL_KINDS.contains(k)),
-            "a kind is stable or experimental, not both"
-        );
-    }
-
-    /// `ui.replacements` is stable — oxplow-bundled's history graph is its
-    /// bundled, shared use — so a shared extension may declare one.
-    #[test]
-    fn replacements_is_stable_and_the_tables_partition_the_kinds() {
-        let text = "manifest: 2\nname: acme\nsharing: shared\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: x\n  examples: [{ name: a }]\nui:\n  replacements: []\n";
-        let (errors, _) = check(&parse(text), "e/extension.yaml", text, false);
-        assert!(errors.is_empty(), "{errors:?}");
-        assert!(STABLE_KINDS.contains(&"ui.replacements"));
-        assert!(!EXPERIMENTAL_KINDS.contains(&"ui.replacements"));
-    }
-
-    /// P10 (K1): `ui.decorators` is stable — oxplow-bundled's verdict
-    /// chip is its bundled, shared use — so a shared extension may declare
-    /// decorators; the tables still partition the kinds.
-    #[test]
-    fn decorators_is_stable_and_the_tables_partition_the_kinds() {
-        let text = "manifest: 2\nname: acme\nsharing: shared\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: x\n  examples: [{ name: a }]\nui:\n  decorators: []\n";
-        let (errors, _) = check(&parse(text), "e/extension.yaml", text, false);
-        assert!(errors.is_empty(), "{errors:?}");
-        assert!(STABLE_KINDS.contains(&"ui.decorators"));
-        assert!(!EXPERIMENTAL_KINDS.contains(&"ui.decorators"));
-        assert!(
-            !STABLE_KINDS.iter().any(|k| EXPERIMENTAL_KINDS.contains(k)),
-            "a kind is stable or experimental, not both"
         );
     }
 

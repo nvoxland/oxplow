@@ -572,7 +572,6 @@ mod tests {
         assert_eq!(d.id.problem(), None);
         assert_eq!(d.aliases, vec!["tracker/work_item.board"]);
         assert_eq!((d.trigger.clone(), d.global.clone()), (RunsOn::Mount, None));
-        assert_eq!(d.stability, oxplow_domain::contribution::Stability::Stable);
     }
 
     /// Two extensions claiming one event type and one ref kind: the first
@@ -669,7 +668,7 @@ mod catalog_tests {
     /// the two can't drift. `OXPLOW_BLESS=1` rewrites it.
     #[test]
     fn the_reference_lists_every_kind() {
-        use oxplow_domain::contribution::{Stability, KINDS};
+        use oxplow_domain::contribution::KINDS;
         let more = |k: ContributionKind| match k {
             ContributionKind::Lens => "[Lenses](../guide/lenses.md)",
             ContributionKind::Measure | ContributionKind::Metric | ContributionKind::Dimension => {
@@ -682,22 +681,13 @@ mod catalog_tests {
             ContributionKind::Provider => "[Provider protocol](provider-protocol.md)",
             _ => "",
         };
-        let mut table =
-            String::from("| Key | What it adds | Stability | More |\n|---|---|---|---|\n");
+        let mut table = String::from("| Key | What it adds | More |\n|---|---|---|\n");
         for k in KINDS {
             let key = match k.kind {
                 ContributionKind::Lens => "`lenses/*.yaml` (files, not a key)".to_string(),
                 _ => format!("`{}`", k.key),
             };
-            let stability = match k.stability {
-                Stability::Stable => "stable",
-                Stability::Experimental => "experimental",
-            };
-            table.push_str(&format!(
-                "| {key} | {} | {stability} | {} |\n",
-                k.summary,
-                more(k.kind)
-            ));
+            table.push_str(&format!("| {key} | {} | {} |\n", k.summary, more(k.kind)));
         }
         crate::test_fixtures::generated_section("docs/reference/extensions.md", "kinds", &table);
     }

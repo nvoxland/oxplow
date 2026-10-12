@@ -60,10 +60,10 @@ pub enum Kind {
     /// A command whose script composes core commands, on a work item's
     /// Commands menu.
     Command,
-    /// An effect (experimental, so private): a script reacting to a logged
+    /// An effect: a script reacting to a logged
     /// event by composing commands, run once a person approves it.
     Effect,
-    /// A custom component (experimental, so private): a web bundle a
+    /// A custom component: a web bundle a
     /// `viz: custom` lens renders in a sandboxed frame, talking to oxplow
     /// through the served client library.
     Component,

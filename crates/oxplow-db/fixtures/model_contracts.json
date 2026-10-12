@@ -8213,6 +8213,83 @@
       "key": [
         "id"
       ]
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "`<extension>/<kind>/<local>`."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that declares it."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `lens`, …"
+        },
+        {
+          "name": "local",
+          "type": "TEXT",
+          "doc": "Its id within the extension (a command's `<area>.<verb>`, a metric's key)."
+        },
+        {
+          "name": "origin",
+          "type": "TEXT",
+          "doc": "`project` or `bundled`."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "The extension's `version:` (a bundled one's is oxplow's); NULL when it declares none."
+        },
+        {
+          "name": "contract_version",
+          "type": "INTEGER",
+          "doc": "The contract's own version (a model's, an event type's), when it has one."
+        },
+        {
+          "name": "runs_on",
+          "type": "TEXT",
+          "doc": "How it comes to run, as JSON: `{on: events, types}`, `{on: schedule, every}`, `{on: run}`, `{on: call}`, `{on: query}`, `{on: mount}`, `{on: agent}`, `{on: declared}`."
+        },
+        {
+          "name": "needs",
+          "type": "TEXT",
+          "doc": "What it requires (capabilities, features, scopes), as a JSON array. Never what a person granted."
+        },
+        {
+          "name": "after",
+          "type": "TEXT",
+          "doc": "What it runs after, as the manifest names them (JSON array)."
+        },
+        {
+          "name": "global_name",
+          "type": "TEXT",
+          "doc": "The name it holds in a space every extension shares (a metric key, a skill name, `<capability>/<id>`); NULL when none."
+        },
+        {
+          "name": "aliases",
+          "type": "TEXT",
+          "doc": "Its other public forms (a command id, `lens:<ext>/<slug>`), as a JSON array."
+        },
+        {
+          "name": "file",
+          "type": "TEXT",
+          "doc": "The manifest it's declared in."
+        },
+        {
+          "name": "line",
+          "type": "INTEGER",
+          "doc": "Its line there, when the kind tracks lines."
+        }
+      ],
+      "key": [
+        "id"
+      ]
     }
   },
   "extension_run": {

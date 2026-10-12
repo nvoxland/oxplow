@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use oxplow_domain::contribution::{valid_extension_name, ContributionId, DeclaredAt, Stability};
+use oxplow_domain::contribution::{valid_extension_name, ContributionId, DeclaredAt};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, specta::Type)]
@@ -360,21 +360,6 @@ pub fn validate_with_blocked(
                     format!(
                         "shared extension `{}` cannot export `{}` as experimental",
                         candidate.name, export.id
-                    ),
-                );
-                invalid = true;
-            }
-            if export.visibility == ExportVisibility::Stable
-                && export.id.kind.spec().stability == Stability::Experimental
-            {
-                invalid_export(
-                    &mut resolution,
-                    candidate,
-                    export,
-                    "experimental_kind_exported_stable",
-                    format!(
-                        "experimental contribution kind `{}` cannot be exported as stable",
-                        export.id.kind.spec().key
                     ),
                 );
                 invalid = true;

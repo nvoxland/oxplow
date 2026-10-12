@@ -1035,23 +1035,21 @@ pub struct Extension {
     pub source: Option<ExtensionSource>,
     /// Declared collectors (valid ones; invalid ones are in `errors`).
     pub collectors: Vec<oxplow_config::collectors::CollectorSpec>,
-    /// Declared providers (experimental: a private extension's only;
-    /// valid ones — invalid ones are in `errors`).
+    /// Declared providers (valid ones — invalid ones are in `errors`).
     pub providers: Vec<crate::providers::ProviderSpec>,
-    /// Web components its `custom` lenses render, sandboxed (experimental:
-    /// a private extension's only; valid ones).
+    /// Web components its `custom` lenses render, sandboxed (valid ones).
     pub custom_components: Vec<custom_components::CustomComponent>,
-    /// Event types it declares (experimental: a private extension's only;
-    /// valid ones — the vocabulary registers them, `vocabulary_reactor`).
+    /// Event types it declares (valid ones — the vocabulary registers
+    /// them, `vocabulary_reactor`).
     pub event_types: crate::extension_event_types::EventTypes,
-    /// Ref kinds it declares (experimental: a private extension's only;
-    /// valid ones — the vocabulary registers them, `vocabulary_reactor`).
+    /// Ref kinds it declares (valid ones — the vocabulary registers
+    /// them, `vocabulary_reactor`).
     pub ref_kinds: Vec<crate::extension_ref_kinds::RefKindDecl>,
-    /// Effects it declares (experimental: a private extension's only;
-    /// valid ones — each runs only once a person approves it, `effects`).
+    /// Effects it declares (valid ones — each runs only once a person
+    /// approves it, `effects`).
     pub effects: Vec<crate::effects::EffectDecl>,
-    /// The capability implementations it declares (stable:
-    /// `implementations:`, each a built-in of core's).
+    /// The capability implementations it declares (`implementations:`,
+    /// each a built-in of core's).
     pub implementations: Vec<implementations::ImplementationDecl>,
     /// Skills and slash commands it gives the coding agent (`skills:`;
     /// valid ones — invalid ones are in `errors`).
@@ -1114,8 +1112,7 @@ pub struct ExtensionUi {
     /// Labels from its models on core refs (valid ones).
     pub decorators: Vec<decorators::UiDecorator>,
     /// Lenses that take the place of a core sub-component while its
-    /// provider is the capability's active one (experimental: a private
-    /// extension's only; valid ones).
+    /// provider is the capability's active one (valid ones).
     pub replacements: Vec<replacements::UiReplacement>,
 }
 
@@ -1972,7 +1969,6 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             ext.event_types = declared;
             ext.errors.extend(errors);
         }
-        // An experimental kind: a shared manifest's is refused by `check`.
         // After `event_types`: an effect may react to its own types — and
         // to another extension's (P9.D1), which resolves when that one is
         // here (`subscriptions`).

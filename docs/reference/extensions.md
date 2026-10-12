@@ -69,7 +69,7 @@ intent:
 - `sharing: shared` is for an extension committed for a team or
   installed from git. A shared extension needs `engine: ">=0.7"` (the
   oxplow it targets) and its own `version: 1.2.0` (`MAJOR.MINOR.PATCH`),
-  and may use stable kinds only. A private one may declare a version too.
+  A private one may declare a version too.
 - The folder name is lowercase letters, digits and single dashes,
   starting with a letter.
 - A metric, measure, dimension or fact collector's key is shared by every
@@ -114,8 +114,7 @@ Versions must match exactly. A model or event export must use its native
 contract version. Package `version` and host `engine` are separate.
 Visibility defaults to `private`, which other extensions cannot import.
 `experimental` exports accept private consumers; `stable` exports accept either
-sharing mode. Experimental kinds cannot declare stable exports, and shared
-packages cannot expose experimental exports. Import targets resolve by canonical
+sharing mode. Shared packages cannot expose experimental exports. Import targets resolve by canonical
 ID; published reference metadata is returned only after resolution.
 
 Imports grant no SQL, network, command or other authority. Existing foreign-event
@@ -173,33 +172,30 @@ for managing references is not implemented yet.
 ### What it can declare
 
 <!-- kinds:begin (generated from oxplow_domain::contribution::KINDS; bless with OXPLOW_BLESS=1) -->
-| Key | What it adds | Stability | More |
-|---|---|---|---|
-| `models` | SQL views over oxplow's models, published as `v_<ext>_<name>` | stable |  |
-| `measures` | what a metric's facts measure | stable | [Metrics](../guide/metrics.md) |
-| `metrics` | a number tracked over a measure | stable | [Metrics](../guide/metrics.md) |
-| `dimensions` | a way to slice metrics | stable | [Metrics](../guide/metrics.md) |
-| `collectors` | outside data brought in as entities, or facts for metrics | stable | below |
-| `event_types` | its own namespace's event types | stable |  |
-| `ref_kinds` | kinds of thing a ref can name | stable |  |
-| `commands` | commands on oxplow's command bus | stable | below |
-| `jobs` | durable host operations scheduled by an extension | stable |  |
-| `effects` | scripts that react to logged events | stable | below |
-| `advisories` | guidance queries for the coding agent | stable |  |
-| `skills` | skills and slash commands for the coding agent | stable |  |
-| `implementations` | an implementation of a capability: a built-in, or an AI provider or effort policy written as a script | stable | below |
-| `providers` | an external program implementing a capability, such as the work list | stable | [Provider protocol](provider-protocol.md) |
-| `lenses/*.yaml` (files, not a key) | a page or panel over a SQL query | stable | [Lenses](../guide/lenses.md) |
-| `pages` | where its lenses show as pages | stable |  |
-| `panels` | where its lenses show as panels | stable |  |
-| `ui.slots` | a lens mounted into a core page | stable |  |
-| `ui.decorators` | labels on core refs | stable |  |
-| `ui.replacements` | a lens in place of a core component | stable |  |
-| `custom_components` | sandboxed HTML components for `viz: custom` lenses | stable |  |
+| Key | What it adds | More |
+|---|---|---|
+| `models` | SQL views over oxplow's models, published as `v_<ext>_<name>` |  |
+| `measures` | what a metric's facts measure | [Metrics](../guide/metrics.md) |
+| `metrics` | a number tracked over a measure | [Metrics](../guide/metrics.md) |
+| `dimensions` | a way to slice metrics | [Metrics](../guide/metrics.md) |
+| `collectors` | outside data brought in as entities, or facts for metrics | below |
+| `event_types` | its own namespace's event types |  |
+| `ref_kinds` | kinds of thing a ref can name |  |
+| `commands` | commands on oxplow's command bus | below |
+| `jobs` | durable host operations scheduled by an extension |  |
+| `effects` | scripts that react to logged events | below |
+| `advisories` | guidance queries for the coding agent |  |
+| `skills` | skills and slash commands for the coding agent |  |
+| `implementations` | an implementation of a capability: a built-in, or an AI provider or effort policy written as a script | below |
+| `providers` | an external program implementing a capability, such as the work list | [Provider protocol](provider-protocol.md) |
+| `lenses/*.yaml` (files, not a key) | a page or panel over a SQL query | [Lenses](../guide/lenses.md) |
+| `pages` | where its lenses show as pages |  |
+| `panels` | where its lenses show as panels |  |
+| `ui.slots` | a lens mounted into a core page |  |
+| `ui.decorators` | labels on core refs |  |
+| `ui.replacements` | a lens in place of a core component |  |
+| `custom_components` | sandboxed HTML components for `viz: custom` lenses |  |
 <!-- kinds:end -->
-
-`ui.replacements` (a lens in place of a core component) is
-experimental: a private extension only.
 
 ### Services
 

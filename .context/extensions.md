@@ -31,11 +31,11 @@ built at load from the kind's typed declaration
 (`extensions::descriptors::describe`, `Extension.contributions`): a
 stable id `<extension>/<kind>/<local>` (`ContributionId`; one grammar for
 `local`, dots only for the kinds whose ids are dotted), its owner
-(extension, origin and the extension's `version:`), the kind's stability,
+(extension, origin and the extension's `version:`),
 how it runs (`RunsOn`), its needs and `after`, the **global name** it
 takes in a space extensions share (a metric key, a fact collector's id)
 and the public forms it already had (`aliases`). The kinds' table
-(`contribution::KINDS`: manifest key, title, stability, whether two
+(`contribution::KINDS`: manifest key, title, whether two
 extensions may share a name) is the one place those facts live.
 
 At load, `check_ids` turns an id that breaks the grammar into a load
@@ -101,8 +101,7 @@ does not make a contribution public.
   require exact equality. A model/event export cannot relabel its native
   descriptor version. An export must name its owner's declared contribution.
 - Export visibility is `private` by default (not importable), `experimental`
-  (private consumers only), or `stable` (private/shared consumers). Kind
-  stability is a ceiling: an experimental kind cannot be exported stable.
+  (private consumers only), or `stable` (private/shared consumers).
   A shared producer cannot expose experimental exports; an explicitly
   private contract can stay internal to a shared package.
 - Missing, disabled, inaccessible or incompatible required targets block
@@ -998,7 +997,7 @@ intent:                  # required
   origin: effort:eff42   # the thread/effort ref that created it, or null
   examples:              # inputs → expected outputs; fixtures for `extension test`
     - { name: …, input: {…}, expect: … }
-# stable kinds (permanent API)
+# kinds
 measures:    [...]   # same schema as .oxplow/project.yaml
 metrics:     [...]   # `key:` definitions; sourceMeasure must be declared here or oxplow.*
 dimensions:  [...]
@@ -1009,7 +1008,7 @@ ui:                  # what it adds to the core UI (a command's own `ui:` puts i
   slots:             # lenses mounted into core pages; see "Slots"
     - { slot: effort.review.details, lens: change-review }
   decorators: …      # labels from its models on core refs (stable since P10; see "Decorators")
-  replacements: …    # experimental: a lens in place of a named core component (see "Replacements")
+  replacements: …    # a lens in place of a named core component (see "Replacements")
 advisories:  [...]   # see "Advisories"
 models:     [...]   # SQL models: ModelDecl entries + models/<name>.sql → v_<ext>_<name>; `key: [cols]`; `materialize: on_change | { every: 1h } | { incremental: <col> }` stores one (semantic-layer.md "Extension models", "Materialized models")
 pages: …  panels: …  # see "Panels" and "Pages"
@@ -1021,7 +1020,6 @@ skills: …           # skills and slash commands for the coding agent
 providers: [...]    # external providers over the provider protocol — a program, or an MCP server behind oxplow's adapter (providers.md)
 effects: …          # scripts reacting to logged events by composing commands (see "Effects")
 custom_components: …   # sandboxed components for `viz: custom` lenses (see "Custom components")
-# experimental — a PRIVATE extension only: ui.replacements (above)
 ```
 
 Lenses aren't listed here: every `lenses/*.yaml` file in the folder is
@@ -1029,12 +1027,9 @@ loaded. A lens gets into the launcher through its own `launcher.category`
 (or stays out with `hidden: true`).
 
 **Private vs shared.** `sharing: private` is the usual case (this
-project, this person, agent-built): experimental kinds allowed, fast
-evolution. `sharing: shared` (committed for a team, installed from git,
-bundled — bundled *must* be shared) is held to the strict lifecycle:
-stable kinds only, `engine` declared and satisfied. Using an
-experimental kind in a shared extension is an error naming the key and
-its line.
+project, this person, agent-built). `sharing: shared` (committed for a
+team, installed from git, bundled — bundled *must* be shared) must
+declare `engine` (satisfied by this oxplow) and its own `version`.
 
 **What the loader checks** (`Extension.errors` / `Extension.warnings`):
 - shape: unknown keys, `manifest` version, `intent` present and
@@ -1389,7 +1384,7 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
 - `viz`: `table`, `list`, `number`, `markdown`, `bar`, `line`, `treemap`,
   `grid` (child lenses, `children`), `tree`, `timeline`, `detail`,
   `steps`, `hunks`, `form` (`form: { command, defaults? }`; no `query`
-  needed) or — experimental, private only — `custom` (`custom: {
+  needed) or `custom` (`custom: {
   component, props? }`, one of the extension's `custom_components`; see
   "Custom components"). Each component names the columns it draws from in
   its own block: `chart` (`x`, `y`, `series`, `label`, `size`, `group`),
@@ -2101,8 +2096,6 @@ each claim and decision an acceptance took unchecked (any makes it
 forced). Retention keeps envelopes and an extension's payloads go after 30
 days at most, so a verdict a decorator shows must not live in its
 payload. It shows; it never acts.
-`STABLE_KINDS` lists `ui.decorators`; a shared extension may declare
-them.
 
 ## The run context
 
@@ -2462,12 +2455,12 @@ timeline carries who decided what, and another extension can react to it
 promise is already built: a published `type@v` is a contract
 (`event_type_contract` refuses a changed schema — stronger than a
 model's drift warning), a new shape is a new version with an upcast, and
-a removed type's rows stay readable. `STABLE_KINDS` lists it;
-`EXPERIMENTAL_KINDS` keeps only `ui.replacements` (`ui.decorators` and
-`ref_kinds` were promoted in P10, "Decorators" and "Ref kinds";
-`effects` and `custom_components` in P11, below and "Custom
-components"; `providers` once the provider host was). `ManifestV2::experimental_kinds_used` reads the
-table, so promoting a kind is moving it from one table to the other.
+a removed type's rows stay readable. It was promoted to a stable kind
+on that evidence; every kind is stable now (`ui.decorators` and
+`ref_kinds` in P10, "Decorators" and "Ref kinds"; `effects` and
+`custom_components` in P11, below and "Custom components";
+`ui.replacements` with oxplow-bundled's history graph; `providers` once
+the provider host was), so a kind carries no stability.
 
 **`effects` is stable** (P11, tsk956), on the evidence rule: a bundled
 extension acts with one. oxplow-bundled's **`verify-unchecked`** reacts to

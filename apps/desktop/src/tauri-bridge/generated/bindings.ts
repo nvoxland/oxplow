@@ -2420,7 +2420,6 @@ export type Deprecated = {
 export type Descriptor = {
 	id: ContributionId,
 	owner: Owner,
-	stability: Stability,
 	/**
 	 *  The contract's own version (a model's, an event type's), when it
 	 *  has one.
@@ -3010,8 +3009,7 @@ export type ExtensionUi = {
 	decorators: UiDecorator[],
 	/**
 	 *  Lenses that take the place of a core sub-component while its
-	 *  provider is the capability's active one (experimental: a private
-	 *  extension's only; valid ones).
+	 *  provider is the capability's active one (valid ones).
 	 */
 	replacements: UiReplacement[],
 };
@@ -3050,34 +3048,28 @@ export type Extension_Deserialize = {
 	source: ExtensionSource | null,
 	// Declared collectors (valid ones; invalid ones are in `errors`).
 	collectors: CollectorSpec[],
-	/**
-	 *  Declared providers (experimental: a private extension's only;
-	 *  valid ones — invalid ones are in `errors`).
-	 */
+	// Declared providers (valid ones — invalid ones are in `errors`).
 	providers: ProviderSpec[],
-	/**
-	 *  Web components its `custom` lenses render, sandboxed (experimental:
-	 *  a private extension's only; valid ones).
-	 */
+	// Web components its `custom` lenses render, sandboxed (valid ones).
 	customComponents: CustomComponent[],
 	/**
-	 *  Event types it declares (experimental: a private extension's only;
-	 *  valid ones — the vocabulary registers them, `vocabulary_reactor`).
+	 *  Event types it declares (valid ones — the vocabulary registers
+	 *  them, `vocabulary_reactor`).
 	 */
 	eventTypes: EventTypes,
 	/**
-	 *  Ref kinds it declares (experimental: a private extension's only;
-	 *  valid ones — the vocabulary registers them, `vocabulary_reactor`).
+	 *  Ref kinds it declares (valid ones — the vocabulary registers
+	 *  them, `vocabulary_reactor`).
 	 */
 	refKinds: RefKindDecl[],
 	/**
-	 *  Effects it declares (experimental: a private extension's only;
-	 *  valid ones — each runs only once a person approves it, `effects`).
+	 *  Effects it declares (valid ones — each runs only once a person
+	 *  approves it, `effects`).
 	 */
 	effects: EffectDecl[],
 	/**
-	 *  The capability implementations it declares (stable:
-	 *  `implementations:`, each a built-in of core's).
+	 *  The capability implementations it declares (`implementations:`,
+	 *  each a built-in of core's).
 	 */
 	implementations: ImplementationDecl[],
 	/**
@@ -3184,34 +3176,28 @@ export type Extension_Serialize = {
 	source: ExtensionSource | null,
 	// Declared collectors (valid ones; invalid ones are in `errors`).
 	collectors: CollectorSpec[],
-	/**
-	 *  Declared providers (experimental: a private extension's only;
-	 *  valid ones — invalid ones are in `errors`).
-	 */
+	// Declared providers (valid ones — invalid ones are in `errors`).
 	providers: ProviderSpec[],
-	/**
-	 *  Web components its `custom` lenses render, sandboxed (experimental:
-	 *  a private extension's only; valid ones).
-	 */
+	// Web components its `custom` lenses render, sandboxed (valid ones).
 	customComponents: CustomComponent[],
 	/**
-	 *  Event types it declares (experimental: a private extension's only;
-	 *  valid ones — the vocabulary registers them, `vocabulary_reactor`).
+	 *  Event types it declares (valid ones — the vocabulary registers
+	 *  them, `vocabulary_reactor`).
 	 */
 	eventTypes: EventTypes,
 	/**
-	 *  Ref kinds it declares (experimental: a private extension's only;
-	 *  valid ones — the vocabulary registers them, `vocabulary_reactor`).
+	 *  Ref kinds it declares (valid ones — the vocabulary registers
+	 *  them, `vocabulary_reactor`).
 	 */
 	refKinds: RefKindDecl[],
 	/**
-	 *  Effects it declares (experimental: a private extension's only;
-	 *  valid ones — each runs only once a person approves it, `effects`).
+	 *  Effects it declares (valid ones — each runs only once a person
+	 *  approves it, `effects`).
 	 */
 	effects: EffectDecl[],
 	/**
-	 *  The capability implementations it declares (stable:
-	 *  `implementations:`, each a built-in of core's).
+	 *  The capability implementations it declares (`implementations:`,
+	 *  each a built-in of core's).
 	 */
 	implementations: ImplementationDecl[],
 	/**
@@ -5737,8 +5723,8 @@ export type ServiceUse = {
 
 /**
  *  Who the extension is for. Explicit and checked: a shared extension
- *  (committed for a team, installed from git, bundled) may use stable
- *  kinds only and must name the engine it targets.
+ *  (committed for a team, installed from git, bundled) must name the
+ *  engine it targets and its own version.
  */
 export type Sharing = "private" | "shared";
 
@@ -5972,9 +5958,6 @@ export type SqlQueryResult = {
 	 */
 	coverage?: SourceCoverage[],
 };
-
-// Whether a contract is permanent API.
-export type Stability = "stable" | "experimental";
 
 // One changed path in a workspace.
 export type StatusEntry = {

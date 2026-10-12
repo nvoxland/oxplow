@@ -1041,9 +1041,9 @@
     - { name: "since", type: "TEXT", doc: "When its run was first deferred (RFC 3339)." }
     - { name: "touched", type: "TEXT", doc: "When a triggering event last arrived for it (RFC 3339): what `settle` counts from." }
 - name: contribution
-  version: 1
+  version: 2
   key: [id]
-  description: "Every enabled extension's contributions, one row each, as their descriptors say: a stable id (`<extension>/<kind>/<local>`), who contributed it and at what version, how stable its contract is, how it runs, what it needs, and the shared name it holds. What `list_extensions` counts and the reference documents. Kinds move onto descriptors one by one; a kind not yet listed here keeps its own listing."
+  description: "Every enabled extension's contributions, one row each, as their descriptors say: a stable id (`<extension>/<kind>/<local>`), who contributed it and at what version, how it runs, what it needs, and the shared name it holds. What `list_extensions` counts and the reference documents. Kinds move onto descriptors one by one; a kind not yet listed here keeps its own listing."
   columns:
     - { name: "id", type: "TEXT", doc: "`<extension>/<kind>/<local>`." }
     - { name: "extension", type: "TEXT", doc: "The extension that declares it." }
@@ -1051,7 +1051,6 @@
     - { name: "local", type: "TEXT", doc: "Its id within the extension (a command's `<area>.<verb>`, a metric's key)." }
     - { name: "origin", type: "TEXT", doc: "`project` or `bundled`." }
     - { name: "version", type: "TEXT", doc: "The extension's `version:` (a bundled one's is oxplow's); NULL when it declares none." }
-    - { name: "stability", type: "TEXT", doc: "`stable` or `experimental`." }
     - { name: "contract_version", type: "INTEGER", doc: "The contract's own version (a model's, an event type's), when it has one." }
     - { name: "runs_on", type: "TEXT", doc: "How it comes to run, as JSON: `{on: events, types}`, `{on: schedule, every}`, `{on: run}`, `{on: call}`, `{on: query}`, `{on: mount}`, `{on: agent}`, `{on: declared}`." }
     - { name: "needs", type: "TEXT", doc: "What it requires (capabilities, features, scopes), as a JSON array. Never what a person granted." }

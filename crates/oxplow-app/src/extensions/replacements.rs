@@ -343,11 +343,6 @@ mod tests {
             "    - { target: vcs.history.graph, lens: graph }\n",
         );
         assert_eq!(said(&ext), "");
-        assert!(
-            !ext.errors.join("\n").contains("experimental"),
-            "{:?}",
-            ext.errors
-        );
         assert_eq!(
             ext.ui
                 .replacements
@@ -368,11 +363,6 @@ mod tests {
             "    - { target: work_item.board, lens: board }\n",
         );
         assert_eq!(said(&ext), "");
-        assert!(
-            !ext.errors.join("\n").contains("experimental"),
-            "{:?}",
-            ext.errors
-        );
         assert_eq!(ext.ui.replacements.len(), 1);
     }
 }
