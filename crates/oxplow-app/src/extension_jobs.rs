@@ -411,8 +411,8 @@ impl JobOperation for AiJob {
                 result = &mut future => return Ok(match result {
                     Ok(value) => JobWorkOutcome::Completed { completion: Completion::Succeeded,
                         result: serde_json::to_value(value).map_err(|_| JobOperationError::Failed)? },
-                    Err(_) => JobWorkOutcome::Completed { completion: Completion::Failed,
-                        result: json!({"error": "typed AI computation failed"}) },
+                    Err(error) => { tracing::warn!(error = ?error, "a typed AI job failed"); JobWorkOutcome::Completed { completion: Completion::Failed,
+                        result: json!({"error": "typed AI computation failed"}) } },
                 }),
                 _ = tokio::time::sleep(Duration::from_millis(100)) => {
                     if work.run().check_authority().is_err() {
