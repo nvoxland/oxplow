@@ -49,7 +49,7 @@ built in place, a trait path or a turbofish is the same call, and
 clippy itself warns on a listed path that no longer resolves.
 `source_guards/db_writes.rs` builds the list from oxplow-db's syntax
 trees: a function writes when its body runs `execute`,
-`execute_batch`, `commit`, `transaction` or `rehearse`, or calls one
+`execute_batch`, `commit`, `transaction`, `rehearse` or an immediate `transaction_with_behavior`, or calls one
 of oxplow-db's functions that writes (to a fixpoint); a trait method
 writes when an implementation does. So a write is told by what it
 does, not its name (`get_or_create` writes), and `Database::read` —

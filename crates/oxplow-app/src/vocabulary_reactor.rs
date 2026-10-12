@@ -12,9 +12,6 @@
 //! - a declaration the registry refuses (`register_declared`);
 //! - a schema that differs from the one recorded at that `type@v`
 //!   (`event_type_contract`): a new shape is a new version;
-//! - two extensions whose names make one namespace (`acme-pr`,
-//!   `acme_pr`) that declare different types: neither registers (one
-//!   type declared twice is settled at load, the first keeping it);
 //! - a reaction (an effect's or collector's `on:`) to another extension's
 //!   type that no enabled extension registers (P9.D1) — the subscriber's
 //!   error, gone once the type's owner is installed and its declaration
@@ -135,8 +132,8 @@ impl PreparedVocabulary {
         let result = build_tx(tx, &self.declared, &now.to_string());
         match result {
             Ok((mut vocabulary, mut errors)) => {
-                // Unlike the legacy live reactor, a bad recognizer rejects
-                // the candidate instead of silently dropping recognition.
+                // A bad recognizer rejects the candidate instead of
+                // silently dropping recognition.
                 match self.work_item_ids.as_ref() {
                     Some((provider, pattern)) => match vocabulary
                         .kinds
@@ -313,43 +310,12 @@ fn build_tx(
 ) -> Result<(Vocabulary, BTreeMap<String, Vec<String>>), DomainError> {
     let mut events = EventSchemaRegistry::core();
     let mut errors: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    let declares = |t: &EventTypes| !t.types.is_empty() || t.retention.is_some();
-    let mut by_namespace: HashMap<String, Vec<&str>> = HashMap::new();
-    for d in declared.iter().filter(|d| declares(&d.types)) {
-        by_namespace
-            .entry(extension_namespace(&d.extension))
-            .or_default()
-            .push(&d.extension);
-    }
     let mut retention = Vec::new();
     for Declares {
         extension, types, ..
     } in declared
     {
         let namespace = extension_namespace(extension);
-        let others: Vec<&str> = by_namespace
-            .get(&namespace)
-            .into_iter()
-            .flatten()
-            .copied()
-            .filter(|o| o != extension)
-            .collect();
-        if declares(types) && !others.is_empty() {
-            errors.entry(extension.clone()).or_default().push(format!(
-                "event types: `{namespace}.*` is also {}'s namespace; rename one extension",
-                others
-                    .iter()
-                    .map(|o| format!("`{o}`"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
-            continue;
-        }
-        // A namesake that declares nothing doesn't speak for a namespace a
-        // declaring extension holds: it would drop that one's window (tsk796).
-        if !declares(types) && by_namespace.contains_key(&namespace) {
-            continue;
-        }
         retention.push(DeclaredRetention {
             namespace,
             extension: extension.clone(),
@@ -916,11 +882,11 @@ mod tests {
         );
     }
 
-    /// Two extensions that make one namespace and declare different types
-    /// share a retention window and a prefix no registry entry settles:
-    /// neither registers.
+    /// `acme_pr` would share `acme-pr`'s namespace, but an extension's name
+    /// is lowercase letters, digits and single dashes: the second is refused
+    /// at its name, so one namespace never has two owners.
     #[tokio::test]
-    async fn two_extensions_sharing_a_namespace_both_fail() {
+    async fn a_name_that_would_share_a_namespace_is_refused_at_the_name() {
         let f = crate::test_fixtures::services_with_effort().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
@@ -945,16 +911,23 @@ mod tests {
         );
         svc.vocabulary_service.sync().await.unwrap();
         let listed = svc.listed_extensions(&root).await;
-        for name in ["acme-pr", "acme_pr"] {
-            let errors = &listed.iter().find(|e| e.name == name).unwrap().errors;
-            assert!(
-                errors
-                    .iter()
-                    .any(|e| e.contains("also") && e.contains("namespace")),
-                "{name}: {errors:?}"
-            );
-        }
-        assert!(!svc.vocabulary.current().is_registered("acme_pr.merged", 1));
+        let errors = |name: &str| {
+            listed
+                .iter()
+                .find(|e| e.name == name)
+                .unwrap()
+                .errors
+                .clone()
+        };
+        assert!(errors("acme-pr").is_empty(), "{:?}", errors("acme-pr"));
+        assert!(
+            errors("acme_pr")
+                .iter()
+                .any(|e| e.contains("isn't an extension name")),
+            "{:?}",
+            errors("acme_pr")
+        );
+        assert!(svc.vocabulary.current().is_registered("acme_pr.merged", 1));
         assert!(!svc.vocabulary.current().is_registered("acme_pr.closed", 1));
     }
 

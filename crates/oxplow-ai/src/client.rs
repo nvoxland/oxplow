@@ -167,7 +167,7 @@ pub trait ModelProvider: Send + Sync {
     ) -> Result<CapabilitySnapshotV1, AiError> {
         Ok(CapabilitySnapshotV1::unknown(model))
     }
-    /// Complete a typed, text-only request using the legacy completion API.
+    /// Complete a typed, text-only request through the provider's text completion.
     /// Providers with native image or tool transport can override this method.
     async fn complete_typed(
         &self,
@@ -206,7 +206,7 @@ pub trait ModelProvider: Send + Sync {
     }
 }
 
-/// Adapt ordered text parts to the legacy API without discarding unsupported parts.
+/// Adapt ordered text parts to the provider's text completion without discarding unsupported parts.
 pub async fn complete_typed_via_text<P: ModelProvider + ?Sized>(
     provider: &P,
     instance: &ProviderInstance<'_>,

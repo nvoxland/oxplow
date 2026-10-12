@@ -91,18 +91,6 @@ pub struct Scope {
 /// Every scope core provides, by id.
 pub const SCOPES: &[Scope] = &[
     Scope {
-        id: "jobs.read",
-        access: Access::Read,
-        host: Host::Daemon,
-        summary: "Read this extension's durable job status and recorded results.",
-    },
-    Scope {
-        id: "jobs.write",
-        access: Access::Record,
-        host: Host::Daemon,
-        summary: "Record intent for this extension's declared jobs or request their cancellation; execution requires its own current approval.",
-    },
-    Scope {
         id: "agent_input.write",
         access: Access::View,
         host: Host::Window,
@@ -223,6 +211,18 @@ pub const SCOPES: &[Scope] = &[
         access: Access::Record,
         host: Host::Daemon,
         summary: "Dismiss a hint oxplow showed.",
+    },
+    Scope {
+        id: "jobs.read",
+        access: Access::Read,
+        host: Host::Daemon,
+        summary: "Read this extension's durable job status and recorded results.",
+    },
+    Scope {
+        id: "jobs.write",
+        access: Access::Record,
+        host: Host::Daemon,
+        summary: "Record intent for this extension's declared jobs or request their cancellation; execution requires its own current approval.",
     },
     Scope {
         id: "knowledge.write",

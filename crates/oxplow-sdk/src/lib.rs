@@ -227,6 +227,24 @@ pub fn scaffold(
         example_expect,
         shared: false,
     });
+    // Every service the table offers, with the builtin that reaches it.
+    let services = oxplow_domain::service::SERVICES
+        .iter()
+        .map(|service| {
+            let via = match service.builtins.first() {
+                Some(builtin) if service.builtins.len() > 1 => format!(" ({builtin}() and more)"),
+                Some(builtin) => format!(" ({builtin}())"),
+                None => String::new(),
+            };
+            let approval = if service.approval {
+                ", you approve it"
+            } else {
+                ""
+            };
+            format!("{}{via}{approval}", service.scope)
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
     match kind {
         Kind::Provider { capability } => {
             manifest.push_str(&format!(
@@ -243,7 +261,7 @@ pub fn scaffold(
              \x20 - id: items\n\
              \x20   runtime: starlark\n\
              \x20   entry: collectors/items.star\n\
-             \x20   # Services its script may use: sql.read (scope()), tree.read (files()), ai.compute (ai_*; you approve it).\n\
+             \x20   # Services its script may use: {services}.\n\
              \x20   needs: []\n\
              \x20   input: \"SELECT ref, title, state FROM v_work_item\"\n\
              \x20   entities:\n\

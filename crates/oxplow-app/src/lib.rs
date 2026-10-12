@@ -2258,6 +2258,11 @@ mod tests {
                 "extension_config.read/snapshot",
                 "extension_config.write/compare_exchange",
                 "files.write/save",
+                // Intent on the extension's own declared jobs; running one
+                // needs the job's own current approval.
+                "jobs.read/snapshot",
+                "jobs.write/cancel",
+                "jobs.write/enqueue",
                 "knowledge.write/add_comment",
                 "knowledge.write/add_note",
                 "knowledge.write/link",

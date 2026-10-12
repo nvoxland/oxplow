@@ -166,7 +166,7 @@ pub struct CredentialDecl {
     /// Obtained by signing in rather than pasted (P9.B3).
     pub oauth: Option<OAuthDecl>,
     /// An inert host-owned secret identity, usable only as a remote MCP bearer.
-    #[serde(rename = "secretRef", skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "secretRef")]
     pub secret_ref: Option<oxplow_domain::extension_secret::SecretRef>,
 }
 

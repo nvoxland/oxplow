@@ -2031,7 +2031,8 @@ export type CommandSpec = {
 	op?: OpRef | null,
 	/**
 	 *  Top-level input fields its record leaves out — a file's content —
-	 *  kept as their size (`{ "omitted_bytes": n }`): the run is still
+	 *  kept as their size (`{ "omitted_bytes": n }`). The reserved `*`
+	 *  marker omits the entire input, including non-object inputs: the run is still
 	 *  audited, the audit log doesn't grow by every file saved.
 	 */
 	unrecorded?: string[],
@@ -2279,7 +2280,7 @@ export type ContributionImpact = {
 };
 
 // Every kind of contribution a manifest can declare.
-export type ContributionKind = "model" | "measure" | "metric" | "dimension" | "collector" | "event_type" | "ref_kind" | "command" | "effect" | "advisory" | "skill" | "implementation" | "provider" | "lens" | "page" | "panel" | "slot" | "decorator" | "replacement" | "custom_component";
+export type ContributionKind = "model" | "measure" | "metric" | "dimension" | "collector" | "event_type" | "ref_kind" | "command" | "job" | "effect" | "advisory" | "skill" | "implementation" | "provider" | "lens" | "page" | "panel" | "slot" | "decorator" | "replacement" | "custom_component";
 
 // One credential a provider declares.
 export type CredentialDecl = {
@@ -2290,6 +2291,8 @@ export type CredentialDecl = {
 	name: string,
 	// Obtained by signing in rather than pasted (P9.B3).
 	oauth: OAuthDecl | null,
+	// An inert host-owned secret identity, usable only as a remote MCP bearer.
+	secretRef: SecretRef | null,
 };
 
 export type CredentialStatus = {
@@ -3141,6 +3144,8 @@ export type Extension_Deserialize = {
 	 *  core commands (P6b; valid ones — invalid ones are in `errors`).
 	 */
 	commands: ExtensionCommand[],
+	// Durable host operations declared by this extension.
+	jobs: JobDecl[],
 	// Its `version:` (semver), when it declares one; required to share.
 	version: string | null,
 	/**
@@ -3273,6 +3278,8 @@ export type Extension_Serialize = {
 	 *  core commands (P6b; valid ones — invalid ones are in `errors`).
 	 */
 	commands: ExtensionCommand[],
+	// Durable host operations declared by this extension.
+	jobs: JobDecl[],
 	// Its `version:` (semver), when it declares one; required to share.
 	version: string | null,
 	/**
@@ -3785,6 +3792,20 @@ export type ItemBody =
 { type: "bypass"; toolCallId: string; label: string; reason: string } | 
 // Something failed: the prompt, the agent process, the protocol.
 { type: "error"; message: string };
+
+// A host-recognized operation owned by one extension contribution.
+export type JobDecl = {
+	id: string,
+	description: string,
+	version: number,
+	operation: JobOperationKind,
+	needs: string[],
+	replay: JobReplay,
+};
+
+export type JobOperationKind = "ai.complete_typed";
+
+export type JobReplay = "never" | "idempotent";
 
 export type KeyedDiff = {
 	key: string[],
@@ -5164,7 +5185,9 @@ export type ProgramKind =
  *  effect does, approved over its extension's folder (the manifest's
  *  `needs` says what it reads).
  */
-"effort-policy";
+"effort-policy" | 
+// A declared durable operation; approval covers its declaration and AI use.
+"job";
 
 // A program the project's config would run.
 export type ProjectProgram = {
@@ -5374,7 +5397,7 @@ export type ProviderSpec = {
 	fields?: FieldDecl[],
 	/**
 	 *  The scopes it calls over the protocol (`host/call`,
-	 *  `sql.read`): part of what its approval covers, and the only ones it
+	 *  `sql.read` or `state.read`): part of what its approval covers, and the only ones it
 	 *  may call.
 	 */
 	needs?: string[],
@@ -5674,6 +5697,15 @@ export type SearchHit = {
 	title: string,
 	snippet: string,
 	score: number,
+};
+
+/**
+ *  A versioned reference. Only the host can create a fresh identity; a wire
+ *  reference conveys identity alone and must be resolved under host authority.
+ */
+export type SecretRef = {
+	schemaVersion: number,
+	id: string,
 };
 
 export type SelectThreadRequest = {

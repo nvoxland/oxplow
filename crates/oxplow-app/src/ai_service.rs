@@ -645,7 +645,7 @@ impl AiService {
             });
         let stored_request = ModelRequest::Typed(request);
         let outcome = result.as_ref().map(|response| {
-            // Legacy aggregate columns count observed usage only. Optional
+            // The aggregate columns count observed usage only. Optional
             // counts and provenance are preserved in the complete payload.
             let (input, output) = observed_counts(response);
             (
@@ -902,9 +902,9 @@ impl AiService {
     }
 }
 
-/// Typed payloads retain optional counts and provenance. Legacy numeric
-/// aggregates include only provider-observed usage and use their old sentinel
-/// for missing or non-observed values.
+/// Typed payloads retain optional counts and provenance. The numeric
+/// aggregates include only provider-observed usage and are zero for missing
+/// or non-observed values.
 pub(crate) fn observed_counts(response: &TypedResponseV1) -> (i64, i64) {
     if response.usage.source != UsageSourceV1::Observed {
         return (0, 0);
