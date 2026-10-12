@@ -4035,6 +4035,14 @@ commands:
   later. The lease is 30 s, renewed every 10 s: an attempt whose lease
   ran out (oxplow stopped) is `interrupted` when recovery finds it.
   Nothing replays an interrupted job yet, `idempotent` or not.
+  A queued job survives a restart and runs after it; one that was
+  running is `interrupted` once its lease is out. A running job whose
+  declaration changes (a new generation) or whose approval is revoked
+  is cancelled with what it had, never completed under the new
+  generation. An extension has at most 256 queued or running jobs (a
+  repeat of an intent it already has is not a new one). No database
+  transaction is held while a model streams. These are pinned in
+  `extension_job_hardening_tests.rs`.
 - **Its end** is the event `contribution.job.completed@1 { job_id,
   contribution, version, attempt, fence, outcome: succeeded | failed |
   cancelled | interrupted }`, logged in the transaction that ended it

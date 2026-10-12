@@ -89,6 +89,8 @@ mod extension_imports_tests;
 pub mod extension_job_ai;
 pub mod extension_job_authority;
 pub mod extension_job_dispatch;
+#[cfg(test)]
+mod extension_job_hardening_tests;
 pub mod extension_job_operations;
 pub(crate) mod extension_job_runner;
 pub mod extension_job_scheduler;

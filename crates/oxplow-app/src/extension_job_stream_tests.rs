@@ -8,7 +8,7 @@ use oxplow_domain::Actor;
 use serde_json::{json, Value};
 use std::{sync::Arc, time::Duration};
 
-const MANIFEST: &str = r#"manifest: 2
+pub(super) const MANIFEST: &str = r#"manifest: 2
 name: triage
 intent:
   purpose: p
@@ -33,27 +33,23 @@ commands:
     invokers: { human: false, agent: false, lens: false, job: true }
 "#;
 
-const LOOKUP: &str = r#"
+pub(super) const LOOKUP: &str = r#"
 def transform(x):
     return {"commands": [], "result": {"todos": ["fix the parser in " + x["input"]["path"]]}}
 "#;
 
-struct Fixture {
-    _dir: tempfile::TempDir,
-    svc: Arc<crate::Services>,
-    model: Arc<FixtureModel>,
+pub(super) struct Fixture {
+    pub(super) _dir: tempfile::TempDir,
+    pub(super) svc: Arc<crate::Services>,
+    pub(super) model: Arc<FixtureModel>,
 }
 
-/// The `triage` extension with its `review` job approved, and the
-/// summarize role on a fixture model answering `replies` in turn.
-async fn fixture(manifest: &str, replies: Vec<FixtureReply>) -> Fixture {
-    let dir = tempfile::tempdir().unwrap();
-    crate::test_fixtures::init_git_repo(dir.path());
-    let ext = dir.path().join("oxplow/extensions/triage");
-    std::fs::create_dir_all(ext.join("commands")).unwrap();
-    std::fs::write(ext.join("extension.yaml"), manifest).unwrap();
-    std::fs::write(ext.join("commands/lookup.star"), LOOKUP).unwrap();
-    let svc = crate::Services::in_memory(dir.path()).await.unwrap();
+/// `svc` with the summarize role on a fixture model answering `replies` in
+/// turn, every job approved and the extensions (re)activated.
+pub(super) async fn prepare(
+    svc: &Arc<crate::Services>,
+    replies: Vec<FixtureReply>,
+) -> Arc<FixtureModel> {
     let model = Arc::new(FixtureModel::new(replies));
     svc.ai.providers().register_host(model.clone());
     svc.ai
@@ -75,15 +71,37 @@ async fn fixture(manifest: &str, replies: Vec<FixtureReply>) -> Fixture {
             }),
         )
         .unwrap();
-    crate::exec_consent::approve_every(&svc, crate::exec_consent::ProgramKind::Job).unwrap();
+    crate::exec_consent::approve_every(svc, crate::exec_consent::ProgramKind::Job).unwrap();
     svc.extension_activation
         .activate(svc.clone())
         .await
         .expect("the extension activates");
     let problems = svc.extension_activation.problems();
     assert!(problems.is_empty(), "{problems:?}");
-    svc.jobs
-        .spawn(svc.extension_activation.clone(), svc.commands.clone());
+    model
+}
+
+/// The `triage` extension with its `review` job approved, and the
+/// summarize role on a fixture model answering `replies` in turn.
+pub(super) async fn fixture(manifest: &str, replies: Vec<FixtureReply>) -> Fixture {
+    let fx = fixture_idle(manifest, replies).await;
+    fx.svc
+        .jobs
+        .spawn(fx.svc.extension_activation.clone(), fx.svc.commands.clone());
+    fx
+}
+
+/// [`fixture`] with the scheduler not started: jobs stay as they are
+/// enqueued.
+pub(super) async fn fixture_idle(manifest: &str, replies: Vec<FixtureReply>) -> Fixture {
+    let dir = tempfile::tempdir().unwrap();
+    crate::test_fixtures::init_git_repo(dir.path());
+    let ext = dir.path().join("oxplow/extensions/triage");
+    std::fs::create_dir_all(ext.join("commands")).unwrap();
+    std::fs::write(ext.join("extension.yaml"), manifest).unwrap();
+    std::fs::write(ext.join("commands/lookup.star"), LOOKUP).unwrap();
+    let svc = crate::Services::in_memory(dir.path()).await.unwrap();
+    let model = prepare(&svc, replies).await;
     Fixture {
         _dir: dir,
         svc,
@@ -91,11 +109,11 @@ async fn fixture(manifest: &str, replies: Vec<FixtureReply>) -> Fixture {
     }
 }
 
-fn reply(text: &str) -> FixtureReply {
+pub(super) fn reply(text: &str) -> FixtureReply {
     text.into()
 }
 
-fn slow(text: &str, every_ms: u64) -> FixtureReply {
+pub(super) fn slow(text: &str, every_ms: u64) -> FixtureReply {
     FixtureReply {
         text: text.into(),
         chunk_delay: Duration::from_millis(every_ms),
@@ -103,7 +121,7 @@ fn slow(text: &str, every_ms: u64) -> FixtureReply {
     }
 }
 
-fn calls(calls: &[(&str, Value)]) -> FixtureReply {
+pub(super) fn calls(calls: &[(&str, Value)]) -> FixtureReply {
     FixtureReply {
         tool_calls: calls
             .iter()
@@ -116,7 +134,7 @@ fn calls(calls: &[(&str, Value)]) -> FixtureReply {
     }
 }
 
-async fn run(fx: &Fixture, actor: &Actor, command: &str, input: Value) -> Value {
+pub(super) async fn run(fx: &Fixture, actor: &Actor, command: &str, input: Value) -> Value {
     fx.svc
         .commands
         .run(actor, command, input, false)
@@ -125,7 +143,7 @@ async fn run(fx: &Fixture, actor: &Actor, command: &str, input: Value) -> Value 
         .result
 }
 
-async fn ask(fx: &Fixture, intent: &str) -> String {
+pub(super) async fn ask(fx: &Fixture, intent: &str) -> String {
     let queued = run(
         fx,
         &Actor::Human,
@@ -144,7 +162,7 @@ async fn ask(fx: &Fixture, intent: &str) -> String {
     queued["id"].as_str().unwrap().to_owned()
 }
 
-async fn until(fx: &Fixture, id: &str, done: impl Fn(&Value) -> bool) -> Value {
+pub(super) async fn until(fx: &Fixture, id: &str, done: impl Fn(&Value) -> bool) -> Value {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
         let snapshot = run(
@@ -165,7 +183,7 @@ async fn until(fx: &Fixture, id: &str, done: impl Fn(&Value) -> bool) -> Value {
     }
 }
 
-async fn rows(fx: &Fixture, sql: &str, params: Vec<Value>) -> Vec<Vec<Value>> {
+pub(super) async fn rows(fx: &Fixture, sql: &str, params: Vec<Value>) -> Vec<Vec<Value>> {
     let out = fx
         .svc
         .sql
@@ -192,7 +210,7 @@ async fn lens(fx: &Fixture, id: &str, params: Vec<(&str, oxplow_db::SqlCell)>) -
     serde_json::to_value(&run.result.rows).unwrap()
 }
 
-async fn completions(fx: &Fixture, id: &str) -> Vec<String> {
+pub(super) async fn completions(fx: &Fixture, id: &str) -> Vec<String> {
     rows(
         fx,
         "SELECT json_extract(payload, '$.outcome') FROM v_event
