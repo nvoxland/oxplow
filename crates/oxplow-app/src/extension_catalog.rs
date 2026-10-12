@@ -22,7 +22,7 @@
 //! from the workspace watcher; the `extensions` config key, from its
 //! `config.changed` reactor). The cache itself still needs no signal.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -63,6 +63,99 @@ impl CatalogSnapshot {
     pub fn source_generation(&self) -> &str {
         &self.source_generation
     }
+    /// What a candidate activates: this load, with each enabled extension
+    /// that can't load (its own errors, a blocked contract, or a required
+    /// import of one that isn't there) replaced by its version in
+    /// `published`, the generation active now, or left out when it has
+    /// none. The rest activate together, so one broken extension never holds
+    /// back the others. Required bundled extensions are never replaced:
+    /// their errors still block. Returns the held extensions and why.
+    pub(crate) fn admitted(
+        &self,
+        published: Option<&CatalogSnapshot>,
+    ) -> (Arc<CatalogSnapshot>, BTreeMap<String, Vec<String>>) {
+        let can_load = |e: &Extension| e.errors.is_empty() && !e.public_contracts.blocked;
+        let mut held = BTreeMap::<String, Vec<String>>::new();
+        let mut admitted: Vec<Extension> = Vec::with_capacity(self.extensions.len());
+        for extension in self.extensions.iter() {
+            if !extension.enabled
+                || crate::bundled_extensions::is_required(&extension.name)
+                || can_load(extension)
+            {
+                admitted.push(extension.clone());
+                continue;
+            }
+            let last = published.and_then(|p| {
+                p.extensions()
+                    .iter()
+                    .find(|e| e.name == extension.name && e.enabled && can_load(e))
+            });
+            let mut why = extension.errors.clone();
+            match last {
+                Some(last) => {
+                    why.push("its last working version stays active until these are fixed".into());
+                    admitted.push(last.clone());
+                }
+                None => why.push("it isn't active until these are fixed".into()),
+            }
+            held.insert(extension.name.clone(), why);
+        }
+        // An extension whose required import's owner is out is out too,
+        // until nothing more drops.
+        loop {
+            let present: std::collections::BTreeSet<String> = admitted
+                .iter()
+                .filter(|e| e.enabled)
+                .map(|e| e.name.clone())
+                .collect();
+            let missing = admitted.iter().position(|e| {
+                e.enabled
+                    && !crate::bundled_extensions::is_required(&e.name)
+                    && e.public_contracts.imports.iter().any(|import| {
+                        !import.optional && !present.contains(&import.contribution.extension)
+                    })
+            });
+            let Some(index) = missing else { break };
+            let out = admitted.remove(index);
+            let owners: Vec<String> = out
+                .public_contracts
+                .imports
+                .iter()
+                .filter(|i| !i.optional && !present.contains(&i.contribution.extension))
+                .map(|i| format!("`{}`", i.contribution.extension))
+                .collect();
+            held.entry(out.name.clone()).or_default().push(format!(
+                "it imports from {}, which isn't active",
+                owners.join(", ")
+            ));
+        }
+        if held.is_empty() {
+            return (
+                Arc::new(CatalogSnapshot {
+                    extensions: self.extensions.clone(),
+                    generation: self.generation.clone(),
+                    source_generation: self.source_generation.clone(),
+                }),
+                held,
+            );
+        }
+        let names: Vec<&str> = held.keys().map(String::as_str).collect();
+        let generation = format!(
+            "{}+held({})@{}",
+            self.source_generation,
+            names.join(","),
+            published.map_or("none", |p| p.generation())
+        );
+        (
+            Arc::new(CatalogSnapshot {
+                extensions: Arc::new(admitted),
+                generation,
+                source_generation: self.source_generation.clone(),
+            }),
+            held,
+        )
+    }
+
     /// A safe initial active generation while extension candidates are
     /// prepared. It contains only required bundled declarations; project and
     /// non-required bundled extensions remain available through raw snapshots.
@@ -131,6 +224,11 @@ impl ExtensionCatalog {
 
     /// Replace the active primary-project catalog after coordinated
     /// generation publication. This never changes the raw load cache.
+    /// The generation last activated, if one has been.
+    pub(crate) fn active(&self) -> Option<Arc<CatalogSnapshot>> {
+        self.active.lock().clone()
+    }
+
     pub(crate) fn publish_active(&self, snapshot: Arc<CatalogSnapshot>) {
         *self.active.lock() = Some(snapshot);
         self.runtime_changed();
@@ -362,6 +460,79 @@ mod tests {
     const EXT: &str =
         "manifest: 2\nname: review\nintent:\n  purpose: x\n  examples: [{ name: a }]\n";
     const LENS: &str = "title: Tasks\nquery: SELECT ref FROM v_work_item\nviz: table\n";
+
+    fn names(snapshot: &CatalogSnapshot) -> Vec<String> {
+        let mut names: Vec<String> = snapshot
+            .extensions()
+            .iter()
+            .filter(|e| e.origin == "project")
+            .map(|e| format!("{}:{}", e.name, e.description))
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// One extension that can't load doesn't hold back the rest: it keeps
+    /// the version last activated, or stays out when it has none, and says
+    /// why.
+    #[test]
+    fn a_broken_extension_is_left_out_of_what_activates() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest = |name: &str, description: &str| {
+            format!("manifest: 2\nname: {name}\ndescription: {description}\nintent:\n  purpose: x\n  examples: [{{ name: a }}]\n")
+        };
+        write(
+            dir.path(),
+            "oxplow/extensions/good/extension.yaml",
+            &manifest("good", "one"),
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/edited/extension.yaml",
+            &manifest("edited", "one"),
+        );
+        let catalog = ExtensionCatalog::new();
+        let (first, held) = catalog.snapshot(dir.path()).admitted(None);
+        assert!(held.is_empty(), "{held:?}");
+        assert_eq!(names(&first), ["edited:one", "good:one"]);
+
+        // `edited` breaks, `good` changes, `fresh` arrives broken.
+        write(
+            dir.path(),
+            "oxplow/extensions/edited/extension.yaml",
+            &format!("{}bogus: 1\n", manifest("edited", "two")),
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/good/extension.yaml",
+            &manifest("good", "two"),
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/fresh/extension.yaml",
+            &format!("{}bogus: 1\n", manifest("fresh", "one")),
+        );
+        let (next, held) = catalog.snapshot(dir.path()).admitted(Some(&first));
+        assert_eq!(names(&next), ["edited:one", "good:two"]);
+        assert_eq!(held.keys().collect::<Vec<_>>(), ["edited", "fresh"]);
+        assert!(
+            held["edited"].iter().any(|e| e.contains("bogus")),
+            "{held:?}"
+        );
+        assert!(
+            held["edited"]
+                .iter()
+                .any(|e| e.contains("last working version stays active")),
+            "{held:?}"
+        );
+        assert!(
+            held["fresh"]
+                .iter()
+                .any(|e| e.contains("isn't active until")),
+            "{held:?}"
+        );
+        assert_ne!(next.generation(), catalog.snapshot(dir.path()).generation());
+    }
 
     #[test]
     fn a_hit_parses_nothing_and_an_edit_misses() {

@@ -485,7 +485,7 @@ the implicit backing scope of native operations.
 
 Scope: Build and validate a candidate catalog including semantic models, vocabulary, commands, providers, capabilities and UI contribution metadata. Activate it through one coherent generation boundary; pinned runs and queries retain the generation that owns them. Define coordination across DB-backed and in-memory registries.
 
-Acceptance: A failed update leaves the last good activation usable and reports candidate errors. New contributions are not partially exposed. A query or invocation sees compatible model/command/provider/UI metadata from one generation. Disabled initial candidates expose no runnable authority. Existing diagnostic partial-load behavior has an explicit compatibility decision.
+Acceptance: A failed update leaves the last good activation usable and reports candidate errors. New contributions are not partially exposed. A query or invocation sees compatible model/command/provider/UI metadata from one generation. Disabled initial candidates expose no runnable authority. Existing diagnostic partial-load behavior has an explicit compatibility decision. Decision: an extension that can't load is held at its last working version (or left out when new) and the rest activate together; only a required bundled extension's errors reject the candidate.
 
 Validation: Inject failure into each registration step and test hot update while queries/actions run. Assert rollback/last-good behavior and no mixed generation or leaked registration.
 

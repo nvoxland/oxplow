@@ -114,9 +114,8 @@ impl ExtensionActivation {
         )?;
         svc.providers
             .adopt_activation(svc.extension_activation.clone())?;
-        match self.activate(svc.clone()).await {
-            Ok(_) => self.problems.lock().clear(),
-            Err(error) => self.record_failure(&svc, error),
+        if let Err(error) = self.activate(svc.clone()).await {
+            self.record_failure(&svc, error);
         }
         Ok(())
     }
@@ -171,7 +170,6 @@ impl ExtensionActivation {
                 };
                 match owner.activate(svc.clone()).await {
                     Ok(_) => {
-                        owner.problems.lock().clear();
                         svc.extension_catalog.runtime_changed();
                         let _ = svc
                             .sql
@@ -298,7 +296,13 @@ impl ExtensionActivation {
         }
         let _one = self.activating.lock().await;
         let raw = svc.extension_catalog.snapshot(&svc.layout.project_dir);
-        let snapshot = if core_only { raw.core_baseline() } else { raw };
+        // An extension that can't load keeps its last working version (or
+        // stays out); the rest activate without it.
+        let (snapshot, held) = if core_only {
+            (raw.core_baseline(), VocabularyErrors::new())
+        } else {
+            raw.admitted(svc.extension_catalog.active().as_deref())
+        };
         let disabled = oxplow_config::disabled_extensions(&svc.layout.project_dir);
         let blocked: VocabularyErrors = snapshot
             .extensions()
@@ -460,6 +464,9 @@ impl ExtensionActivation {
             })
             .await?;
         retired.finish().await;
+        if !core_only {
+            *self.problems.lock() = held;
+        }
         Ok(published)
     }
 }

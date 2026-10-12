@@ -3797,7 +3797,19 @@ fence, with compatible SQL and command readers. Capability and command
 reservations are held across the commit and map swaps. A required-bundled core
 baseline is active before strict full activation: baseline failure prevents the
 daemon from serving; full-candidate rejection retains the baseline or last good
-generation. The active catalog is separate from raw candidate loads. Its
+generation.
+
+**One broken extension doesn't hold back the rest.** Before staging,
+`CatalogSnapshot::admitted` builds the candidate from the raw load with each
+enabled extension that can't load (its own errors, a blocked contract, or a
+required import whose owner is out) replaced by its version in the active
+generation, or left out when it has none; everything else activates together
+as one coherent generation. Required bundled extensions are never replaced:
+their errors still reject the candidate. The held extensions and why are the
+activation's `problems` (Settings → Extensions), so the reason is visible
+while the last working version keeps running. A held extension's declarations
+are its last working ones; its scripts are read from disk as they are now.
+The active catalog is separate from raw candidate loads. Its
 `source_generation` preserves the raw fingerprint, while the core baseline has a
 distinct `core:<source_generation>` runtime identity. Runtime catalog reads use
 the committed snapshot and apply immediate explicit-disable and missing-folder
