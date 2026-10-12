@@ -3534,12 +3534,78 @@ async fn a_call_finishing_after_its_instance_stopped_changes_nothing() {
     // Running again, it is a new instance: the old one's late results
     // still aren't its.
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    first_read(&fx).await;
+    // The successor is the running one once it is Ready (its first read
+    // is a read of the one before it, so it says nothing of this).
+    for _ in 0..200 {
+        let successor = fx.svc.providers.get(INSTANCE).await;
+        if successor.is_some_and(|i| !std::sync::Arc::ptr_eq(&i, &was_running))
+            && state() == Some((InstanceState::Ready, 0))
+        {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert_eq!(state(), Some((InstanceState::Ready, 0)));
     fx.svc
         .providers
         .call_failed(&was_running, "the old process went away".into())
         .await;
     assert_eq!(state(), Some((InstanceState::Ready, 0)));
+}
+
+/// A generation restarts only the instances it changed: an unrelated
+/// extension's edit leaves a running provider's process alone, while an
+/// edit to its own program or its config restarts it.
+#[tokio::test]
+async fn a_generation_restarts_only_the_instances_it_changed() {
+    let (fx, ext) = approved("").await;
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
+    first_read(&fx).await;
+    let running = fx.svc.providers.get(INSTANCE).await.expect("running");
+
+    // Another extension is added: nothing of the provider changed.
+    let other = fx.svc.layout.project_dir.join("oxplow/extensions/other");
+    std::fs::create_dir_all(&other).unwrap();
+    std::fs::write(
+        other.join("extension.yaml"),
+        "manifest: 2\nname: other\nintent:\n  purpose: unrelated\n",
+    )
+    .unwrap();
+    crate::test_fixtures::activate(&fx.svc).await;
+    let after = fx.svc.providers.get(INSTANCE).await.expect("still running");
+    assert!(
+        std::sync::Arc::ptr_eq(&running, &after),
+        "an unrelated edit restarted the provider"
+    );
+    assert_eq!(
+        fx.svc.providers.health(INSTANCE).map(|h| h.state),
+        Some(InstanceState::Ready)
+    );
+
+    // Its config changes: a new instance.
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "other" })).await;
+    let reconfigured = fx.svc.providers.get(INSTANCE).await.expect("running");
+    assert!(
+        !std::sync::Arc::ptr_eq(&running, &reconfigured),
+        "a config edit kept the old process"
+    );
+    assert!(running.is_stopped(), "the old one was retired");
+
+    // Its own program changes (re-approved): a new instance again.
+    let before = fx.svc.providers.get(INSTANCE).await.unwrap();
+    let script = fx
+        .svc
+        .layout
+        .project_dir
+        .join("oxplow/extensions/tracker/bin/provider");
+    let text = std::fs::read_to_string(&script).unwrap();
+    std::fs::write(&script, format!("{text}\n# edited\n")).unwrap();
+    approve(&fx, &extension(&fx.svc.layout.project_dir)).await;
+    let edited = fx.svc.providers.get(INSTANCE).await.expect("running");
+    assert!(
+        !std::sync::Arc::ptr_eq(&before, &edited),
+        "a program edit kept the old process"
+    );
 }
 
 /// tsk836: a stopped instance never starts again. A read still holding

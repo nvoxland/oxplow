@@ -6,7 +6,7 @@
 //! examples dry-run), then each intent example whose fixture names a lens
 //! (`input: { lens, params? }`, `expect: { columns?, rows }`), a derived
 //! collector (`input: { collector, rows? }`, `expect: { entities: { <name>:
-//! n }, events?: [{ type, payload? }] }`; an exec collector's isn't run — it needs a person's approval),
+//! n }, events?: [{ type, payload? }] }`; one that calls a model runs against the fixture model, approved in the throwaway; an exec collector's isn't run — it needs a person's approval),
 //! a fact collector (`input: { collector, files: { <path>: <text> } }`,
 //! `expect: { facts: [{ measure, value?, path?, … }] }`, tsk1047),
 //! or one of its own commands (`input: { command, input, rows? }`,
@@ -382,6 +382,24 @@ async fn event_example(host: &Host, ext: &Extension, ex: &Example<'_>, report: &
             return;
         }
     };
+    let (effects, commands) = effect_outcome(host, seq, "=").await;
+    let got = shaped_like(
+        &ex.expect,
+        &json!({ "effects": effects, "commands": commands }),
+    );
+    if let Some((path, want, got)) = first_mismatch(&ex.expect, &got) {
+        report.errors.push(format!(
+            "{shown}:1: the event led to {got} at `{path}`, the example expects {want} — fix: \
+             the effects, or the example's `expect` (`{{ effects: [{{ id, state }}], commands: \
+             [names] }}`)"
+        ));
+    }
+}
+
+/// What the effects did after log position `seq`: each latest run on the
+/// events at it (`at` is `=`: one event) or past it (`>`: whatever a job
+/// logged), and the commands they ran, once the effects have heard the log.
+async fn effect_outcome(host: &Host, seq: i64, at: &str) -> (Vec<Value>, Vec<String>) {
     host.svc
         .event_pump
         .settle(
@@ -404,10 +422,10 @@ async fn event_example(host: &Host, ext: &Extension, ex: &Example<'_>, report: &
         oxplow_db::SqlCell::Text(t) => t.clone(),
         other => format!("{other:?}"),
     };
-    let effects: Vec<Value> = rows(
-        "SELECT effect, state, reason FROM v_effect_run WHERE event_seq = ?1 AND latest = 1 \
-         ORDER BY effect",
-    )
+    let effects: Vec<Value> = rows(&format!(
+        "SELECT effect, state, reason FROM v_effect_run WHERE event_seq {at} ?1 AND latest = 1 \
+         ORDER BY effect"
+    ))
     .await
     .iter()
     .map(|r| json!({ "id": text(&r[0]), "state": text(&r[1]), "reason": text(&r[2]) }))
@@ -421,17 +439,7 @@ async fn event_example(host: &Host, ext: &Extension, ex: &Example<'_>, report: &
     .iter()
     .map(|r| text(&r[0]))
     .collect();
-    let got = shaped_like(
-        &ex.expect,
-        &json!({ "effects": effects, "commands": commands }),
-    );
-    if let Some((path, want, got)) = first_mismatch(&ex.expect, &got) {
-        report.errors.push(format!(
-            "{shown}:1: the event led to {got} at `{path}`, the example expects {want} — fix: \
-             the effects, or the example's `expect` (`{{ effects: [{{ id, state }}], commands: \
-             [names] }}`)"
-        ));
-    }
+    (effects, commands)
 }
 
 /// Approve `ext`'s effects in the throwaway as a person does, each
@@ -453,8 +461,12 @@ async fn approve_effects(host: &Host, ext: &Extension) -> Result<(), String> {
 /// `jobs.write/enqueue` (`input: { job, intentKey, request, model? }`), the
 /// job approved here as a person would, and read its outcome through its
 /// `jobs.read/snapshot` command once it ends: against `expect` — `{ state,
-/// result? }` (`$any` matches). Its model call answers with the fixture
-/// model's replies.
+/// result?, effects?, commands?, pages? }` (`$any` matches). Its model call
+/// answers with the fixture model's replies. An expectation of `effects`,
+/// `commands` or `pages` delivers the `contribution.job.completed` the job
+/// logs to the extension's effects, approved here as a person would: the
+/// effects that reacted (`[{ id, state? }]`), the commands they ran
+/// (`[names]`) and which of the named wiki pages (`[ref]`) now exist.
 async fn job_example(
     host: &Host,
     ext: &Extension,
@@ -490,17 +502,45 @@ async fn job_example(
             .push(format!("{shown}:1: approving its jobs: {e}"));
         return;
     }
+    let delivers = ["effects", "commands", "pages"]
+        .iter()
+        .any(|k| ex.expect.get(k).is_some());
+    if delivers {
+        if let Err(e) = approve_effects(host, ext).await {
+            report
+                .errors
+                .push(format!("{shown}:1: approving its effects: {e}"));
+            return;
+        }
+    }
+    let logged = host
+        .svc
+        .sql
+        .query_sql("SELECT COALESCE(MAX(seq), 0) FROM v_event", vec![], None)
+        .await
+        .ok()
+        .and_then(|r| match r.rows.first().and_then(|row| row.first()) {
+            Some(oxplow_db::SqlCell::Int(n)) => Some(*n),
+            _ => None,
+        })
+        .unwrap_or(0);
     let input = json!({
         "job": id,
         "intentKey": ex.input.get("intentKey").cloned().unwrap_or_else(|| json!(ex.name)),
         "request": ex.input.get("request").cloned().unwrap_or(Value::Null),
     });
-    let queued = match host
-        .svc
-        .commands
-        .run(&Actor::Human, &enqueue, input, false)
-        .await
-    {
+    // A job asked for in a thread: the effects that react to its end run
+    // for that thread, as a writer-bound command needs.
+    let asker = if delivers {
+        Actor::Agent {
+            session_id: None,
+            thread_id: Some(oxplow_domain::ThreadId::new(1)),
+            stream_id: None,
+        }
+    } else {
+        Actor::Human
+    };
+    let queued = match host.svc.commands.run(&asker, &enqueue, input, false).await {
         Ok(out) => out.result,
         Err(e) => {
             report
@@ -540,14 +580,46 @@ async fn job_example(
             }
         }
     };
-    let got = shaped_like(
-        &ex.expect,
-        &json!({ "state": done.get("state"), "result": done.get("result") }),
-    );
+    let mut ended = json!({ "state": done.get("state"), "result": done.get("result") });
+    if delivers {
+        let (effects, commands) = effect_outcome(host, logged, ">").await;
+        ended["effects"] = Value::Array(effects);
+        ended["commands"] = json!(commands);
+        let wanted: Vec<String> = ex
+            .expect
+            .get("pages")
+            .and_then(Value::as_array)
+            .map(|p| {
+                p.iter()
+                    .filter_map(|r| r.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut pages = Vec::new();
+        for page in wanted {
+            let found = host
+                .svc
+                .sql
+                .query_sql(
+                    "SELECT 1 FROM v_knowledge_page WHERE ref = ?1",
+                    vec![oxplow_db::SqlCell::Text(page.clone())],
+                    None,
+                )
+                .await
+                .map(|r| !r.rows.is_empty())
+                .unwrap_or(false);
+            if found {
+                pages.push(page);
+            }
+        }
+        ended["pages"] = json!(pages);
+    }
+    let got = shaped_like(&ex.expect, &ended);
     if let Some((path, want, got)) = first_mismatch(&ex.expect, &got) {
         report.errors.push(format!(
             "{shown}:1: job `{id}` ended {got} at `{path}`, the example expects {want} — fix: \
-             the job's request, or the example's `expect` (`{{ state, result? }}`)"
+             the job's request, or the example's `expect` (`{{ state, result?, effects?, commands?, \
+             pages? }}`)"
         ));
     }
 }
@@ -1147,7 +1219,13 @@ async fn fact_collector_example(
     let facts = match host
         .svc
         .metrics
-        .preview_fact_collector(&ext.name, spec, files, Value::Object(input))
+        .preview_fact_collector(
+            &ext.name,
+            spec,
+            files,
+            Value::Object(input),
+            oxplow_domain::run::Mode::External,
+        )
         .await
     {
         Ok(f) => f,
@@ -1205,15 +1283,32 @@ async fn collector_example(
     if oxplow_app::collector_runner::needs_approval(&host.root, &ext.name, spec) {
         use oxplow_config::collectors::CollectorRuntime as R;
         let does = match spec.runtime {
-            R::Starlark | R::Jaq => "calls a model",
-            R::Read => "reads a provider",
-            R::Exec => "runs a program",
+            // Calls a model: approved here as a person would, then run
+            // against the fixture model.
+            R::Starlark | R::Jaq => None,
+            R::Read => Some("reads a provider"),
+            R::Exec => Some("runs a program"),
         };
-        report.warnings.push(format!(
-            "{shown}:1: example `{example}` runs collector `{id}`, which {does}: `extension test` \
-             doesn't run it (it needs a person's approval) — fix: none; run it from Settings → Data"
-        ));
-        return;
+        if let Some(does) = does {
+            report.warnings.push(format!(
+                "{shown}:1: example `{example}` runs collector `{id}`, which {does}: `extension \
+                 test` doesn't run it (it needs a person's approval) — fix: none; run it from \
+                 Settings → Data"
+            ));
+            return;
+        }
+        let approved =
+            oxplow_app::collector_runner::approval_hash(&host.root.join(&ext.path), spec).and_then(
+                |hash| {
+                    oxplow_app::collector_runner::approve(&host.svc.approvals, &ext.name, id, &hash)
+                },
+            );
+        if let Err(e) = approved {
+            report
+                .errors
+                .push(format!("{shown}:1: approving collector `{id}`: {e}"));
+            return;
+        }
     }
     if !spec.facts.is_empty() {
         return fact_collector_example(host, ext, ex, spec, report).await;
@@ -2332,11 +2427,11 @@ commands:
         );
     }
 
-    /// A collector that calls a model is a program a person approves, like
-    /// an exec one: `extension test` doesn't run its example, so it never
-    /// spends a key.
+    /// A collector that calls a model is a program a person approves; the
+    /// throwaway approves it as a person would, and its example runs
+    /// against the fixture model — so it never spends a key.
     #[tokio::test(flavor = "multi_thread")]
-    async fn extension_test_doesnt_run_a_collector_that_calls_a_model() {
+    async fn extension_test_runs_a_collector_that_calls_a_model_against_the_fixture_model() {
         let dir = tempfile::tempdir().unwrap();
         tally(
             dir.path(),
@@ -2351,17 +2446,12 @@ commands:
         let report = test_extension(dir.path(), "tally", false).await.unwrap();
         assert_eq!(report.errors, Vec::<String>::new());
         assert!(
-            !report.ran.iter().any(|r| r == "example things"),
+            report.ran.iter().any(|r| r == "example things"),
             "{:?}",
             report.ran
         );
         let warnings = report.warnings.join("\n");
-        assert!(
-            warnings.contains(
-                "fixtures/things.yaml:1: example `things` runs collector `things`, which calls a model"
-            ),
-            "{warnings}"
-        );
+        assert!(!warnings.contains("calls a model"), "{warnings}");
     }
 
     /// P7.C6: `extension test` runs every kind's examples on a throwaway

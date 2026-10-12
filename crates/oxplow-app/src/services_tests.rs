@@ -209,7 +209,7 @@ async fn a_fact_collector_reads_the_layer_it_declares() {
     let files = [("a.rs".to_string(), "fn a() {}".to_string())].into();
     let facts = svc
         .metrics
-        .preview_fact_collector("acme", &spec("items"), files, json!({}))
+        .preview_fact_collector("acme", &spec("items"), files, json!({}), Mode::Pure)
         .await
         .unwrap();
     // The task fixture's one item, and the one file it was given.
@@ -217,7 +217,13 @@ async fn a_fact_collector_reads_the_layer_it_declares() {
 
     let err = svc
         .metrics
-        .preview_fact_collector("acme", &spec("asks"), Default::default(), json!({}))
+        .preview_fact_collector(
+            "acme",
+            &spec("asks"),
+            Default::default(),
+            json!({}),
+            Mode::Pure,
+        )
         .await
         .unwrap_err();
     assert!(err.contains("needs a person's approval first"), "{err}");

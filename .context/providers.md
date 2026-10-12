@@ -1002,8 +1002,12 @@ starts or replaces them: `initialize` at boot, then a generation on the
 extension catalog's change signal and on an `extensionInstances` /
 `activeProviders` change (the `config.providers` reactor on `config.changed`).
 `ProviderRegistry::reconcile()` is only the request for a generation. A
-generation starts every enabled instance and stops the rest (a config or spec
-change restarts one). An instance that can't run never rejects the
+generation starts every enabled instance that isn't already running unchanged
+and stops the rest. A running instance whose identity is the same in the new
+generation — its program (the extension's files, so its approval hash), its
+config, scope, declarations and spec, and a live connection — is carried over
+with its process; only a changed instance is replaced, and a removed or turned-off
+one stopped (the extension's place among the others doesn't count). An instance that can't run never rejects the
 generation: one that is unapproved, unconfigured, refused (its id is another
 owner's), missing, or disabled is left out with that state on its row, and one
 whose start failed or hung is published failing, restarting with backoff and

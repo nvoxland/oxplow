@@ -1,0 +1,19 @@
+# The job runs once a person approved it; the event it logs when it ends
+# reaches `publish-summary` (approved here too), which writes the model's
+# answer to the `triage-summary` page.
+input:
+  job: summarize
+  intentKey: summary-2
+  request:
+    schemaVersion: 1
+    role: summarize
+    messages:
+      - { role: user, parts: [{ type: text, text: "Summarize the TODO comments in two lines." }] }
+  model:
+    replies: ["One bug TODO and two cleanups."]
+expect:
+  state: succeeded
+  effects:
+    - { id: triage/publish-summary, state: ok }
+  commands: [oxplow.command.sequence]
+  pages: ["wiki:triage-summary"]

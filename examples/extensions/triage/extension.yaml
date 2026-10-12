@@ -15,6 +15,9 @@ intent:
     - name: summary-published
       input: { job: summarize }
       expect: the job succeeds with the model's answer
+    - name: summary-delivered
+      input: { job: summarize }
+      expect: the job succeeds, its completion reaches publish-summary, and the triage-summary page is written
     - name: summary-to-the-wiki
       input: { event: contribution.job.completed }
       expect: publish-summary writes the triage-summary page

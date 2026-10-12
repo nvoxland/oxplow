@@ -314,7 +314,7 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
     let tested = test_extension(root, "triage", false).await.unwrap();
     assert_eq!(tested.errors, Vec::<String>::new());
     assert!(
-        tested.warnings.iter().any(|w| w.contains("calls a model")),
+        !tested.warnings.iter().any(|w| w.contains("calls a model")),
         "{:?}",
         tested.warnings
     );
@@ -322,7 +322,14 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
     // event its job logs through its effect, its component's reads — in
     // the throwaway's activated generation, listing what it contributes
     // and what only the app shows.
-    for example in ["summary-published", "summary-to-the-wiki", "todo-board"] {
+    for example in [
+        "summary-published",
+        "summary-to-the-wiki",
+        "summary-delivered",
+        "todo-board",
+        "todos-and-open-work",
+        "an-older-snapshot-event",
+    ] {
         assert!(
             tested.ran.contains(&format!("example {example}")),
             "{example}: {:?}",

@@ -874,6 +874,14 @@ impl Instance {
         }
     }
 
+    /// Whether its process is up and its connection open.
+    pub(super) fn is_connected(&self) -> bool {
+        self.live
+            .try_lock()
+            .map(|live| live.as_ref().is_some_and(|l| !l.conn.peer.is_closed()))
+            .unwrap_or(true)
+    }
+
     pub(super) fn is_stopped(&self) -> bool {
         self.stopped.load(std::sync::atomic::Ordering::SeqCst)
     }
