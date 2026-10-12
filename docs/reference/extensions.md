@@ -304,7 +304,9 @@ commands:
 - `ui` says how a person meets it. `about` offers it on that kind of
   ref's page and rows. `input` binds `{{stream}}`, `{{thread}}`,
   `{{ref}}` or `{{ref.id}}`, each as a whole string. `form` opens a
-  page to gather the input instead. `open_after` opens a ref once it
+  page to gather the input instead; offered on a ref (`about`), the page
+  opens with `?ref=<ref>`, which a `pages:` lens form prefills from with
+  `defaults: { ref: "{{param.ref}}" }`. `open_after` opens a ref once it
   ran, taking `{{result.<field>}}` from its result.
 - A mistake in `ui` is a load error naming the field, not a menu entry
   that never shows.

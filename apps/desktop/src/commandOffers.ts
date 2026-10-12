@@ -6,6 +6,7 @@
 import type { CommandEntry } from "./components/quickOpenResults.js";
 import type { CommandOutcome, CommandSpec } from "./tauri-bridge/generated/bindings.js";
 import { streamRef, threadRef } from "./recordRefs.js";
+import { withPageParams } from "./tabs/pageRefs.js";
 import { offeredWhen, type WhenContext } from "./when.js";
 
 /** Where a command is offered from: what its input's bindings take, and
@@ -65,7 +66,7 @@ export function bindInput(template: unknown, ctx: OfferContext): { input: unknow
 }
 
 /** `spec`'s entry, run with `input` (or its form). */
-function offer(spec: CommandSpec, input: unknown, ctx: OfferContext, deps: OfferDeps): CommandEntry {
+function offer(spec: CommandSpec, input: unknown, ctx: OfferContext, deps: OfferDeps, ref?: string): CommandEntry {
   const ui = spec.ui!;
   const group = ui.group ?? "Commands";
   return {
@@ -80,9 +81,13 @@ function offer(spec: CommandSpec, input: unknown, ctx: OfferContext, deps: Offer
     // not run by its shortcut.
     enabled: offeredWhen(ui.when, ctx.when ?? {}),
     run: () => {
-      // A tab id (`page:new-task`) is a page; anything else one of the
+      // A tab id (`page:new-task`) is a page — given the ref the offer is
+      // about, as `?ref=`, to prefill from; anything else one of the
       // window's own forms.
-      if (ui.form) return ui.form.includes(":") ? deps.openPage(ui.form) : deps.openForm(ui.form);
+      if (ui.form) {
+        if (!ui.form.includes(":")) return deps.openForm(ui.form);
+        return deps.openPage(ref ? withPageParams(ui.form, { ref }) : ui.form);
+      }
       if (ui.background) return deps.runInBackground(ui.label, spec.id, input);
       void deps.run(ui.label, spec.id, input).then(async (out) => {
         if (!out || !ui.open_after) return;
@@ -117,7 +122,7 @@ export function refOffers(specs: CommandSpec[], ref: string, ctx: OfferContext, 
     const ui = spec.ui;
     if (!ui || ui.about !== kind) continue;
     const bound = ui.form ? { input: null } : bindInput(ui.input ?? { ref: "{{ref}}" }, { ...ctx, ref });
-    if (bound) out.push(offer(spec, bound.input, ctx, deps));
+    if (bound) out.push(offer(spec, bound.input, ctx, deps, ref));
   }
   return out;
 }

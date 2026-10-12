@@ -66,6 +66,13 @@ function encodeParams(params: Record<string, ParamValue>): string {
   return parts.join("&");
 }
 
+/** `tabId` with `params` added to its query (after any it has). */
+export function withPageParams(tabId: string, params: Record<string, ParamValue>): string {
+  const qs = encodeParams(params);
+  if (!qs) return tabId;
+  return `${tabId}${tabId.includes("?") ? "&" : "?"}${qs}`;
+}
+
 /** Split `<head>?<qs>` at the first `?`; `head` is percent-decoded. */
 function splitParams(raw: string): { head: string; params: URLSearchParams } {
   const q = raw.indexOf("?");

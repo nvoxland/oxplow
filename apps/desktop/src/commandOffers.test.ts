@@ -129,3 +129,18 @@ test("a ref's menus offer the commands about its kind, the ref bound into their 
     'run tracker.item.flag {"ref":"work_item:fake:W-1"}',
   ]);
 });
+
+test("a form about a ref opens with that ref as its param; a form about nothing is unchanged", () => {
+  const { d, calls } = deps();
+  const specs = [
+    spec("triage.note.add", { label: "Add Note…", about: "triage", form: "page:ext.triage.note-form" }),
+    spec("triage.note.tag", { label: "Tag…", about: "triage", form: "page:ext.triage.tag-form?mode=quick" }),
+    spec("oxplow.thread.create", { label: "New Thread…", about: "triage", form: "new-thread" }),
+  ];
+  for (const o of refOffers(specs, "triage:item/7", { streamId: null, threadId: null }, d)) o.run();
+  expect(calls).toEqual([
+    "open page:ext.triage.note-form?ref=triage:item/7",
+    "open page:ext.triage.tag-form?mode=quick&ref=triage:item/7",
+    "form new-thread",
+  ]);
+});
