@@ -393,7 +393,7 @@ impl RunContext {
     }
 
     /// A bounded SQL grant needs a policy at preparation, before any rows
-    /// are evaluated. Legacy `sql.read` explicitly grants the whole layer.
+    /// are evaluated. Bare `sql.read` explicitly grants the whole layer.
     pub fn has_model_bounds(&self) -> bool {
         self.authority.as_ref().is_some_and(|a| {
             !a.grant

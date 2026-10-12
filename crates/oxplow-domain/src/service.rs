@@ -28,7 +28,7 @@ pub struct ServiceSpec {
 const ALL: &[Mode] = &[Mode::Pure, Mode::Transactional, Mode::External];
 
 /// Services multiplexed by the `scope` builtin. The SQL service owns the
-/// builtin's legacy metadata; each call checks its actual declared service.
+/// builtin's metadata; each call checks its actual declared service.
 pub const CALLABLE: &[&str] = &[
     "sql.read",
     "state.read",

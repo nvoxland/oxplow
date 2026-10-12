@@ -484,12 +484,6 @@ impl HostCalls {
         })
     }
 
-    /// Legacy registration for compatibility callers; production invokes use
-    /// [`Self::register`] so cancellation releases the run automatically.
-    pub fn begin(&self, key: &str, run: oxplow_domain::run::RunContext) {
-        self.runs.lock().insert(key.to_string(), run);
-    }
-
     pub fn finish(&self, key: &str) {
         self.runs.lock().remove(key);
     }

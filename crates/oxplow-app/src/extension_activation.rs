@@ -365,7 +365,7 @@ impl ExtensionActivation {
         // Move the owned writer into the worker closure. Cancelling the async
         // caller must not open readers while that worker can still commit.
         let boundary = Mutex::new(self.state.clone().write_owned().await);
-        // Legacy admission may hold this map while awaiting a DB write. Acquire
+        // Provider admission may hold this map while awaiting a DB write. Acquire
         // it before the DB permit, otherwise the publication worker can deadlock.
         let running = Mutex::new(svc.providers.reserve_running().await);
         let providers = Mutex::new(providers);
