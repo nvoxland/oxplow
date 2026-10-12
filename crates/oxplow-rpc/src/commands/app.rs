@@ -60,7 +60,7 @@ mod tests {
 
     #[tokio::test]
     async fn app_version_dispatches_with_no_args() {
-        let (svc, _dir) = services();
+        let (svc, _dir) = services().await;
         let out = crate::dispatch("app_version", json!(null), &svc)
             .await
             .unwrap();
@@ -72,7 +72,7 @@ mod tests {
 
     #[tokio::test]
     async fn log_ui_accepts_entry_and_returns_null() {
-        let (svc, _dir) = services();
+        let (svc, _dir) = services().await;
         let out = crate::dispatch(
             "log_ui",
             json!({ "entry": {

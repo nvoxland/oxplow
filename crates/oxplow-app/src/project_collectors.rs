@@ -71,16 +71,16 @@ mod tests {
     async fn services() -> (Arc<Services>, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
-        let svc = Arc::new(Services::in_memory(dir.path()).unwrap());
+        let svc = Services::in_memory(dir.path()).await.unwrap();
         svc.streams.ensure_primary().await.unwrap();
-        svc.metrics.seed_catalog().await;
         (svc, dir)
     }
 
-    fn configure(svc: &Services, dir: &std::path::Path, yaml: &str) {
+    async fn configure(svc: &std::sync::Arc<Services>, dir: &std::path::Path, yaml: &str) {
         std::fs::create_dir_all(dir.join(".oxplow")).unwrap();
         std::fs::write(dir.join(".oxplow/project.yaml"), yaml).unwrap();
         svc.reload_config_from_disk().unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
     }
 
     const CONFIG: &str = "collectors:\n\
@@ -96,7 +96,7 @@ mod tests {
         let (svc, dir) = services().await;
         std::fs::create_dir_all(dir.path().join("tools")).unwrap();
         std::fs::write(dir.path().join("tools/fetch.sh"), "#!/bin/sh\necho '{}'\n").unwrap();
-        configure(&svc, dir.path(), CONFIG);
+        configure(&svc, dir.path(), CONFIG).await;
         let listed = listings(&svc).await.unwrap();
         let ids: Vec<(&str, &str)> = listed
             .iter()
@@ -136,7 +136,7 @@ mod tests {
             "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 1, \"rule\": \"answer\", \"subject\": \"tree:.\"}]}\n",
         )
         .unwrap();
-        configure(&svc, dir.path(), CONFIG);
+        configure(&svc, dir.path(), CONFIG).await;
         svc.commands
             .run(
                 &Actor::Human,

@@ -80,7 +80,7 @@ mod tests {
 
     #[tokio::test]
     async fn providers_roles_and_keys_round_trip_without_exposing_keys() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let st = crate::dispatch(
             "save_ai_provider",
             json!({ "provider": { "id": "or", "kind": "openrouter" }, "key": "sk-secret" }),
@@ -134,7 +134,7 @@ mod tests {
     /// like every other config write — the view refreshes the one way.
     #[tokio::test]
     async fn setting_a_role_announces_a_config_change() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         crate::dispatch(
             "save_ai_provider",
             json!({ "provider": { "id": "or", "kind": "openrouter" }, "key": "sk-secret" }),
@@ -159,7 +159,7 @@ mod tests {
 
     #[tokio::test]
     async fn reading_an_unknown_model_call_is_invalid() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let err = crate::dispatch("read_ai_call", json!({ "id": 9, "body": "request" }), &svc)
             .await
             .unwrap_err();
@@ -168,7 +168,7 @@ mod tests {
 
     #[tokio::test]
     async fn testing_an_unknown_provider_is_invalid() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let err = crate::dispatch("test_ai_provider", json!({ "id": "x", "model": "m" }), &svc)
             .await
             .unwrap_err();

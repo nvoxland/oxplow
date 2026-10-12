@@ -106,7 +106,7 @@ async fn a_qualified_read_reaches_only_its_model_and_what_derives_from_it() {
         .activate(fx.svc.clone())
         .await
         .expect("the project activates");
-    fx.svc.extension_commands.reconcile().await;
+    crate::test_fixtures::activate(&fx.svc).await;
     let errors = fx
         .svc
         .extension_catalog
@@ -177,7 +177,8 @@ async fn errors_of(fx: &TaskEffortFixture, extension: &str) -> String {
     let root = fx.svc.layout.project_dir.clone();
     fx.svc
         .extension_catalog
-        .get(&root)
+        .snapshot(&root)
+        .extensions()
         .iter()
         .find(|e| e.name == extension)
         .map(|e| e.errors.join("\n"))
@@ -208,7 +209,7 @@ async fn a_service_the_script_did_not_declare_is_refused() {
         "oxplow/extensions/acme/sneak.star",
         &script("SELECT 1 AS n"),
     );
-    fx.svc.extension_commands.reconcile().await;
+    crate::test_fixtures::activate(&fx.svc).await;
 
     // `state.read` is not among what the script declared: the run refuses it
     // and says which service and why.
@@ -278,6 +279,8 @@ mod approved_code {
         fx: &TaskEffortFixture,
     ) -> Result<crate::collector_runner::CollectorRunReport, RunCollectorError> {
         let root = fx.svc.layout.project_dir.clone();
+        // What was written (or edited) since is published first.
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
         let collectors = Collectors::of(&fx.svc, &root);
         run_collector(
             &collectors,
@@ -294,7 +297,8 @@ mod approved_code {
         let ext = fx
             .svc
             .extension_catalog
-            .get(&root)
+            .snapshot(&root)
+            .extensions()
             .iter()
             .find(|e| e.name == "acme")
             .cloned()
@@ -379,7 +383,7 @@ mod approved_code {
             .activate(fx.svc.clone())
             .await
             .unwrap();
-        fx.svc.extension_commands.reconcile().await;
+        crate::test_fixtures::activate(&fx.svc).await;
         approve_current(&fx);
         assert!(super::run(&fx, "acme.read.all").await.is_ok());
         go(&fx).await.unwrap();
@@ -394,7 +398,7 @@ mod approved_code {
             .activate(fx.svc.clone())
             .await
             .unwrap();
-        fx.svc.extension_commands.reconcile().await;
+        crate::test_fixtures::activate(&fx.svc).await;
         assert!(
             super::run(&fx, "acme.read.all").await.is_err(),
             "its command is withdrawn"
@@ -415,7 +419,7 @@ mod approved_code {
             .activate(fx.svc.clone())
             .await
             .unwrap();
-        fx.svc.extension_commands.reconcile().await;
+        crate::test_fixtures::activate(&fx.svc).await;
         assert!(super::run(&fx, "acme.read.all").await.is_ok());
         go(&fx).await.unwrap();
     }
@@ -554,7 +558,8 @@ mod approved_code {
         let ext = fx
             .svc
             .extension_catalog
-            .get(&root)
+            .snapshot(&root)
+            .extensions()
             .iter()
             .find(|e| e.name == "acme")
             .cloned()

@@ -8,7 +8,9 @@ use std::time::SystemTime;
 use oxplow_config::{ExtensionInstanceConfig, OxplowConfig};
 use oxplow_domain::vocabulary::Vocabulary;
 
-use super::{Instance, Live, PreparedProviderCapability, ProviderRegistry, Scope};
+use super::{
+    HostError, Instance, InstanceState, Live, PreparedProviderCapability, ProviderRegistry, Scope,
+};
 use crate::capabilities::{Implementation, Source};
 use crate::extension_catalog::CatalogSnapshot;
 use crate::vocabulary_reactor::VocabularyErrors;
@@ -19,6 +21,10 @@ struct Staged {
     live: Option<Live>,
     epoch: u64,
     published: bool,
+    /// Its start failed the way a start may (the process won't come up
+    /// yet): it is published without a connection, failing, and its next
+    /// call restarts it with backoff.
+    start_failure: Option<String>,
 }
 
 impl Drop for Staged {
@@ -46,6 +52,9 @@ pub struct PreparedProviderGeneration {
     global_mtime: Option<SystemTime>,
     base: BTreeMap<String, Arc<Instance>>,
     staged: Vec<Staged>,
+    /// What instances left out of the generation read as, set when it is
+    /// published (a retired instance's late failure must not override it).
+    states: Vec<(String, InstanceState)>,
     _reconciling: tokio::sync::OwnedMutexGuard<()>,
 }
 
@@ -81,6 +90,7 @@ impl PreparedProviderGeneration {
 pub struct ProviderGenerationPublication {
     retired: Vec<(Arc<Instance>, Option<Live>)>,
     published: Vec<Arc<Instance>>,
+    start_failures: Vec<(Arc<Instance>, String)>,
     registry: std::sync::Weak<ProviderRegistry>,
 }
 
@@ -89,6 +99,11 @@ impl ProviderGenerationPublication {
     /// processes outside the publication transaction.
     pub async fn finish(mut self) {
         if let Some(registry) = self.registry.upgrade() {
+            for (instance, error) in std::mem::take(&mut self.start_failures) {
+                registry
+                    .failed(&instance.name.clone(), Some(&instance), error)
+                    .await;
+            }
             for instance in &self.published {
                 let current = {
                     let running = registry.running.lock().await;
@@ -199,11 +214,14 @@ impl ProviderRegistry {
         let mut ids = BTreeSet::new();
         let declared = crate::capabilities::declared_by(snapshot.extensions());
 
+        // One instance that can't run never holds back the others: it is
+        // left out and its state says why (the way the instance's
+        // `health` reads it), so the generation activates without it.
+        let mut states: Vec<(String, InstanceState)> = Vec::new();
         for (name, (scope, config)) in &configured {
-            if !start_instances || !config.enabled {
+            if !start_instances {
                 continue;
             }
-            let epoch = self.disable_epoch(name);
             let resolved = match Self::resolve_in(
                 snapshot.extensions(),
                 name,
@@ -211,22 +229,49 @@ impl ProviderRegistry {
                 *scope,
             ) {
                 Ok(resolved) => resolved,
-                Err(_) => {
-                    cleanup(&mut staged).await;
-                    return Err(error(name, "provider configuration could not be resolved"));
+                Err(why) => {
+                    states.push((
+                        name.clone(),
+                        InstanceState::Missing {
+                            reason: format!("`{name}`: {why}"),
+                        },
+                    ));
+                    continue;
                 }
             };
+            if !config.enabled {
+                states.push((name.clone(), InstanceState::Off));
+                continue;
+            }
+            let epoch = self.disable_epoch(name);
             match self.disabled_reason(name).await {
                 Ok(None) => {}
-                Ok(Some(_)) => continue,
-                Err(_) => {
-                    cleanup(&mut staged).await;
-                    return Err(error(name, "provider disabled state could not be read"));
+                Ok(Some(reason)) => {
+                    states.push((name.clone(), InstanceState::Disabled { reason }));
+                    continue;
+                }
+                // Not knowing is not a yes: it stays off.
+                Err(e) => {
+                    states.push((
+                        name.clone(),
+                        InstanceState::Failing {
+                            errors: vec![format!("couldn't read whether it was disabled: {e}")],
+                        },
+                    ));
+                    continue;
                 }
             }
+            let mut refused = |reason: &str| {
+                states.push((
+                    name.clone(),
+                    InstanceState::Refused {
+                        reason: reason.to_string(),
+                    },
+                ));
+            };
             if !ids.insert(resolved.id.clone()) {
-                cleanup(&mut staged).await;
-                return Err(error(name, "provider instance id is duplicated"));
+                refused("provider instance id is duplicated");
+                continue;
             }
             if self.hosts.contains_key(resolved.spec.capability.as_str())
                 && declared.iter().any(|implementation| {
@@ -234,11 +279,29 @@ impl ProviderRegistry {
                         && implementation.id == resolved.id
                 })
             {
-                cleanup(&mut staged).await;
-                return Err(error(
-                    name,
-                    "provider capability id conflicts with a declared implementation",
+                refused("provider capability id conflicts with a declared implementation");
+                continue;
+            }
+            // Its id is a command namespace and a provider id: another
+            // owner's, it is refused (its row says so).
+            if let Some(owner) = self
+                .bus
+                .upgrade()
+                .and_then(|bus| bus.namespace_owner(&resolved.id))
+                .filter(|owner| *owner != format!("provider:{name}"))
+            {
+                refused(&format!(
+                    "the command namespace `{}` is already {owner}'s — give the instance another id",
+                    resolved.id
                 ));
+                continue;
+            }
+            if !base.contains_key(name) && self.hosts.values().any(|h| h.has(&resolved.id)) {
+                refused(&format!(
+                    "`{}` is already a provider — give the instance another id",
+                    resolved.id
+                ));
+                continue;
             }
             let instance = match self
                 .instance_in_snapshot(
@@ -252,9 +315,9 @@ impl ProviderRegistry {
                 .await
             {
                 Ok(instance) => instance,
-                Err(_) => {
-                    cleanup(&mut staged).await;
-                    return Err(error(name, "provider candidate could not be constructed"));
+                Err(e) => {
+                    self.start_failed(name, None, e).await;
+                    continue;
                 }
             };
             let capability = match self
@@ -262,11 +325,12 @@ impl ProviderRegistry {
                 .and_then(|host| host.prepare(&instance))
             {
                 Ok(capability) => capability,
-                Err(_) => {
-                    cleanup(&mut staged).await;
-                    return Err(error(name, "provider capability could not be prepared"));
+                Err(reason) => {
+                    refused(&reason);
+                    continue;
                 }
             };
+            self.set_state(name, InstanceState::Checking);
             match instance.start().await {
                 Ok(live) => staged.push(Staged {
                     instance,
@@ -274,10 +338,21 @@ impl ProviderRegistry {
                     live: Some(live),
                     epoch,
                     published: false,
+                    start_failure: None,
                 }),
-                Err(_) => {
-                    cleanup(&mut staged).await;
-                    return Err(error(name, "provider candidate failed to start"));
+                // It may come up: enabled and failing, its next call
+                // restarts it with backoff.
+                Err(e @ HostError::Failed { .. }) => staged.push(Staged {
+                    instance,
+                    capability: Some(capability),
+                    live: None,
+                    epoch,
+                    published: false,
+                    start_failure: Some(e.to_string()),
+                }),
+                Err(e) => {
+                    instance.discard_unpublished().await;
+                    self.start_failed(name, None, e).await;
                 }
             }
         }
@@ -300,6 +375,7 @@ impl ProviderRegistry {
             global_mtime,
             base,
             staged,
+            states,
             _reconciling: reconciling,
         })
     }
@@ -391,11 +467,11 @@ impl ProviderGenerationReservation<'_> {
     /// caller commits its database transaction.
     pub fn validate_live(&self) -> Result<(), VocabularyErrors> {
         for staged in &self.prepared.staged {
-            let valid = staged
-                .live
-                .as_ref()
-                .is_some_and(|live| !live.conn.peer.is_closed())
-                && staged.instance.host_calls.authority_current();
+            let connected = match &staged.live {
+                Some(live) => !live.conn.peer.is_closed(),
+                None => staged.start_failure.is_some(),
+            };
+            let valid = connected && staged.instance.host_calls.authority_current();
             if !valid {
                 return Err(error(
                     &staged.instance.name,
@@ -485,6 +561,9 @@ impl ProviderGenerationReservation<'_> {
         for (instance, peer) in supervisors {
             instance.supervise(peer);
         }
+        for (name, state) in std::mem::take(&mut self.prepared.states) {
+            self.registry.set_state(&name, state);
+        }
         self.registry.global.lock().reconciled_at = self.prepared.global_mtime;
         self.registry.reconciled.send_replace(true);
         ProviderGenerationPublication {
@@ -493,7 +572,19 @@ impl ProviderGenerationReservation<'_> {
                 .prepared
                 .staged
                 .iter()
+                .filter(|staged| staged.start_failure.is_none())
                 .map(|staged| staged.instance.clone())
+                .collect(),
+            start_failures: self
+                .prepared
+                .staged
+                .iter()
+                .filter_map(|staged| {
+                    staged
+                        .start_failure
+                        .clone()
+                        .map(|error| (staged.instance.clone(), error))
+                })
                 .collect(),
             registry: self.registry.me.clone(),
         }

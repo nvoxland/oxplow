@@ -249,14 +249,19 @@ async fn a_provider_launched_session_is_recorded_canonically() {
         program.version.as_deref().unwrap(),
     )
     .unwrap();
-    svc.providers
-        .enable(
-            &ext,
-            &ext.providers[0],
-            serde_json::json!({ "team": "core" }),
-        )
+    svc.config.write().unwrap().extension_instances.insert(
+        "relay/relay".into(),
+        oxplow_config::ExtensionInstanceConfig {
+            enabled: true,
+            config: serde_json::json!({ "team": "core" }),
+            sync_minutes: None,
+            provider: None,
+        },
+    );
+    svc.extension_activation
+        .activate(svc.clone())
         .await
-        .unwrap();
+        .expect("the extension and its provider activate");
     assert!(
         svc.harnesses.get(oxplow_harness_fake::ID).is_err(),
         "only the provider's instance stands for the fake"

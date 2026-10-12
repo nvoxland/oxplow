@@ -23,7 +23,7 @@ pub async fn list_thread_notes(
 mod tests {
     #[tokio::test]
     async fn list_thread_notes_dispatches() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let out = crate::dispatch(
             "list_thread_notes",
             serde_json::json!({"threadId": "thr999999"}),

@@ -20,7 +20,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_commit_change_is_analyzed_over_ipc() {
-        let (svc, dir) = crate::test_support::services();
+        let (svc, dir) = crate::test_support::services().await;
         std::fs::write(dir.path().join("a.rs"), "fn a() {}\n").unwrap();
         let status = |args: &[&str]| {
             std::process::Command::new("git")

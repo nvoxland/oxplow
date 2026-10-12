@@ -160,7 +160,7 @@ mod tests {
     async fn services() -> (Arc<crate::Services>, tempfile::TempDir, i64) {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
-        let svc = Arc::new(crate::Services::in_memory(dir.path()).unwrap());
+        let svc = crate::Services::in_memory(dir.path()).await.unwrap();
         svc.streams.ensure_primary().await.unwrap();
         let facts = &svc.fact_store;
         // A complete measure: each scan restates the whole population.

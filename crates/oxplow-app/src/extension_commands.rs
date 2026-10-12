@@ -1061,14 +1061,12 @@ pub(crate) struct ExtensionCommandReservation<'a> {
     commands: crate::commands::NamespaceReservation<'a>,
     registered: tokio::sync::MutexGuard<'a, BTreeMap<String, RegisteredCommands>>,
     registrations: BTreeMap<String, RegisteredCommands>,
-    problems: &'a parking_lot::Mutex<BTreeMap<String, String>>,
 }
 
 impl ExtensionCommandReservation<'_> {
     pub(crate) fn apply(&mut self) {
         self.commands.apply();
         *self.registered = std::mem::take(&mut self.registrations);
-        self.problems.lock().clear();
     }
 }
 
@@ -1088,7 +1086,6 @@ pub struct ExtensionCommands {
     root: std::path::PathBuf,
     /// What's registered, by namespace: the extension and its commands.
     registered: tokio::sync::Mutex<BTreeMap<String, RegisteredCommands>>,
-    problems: parking_lot::Mutex<BTreeMap<String, String>>,
 }
 
 impl ExtensionCommands {
@@ -1102,13 +1099,7 @@ impl ExtensionCommands {
             catalog,
             root,
             registered: tokio::sync::Mutex::default(),
-            problems: parking_lot::Mutex::default(),
         }
-    }
-
-    /// Why `extension`'s commands aren't registered, if they aren't.
-    pub fn problem(&self, extension: &str) -> Option<String> {
-        self.problems.lock().get(extension).cloned()
     }
 
     /// Prepare commands from one snapshot without changing the active bus.
@@ -1214,7 +1205,6 @@ impl ExtensionCommands {
     ) -> Result<(), oxplow_domain::CommandError> {
         let mut registered = self.registered.lock().await;
         self.publish_into(staged, &mut registered)?;
-        self.problems.lock().clear();
         Ok(())
     }
 
@@ -1237,7 +1227,6 @@ impl ExtensionCommands {
             commands,
             registered,
             registrations: staged.registrations.clone(),
-            problems: &self.problems,
         })
     }
 
@@ -1255,76 +1244,6 @@ impl ExtensionCommands {
         self.bus.publish_namespaces(staged.commands)?;
         *registered = staged.registrations;
         Ok(())
-    }
-
-    /// Withdraw disabled/removed sources, then stage and publish every enabled
-    /// replacement together. A failed candidate cannot retain revoked sources.
-    pub async fn reconcile(&self) {
-        let mut registered = self.registered.lock().await;
-        let mut problems = BTreeMap::new();
-        for attempt in 0..3 {
-            match self.reconcile_once(&mut registered) {
-                Ok(found) => {
-                    problems = found;
-                    break;
-                }
-                Err(oxplow_domain::CommandError::Unavailable { .. }) if attempt < 2 => {
-                    // Provider registrations can race this pass. Yield, then
-                    // rebuild against fresh catalog and registry identities.
-                    tokio::task::yield_now().await;
-                }
-                Err(error) => {
-                    let snapshot = self.catalog.snapshot(&self.root);
-                    problems = Self::wanted(&snapshot)
-                        .keys()
-                        .chain(registered.keys())
-                        .map(|name| (name.clone(), error.to_string()))
-                        .collect();
-                    tracing::warn!(%error, "extension command publication deferred");
-                    break;
-                }
-            }
-        }
-        for (extension, problem) in &problems {
-            tracing::warn!(extension, problem, "extension command candidate rejected");
-        }
-        *self.problems.lock() = problems;
-    }
-
-    fn reconcile_once(
-        &self,
-        registered: &mut BTreeMap<String, RegisteredCommands>,
-    ) -> Result<BTreeMap<String, String>, oxplow_domain::CommandError> {
-        let snapshot = self.catalog.snapshot(&self.root);
-        let wanted = Self::wanted(&snapshot);
-        // Keyed by extension: bundled sources can share the oxplow namespace.
-        // Withdrawal is authority revocation, independent of accepting new code.
-        let enabled: std::collections::BTreeSet<_> = snapshot
-            .extensions()
-            .iter()
-            .filter(|e| e.enabled)
-            .map(|e| e.name.as_str())
-            .collect();
-        let removed: Vec<_> = registered
-            .keys()
-            .filter(|name| !enabled.contains(name.as_str()))
-            .cloned()
-            .collect();
-        for extension in removed {
-            self.bus
-                .unregister_source(&format!("extension:{extension}"));
-            registered.remove(&extension);
-        }
-        if *registered == wanted {
-            return Ok(BTreeMap::new());
-        }
-        match self.stage_from(&snapshot, registered) {
-            Ok(staged) => {
-                self.publish_into(staged, registered)?;
-                Ok(BTreeMap::new())
-            }
-            Err(problems) => Ok(problems),
-        }
     }
 
     /// Build handlers with their original contribution metadata, without publication.
@@ -1415,23 +1334,6 @@ fn registration_problem(error: oxplow_domain::CommandError) -> String {
         }
         other => other.to_string(),
     }
-}
-
-/// Keep the extension commands matching the enabled extensions of the
-/// primary worktree: once at boot, then whenever they may have changed
-/// (the extension catalog's signal: a file under `oxplow/extensions/`
-/// there, or the `extensions` config key).
-pub fn spawn_reconciler(state: std::sync::Arc<crate::Services>) {
-    let mut changes = state.extension_catalog.changes();
-    tokio::spawn(async move {
-        state.extension_commands.reconcile().await;
-        // Lagging only means it missed some: one pass covers them.
-        while let Ok(()) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) =
-            changes.recv().await
-        {
-            state.extension_commands.reconcile().await;
-        }
-    });
 }
 
 /// Check `ext`'s commands (`check_extension`): with the running oxplow's
@@ -1586,6 +1488,15 @@ pub fn check_calls(registry: CommandSchemas<'_>, calls: &[CommandCall]) -> Resul
 
 #[cfg(test)]
 mod tests {
+    /// Why `extension` is held back by the last activation, if it is.
+    fn held_problem(fx: &crate::test_fixtures::EffortFixture, extension: &str) -> Option<String> {
+        fx.svc
+            .extension_activation
+            .problems()
+            .get(extension)
+            .map(|lines| lines.join("\n"))
+    }
+
     use super::*;
     use crate::extensions::{load_extensions, validate_extension, Extension};
     use std::path::Path;
@@ -1993,7 +1904,7 @@ mod tests {
         // can register.
         std::fs::remove_dir_all(root.join("oxplow/extensions/held")).unwrap();
         write_ext(root, "mine", GOOD, &files);
-        fx.svc.extension_commands.reconcile().await;
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
         assert_eq!(
             fx.svc.commands.namespace_owner("mine").as_deref(),
             Some("extension:mine")
@@ -2138,7 +2049,7 @@ mod tests {
 ",
             &[("handlers/finish.star", script)],
         );
-        fx.svc.extension_commands.reconcile().await;
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
     }
 
     /// Transitions the task to done and renames it after its row.
@@ -2190,8 +2101,8 @@ mod tests {
                 "def transform(x):\n    return {{\"commands\": [], \"events\": [{{\"type\": \"{event_type}\", \"payload\": {{\"ref\": x[\"input\"][\"ref\"]}}, \"subject\": [x[\"input\"][\"ref\"]]}}]}}\n"
             ),
         );
-        fx.svc.vocabulary_service.sync().await.unwrap();
-        fx.svc.extension_commands.reconcile().await;
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
     }
 
     /// P8.D4: a script's `events` append its extension's own types,
@@ -2313,9 +2224,9 @@ mod tests {
         declare(
             "  - name: page.star\n    summary: Star the page.\n    scope: bookmarks.write\n    op: set\n    invokers: { human: true, agent: true, lens: true }\n",
         );
-        fx.svc.extension_commands.reconcile().await;
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
         assert!(fx.svc.commands.spec("acme.page.star").is_none());
-        let problem = fx.svc.extension_commands.problem("acme").unwrap();
+        let problem = held_problem(&fx, "acme").unwrap();
         assert!(
             problem.contains("`bookmarks.write/set` is open to human, lens at most")
                 && problem.contains("`acme.page.star` admits human, agent, lens"),
@@ -2325,9 +2236,9 @@ mod tests {
         declare(
             "  - name: files.drop\n    summary: Discard.\n    scope: vcs.write\n    op: discard\n    invokers: { human: true, agent: false, lens: false }\n",
         );
-        fx.svc.extension_commands.reconcile().await;
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
         assert!(fx.svc.commands.spec("acme.files.drop").is_none());
-        let problem = fx.svc.extension_commands.problem("acme").unwrap();
+        let problem = held_problem(&fx, "acme").unwrap();
         assert!(
             problem.contains("`vcs.write/discard` is confirmed `destructive` at least")
                 && problem.contains("`acme.files.drop` declares `never`"),
@@ -2338,9 +2249,9 @@ mod tests {
         declare(
             "  - name: page.star\n    summary: Star the page.\n    scope: bookmarks.write\n    op: set\n    invokers: { human: true, agent: false, lens: false }\n",
         );
-        fx.svc.extension_commands.reconcile().await;
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
         assert!(fx.svc.commands.spec("acme.page.star").is_some());
-        assert!(fx.svc.extension_commands.problem("acme").is_none());
+        assert!(held_problem(&fx, "acme").is_none());
     }
 
     /// A project extension declares its own command over one of the
@@ -2362,7 +2273,7 @@ mod tests {
             );
         };
         star("set");
-        fx.svc.extension_commands.reconcile().await;
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
         let spec = fx.svc.commands.spec("acme.page.star").expect("registered");
         let oxplows = fx.svc.commands.spec("oxplow.bookmark.set").unwrap();
         assert_eq!(spec.input_schema, oxplows.input_schema);
@@ -2385,10 +2296,10 @@ mod tests {
         // A replacement that doesn't stage is rejected whole: the old
         // command stays as it was, and the problem is reported.
         star("erase");
-        fx.svc.extension_commands.reconcile().await;
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
         let kept = fx.svc.commands.spec("acme.page.star").expect("kept");
         assert_eq!(kept, spec);
-        let problem = fx.svc.extension_commands.problem("acme").unwrap();
+        let problem = held_problem(&fx, "acme").unwrap();
         assert!(problem.contains("has no op `erase`"), "{problem}");
     }
 
@@ -2403,16 +2314,9 @@ mod tests {
             "  - name: review.finish\n    summary: Finish the task.\n    input_schema: { type: object }\n    entry: handlers/finish.star\n    invokers: { human: true, agent: true, lens: true }\n",
             &[("handlers/finish.star", FINISH)],
         );
-        fx.svc.extension_commands.reconcile().await;
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
         assert!(fx.svc.commands.spec("my_review.review.finish").is_none());
-        let errors = fx
-            .svc
-            .extension_catalog
-            .get(fx._dir.path())
-            .iter()
-            .find(|e| e.name == "my-review")
-            .map(|e| e.errors.join("\n"))
-            .unwrap();
+        let errors = held_problem(&fx, "my-review").unwrap();
         assert!(
             errors.contains("uses `scope()` without `sql.read` in its `needs`"),
             "{errors}"
@@ -2499,7 +2403,7 @@ mod tests {
         with_count(
             "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT count(*) AS n FROM v_work_item\"})\n    return {\"commands\": [], \"result\": {\"n\": rows[0][\"n\"]}}\n",
         );
-        fx.svc.extension_commands.reconcile().await;
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
         let out = run().await.unwrap();
         assert_eq!(out.result["result"]["n"], json!(1));
         assert_eq!(out.audit_id, None, "a read isn't recorded");
@@ -2508,7 +2412,7 @@ mod tests {
             "def transform(x):\n    return {{\"commands\": [{{\"name\": \"oxplow.work_item.transition\", \"input\": {{\"ref\": \"{}\", \"to\": \"done\"}}}}]}}\n",
             oxplow_tasks::work_item_ref(fx.task)
         ));
-        fx.svc.extension_commands.reconcile().await;
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
         let err = run().await.unwrap_err();
         assert!(err.to_string().contains("composes no commands"), "{err}");
         assert_eq!(task(&fx).await.status, oxplow_tasks::TaskStatus::InProgress);
@@ -2668,7 +2572,7 @@ mod tests {
             ".oxplow/project.yaml",
             "extensions:\n  disabled: [my-review]\n",
         );
-        fx.svc.extension_commands.reconcile().await;
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
         assert!(
             bus.spec("my_review.review.finish").is_none(),
             "disabled: gone"
@@ -2702,19 +2606,17 @@ mod tests {
             .unwrap()],
         )
         .unwrap();
-        fx.svc.extension_commands.reconcile().await;
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
         assert!(bus.spec("my_review.review.finish").is_none());
         assert!(
             bus.spec("my_review.review.held").is_some(),
             "the holder keeps it"
         );
         assert!(
-            fx.svc
-                .extension_commands
-                .problem("my-review")
-                .is_some_and(|p| p == "the command namespace `my_review` is already provider:held's; declare another `namespace:`"),
+            held_problem(&fx, "my-review")
+                .is_some_and(|p| p.starts_with("the command namespace `my_review` is already provider:held's; declare another `namespace:`")),
             "{:?}",
-            fx.svc.extension_commands.problem("my-review")
+            held_problem(&fx, "my-review")
         );
     }
 

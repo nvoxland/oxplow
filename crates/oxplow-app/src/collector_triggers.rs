@@ -286,8 +286,8 @@ mod tests {
     const HEAD: &str =
         "manifest: 2\nname: work\nsharing: private\nintent: { purpose: t, origin: null, examples: [] }\n";
 
-    fn extension(root: &std::path::Path, collectors: &str, files: &[(&str, &str)]) {
-        let dir = root.join("oxplow/extensions/work");
+    async fn extension(svc: &std::sync::Arc<Services>, collectors: &str, files: &[(&str, &str)]) {
+        let dir = svc.layout.project_dir.join("oxplow/extensions/work");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("extension.yaml"),
@@ -297,6 +297,7 @@ mod tests {
         for (name, body) in files {
             std::fs::write(dir.join(name), body).unwrap();
         }
+        crate::test_fixtures::activate_with_problems(svc).await;
     }
 
     const SEEN: &str = "def transform(input):\n    return {\"entities\": {\"seen\": [{\"ev\": r[\"ev\"], \"id\": r[\"id\"], \"effort\": r[\"effort\"], \"kind\": input[\"event\"][\"type\"]} for r in input[\"rows\"]]}}\n";
@@ -366,11 +367,7 @@ mod tests {
     #[tokio::test]
     async fn an_on_collector_runs_once_per_event_with_its_anchors() {
         let fx = crate::test_fixtures::services_with_effort().await;
-        extension(
-            &fx.svc.layout.project_dir,
-            &on_claims(""),
-            &[("seen.star", SEEN)],
-        );
+        extension(&fx.svc, &on_claims(""), &[("seen.star", SEEN)]).await;
         let consumer = CollectorTriggers::new(Arc::downgrade(&fx.svc));
         let ev = log(&fx.svc, fx.effort, "reviewer").await;
         assert!(consumer.handles(&ev.envelope.event_type));
@@ -407,11 +404,7 @@ mod tests {
     #[tokio::test]
     async fn a_settled_collector_waits_then_runs_once_for_the_latest_event() {
         let fx = crate::test_fixtures::services_with_effort().await;
-        extension(
-            &fx.svc.layout.project_dir,
-            &on_claims(", settle: 30s"),
-            &[("seen.star", SEEN)],
-        );
+        extension(&fx.svc, &on_claims(", settle: 30s"), &[("seen.star", SEEN)]).await;
         let consumer = CollectorTriggers::new(Arc::downgrade(&fx.svc));
         let first = log(&fx.svc, fx.effort, "reviewer").await;
         consumer.handle(&first).await.unwrap();
@@ -450,11 +443,7 @@ mod tests {
     #[tokio::test]
     async fn an_idle_collector_waits_out_a_running_turn() {
         let fx = crate::test_fixtures::services_with_effort().await;
-        extension(
-            &fx.svc.layout.project_dir,
-            &on_claims(", idle: 2m"),
-            &[("seen.star", SEEN)],
-        );
+        extension(&fx.svc, &on_claims(", idle: 2m"), &[("seen.star", SEEN)]).await;
         let consumer = CollectorTriggers::new(Arc::downgrade(&fx.svc));
         consumer
             .handle(&log(&fx.svc, fx.effort, "reviewer").await)
@@ -501,10 +490,11 @@ mod tests {
     async fn a_where_filter_skips() {
         let fx = crate::test_fixtures::services_with_effort().await;
         extension(
-            &fx.svc.layout.project_dir,
+            &fx.svc,
             &on_claims(", where: { evidence: reviewer }"),
             &[("seen.star", SEEN)],
-        );
+        )
+        .await;
         let consumer = CollectorTriggers::new(Arc::downgrade(&fx.svc));
         let other = log(&fx.svc, fx.effort, "run:3").await;
         consumer.handle(&other).await.unwrap();
@@ -530,13 +520,14 @@ mod tests {
             .replace("entry: seen.star", "entry: broken.star")
             .replace("name: seen", "name: broken");
         extension(
-            &fx.svc.layout.project_dir,
+            &fx.svc,
             &format!("{broken}{}", on_claims("")),
             &[
                 ("seen.star", SEEN),
                 ("broken.star", "def transform(input):\n    return 1 // 0\n"),
             ],
-        );
+        )
+        .await;
         let consumer = CollectorTriggers::new(Arc::downgrade(&fx.svc));
         let ev = log(&fx.svc, fx.effort, "reviewer").await;
         consumer.handle(&ev).await.unwrap();
@@ -559,11 +550,10 @@ mod tests {
     #[tokio::test]
     async fn an_unapproved_exec_collector_records_needs_approval() {
         let fx = crate::test_fixtures::services_with_effort().await;
-        extension(
-            &fx.svc.layout.project_dir,
+        extension(&fx.svc,
             "  - id: pull\n    runtime: exec\n    entry: pull.sh\n    trigger: { on: [effort.claim_verified] }\n    entities:\n      - { name: pr, key: n, columns: { n: int } }\n",
             &[("pull.sh", "#!/bin/sh\necho '{\"entities\":{\"pr\":[{\"n\":1}]}}'\n")],
-        );
+        ).await;
         let consumer = CollectorTriggers::new(Arc::downgrade(&fx.svc));
         let ev = log(&fx.svc, fx.effort, "reviewer").await;
         consumer.handle(&ev).await.unwrap();
@@ -588,13 +578,14 @@ mod tests {
         let fx = crate::test_fixtures::services_with_effort().await;
         crate::effort_reactors::register(&fx.svc);
         extension(
-            &fx.svc.layout.project_dir,
+            &fx.svc,
             &on_claims("").replace(
                 "    input:",
                 "    after: [effort.evidence, no.such_consumer]\n    input:",
             ),
             &[("seen.star", SEEN)],
-        );
+        )
+        .await;
         let consumer = CollectorTriggers::new(Arc::downgrade(&fx.svc));
         assert_eq!(
             consumer.after_for("effort.claim_verified"),
@@ -618,8 +609,8 @@ mod tests {
 
     /// `acme-pr`: it declares `acme_pr.merged`, `.ping` and `.pong`
     /// (payload `{ number }`), and the given collectors.
-    fn emitter(root: &std::path::Path, collectors: &str, files: &[(&str, &str)]) {
-        let dir = root.join("oxplow/extensions/acme-pr");
+    async fn emitter(svc: &std::sync::Arc<Services>, collectors: &str, files: &[(&str, &str)]) {
+        let dir = svc.layout.project_dir.join("oxplow/extensions/acme-pr");
         std::fs::create_dir_all(&dir).unwrap();
         let types: String = ["merged", "ping", "pong"]
             .iter()
@@ -642,6 +633,7 @@ mod tests {
         for (name, body) in files {
             std::fs::write(dir.join(name), body).unwrap();
         }
+        crate::test_fixtures::activate_with_problems(svc).await;
     }
 
     /// A manual collector `prs` storing one `pr` row and returning `events`.
@@ -683,15 +675,14 @@ mod tests {
     async fn a_collector_emits_its_extensions_events_with_its_run() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let svc = &fx.svc;
-        emitter(
-            &svc.layout.project_dir,
+        emitter(svc,
             &prs(""),
             &[(
                 "prs.star",
                 &prs_script("[{\"type\": \"acme_pr.merged\", \"payload\": {\"number\": 12}, \"subject\": [\"collector:acme-pr/prs\"]}]"),
             )],
-        );
-        svc.vocabulary_service.sync().await.unwrap();
+        ).await;
+        crate::test_fixtures::activate_with_problems(svc).await;
         sync(svc, "prs").await.unwrap();
         assert_eq!(rows(svc, "SELECT n FROM v_acme_pr_pr").await, json!([[12]]));
         let synced = rows(
@@ -771,12 +762,8 @@ mod tests {
             // disable the collector, which is another rule's business.
             let fx = crate::test_fixtures::services_with_effort().await;
             let svc = &fx.svc;
-            emitter(
-                &svc.layout.project_dir,
-                &prs(trigger),
-                &[("prs.star", &prs_script(&events))],
-            );
-            svc.vocabulary_service.sync().await.unwrap();
+            emitter(svc, &prs(trigger), &[("prs.star", &prs_script(&events))]).await;
+            crate::test_fixtures::activate_with_problems(svc).await;
             let refused = sync(svc, "prs").await.unwrap_err();
             assert!(refused.contains(says), "{says}: {refused}");
             assert_eq!(
@@ -820,14 +807,15 @@ mod tests {
             format!("def transform(input):\n    n = input[\"event\"][\"payload\"][\"number\"] + 1\n    return {{\"entities\": {{\"{id}\": [{{\"n\": n}}]}}, \"events\": [{{\"type\": \"acme_pr.{id}\", \"payload\": {{\"number\": n}}}}]}}\n")
         };
         emitter(
-            &svc.layout.project_dir,
+            svc,
             &format!("{}{}", echo("ping", "pong"), echo("pong", "ping")),
             &[
                 ("ping.star", &script("ping")),
                 ("pong.star", &script("pong")),
             ],
-        );
-        svc.vocabulary_service.sync().await.unwrap();
+        )
+        .await;
+        crate::test_fixtures::activate_with_problems(svc).await;
         let consumer = CollectorTriggers::new(Arc::downgrade(svc));
         svc.event_log_store
             .append(Envelope::new("acme_pr.ping", 1, "test", json!({ "number": 0 })).unwrap())

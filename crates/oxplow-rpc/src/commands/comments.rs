@@ -32,7 +32,7 @@ pub async fn list_comments_for_stream(
 mod tests {
     #[tokio::test]
     async fn list_comments_for_target_dispatches() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let out = crate::dispatch(
             "list_comments_for_target",
             serde_json::json!({"targetKind": "wiki", "targetId": "some-slug"}),
@@ -45,7 +45,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_comments_for_stream_dispatches() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let out = crate::dispatch(
             "list_comments_for_stream",
             serde_json::json!({"streamId": "str1"}),

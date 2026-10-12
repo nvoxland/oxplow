@@ -5,151 +5,15 @@
 //! source data, so a worktree stream's extension edits reach them only
 //! once merged.
 //!
-//! A pass runs at boot and again whenever what it compiles may have
-//! changed: the extension catalog's signal (an edit under
-//! `oxplow/extensions/` in the primary worktree, the `extensions` config
-//! key), or a collector run (`collector.synced`, the
-//! `extension_models.entities` consumer: it may have registered a new
-//! entity a model reads). The inputs are fingerprinted, so a pass over the
-//! same models and entities does nothing.
-//!
-//! A model that fails doesn't stop the others; its errors are its
-//! extension's health, merged into the extension list, never a boot
-//! failure.
+//! A collector run (`collector.synced`, the `extension_models.entities`
+//! consumer) may have registered an entity a model reads: it asks the
+//! generation owner for a new generation when the entity signature moved.
+//! Compiling is the generation's (`extension_activation.rs`); a model that
+//! fails holds back its extension, never boot.
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::hash::{Hash, Hasher};
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
 
-use oxplow_db::models::ExtensionModels;
-use oxplow_db::Database;
 use oxplow_domain::DomainError;
-use tokio::sync::Mutex;
-
-use crate::extension_catalog::ExtensionCatalog;
-use crate::extensions::Extension;
-
-/// A burst of file events is one pass.
-const SETTLE: Duration = Duration::from_millis(250);
-
-#[derive(Default)]
-struct State {
-    fingerprint: Option<u64>,
-    errors: BTreeMap<String, Vec<String>>,
-}
-
-pub struct ExtensionModelsService {
-    db: Database,
-    catalog: Arc<ExtensionCatalog>,
-    /// The primary worktree, whose extensions publish models.
-    root: PathBuf,
-    state: Mutex<State>,
-}
-
-impl ExtensionModelsService {
-    pub fn new(db: Database, catalog: Arc<ExtensionCatalog>, root: PathBuf) -> Self {
-        Self {
-            db,
-            catalog,
-            root,
-            state: Mutex::new(State::default()),
-        }
-    }
-
-    /// Compile the extensions' models if anything they depend on changed.
-    /// Passes are serialized.
-    pub async fn sync(&self) -> Result<(), DomainError> {
-        let mut state = self.state.lock().await;
-        let extensions: Vec<ExtensionModels> = self
-            .catalog
-            .get(&self.root)
-            .iter()
-            .filter(|e| e.enabled && !e.models.is_empty())
-            .map(|e| ExtensionModels {
-                extension: e.name.clone(),
-                sources: e.models.clone(),
-            })
-            .collect();
-        let entities: BTreeSet<String> = self
-            .db
-            .read(|tx| {
-                let mut st = tx
-                    .prepare("SELECT view FROM model WHERE kind = 'entity'")
-                    .map_err(oxplow_db::map_sql_err)?;
-                let rows = st
-                    .query_map([], |r| r.get::<_, String>(0))
-                    .map_err(oxplow_db::map_sql_err)?
-                    .collect::<rusqlite::Result<BTreeSet<_>>>()
-                    .map_err(oxplow_db::map_sql_err)?;
-                Ok(rows)
-            })
-            .await?;
-        let fingerprint = {
-            let mut h = std::collections::hash_map::DefaultHasher::new();
-            serde_json::to_string(
-                &extensions
-                    .iter()
-                    .map(|e| (&e.extension, &e.sources))
-                    .collect::<Vec<_>>(),
-            )
-            .map_err(|e| DomainError::Invalid(e.to_string()))?
-            .hash(&mut h);
-            entities.hash(&mut h);
-            h.finish()
-        };
-        if state.fingerprint == Some(fingerprint) {
-            return Ok(());
-        }
-        let errors = self.db.compile_extension_models(extensions).await?;
-        for (extension, errs) in &errors {
-            for e in errs {
-                tracing::warn!(extension, error = %e, "extension model didn't compile");
-            }
-        }
-        state.errors = errors;
-        state.fingerprint = Some(fingerprint);
-        Ok(())
-    }
-
-    /// `extensions` with each one's model errors added to its `errors` —
-    /// for the primary worktree's list, where the models compile.
-    pub async fn with_health(&self, root: &Path, mut extensions: Vec<Extension>) -> Vec<Extension> {
-        if root != self.root {
-            return extensions;
-        }
-        let state = self.state.lock().await;
-        for ext in &mut extensions {
-            if let Some(errs) = state.errors.get(&ext.name) {
-                ext.errors.extend(errs.iter().cloned());
-            }
-        }
-        extensions
-    }
-
-    /// Compile now, then again whenever the primary worktree's extensions
-    /// may have changed (`changes`, the catalog's signal), for the life of
-    /// the process. A burst settles into one pass.
-    pub fn spawn(self: Arc<Self>, mut changes: tokio::sync::broadcast::Receiver<()>) {
-        tokio::spawn(async move {
-            if let Err(error) = self.sync().await {
-                tracing::warn!(%error, "extension models didn't compile at boot");
-            }
-            loop {
-                match changes.recv().await {
-                    Ok(()) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
-                }
-                tokio::time::sleep(SETTLE).await;
-                while changes.try_recv().is_ok() {}
-                if let Err(error) = self.sync().await {
-                    tracing::warn!(%error, "extension models didn't compile");
-                }
-            }
-        });
-    }
-}
 
 /// `extension_models.entities` (P7.B6): a collector run may have
 /// registered an entity a model reads, so the models compile again (a
@@ -202,13 +66,9 @@ impl crate::event_pump::AsyncEventConsumer for EntitiesConsumer {
 
     async fn handle(&self, _event: &oxplow_domain::StoredEvent) -> Result<(), DomainError> {
         if let Some(svc) = self.services.upgrade() {
-            if svc.sql.has_activation() {
-                svc.extension_activation
-                    .request_entity_refresh(&svc.db)
-                    .await?;
-            } else {
-                svc.extension_models.sync().await?;
-            }
+            svc.extension_activation
+                .request_entity_refresh(&svc.db)
+                .await?;
         }
         Ok(())
     }
@@ -222,7 +82,7 @@ pub fn register(state: &Arc<crate::Services>) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::path::Path;
 
     fn write(root: &Path, rel: &str, body: &str) {
         let p = root.join(rel);
@@ -240,7 +100,10 @@ mod tests {
         let f = crate::test_fixtures::services_with_effort().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
-        write(&root, "oxplow/extensions/late/extension.yaml", MANIFEST);
+        // `late` has a good model, `shaky` one that doesn't compile: the
+        // broken extension is held back with its error, the other publishes.
+        let (good, broken) = MANIFEST.split_once("  - name: broken").unwrap();
+        write(&root, "oxplow/extensions/late/extension.yaml", good);
         write(
             &root,
             "oxplow/extensions/late/models/blocked.sql",
@@ -248,20 +111,31 @@ mod tests {
         );
         write(
             &root,
-            "oxplow/extensions/late/models/broken.sql",
+            "oxplow/extensions/shaky/extension.yaml",
+            &format!(
+                "{}  - name: broken{broken}",
+                good.replace("name: late", "name: shaky")
+                    .split("  - name: blocked")
+                    .next()
+                    .unwrap()
+            ),
+        );
+        write(
+            &root,
+            "oxplow/extensions/shaky/models/broken.sql",
             "SELECT nope FROM ref('work_item')",
         );
-        svc.extension_models.sync().await.unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
         svc.sql
             .query_sql("SELECT ref FROM v_late_blocked", vec![], None)
             .await
             .unwrap();
         let listed = svc.listed_extensions(&root).await;
-        let late = listed.iter().find(|e| e.name == "late").unwrap();
+        let shaky = listed.iter().find(|e| e.name == "shaky").unwrap();
         assert!(
-            late.errors.iter().any(|e| e.contains("models/broken.sql")),
+            shaky.errors.iter().any(|e| e.contains("models/broken.sql")),
             "{:?}",
-            late.errors
+            shaky.errors
         );
         // Off: its views go.
         write(
@@ -269,7 +143,7 @@ mod tests {
             ".oxplow/project.yaml",
             "extensions:\n  disabled: [late]\n",
         );
-        svc.extension_models.sync().await.unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
         assert!(svc
             .sql
             .query_sql("SELECT ref FROM v_late_blocked", vec![], None)
@@ -302,7 +176,7 @@ mod tests {
             "oxplow/extensions/late/models/blocked.sql",
             "SELECT ref FROM ref('work_item') WHERE state = 'blocked'",
         );
-        svc.extension_models.sync().await.unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
         let validate = || async {
             crate::extensions::validate_extension(
                 &svc.sql,

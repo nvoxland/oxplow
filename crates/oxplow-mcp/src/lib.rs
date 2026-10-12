@@ -3472,14 +3472,14 @@ mod tests {
         }
     }
 
-    fn boot() -> (tempfile::TempDir, Arc<Services>, OxplowMcp) {
-        boot_with_config("")
+    async fn boot() -> (tempfile::TempDir, Arc<Services>, OxplowMcp) {
+        boot_with_config("").await
     }
 
-    /// `boot()` with `project_yaml` written to `.oxplow/project.yaml`
+    /// `boot().await` with `project_yaml` written to `.oxplow/project.yaml`
     /// first, so the booted `Services` picks it up (e.g. a
     /// `generated:` block that shapes the workspace filter).
-    fn boot_with_config(project_yaml: &str) -> (tempfile::TempDir, Arc<Services>, OxplowMcp) {
+    async fn boot_with_config(project_yaml: &str) -> (tempfile::TempDir, Arc<Services>, OxplowMcp) {
         let project = tempfile::tempdir().unwrap();
         if !project_yaml.is_empty() {
             std::fs::create_dir_all(project.path().join(".oxplow")).unwrap();
@@ -3498,7 +3498,7 @@ mod tests {
         let tree = repo.find_tree(tree_id).unwrap();
         repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
             .unwrap();
-        let services = Arc::new(Services::in_memory(project.path()).unwrap());
+        let services = Services::in_memory(project.path()).await.unwrap();
         let server = OxplowMcp::new(services.clone());
         (project, services, server)
     }
@@ -3540,13 +3540,13 @@ mod tests {
 
     #[tokio::test]
     async fn server_constructs() {
-        let (_proj, _svc, _server) = boot();
+        let (_proj, _svc, _server) = boot().await;
     }
 
     #[tokio::test]
     async fn get_open_page_reports_what_the_human_sees() {
         use oxplow_domain::stores::ThreadStore;
-        let (proj, services, server) = boot();
+        let (proj, services, server) = boot().await;
         let stream = services.streams.list_streams().await.unwrap()[0].clone();
         let thread = services
             .thread_store
@@ -3579,6 +3579,11 @@ mod tests {
             "title: Kinds\nparams:\n  - { name: kind, default: worktree }\nquery: SELECT kind FROM v_stream WHERE kind = :kind\n",
         )
         .unwrap();
+        services
+            .extension_activation
+            .activate(services.clone())
+            .await
+            .unwrap();
         services.thread_runtime.set_open_page(
             &thread,
             Some(oxplow_app::thread_runtime::OpenPage {
@@ -3615,7 +3620,7 @@ mod tests {
     #[tokio::test]
     async fn source_tools_never_approve_and_schema_lists_extension_entities() {
         use std::os::unix::fs::PermissionsExt;
-        let (proj, services, server) = boot();
+        let (proj, services, server) = boot().await;
         let ext = proj.path().join("oxplow/extensions/my-gh");
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
@@ -3630,6 +3635,11 @@ mod tests {
         )
         .unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        services
+            .extension_activation
+            .activate(services.clone())
+            .await
+            .unwrap();
 
         let list: serde_json::Value =
             serde_json::from_str(&text_payload(server.list_collectors().await.unwrap())).unwrap();
@@ -3651,7 +3661,7 @@ mod tests {
 
     #[tokio::test]
     async fn extension_and_lens_tools() {
-        let (proj, _services, server) = boot();
+        let (proj, services, server) = boot().await;
         let root = proj.path();
         let w = |rel: &str, body: &str| {
             let p = root.join(rel);
@@ -3674,6 +3684,11 @@ mod tests {
             "oxplow/extensions/demo/lenses/broken.yaml",
             "title: Broken\nquery: SELECT x FROM v_nope\n",
         );
+        services
+            .extension_activation
+            .activate(services.clone())
+            .await
+            .unwrap();
 
         let list = |name: Option<&str>| {
             let server = &server;
@@ -3696,7 +3711,14 @@ mod tests {
         };
         // The list is a summary: what each extension contributes, counted,
         // and its errors — not every lens's query.
-        let exts = list(None).await;
+        let all = list(None).await;
+        let exts: Vec<_> = all
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|e| e["name"] == "demo")
+            .collect();
+        let exts = serde_json::json!(exts);
         assert_eq!(exts[0]["name"], "demo");
         assert_eq!(exts[0]["contributes"]["lenses"], 3, "{exts}");
         // Every kind counts, the nested ones too (a slot mount under `ui`).
@@ -3819,7 +3841,7 @@ mod tests {
 
     #[tokio::test]
     async fn semantic_layer_query_and_schema_tools() {
-        let (_proj, _services, server) = boot();
+        let (_proj, _services, server) = boot().await;
         let out: serde_json::Value = serde_json::from_str(&text_payload(
             server
                 .query_sql(Parameters(QuerySqlParams {
@@ -3868,7 +3890,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_comments_enriches_primary_and_context() {
-        let (_proj, services, server) = boot();
+        let (_proj, services, server) = boot().await;
         let stream = services.streams.list_streams().await.unwrap()[0].id;
 
         // A task to use as the primary target, and another as a context
@@ -3923,7 +3945,7 @@ mod tests {
 
     #[tokio::test]
     async fn lsp_list_servers_returns_array() {
-        let (_proj, _svc, server) = boot();
+        let (_proj, _svc, server) = boot().await;
         let r = server.lsp_list_servers().await.unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&text_payload(r)).unwrap();
         assert!(parsed.is_array());
@@ -3931,7 +3953,7 @@ mod tests {
 
     #[tokio::test]
     async fn lsp_no_config_error_is_self_describing_for_agents() {
-        let (_proj, services, server) = boot();
+        let (_proj, services, server) = boot().await;
         let stream_id = services.streams.list_streams().await.unwrap()[0]
             .id
             .to_string();
@@ -3952,7 +3974,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_info_advertises_tool_capability() {
-        let (_proj, _svc, server) = boot();
+        let (_proj, _svc, server) = boot().await;
         let info = server.get_info();
         assert!(info.capabilities.tools.is_some());
     }
@@ -3962,7 +3984,7 @@ mod tests {
     /// person's thread.
     #[tokio::test]
     async fn get_info_instructions_say_to_show_answers_in_the_thread() {
-        let (_proj, _svc, server) = boot();
+        let (_proj, _svc, server) = boot().await;
         let instructions = server.get_info().instructions.unwrap_or_default();
         assert!(instructions.contains("show_lens"), "{instructions}");
         assert!(instructions.contains("query_sql"), "{instructions}");
@@ -3973,7 +3995,7 @@ mod tests {
         // The instructions ship to every downstream agent — they must not
         // point at this repo's own `.context/` docs, which don't exist
         // in a user's project.
-        let (_proj, _svc, server) = boot();
+        let (_proj, _svc, server) = boot().await;
         let info = server.get_info();
         let instructions = info.instructions.unwrap_or_default();
         assert!(
@@ -3986,7 +4008,7 @@ mod tests {
     /// (tsk376); it's read-only.
     #[tokio::test]
     async fn get_skill_returns_a_skill_body() {
-        let (_proj, _svc, server) = boot();
+        let (_proj, _svc, server) = boot().await;
         let r = server
             .get_skill(Parameters(GetSkillParams {
                 name: "oxplow-extension".into(),
@@ -4008,7 +4030,7 @@ mod tests {
     /// nothing stored (tsk377).
     #[tokio::test]
     async fn preview_collector_returns_rows_without_storing() {
-        let (proj, svc, server) = boot();
+        let (proj, svc, server) = boot().await;
         let ext = proj.path().join("oxplow/extensions/work");
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
@@ -4017,6 +4039,10 @@ mod tests {
         )
         .unwrap();
         std::fs::write(ext.join("one.jq"), "{entities: {nums: .rows}}").unwrap();
+        svc.extension_activation
+            .activate(svc.clone())
+            .await
+            .unwrap();
         let r = server
             .preview_collector(
                 rmcp::model::Extensions::new(),
@@ -4036,14 +4062,14 @@ mod tests {
 
     #[tokio::test]
     async fn ping_returns_pong() {
-        let (_proj, _svc, server) = boot();
+        let (_proj, _svc, server) = boot().await;
         let r = server.ping().await.unwrap();
         assert_eq!(text_payload(r), "pong");
     }
 
     #[tokio::test]
     async fn app_version_returns_cargo_version() {
-        let (_proj, _svc, server) = boot();
+        let (_proj, _svc, server) = boot().await;
         let r = server.app_version().await.unwrap();
         assert_eq!(text_payload(r), env!("CARGO_PKG_VERSION"));
     }
@@ -4053,7 +4079,7 @@ mod tests {
         // Boot ensures the primary stream exists (snapshot capture is
         // stream-scoped and must always have one), so a freshly booted
         // services has exactly one primary stream.
-        let (_proj, _services, server) = boot();
+        let (_proj, _services, server) = boot().await;
         let r = server.list_streams().await.unwrap();
         let body = text_payload(r);
         let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
@@ -4064,7 +4090,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_backlog_lists_the_items_on_no_thread() {
-        let (_proj, services, server) = boot();
+        let (_proj, services, server) = boot().await;
         let id = file_task(&services, None, "do the thing").await;
         let r = server
             .list_work_items(Parameters(ListWorkItemsParams {
@@ -4100,7 +4126,7 @@ mod tests {
     /// the active list's, and none with no list.
     #[tokio::test]
     async fn a_threads_context_reads_the_work_item_interface() {
-        let (_proj, services, server) = boot();
+        let (_proj, services, server) = boot().await;
         services.streams.ensure_primary().await.unwrap();
         let thread = ThreadId::new(1);
         file_task(&services, Some(thread), "on the thread").await;
@@ -4133,7 +4159,7 @@ mod tests {
     /// with none.
     #[tokio::test]
     async fn the_work_item_tools_read_the_active_list() {
-        let (_proj, services, server) = boot();
+        let (_proj, services, server) = boot().await;
         let id = file_task(&services, None, "round trip").await;
         let item_ref = format!("work_item:oxplow:{id}");
         let get = |server: &OxplowMcp| {
@@ -4238,7 +4264,7 @@ mod tests {
     /// that may use it.
     #[tokio::test]
     async fn list_services_describes_what_a_script_may_use() {
-        let (_proj, _services, server) = boot();
+        let (_proj, _services, server) = boot().await;
         let listed = server.list_services().await.unwrap();
         let text = listed.content[0].as_text().unwrap().text.clone();
         let services: Vec<serde_json::Value> = serde_json::from_str(&text).unwrap();
@@ -4272,7 +4298,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_command_refuses_an_anonymous_connection_and_lists_for_agents() {
-        let (_proj, _services, server) = boot();
+        let (_proj, _services, server) = boot().await;
         let err = server
             .run_command_as(
                 &McpCaller::default(),
@@ -4327,7 +4353,7 @@ mod tests {
     #[tokio::test]
     async fn commands_refuse_unknown_or_mismatched_callers() {
         use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
-        let (_proj, services, server) = boot();
+        let (_proj, services, server) = boot().await;
         let stream = services.stream_store.list().await.unwrap().pop().unwrap();
         let thread = services
             .thread_store
@@ -4396,7 +4422,7 @@ mod tests {
     #[tokio::test]
     async fn run_command_sets_zones_as_the_calling_thread() {
         use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
-        let (proj, services, server) = boot();
+        let (proj, services, server) = boot().await;
         let stream = services.stream_store.list().await.unwrap().pop().unwrap();
         let thread = services
             .thread_store
@@ -4502,7 +4528,7 @@ mod tests {
     #[tokio::test]
     async fn read_at_and_diff_default_to_the_callers_stream() {
         use oxplow_domain::stores::StreamStore as _;
-        let (proj, services, server) = boot();
+        let (proj, services, server) = boot().await;
         let primary = services.stream_store.list().await.unwrap().pop().unwrap();
         std::fs::write(proj.path().join("who.txt"), "primary").unwrap();
         let elsewhere = tempfile::tempdir().unwrap();
@@ -4541,7 +4567,7 @@ mod tests {
     #[tokio::test]
     async fn extension_tools_default_to_the_callers_stream() {
         use oxplow_domain::stores::StreamStore as _;
-        let (_proj, services, server) = boot();
+        let (_proj, services, server) = boot().await;
         let primary = services.stream_store.list().await.unwrap().pop().unwrap();
         let elsewhere = tempfile::tempdir().unwrap();
         let ext = elsewhere.path().join("oxplow/extensions/mine");
@@ -4603,7 +4629,7 @@ mod tests {
     /// ref and what the person sees, as text.
     #[tokio::test]
     async fn show_lens_records_an_answer_and_returns_its_text() {
-        let (_proj, services, server) = boot();
+        let (_proj, services, server) = boot().await;
         let out: serde_json::Value = serde_json::from_str(&text_payload(
             server
                 .show_lens(
@@ -4653,7 +4679,7 @@ mod tests {
     async fn mcp_observations_are_the_stored_rows() {
         use oxplow_db::EffortStore as _;
         use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
-        let (_proj, services, server) = boot();
+        let (_proj, services, server) = boot().await;
         let stream = services.stream_store.list().await.unwrap().pop().unwrap();
         let thread = services
             .thread_store
@@ -4711,7 +4737,7 @@ mod tests {
     async fn get_open_effort_reports_open_effort() {
         use oxplow_db::EffortStore as _;
         use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
-        let (_proj, services, server) = boot();
+        let (_proj, services, server) = boot().await;
         let stream = services.stream_store.list().await.unwrap().pop().unwrap();
         let thread = services
             .thread_store
@@ -4748,7 +4774,7 @@ mod tests {
     #[tokio::test]
     async fn get_open_effort_reports_none_when_no_open_effort() {
         use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
-        let (_proj, services, server) = boot();
+        let (_proj, services, server) = boot().await;
         let stream = services.stream_store.list().await.unwrap().pop().unwrap();
         let thread = services
             .thread_store
@@ -4772,7 +4798,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_open_effort_rejects_non_thread_id() {
-        let (_proj, _svc, server) = boot();
+        let (_proj, _svc, server) = boot().await;
         let err = server
             .get_open_effort(Parameters(GetOpenEffortParams {
                 thread_id: "str1".into(),
@@ -4792,7 +4818,7 @@ mod tests {
 
     #[tokio::test]
     async fn wiki_ref_drift_reports_status_per_ref() {
-        let (proj, svc, server) = boot();
+        let (proj, svc, server) = boot().await;
         seed_wiki(proj.path(), "intro", "see [[crates/foo.rs]]").await;
         oxplow_app::wiki_pages::sync_page(&svc.db, &svc.vocabulary, proj.path(), "intro")
             .await
@@ -4992,7 +5018,7 @@ mod tests {
     /// text capped; a connection with no thread identity asks nothing.
     #[tokio::test]
     async fn ai_tools_list_roles_decide_and_summarize() {
-        let (_proj, services, server) = boot();
+        let (_proj, services, server) = boot().await;
         let me = as_writer(&services).await;
         let thread = oxplow_domain::refs::build::thread_ref(caller_of(&me).thread_id.unwrap());
         let roles: serde_json::Value =
@@ -5143,7 +5169,7 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_change_analyzes_a_commit_for_agents() {
-        let (proj, _services, server) = boot();
+        let (proj, _services, server) = boot().await;
         std::fs::write(proj.path().join("a.rs"), "fn a() {}\n").unwrap();
         let repo = git2::Repository::open(proj.path()).unwrap();
         let mut idx = repo.index().unwrap();

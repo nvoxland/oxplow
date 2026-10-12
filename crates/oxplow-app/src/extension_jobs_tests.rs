@@ -31,7 +31,7 @@ struct Fixture {
 async fn fixture(approve_jobs: bool) -> Fixture {
     let dir = project();
     let (base, seen) = model().await;
-    let svc = Arc::new(crate::Services::in_memory(dir.path()).unwrap());
+    let svc = crate::Services::in_memory(dir.path()).await.unwrap();
     configure(&svc, base);
     start(&svc, approve_jobs).await;
     Fixture {
@@ -225,8 +225,8 @@ async fn a_recorded_job_runs_after_a_restart() {
     let global = dir.path().join(".oxplow/global-config");
     let secrets: Arc<dyn oxplow_ai::secrets::SecretStore> =
         Arc::new(oxplow_ai::secrets::MemorySecrets::default());
-    let open = || {
-        Arc::new(
+    let open = || async {
+        {
             crate::Services::on_machine_with_database(
                 dir.path(),
                 global.clone(),
@@ -234,12 +234,13 @@ async fn a_recorded_job_runs_after_a_restart() {
                 crate::providers::host::process_env(),
                 oxplow_db::Database::open(dir.path().join("restart.sqlite")).unwrap(),
             )
-            .unwrap(),
-        )
+            .await
+            .unwrap()
+        }
     };
     let (base, seen) = model().await;
 
-    let before = open();
+    let before = open().await;
     configure(&before, base);
     start(&before, false).await;
     let id = run_on(&before, "triage.summary.ask", ask("item-3")).await["id"]
@@ -249,7 +250,7 @@ async fn a_recorded_job_runs_after_a_restart() {
     before.jobs.shutdown();
     drop(before);
 
-    let after = open();
+    let after = open().await;
     start(&after, true).await;
     let done = until_on(&after, &id, |s| s["state"] == json!("succeeded")).await;
     assert!(done["result"].to_string().contains("hello"), "{done}");

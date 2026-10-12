@@ -586,7 +586,7 @@ ref_kinds:
         std::fs::write(dir.join("extension.yaml"), manifest).unwrap();
         std::fs::write(
             dir.join("models/prs.sql"),
-            "SELECT 'acme_pr:1' AS ref, 'One' AS title",
+            "SELECT CAST('acme_pr:1' AS TEXT) AS ref, CAST('One' AS TEXT) AS title",
         )
         .unwrap();
         std::fs::write(

@@ -33,7 +33,7 @@ pub async fn search(
 mod tests {
     #[tokio::test]
     async fn search_dispatches() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let out = crate::dispatch("search", serde_json::json!({ "query": "anything" }), &svc)
             .await
             .unwrap();

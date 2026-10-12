@@ -1120,6 +1120,7 @@ mod tests {
             .unwrap()
             .active_providers
             .insert("work_items".into(), "issues".into());
+        crate::test_fixtures::activate(&fx.svc).await;
         // The chosen one isn't running: none is, and files nowhere.
         let out = fx
             .svc
@@ -1166,6 +1167,7 @@ mod tests {
             .unwrap()
             .active_providers
             .insert("work_items".into(), "tracker".into());
+        crate::test_fixtures::activate(&fx.svc).await;
         let before = list_order(&fx, None).await.len();
         // Never another list: the chosen one isn't running, so none files
         // it nowhere.

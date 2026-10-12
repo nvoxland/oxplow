@@ -171,7 +171,7 @@ mod tests {
 
     /// A project with enabled extension `alpha`, over a memory keychain the
     /// test can inspect. The real keychain is never touched.
-    async fn fixture() -> (crate::Services, Arc<MemorySecrets>, tempfile::TempDir) {
+    async fn fixture() -> (Arc<crate::Services>, Arc<MemorySecrets>, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
         let ext = dir.path().join("oxplow/extensions/alpha");
@@ -188,6 +188,7 @@ mod tests {
             keychain.clone(),
             crate::providers::host::process_env(),
         )
+        .await
         .unwrap();
         (svc, keychain, dir)
     }

@@ -419,7 +419,7 @@ mod tests {
     /// the process already holding it keeps working.
     #[tokio::test]
     async fn a_launch_carries_its_sessions_one_bearer() {
-        let (mut ctx, _dir) = services();
+        let (mut ctx, _dir) = services().await;
         ctx.plugin_runtime = Some(runtime());
         let session = first_session(&ctx).await;
         let thread =
@@ -473,7 +473,7 @@ mod tests {
     /// ones that are.
     #[tokio::test]
     async fn an_unregistered_harness_is_refused_naming_the_registered() {
-        let (mut ctx, _dir) = services();
+        let (mut ctx, _dir) = services().await;
         ctx.plugin_runtime = Some(runtime());
         let session = first_session(&ctx).await.id;
         ctx.harnesses.unregister("claude");
@@ -573,7 +573,7 @@ mod tests {
         // test_support builds a context with plugin_runtime: None — the
         // agent path must refuse cleanly instead of panicking, so a
         // mis-configured host degrades to plain terminals only.
-        let (svc, _dir) = services();
+        let (svc, _dir) = services().await;
         let session = first_session(&svc).await.id;
         let err = open(&svc, &session.to_string()).await.unwrap_err();
         assert_eq!(err.code, "INVALID");
@@ -589,7 +589,7 @@ mod tests {
         // Opening the same agent session twice — another window, a
         // browser client — reattaches the ONE existing PTY, not a second
         // agent.
-        let (mut ctx, _dir) = services();
+        let (mut ctx, _dir) = services().await;
         ctx.plugin_runtime = Some(runtime());
         let session = first_session(&ctx).await.id.to_string();
         let first = open(&ctx, &session).await.unwrap();
@@ -608,7 +608,7 @@ mod tests {
 
     #[tokio::test]
     async fn open_terminal_session_rejects_unknown_pane_target() {
-        let (svc, _dir) = services();
+        let (svc, _dir) = services().await;
         let err = crate::dispatch(
             "open_terminal_session",
             json!({ "paneTarget": "bogus", "cols": 80, "rows": 24 }),
@@ -626,7 +626,7 @@ mod tests {
 
     #[tokio::test]
     async fn terminal_session_cwd_returns_null_for_unknown_session() {
-        let (svc, _dir) = services();
+        let (svc, _dir) = services().await;
         let out = crate::dispatch("terminal_session_cwd", json!({ "sessionId": "nope" }), &svc)
             .await
             .unwrap();
@@ -687,7 +687,7 @@ mod tests {
     async fn lookup_terminal_session_returns_none_without_spawning() {
         // Read-only: a session with no live PTY resolves to null, and the
         // lookup never spawns (no plugin runtime: a spawn is impossible).
-        let (ctx, _dir) = services();
+        let (ctx, _dir) = services().await;
         let session = first_session(&ctx).await.id;
         let out = crate::dispatch(
             "lookup_terminal_session",
@@ -703,7 +703,7 @@ mod tests {
     async fn lookup_terminal_session_finds_live_agent_session() {
         // Open a session's PTY, then resolve it through the read-only
         // lookup — the id must match.
-        let (mut ctx, _dir) = services();
+        let (mut ctx, _dir) = services().await;
         ctx.plugin_runtime = Some(runtime());
         let session = first_session(&ctx).await.id.to_string();
         let opened = open(&ctx, &session).await.unwrap();
@@ -725,7 +725,7 @@ mod tests {
 
     #[tokio::test]
     async fn close_terminal_session_is_best_effort_on_unknown_session() {
-        let (svc, _dir) = services();
+        let (svc, _dir) = services().await;
         // Detach errors are swallowed — an unknown session still yields Ok.
         let out = crate::dispatch(
             "close_terminal_session",

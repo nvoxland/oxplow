@@ -221,6 +221,17 @@ need `lint:collect` clean before they're pushed.
 instead of running every migration, ~330 ms → a few ms). A new migration
 or model needs nothing: a rebuilt test binary is a new template key.
 
+**Fixtures run the production activation.** `Services::in_memory`,
+`in_memory_on_machine` and the fixtures built on them (`test_fixtures::services_with_effort`, …) are
+async, return `Arc<Services>`, and end with `extension_activation.initialize`
+exactly as boot does; there is no test-only way to register commands, models or
+providers. A test that writes extension files or changes config after setup
+is standing in for the generation owner: it calls `test_fixtures::activate(&svc)`
+(asserts no extension was held back) or `activate_with_problems(&svc)` (returns
+what was) at that point. `Services::in_memory_inactive` + `initialize_extensions`
+exist for the SDK's throwaway host, which seeds declared entities before the
+first generation.
+
 **An effort needs no task, and neither does its fixture.**
 `test_fixtures::services_with_effort()` opens an effort linked to nothing
 (through `oxplow.effort.open`, so its event is logged like a real one); a test

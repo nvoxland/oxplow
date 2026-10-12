@@ -1043,22 +1043,6 @@ fn build_built_ins(
     (PreparedModelProviders { providers: built }, errors)
 }
 
-/// Register the model providers `declared` names (the project's
-/// extensions' `ai_provider` implementations), each under its declared id.
-/// One whose config doesn't hold is left out (logged).
-pub fn register_built_ins(
-    providers: &ModelProviders,
-    declared: &[crate::capabilities::Implementation],
-    approvals: &Arc<crate::exec_consent::ApprovalStore>,
-    project_dir: &std::path::Path,
-) {
-    let (prepared, errors) = build_built_ins(declared, approvals, project_dir);
-    for (id, error) in errors {
-        tracing::warn!(provider = %id, error = %error, "a scripted model provider doesn't load");
-    }
-    prepared.publish(providers);
-}
-
 fn endpoint_of(provider: Option<&ProviderConfig>) -> String {
     provider
         .and_then(|p| p.base_url.as_deref())
@@ -1486,7 +1470,7 @@ mod tests {
             script("x[\"body\"][\"choices\"][0][\"message\"][\"content\"]"),
         )
         .unwrap();
-        let svc = crate::Services::in_memory(dir.path()).unwrap();
+        let svc = crate::Services::in_memory(dir.path()).await.unwrap();
         let (base, seen) = mock("/chat/completions", 200, chat_reply()).await;
         svc.ai
             .save_provider(
@@ -1817,7 +1801,7 @@ mod tests {
             .unwrap();
         };
         yaml("small");
-        let svc = crate::Services::in_memory(dir.path()).unwrap();
+        let svc = crate::Services::in_memory(dir.path()).await.unwrap();
         svc.ai
             .save_provider(
                 ProviderConfig {
@@ -1840,6 +1824,7 @@ mod tests {
         assert_eq!(summarize(&svc), (true, Some("small".to_string())));
         yaml("tiny");
         svc.reload_config_from_disk().unwrap();
+        crate::test_fixtures::activate_with_problems(&svc).await;
         assert_eq!(summarize(&svc), (true, Some("tiny".to_string())));
     }
 

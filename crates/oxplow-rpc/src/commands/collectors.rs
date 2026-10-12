@@ -223,7 +223,7 @@ mod tests {
     /// effect's script, wherever its extension lives.
     #[tokio::test]
     async fn a_programs_source_dispatches() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let ext = svc.layout.project_dir.join("oxplow/extensions/acme");
         std::fs::create_dir_all(ext.join("effects")).unwrap();
         std::fs::write(
@@ -236,6 +236,7 @@ mod tests {
             "def transform(x):\n    return {}\n",
         )
         .unwrap();
+        crate::test_support::publish(&svc).await;
         let source = crate::dispatch(
             "program_source",
             serde_json::json!({ "kind": "effect", "name": "acme/look" }),
@@ -256,7 +257,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_and_approve_project_programs_dispatch() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let out = crate::dispatch("list_project_programs", serde_json::json!({}), &svc)
             .await
             .unwrap();
@@ -299,7 +300,7 @@ mod tests {
     /// (Settings → Integrations) refreshes instead of staying stale.
     #[tokio::test]
     async fn approving_a_program_announces_it() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let mut events = svc.events.subscribe_ui();
         let listed = crate::dispatch("list_project_programs", serde_json::json!({}), &svc)
             .await
@@ -323,7 +324,7 @@ mod tests {
     /// collectors included) beside the extensions'.
     #[tokio::test]
     async fn list_collectors_includes_the_projects_own() {
-        let (svc, dir) = crate::test_support::services();
+        let (svc, dir) = crate::test_support::services().await;
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
         std::fs::write(
             dir.path().join(".oxplow/project.yaml"),
@@ -347,13 +348,20 @@ mod tests {
 
     #[tokio::test]
     async fn list_run_and_query_a_collector() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         seed(&svc.layout.project_dir);
+        crate::test_support::publish(&svc).await;
 
         let list = crate::dispatch("list_collectors", json!({}), &svc)
             .await
             .unwrap();
-        assert_eq!(list[0]["owner"], "my-gh");
+        let list = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|l| l["owner"] == "my-gh")
+            .cloned()
+            .collect::<Vec<_>>();
         assert_eq!(list[0]["spec"]["id"], "gh");
         assert_eq!(list[0]["approved"], false);
         assert_eq!(list[0]["run"], serde_json::Value::Null);
@@ -422,8 +430,9 @@ mod tests {
 
     #[tokio::test]
     async fn credentials_are_set_through_ipc_and_reported_without_values() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         seed(&svc.layout.project_dir);
+        crate::test_support::publish(&svc).await;
         let yaml = svc
             .layout
             .project_dir
@@ -437,6 +446,7 @@ mod tests {
             ),
         )
         .unwrap();
+        crate::test_support::publish(&svc).await;
 
         crate::dispatch(
             "set_credential",

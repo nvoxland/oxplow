@@ -52,6 +52,32 @@ pub fn commit_index(dir: &Path, message: &str) -> String {
         .to_string()
 }
 
+/// Publish a new extension generation from the files on disk, as the
+/// activation owner does after a file or config change, and assert that
+/// nothing was held back. Fixtures activate once when built (as boot does);
+/// a test that writes extension files after that calls this.
+pub async fn activate(svc: &Arc<crate::Services>) {
+    let problems = activate_with_problems(svc).await;
+    assert!(
+        problems.is_empty(),
+        "the extensions activate without problems: {problems:?}"
+    );
+}
+
+/// [`activate`] for a test that expects some extension to be held back or
+/// rejected: what the activation recorded, by extension.
+pub async fn activate_with_problems(
+    svc: &Arc<crate::Services>,
+) -> crate::vocabulary_reactor::VocabularyErrors {
+    use oxplow_db::TxError;
+    match svc.extension_activation.activate(svc.clone()).await {
+        Ok(_) => svc.extension_activation.problems(),
+        // A rejected candidate: the previous generation stays, and why.
+        Err(TxError::Aborted(problems)) => problems,
+        Err(error) => panic!("activation failed: {error:?}"),
+    }
+}
+
 pub struct EffortFixture {
     pub svc: Arc<crate::Services>,
     /// Keep alive: the project directory.
@@ -85,8 +111,19 @@ pub async fn open_session(
 pub async fn services_with_effort() -> EffortFixture {
     let dir = tempfile::tempdir().unwrap();
     init_git_repo(dir.path());
-    let svc = Arc::new(crate::Services::in_memory(dir.path()).unwrap());
+    let svc = crate::Services::in_memory(dir.path()).await.unwrap();
     svc.streams.ensure_primary().await.unwrap();
+    // Activation logged the capability choices; the policy has heard them
+    // (they close open efforts) before the fixture opens one.
+    svc.event_pump
+        .settle(
+            &[
+                crate::effort_policy::NAME,
+                crate::knowledge::KnowledgeSwitch::NAME,
+            ],
+            std::time::Duration::from_secs(5),
+        )
+        .await;
     let thread = ThreadId::new(1);
     let session = open_session(&svc, thread).await;
     let opened = svc
@@ -132,8 +169,19 @@ impl std::ops::Deref for TaskEffortFixture {
 pub async fn services_with_task_effort() -> TaskEffortFixture {
     let dir = tempfile::tempdir().unwrap();
     init_git_repo(dir.path());
-    let svc = Arc::new(crate::Services::in_memory(dir.path()).unwrap());
+    let svc = crate::Services::in_memory(dir.path()).await.unwrap();
     svc.streams.ensure_primary().await.unwrap();
+    // Activation logged the capability choices; the policy has heard them
+    // (they close open efforts) before the fixture opens one.
+    svc.event_pump
+        .settle(
+            &[
+                crate::effort_policy::NAME,
+                crate::knowledge::KnowledgeSwitch::NAME,
+            ],
+            std::time::Duration::from_secs(5),
+        )
+        .await;
     let thread = ThreadId::new(1);
     let session = open_session(&svc, thread).await;
     let now = oxplow_domain::Timestamp::now();

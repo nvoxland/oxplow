@@ -6,13 +6,14 @@
 //! no oxplow is running. It never touches the project's own data.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use oxplow_app::extensions::EXTENSIONS_DIR;
 
 pub(crate) struct Host {
     _dir: tempfile::TempDir,
     pub(crate) root: PathBuf,
-    pub(crate) svc: oxplow_app::Services,
+    pub(crate) svc: Arc<oxplow_app::Services>,
 }
 
 impl Host {
@@ -27,23 +28,18 @@ impl Host {
             .init_repository(&root)
             .await
             .map_err(|e| e.to_string())?;
-        let svc = oxplow_app::Services::in_memory(&root).map_err(|e| e.to_string())?;
+        let svc = oxplow_app::Services::in_memory_inactive(&root).map_err(|e| e.to_string())?;
         oxplow_app::collector_runner::publish_declared_empty(
             &svc.db,
             &svc.extension_catalog.get(&root),
         )
         .await
         .map_err(|e| e.to_string())?;
-        svc.extension_models
-            .sync()
+        // The models, the event types they declare and the commands, as
+        // boot publishes them.
+        svc.initialize_extensions()
             .await
             .map_err(|e| e.to_string())?;
-        // The event types they declare, as the app's log would accept.
-        svc.vocabulary_service
-            .sync()
-            .await
-            .map_err(|e| e.to_string())?;
-        svc.extension_commands.reconcile().await;
         Ok(Host {
             _dir: dir,
             root,

@@ -635,7 +635,7 @@ welded to collection.
 >   dim arriving promoted) — promotion is a GRAIN change; a pre-promotion
 >   bucket lacks the key and serves explicit 0s through a newly-eligible
 >   filter. The V64 migration honored this by hand; the config path
->   (`seed_catalog`, every boot) now honors it automatically.
+>   (the generation, every boot) now honors it automatically.
 > - **`upsert_measure` on a `capture_scope` change** — the scope picks the
 >   build RULE; scoped to that one measure.
 >
@@ -779,7 +779,7 @@ welded to collection.
   **Additive** beside the old `metric_definition` (still FK-referenced by the V38
   `metric_sample`/`metric_finding`); the retire migration (tsk20) drops the V38
   cluster once reads flip (tsk26). The migration seeds no rows; the **built-in
-  specs** are seeded from Rust in `seed_catalog`: the code-metric specs
+  specs** are seeded from Rust by the generation: the code-metric specs
   (`oxplow.high_complexity_fns` / `long_functions` / `fn_count` / `todos` — a
   `count` over its measure, thresholds via `min_value`; `builtin_metric_specs`,
   tsk23) and the per-language idiom specs (`oxplow.rust.unsafe_blocks` etc. — a
@@ -1103,7 +1103,7 @@ wrote (P7.B1) — a producer emits nothing itself.
 
 **Collection gate (tsk31).** Before writing, each base-data producer checks
 `fact_store.measure_has_active_spec(<measure>)` and skips when no *enabled* metric
-consumes that measure (the spec table = the enabled set after `seed_catalog`'s
+consumes that measure (the spec table = the enabled set after the generation's
 reconcile). So disabling every metric over a measure stops its collection:
 `oxplow.tokens` (all `agent.tokens.*` off), `oxplow.test_case` (all
 `oxplow.tests.*` off), `oxplow.lint_hit` (both `oxplow.analysis.*` off),
@@ -1263,7 +1263,7 @@ so they share **one** generic measure `oxplow.ast_hit` (a per-file idiom
 occurrence) and are told apart by the `oxplow.rule` dimension (the idiom slug,
 carried on the fact's `rule` column via `CollectedFact.rule`). Each collector records
 one per-file `ast_hit` fact (value=that file's count, `rule`=its slug); each metric is a `Sum(oxplow.ast_hit)` spec filtered by
-`dim_eq(oxplow.rule, <slug>)` (`builtin_ast_specs`, seeded in `seed_catalog`). Idioms
+`dim_eq(oxplow.rule, <slug>)` (`builtin_ast_specs`, seeded by the generation). Idioms
 sharing the measure never collide because every spec read applies the rule filter
 **before** it aggregates. `per_language_collector_facts_reaggregate_to_the_baked_headline`
 pins each spec's `Sum` to its baked headline. The `<slug>` in the script and the
@@ -1275,7 +1275,7 @@ Wired into `Services` as `fact_store: Arc<SqliteFactStore>` +
 layer (`svc.fact_store`).
 
 **Producer specs (T-B).** Each always-on producer metric now has a `metric_spec`
-(`producer_metrics.rs::builtin_producer_specs`, seeded in `seed_catalog` beside
+(`producer_metrics.rs::builtin_producer_specs`, seeded by the generation beside
 the built-in code-metric specs) — the aggregation it *is* over the measure its producer
 emits facts on, with conformed dims (not extra measures) distinguishing variants:
 token in/out slice `oxplow.tokens` by `oxplow.token_kind`; tests slice
@@ -1376,7 +1376,7 @@ dimensions:                        # custom conformed slice axes
   `effort_metric_deltas` loads each measure's history **once** across the
   File-family specs sharing it (a per-call `fact_cache`), and `dim_value` parses
   a fact's `dims_json` **once** per lookup (`parse_dims` + `dim_from_map`).
-- **Boot seeding:** `MetricsService::seed_catalog()` runs once at boot and on
+- **Boot seeding:** The metric catalog is published by the generation at boot and on
   every reseed — a config change (`config.metrics`) or extension change (the
   catalog's signal) — (beside `seed_definitions`), upserting resolved
   measures/dimensions into the `measure`/`dimension` tables. `MetricsService`
@@ -1393,12 +1393,12 @@ dimensions:                        # custom conformed slice axes
   "unknown catalog key" warning and its target dropped (tsk1071).
   `resolve_metrics` itself is silent: it runs on every event (through
   `fact_collectors`), so a `use:` naming nothing is reported by
-  `unknown_uses` once per `seed_catalog` (boot, config or extension
+  `unknown_uses` once per generation (boot, config or extension
   change), never per call (tsk1076).
 - **Adding one** is `oxplow.config.set` on `measures` / `dimensions` (a global one
   is a file under the global dir). The old `scaffold_measure` /
   `scaffold_dimension` writers had no caller and were deleted (P4.8).
-- **`promote`** now persists onto the row: `seed_catalog` threads the resolved
+- **`promote`** now persists onto the row: the generation threads the resolved
   dimension's `promote` into `NewDimension.promoted`, so `dimension.promoted`
   reflects the config (it was previously parsed but dropped at seed). Still
   **inert** downstream (see tsk28): the engine loads all facts and filters
@@ -1657,7 +1657,7 @@ just carries a Help blurb pointing there.
   navigates to the metric's **detail page** (via `onOpenDetail` → `metricRef`).
 > ### ⚠️ A seeded spec does NOT mean an enabled metric (tsk87)
 >
-> `seed_catalog` seeds a built-in **gauge's** spec (`builtin_metric_specs` /
+> The generation seeds a built-in **gauge's** spec (`builtin_metric_specs` /
 > `builtin_ast_specs`) only while its collector runs — `use:`d, or default-on
 > (`DEFAULT_ON`) and not disabled (tsk1046). It used to seed every built-in
 > spec, so an un-`use:`d gauge kept a spec nothing recorded into: `MEASURE()`
@@ -1823,7 +1823,7 @@ The mechanics behind those controls (unchanged by tsk117):
   metric (built-in code metric / global def) toggles by the presence of a bare
   `use:` entry, while a default-ON metric (producer/extension) or a config `key:`
   definition toggles by an `enabled: false` **marker** (so disabling never
-  deletes a `key:` definition). `seed_catalog` then **reconciles** the
+  deletes a `key:` definition). the generation then **reconciles** the
   `metric_spec` table down to exactly the enabled set — upsert the enabled,
   `delete_spec` the disabled — so all spec-driven reads
   (Explorer/Recorded/Detail/effort-deltas/MCP) go empty for a disabled metric,
@@ -1862,7 +1862,7 @@ effort review (`DiffViewPage`'s `effort.review.details` slot) shows the oxplow-b
 left out). A row links to the metric's detail page.
 
 Catalog reads/writes: `v_metric_catalog` (the `metric_catalog` table, V106,
-which `seed_catalog` rewrites from `MetricsService::catalog()` on every
+which the generation rewrites from `MetricsService::catalog()` on every
 reseed) and the `oxplow.metric.enable` command — consumed by the Metric Detail
 Configure block and the Metrics rows.
 **Scaffolding is not here** (tsk122): its UI button was retired, and it is

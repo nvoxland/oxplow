@@ -142,7 +142,7 @@ pub async fn delete_workspace_path(
 mod tests {
     #[tokio::test]
     async fn list_workspace_files_excludes_generated_dirs() {
-        let (svc, dir) = crate::test_support::services();
+        let (svc, dir) = crate::test_support::services().await;
         std::fs::create_dir_all(dir.path().join("node_modules/pkg")).unwrap();
         std::fs::write(dir.path().join("node_modules/pkg/index.js"), "x").unwrap();
         std::fs::create_dir_all(dir.path().join("src")).unwrap();
@@ -177,7 +177,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_workspace_entries_dispatches_root_listing() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let out = crate::dispatch(
             "list_workspace_entries",
             serde_json::json!({ "streamId": null, "relativePath": "" }),

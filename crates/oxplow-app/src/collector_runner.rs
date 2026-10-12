@@ -2950,6 +2950,7 @@ pub(crate) mod tests {
             "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: bad\n    runtime: starlark\n    entry: bad.star\n    entities:\n      - { name: hot, key: id, columns: { id: int } }\n",
             &[("bad.star", "def transform(input):\n    return 1 // 0\n")],
         );
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
         let sync = || {
             fx.svc.commands.run(
                 &oxplow_domain::Actor::Human,
@@ -3027,6 +3028,7 @@ pub(crate) mod tests {
                 "def transform(input):\n    return {\"entities\": {\"hot\": [{\"ref\": r[\"ref\"], \"title\": r[\"title\"]} for r in input[\"rows\"]]}}\n",
             )],
         );
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
         let ran = run_due_collectors(&fx.svc).await;
         assert_eq!(ran, vec![("work".to_string(), "star".to_string())]);
         let audits = oxplow_db::SqliteCommandAuditStore::new(fx.svc.db.clone())
@@ -3157,6 +3159,7 @@ pub(crate) mod tests {
                 "def transform(input):\n    e = input[\"event\"]\n    return {\"entities\": {\"seen\": [{\"k\": \"x\", \"v\": e[\"v\"], \"source\": e[\"source\"], \"turn\": e[\"anchors\"][\"turn_id\"]}]}}\n",
             )],
         );
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
         let ctx = Collectors::of(&fx.svc, &root);
         let event = serde_json::json!({
             "type": "thread.checkpoint",

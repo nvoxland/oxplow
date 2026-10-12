@@ -193,18 +193,6 @@ pub fn prepare_built_ins(
     PreparedSnapshots { providers }
 }
 
-/// Register the snapshot built-ins `declared` names, and core's own
-/// default (`oxplow`, which keeps every version: it is always there, a
-/// required capability's fallback).
-pub fn register_built_ins(
-    registry: &SnapshotRegistry,
-    declared: &[Implementation],
-    captures: &SnapshotCaptureRegistry,
-    files: &SnapshotFiles,
-) {
-    prepare_built_ins(declared, captures, files).publish(registry, captures);
-}
-
 /// Set every stream's capture policy to what the active implementation
 /// keeps, and idle the captures while it's one they don't serve (a
 /// provider process, which marks the worktree itself).
@@ -281,7 +269,7 @@ pub(crate) fn registry_over(
         .map(|s| s.default.to_string())
         .unwrap_or_default();
     let registry = Arc::new(SnapshotRegistry::new(Arc::new(move || default.clone())));
-    register_built_ins(&registry, &[], captures, &files);
+    prepare_built_ins(&[], captures, &files).publish(&registry, captures);
     registry
 }
 
@@ -331,12 +319,7 @@ mod tests {
             .unwrap()
             .active_providers
             .insert(CAPABILITY.into(), id.into());
-        let config = crate::config_service::read_config(&f.svc.config);
-        f.svc
-            .capabilities
-            .publish(&config, &f.svc.db)
-            .await
-            .unwrap();
+        crate::test_fixtures::activate_with_problems(&f.svc).await;
         f.svc
             .event_pump
             .settle(&["snapshots.switch"], Duration::from_secs(10))
@@ -392,12 +375,8 @@ mod tests {
             let chosen = chosen.clone();
             Arc::new(move || chosen.lock().unwrap().clone())
         });
-        register_built_ins(
-            &registry,
-            &[],
-            &f.svc.snapshot_captures,
-            &f.svc.snapshot_files(),
-        );
+        prepare_built_ins(&[], &f.svc.snapshot_captures, &f.svc.snapshot_files())
+            .publish(&registry, &f.svc.snapshot_captures);
         registry.register(Arc::new(Elsewhere));
 
         apply_active_policy(&registry, &f.svc.snapshot_captures);

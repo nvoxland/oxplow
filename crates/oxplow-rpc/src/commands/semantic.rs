@@ -103,7 +103,7 @@ pub async fn set_panel_layout(
 mod tests {
     #[tokio::test]
     async fn prompt_catalog_dispatches() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let out = crate::dispatch("prompt_catalog", serde_json::json!({}), &svc)
             .await
             .unwrap();
@@ -116,7 +116,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_data_entities_dispatches() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let out = crate::dispatch("list_data_entities", serde_json::json!({}), &svc)
             .await
             .unwrap();
@@ -136,7 +136,7 @@ mod tests {
 
     #[tokio::test]
     async fn query_sql_dispatches_and_reads_views() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let out = crate::dispatch(
             "query_sql",
             json!({ "sql": "SELECT count(*) AS n FROM v_stream WHERE kind = ?1", "params": ["primary"], "limit": 5 }),
@@ -151,7 +151,7 @@ mod tests {
 
     #[tokio::test]
     async fn query_sql_rejects_writes_as_invalid() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let err = crate::dispatch("query_sql", json!({ "sql": "DELETE FROM task" }), &svc)
             .await
             .unwrap_err();
@@ -162,7 +162,7 @@ mod tests {
     /// explorer asks for a raw read.
     #[tokio::test]
     async fn query_sql_reads_tables_only_when_raw() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let err = crate::dispatch(
             "query_sql",
             json!({ "sql": "SELECT count(*) FROM work_item" }),

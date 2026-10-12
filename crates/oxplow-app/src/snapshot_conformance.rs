@@ -352,12 +352,7 @@ mod tests {
             .unwrap()
             .active_providers
             .insert(crate::snapshots::CAPABILITY.into(), id.into());
-        let config = crate::config_service::read_config(&f.svc.config);
-        f.svc
-            .capabilities
-            .publish(&config, &f.svc.db)
-            .await
-            .unwrap();
+        crate::test_fixtures::activate_with_problems(&f.svc).await;
         f.svc
             .event_pump
             .settle(&["snapshots.switch"], Duration::from_secs(10))

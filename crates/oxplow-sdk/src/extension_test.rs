@@ -1427,7 +1427,7 @@ async fn suite_host(
     root: &Path,
     ext: &Extension,
     env: &host::HostEnv,
-) -> Result<(tempfile::TempDir, oxplow_app::Services, Extension), String> {
+) -> Result<(tempfile::TempDir, Arc<oxplow_app::Services>, Extension), String> {
     let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
     let target = tmp.path().join(EXTENSIONS_DIR).join(&ext.name);
     crate::throwaway::copy_dir(&root.join(&ext.path), &target).map_err(|e| e.to_string())?;
@@ -1441,6 +1441,7 @@ async fn suite_host(
         Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
         env.clone(),
     )
+    .await
     .map_err(|e| e.to_string())?;
     let hosted = svc
         .extension_catalog
@@ -1455,6 +1456,16 @@ async fn suite_host(
 /// The effort-policy suite over the extension's policy script `decl`, in a
 /// throwaway host: the script approved there and chosen as the project's
 /// policy. A finding is an error at the manifest.
+/// Publish the generation the throwaway project's config and files ask
+/// for, as the app's owner of generations does on a change.
+async fn publish_generation(svc: &Arc<oxplow_app::Services>) -> Result<(), String> {
+    svc.extension_activation
+        .activate(svc.clone())
+        .await
+        .map(|_| ())
+        .map_err(|e| format!("{e:?}"))
+}
+
 async fn policy_suite(
     root: &Path,
     ext: &Extension,
@@ -1485,19 +1496,12 @@ async fn policy_suite(
             &program.name,
             &version,
         )?;
-        oxplow_app::capabilities::refresh(&svc)
-            .await
-            .map_err(|e| e.to_string())?;
         svc.config
             .write()
             .map_err(|e| e.to_string())?
             .active_providers
             .insert(EFFORT_POLICY.into(), decl.id.clone());
-        let config = oxplow_app::config_service::read_config(&svc.config);
-        svc.capabilities
-            .publish(&config, &svc.db)
-            .await
-            .map_err(|e| e.to_string())?;
+        publish_generation(&svc).await?;
         Ok::<_, String>(oxplow_app::effort_policy_conformance::suite(&svc, &decl.id).await)
     };
     match run.await {
@@ -1554,10 +1558,30 @@ async fn suite(
                 )
                 .map_err(|e| e.to_string())?;
         }
-        svc.providers
-            .enable(&hosted, spec, config)
-            .await
-            .map_err(|e| e.to_string())?;
+        svc.config
+            .write()
+            .map_err(|e| e.to_string())?
+            .extension_instances
+            .insert(
+                format!("{}/{}", ext.name, spec.id),
+                oxplow_config::ExtensionInstanceConfig {
+                    enabled: true,
+                    config,
+                    sync_minutes: None,
+                    provider: None,
+                },
+            );
+        publish_generation(&svc).await?;
+        match svc.providers.health(&format!("{}/{}", ext.name, spec.id)) {
+            // A start that merely failed stays enabled; the suite reports it.
+            Some(health)
+                if matches!(
+                    health.state,
+                    oxplow_app::providers::InstanceState::Ready
+                        | oxplow_app::providers::InstanceState::Failing { .. }
+                ) => {}
+            other => return Err(format!("it didn't start: {other:?}")),
+        }
         let findings = match spec.capability.as_str() {
             providers::work_items::WorkItemsHost::CAPABILITY => {
                 let provider = svc.work_items.get(&spec.id).map_err(|e| e.to_string())?;
@@ -1570,11 +1594,7 @@ async fn suite(
                     .insert("work_items".into(), provider.id.clone());
                 // …and published, as a `oxplow.config.set` would: the interface
                 // reads the active list's items.
-                let config = oxplow_app::config_service::read_config(&svc.config);
-                svc.capabilities
-                    .publish(&config, &svc.db)
-                    .await
-                    .map_err(|e| e.to_string())?;
+                publish_generation(&svc).await?;
                 oxplow_app::work_items_conformance::suite(
                     &svc.work_items_client(),
                     &provider.id,
@@ -1592,11 +1612,7 @@ async fn suite(
                     .map_err(|e| e.to_string())?
                     .active_providers
                     .insert(spec.capability.clone(), spec.id.clone());
-                let config = oxplow_app::config_service::read_config(&svc.config);
-                svc.capabilities
-                    .publish(&config, &svc.db)
-                    .await
-                    .map_err(|e| e.to_string())?;
+                publish_generation(&svc).await?;
                 oxplow_app::effort_policy_conformance::suite(&svc, &spec.id).await
             }
             providers::agent_harness::HarnessHost::CAPABILITY => {
@@ -1620,11 +1636,7 @@ async fn suite(
                     .map_err(|e| e.to_string())?
                     .active_providers
                     .insert(spec.capability.clone(), spec.id.clone());
-                let config = oxplow_app::config_service::read_config(&svc.config);
-                svc.capabilities
-                    .publish(&config, &svc.db)
-                    .await
-                    .map_err(|e| e.to_string())?;
+                publish_generation(&svc).await?;
                 svc.event_pump.run_once().await.map_err(|e| e.to_string())?;
                 oxplow_app::work_items_conformance::SuiteRun {
                     findings: oxplow_app::knowledge_conformance::suite(&svc, &Actor::Human).await,
@@ -1640,11 +1652,7 @@ async fn suite(
                     .map_err(|e| e.to_string())?
                     .active_providers
                     .insert(spec.capability.clone(), spec.id.clone());
-                let config = oxplow_app::config_service::read_config(&svc.config);
-                svc.capabilities
-                    .publish(&config, &svc.db)
-                    .await
-                    .map_err(|e| e.to_string())?;
+                publish_generation(&svc).await?;
                 oxplow_app::snapshots::apply_active_policy(&svc.snapshots, &svc.snapshot_captures);
                 let provider = svc
                     .snapshots

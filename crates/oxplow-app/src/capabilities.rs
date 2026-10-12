@@ -951,19 +951,15 @@ impl CapabilityRegistry {
         Self::work_item_ids_from(&self.implementations(), &config)
     }
 
+    /// The config the last generation published; before the first one
+    /// (boot's `initialize`) `fallback`, the config as it is now.
     fn read_effective_config(&self, fallback: &OxplowConfig) -> Arc<OxplowConfig> {
-        if self.activation.is_active() {
-            if let Some(config) = self
-                .state
-                .read()
-                .unwrap_or_else(|e| e.into_inner())
-                .published_config
-                .clone()
-            {
-                return config;
-            }
-        }
-        Arc::new(fallback.clone())
+        self.state
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .published_config
+            .clone()
+            .unwrap_or_else(|| Arc::new(fallback.clone()))
     }
 
     fn work_item_ids_from(
@@ -1264,10 +1260,6 @@ impl crate::event_pump::AsyncEventConsumer for AgentTextRefresh {
     async fn handle(&self, _event: &oxplow_domain::StoredEvent) -> Result<(), DomainError> {
         if let Some(svc) = self.services.upgrade() {
             refresh_agent_text(&svc).await;
-            // The vocabulary reads the active list's ids.
-            if !svc.extension_activation.is_active() {
-                svc.vocabulary_service.sync().await?;
-            }
         }
         Ok(())
     }
@@ -1316,59 +1308,6 @@ pub fn offered_text(
         }
     }
     text
-}
-
-/// Restate the registry's declared implementations from the project's
-/// extensions and publish the rows, and the extensions' contributions
-/// (`v_contribution`).
-pub async fn refresh(svc: &crate::Services) -> Result<(), DomainError> {
-    let extensions = svc.extension_catalog.get(&svc.layout.project_dir);
-    let declared = declared_by(&extensions);
-    crate::work_items::register_built_ins(&svc.work_items, &declared, &svc.db);
-    crate::harnesses::register_built_ins(&svc.harnesses, &declared);
-    crate::effort_policy::register_built_ins(
-        &svc.effort_policies,
-        &declared,
-        &svc.sql,
-        &(std::sync::Arc::new(svc.metrics.clone())
-            as std::sync::Arc<dyn crate::services::TreeSource>),
-        &svc.approvals,
-        &svc.layout.project_dir,
-    );
-    crate::harnesses::register_acp_adapters(&svc.acp_adapters, &declared);
-    crate::knowledge::register_built_ins(
-        &svc.knowledge,
-        &declared,
-        &svc.layout.project_dir,
-        &svc.wiki,
-    );
-    crate::snapshots::register_built_ins(
-        &svc.snapshots,
-        &declared,
-        &svc.snapshot_captures,
-        &svc.snapshot_files(),
-    );
-    crate::ai_service::register_built_ins(
-        svc.ai.providers(),
-        &declared,
-        &svc.approvals,
-        &svc.layout.project_dir,
-    );
-    svc.capabilities.set_declared(declared);
-    // Every enabled extension's contributions, as `v_contribution`.
-    let contributions = extensions
-        .iter()
-        .filter(|e| e.enabled)
-        .flat_map(|e| e.contributions.iter().cloned())
-        .collect();
-    oxplow_db::contribution_store::reset(&svc.db, contributions).await?;
-    svc.feeds.restate(&extensions);
-    let config = crate::config_service::read_config(&svc.config);
-    let published = svc.capabilities.publish(&config, &svc.db).await;
-    // A reload can drop the chosen snapshot implementation (its extension
-    // disabled): the captures follow whatever is active now.
-    crate::snapshots::apply_active_policy(&svc.snapshots, &svc.snapshot_captures);
-    published
 }
 
 #[cfg(test)]
@@ -1601,7 +1540,7 @@ mod tests {
         )
         .unwrap();
         svc.extension_catalog.changed();
-        refresh(svc).await.unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
         let config = crate::config_service::read_config(&svc.config);
         assert_eq!(svc.capabilities.active(&config, "work_items"), NONE);
         assert_eq!(svc.capabilities.active(&config, "effort_policy"), NONE);
@@ -1676,20 +1615,31 @@ mod tests {
         let svc = &fx.svc;
         let default = config(&[], &[]);
         let off = config(&[("effort_policy", "none")], &[]);
+        // (Startup logged its own choices; only what follows is checked.)
+        let startup = svc
+            .db
+            .read(|tx| {
+                tx.query_row("SELECT coalesce(max(seq), 0) FROM event_log", [], |r| {
+                    r.get::<_, i64>(0)
+                })
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
         for c in [&default, &default, &off, &off] {
             svc.capabilities.publish(c, &svc.db).await.unwrap();
         }
         let switches: Vec<String> = svc
             .db
-            .read(|tx| {
+            .read(move |tx| {
                 let mut stmt = tx
                     .prepare(
                         "SELECT payload FROM event_log WHERE type = 'capability.switched'
-                          ORDER BY seq",
+                          AND seq > ?1 ORDER BY seq",
                     )
                     .map_err(oxplow_db::map_sql_err)?;
                 let rows = stmt
-                    .query_map([], |r| r.get(0))
+                    .query_map([startup], |r| r.get(0))
                     .map_err(oxplow_db::map_sql_err)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
                     .map_err(oxplow_db::map_sql_err)
@@ -1730,7 +1680,7 @@ mod tests {
             .unwrap()
             .personal_active_providers
             .insert("work_items".into(), NONE.into());
-        refresh(svc).await.unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
         let offered: Vec<String> = svc
             .commands
             .list(&agent)
@@ -1798,11 +1748,10 @@ mod tests {
     }
 
     /// A feature the active work list doesn't declare hides what needs it.
-    #[tokio::test]
-    async fn a_missing_feature_hides_what_needs_it() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        let svc = &fx.svc;
-        svc.capabilities.set_external(
+    #[test]
+    fn a_missing_feature_hides_what_needs_it() {
+        let r = registry(true);
+        r.set_external(
             Implementation {
                 capability: "work_items".into(),
                 id: "plain".into(),
@@ -1816,22 +1765,20 @@ mod tests {
             },
             true,
         );
-        svc.config
-            .write()
-            .unwrap()
-            .active_providers
-            .insert("work_items".into(), "plain".into());
-        let offered: Vec<String> = svc
-            .commands
-            .list(&oxplow_domain::Actor::Human)
-            .into_iter()
-            .map(|c| c.id)
-            .collect();
-        assert!(offered.iter().any(|n| n == "oxplow.work_item.link"));
-        assert!(!offered.iter().any(|n| n == "oxplow.work_item.comment"));
+        let plain = r.snapshot(&config(&[("work_items", "plain")], &[]));
+        let needs = |n: &str| vec![n.to_string()];
+        assert_eq!(plain.command_refusal("x", &needs("work_items.links")), None);
+        assert!(plain
+            .command_refusal("x", &needs("work_items.comments"))
+            .is_some());
         // Ordering and lists are features like the rest.
-        assert!(offered.iter().any(|n| n == "oxplow.work_item.reorder"));
-        assert!(!offered.iter().any(|n| n == "oxplow.work_item.move"));
+        assert_eq!(
+            plain.command_refusal("x", &needs("work_items.ordering")),
+            None
+        );
+        assert!(plain
+            .command_refusal("x", &needs("work_items.lists"))
+            .is_some());
     }
 
     /// A provider instance's own commands are offered only while it's the
@@ -1902,6 +1849,7 @@ mod tests {
             .unwrap()
             .personal_active_providers
             .insert("work_items".into(), NONE.into());
+        crate::test_fixtures::activate_with_problems(svc).await;
         refresh_agent_text(svc).await;
         assert!(skills.join("work-items/SKILL.md").is_file());
         assert!(!commands.join("work-next.md").exists());
@@ -1997,8 +1945,8 @@ mod tests {
             .unwrap()
             .personal_active_providers
             .insert("work_items".into(), NONE.into());
-        refresh(svc).await.unwrap();
-        svc.vocabulary_service.sync().await.unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
+        crate::test_fixtures::activate_with_problems(svc).await;
         assert!(found().is_empty(), "{:?}", found());
     }
 }
@@ -2023,7 +1971,7 @@ mod contribution_tests {
         )
         .unwrap();
         fx.svc.extension_catalog.changed();
-        super::refresh(&fx.svc).await.unwrap();
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
         let rows = fx
             .svc
             .sql

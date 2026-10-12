@@ -119,7 +119,7 @@ async fn source_label(svc: &Services, kind: &str, id: &str) -> Option<String> {
 mod tests {
     #[tokio::test]
     async fn list_backlinks_dispatches() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let out = crate::dispatch(
             "list_backlinks",
             serde_json::json!({ "targetKind": "wiki", "targetId": "some-slug" }),
@@ -132,7 +132,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_outbound_dispatches() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let out = crate::dispatch(
             "list_outbound",
             serde_json::json!({ "sourceKind": "wiki", "sourceId": "some-slug", "limit": 5 }),

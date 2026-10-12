@@ -220,14 +220,18 @@ impl ComponentBundles {
     }
 
     /// Old frames can still read retained bytes, but invoking against a later
-    /// activated catalog requires reloading. A root with no activated
-    /// bundle set (nothing activated yet, or another project's) has no
-    /// generation to compare, so its frames stay current.
+    /// activated catalog requires reloading. A bundle of another root (an
+    /// authoring root, not the activated project) has no generation to
+    /// compare, so its frames stay current; before any activation nothing
+    /// is current.
     pub fn is_current(&self, root: &Path, bundle: &BundleSnapshot) -> bool {
         let active = self.active.lock();
-        match active.as_ref().filter(|active| active.root == root) {
-            Some(active) => bundle.generation.as_deref() == Some(active.generation()),
-            None => true,
+        match active.as_ref() {
+            Some(active) if active.root == root => {
+                bundle.generation.as_deref() == Some(active.generation())
+            }
+            Some(_) => true,
+            None => false,
         }
     }
 }

@@ -74,10 +74,10 @@ async fn a_collector_reads_the_tree_it_declares() {
         "oxplow/extensions/acme/extension.yaml",
         "manifest: 2\nname: acme\nsharing: private\nintent: { purpose: Reads., origin: null, examples: [] }\n\
          collectors:\n\
-         \x20 - id: paths\n    runtime: starlark\n    entry: paths.star\n    needs: [tree.read]\n    entities:\n      - { name: seen, key: k, columns: { k: text } }\n\
-         \x20 - id: peek\n    runtime: starlark\n    entry: paths.star\n    entities:\n      - { name: peeked, key: k, columns: { k: text } }\n",
+         \x20 - id: paths\n    runtime: starlark\n    entry: paths.star\n    needs: [tree.read]\n    entities:\n      - { name: seen, key: k, columns: { k: text } }\n",
     );
     write(&root, "oxplow/extensions/acme/paths.star", PATHS);
+    crate::test_fixtures::activate(svc).await;
     let trees = Arc::new(Trees::default());
     let mut collectors = Collectors::of(svc, &root);
     collectors.trees = Some(trees.clone());
@@ -93,10 +93,22 @@ async fn a_collector_reads_the_tree_it_declares() {
         json!([{ "need": "scope", "name": "tree.read", "decision": "allowed" }])
     );
 
-    // One that uses the tree without declaring it doesn't load.
+    // One that uses the tree without declaring it doesn't load: the
+    // edit is held back and the working version stays.
+    write(
+        &root,
+        "oxplow/extensions/acme/extension.yaml",
+        "manifest: 2\nname: acme\nsharing: private\nintent: { purpose: Reads., origin: null, examples: [] }\n\
+         collectors:\n\
+         \x20 - id: paths\n    runtime: starlark\n    entry: paths.star\n    needs: [tree.read]\n    entities:\n      - { name: seen, key: k, columns: { k: text } }\n\
+         \x20 - id: peek\n    runtime: starlark\n    entry: paths.star\n    entities:\n      - { name: peeked, key: k, columns: { k: text } }\n",
+    );
+    let held = crate::test_fixtures::activate_with_problems(svc).await;
+    assert!(held.contains_key("acme"), "{held:?}");
     let errors = svc
         .extension_catalog
-        .get(&root)
+        .snapshot(&root)
+        .extensions()
         .iter()
         .find(|e| e.name == "acme")
         .map(|e| e.errors.join("\n"))
@@ -136,7 +148,8 @@ async fn a_commands_script_cant_ask_a_model_or_read_the_tree() {
             &format!("def transform(x):\n    return {{\"commands\": [], \"result\": {body}}}\n"),
         );
         svc.extension_catalog
-            .get(&root)
+            .snapshot(&root)
+            .extensions()
             .iter()
             .find(|e| e.name == "acme")
             .map(|e| e.errors.join("\n"))
@@ -154,7 +167,8 @@ async fn a_commands_script_cant_ask_a_model_or_read_the_tree() {
         errors.contains("a command's script composes inside its transaction"),
         "{errors}"
     );
-    svc.extension_commands.reconcile().await;
+    let held = crate::test_fixtures::activate_with_problems(svc).await;
+    assert!(held.contains_key("acme"), "{held:?}");
     assert!(svc.commands.spec("acme.note.sum").is_none());
 }
 
@@ -183,6 +197,7 @@ async fn a_fact_collector_reads_the_layer_it_declares() {
         "oxplow/extensions/acme/asks.star",
         "def transform(x):\n    return {\"facts\": [{\"measure\": \"acme.items\", \"value\": len(ai_summarize(\"t\"))}]}\n",
     );
+    crate::test_fixtures::activate(svc).await;
     let ext = svc
         .extension_catalog
         .get(&root)

@@ -86,7 +86,7 @@ pub async fn list_efforts_overlapping_range(
 mod tests {
     #[tokio::test]
     async fn get_effort_dispatches_and_returns_null_for_missing() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let out = crate::dispatch(
             "get_effort",
             serde_json::json!({"effortId": "eff999999"}),

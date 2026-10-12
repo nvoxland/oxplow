@@ -33,7 +33,7 @@ pub async fn switch_stream(svc: &Services, id: Option<StreamId>) -> Result<(), I
 mod tests {
     #[tokio::test]
     async fn switch_stream_accepts_optional_id() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         // Missing `id` key deserializes as None and clears the selection.
         let out = crate::dispatch("switch_stream", serde_json::json!({}), &svc)
             .await

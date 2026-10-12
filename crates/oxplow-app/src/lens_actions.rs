@@ -572,6 +572,7 @@ actions:
 "#,
         )
         .unwrap();
+        crate::test_fixtures::activate(&fx.svc).await;
         (fx, root)
     }
 
@@ -726,6 +727,7 @@ actions:
             "title: New Task\nviz: form\nparams: [{ name: body, default: from the form }]\nform: { command: oxplow.work_item.create, defaults: { body: '{{param.body}}' } }\n",
         )
         .unwrap();
+        crate::test_fixtures::activate(&fx.svc).await;
         let out = submit_form(
             &fx.svc,
             &root,
@@ -792,11 +794,12 @@ actions:
             "title: View\nquery: SELECT 1 AS n\nviz: custom\ncustom: { component: board }\n",
         )
         .unwrap();
+        crate::test_fixtures::activate(&fx.svc).await;
         (fx, root)
     }
 
     /// Approve `acme/board` as it is now, as a person on Programs does.
-    fn approve_board(fx: &crate::test_fixtures::EffortFixture, root: &Path) {
+    async fn approve_board(fx: &crate::test_fixtures::EffortFixture, root: &Path) {
         let ext = fx.svc.extension_catalog.named(root, "acme").unwrap();
         let program = crate::exec_consent::component_program(&ext, &ext.custom_components[0]);
         let config = fx.svc.config.read().unwrap().clone();
@@ -810,10 +813,14 @@ actions:
             &program.hash(root).unwrap(),
         )
         .unwrap();
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
     }
 
     /// Load `acme/view`'s bundle as its frame does: the version it runs.
-    fn load_board(fx: &crate::test_fixtures::EffortFixture, root: &Path) -> String {
+    async fn load_board(fx: &crate::test_fixtures::EffortFixture, root: &Path) -> String {
+        // Whatever was edited since is published first, as the owner of
+        // generations does on the file change.
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
         load_component(&fx.svc, root, "acme/view").unwrap()
     }
 
@@ -866,7 +873,7 @@ actions:
             vec!["oxplow.work_item.transition".to_string()]
         );
         assert!(!board.approved);
-        let version = load_board(&fx, &root);
+        let version = load_board(&fx, &root).await;
         assert_eq!(
             board.version.as_deref(),
             Some(version.as_str()),
@@ -880,7 +887,7 @@ actions:
             "approval",
         );
         assert_ne!(state(&fx.svc, fx.task).await, "done");
-        approve_board(&fx, &root);
+        approve_board(&fx, &root).await;
         invoke_component_command(&fx.svc, &root, invoke())
             .await
             .unwrap();
@@ -891,7 +898,7 @@ actions:
             "<!doctype html><script src=other.js></script>",
         )
         .unwrap();
-        let changed = load_board(&fx, &root);
+        let changed = load_board(&fx, &root).await;
         assert_ne!(changed, version);
         refused(
             invoke_component_command(
@@ -923,11 +930,10 @@ actions:
     async fn an_invoke_acts_only_for_the_version_its_frame_loaded() {
         let (fx, root) = component_fixture().await;
         let index = root.join("oxplow/extensions/acme/components/board/index.html");
-        let approved = load_board(&fx, &root);
-        approve_board(&fx, &root);
+        let approved = load_board(&fx, &root).await;
+        approve_board(&fx, &root).await;
         std::fs::write(&index, "<!doctype html><script src=evil.js></script>").unwrap();
-        let tampered = load_board(&fx, &root);
-        std::fs::write(&index, "<!doctype html>").unwrap();
+        let tampered = load_board(&fx, &root).await;
         refused(
             invoke_component_command(
                 &fx.svc,
@@ -939,6 +945,9 @@ actions:
             "approval",
         );
         assert_ne!(state(&fx.svc, fx.task).await, "done");
+        // Put back, the next generation serves the approved bytes again.
+        std::fs::write(&index, "<!doctype html>").unwrap();
+        assert_eq!(load_board(&fx, &root).await, approved);
         refused(
             invoke_component_command(
                 &fx.svc,
@@ -985,11 +994,11 @@ actions:
             "title: View\nquery: SELECT 1 AS n\nviz: custom\ncustom: { component: board }\n",
         )
         .unwrap();
-        let first = load_board(&fx, &root);
+        let first = load_board(&fx, &root).await;
         let served = fx.svc.component_bundles.get(&first).unwrap();
         assert_eq!(served.file(""), Some(&b"<!doctype html>"[..]));
         std::fs::write(ext.join("components/board/index.html"), "<!doctype html>2").unwrap();
-        assert_ne!(load_board(&fx, &root), first);
+        assert_ne!(load_board(&fx, &root).await, first);
         let program = programs(&fx, &root)
             .into_iter()
             .find(|p| p.kind == crate::exec_consent::ProgramKind::Component)
@@ -1026,7 +1035,7 @@ actions:
             "tasks",
             BTreeMap::new(),
             &ctx,
-            &load_board(&fx, &root),
+            &load_board(&fx, &root).await,
         )
         .await
         .unwrap();
@@ -1043,7 +1052,7 @@ actions:
             "tasks",
             BTreeMap::new(),
             &ctx,
-            &load_board(&fx, &root),
+            &load_board(&fx, &root).await,
         )
         .await
         .unwrap();
@@ -1055,7 +1064,7 @@ actions:
             "acme/view",
             BTreeMap::new(),
             &ctx,
-            &load_board(&fx, &root),
+            &load_board(&fx, &root).await,
         )
         .await
         .unwrap_err();
@@ -1070,7 +1079,7 @@ actions:
             "tasks",
             BTreeMap::new(),
             &ctx,
-            &load_board(&fx, &root),
+            &load_board(&fx, &root).await,
         )
         .await
         .unwrap_err();
@@ -1083,7 +1092,7 @@ actions:
     #[tokio::test]
     async fn a_component_invokes_only_its_declared_commands_as_the_lens() {
         let (fx, root) = component_fixture().await;
-        let version = load_board(&fx, &root);
+        let version = load_board(&fx, &root).await;
         let invoke = |command: &str| board_invoke(&fx, command, &version);
         let err = invoke_component_command(&fx.svc, &root, invoke("oxplow.config.set"))
             .await
@@ -1093,7 +1102,7 @@ actions:
                 .contains("isn't one of component `board`'s commands"),
             "{err}"
         );
-        approve_board(&fx, &root);
+        approve_board(&fx, &root).await;
         let out = invoke_component_command(&fx.svc, &root, invoke("oxplow.work_item.transition"))
             .await
             .unwrap();
@@ -1118,8 +1127,8 @@ actions:
     #[tokio::test(flavor = "multi_thread")]
     async fn a_component_invoke_with_a_non_object_input_is_invalid() {
         let (fx, root) = component_fixture().await;
-        let version = load_board(&fx, &root);
-        approve_board(&fx, &root);
+        let version = load_board(&fx, &root).await;
+        approve_board(&fx, &root).await;
         for input in [
             serde_json::json!([1, 2]),
             serde_json::json!("done"),

@@ -111,7 +111,7 @@ async fn every_path_hands_over_the_same_envelope() {
     let svc = &fx.svc;
     let root = svc.layout.project_dir.clone();
     extensions(&root, false);
-    svc.vocabulary_service.sync().await.unwrap();
+    crate::test_fixtures::activate_with_problems(svc).await;
 
     // Logged at v1 with every kind of provenance, while v1 was newest.
     let cause = log(
@@ -141,7 +141,7 @@ async fn every_path_hands_over_the_same_envelope() {
     .await;
     // The owner publishes v2; every reader gets the row carried to it.
     extensions(&root, true);
-    svc.vocabulary_service.sync().await.unwrap();
+    crate::test_fixtures::activate_with_problems(svc).await;
     let expected = EventView::of(&event, &svc.vocabulary.current()).unwrap();
     assert_eq!(expected.v, 2);
     assert_eq!(expected.payload, json!({ "number": 12, "by": "unknown" }));

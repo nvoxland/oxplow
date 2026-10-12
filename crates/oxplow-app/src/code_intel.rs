@@ -541,7 +541,7 @@ mod tests {
             "\n\nclass Widget:\n    def spin(self): pass\n",
         )
         .unwrap();
-        let svc = Arc::new(crate::Services::in_memory(dir.path()).unwrap());
+        let svc = crate::Services::in_memory(dir.path()).await.unwrap();
         svc.config
             .write()
             .unwrap()

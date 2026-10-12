@@ -136,7 +136,7 @@ pub async fn get_file_snapshot(
 mod tests {
     #[tokio::test]
     async fn list_file_snapshots_dispatches() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let out = crate::dispatch(
             "list_file_snapshots",
             serde_json::json!({ "path": "src/main.rs" }),

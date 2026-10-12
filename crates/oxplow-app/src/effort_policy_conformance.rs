@@ -267,6 +267,7 @@ mod tests {
             .unwrap()
             .active_providers
             .insert(crate::effort_policy::CAPABILITY.into(), "none".into());
+        crate::test_fixtures::activate(&fx.svc).await;
         let run = suite(&fx.svc, "none").await;
         let checks: Vec<_> = run.findings.iter().map(|f| f.check).collect();
         assert!(

@@ -409,7 +409,6 @@ oxplow_command_table!(rpc_dispatch);
 /// without duplicating the git-repo + Services scaffolding.
 #[cfg(test)]
 pub(crate) mod test_support {
-    use std::sync::Arc;
 
     use oxplow_app::Services;
 
@@ -420,7 +419,7 @@ pub(crate) mod test_support {
     /// `svc.<store>` test usage keeps working. Keep the returned
     /// `TempDir` alive for the duration of the test.
     #[allow(clippy::unwrap_used)]
-    pub fn services() -> (crate::RpcContext, tempfile::TempDir) {
+    pub async fn services() -> (crate::RpcContext, tempfile::TempDir) {
         use std::process::Command;
         let dir = tempfile::tempdir().unwrap();
         let git = |args: &[&str]| {
@@ -437,10 +436,20 @@ pub(crate) mod test_support {
         git(&["config", "user.email", "test@example.com"]);
         git(&["commit", "-q", "--allow-empty", "-m", "init"]);
         let ctx = crate::RpcContext {
-            services: Arc::new(Services::in_memory(dir.path()).unwrap()),
+            services: Services::in_memory(dir.path()).await.unwrap(),
             plugin_runtime: None,
         };
         (ctx, dir)
+    }
+
+    /// Publish the generation the files written and the config changed since
+    /// ask for, as the owner of generations does on the change.
+    pub async fn publish(ctx: &crate::RpcContext) {
+        ctx.services
+            .extension_activation
+            .activate(ctx.services.clone())
+            .await
+            .expect("the extensions activate");
     }
 }
 
@@ -453,14 +462,14 @@ mod tests {
 
     #[tokio::test]
     async fn ping_routes_with_no_args() {
-        let (svc, _dir) = services();
+        let (svc, _dir) = services().await;
         let out = dispatch("ping", json!(null), &svc).await.unwrap();
         assert_eq!(out, json!("pong"));
     }
 
     #[tokio::test]
     async fn list_streams_routes_and_serializes() {
-        let (svc, _dir) = services();
+        let (svc, _dir) = services().await;
         // Empty object body works the same as a null body for no-arg cmds.
         let out = dispatch("list_streams", json!({}), &svc).await.unwrap();
         assert!(out.is_array(), "expected a JSON array, got {out}");
@@ -470,7 +479,7 @@ mod tests {
     /// `work_item.*` commands; the typed task RPCs are gone.
     #[tokio::test]
     async fn the_typed_task_rpcs_are_gone() {
-        let (svc, _dir) = services();
+        let (svc, _dir) = services().await;
         for name in [
             "get_thread_work_state",
             "get_backlog_state",
@@ -494,7 +503,7 @@ mod tests {
     /// P6.E2: the UI reads knowledge pages through the models.
     #[tokio::test]
     async fn the_wiki_read_rpcs_are_gone() {
-        let (svc, _dir) = services();
+        let (svc, _dir) = services().await;
         for name in [
             "list_wiki_pages",
             "search_wiki_titles",
@@ -508,7 +517,7 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_command_is_not_found() {
-        let (svc, _dir) = services();
+        let (svc, _dir) = services().await;
         let err = dispatch("no_such_command", json!({}), &svc)
             .await
             .unwrap_err();
@@ -517,7 +526,7 @@ mod tests {
 
     #[tokio::test]
     async fn bad_args_are_rejected_as_invalid() {
-        let (svc, _dir) = services();
+        let (svc, _dir) = services().await;
         // `effortId` is required; an empty object can't deserialize into Args.
         let err = dispatch("get_effort", json!({}), &svc).await.unwrap_err();
         assert_eq!(err.code, "INVALID");

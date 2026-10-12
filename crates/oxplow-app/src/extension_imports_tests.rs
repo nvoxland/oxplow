@@ -93,13 +93,13 @@ fn put_in(dir: &Path, e: &Ext) {
     write(dir, "models/plain.sql", "SELECT ref FROM ref('work_item')");
 }
 
-fn project(exts: &[Ext]) -> (tempfile::TempDir, Arc<crate::Services>) {
+async fn project(exts: &[Ext<'_>]) -> (tempfile::TempDir, Arc<crate::Services>) {
     let dir = tempfile::tempdir().unwrap();
     crate::test_fixtures::init_git_repo(dir.path());
     for e in exts {
         put(dir.path(), e);
     }
-    let svc = Arc::new(crate::Services::in_memory(dir.path()).unwrap());
+    let svc = crate::Services::in_memory(dir.path()).await.unwrap();
     (dir, svc)
 }
 
@@ -152,7 +152,8 @@ async fn a_consumer_of_a_compatible_stable_model_activates_and_reads_it() {
     let (_dir, svc) = project(&[
         Ext::new("prod").at_version(2).exports("stable"),
         Ext::new("cons").imports("prod", 2, false),
-    ]);
+    ])
+    .await;
     activate(&svc).await;
     assert_eq!(svc.extension_activation.problems().len(), 0);
     assert!(readable(&svc, "v_prod_items").await);
@@ -171,7 +172,8 @@ async fn a_breaking_version_mismatch_blocks_only_the_consumer() {
         Ext::new("prod").at_version(2).exports("stable"),
         Ext::new("cons").imports("prod", 1, false),
         Ext::new("other"),
-    ]);
+    ])
+    .await;
     activate(&svc).await;
     let why = problem(&svc, "cons");
     assert!(
@@ -190,7 +192,8 @@ async fn a_missing_required_producer_blocks_only_the_consumer() {
     let (_dir, svc) = project(&[
         Ext::new("cons").imports("gone", 1, false),
         Ext::new("other"),
-    ]);
+    ])
+    .await;
     activate(&svc).await;
     let why = problem(&svc, "cons");
     assert!(
@@ -209,7 +212,8 @@ async fn a_blocked_consumer_cannot_supply_its_own_consumers() {
         Ext::new("mid").imports("gone", 1, false).exports("stable"),
         Ext::new("leaf").imports("mid", 1, false),
         Ext::new("other"),
-    ]);
+    ])
+    .await;
     activate(&svc).await;
     assert!(!problem(&svc, "mid").is_empty());
     assert!(!problem(&svc, "leaf").is_empty());
@@ -221,7 +225,7 @@ async fn a_blocked_consumer_cannot_supply_its_own_consumers() {
 /// reads it.
 #[tokio::test]
 async fn an_optional_import_of_a_missing_producer_degrades() {
-    let (_dir, svc) = project(&[Ext::new("cons").imports("gone", 1, true)]);
+    let (_dir, svc) = project(&[Ext::new("cons").imports("gone", 1, true)]).await;
     activate(&svc).await;
     assert!(svc.extension_activation.problems().is_empty());
     assert!(readable(&svc, "v_cons_plain").await);
@@ -234,7 +238,8 @@ async fn an_optional_import_of_a_disabled_producer_degrades() {
     let (dir, svc) = project(&[
         Ext::new("prod").exports("stable"),
         Ext::new("cons").imports("prod", 1, true),
-    ]);
+    ])
+    .await;
     disable(dir.path(), "prod");
     activate(&svc).await;
     assert!(svc.extension_activation.problems().is_empty());
@@ -245,16 +250,17 @@ async fn an_optional_import_of_a_disabled_producer_degrades() {
 
 #[tokio::test]
 async fn a_cyclic_import_is_diagnosed_deterministically() {
-    let build = || {
+    let build = || async {
         project(&[
             Ext::new("a").exports("stable").imports("b", 1, false),
             Ext::new("b").exports("stable").imports("a", 1, false),
             Ext::new("other"),
         ])
+        .await
     };
     let mut seen = Vec::new();
     for _ in 0..2 {
-        let (_dir, svc) = build();
+        let (_dir, svc) = build().await;
         activate(&svc).await;
         assert!(readable(&svc, "v_other_items").await);
         assert!(!readable(&svc, "v_a_plain").await && !readable(&svc, "v_b_plain").await);
@@ -270,7 +276,8 @@ async fn a_private_export_is_not_importable() {
     let (_dir, svc) = project(&[
         Ext::new("prod").exports("private"),
         Ext::new("cons").imports("prod", 1, false),
-    ]);
+    ])
+    .await;
     activate(&svc).await;
     let why = problem(&svc, "cons");
     assert!(
@@ -283,7 +290,8 @@ async fn a_private_export_is_not_importable() {
 
 #[tokio::test]
 async fn an_unexported_model_is_not_importable() {
-    let (_dir, svc) = project(&[Ext::new("prod"), Ext::new("cons").imports("prod", 1, false)]);
+    let (_dir, svc) =
+        project(&[Ext::new("prod"), Ext::new("cons").imports("prod", 1, false)]).await;
     activate(&svc).await;
     assert!(problem(&svc, "cons").contains("`dep`"));
     assert!(readable(&svc, "v_prod_items").await);
@@ -296,7 +304,8 @@ async fn an_experimental_export_is_refused_to_a_sconsumer() {
         Ext::new("prod").exports("experimental"),
         Ext::new("scons").imports("prod", 1, false).shared(),
         Ext::new("pcons").imports("prod", 1, false),
-    ]);
+    ])
+    .await;
     activate(&svc).await;
     let why = problem(&svc, "scons");
     assert!(
@@ -316,7 +325,8 @@ async fn disabling_the_producer_withdraws_a_required_consumer_and_degrades_an_op
         Ext::new("prod").exports("stable"),
         Ext::new("must").imports("prod", 1, false),
         Ext::new("may").imports("prod", 1, true),
-    ]);
+    ])
+    .await;
     activate(&svc).await;
     assert!(svc.extension_activation.problems().is_empty());
     for view in ["v_prod_items", "v_must_items", "v_may_items"] {

@@ -55,30 +55,27 @@ not a DB commit boundary.
 The native generation coordinator can reserve a checked command candidate and
 its extension owner metadata before SQL commit, then apply the replacement while
 retaining both locks through the remaining generation maps. Until the first generation is
-activated, command publication keeps its optimistic checks. The command bus,
-SQL gateway, AI service, capability registry and provider registry are built
-holding the project's activation boundary (a part built alone has its own,
-which nothing has activated), so a pin is always available and means "the
-current load" before the first activation.
+activated (boot's `initialize`), command publication keeps its optimistic
+checks. The command bus, SQL gateway, AI service, capability registry and
+provider registry are built holding the project's activation boundary (a part
+built alone, as the CLI's checks do, has its own, which nothing has
+activated), so a pin is always available.
 `CommandBus::with_activation` sets the ingress boundary: a pin is
 attached before command lookup and retained through the entire pipeline, including
 prepared effect commands, compositions and post-commit projections. A standalone
 bus retains its previous behavior. Production Services adopt the same boundary
 as the SQL gateway and provider registry during boot.
 
-Live extension reconciliation now stages every enabled replacement together from
-one CatalogSnapshot and publishes one fenced registry candidate. Load errors in
-an enabled non-required extension reject the batch; partially parsed command
-lists do not replace prior handlers. Namespace/shortcut validation spans all
-sources. Explicit disabled/removed sources are withdrawn first, independently
-of accepting new code, and captured command contexts have a live owner check so
-already-routed handlers cannot preserve that authority. Catalog changes during
-staging also reject publication. The reconciler yields and restages up to three
-times for publication races; persistent contention leaves diagnostics until
-another reconciliation. These rules preserve command handlers, not a coherent
-DB/vocabulary/provider/UI activation in standalone use. Production boot retires
-this separate reconciler in favor of the shared generation coordinator and
-committed runtime catalog; raw filesystem snapshots remain authoring inputs. `unregister_source` removes one source's (an extension disabled, an
+Extension commands are staged together from one CatalogSnapshot and published
+as one fenced registry candidate by the generation coordinator (activation) —
+the only path that registers them. An enabled extension that fails to stage is
+held back on its own (the generation names it in its problems); partially
+parsed command lists never replace prior handlers. Namespace/shortcut
+validation spans all sources. Disabled/removed sources are withdrawn in the
+same candidate, and captured command contexts have a live owner check so
+already-routed handlers cannot preserve that authority. A catalog change during
+staging rejects publication and the owner stages again. Raw filesystem
+snapshots remain authoring inputs. `unregister_source` removes one source's (an extension disabled, an
 external provider stopped), freeing a namespace left empty. Migration V26 rewrote
 history (audit, proposals, `command.*` payloads) from the old two-part
 ids. A command declares (`oxplow_domain::commands::CommandSpec`):
@@ -342,7 +339,7 @@ the scope in its `needs`; the manifest says the rest. oxplow's own
 are declared in **`oxplow-foundation`** — a shipped extension that is
 **required** (`BundledExtension::required`: it can't be disabled, and
 `extension_commands::register_required` registers its commands when
-services are built, before anything runs one; the reconciler leaves it
+services are built, before anything runs one; activation leaves it
 alone). An extension may declare a command over the same operation in
 its own namespace. A script reaches record and write operations only by
 composing commands.

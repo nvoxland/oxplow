@@ -737,10 +737,9 @@ mod tests {
     async fn service_fixture() -> (std::sync::Arc<crate::Services>, tempfile::TempDir, ThreadId) {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
-        let svc = std::sync::Arc::new(crate::Services::in_memory(dir.path()).unwrap());
+        let svc = crate::Services::in_memory(dir.path()).await.unwrap();
         // Seed the catalog as boot does — the token/turn producers gate collection
         // on `measure_has_active_spec` (tsk31), so the specs must exist.
-        svc.metrics.seed_catalog().await;
         let stream = svc.streams.ensure_primary().await.unwrap();
         let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
         (svc, dir, thread.id)
@@ -789,7 +788,6 @@ mod tests {
     async fn a_turns_transcript_is_counted_once_by_the_reactor() {
         let f = crate::test_fixtures::services_with_effort().await;
         let svc = &f.svc;
-        svc.metrics.seed_catalog().await;
         let tdir = tempfile::tempdir().unwrap();
         let path = tdir.path().join("session.jsonl");
         std::fs::write(&path, "").unwrap();
@@ -1156,7 +1154,6 @@ mod tests {
         assert_eq!(facts_after.len(), 2, "retransmit is a no-op");
 
         // The producer specs re-aggregate the OTEL facts to the expected totals.
-        svc.metrics.seed_catalog().await;
         let engine = crate::metric_engine::MetricEngine::new((*svc.fact_store).clone());
         for (key, expected) in [
             ("agent.tokens.total", 120.0),
@@ -1224,7 +1221,6 @@ mod tests {
         assert!((usage_facts[0].value - 70.0).abs() < 1e-9);
 
         // The specs read back: sums by kind + the cumulative ratio headline.
-        svc.metrics.seed_catalog().await;
         let engine = crate::metric_engine::MetricEngine::new((*svc.fact_store).clone());
         for (key, expected) in [
             ("agent.tokens.total", 120.0),
@@ -1332,7 +1328,6 @@ mod tests {
         );
 
         // The `agent.turns` spec re-aggregates the turn fact.
-        svc.metrics.seed_catalog().await;
         let engine = crate::metric_engine::MetricEngine::new((*svc.fact_store).clone());
         let spec = svc
             .fact_store

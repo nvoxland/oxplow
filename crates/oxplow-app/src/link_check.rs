@@ -343,7 +343,7 @@ mod tests {
     #[tokio::test]
     async fn flags_unrecognized_github_style_ref() {
         let dir = git_repo();
-        let services = Services::in_memory(dir.path()).unwrap();
+        let services = Services::in_memory(dir.path()).await.unwrap();
         let warnings = check_links(&services, "See [[#13]] for the follow-up.").await;
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].target, "#13");
@@ -355,7 +355,7 @@ mod tests {
     #[tokio::test]
     async fn accepts_refs_of_kinds_with_no_probe() {
         let dir = git_repo();
-        let services = Services::in_memory(dir.path()).unwrap();
+        let services = Services::in_memory(dir.path()).await.unwrap();
         let warnings = check_links(&services, "See [[effort:eff1]].").await;
         assert!(warnings.is_empty(), "got {warnings:?}");
         // A work item is checked against the active list's items: another
@@ -367,7 +367,7 @@ mod tests {
     #[tokio::test]
     async fn flags_nonexistent_task() {
         let dir = git_repo();
-        let services = Services::in_memory(dir.path()).unwrap();
+        let services = Services::in_memory(dir.path()).await.unwrap();
         let warnings = check_links(&services, "Blocked by [[tsk999]].").await;
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].target, "tsk999");
@@ -385,7 +385,7 @@ mod tests {
     #[tokio::test]
     async fn a_task_link_checks_the_active_list() {
         let dir = git_repo();
-        let services = Services::in_memory(dir.path()).unwrap();
+        let services = Services::in_memory(dir.path()).await.unwrap();
         let task =
             crate::test_fixtures::file_item(&services, serde_json::json!({ "title": "Real task" }))
                 .await;
@@ -408,7 +408,7 @@ mod tests {
     #[tokio::test]
     async fn accepts_existing_task() {
         let dir = git_repo();
-        let services = Services::in_memory(dir.path()).unwrap();
+        let services = Services::in_memory(dir.path()).await.unwrap();
         let task =
             crate::test_fixtures::file_item(&services, serde_json::json!({ "title": "Real task" }))
                 .await;
@@ -420,7 +420,7 @@ mod tests {
     #[tokio::test]
     async fn flags_missing_wiki_slug_but_not_code_fenced() {
         let dir = git_repo();
-        let services = Services::in_memory(dir.path()).unwrap();
+        let services = Services::in_memory(dir.path()).await.unwrap();
         // The fenced example must be ignored; only the prose link counts.
         let body = "Prose [[ghost-page]].\n\n```\n[[also-ghost]]\n```\n";
         let warnings = check_links(&services, body).await;
@@ -432,7 +432,7 @@ mod tests {
     #[tokio::test]
     async fn flags_missing_file() {
         let dir = git_repo();
-        let services = Services::in_memory(dir.path()).unwrap();
+        let services = Services::in_memory(dir.path()).await.unwrap();
         let warnings = check_links(&services, "Edited [[src/gone.rs]].").await;
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].target, "src/gone.rs");
@@ -454,7 +454,7 @@ mod tests {
         repo.commit(Some("HEAD"), &sig, &sig, "a", &tree, &[])
             .unwrap();
         std::fs::remove_file(dir.path().join("src/a.rs")).unwrap();
-        let services = Services::in_memory(dir.path()).unwrap();
+        let services = Services::in_memory(dir.path()).await.unwrap();
         let warnings =
             check_links(&services, "Was [[src/a.rs@HEAD]], never [[src/b.rs@HEAD]].").await;
         assert_eq!(

@@ -425,7 +425,7 @@ mod tests {
             .init_repository(tmp.path())
             .await
             .unwrap();
-        let svc = oxplow_app::Services::in_memory(tmp.path()).unwrap();
+        let svc = oxplow_app::Services::in_memory(tmp.path()).await.unwrap();
         // Core's skills and what the bundled extension offers by default.
         let text = oxplow_app::capabilities::agent_text(&svc);
         let skill = |name: &str| text.skill_body(name).map(str::to_string);
@@ -470,9 +470,7 @@ mod tests {
             .init_repository(tmp.path())
             .await
             .unwrap();
-        let svc = oxplow_app::Services::in_memory(tmp.path()).unwrap();
-        svc.extension_models.sync().await.unwrap();
-        svc.extension_commands.reconcile().await;
+        let svc = oxplow_app::Services::in_memory(tmp.path()).await.unwrap();
         let command = |name: &str| svc.commands.spec(name).map(|s| s.input_schema);
         let mut asked = 0;
         for b in oxplow_app::bundled_extensions::BUNDLED {

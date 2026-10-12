@@ -56,11 +56,6 @@ fn write_extension(project: &Path, sim: &OAuthSim) {
 /// File an item on the notes tracker: the active one, as every create
 /// files there (tsk1058).
 async fn create(svc: &oxplow_app::Services, title: &str) -> Result<(), String> {
-    svc.config
-        .write()
-        .unwrap()
-        .active_providers
-        .insert("work_items".into(), "notes".into());
     svc.commands
         .run(
             &Actor::Human,
@@ -89,6 +84,7 @@ async fn a_signed_in_bearer_renews_once_when_its_server_stops_taking_it() {
         Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
         oxplow_app::providers::host::process_env(),
     )
+    .await
     .unwrap();
 
     // The person approves the provider (where it signs in is part of it)
@@ -114,6 +110,12 @@ async fn a_signed_in_bearer_renews_once_when_its_server_stops_taking_it() {
         &version,
     )
     .unwrap();
+    // Every create files on the notes tracker.
+    svc.config
+        .write()
+        .unwrap()
+        .active_providers
+        .insert("work_items".into(), "notes".into());
     svc.config.write().unwrap().extension_instances.insert(
         INSTANCE.into(),
         oxplow_config::ExtensionInstanceConfig {
@@ -159,7 +161,10 @@ async fn a_signed_in_bearer_renews_once_when_its_server_stops_taking_it() {
         .await
         .expect("the sign-in finishes");
     assert_eq!(error, None);
-    svc.providers.reconcile().await;
+    svc.extension_activation
+        .activate(svc.clone())
+        .await
+        .expect("the saved credential starts the instance");
     assert_eq!(
         svc.providers.health(INSTANCE).map(|h| h.state),
         Some(InstanceState::Ready)
@@ -169,6 +174,9 @@ async fn a_signed_in_bearer_renews_once_when_its_server_stops_taking_it() {
 
     // The server stops taking the token the instance holds: the next call
     // is refused `Auth` naming NOTES_TOKEN, renewed once, and lands.
+    // The refused token restarts the instance through the owner of
+    // generations, as it does in the app.
+    svc.extension_activation.spawn(&svc);
     sim.expire();
     create(&svc, "Second").await.unwrap();
     assert_eq!(sim.grants(), vec!["authorization_code", "refresh_token"]);

@@ -37,7 +37,7 @@ async fn boot() -> (Arc<Services>, std::path::PathBuf, tempfile::TempDir) {
     git(&["config", "user.email", "test@example.com"]);
     git(&["commit", "-q", "--allow-empty", "-m", "init"]);
     let root = dir.path().canonicalize().unwrap();
-    let svc = Arc::new(Services::in_memory(&root).unwrap());
+    let svc = Services::in_memory(&root).await.unwrap();
     (svc, root, dir)
 }
 

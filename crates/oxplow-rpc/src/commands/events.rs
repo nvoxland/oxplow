@@ -38,7 +38,7 @@ pub async fn discard_dead_letter(svc: &Services, id: i64) -> Result<DeadLetter, 
 mod tests {
     #[tokio::test]
     async fn list_dead_letters_dispatches() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let out = crate::dispatch("list_dead_letters", serde_json::json!({}), &svc)
             .await
             .unwrap();
@@ -47,7 +47,7 @@ mod tests {
 
     #[tokio::test]
     async fn retry_and_discard_report_not_found_for_an_unknown_letter() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         for name in ["retry_dead_letter", "discard_dead_letter"] {
             let err = crate::dispatch(name, serde_json::json!({"id": 424242}), &svc)
                 .await

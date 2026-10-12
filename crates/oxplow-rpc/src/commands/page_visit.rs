@@ -84,7 +84,7 @@ pub async fn forget_page(
 mod tests {
     #[tokio::test]
     async fn list_recent_page_visits_dispatches() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let out = crate::dispatch(
             "list_recent_page_visits",
             serde_json::json!({"limit": 10, "threadId": null}),

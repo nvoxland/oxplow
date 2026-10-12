@@ -221,7 +221,7 @@ mod tests {
 
     #[tokio::test]
     async fn without_a_session_prompting_is_refused_and_the_transcript_is_empty() {
-        let (ctx, _dir) = crate::test_support::services();
+        let (ctx, _dir) = crate::test_support::services().await;
         let err = crate::dispatch(
             "acp_prompt",
             json!({"sessionId": "ses1", "text": "hi"}),
@@ -242,7 +242,7 @@ mod tests {
 
     #[tokio::test]
     async fn opening_a_terminal_session_as_acp_is_refused() {
-        let (ctx, _dir) = crate::test_support::services();
+        let (ctx, _dir) = crate::test_support::services().await;
         let stream = ctx.streams.ensure_primary().await.unwrap();
         let thread = ctx
             .threads

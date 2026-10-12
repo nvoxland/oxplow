@@ -97,7 +97,7 @@ async fn run(fx: &EffortFixture, name: &str, input: Value) -> Result<Value, Comm
 }
 
 async fn reconcile(fx: &EffortFixture) {
-    fx.svc.extension_commands.reconcile().await;
+    crate::test_fixtures::activate(&fx.svc).await;
 }
 
 fn write_state(scope: &str, expected: Value, values: Value) -> Value {
@@ -419,7 +419,7 @@ async fn state_and_configuration_survive_a_restart() {
     crate::test_fixtures::init_git_repo(dir.path());
     declare(dir.path(), "alpha", CONFIGURATION);
     let db_path = dir.path().join("restart.sqlite");
-    let boot = || {
+    let boot = || async {
         let svc = crate::Services::on_machine_with_database(
             dir.path(),
             dir.path().join(".oxplow/global-config"),
@@ -427,12 +427,13 @@ async fn state_and_configuration_survive_a_restart() {
             crate::providers::host::process_env(),
             oxplow_db::Database::open(&db_path).unwrap(),
         )
+        .await
         .unwrap();
-        std::sync::Arc::new(svc)
+        svc
     };
 
-    let first = boot();
-    first.extension_commands.reconcile().await;
+    let first = boot().await;
+    crate::test_fixtures::activate(&first).await;
     for (name, input) in [
         (
             "alpha.state.write",
@@ -452,8 +453,8 @@ async fn state_and_configuration_survive_a_restart() {
     drop(first);
 
     // A new process over the same file: nothing in memory carries over.
-    let second = boot();
-    second.extension_commands.reconcile().await;
+    let second = boot().await;
+    crate::test_fixtures::activate(&second).await;
     let read = second
         .commands
         .run(

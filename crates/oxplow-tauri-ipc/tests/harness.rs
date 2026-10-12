@@ -15,8 +15,6 @@
 
 #![allow(dead_code)]
 
-use std::sync::Arc;
-
 use oxplow_app::Services;
 use oxplow_tauri_ipc::AppState;
 use tauri::test::{mock_builder, mock_context, noop_assets, MockRuntime};
@@ -30,7 +28,7 @@ pub struct TestApp {
 }
 
 impl TestApp {
-    pub fn build() -> Self {
+    pub async fn build() -> Self {
         let tmp = TempDir::new().expect("tmp project dir");
         // Services::in_memory now calls ensure_primary, which requires
         // the project_dir to be a git repo. Init one with a single
@@ -47,8 +45,10 @@ impl TestApp {
         let tree = repo.find_tree(tree_id).unwrap();
         repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
             .unwrap();
-        let services = Services::in_memory(tmp.path()).expect("services in_memory");
-        let state: AppState = Arc::new(services);
+        let services = Services::in_memory(tmp.path())
+            .await
+            .expect("services in_memory");
+        let state: AppState = services;
         let app = mock_builder()
             .manage(state.clone())
             .build(mock_context(noop_assets()))

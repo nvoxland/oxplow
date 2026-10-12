@@ -101,8 +101,8 @@ async fn every_run_is_recorded_once_as_itself() {
     let root = svc.layout.project_dir.clone();
     let task = oxplow_tasks::work_item_ref(fx.task);
     acme(&root, &task);
-    svc.vocabulary_service.sync().await.unwrap();
-    svc.extension_commands.reconcile().await;
+    crate::test_fixtures::activate_with_problems(svc).await;
+    crate::test_fixtures::activate(svc).await;
     let generation = svc.extension_catalog.generation(&root);
 
     let env = Envelope::new("acme.merged", 1, "test", json!({ "number": 1 }))
@@ -287,7 +287,7 @@ async fn a_run_records_what_its_grant_decided() {
         "oxplow/extensions/acme/count.star",
         "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT 1 AS n\"})\n    return {\"commands\": [], \"result\": {\"n\": len(rows)}}\n",
     );
-    svc.extension_commands.reconcile().await;
+    crate::test_fixtures::activate(svc).await;
     let collectors = Collectors::of(svc, &root);
     let (ext, spec) = svc
         .extension_catalog

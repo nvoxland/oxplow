@@ -73,7 +73,7 @@ pub async fn update_background_task(
 mod tests {
     #[tokio::test]
     async fn list_background_tasks_dispatches() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let out = crate::dispatch("list_background_tasks", serde_json::json!({}), &svc)
             .await
             .unwrap();
@@ -82,7 +82,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_background_task_returns_null_for_missing() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let out = crate::dispatch(
             "get_background_task",
             serde_json::json!({ "id": "nope" }),

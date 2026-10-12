@@ -630,17 +630,6 @@ pub fn prepare_built_ins(
     PreparedKnowledge { providers: all }
 }
 
-/// Register the knowledge stores: core's none (the sink, always there) and
-/// the wiki under each id `declared` gives it, which `wiki` follows.
-pub fn register_built_ins(
-    registry: &oxplow_domain::knowledge::KnowledgeRegistry,
-    declared: &[crate::capabilities::Implementation],
-    project_dir: &Path,
-    wiki: &WikiFollow,
-) {
-    prepare_built_ins(declared, project_dir).publish(registry, wiki);
-}
-
 /// How current each of `page`'s pinned file refs is (`v_knowledge_ref`:
 /// the one definition of staleness), whichever store keeps it.
 pub async fn freshness(
@@ -1798,12 +1787,7 @@ mod tests {
             .unwrap()
             .active_providers
             .insert(CAPABILITY.into(), id.into());
-        let config = crate::config_service::read_config(&fx.svc.config);
-        fx.svc
-            .capabilities
-            .publish(&config, &fx.svc.db)
-            .await
-            .unwrap();
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
         fx.svc
             .event_pump
             .settle(&[KnowledgeSwitch::NAME], std::time::Duration::from_secs(10))
@@ -1856,139 +1840,6 @@ mod tests {
         assert_eq!(recorded(&fx).await, ["kept"]);
     }
 
-    /// A store that records what it's asked, and keeps the body it's given.
-    struct Recording(std::sync::Mutex<Vec<String>>);
-
-    #[async_trait::async_trait]
-    impl KnowledgeProvider for Recording {
-        fn id(&self) -> &str {
-            "vault"
-        }
-        async fn write_page(
-            &self,
-            call: &PageCall<'_>,
-            draft: &PageDraft,
-        ) -> Result<Option<Kept>, CommandError> {
-            self.0.lock().unwrap().push(format!(
-                "write {} {:?} by {}",
-                draft.slug,
-                draft.verified_refs,
-                call.actor().source()
-            ));
-            Ok(Some(Kept {
-                body: draft.body.clone(),
-                refs: None,
-                events: Vec::new(),
-            }))
-        }
-        async fn delete_page(
-            &self,
-            _: &PageCall<'_>,
-            slug: &str,
-        ) -> Result<Option<Vec<Envelope>>, CommandError> {
-            self.0.lock().unwrap().push(format!("delete {slug}"));
-            Ok(Some(Vec::new()))
-        }
-        async fn link(
-            &self,
-            _: &PageCall<'_>,
-            slug: &str,
-            target: &str,
-        ) -> Result<Option<Kept>, CommandError> {
-            self.0.lock().unwrap().push(format!("link {slug} {target}"));
-            Ok(Some(Kept {
-                body: format!("# Kept\n\n- [[{target}]]\n"),
-                refs: None,
-                events: Vec::new(),
-            }))
-        }
-    }
-
-    /// The page commands reach whichever store is active, checked first
-    /// against core's record, and core records what the store kept: the
-    /// wiki's files aren't touched while another store is chosen.
-    #[tokio::test]
-    async fn the_commands_write_through_the_active_store() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        let vault = Arc::new(Recording(Default::default()));
-        fx.svc.knowledge.register(vault.clone());
-        // Running, as a provider's instance is.
-        fx.svc.capabilities.set_external(
-            crate::capabilities::Implementation {
-                capability: CAPABILITY.into(),
-                id: "vault".into(),
-                title: "Vault".into(),
-                extension: None,
-                source: crate::capabilities::Source::External,
-                features: json!({}),
-                fields: json!([]),
-                id_pattern: None,
-                config: json!({}),
-            },
-            true,
-        );
-        fx.svc
-            .config
-            .write()
-            .unwrap()
-            .active_providers
-            .insert(CAPABILITY.into(), "vault".into());
-        std::fs::create_dir_all(dir(&fx).join("src")).unwrap();
-        std::fs::write(dir(&fx).join("src/lib.rs"), "fn a() {}\n").unwrap();
-
-        let out = run(
-            &fx,
-            WRITE_PAGE,
-            json!({ "slug": "kept", "body": "# Kept\n\nSee [[src/lib.rs]].\n",
-                    "verified_refs": ["src/lib.rs"] }),
-        )
-        .await
-        .unwrap();
-        assert_eq!(out.result["page"], "wiki:kept");
-        assert!(!dir(&fx).join(".oxplow/wiki/kept.md").exists());
-        assert_eq!(
-            fx.svc
-                .wiki_page_store
-                .get("kept")
-                .await
-                .unwrap()
-                .map(|p| p.title),
-            Some("Kept".into())
-        );
-        // A dangling link never reaches the store.
-        let err = run(
-            &fx,
-            WRITE_PAGE,
-            json!({ "slug": "kept", "body": "# Kept\n\n[[no-such-page]]\n" }),
-        )
-        .await
-        .unwrap_err();
-        assert!(err.to_string().contains("no-such-page"), "{err}");
-        run(
-            &fx,
-            WRITE_PAGE,
-            json!({ "slug": "other", "body": "# Other\n" }),
-        )
-        .await
-        .unwrap();
-        run(&fx, LINK, json!({ "page": "kept", "target": "other" }))
-            .await
-            .unwrap();
-        run(&fx, DELETE_PAGE, json!({ "slug": "other" }))
-            .await
-            .unwrap();
-        assert_eq!(
-            *vault.0.lock().unwrap(),
-            [
-                r#"write kept ["src/lib.rs"] by human"#.to_string(),
-                "write other [] by human".into(),
-                "link kept other".into(),
-                "delete other".into(),
-            ]
-        );
-        assert!(fx.svc.wiki_page_store.get("other").await.unwrap().is_none());
-    }
-
     /// Knowledge is a choice: oxplow's wiki (bundled) or none, which is a
     /// sink — a write through it lands nowhere and succeeds.
     #[tokio::test]
@@ -2014,12 +1865,7 @@ mod tests {
                 vec![Text("oxplow".into()), Int(1), Int(1), Int(1)],
             ]
         );
-        fx.svc
-            .config
-            .write()
-            .unwrap()
-            .active_providers
-            .insert(CAPABILITY.into(), "none".into());
+        choose(&fx, "none").await;
         let out = run(
             &fx,
             WRITE_PAGE,
