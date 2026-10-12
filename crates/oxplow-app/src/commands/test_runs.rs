@@ -103,7 +103,6 @@ mod tests {
     async fn collector_sync_reads_a_report_into_the_agents_thread() {
         let fx = services_with_effort().await;
         // Coverage is recorded while a metric consumes it.
-        fx.svc.metrics.seed_catalog().await;
         std::fs::write(fx._dir.path().join("coverage.xml"), COBERTURA).unwrap();
         fx.svc.config.write().unwrap().collectors =
             vec![crate::collection::test_support::report_collector(

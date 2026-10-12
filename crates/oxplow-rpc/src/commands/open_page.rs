@@ -38,7 +38,7 @@ mod tests {
 
     #[tokio::test]
     async fn reports_and_clears_the_open_page() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         crate::dispatch(
             "report_open_page",
             json!({ "threadId": "thr1", "pageId": "lens:review/waiting", "kind": "lens", "detailJson": "{\"params\":{}}" }),

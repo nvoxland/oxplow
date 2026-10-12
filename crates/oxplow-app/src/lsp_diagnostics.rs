@@ -300,7 +300,7 @@ mod tests {
     async fn the_boot_clear_logs_each_cleared_file_at_zero() {
         let dir = tempfile::tempdir().unwrap();
         git2::Repository::init(dir.path()).unwrap();
-        let svc = Services::in_memory(dir.path()).unwrap();
+        let svc = Services::in_memory(dir.path()).await.unwrap();
         let stream = svc.streams.ensure_primary().await.unwrap();
         for path in ["a.rs", "b.rs"] {
             svc.diagnostic_store
@@ -344,7 +344,7 @@ mod tests {
     async fn published_diagnostics_land_in_v_diagnostic_and_a_restart_clears_them() {
         let dir = tempfile::tempdir().unwrap();
         git2::Repository::init(dir.path()).unwrap();
-        let svc = std::sync::Arc::new(Services::in_memory(dir.path()).unwrap());
+        let svc = Services::in_memory(dir.path()).await.unwrap();
         let stream = svc.streams.ensure_primary().await.unwrap();
         let mut events = svc.events.subscribe_ui();
         // The renderer hears a diagnostics change as the model changing.

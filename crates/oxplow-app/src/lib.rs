@@ -254,6 +254,8 @@ pub enum AppInitError {
     Io(#[from] std::io::Error),
     #[error("capabilities: {0}")]
     Capabilities(String),
+    #[error("extensions: {0}")]
+    Extensions(String),
 }
 
 /// Layout of the on-disk state for one project. Lives under
@@ -557,7 +559,6 @@ pub struct Services {
     /// (tsk984): what the daemon serves a frame, and what its invoke names.
     pub component_bundles: Arc<component_bundles::ComponentBundles>,
     /// The primary worktree's extensions' SQL models, and their errors (P4.9).
-    pub extension_models: Arc<extension_models::ExtensionModelsService>,
     /// Rebuilds `vocabulary` from the primary worktree's extensions, and
     /// their refused declarations (P8.D3).
     pub vocabulary_service: Arc<vocabulary_reactor::VocabularyService>,
@@ -758,20 +759,27 @@ impl Services {
                     .iter()
                     .map(|extension| extension.name.clone())
                     .collect();
-                let mut loaded = self.extension_models.with_health(root, active).await;
-                loaded = self.vocabulary_service.with_health(root, loaded).await;
+                let mut loaded = active;
 
                 let primary = root == self.layout.project_dir;
                 let problems = primary.then(|| self.extension_activation.problems());
                 if let Some(problems) = &problems {
                     for extension in &mut loaded {
-                        if let Some(errors) = problems.get(&extension.name) {
-                            extension.errors.extend(errors.iter().cloned());
-                        }
-                        if let Some(errors) = problems.get("<host>") {
-                            extension.errors.extend(errors.iter().cloned());
+                        // A held extension's problems repeat its own load
+                        // errors: each is said once.
+                        for key in [extension.name.as_str(), "<host>"] {
+                            for error in problems.get(key).into_iter().flatten() {
+                                if !extension.errors.contains(error) {
+                                    extension.errors.push(error.clone());
+                                }
+                            }
                         }
                     }
+                }
+
+                for extension in &mut loaded {
+                    let mut seen = std::collections::BTreeSet::new();
+                    extension.errors.retain(|error| seen.insert(error.clone()));
                 }
 
                 // Keep changed candidate owners visible for repair without
@@ -798,6 +806,8 @@ impl Services {
                             pending.errors.extend(errors.iter().cloned());
                         }
                     }
+                    let mut seen = std::collections::BTreeSet::new();
+                    pending.errors.retain(|error| seen.insert(error.clone()));
                     loaded.push(pending);
                 }
                 loaded
@@ -1251,13 +1261,6 @@ impl Services {
                 extension_activation.clone(),
             ),
         );
-        let declared = capabilities::declared_by(&extension_catalog.get(&layout.project_dir));
-        capabilities.set_declared(declared.clone());
-        // What's active, published before anything reads it: the work-item
-        // interface shows the active list's items.
-        capabilities
-            .publish_now(&config_service::read_config(&config_arc), &db)
-            .map_err(|e| AppInitError::Capabilities(e.to_string()))?;
         // The snapshot implementations: core's own (every version), what
         // the extensions declare (changes only), resolved from the config
         // as it is now; the captures follow the active one's policy.
@@ -1276,7 +1279,6 @@ impl Services {
                 },
             )))
         };
-        snapshots::register_built_ins(&snapshots, &declared, &snapshot_captures, &snapshot_files);
         snapshots::apply_active_policy(&snapshots, &snapshot_captures);
         let hook_ingest =
             hook_ingest.with_turn_snapshots(Arc::new(turn_snapshots::CaptureTurnSnapshots {
@@ -1287,11 +1289,6 @@ impl Services {
             }));
         // An agent's PTY exiting ends its session (Codex posts no SessionEnd).
         terminal_sessions.ingest_exits_into(hook_ingest.clone());
-        let extension_models = Arc::new(extension_models::ExtensionModelsService::new(
-            db.clone(),
-            extension_catalog.clone(),
-            layout.project_dir.clone(),
-        ));
         let metrics = metrics_service::MetricsService::new(
             snapshot_store.clone(),
             thread_store.clone(),
@@ -1344,13 +1341,8 @@ impl Services {
                 vocabulary_reactor::with_work_item_ids(core.kinds, work_item_ids().as_ref());
             vocabulary.swap(core);
         }
-        let vocabulary_service = Arc::new(vocabulary_reactor::VocabularyService::new(
-            db.clone(),
-            extension_catalog.clone(),
-            layout.project_dir.clone(),
-            vocabulary.clone(),
-            work_item_ids,
-        ));
+        let vocabulary_service =
+            Arc::new(vocabulary_reactor::VocabularyService::new(work_item_ids));
         let agent_policy = Arc::new(agent_policy::AgentPolicy);
         let commands = Arc::new(
             commands::CommandBus::new(
@@ -1397,24 +1389,11 @@ impl Services {
                 capabilities.active(&config_service::read_config(&config), "work_items")
             }))
         };
-        // The built-in lists the project's extensions declare (oxplow's
-        // tasks, while `oxplow-bundled` does).
-        work_items::register_built_ins(&work_items, &declared, &db);
         // None as a work list: the sink every verb reaches while no list is
         // active (`work_items::none_provider`).
         work_items.register(work_items::none_provider());
-        // The agent harnesses foundation declares (the registry is made
-        // before the hook ingest, which maps tool calls with them).
-        harnesses::register_built_ins(&harnesses, &declared);
         // The ACP adapters foundation declares.
         let acp_adapters = oxplow_domain::agent::registry::AcpAdapterRegistry::default();
-        harnesses::register_acp_adapters(&acp_adapters, &declared);
-        ai_service::register_built_ins(
-            &model_providers,
-            &declared,
-            &approvals,
-            &layout.project_dir,
-        );
         // A turn's end take becomes a `thread.checkpoint` a policy reads.
         event_pump.register_async(Arc::new(thread_checkpoint::ThreadCheckpointConsumer {
             log: (*event_log_store).clone(),
@@ -1431,14 +1410,6 @@ impl Services {
         // declare, and the provider instances that register themselves.
         let effort_policies =
             Arc::new(oxplow_domain::effort_policy::EffortPolicyRegistry::default());
-        effort_policy::register_built_ins(
-            &effort_policies,
-            &declared,
-            &sql,
-            &(Arc::new(metrics.clone()) as Arc<dyn services::TreeSource>),
-            &approvals,
-            &layout.project_dir,
-        );
         event_pump.register_async(Arc::new(snapshots::SnapshotSwitch {
             registry: snapshots.clone(),
             captures: snapshot_captures.clone(),
@@ -1543,7 +1514,6 @@ impl Services {
             )))
         };
         let wiki = Arc::new(knowledge::WikiFollow::default());
-        knowledge::register_built_ins(&knowledge, &declared, &layout.project_dir, &wiki);
         event_pump.register_async(Arc::new(knowledge::KnowledgeSwitch {
             stores: knowledge.clone(),
             wiki: wiki.clone(),
@@ -1835,7 +1805,6 @@ impl Services {
             assets,
             vocabulary,
             event_pump,
-            extension_models,
             vocabulary_service,
             extension_catalog,
             extension_secrets,
@@ -1924,15 +1893,30 @@ impl Services {
 
     /// Test-only constructor with an in-memory DB. Useful for the
     /// IPC layer's smoke tests where we want a real Services without
-    /// hitting the filesystem.
-    pub fn in_memory(project_dir: impl Into<PathBuf>) -> Result<Self, AppInitError> {
+    /// hitting the filesystem. Extensions are activated as boot does
+    /// (`ExtensionActivation::initialize`), so the services publish
+    /// commands, models and providers through the production path; a test
+    /// that writes extension files afterwards re-activates with
+    /// `test_fixtures::activate`.
+    pub async fn in_memory(project_dir: impl Into<PathBuf>) -> Result<Arc<Self>, AppInitError> {
+        let svc = Self::in_memory_inactive(project_dir)?;
+        svc.initialize_extensions().await?;
+        Ok(svc)
+    }
+
+    /// [`Self::in_memory`] before boot's `initialize`: for the one caller
+    /// that must seed the database first (the SDK's throwaway host
+    /// publishes the declared entities empty, so the models over them
+    /// compile) and then calls [`Self::initialize_extensions`].
+    pub fn in_memory_inactive(project_dir: impl Into<PathBuf>) -> Result<Arc<Self>, AppInitError> {
         let project_dir = project_dir.into();
         let global = project_dir.join(".oxplow/global-config");
-        Self::in_memory_on_machine(
+        Self::on_machine_inactive(
             project_dir,
             global,
             Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
             providers::host::process_env(),
+            Database::in_memory(),
         )
     }
 
@@ -1940,12 +1924,12 @@ impl Services {
     /// `global_dir`, `secrets` and `host_env` stand in for the machine's
     /// global config dir, keychain and environment, shared by every
     /// project built on them.
-    pub fn in_memory_on_machine(
+    pub async fn in_memory_on_machine(
         project_dir: impl Into<PathBuf>,
         global_dir: PathBuf,
         secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
         host_env: providers::host::HostEnv,
-    ) -> Result<Self, AppInitError> {
+    ) -> Result<Arc<Self>, AppInitError> {
         Self::on_machine_with_database(
             project_dir,
             global_dir,
@@ -1953,17 +1937,38 @@ impl Services {
             host_env,
             Database::in_memory(),
         )
+        .await
     }
 
     /// [`Self::in_memory_on_machine`] over a database the caller opened: a
     /// test's file, reopened to see what survives a restart.
-    pub(crate) fn on_machine_with_database(
+    pub(crate) async fn on_machine_with_database(
         project_dir: impl Into<PathBuf>,
         global_dir: PathBuf,
         secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
         host_env: providers::host::HostEnv,
         db: Database,
-    ) -> Result<Self, AppInitError> {
+    ) -> Result<Arc<Self>, AppInitError> {
+        let svc = Self::on_machine_inactive(project_dir, global_dir, secrets, host_env, db)?;
+        svc.initialize_extensions().await?;
+        Ok(svc)
+    }
+
+    /// Publish the first extension generation, as boot does.
+    pub async fn initialize_extensions(self: &Arc<Self>) -> Result<(), AppInitError> {
+        self.extension_activation
+            .initialize(self.clone())
+            .await
+            .map_err(|e| AppInitError::Extensions(e.to_string()))
+    }
+
+    fn on_machine_inactive(
+        project_dir: impl Into<PathBuf>,
+        global_dir: PathBuf,
+        secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
+        host_env: providers::host::HostEnv,
+        db: Database,
+    ) -> Result<Arc<Self>, AppInitError> {
         let project_dir = project_dir.into();
         let state_dir = project_dir.join(".oxplow");
         ensure_state_dir(&state_dir)?;
@@ -1990,7 +1995,7 @@ impl Services {
             lsp_request_timeout: std::time::Duration::from_secs(2),
             host_env,
         };
-        Self::build(layout, config, db, machine)
+        Ok(Arc::new(Self::build(layout, config, db, machine)?))
     }
 
     /// Reload `.oxplow/project.yaml` from disk into the in-memory config, re-apply
@@ -2132,7 +2137,7 @@ mod tests {
         let tree = repo.find_tree(tree_id).unwrap();
         repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
             .unwrap();
-        let services = Services::in_memory(project.path()).unwrap();
+        let services = Services::in_memory(project.path()).await.unwrap();
         // The state dir is created (config load needs it for fallback
         // basename) but the DB is in-memory.
         assert!(services.layout.state_dir.exists());
@@ -2156,7 +2161,7 @@ mod tests {
     async fn reload_config_from_disk_picks_up_external_edits() {
         let project = tempdir().unwrap();
         init_git(project.path());
-        let services = Services::in_memory(project.path()).unwrap();
+        let services = Services::in_memory(project.path()).await.unwrap();
         // Boot config reads no reports.
         assert!(config_service::read_config(&services.config)
             .collectors
@@ -2191,7 +2196,7 @@ mod tests {
     async fn the_external_commands_are_the_reviewed_ones() {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
-        let services = Services::in_memory(dir.path()).unwrap();
+        let services = Services::in_memory(dir.path()).await.unwrap();
         assert_eq!(
             services.commands.external_commands(),
             [
@@ -2272,7 +2277,7 @@ mod tests {
     async fn the_open_ops_are_the_reviewed_ones() {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
-        let services = Services::in_memory(dir.path()).unwrap();
+        let services = Services::in_memory(dir.path()).await.unwrap();
         assert_eq!(
             services.commands.open_ops(),
             [
@@ -2360,10 +2365,17 @@ mod tests {
     async fn the_composite_commands_are_the_reviewed_ones() {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
-        let services = Services::in_memory(dir.path()).unwrap();
+        let services = Services::in_memory(dir.path()).await.unwrap();
         assert_eq!(
             services.commands.composite_commands(),
-            ["oxplow.command.sequence",]
+            [
+                "oxplow.command.sequence",
+                // The bundled extension's script commands compose their
+                // calls per input.
+                "oxplow.review.accept",
+                "oxplow.review.request_changes",
+                "oxplow.work.clear_finished",
+            ]
         );
     }
 }

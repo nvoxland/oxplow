@@ -472,18 +472,13 @@ instance's own (`registry::owns`).
 Each host's `prepare` validates declarations and constructs its adapter
 without changing a live registry or starting a process. It returns a
 `PreparedProviderCapability` with fixed features and an infallible,
-synchronous registry action; the compatibility `admit` method prepares
-and immediately publishes it. All five capability hosts use this split.
-This does not yet stage a whole provider generation: candidate cleanup,
-running-map and database publication, and host read-pin adoption remain
-outside the coordinated activation boundary.
+synchronous registry action that the generation applies at publication. All
+five capability hosts use this split; nothing publishes an adapter outside a
+generation.
 
-Legacy instance enable now prepares the adapter before process startup and
-rechecks disable epochs and provider-ID collisions before registration. A
-rejected unpublished instance is marked stopped and shut down directly; cleanup
-does not withdraw by name or touch an incumbent's maps/database rows. Process
-supervision starts after successful admission. Whole-generation staging still
-needs the same cleanup for every started candidate and a shared publication pin.
+A candidate that is rejected before publication is marked stopped and shut down
+directly; cleanup does not withdraw by name or touch an incumbent's
+maps/database rows. Process supervision starts after publication.
 
 **A knowledge provider** keeps pages (an Obsidian vault, a Confluence or
 MediaWiki space); core keeps the record (`.context/knowledge.md` "The
@@ -1002,13 +997,19 @@ credentials, health). The config object is the provider's
 `config_schema`'s; `check` validates it.
 
 **The registry** (`registry.rs`, `Services.providers`) keeps the running
-instances matching the config: `reconcile()` runs at boot, on the
-extension catalog's change signal (`spawn_reconciler`) and on an
-`extensionInstances` / `activeProviders` change (the `config.providers`
-reactor on `config.changed`, P7.B6), starting enabled instances and
-stopping the rest (a config or spec change restarts one). `enable(ext,
-spec, config)` starts an instance and only then hands it to its
-capability's host (`CapabilityHost::admit`) — for a work list,
+instances matching the config. Extension activation is the only thing that
+starts or replaces them: `initialize` at boot, then a generation on the
+extension catalog's change signal and on an `extensionInstances` /
+`activeProviders` change (the `config.providers` reactor on `config.changed`).
+`ProviderRegistry::reconcile()` is only the request for a generation. A
+generation starts every enabled instance and stops the rest (a config or spec
+change restarts one). An instance that can't run never rejects the
+generation: one that is unapproved, unconfigured, refused (its id is another
+owner's), missing, or disabled is left out with that state on its row, and one
+whose start failed or hung is published failing, restarting with backoff and
+counted by `contribution_health` — every other extension and instance
+activates. A started instance is handed to its capability's host at
+publication — for a work list,
 `ExternalWorkItems::provider` (id, declared features, and the
 `WorkItemVerbs` the `work_item.*` commands call — the trait every list
 implements, oxplow's own tasks included (`oxplow_tasks::OxplowTasks`) — each verb's
@@ -1028,7 +1029,7 @@ declares each once over an operation its declarations list
 (`commands:` → `{ name: item.estimate, provider: fake, op: estimate,
 invokers, ui, … }`, [extensions.md](./extensions.md) "Commands"), so it has one id
 for every instance (`tracker.item.estimate`), registered by the
-extension reconciler whether or not an instance runs. Its spec takes the
+extension's generation whether or not an instance runs. Its spec takes the
 operation's input schema (plus an optional `instance`), effect and
 undo; its `confirm` is the manifest's when that asks more, else the
 declaration's; its `op` is `{ scope: provider:<ext>/<provider>, op }`.
@@ -1133,18 +1134,18 @@ that a reaction retries through doesn't halt it: it stops, and the row (`disable
 `contribution.disabled@1 { extension, contribution, kind, reason }` commit
 together (source `system:extensions`, subject `extension:<extension>`). So is
 a handshake that doesn't match the approved declarations. The row is
-what keeps it off, across reconciles and restarts, and one whose row
+what keeps it off, across generations and restarts, and one whose row
 can't be read stays off too (`failing`, naming the error — not knowing
 isn't a yes). `InstanceHealth` is the process's state, showing the
 row's count. **A disable wins over a start in
 flight** (tsk569): each disable bumps the instance's epoch under the
-`running` lock, and a start registers (`admit`) only if the epoch it
-began with still holds, so a concurrent reconcile can't bring back
+`running` lock, and a generation publishes a started instance only if the
+epoch it began with still holds, so a concurrent generation can't bring back
 what was just disabled.
 Only a person turns it back on — **`oxplow.contribution.enable { extension, kind,
 contribution }`** (human-only, `External`, not undoable; it replaced
 `provider.enable`), which marks the row `ok`, logs `contribution.enabled@1`,
-resets the backoff and reconciles. Settings → Integrations' Enable runs
+resets the backoff and asks for a generation. Settings → Integrations' Enable runs
 it before writing `extensionInstances`.
 
 **Reading: collectors and sync** (`sync.rs`, P7.A3). `Instance::read`
@@ -1264,13 +1265,11 @@ resolves to `none` and starting a task opens nothing.
 ref's kind (`ui.about: work_item`) is on that ref's page menu and its
 rows' right-click menus (`refOffers`).
 
-**Its features are published** while it runs: `admit` writes the
-instance in the capability registry (`CapabilityRegistry::set_external`)
-and `tear_down` takes it out, each restating `v_capability_provider`, so
-the UI offers only what the provider declares
-([work-items.md](./work-items.md)). Each reconcile restates the rows
-(`CapabilityRegistry::publish`), so a choice takes effect with the config
-change.
+**Its features are published** while it runs: publication writes the
+instance in the capability registry and the generation's withdrawal takes it
+out, each restating `v_capability_provider`, so the UI offers only what the
+provider declares ([work-items.md](./work-items.md)). Each generation restates
+the rows, so a choice takes effect with the config change.
 
 ## Idempotency
 
@@ -1457,7 +1456,7 @@ candidates, with owned process-group cleanup as the cancellation/drop fallback.
 
 The candidate owns the provider reconcile gate. Before publication,
 `reserve_running` takes the running-map writer before the database write
-permit. This ordering is required because legacy admission can hold that map
+permit. This ordering is required because a stop or failure can hold that map
 while awaiting a database write. The reservation verifies that the incumbent
 map still matches the captured base and rechecks effective configuration,
 scope, global-file mtime, catalog generation, disable epoch, candidate peer

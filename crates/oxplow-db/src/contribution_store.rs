@@ -1,13 +1,13 @@
 //! `contribution` (V47): every enabled extension's contributions, as their
 //! descriptors say (`oxplow_domain::contribution`). Restated whole by the
-//! app on each catalog change (`oxplow_app::capabilities::refresh`); read
+//! app on each catalog change (each generation); read
 //! as `v_contribution`.
 
 use oxplow_domain::contribution::Descriptor;
 use oxplow_domain::DomainError;
 use rusqlite::params;
 
-use crate::database::{map_sql_err, Database};
+use crate::database::map_sql_err;
 
 fn json(v: &impl serde::Serialize) -> String {
     serde_json::to_string(v).expect("a descriptor field serializes")
@@ -50,14 +50,14 @@ pub fn reset_tx(
     Ok(())
 }
 
-/// [`reset_tx`] in its own transaction.
-pub async fn reset(db: &Database, descriptors: Vec<Descriptor>) -> Result<(), DomainError> {
-    db.transaction(move |tx| reset_tx(tx, &descriptors)).await
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::database::Database;
+
+    async fn reset(db: &Database, descriptors: Vec<Descriptor>) -> Result<(), DomainError> {
+        db.transaction(move |tx| reset_tx(tx, &descriptors)).await
+    }
     use oxplow_domain::contribution::{
         ContributionId, ContributionKind, DeclaredAt, Descriptor, Owner, RunsOn,
     };

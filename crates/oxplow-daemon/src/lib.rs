@@ -347,7 +347,7 @@ mod tests {
     use std::process::Command;
     use std::sync::Arc;
 
-    fn services() -> (Arc<Services>, tempfile::TempDir) {
+    async fn services() -> (Arc<Services>, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let git = |args: &[&str]| {
             let ok = Command::new("git")
@@ -362,7 +362,7 @@ mod tests {
         git(&["config", "user.name", "test"]);
         git(&["config", "user.email", "test@example.com"]);
         git(&["commit", "-q", "--allow-empty", "-m", "init"]);
-        let svc = Arc::new(Services::in_memory(dir.path()).unwrap());
+        let svc = Services::in_memory(dir.path()).await.unwrap();
         (svc, dir)
     }
 
@@ -397,7 +397,7 @@ mod tests {
 
     #[tokio::test]
     async fn ipc_and_events_refuse_callers_without_the_ui_token() {
-        let (svc, _dir) = services();
+        let (svc, _dir) = services().await;
         let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc))
             .await
             .unwrap();
@@ -442,7 +442,7 @@ mod tests {
     /// anything else is a 404.
     #[tokio::test]
     async fn component_bundles_are_served_with_their_csp_and_nothing_else() {
-        let (svc, dir) = services();
+        let (svc, dir) = services().await;
         let ext = dir.path().join("oxplow/extensions/x");
         std::fs::create_dir_all(ext.join("components/c/assets")).unwrap();
         std::fs::create_dir_all(ext.join("lenses")).unwrap();
@@ -453,7 +453,7 @@ mod tests {
         .unwrap();
         std::fs::write(ext.join("components/c/index.html"), "<!doctype html>hi").unwrap();
         std::fs::write(ext.join("components/c/assets/app.js"), "1").unwrap();
-        let version = load(&svc, dir.path(), "x", "c");
+        let version = load(&svc, dir.path(), "x", "c").await;
         let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc))
             .await
             .unwrap();
@@ -527,7 +527,18 @@ mod tests {
 
     /// Load `component` of extension `ext` under `root` as a frame's host
     /// does: its version.
-    fn load(svc: &Arc<Services>, root: &std::path::Path, ext: &str, component: &str) -> String {
+    async fn load(
+        svc: &Arc<Services>,
+        root: &std::path::Path,
+        ext: &str,
+        component: &str,
+    ) -> String {
+        // What was written since is published first, as the owner of
+        // generations does on the file change.
+        svc.extension_activation
+            .activate(svc.clone())
+            .await
+            .expect("the extension activates");
         let ext = svc.extension_catalog.named(root, ext).unwrap();
         let declared = ext
             .custom_components
@@ -546,7 +557,7 @@ mod tests {
     /// bundle's: ungated, outside CORS, to a loopback `Host` only.
     #[tokio::test]
     async fn the_client_library_is_served_to_loopback_only_as_javascript() {
-        let (svc, _dir) = services();
+        let (svc, _dir) = services().await;
         let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc))
             .await
             .unwrap();
@@ -603,7 +614,7 @@ mod tests {
     /// the daemon with its own `Host`; only a loopback `Host` is served.
     #[tokio::test]
     async fn component_bundles_answer_only_a_loopback_host() {
-        let (svc, dir) = services();
+        let (svc, dir) = services().await;
         let ext = dir.path().join("oxplow/extensions/x");
         std::fs::create_dir_all(ext.join("components/c")).unwrap();
         std::fs::write(
@@ -612,7 +623,7 @@ mod tests {
         )
         .unwrap();
         std::fs::write(ext.join("components/c/index.html"), "hi").unwrap();
-        let version = load(&svc, dir.path(), "x", "c");
+        let version = load(&svc, dir.path(), "x", "c").await;
         let folder = format!("/components/v/{version}/");
         let bare_folder = format!("/components/v/{version}");
         let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc))
@@ -661,7 +672,7 @@ mod tests {
     /// version of its own, served from what that worktree held.
     #[tokio::test]
     async fn a_streams_bundle_is_loaded_from_its_worktree() {
-        let (svc, dir) = services();
+        let (svc, dir) = services().await;
         let wt = tempfile::tempdir().unwrap();
         for (root, js) in [(dir.path(), "primary"), (wt.path(), "stream")] {
             let ext = root.join("oxplow/extensions/x");
@@ -696,8 +707,8 @@ mod tests {
             })
             .await
             .unwrap();
-        let primary = load(&svc, dir.path(), "x", "c");
-        let stream = load(&svc, wt.path(), "x", "c");
+        let primary = load(&svc, dir.path(), "x", "c").await;
+        let stream = load(&svc, wt.path(), "x", "c").await;
         assert_ne!(primary, stream);
         let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc))
             .await
@@ -713,7 +724,7 @@ mod tests {
 
     #[tokio::test]
     async fn ipc_ping_returns_ok_envelope() {
-        let (svc, _dir) = services();
+        let (svc, _dir) = services().await;
         let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc))
             .await
             .unwrap();
@@ -737,7 +748,7 @@ mod tests {
         // rather than hand-rolling the shape — for both the ok and error
         // branches. The Tauri host reaches the same shape via typedError +
         // the shared IpcError, so this is the single source of truth.
-        let (svc, _dir) = services();
+        let (svc, _dir) = services().await;
         let state = daemon_state(svc);
         let daemon = run_server("127.0.0.1:0".parse().unwrap(), state.clone())
             .await
@@ -766,7 +777,7 @@ mod tests {
 
     #[tokio::test]
     async fn ipc_allows_cross_origin_browser_callers() {
-        let (svc, _dir) = services();
+        let (svc, _dir) = services().await;
         let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc))
             .await
             .unwrap();
@@ -804,7 +815,7 @@ mod tests {
 
     #[tokio::test]
     async fn ipc_list_streams_round_trips() {
-        let (svc, _dir) = services();
+        let (svc, _dir) = services().await;
         let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc))
             .await
             .unwrap();
@@ -827,7 +838,7 @@ mod tests {
 
     #[tokio::test]
     async fn ipc_unknown_command_is_error_envelope() {
-        let (svc, _dir) = services();
+        let (svc, _dir) = services().await;
         let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc))
             .await
             .unwrap();
@@ -847,7 +858,7 @@ mod tests {
 
     #[tokio::test]
     async fn ipc_bad_args_is_invalid_envelope() {
-        let (svc, _dir) = services();
+        let (svc, _dir) = services().await;
         let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc))
             .await
             .unwrap();
@@ -871,7 +882,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn an_event_emitted_as_the_socket_opens_arrives() {
         use futures::StreamExt as _;
-        let (svc, _dir) = services();
+        let (svc, _dir) = services().await;
         let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc.clone()))
             .await
             .unwrap();
@@ -893,7 +904,7 @@ mod tests {
     #[tokio::test]
     async fn events_ws_streams_lsp_session_events() {
         use futures::StreamExt as _;
-        let (svc, _dir) = services();
+        let (svc, _dir) = services().await;
         let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc.clone()))
             .await
             .unwrap();
@@ -925,7 +936,7 @@ mod tests {
     #[tokio::test]
     async fn events_ws_streams_terminal_events() {
         use futures::StreamExt as _;
-        let (svc, _dir) = services();
+        let (svc, _dir) = services().await;
         let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc.clone()))
             .await
             .unwrap();
@@ -963,7 +974,7 @@ mod tests {
     async fn events_ws_streams_acp_events() {
         use futures::StreamExt as _;
         use oxplow_app::acp::session::{AcpEvent, AcpEventBody, AcpStatus};
-        let (svc, _dir) = services();
+        let (svc, _dir) = services().await;
         let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc.clone()))
             .await
             .unwrap();
@@ -1000,7 +1011,7 @@ mod tests {
 
     #[tokio::test]
     async fn health_route_responds() {
-        let (svc, _dir) = services();
+        let (svc, _dir) = services().await;
         let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc))
             .await
             .unwrap();

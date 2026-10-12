@@ -39,7 +39,7 @@ pub async fn list_recent_usage_rollup(
 mod tests {
     #[tokio::test]
     async fn record_usage_dispatches() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let out = crate::dispatch(
             "record_usage",
             serde_json::json!({"kind": "file-open", "payloadJson": "{\"path\": \"src/main.rs\"}"}),

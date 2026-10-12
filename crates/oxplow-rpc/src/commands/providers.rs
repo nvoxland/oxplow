@@ -150,7 +150,7 @@ mod tests {
 
     #[tokio::test]
     async fn provider_instances_dispatch() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let listed = crate::dispatch("list_provider_instances", json!({}), &svc)
             .await
             .unwrap();

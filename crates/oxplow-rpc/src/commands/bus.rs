@@ -186,7 +186,7 @@ mod tests {
     /// nothing and says why, rather than a page with an empty id.
     #[tokio::test]
     async fn the_page_a_run_opens_is_bound_from_its_result() {
-        let (svc, _dir) = services();
+        let (svc, _dir) = services().await;
         let open = |result: serde_json::Value| {
             let svc = svc.clone();
             async move {
@@ -217,7 +217,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_person_is_offered_the_commands_with_a_label() {
-        let (svc, _dir) = services();
+        let (svc, _dir) = services().await;
         let listed = crate::dispatch("list_person_commands", json!({}), &svc)
             .await
             .unwrap();
@@ -257,7 +257,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_person_runs_a_command_confirming_where_asked() {
-        let (svc, dir) = services();
+        let (svc, dir) = services().await;
         let set = |confirmed: bool| {
             let svc = svc.clone();
             async move {
@@ -307,7 +307,7 @@ mod tests {
     #[tokio::test]
     async fn a_person_decides_an_agents_proposal() {
         use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
-        let (svc, dir) = services();
+        let (svc, dir) = services().await;
         let stream = svc.stream_store.list().await.unwrap().pop().unwrap();
         let thread = svc
             .thread_store

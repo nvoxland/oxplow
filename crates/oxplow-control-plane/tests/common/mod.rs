@@ -34,10 +34,9 @@ pub async fn boot() -> (
     // symlink, and the write-guard's is-inside-project check compares
     // literal path prefixes.
     let root = dir.path().canonicalize().unwrap();
-    let services = Arc::new(Services::in_memory(&root).unwrap());
+    let services = Services::in_memory(&root).await.unwrap();
     // Seed the catalog as boot does — the OTLP token producer gates collection on
     // `measure_has_active_spec` (tsk31), so the token specs must exist.
-    services.metrics.seed_catalog().await;
     let cp = spawn(services.clone()).await.unwrap();
     (cp, services, root, dir)
 }

@@ -840,6 +840,7 @@ mod tests {
             "title: Tasks\nquery: SELECT title FROM v_work_item\n",
         )
         .unwrap();
+        crate::test_fixtures::activate(&fx.svc).await;
         let worktree = tempfile::tempdir().unwrap();
         let wt = worktree.path().to_string_lossy().to_string();
         fx.svc
@@ -998,6 +999,7 @@ mod tests {
             manifest.contains(&format!("origin: {}", thread_ref(fx.thread))),
             "{manifest}"
         );
+        crate::test_fixtures::activate(&fx.svc).await;
         let lens = fx
             .svc
             .extension_catalog
@@ -1360,6 +1362,7 @@ mod tests {
             "title: Raw\nquery: SELECT id FROM task\n",
         )
         .unwrap();
+        crate::test_fixtures::activate(&fx.svc).await;
         let share = |lens: &str| {
             let svc = fx.svc.clone();
             let lens = lens.to_string();
@@ -1435,6 +1438,7 @@ mod tests {
             "title: Raw\nquery: SELECT id FROM task\n",
         )
         .unwrap();
+        crate::test_fixtures::activate(&fx.svc).await;
         let share = |to: &str| {
             let svc = fx.svc.clone();
             let to = to.to_string();

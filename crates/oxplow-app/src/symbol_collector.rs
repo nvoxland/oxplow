@@ -159,7 +159,7 @@ mod tests {
             )
             .unwrap();
         }
-        let svc = Arc::new(Services::in_memory(dir.path()).unwrap());
+        let svc = Services::in_memory(dir.path()).await.unwrap();
         {
             let mut cfg = svc.config.write().unwrap();
             cfg.lsp_servers

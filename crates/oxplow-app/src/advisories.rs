@@ -643,6 +643,7 @@ mod tests {
             "manifest: 2\nname: guide\nintent:\n  purpose: test\nadvisories:\n  - id: hello\n    on: post-tool-use\n    query: SELECT 'effort ' || :effort_id AS message\n",
         )
         .unwrap();
+        crate::test_fixtures::activate(&f.svc).await;
         // A project extension's advisories are silent until a person
         // approves them.
         assert!(for_thread(
@@ -660,6 +661,7 @@ mod tests {
             .approvals
             .approve(&program.key(), &program.hash(Path::new("")).unwrap())
             .unwrap();
+        crate::test_fixtures::activate(&f.svc).await;
         let hits = for_thread(
             &f.svc.advisory_deps(),
             &f.thread,
@@ -699,7 +701,8 @@ mod tests {
             &f.svc,
             "guide",
             "  - id: hello\n    on: post-tool-use\n    query: SELECT 'hi' AS message\n",
-        );
+        )
+        .await;
         let worktree = tempfile::tempdir().unwrap();
         let wt = worktree.path().to_string_lossy().to_string();
         f.svc
@@ -729,7 +732,7 @@ mod tests {
 
     /// A project extension at `name` with `advisories` (YAML list items),
     /// approved by a person.
-    fn approved(svc: &crate::Services, name: &str, advisories: &str) {
+    async fn approved(svc: &std::sync::Arc<crate::Services>, name: &str, advisories: &str) {
         let dir = svc.layout.project_dir.join("oxplow/extensions").join(name);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
@@ -745,6 +748,7 @@ mod tests {
         svc.approvals
             .approve(&program.key(), &program.hash(Path::new("")).unwrap())
             .unwrap();
+        crate::test_fixtures::activate(svc).await;
     }
 
     /// A turn-end hint is evaluated when the turn's checkpoint lands, with
@@ -768,7 +772,7 @@ mod tests {
             svc,
             "guide",
             "  - id: asked\n    on: turn-end\n    once_per: thread\n    query: SELECT 'thread ' || :thread_id || ' stream ' || :stream_id || ' turn ' || :turn_id || ' effort ' || coalesce(:effort_id, 'none') AS message\n",
-        );
+        ).await;
         let settle = || {
             svc.event_pump.settle(
                 &[
@@ -920,7 +924,7 @@ mod tests {
             &f.svc,
             "guide",
             "  - id: nag\n    on: prompt\n    once_per: turn\n    query: SELECT 'please nag' AS message\n",
-        );
+        ).await;
         for _ in 0..3 {
             assert!(prompt(&f).await.contains("please nag"));
         }
@@ -959,7 +963,7 @@ mod tests {
             &f.svc,
             "guide",
             "  - id: tell\n    on: prompt\n    audience: person\n    once_per: thread\n    query: SELECT 'look at this' AS message\n",
-        );
+        ).await;
         assert!(!prompt(&f).await.contains("look at this"));
         assert_eq!(
             nudges(&f.svc).await,

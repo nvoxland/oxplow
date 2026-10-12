@@ -12,7 +12,6 @@
 
 use std::io::Write as _;
 use std::process::{Command, Stdio};
-use std::sync::Arc;
 
 use oxplow_app::Services;
 use oxplow_domain::stores::{AgentSessionStore as _, StreamStore as _, ThreadStore as _};
@@ -92,7 +91,7 @@ async fn the_daemon_binary_forwards_a_command_hook() {
         assert!(ok, "git {args:?}");
     }
     let root = dir.path().canonicalize().unwrap();
-    let services = Arc::new(Services::in_memory(&root).unwrap());
+    let services = Services::in_memory(&root).await.unwrap();
     let cp = oxplow_control_plane::spawn(services.clone()).await.unwrap();
     let (thread, bearer) = codex_session(&services).await;
 

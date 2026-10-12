@@ -81,13 +81,12 @@ async fn project(edit: impl FnOnce(&mut Vec<ScaffoldFile>)) -> (Project, Lines) 
     for f in &files {
         write(dir.path(), &f.path, &f.content);
     }
-    let svc = Arc::new(crate::Services::in_memory(dir.path()).unwrap());
+    let svc = crate::Services::in_memory(dir.path()).await.unwrap();
     svc.streams.ensure_primary().await.unwrap();
     svc.extension_activation
         .activate(svc.clone())
         .await
         .expect("the extension activates");
-    svc.metrics.seed_catalog().await;
     (Project { dir, svc }, lines)
 }
 
@@ -497,13 +496,12 @@ async fn an_oversized_file_is_reported_as_excluded_not_silently_dropped() {
     for f in extension_files(NAME, None, &MetricStarter::default()) {
         write(dir.path(), &f.path, &f.content);
     }
-    let svc = Arc::new(crate::Services::in_memory(dir.path()).unwrap());
+    let svc = crate::Services::in_memory(dir.path()).await.unwrap();
     svc.streams.ensure_primary().await.unwrap();
     svc.extension_activation
         .activate(svc.clone())
         .await
         .expect("activates");
-    svc.metrics.seed_catalog().await;
     let p = Project { dir, svc };
 
     let report = p.baseline().await;

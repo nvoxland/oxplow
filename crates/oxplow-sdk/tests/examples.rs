@@ -48,13 +48,12 @@ async fn the_github_example_checks_tests_and_its_pr_opens() {
     );
 
     // A real oxplow over the project, one pull request collected.
-    let svc = oxplow_app::Services::in_memory(root).unwrap();
+    let svc = oxplow_app::Services::in_memory_inactive(root).unwrap();
     // Its entity's table, as the collector's first run makes it.
     oxplow_app::collector_runner::publish_declared_empty(&svc.db, &svc.extension_catalog.get(root))
         .await
         .unwrap();
-    svc.extension_models.sync().await.unwrap();
-    svc.vocabulary_service.sync().await.unwrap();
+    svc.initialize_extensions().await.unwrap();
     svc.db
         .transaction(|tx| {
             tx.execute(
@@ -330,8 +329,7 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
         "// TODO: the cache never expires\nfn a() {}\n",
     )
     .unwrap();
-    let svc = oxplow_app::Services::in_memory(root).unwrap();
-    svc.metrics.seed_catalog().await;
+    let svc = oxplow_app::Services::in_memory(root).await.unwrap();
     svc.commands
         .run(
             &oxplow_domain::Actor::Human,

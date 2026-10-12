@@ -13,12 +13,6 @@ use oxplow_domain::agent::registry::{AcpAdapterRegistry, HarnessRegistry};
 
 use crate::capabilities::{Implementation, Source};
 
-/// Register the harnesses `declared` names (the project's extensions'
-/// `implementations:`), in declaration order, and nothing else.
-pub fn register_built_ins(registry: &HarnessRegistry, declared: &[Implementation]) {
-    prepare_built_ins(declared).publish(registry);
-}
-
 /// Harnesses prepared from one declaration snapshot, without registry writes.
 pub struct PreparedHarnesses {
     harnesses: Vec<Arc<dyn AgentHarness>>,
@@ -181,6 +175,10 @@ fn build_acp_adapters(
 
 #[cfg(test)]
 mod tests {
+    fn register(registry: &HarnessRegistry, declared: &[Implementation]) {
+        prepare_built_ins(declared).publish(registry);
+    }
+
     use super::*;
 
     fn declared(capability: &str, id: &str, entry: &'static str) -> Implementation {
@@ -201,7 +199,7 @@ mod tests {
     #[test]
     fn the_declared_harnesses_are_registered() {
         let r = HarnessRegistry::new(std::sync::Arc::new(|| "claude".into()));
-        register_built_ins(
+        register(
             &r,
             &[
                 declared("agent_harness", "claude", "oxplow:claude-code"),
@@ -211,7 +209,7 @@ mod tests {
         );
         assert_eq!(r.names(), ["claude", "acp"]);
         assert_eq!(r.default().unwrap().id(), "claude");
-        register_built_ins(&r, &[declared("agent_harness", "acp", "oxplow:acp")]);
+        register(&r, &[declared("agent_harness", "acp", "oxplow:acp")]);
         assert_eq!(r.names(), ["acp"]);
     }
 
@@ -254,7 +252,7 @@ mod tests {
     #[test]
     fn the_listing_says_which_run_acp_agents_and_which_are_enabled() {
         let r = HarnessRegistry::new(std::sync::Arc::new(String::new));
-        register_built_ins(
+        register(
             &r,
             &[
                 declared("agent_harness", "claude", "oxplow:claude-code"),
@@ -283,7 +281,7 @@ mod tests {
     #[test]
     fn the_listing_carries_each_harnesss_settings() {
         let r = HarnessRegistry::new(std::sync::Arc::new(String::new));
-        register_built_ins(
+        register(
             &r,
             &[
                 declared("agent_harness", "claude", "oxplow:claude-code"),

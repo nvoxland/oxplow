@@ -378,9 +378,8 @@ mod tests {
     async fn services() -> (Arc<crate::Services>, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
-        let svc = Arc::new(crate::Services::in_memory(dir.path()).unwrap());
+        let svc = crate::Services::in_memory(dir.path()).await.unwrap();
         svc.streams.ensure_primary().await.unwrap();
-        svc.metrics.seed_catalog().await;
         (svc, dir)
     }
 
@@ -452,7 +451,6 @@ mod tests {
     #[tokio::test]
     async fn an_agents_assertion_carries_its_thread_and_turn() {
         let fx = crate::test_fixtures::services_with_effort().await;
-        fx.svc.metrics.seed_catalog().await;
         fx.svc
             .fact_store
             .upsert_spec(oxplow_db::NewMetricSpec::base(
@@ -549,7 +547,7 @@ mod tests {
             use_key: Some("oxplow.rust.unsafe_blocks".into()),
             ..Default::default()
         }];
-        svc.metrics.seed_catalog().await;
+        crate::test_fixtures::activate(&svc).await;
         run(
             &svc,
             RECORD,
@@ -629,6 +627,7 @@ mod tests {
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
+        crate::test_fixtures::activate_with_problems(&svc).await;
         let out = run(
             &svc,
             crate::collector_runner::SYNC,
@@ -679,6 +678,7 @@ mod tests {
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
+        crate::test_fixtures::activate_with_problems(&svc).await;
         let sync = || {
             run(
                 &svc,

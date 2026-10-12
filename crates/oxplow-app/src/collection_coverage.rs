@@ -155,7 +155,7 @@ mod tests {
         .unwrap();
         std::fs::write(dir.join("sync.sh"), "#!/bin/sh\necho '{}'\n").unwrap();
         fx.svc.extension_catalog.changed();
-        crate::capabilities::refresh(&fx.svc).await.unwrap();
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
         fx
     }
 
@@ -220,6 +220,7 @@ mod tests {
             "x",
         )
         .unwrap();
+        crate::test_fixtures::activate(&fx.svc).await;
         assert_ne!(
             fx.svc.sql.run(query()).await.unwrap().generation,
             Some(generation)

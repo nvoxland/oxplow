@@ -74,7 +74,7 @@ or be declared twice in one extension; the event-type "two extensions
 make one namespace" check (unreachable with valid names, kept for an
 invalid-named folder, which still loads).
 
-**Discovery.** `capabilities::refresh` (boot and every catalog change)
+**Discovery.** Each generation (boot and every catalog change)
 restates the `contribution` table (V47, `oxplow_db::contribution_store`)
 from every enabled extension's descriptors, read as `v_contribution`.
 The reference's "What it can declare" table is generated from
@@ -1239,7 +1239,7 @@ an extension, exists for. A questions file is a list of `{ question, skill, reac
   (`oxplow-codebase` — history and code, added for this —
   `oxplow-runtime`, `oxplow-wiki-capture`). The in-tree test
   (`every_answerability_question_reaches_what_its_skill_names`) runs them
-  against a throwaway `Services::in_memory`.
+  against a throwaway `Services::in_memory` (async, activated as boot does).
 - **Per question**: the skill's text names every model the SQL reads
   and the command it runs — as a whole word, in any case
   (`answerability::names`: `v_commit_file` doesn't name `v_commit`); a
@@ -1263,7 +1263,7 @@ an extension, exists for. A questions file is a list of `{ question, skill, reac
 
 **`oxplow extension test <name>`** (P5.D5, P7.C6; `extension_test.rs`) runs on
 **a throwaway oxplow** (`Host`): a temp project with a copy of the
-project's `oxplow/extensions/`, `Services::in_memory` over it, every
+project's `oxplow/extensions/`, `Services::in_memory_inactive` over it, every
 declared entity published empty (`collector_runner::publish_declared_empty`
 — as if each collector had run and found nothing; never on a real
 database), the extension models published and commands registered as at
@@ -1316,8 +1316,7 @@ fixtures to it.
   error naming the id. For each such script `test` also runs the
   effort-policy suite (`policy_suite`): a throwaway host over a copy of
   the extension (`suite_host`, shared with a provider's suite), the
-  program approved there (`effort_policy_program`), `capabilities::refresh`,
-  the script chosen as `activeProviders.effort_policy`, then
+  program approved there (`effort_policy_program`), the script chosen as `activeProviders.effort_policy`, then
   `effort_policy_conformance::suite`; a finding is an error at the
   manifest, `ran` shows `effort_policy suite`;
 - `input: { event_type, v?, payload }`, `expect: { valid: true | false,
@@ -2926,7 +2925,7 @@ person. Each step carries its idempotency key, the
 same on every attempt ([commands.md](./commands.md) `effect_step_key`), so
 a write that landed lands once. A person's **Retry** composes afresh from
 what the effect reads now — the person decides it should. A loop every 5 s (`spawn_auto_retry`, at boot — its first tick only
-after the provider registry's first reconcile, so the providers the
+after the provider registry's first generation, so the providers the
 config names are up; tsk915 — one row's error logged and the rest
 going on, tsk932) runs what is
 due as the next attempt, `origin: auto` (`effect.result@4`), on the event
@@ -3073,8 +3072,8 @@ bus's to say (`CommandBus::namespace_owner`: `oxplow`, or the one source —
 `extension:<name>` / `provider:<instance>` — holding it) — there is no
 hand-kept list: checked against the running registry (`RunningCommands`,
 which the bus implements), a namespace another source holds is an error, and
-at run time the reconciler's `register_namespace` refuses it all-or-nothing
-under one lock (reported as the extension's problem). The reconciler keys
+at run time the generation's namespace reservation refuses it all-or-nothing
+under one lock (reported as the extension's problem). The registrations key
 registrations by extension (several of oxplow's share `oxplow`) and removes a
 disabled one's with `unregister_source`. Two enabled extensions declaring one
 namespace (other than `oxplow`) are both refused at load
@@ -3129,7 +3128,7 @@ what it `needs`. **Registration**
 (`ExtensionCommands`, `Services.extension_commands`): the enabled
 extensions of the **primary worktree** (one bus, like providers — a
 command authored in another stream registers once merged), one
-namespace at a time, all-or-nothing; reconciled at boot and on the
+namespace at a time, all-or-nothing; registered by the generation at boot and on the
 extension catalog's change signal (`ExtensionCatalog::changes`, P7.B6):
 the workspace watcher fires it for a file under `oxplow/extensions/`
 **in the primary worktree** only (another stream's edits wait for the
@@ -3189,9 +3188,9 @@ project's), plus:
   so the store writes `extension:<name>` as `scope = 'global'` plus the
   `extension` column (V84) and reads it back. `v_metric_spec` shows
   `scope = 'extension'` and the `extension` name.
-- `seed_catalog` prunes extension specs no longer declared (a disabled or
+- A generation prunes extension specs no longer declared (a disabled or
   removed extension) with `delete_extension_specs_not_in`; its measures
-  stay, since deleting one would take its facts. It reseeds when an
+  stay, since deleting one would take its facts. A new generation follows when an
   `oxplow/extensions/*/extension.yaml` changes (`WorkspaceChanged`).
 
 ## Health, disable and repair (P7.C1–C3)
@@ -3310,8 +3309,8 @@ implementations:
   `openai_compatible.star` — twice, `openai` with OpenAI's `baseUrl` —
   `openrouter.star`, `typesafe.star`); foundation is required, so
   `CapabilityRegistry::new` registers nothing for them. The harnesses are
-  registered by declaration (`harnesses::register_built_ins` →
-  `Services.harnesses`, an `oxplow_domain::agent::registry::HarnessRegistry`).
+  registered by declaration (`harnesses::prepare_built_ins`, published by the
+  generation → `Services.harnesses`, an `oxplow_domain::agent::registry::HarnessRegistry`).
 - A required capability's default is core's own: `CapabilityRegistry::new`
   registers it (snapshots' `oxplow`, `oxplow:snapshots`), so it's there
   whatever is disabled, and a manifest declaring that id is an error.
@@ -3754,7 +3753,7 @@ Enabled load errors reject preparation. `PreparedVocabulary::replace_tx` uses
 a savepoint and rejects the complete set on any event/ref/subscription or
 recognizer diagnostic, restoring event contracts, retention and ref-kind rows.
 A changed recorded event schema and a shared wikilink prefix are candidate
-errors; strict candidates do not publish the legacy reactor's partial result.
+errors; a candidate never publishes a partial result.
 
 `PreparedExtensionDatabase` captures models, vocabulary and enabled contribution
 descriptors from the same snapshot, and every entity the enabled collectors
@@ -3850,7 +3849,7 @@ assert stopped execution.
 
 Provider resolution captures config/provider choice with project/global credential
 scope in one merged mapping, and uses one catalog declaration snapshot per
-reconcile pass. A disabled bundled owner cannot be shadowed by a project namesake.
+generation. A disabled bundled owner cannot be shadowed by a project namesake.
 These checks preserve owner/scope identity during preparation; they do not
 coordinate provider process/adaptor publication with the other registries.
 
@@ -3863,8 +3862,8 @@ strict ACP/AI factory failures before any map publication. Script/gate objects
 are constructed but no process, handshake, network call or paid probe runs.
 External adapters/processes remain the provider lifecycle owner's work.
 
-Each adapter subsystem exposes prepare/publish; legacy register helpers retain
-their previous behavior, including partial factory skipping where applicable.
+Each adapter subsystem exposes prepare/publish only (no separate register
+helper); partial factory skipping, where it applies, is logged.
 The boot coordinator publishes the prepared aggregate under the shared activation
 fence, with compatible SQL and command readers. Capability and command
 reservations are held across the commit and map swaps. A required-bundled core
@@ -3919,15 +3918,16 @@ across candidate publication. Native/background and synchronous metadata
 entrypoints still need a complete audit. Metric declaration rows now join the
 publication transaction; state-value recapture remains a post-publication reader. The renderer receives the published metadata change signal;
 raw filesystem changes continue to trigger candidate preparation. Until the first
-generation is activated (`ExtensionActivation::is_active`), every reader serves the
-current load.
+generation is activated (boot's `initialize`, before ingress opens), no reader is
+served: the generation is the only publisher of commands, models, vocabulary,
+providers and capabilities.
 
 Custom component preparation reads immutable bundle bytes on a blocking worker,
 with at most 64 bundles and 128 MiB in a candidate. Publication swaps the whole
 active bundle map without rereading files. Active bytes remain available independently
 of the sixteen-entry history used by previous frames. A retained frame from a
 different activated generation must reload before invoking a query or command;
-standalone/authoring roots retain legacy loading. This check requires the owning
+a bundle of another root (a stream's lens) is built from that root's files. This check requires the owning
 runtime reader scope for atomicity with command or query execution.
 
 ## One-attempt durable job dispatch

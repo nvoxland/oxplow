@@ -493,7 +493,6 @@ mod tests {
         let fx = crate::test_fixtures::services_with_effort().await;
         let svc = &fx.svc;
         // The token facts are written only while a spec consumes them.
-        svc.metrics.seed_catalog().await;
         svc.hook_ingest
             .ingest(hook(fx.thread, HookKind::UserPromptSubmit))
             .await

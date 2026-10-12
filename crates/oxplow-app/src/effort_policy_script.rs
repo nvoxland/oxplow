@@ -126,19 +126,13 @@ def transform(x):
         )
         .unwrap();
         std::fs::write(dir.join("policies/tidy.star"), script).unwrap();
-        crate::capabilities::refresh(&fx.svc).await.unwrap();
         fx.svc
             .config
             .write()
             .unwrap()
             .active_providers
             .insert(crate::effort_policy::CAPABILITY.into(), "tidy".into());
-        let config = crate::config_service::read_config(&fx.svc.config);
-        fx.svc
-            .capabilities
-            .publish(&config, &fx.svc.db)
-            .await
-            .unwrap();
+        crate::test_fixtures::activate(&fx.svc).await;
         fx.svc
             .commands
             .run(
@@ -319,7 +313,7 @@ def transform(x):
             "# Acme\n",
         )
         .unwrap();
-        crate::capabilities::refresh(&fx.svc).await.unwrap();
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
         let third = task(&fx).await;
         agent_moves(&fx, &third, "in_progress").await;
         assert_eq!(open_for(&fx, &third).await, 0);
@@ -349,7 +343,7 @@ def transform(x):
     async fn a_reload_keeps_the_policy_script() {
         let fx = scripted(TIDY).await;
         approve(&fx);
-        crate::capabilities::refresh(&fx.svc).await.unwrap();
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
         assert!(fx.svc.effort_policies.has("tidy"));
         let item = task(&fx).await;
         agent_moves(&fx, &item, "in_progress").await;

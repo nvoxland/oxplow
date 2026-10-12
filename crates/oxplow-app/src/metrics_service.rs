@@ -602,15 +602,6 @@ impl MetricsService {
         f(guard.as_ref().expect("populated above"))
     }
 
-    /// Drop the cached global catalog so the next read reloads it. Called on
-    /// every `ConfigChanged`.
-    fn invalidate_global_catalog(&self) {
-        *self
-            .global_catalog
-            .lock()
-            .unwrap_or_else(|p| p.into_inner()) = None;
-    }
-
     fn read_metric_config(&self) -> OxplowConfig {
         self.published_inputs
             .lock()
@@ -756,295 +747,6 @@ impl MetricsService {
             .read()
             .map(|c| c.snapshot_max_file_bytes)
             .unwrap_or(DEFAULT_MAX_FILE_BYTES)
-    }
-
-    /// Seed the fact-substrate catalogs (`measure` + `dimension`) from config —
-    /// the pluggable-data half of the substrate (epic tsk12, E). Resolves the
-    /// global + project `measures:`/`dimensions:` blocks and upserts each beside
-    /// the migration-seeded `oxplow.*` built-ins. Best-effort (a write error is
-    /// logged, never propagated); idempotent (upsert by key). No-op if no fact
-    /// store is wired. Returns `(measures, dimensions)` seeded.
-    ///
-    /// The dimension `promote` flag (a generated column + index) is honored by a
-    /// later `promote_dimension` step; this seeds the catalog row only.
-    pub async fn seed_catalog(&self) -> (usize, usize) {
-        if self
-            .run_log
-            .as_ref()
-            .is_some_and(|log| log.layer.has_activation())
-        {
-            // Production declarations publish through the generation owner.
-            return (0, 0);
-        }
-        let Some(facts) = self.fact_store.as_ref() else {
-            return (0, 0);
-        };
-        let (project_measures, project_dims) = self
-            .config
-            .read()
-            .map(|c| (c.measures.clone(), c.dimensions.clone()))
-            .unwrap_or_default();
-        let (global_measures, global_dims) =
-            self.with_global_catalog(|g| (g.measures.clone(), g.dimensions.clone()));
-
-        let ext = self.extension_catalog();
-        let layer = crate::sql_gateway::SqlGateway::new(facts.database());
-        let mut m = 0;
-        for rm in resolve_measures(&global_measures, &ext.measures, &project_measures) {
-            let nm = NewMeasure {
-                key: rm.key.clone(),
-                title: rm.title,
-                unit: rm.unit,
-                subject_kind: rm.subject_kind,
-                temporal_semantics: rm.temporal_semantics,
-                capture_scope: rm.capture_scope,
-                scope: rm.scope,
-                description: rm.description,
-            };
-            match facts.upsert_measure(nm).await {
-                Ok(_) => m += 1,
-                Err(e) => tracing::warn!(key = %rm.key, error = %e, "failed to seed measure"),
-            }
-        }
-        let mut d = 0;
-        let resolved_dims = resolve_dimensions(&global_dims, &ext.dimensions, &project_dims);
-        // A disabled or removed extension's dimensions leave the catalog.
-        let keep_ext_dims: Vec<String> = resolved_dims
-            .iter()
-            .filter(|d| oxplow_config::scope_extension(&d.scope).is_some())
-            .map(|d| d.key.clone())
-            .collect();
-        if let Err(e) = facts
-            .delete_extension_dimensions_not_in(keep_ext_dims)
-            .await
-        {
-            tracing::warn!(error = %e, "seed: extension dimension reconciliation failed");
-        }
-        for rd in resolved_dims {
-            let vocabulary_json = (!rd.vocabulary.is_empty())
-                .then(|| serde_json::to_string(&rd.vocabulary).ok())
-                .flatten();
-            let nd = NewDimension {
-                key: rd.key.clone(),
-                label: rd.label,
-                value_type: rd.value_type,
-                subject_kind: rd.subject_kind,
-                vocabulary_json,
-                scope: rd.scope,
-                promoted: rd.promote,
-                entity_json: rd
-                    .entity
-                    .as_ref()
-                    .and_then(|e| serde_json::to_string(e).ok()),
-            };
-            if seed_dimension(facts, &layer, nd).await {
-                d += 1;
-            }
-        }
-        // Built-ins aren't config-declared, so they don't count toward `d`.
-        for nd in builtin_entity_dimensions() {
-            seed_dimension(facts, &layer, nd).await;
-        }
-        // Entity dimensions by the view they slice, for entity metrics'
-        // sliceable dims.
-        let entity_dims: Vec<(String, String)> = facts
-            .list_dimensions()
-            .await
-            .unwrap_or_default()
-            .iter()
-            .filter_map(|d| {
-                crate::entity_metrics::entity_dim_of(d).map(|e| (e.view, d.key.clone()))
-            })
-            .collect();
-        // Metric SPECS — RECONCILE the `metric_spec` table down to exactly the
-        // *enabled* set (tsk31). Because reads treat a missing spec as empty and
-        // producers gate collection on `measure_has_active_spec`, pruning a
-        // disabled metric's row is the single lever that hides it AND stops its
-        // base-data collection. Per-metric enabled state comes from config:
-        let cfg_metrics = self
-            .config
-            .read()
-            .map(|c| c.metrics.clone())
-            .unwrap_or_default();
-        // `None` = no config entry; `Some(true/false)` = an explicit flag.
-        let config_state = |key: &str| -> Option<bool> {
-            cfg_metrics
-                .iter()
-                .find(|e| e.use_key.as_deref() == Some(key) || e.key.as_deref() == Some(key))
-                .map(|e| e.enabled.unwrap_or(true))
-        };
-        // Built-in metric SPECS — the bundled code/idiom collector specs
-        // (`builtin_metric_specs` + `builtin_ast_specs`) and the always-on producer
-        // specs. A producer/entity spec is seeded UNLESS explicitly disabled by a
-        // `enabled: false` marker in config, in which case the row is pruned (so
-        // spec-driven reads go empty and `measure_has_active_spec` closes the
-        // collection gate). A built-in COLLECTOR's spec is seeded only while its
-        // collector runs (`use:`d, or default-on and not disabled — tsk1046): a
-        // spec nothing records into read as an empty metric, silently, so
-        // `v_metric_spec` is now exactly what has a source, and `MEASURE()` of
-        // an off one says how to turn it on.
-        let builtins_on: std::collections::HashSet<String> =
-            self.fact_collectors().into_iter().map(|c| c.key).collect();
-        let builtin_off = |key: &str| {
-            builtin_metrics().iter().any(|m| m.key == key) && !builtins_on.contains(key)
-        };
-        // A spec whose aggregation the engine cannot compute must not seed
-        // (tsk108): the V44 CHECK reserves `p95`/`count_distinct` in the
-        // schema vocabulary and config doesn't validate the string, but an
-        // unimplemented aggregation would open the COLLECTION gate
-        // (`measure_has_active_spec`) for a metric that can never render —
-        // data gathered for nothing, forever. Pruned like a disabled entry
-        // (implementing the aggregation later re-seeds it cleanly). Formula
-        // specs carry no aggregation of their own to validate.
-        let computable = |spec: &oxplow_db::NewMetricSpec| {
-            let ok = spec.source_measure.is_none()
-                || crate::metric_engine::Aggregation::parse(&spec.aggregation).is_some();
-            if !ok {
-                tracing::warn!(
-                    key = %spec.key, aggregation = %spec.aggregation,
-                    "spec uses an aggregation the engine can't compute (reserved in the \
-                     schema); pruning it so collection doesn't run for a metric that can \
-                     never render"
-                );
-            }
-            ok
-        };
-        for mut spec in builtin_metric_specs()
-            .into_iter()
-            .chain(builtin_ast_specs())
-            .chain(crate::producer_metrics::builtin_producer_specs())
-            .chain(builtin_entity_specs())
-        {
-            let key = spec.key.clone();
-            let res = if config_state(&key) != Some(false)
-                && !builtin_off(&key)
-                && computable(&spec)
-                && prepare_entity_spec(facts, &layer, &mut spec, &entity_dims).await
-            {
-                facts.upsert_spec(spec).await.map(|_| ())
-            } else {
-                facts.delete_spec(&key).await
-            };
-            if let Err(e) = res {
-                tracing::warn!(key = %key, error = %e, "failed to reconcile built-in metric spec");
-            }
-        }
-        // Config-declared SPECS (global ∪ project `metrics:`). A `key:` seeds a new
-        // spec; a `use:` of a BUILT-IN resolves to scope `built-in` carrying the
-        // catalog default target plus the project's threshold overrides (the
-        // Catalog inline target editor writes exactly such a `use:`), so it must
-        // re-seed AFTER the override-free built-ins above — dropping it left
-        // target/warn_at/fail_at NULL everywhere the engine reads the spec row. A
-        // disabled entry (`enabled: false`) is pruned instead of seeded.
-        // Seeding runs once per load and change, not per event: the place to
-        // name a `use:` that resolves to nothing (tsk1076).
-        let layers = self.metric_layers();
-        for key in layers.unknown_uses() {
-            tracing::warn!(%key, "metrics: `use:` names no metric; skipping it");
-        }
-        let resolved = layers.resolve();
-        for s in &resolved {
-            let mut spec = spec_to_new_spec(s);
-            let res = if s.enabled
-                && computable(&spec)
-                && prepare_entity_spec(facts, &layer, &mut spec, &entity_dims).await
-            {
-                facts.upsert_spec(spec).await.map(|_| ())
-            } else {
-                facts.delete_spec(&s.key).await
-            };
-            if let Err(e) = res {
-                tracing::warn!(key = %s.key, error = %e, "failed to reconcile config metric spec");
-            }
-        }
-        // RECONCILE REMOVALS (tsk61): a project metric/measure deleted from
-        // `.oxplow/project.yaml` entirely (not merely `enabled: false`) used to
-        // leave zombie catalog rows behind — four forever-blank collectors sat in
-        // the catalog for a week after their collectors were replaced. Project
-        // scope only: the declared config is the truth for exactly its scope.
-        let keep_specs: Vec<String> = resolved
-            .iter()
-            .filter(|s| s.scope == "project")
-            .map(|s| s.key.clone())
-            .collect();
-        match facts.delete_project_specs_not_in(keep_specs).await {
-            Ok(n) if n > 0 => {
-                tracing::info!(pruned = n, "seed: dropped undeclared project metric specs");
-            }
-            Ok(_) => {}
-            Err(e) => tracing::warn!(error = %e, "seed: project spec reconciliation failed"),
-        }
-        // Same for extension-declared specs: a disabled or removed extension's
-        // metrics leave the catalog (their measures and facts stay).
-        let keep_extension_specs: Vec<String> = resolved
-            .iter()
-            .filter(|s| oxplow_config::scope_extension(&s.scope).is_some())
-            .map(|s| s.key.clone())
-            .collect();
-        match facts
-            .delete_extension_specs_not_in(keep_extension_specs)
-            .await
-        {
-            Ok(n) if n > 0 => {
-                tracing::info!(
-                    pruned = n,
-                    "seed: dropped specs of disabled or removed extensions"
-                );
-            }
-            Ok(_) => {}
-            Err(e) => tracing::warn!(error = %e, "seed: extension spec reconciliation failed"),
-        }
-        let keep_measures: Vec<String> =
-            resolve_measures(&global_measures, &ext.measures, &project_measures)
-                .into_iter()
-                .filter(|rm| rm.scope == "project")
-                .map(|rm| rm.key)
-                // A project state entity metric's synthesized measure.
-                .chain(
-                    resolved
-                        .iter()
-                        .filter(|s| s.scope == "project")
-                        .filter(|s| s.entity.as_ref().is_some_and(|e| e.time.is_none()))
-                        .map(|s| s.key.clone()),
-                )
-                .collect();
-        match facts.delete_project_measures_not_in(keep_measures).await {
-            Ok(n) if n > 0 => {
-                tracing::info!(pruned = n, "seed: dropped undeclared project measures");
-            }
-            Ok(_) => {}
-            Err(e) => tracing::warn!(error = %e, "seed: project measure reconciliation failed"),
-        }
-        if let Err(e) = self.publish_catalog(facts).await {
-            tracing::warn!(error = %e, "seed: publishing the metric catalog failed");
-        }
-        (m, d)
-    }
-
-    /// Write the resolved catalog to `metric_catalog` (`v_metric_catalog`,
-    /// P4.7) — the whole of it, replacing what was there.
-    async fn publish_catalog(&self, facts: &SqliteFactStore) -> Result<(), DomainError> {
-        let entries = self.catalog().await;
-        facts
-            .database()
-            .transaction(move |tx| {
-                tx.execute("DELETE FROM metric_catalog", [])
-                    .map_err(oxplow_db::map_sql_err)?;
-                for e in &entries {
-                    tx.execute(
-                        "INSERT INTO metric_catalog
-                           (key, title, kind, language, scope, enabled, target, trigger, toggleable, category)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                        rusqlite::params![
-                            e.key, e.title, e.kind, e.language, e.scope, e.enabled, e.target,
-                            e.trigger, e.toggleable, e.category
-                        ],
-                    )
-                    .map_err(oxplow_db::map_sql_err)?;
-                }
-                Ok(())
-            })
-            .await
     }
 
     /// The **available** catalog (built-in ∪ global ∪ project) with each entry's
@@ -1541,38 +1243,12 @@ impl MetricsService {
         })
     }
 
-    /// Reseed the catalog from scratch — the global catalog dropped, the
-    /// config's and the extensions' declarations seeded — and re-capture
-    /// every state entity metric. What a config change (`config.metrics`)
-    /// and an extension change (the catalog's signal) run.
+    /// Ask for a new generation: what a config change (`config.metrics`)
+    /// and an extension change run. The generation owner reseeds the
+    /// catalog and the extensions' declarations together.
     pub async fn reseed(&self) {
-        if let Some(log) = self
-            .run_log
-            .as_ref()
-            .filter(|log| log.layer.has_activation())
-        {
+        if let Some(log) = self.run_log.as_ref() {
             log.layer.request_activation();
-            return;
-        }
-        self.invalidate_global_catalog();
-        self.seed_catalog().await;
-        self.capture_entity_states(true).await;
-    }
-
-    /// Seed once, then reseed whenever the primary worktree's extensions
-    /// may have changed (`changes`, the extension catalog's signal: their
-    /// measures, metrics and collectors). A config change reseeds through
-    /// `config.metrics`; rows moving re-capture state metrics through
-    /// `metrics.entity_states`; fact collectors run from
-    /// `collector.triggers`. Spawned at boot (`boot.rs`).
-    pub async fn run(self, mut changes: tokio::sync::broadcast::Receiver<()>) {
-        self.seed_catalog().await;
-        self.capture_entity_states(true).await;
-        // Lagging only means it missed some: one pass covers them.
-        while let Ok(()) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) =
-            changes.recv().await
-        {
-            self.reseed().await;
         }
     }
 
@@ -2922,7 +2598,6 @@ impl MetricsService {
                 .map(|f| f.measure.clone())
         };
         if undefined(store.list_measures().await.ok()?).is_some() {
-            self.seed_catalog().await;
             if let Some(measure) = undefined(store.list_measures().await.ok()?) {
                 return Some(format!(
                     "a fact for `{measure}`, which no measure defines (declare it in `measures:`)"
@@ -3078,91 +2753,6 @@ fn as_entity_spec(mut spec: NewMetricSpec, entity: &oxplow_config::EntitySpec) -
     spec
 }
 
-/// Seed one dimension; an entity dimension whose SQL doesn't compile is
-/// skipped with a warning instead of reaching the catalog.
-async fn seed_dimension(
-    facts: &SqliteFactStore,
-    layer: &crate::sql_gateway::SqlGateway,
-    nd: NewDimension,
-) -> bool {
-    let entity = nd
-        .entity_json
-        .as_deref()
-        .and_then(|j| serde_json::from_str::<oxplow_config::EntityDimensionSpec>(j).ok());
-    if let Some(dim) = &entity {
-        let probe = oxplow_config::EntitySpec {
-            view: dim.view.clone(),
-            where_: None,
-            time: None,
-            value: None,
-            aggregation: "count".into(),
-        };
-        if let Err(e) = crate::entity_metrics::check(layer, &probe, Some(dim)).await {
-            tracing::warn!(key = %nd.key, error = %e, "entity dimension doesn't compile; skipping");
-            return false;
-        }
-    }
-    match facts.upsert_dimension(nd.clone()).await {
-        Ok(()) => true,
-        Err(e) => {
-            tracing::warn!(key = %nd.key, error = %e, "failed to seed dimension");
-            false
-        }
-    }
-}
-
-/// Ready an entity spec for the catalog: its SQL must compile, its sliceable
-/// dims are the entity dimensions over its view, and a state metric gets its
-/// synthesized measure. `false` (with a warning) keeps it out. A non-entity
-/// spec passes through untouched.
-async fn prepare_entity_spec(
-    facts: &SqliteFactStore,
-    layer: &crate::sql_gateway::SqlGateway,
-    spec: &mut NewMetricSpec,
-    entity_dims: &[(String, String)],
-) -> bool {
-    let Some(entity) = spec
-        .entity_json
-        .as_deref()
-        .and_then(|j| serde_json::from_str::<oxplow_config::EntitySpec>(j).ok())
-    else {
-        return true;
-    };
-    if let Err(e) = crate::entity_metrics::check(layer, &entity, None).await {
-        tracing::warn!(key = %spec.key, error = %e, "entity metric doesn't compile; skipping");
-        return false;
-    }
-    let mut dims: Vec<String> = spec
-        .sliceable_dims_json
-        .as_deref()
-        .and_then(|j| serde_json::from_str(j).ok())
-        .unwrap_or_default();
-    for (view, key) in entity_dims {
-        if *view == entity.view && !dims.contains(key) {
-            dims.push(key.clone());
-        }
-    }
-    spec.sliceable_dims_json =
-        (!dims.is_empty()).then(|| serde_json::to_string(&dims).unwrap_or_default());
-    if entity.time.is_none() {
-        let measure = NewMeasure {
-            key: spec.key.clone(),
-            title: spec.title.clone(),
-            unit: spec.unit.clone(),
-            subject_kind: None,
-            temporal_semantics: "semi-additive".into(),
-            capture_scope: "complete".into(),
-            scope: spec.scope.clone(),
-            description: spec.description.clone(),
-        };
-        if let Err(e) = facts.upsert_measure(measure).await {
-            tracing::warn!(key = %spec.key, error = %e, "failed to seed entity metric measure");
-            return false;
-        }
-    }
-    true
-}
-
 /// The primary stream's id, which project-wide captures are recorded against.
 async fn primary_stream(layer: &crate::sql_gateway::SqlGateway) -> Option<i64> {
     let out = layer
@@ -3262,10 +2852,6 @@ struct MetricLayers {
 impl MetricLayers {
     fn resolve(&self) -> Vec<ResolvedSpec> {
         resolve_metrics(&self.builtin, &self.global, &self.extensions, &self.project)
-    }
-
-    fn unknown_uses(&self) -> Vec<String> {
-        oxplow_config::unknown_uses(&self.builtin, &self.global, &self.extensions, &self.project)
     }
 }
 
@@ -3752,10 +3338,9 @@ impl crate::event_pump::AsyncEventConsumer for EntityStates {
 mod tests {
 
     /// Switch metrics through the real path — the `oxplow.metric.enable` command —
-    /// then reseed, as the service's event loop does on `ConfigChanged`.
-    async fn enable(svc: &crate::Services, keys: &[String], enabled: bool) {
+    /// then publish the generation the config change asks for.
+    async fn enable(svc: &Arc<crate::Services>, keys: &[String], enabled: bool) {
         // The catalog the command checks keys against (boot seeds it).
-        svc.metrics.seed_catalog().await;
         svc.commands
             .run(
                 &oxplow_domain::Actor::Human,
@@ -3765,7 +3350,7 @@ mod tests {
             )
             .await
             .unwrap();
-        svc.metrics.seed_catalog().await;
+        crate::test_fixtures::activate_with_problems(svc).await;
     }
 
     /// P4.1 (tsk486): every built-in entity metric and dimension reads only
@@ -3829,7 +3414,7 @@ mod tests {
     async fn fixture() -> (Arc<crate::Services>, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
-        let svc = Arc::new(crate::Services::in_memory(dir.path()).unwrap());
+        let svc = crate::Services::in_memory(dir.path()).await.unwrap();
         svc.streams.ensure_primary().await.unwrap();
         (svc, dir)
     }
@@ -3896,6 +3481,7 @@ mod tests {
         );
         assert!(errors.is_empty(), "{errors:?}");
         svc.config.write().unwrap().collectors = specs;
+        crate::test_fixtures::activate_with_problems(&svc).await;
         let snap =
             snapshot_with_files(&svc, &[("src/a.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
         let event = log_take(&svc, snap, SnapshotTrigger::TurnEnd, false, 1).await;
@@ -3942,6 +3528,7 @@ mod tests {
         );
         assert!(errors.is_empty(), "{errors:?}");
         svc.config.write().unwrap().collectors = specs;
+        crate::test_fixtures::activate_with_problems(&svc).await;
         let snap =
             snapshot_with_files(&svc, &[("src/a.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
         let event = log_take(&svc, snap, SnapshotTrigger::TurnEnd, false, 1).await;
@@ -3982,7 +3569,10 @@ mod tests {
         )
         .unwrap();
         let configure = |trigger: &str| {
-            let (specs, errors) = oxplow_config::collectors::parse_collectors(
+            let svc = svc.clone();
+            let trigger = trigger.to_string();
+            async move {
+                let (specs, errors) = oxplow_config::collectors::parse_collectors(
                 oxplow_config::collectors::PROJECT,
                 &serde_yaml::from_str(&format!(
                     "- {{ id: repo.seen, runtime: starlark, entry: seen.star, trigger: {trigger}, facts: [oxplow.ast_hit] }}"
@@ -3990,20 +3580,22 @@ mod tests {
                 .unwrap(),
                 &|_| true,
             );
-            assert!(errors.is_empty(), "{errors:?}");
-            svc.config.write().unwrap().collectors = specs;
+                assert!(errors.is_empty(), "{errors:?}");
+                svc.config.write().unwrap().collectors = specs;
+                crate::test_fixtures::activate_with_problems(&svc).await;
+            }
         };
         let consumer = crate::collector_triggers::CollectorTriggers::new(Arc::downgrade(&svc));
         use crate::event_pump::AsyncEventConsumer as _;
         // A baseline, run at once.
-        configure("{ on: [snapshot.taken] }");
+        configure("{ on: [snapshot.taken] }").await;
         let base = snapshot_with_content(&svc, &[("src/z.rs", Some("z"))]).await;
         consumer
             .handle(&log_take(&svc, base, SnapshotTrigger::TurnEnd, false, 1).await)
             .await
             .unwrap();
         // Now paced: two takes, each recording another file, both deferred.
-        configure("{ on: [snapshot.taken], settle: 30s }");
+        configure("{ on: [snapshot.taken], settle: 30s }").await;
         let one = snapshot_with_content(&svc, &[("src/a.rs", Some("a"))]).await;
         consumer
             .handle(&log_take(&svc, one, SnapshotTrigger::TurnEnd, false, 1).await)
@@ -4123,6 +3715,7 @@ mod tests {
             use_key: Some("oxplow.duplicate_lines".into()),
             ..Default::default()
         });
+        crate::test_fixtures::activate_with_problems(&svc).await;
         let consumer = crate::collector_triggers::CollectorTriggers::new(Arc::downgrade(&svc));
         use crate::event_pump::AsyncEventConsumer as _;
         let mut snaps = Vec::new();
@@ -4182,6 +3775,7 @@ mod tests {
             use_key: Some("oxplow.duplicate_lines".into()),
             ..Default::default()
         });
+        crate::test_fixtures::activate_with_problems(&svc).await;
         let consumer = crate::collector_triggers::CollectorTriggers::new(Arc::downgrade(&svc));
         use crate::event_pump::AsyncEventConsumer as _;
         // A ref move's scan is paced: run what's due well past its pacing.
@@ -4332,6 +3926,7 @@ mod tests {
         );
         assert!(errors.is_empty(), "{errors:?}");
         svc.config.write().unwrap().collectors = specs;
+        crate::test_fixtures::activate_with_problems(&svc).await;
         let snap =
             snapshot_with_files(&svc, &[("src/a.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
         let event = log_take(&svc, snap, SnapshotTrigger::TurnEnd, false, 1).await;
@@ -4408,6 +4003,7 @@ mod tests {
         );
         assert!(errors.is_empty(), "{errors:?}");
         svc.config.write().unwrap().collectors = specs;
+        crate::test_fixtures::activate_with_problems(&svc).await;
         let snap =
             snapshot_with_files(&svc, &[("src/a.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
         let event = log_take(&svc, snap, SnapshotTrigger::TurnEnd, false, 1).await;
@@ -4476,6 +4072,7 @@ mod tests {
         );
         assert!(errors.is_empty(), "{errors:?}");
         svc.config.write().unwrap().collectors = specs;
+        crate::test_fixtures::activate_with_problems(svc).await;
         let snap =
             snapshot_with_files(svc, &[("src/a.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
         let event = log_take(svc, snap, SnapshotTrigger::TurnEnd, false, 1).await;
@@ -4529,12 +4126,12 @@ mod tests {
     #[tokio::test]
     async fn a_measure_declared_after_the_catalog_was_seeded_is_found() {
         let (svc, dir) = fixture().await;
-        svc.metrics.seed_catalog().await;
         svc.config.write().unwrap().measures = vec![oxplow_config::MeasureEntry {
             key: Some("repo.lines.count".into()),
             subject_kind: Some("file".into()),
             ..Default::default()
         }];
+        crate::test_fixtures::activate_with_problems(&svc).await;
         let (status, error, facts) = run_one_fact(&svc, &dir, "lines", "repo.lines.count").await;
         assert_eq!((status.as_str(), error), ("ok", None));
         assert_eq!(facts, 1);
@@ -4570,13 +4167,14 @@ mod tests {
             enabled: Some(false),
             ..Default::default()
         }];
+        crate::test_fixtures::activate_with_problems(&svc).await;
         assert!(!keys(&svc).iter().any(|k| k == "oxplow.todos"));
         assert!(keys(&svc).iter().any(|k| k == "oxplow.fn_count"));
     }
 
     /// Seed the catalog with every built-in collector `use:`d: a built-in's spec
     /// is seeded only while it's on (tsk1046).
-    async fn seed_with_every_builtin_on(svc: &crate::Services) {
+    async fn seed_with_every_builtin_on(svc: &Arc<crate::Services>) {
         svc.config.write().unwrap().metrics = builtin_metrics()
             .iter()
             .map(|m| MetricEntry {
@@ -4584,7 +4182,7 @@ mod tests {
                 ..Default::default()
             })
             .collect();
-        svc.metrics.seed_catalog().await;
+        crate::test_fixtures::activate_with_problems(svc).await;
     }
 
     fn starlark_collector(key: &str, entry_file: &str) -> FactCollector {
@@ -4779,7 +4377,6 @@ def transform(input):
         // uses. It runs TWO collectors sharing `oxplow.ast_hit` — the exact shape tsk49
         // hid in — so a single-collector unit test could not have found it.
         let (svc, dir) = fixture().await;
-        svc.metrics.seed_catalog().await;
         enable(
             &svc,
             &[
@@ -4865,7 +4462,6 @@ def transform(input):
         // snapshot and scans the RECONSTRUCTED tree — so a rebuild over an
         // unchanged tree must not create any snapshot at all.
         let (svc, dir) = fixture().await;
-        svc.metrics.seed_catalog().await;
         enable(&svc, &["oxplow.rust.unsafe_blocks".into()], true).await;
         std::fs::create_dir_all(dir.path().join("src")).unwrap();
         std::fs::write(dir.path().join("src/a.rs"), "fn a() { unsafe { x(); } }\n").unwrap();
@@ -4903,7 +4499,6 @@ def transform(input):
         // ever ran on small deltas. A measure-level "is it empty" check says "done" and
         // console_calls reads empty forever. The baseline question must be per-collector.
         let (svc, _dir) = fixture().await;
-        svc.metrics.seed_catalog().await;
         // A built-in is only in `fact_collectors` when its metric is enabled — enable the
         // two built-ins this test drives.
         enable(
@@ -4986,7 +4581,7 @@ def transform(input):
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
-        svc.metrics.seed_catalog().await;
+        crate::test_fixtures::activate_with_problems(&svc).await;
         svc.snapshot_captures
             .set_content_policy(crate::snapshot_capture::ContentPolicy::HashesOnly);
         let snapshot =
@@ -5022,7 +4617,6 @@ def transform(input):
         // "why is oxplow eating CPU?" had no answer, and when it went wrong I could
         // only find out by reading SQL by hand.
         let (svc, _dir) = fixture().await;
-        svc.metrics.seed_catalog().await;
         let collector = builtin_collector_fixture("oxplow.rust.unsafe_blocks");
 
         svc.metrics
@@ -5046,7 +4640,6 @@ def transform(input):
     async fn an_ordinary_delta_sweep_is_not_tracked() {
         // A per-commit delta finishes in milliseconds — tracking it would be noise.
         let (svc, _dir) = fixture().await;
-        svc.metrics.seed_catalog().await;
         let collector = builtin_collector_fixture("oxplow.rust.unsafe_blocks");
 
         svc.metrics
@@ -5068,7 +4661,6 @@ def transform(input):
         // reading stale or empty. Reporting the sweep as "done" would hide exactly the
         // failure that let two built-in metrics read empty for weeks.
         let (svc, dir) = fixture().await;
-        svc.metrics.seed_catalog().await;
 
         let script = dir.path().join("oxplow/metrics/boom.star");
         std::fs::create_dir_all(script.parent().unwrap()).unwrap();
@@ -5111,7 +4703,6 @@ def transform(input):
         // WRONG, and the baseline only fires on an empty fold. (Real case, tsk44:
         // teaching repo_allow.star to also match inner `#![allow]` silently no-opped.)
         let (svc, dir) = fixture().await;
-        svc.metrics.seed_catalog().await;
 
         let script = dir.path().join("oxplow/metrics/g.star");
         std::fs::create_dir_all(script.parent().unwrap()).unwrap();
@@ -5426,6 +5017,7 @@ def transform(input):
         );
         assert!(errors.is_empty(), "{errors:?}");
         svc.config.write().unwrap().collectors = specs;
+        crate::test_fixtures::activate_with_problems(&svc).await;
         svc.effort_store
             .finish(&effort.id, None, None)
             .await
@@ -5549,7 +5141,6 @@ def transform(input):
         // engine (T-C3) and the baked sample be removed (T-C3b).
         let (svc, _dir) = fixture().await;
         // Seed the built-in specs (count-over-facts) into the catalog.
-        svc.metrics.seed_catalog().await;
 
         let files = Arc::new(equivalence_corpus());
         let ctx = CollectorRunContext {
@@ -5948,11 +5539,10 @@ def transform(input):
     }
 
     #[tokio::test]
-    async fn seed_catalog_seeds_producer_specs() {
+    async fn a_generation_seeds_producer_specs() {
         // T-B: the always-on producer metrics are seeded as `metric_spec`s beside
         // the built-in collector specs, over the V43/V46 measures.
         let (svc, _dir) = fixture().await;
-        svc.metrics.seed_catalog().await;
         let spec = svc
             .fact_store
             .get_spec("oxplow.coverage.abs_pct")
@@ -5982,13 +5572,13 @@ def transform(input):
             fail_at: Some(1.0),
             ..Default::default()
         }];
+        crate::test_fixtures::activate_with_problems(&svc).await;
         let resolved = svc.metrics.resolved_specs();
         let failed = resolved
             .iter()
             .find(|s| s.key == "oxplow.tests.failed")
             .expect("the use: resolves");
         assert_eq!(failed.scope, "built-in");
-        svc.metrics.seed_catalog().await;
         let spec = svc
             .fact_store
             .get_spec("oxplow.tests.failed")
@@ -6090,7 +5680,7 @@ def transform(input):
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
-        svc.metrics.seed_catalog().await;
+        crate::test_fixtures::activate_with_problems(&svc).await;
         let f = &svc.fact_store;
         assert!(f.get_spec("repo.bad").await.unwrap().is_none());
 
@@ -6164,7 +5754,7 @@ def transform(input):
     }
 
     #[tokio::test]
-    async fn seed_catalog_upserts_configured_metric_specs() {
+    async fn a_generation_upserts_configured_metric_specs() {
         // T-E2: config `metrics:` entries seed metric SPECS (the legacy
         // definition seeding is gone).
         let (svc, dir) = fixture().await;
@@ -6174,7 +5764,7 @@ def transform(input):
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
-        svc.metrics.seed_catalog().await;
+        crate::test_fixtures::activate_with_problems(&svc).await;
         let spec = svc
             .fact_store
             .get_spec("repo.loc")
@@ -6188,7 +5778,7 @@ def transform(input):
     }
 
     #[tokio::test]
-    async fn seed_catalog_applies_use_overrides_to_builtin_specs() {
+    async fn a_generation_applies_use_overrides_to_builtin_specs() {
         // A project `use:` of a built-in resolves WITH the user's threshold
         // overrides (the Catalog inline target editor writes exactly this) —
         // they must land on the persisted metric_spec, not be dropped by the
@@ -6201,7 +5791,7 @@ def transform(input):
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
-        svc.metrics.seed_catalog().await;
+        crate::test_fixtures::activate_with_problems(&svc).await;
         let spec = svc
             .fact_store
             .get_spec("oxplow.todos")
@@ -6218,7 +5808,7 @@ def transform(input):
     }
 
     #[tokio::test]
-    async fn seed_catalog_upserts_configured_measures_and_dimensions() {
+    async fn a_generation_publishes_configured_measures_and_dimensions() {
         let (svc, dir) = fixture().await;
         std::fs::write(
             oxplow_config::config_path(dir.path()),
@@ -6228,13 +5818,7 @@ def transform(input):
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
-        let (m, d) = svc.metrics.seed_catalog().await;
-        assert_eq!(
-            (m, d),
-            (2, 1),
-            "the project's measure and oxplow-bundled's (bundled, on), one project dimension"
-        );
-
+        crate::test_fixtures::activate_with_problems(&svc).await;
         // The custom measure lands beside the migration-seeded `oxplow.*` built-ins.
         let measure = svc
             .fact_store
@@ -6256,7 +5840,7 @@ def transform(input):
     }
 
     #[tokio::test]
-    async fn seed_catalog_prunes_project_rows_removed_from_config() {
+    async fn a_generation_prunes_project_rows_removed_from_config() {
         // tsk61: a project metric/measure deleted from project.yaml entirely
         // (not merely `enabled: false`) must not linger as a zombie catalog
         // row — four forever-blank collectors did exactly that for a week.
@@ -6282,8 +5866,7 @@ def transform(input):
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
-
-        svc.metrics.seed_catalog().await;
+        crate::test_fixtures::activate_with_problems(&svc).await;
 
         assert!(
             svc.fact_store
@@ -6334,7 +5917,7 @@ def transform(input):
         // metric that can never render. Two fences keep that impossible:
         // config validation rejects the string with the allowed set (pinned
         // here — the review assumed this fence didn't exist), and
-        // `seed_catalog`'s computable() guard prunes rather than seeds if an
+        // the catalog's computable() guard prunes rather than seeds if an
         // uncomputable spec ever arrives another way (a typo'd BUILT-IN list,
         // which no config validation sees).
         let (svc, dir) = fixture().await;
@@ -6351,7 +5934,6 @@ def transform(input):
         );
         // The bad config never loaded; seeding runs with the prior (empty)
         // config and nothing reaches the catalog or the gate.
-        svc.metrics.seed_catalog().await;
         assert!(
             svc.fact_store
                 .get_spec("repo.latency_p95")
@@ -6370,7 +5952,7 @@ def transform(input):
     }
 
     #[tokio::test]
-    async fn seed_catalog_threads_promote_flag_to_dimension_row() {
+    async fn a_generation_threads_promote_flag_to_dimension_row() {
         let (svc, dir) = fixture().await;
         std::fs::write(
             oxplow_config::config_path(dir.path()),
@@ -6379,7 +5961,7 @@ def transform(input):
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
-        svc.metrics.seed_catalog().await;
+        crate::test_fixtures::activate_with_problems(&svc).await;
 
         let dims = svc.fact_store.list_dimensions().await.unwrap();
         let hot = dims
@@ -6404,11 +5986,11 @@ def transform(input):
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
+        crate::test_fixtures::activate_with_problems(&svc).await;
 
         // Seeding registers the SPEC (T-E2: the legacy definition seeding is
         // gone); the resolved config carries the project's target override into
         // the catalog entry.
-        svc.metrics.seed_catalog().await;
         let spec = svc
             .fact_store
             .get_spec("oxplow.rust.unsafe_blocks")
@@ -6475,8 +6057,7 @@ def transform(input):
             "def transform(input):\n    return {\"facts\": [{\"measure\": \"acme.todo\", \"value\": 3}]}\n",
         )
         .unwrap();
-
-        svc.metrics.seed_catalog().await;
+        crate::test_fixtures::activate(&svc).await;
         let spec = svc
             .fact_store
             .get_spec("acme.todos")
@@ -6522,7 +6103,7 @@ def transform(input):
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
-        svc.metrics.seed_catalog().await;
+        crate::test_fixtures::activate_with_problems(&svc).await;
         assert!(svc
             .fact_store
             .get_spec("acme.todos")
@@ -6569,8 +6150,7 @@ def transform(input):
             .unwrap();
         }
 
-        svc.metrics.seed_catalog().await;
-
+        crate::test_fixtures::activate_with_problems(&svc).await;
         let reports: Vec<String> = svc
             .listed_extensions(dir.path())
             .await
@@ -6604,7 +6184,7 @@ def transform(input):
              metrics:\n  - { key: acme.tasks, title: Tasks, entity: v_work_item }\n",
         )
         .unwrap();
-        svc.metrics.seed_catalog().await;
+        crate::test_fixtures::activate(&svc).await;
         let dims = svc.fact_store.list_dimensions().await.unwrap();
         let d = dims
             .iter()
@@ -6631,7 +6211,7 @@ def transform(input):
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
-        svc.metrics.seed_catalog().await;
+        crate::test_fixtures::activate_with_problems(&svc).await;
         assert!(!svc
             .fact_store
             .list_dimensions()
@@ -6659,7 +6239,7 @@ def transform(input):
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
-        svc.metrics.seed_catalog().await;
+        crate::test_fixtures::activate_with_problems(&svc).await;
         let err = svc
             .metrics
             .run_collector_by_key(
@@ -6800,7 +6380,7 @@ def transform(input):
         let (svc, _dir) = fixture().await;
 
         // Simulate a producer (or an extension) seeding a SPEC directly, the
-        // way seed_catalog does for the always-on producers at boot (T-E2: the
+        // way a generation does for the always-on producers at boot (T-E2: the
         // catalog's tail sweep reads the spec catalog, not legacy definitions).
         let mut spec = oxplow_db::NewMetricSpec::base(
             "agent.tokens.total",
@@ -6834,7 +6414,6 @@ def transform(input):
     async fn disabling_a_producer_prunes_its_spec_and_writes_a_marker() {
         let (svc, dir) = fixture().await;
         // Boot-seed the producer specs so there's a row to prune.
-        svc.metrics.seed_catalog().await;
         assert!(
             svc.fact_store
                 .get_spec("agent.tokens.total")
@@ -6900,7 +6479,6 @@ def transform(input):
     #[tokio::test]
     async fn set_metrics_enabled_batches_a_whole_section() {
         let (svc, dir) = fixture().await;
-        svc.metrics.seed_catalog().await;
         let keys = vec![
             "agent.tokens.total".to_string(),
             "agent.tokens.input".to_string(),
@@ -6930,7 +6508,6 @@ def transform(input):
         // disabled (its specs pruned), `measure_has_active_spec` is false so the
         // producer skips the write.
         let (svc, _dir) = fixture().await;
-        svc.metrics.seed_catalog().await;
         assert!(
             svc.fact_store
                 .measure_has_active_spec("oxplow.tokens")
@@ -7006,7 +6583,7 @@ def transform(input):
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(path, &f.content).unwrap();
         }
-        svc.metrics.seed_catalog().await;
+        crate::test_fixtures::activate_with_problems(&svc).await;
         let spec = svc
             .fact_store
             .get_spec("complex_fns.complex_functions")
@@ -7042,35 +6619,5 @@ def transform(input):
                 .unwrap_err();
             assert!(err.contains(says), "{name}: {err}");
         }
-    }
-
-    #[tokio::test]
-    async fn global_catalog_caches_until_invalidated() {
-        // tsk17: the global catalog loads from disk once, then serves the cache;
-        // a file added after the first read isn't seen until invalidation.
-        let (svc, _dir) = fixture().await;
-        let gtmp = tempfile::tempdir().unwrap();
-        let m = svc
-            .metrics
-            .clone()
-            .with_global_dir(gtmp.path().to_path_buf());
-
-        // First read: empty (no global measures yet) — and caches that.
-        assert_eq!(m.with_global_catalog(|g| g.measures.len()), 0);
-
-        // Write a global measure file directly (an "external" edit).
-        std::fs::create_dir_all(gtmp.path().join("measures")).unwrap();
-        std::fs::write(
-            gtmp.path().join("measures").join("acme.yaml"),
-            "measures:\n  - key: acme.thing\n",
-        )
-        .unwrap();
-
-        // Still 0 — served from cache, the new file isn't re-read.
-        assert_eq!(m.with_global_catalog(|g| g.measures.len()), 0, "cached");
-
-        // After invalidation the reload picks it up.
-        m.invalidate_global_catalog();
-        assert_eq!(m.with_global_catalog(|g| g.measures.len()), 1, "reloaded");
     }
 }

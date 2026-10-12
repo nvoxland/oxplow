@@ -412,14 +412,20 @@ mod tests {
 
     #[tokio::test]
     async fn lists_gets_runs_and_validates_lenses() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         seed(&svc.layout.project_dir);
+        crate::test_support::publish(&svc).await;
 
         let exts = crate::dispatch("list_extensions", json!({}), &svc)
             .await
             .unwrap();
-        assert_eq!(exts[0]["name"], "demo");
-        assert_eq!(exts[0]["lenses"][0]["id"], "demo/streams");
+        let demo = exts
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["name"] == "demo")
+            .expect("listed");
+        assert_eq!(demo["lenses"][0]["id"], "demo/streams");
 
         let lens = crate::dispatch("get_lens", json!({ "id": "demo/streams" }), &svc)
             .await
@@ -481,13 +487,15 @@ mod tests {
     /// shows once merged.
     #[tokio::test]
     async fn every_stream_shows_the_main_worktrees_extensions() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         seed(&svc.layout.project_dir);
+        crate::test_support::publish(&svc).await;
         write(
             &svc.layout.project_dir,
             ".oxplow/project.yaml",
             "extensions:\n  disabled:\n  - oxplow-bundled\n",
         );
+        crate::test_support::publish(&svc).await;
         let parent = tempfile::tempdir().unwrap();
         let side = parent.path().join("side");
         let stream = worktree_stream(&svc, &side).await;
@@ -528,8 +536,9 @@ mod tests {
 
     #[tokio::test]
     async fn missing_lens_is_not_found_and_bad_params_are_invalid() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         seed(&svc.layout.project_dir);
+        crate::test_support::publish(&svc).await;
         let err = crate::dispatch("get_lens", json!({ "id": "demo/nope" }), &svc)
             .await
             .unwrap_err();
@@ -556,7 +565,7 @@ mod tests {
 
     #[tokio::test]
     async fn installs_and_updates_from_git() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let repo = tempfile::tempdir().unwrap();
         write(
             repo.path(),
@@ -626,7 +635,7 @@ mod tests {
 
     #[tokio::test]
     async fn extensions_can_be_disabled_and_reenabled() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let enabled = |list: &serde_json::Value| {
             list.as_array()
                 .unwrap()

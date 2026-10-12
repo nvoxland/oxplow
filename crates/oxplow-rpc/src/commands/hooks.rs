@@ -96,7 +96,7 @@ pub async fn get_agent_turn(
 mod tests {
     #[tokio::test]
     async fn list_agent_events_dispatches_with_all_optionals_absent() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let out = crate::dispatch("list_agent_events", serde_json::json!({}), &svc)
             .await
             .unwrap();
@@ -105,7 +105,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_agent_statuses_dispatches() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let out = crate::dispatch("list_agent_statuses", serde_json::json!(null), &svc)
             .await
             .unwrap();
@@ -116,7 +116,7 @@ mod tests {
     async fn a_thread_with_a_logged_status_is_listed_with_its_derived_state() {
         // The row list is every thread that has logged a status; the
         // state shown is derived from its activity.
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         crate::dispatch(
             "ingest_hook_event",
             serde_json::json!({

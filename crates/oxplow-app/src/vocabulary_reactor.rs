@@ -21,45 +21,27 @@
 //! the same transaction that checks it.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::hash::{Hash, Hasher};
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
 
 use oxplow_db::event_retention::{restate_declared_tx, DeclaredRetention};
 use oxplow_db::event_type_store::{recorded_schema_tx, restate_tx, EventTypeRow};
 use oxplow_db::ref_kind_store::RefKindRow;
-use oxplow_db::Database;
 use oxplow_domain::events::schema::{extension_namespace, EventSchemaRegistry};
 use oxplow_domain::refs::kind::{core_kinds, KindRegistry};
-use oxplow_domain::vocabulary::{Vocabulary, VocabularyHandle};
+use oxplow_domain::vocabulary::Vocabulary;
 use oxplow_domain::DomainError;
-use tokio::sync::Mutex;
 
-use crate::extension_catalog::{CatalogSnapshot, ExtensionCatalog};
+use crate::extension_catalog::CatalogSnapshot;
 use crate::extension_event_types::EventTypes;
 use crate::extension_ref_kinds::RefKindDecl;
 use crate::extensions::Extension;
 
-/// A burst of file events is one pass.
-const SETTLE: Duration = Duration::from_millis(250);
-
-#[derive(Default)]
-struct State {
-    fingerprint: Option<u64>,
-    errors: BTreeMap<String, Vec<String>>,
-}
-
+/// What the generation needs of the host to build a vocabulary: the
+/// active work list's id recognizer, asked at each build.
 pub struct VocabularyService {
-    db: Database,
-    catalog: Arc<ExtensionCatalog>,
-    /// The primary worktree, whose extensions declare the vocabulary.
-    root: PathBuf,
-    vocabulary: VocabularyHandle,
     /// The active work list's id recognizer (its id and `id_pattern`), if
     /// it declares one: the vocabulary's way of reading `tsk42` in text.
     work_item_ids: WorkItemIds,
-    state: Mutex<State>,
 }
 
 /// The active work list's id recognizer, asked at each build.
@@ -187,21 +169,8 @@ fn declarations(extensions: &[Extension]) -> Declared {
 }
 
 impl VocabularyService {
-    pub fn new(
-        db: Database,
-        catalog: Arc<ExtensionCatalog>,
-        root: PathBuf,
-        vocabulary: VocabularyHandle,
-        work_item_ids: WorkItemIds,
-    ) -> Self {
-        Self {
-            db,
-            catalog,
-            root,
-            vocabulary,
-            work_item_ids,
-            state: Mutex::new(State::default()),
-        }
+    pub fn new(work_item_ids: WorkItemIds) -> Self {
+        Self { work_item_ids }
     }
 
     /// Capture declarations and the current host recognizer from one catalog
@@ -212,78 +181,6 @@ impl VocabularyService {
         snapshot: &CatalogSnapshot,
     ) -> Result<PreparedVocabulary, VocabularyErrors> {
         PreparedVocabulary::prepare(snapshot, (self.work_item_ids)())
-    }
-
-    /// Rebuild and swap the vocabulary if what extensions declare changed.
-    /// Passes are serialized.
-    pub async fn sync(&self) -> Result<(), DomainError> {
-        let mut state = self.state.lock().await;
-        // Every enabled extension: one that declares nothing restates its
-        // retention back to the default.
-        let declared = declarations(&self.catalog.get(&self.root));
-        let ids = (self.work_item_ids)();
-        let fingerprint = {
-            let mut h = std::collections::hash_map::DefaultHasher::new();
-            serde_json::to_string(&declared)
-                .map_err(|e| DomainError::Invalid(e.to_string()))?
-                .hash(&mut h);
-            ids.hash(&mut h);
-            h.finish()
-        };
-        if state.fingerprint == Some(fingerprint) {
-            return Ok(());
-        }
-        let now = oxplow_domain::Timestamp::now().to_string();
-        let (mut vocabulary, errors) = self
-            .db
-            .transaction(move |tx| build_tx(tx, &declared, &now))
-            .await?;
-        vocabulary.kinds = with_work_item_ids(vocabulary.kinds, ids.as_ref());
-        for (extension, errs) in &errors {
-            for e in errs {
-                tracing::warn!(extension, error = %e, "extension event type not registered");
-            }
-        }
-        self.vocabulary.swap(vocabulary);
-        state.errors = errors;
-        state.fingerprint = Some(fingerprint);
-        Ok(())
-    }
-
-    /// `extensions` with what each one's declarations were refused for
-    /// added to its `errors` — for the primary worktree's list.
-    pub async fn with_health(&self, root: &Path, mut extensions: Vec<Extension>) -> Vec<Extension> {
-        if root != self.root {
-            return extensions;
-        }
-        let state = self.state.lock().await;
-        for ext in &mut extensions {
-            if let Some(errs) = state.errors.get(&ext.name) {
-                ext.errors.extend(errs.iter().cloned());
-            }
-        }
-        extensions
-    }
-
-    /// Build now, then again whenever the primary worktree's extensions
-    /// may have changed, for the life of the process.
-    pub fn spawn(self: Arc<Self>, mut changes: tokio::sync::broadcast::Receiver<()>) {
-        tokio::spawn(async move {
-            if let Err(error) = self.sync().await {
-                tracing::warn!(%error, "the vocabulary didn't build at boot");
-            }
-            loop {
-                match changes.recv().await {
-                    Ok(()) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
-                }
-                tokio::time::sleep(SETTLE).await;
-                while changes.try_recv().is_ok() {}
-                if let Err(error) = self.sync().await {
-                    tracing::warn!(%error, "the vocabulary didn't build");
-                }
-            }
-        });
     }
 }
 
@@ -493,6 +390,7 @@ mod tests {
     use oxplow_db::SqlCell;
     use oxplow_domain::Envelope;
     use serde_json::json;
+    use std::path::Path;
 
     fn write(root: &Path, rel: &str, body: &str) {
         let p = root.join(rel);
@@ -530,7 +428,7 @@ mod tests {
             "oxplow/extensions/acme-pr/merged.json",
             &schema("number"),
         );
-        svc.vocabulary_service.sync().await.unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
         log.append(merged(12)).await.unwrap();
         let listed = svc
             .sql
@@ -552,13 +450,13 @@ mod tests {
             ]]
         );
 
-        // The same version, a new shape: refused; the old one is gone too.
+        // The same version, a new shape: refused (named in the errors).
         write(
             &root,
             "oxplow/extensions/acme-pr/merged.json",
             &schema("pr"),
         );
-        svc.vocabulary_service.sync().await.unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
         let errors = svc
             .listed_extensions(&root)
             .await
@@ -571,12 +469,18 @@ mod tests {
                 && e.contains("changed since that version was recorded")),
             "{errors:?}"
         );
-        assert!(log.append(merged(13)).await.is_err());
+        // The edit isn't adopted: the last working version stays, so the
+        // contract recorded at that version still holds.
+        log.append(merged(13)).await.unwrap();
+        assert!(log
+            .append(Envelope::new("acme_pr.merged", 1, "test", json!({ "pr": 13 })).unwrap())
+            .await
+            .is_err());
 
         // Removed: no appends, the logged row still reads, the type stays
         // listed unregistered.
         std::fs::remove_dir_all(root.join("oxplow/extensions/acme-pr")).unwrap();
-        svc.vocabulary_service.sync().await.unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
         assert!(log.append(merged(14)).await.is_err());
         let rows = log.read_after(0, 10_000).await.unwrap();
         assert!(rows.iter().any(
@@ -628,10 +532,10 @@ mod tests {
                 .await
                 .unwrap()
         };
-        svc.vocabulary_service.sync().await.unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
         assert_eq!(window().await, (7, 3));
         std::fs::remove_dir_all(root.join("oxplow/extensions/acme-pr")).unwrap();
-        svc.vocabulary_service.sync().await.unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
         assert_eq!(window().await, (7, 3));
     }
 
@@ -650,7 +554,7 @@ mod tests {
         };
         assert_eq!(link(), None);
         write_acme(&root, ACME);
-        svc.vocabulary_service.sync().await.unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
         assert_eq!(link().as_deref(), Some("acme_pr:12"));
         let listed = svc
             .sql
@@ -670,7 +574,7 @@ mod tests {
             ]]
         );
         std::fs::remove_dir_all(root.join("oxplow/extensions/acme")).unwrap();
-        svc.vocabulary_service.sync().await.unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
         assert_eq!(link(), None);
     }
 
@@ -697,7 +601,7 @@ mod tests {
             root.join("oxplow/extensions/beta"),
         )
         .unwrap();
-        svc.vocabulary_service.sync().await.unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
         let listed = svc.listed_extensions(&root).await;
         for (name, other) in [("acme", "beta"), ("beta", "acme")] {
             let errors = listed
@@ -711,13 +615,16 @@ mod tests {
                 "{name}: {errors}"
             );
         }
+        // The error holds each extension back whole (an extension with a
+        // load error doesn't activate), so neither kind is registered and
+        // nothing links.
         let kinds = &svc.vocabulary.current().kinds;
-        assert!(kinds.get("acme_pr").is_some() && kinds.get("beta_pr").is_some());
+        assert!(kinds.get("acme_pr").is_none() && kinds.get("beta_pr").is_none());
         let link =
             |l: &str| oxplow_domain::refs::canonical_wikilink(kinds, l).map(|r| r.to_string());
         assert_eq!(link("pr:12"), None, "the sugar links neither");
-        assert_eq!(link("acme_pr:12").as_deref(), Some("acme_pr:12"));
-        assert_eq!(link("beta_pr:12").as_deref(), Some("beta_pr:12"));
+        assert_eq!(link("acme_pr:12"), None);
+        assert_eq!(link("beta_pr:12"), None);
     }
 
     /// tsk933: namespaces are string prefixes, so `acme`'s (`acme_`) holds
@@ -749,7 +656,7 @@ mod tests {
             root.join("oxplow/extensions/acme-pr"),
         )
         .unwrap();
-        svc.vocabulary_service.sync().await.unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
         let listed = svc.listed_extensions(&root).await;
         let errors = |name: &str| {
             listed
@@ -802,7 +709,7 @@ mod tests {
             "oxplow/extensions/acme_pr/extension.yaml",
             "manifest: 2\nname: acme_pr\nsharing: private\nintent: { purpose: Other., origin: null, examples: [] }\n",
         );
-        svc.vocabulary_service.sync().await.unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
         let window = svc
             .db
             .read(|tx| {
@@ -909,7 +816,7 @@ mod tests {
             "oxplow/extensions/acme_pr/closed.json",
             &schema("number"),
         );
-        svc.vocabulary_service.sync().await.unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
         let listed = svc.listed_extensions(&root).await;
         let errors = |name: &str| {
             listed
@@ -982,7 +889,7 @@ mod tests {
         );
 
         // Nobody registers it: the subscriber's error, for each.
-        svc.vocabulary_service.sync().await.unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
         let unresolved = |errors: &[String]| {
             errors
                 .iter()
@@ -994,7 +901,10 @@ mod tests {
         let errors = listed(svc, "beta").await.errors;
         assert_eq!(unresolved(&errors), 2, "{errors:?}");
         assert!(
-            errors.iter().all(|e| e.contains("extension.yaml:")),
+            errors
+                .iter()
+                .filter(|e| e.contains("no enabled extension registers"))
+                .all(|e| e.contains("extension.yaml:")),
             "{errors:?}"
         );
 
@@ -1005,7 +915,7 @@ mod tests {
             "oxplow/extensions/acme-pr/merged.json",
             &schema("number"),
         );
-        svc.vocabulary_service.sync().await.unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
         assert_eq!(listed(svc, "beta").await.errors, Vec::<String>::new());
 
         // The owner's declaration is refused (a new shape at a recorded
@@ -1015,12 +925,12 @@ mod tests {
             "oxplow/extensions/acme-pr/merged.json",
             &schema("pr"),
         );
-        svc.vocabulary_service.sync().await.unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
         assert_eq!(unresolved(&listed(svc, "beta").await.errors), 2);
 
         // The owner goes: unresolved again.
         std::fs::remove_dir_all(root.join("oxplow/extensions/acme-pr")).unwrap();
-        svc.vocabulary_service.sync().await.unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
         assert_eq!(unresolved(&listed(svc, "beta").await.errors), 2);
     }
 

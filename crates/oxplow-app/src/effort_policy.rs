@@ -421,17 +421,6 @@ pub fn prepare_built_ins(
     PreparedEffortPolicies { providers: built }
 }
 
-pub fn register_built_ins(
-    registry: &EffortPolicyRegistry,
-    declared: &[crate::capabilities::Implementation],
-    sql: &SqlGateway,
-    trees: &Arc<dyn crate::services::TreeSource>,
-    approvals: &Arc<crate::exec_consent::ApprovalStore>,
-    project_dir: &std::path::Path,
-) {
-    prepare_built_ins(declared, sql, trees, approvals, project_dir).publish(registry);
-}
-
 /// The dispatcher: offers the active effort policy each of [`EVENTS`] and
 /// runs what it composes; closes every open effort when the effort policy
 /// is switched.
@@ -782,58 +771,6 @@ mod tests {
         );
     }
 
-    /// A policy that records what it was offered and composes `calls`
-    /// for an item started — a provider instance's stand-in.
-    struct Recorder {
-        id: &'static str,
-        seen: std::sync::Mutex<Vec<String>>,
-        calls: Vec<CommandCall>,
-    }
-
-    #[async_trait]
-    impl EffortPolicy for Recorder {
-        fn id(&self) -> &str {
-            self.id
-        }
-        async fn react(
-            &self,
-            _run: &oxplow_domain::run::RunContext,
-            event: &EventView,
-        ) -> Result<Vec<CommandCall>, DomainError> {
-            self.seen.lock().unwrap().push(event.event_type.clone());
-            Ok(if event.payload["to"] == "in_progress" {
-                self.calls.clone()
-            } else {
-                Vec::new()
-            })
-        }
-    }
-
-    /// Make `id` an effort policy implementation that runs, and the
-    /// project's choice.
-    fn choose(fx: &EffortFixture, id: &str) {
-        fx.svc.capabilities.set_external(
-            crate::capabilities::Implementation {
-                capability: CAPABILITY.into(),
-                id: id.into(),
-                title: id.into(),
-                extension: None,
-                source: crate::capabilities::Source::External,
-                features: Value::Null,
-                fields: Value::Array(Vec::new()),
-                id_pattern: None,
-                config: json!({}),
-            },
-            true,
-        );
-        fx.svc
-            .config
-            .write()
-            .unwrap()
-            .active_providers
-            .insert(CAPABILITY.into(), id.into());
-    }
-
     /// What the built-in composes runs as its own effect,
     /// `effect:effort_policy:<id>` — what it logs says which policy did it.
     #[tokio::test]
@@ -861,81 +798,6 @@ mod tests {
         assert_eq!(actors.last().unwrap(), "effect:effort_policy:oxplow");
     }
 
-    /// The dispatcher offers events to the active policy only — a
-    /// registered one that isn't chosen hears nothing — and runs what it
-    /// composes as its effect. A catalog reload restates the declared
-    /// built-ins and keeps it registered.
-    #[tokio::test]
-    async fn only_the_active_policy_is_offered_events_and_a_reload_keeps_an_instance() {
-        let fx = services_with_effort().await;
-        close_fixture_effort(&fx).await;
-        let rec = Arc::new(Recorder {
-            id: "rec",
-            seen: std::sync::Mutex::default(),
-            calls: vec![call(
-                crate::commands::effort::OPEN,
-                json!({ "thread": thread_ref(fx.thread) }),
-            )],
-        });
-        fx.svc.effort_policies.register(rec.clone());
-        let first = item(&fx, "first", None, true).await;
-        transition(&fx, &Actor::Human, &first, "in_progress").await;
-        assert!(
-            rec.seen.lock().unwrap().is_empty(),
-            "oxplow is the active one"
-        );
-        transition(&fx, &Actor::Human, &first, "done").await;
-
-        choose(&fx, "rec");
-        crate::capabilities::refresh(&fx.svc).await.unwrap();
-        assert!(
-            fx.svc.effort_policies.has("rec"),
-            "a reload keeps an instance"
-        );
-        assert!(fx.svc.effort_policies.has("oxplow"));
-        let second = item(&fx, "second", None, true).await;
-        transition(&fx, &Actor::Human, &second, "in_progress").await;
-        // Filing the item and starting it.
-        assert_eq!(
-            *rec.seen.lock().unwrap(),
-            vec!["work_item.state_changed", "work_item.state_changed"]
-        );
-        let open: Vec<_> = efforts(&fx)
-            .await
-            .into_iter()
-            .filter(|e| e.2.as_deref() == Some("open"))
-            .collect();
-        assert_eq!(open.len(), 1, "rec opened one, unlinked");
-        assert_eq!(open[0].1, None);
-    }
-
-    /// A composed call that isn't a command fails the run before anything
-    /// runs: the item's state stands and no effort opens.
-    #[tokio::test]
-    async fn a_call_that_isnt_a_command_runs_nothing() {
-        let fx = services_with_effort().await;
-        close_fixture_effort(&fx).await;
-        fx.svc.effort_policies.register(Arc::new(Recorder {
-            id: "rec",
-            seen: std::sync::Mutex::default(),
-            calls: vec![
-                call(
-                    crate::commands::effort::OPEN,
-                    json!({ "thread": thread_ref(fx.thread) }),
-                ),
-                call("nope.no.cmd", json!({})),
-            ],
-        }));
-        choose(&fx, "rec");
-        let filed = item(&fx, "filed", None, true).await;
-        transition(&fx, &Actor::Human, &filed, "in_progress").await;
-        assert_eq!(state(&fx, &filed).await, "in_progress");
-        assert!(efforts(&fx)
-            .await
-            .iter()
-            .all(|e| e.2.as_deref() != Some("open")));
-    }
-
     /// With the policy `none`, starting and finishing items leaves efforts
     /// alone.
     #[tokio::test]
@@ -947,6 +809,9 @@ mod tests {
             .unwrap()
             .active_providers
             .insert(CAPABILITY.into(), NONE.into());
+        crate::test_fixtures::activate(&fx.svc).await;
+        // Core's rule: the switch closes what the policy before it opened.
+        settle(&fx).await;
         let other = item(&fx, "other", None, false).await;
         transition(&fx, &agent(&fx), &other, "in_progress").await;
         transition(&fx, &agent(&fx), &work_item_ref(fx.task), "done").await;
@@ -955,8 +820,9 @@ mod tests {
             vec![(
                 fx.effort.value(),
                 Some(work_item_ref(fx.task)),
-                Some("open".into())
-            )]
+                Some("switch".into())
+            )],
+            "nothing opened, nothing else closed"
         );
     }
 

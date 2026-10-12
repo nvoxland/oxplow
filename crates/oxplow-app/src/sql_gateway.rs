@@ -92,10 +92,6 @@ impl SqlGateway {
         self
     }
 
-    pub(crate) fn has_activation(&self) -> bool {
-        self.activation.is_active()
-    }
-
     pub(crate) fn request_activation(&self) {
         self.activation.request();
     }

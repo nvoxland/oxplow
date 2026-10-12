@@ -163,7 +163,9 @@ mod tests {
     async fn services() -> (Arc<Services>, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         git2::Repository::init(dir.path()).unwrap();
-        let svc = Arc::new(Services::in_memory(dir.path()).expect("in-memory services"));
+        let svc = Services::in_memory(dir.path())
+            .await
+            .expect("in-memory services");
         (svc, dir)
     }
 

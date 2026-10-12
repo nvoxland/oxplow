@@ -42,11 +42,8 @@ async fn tested(root: &Path, name: &str) -> Vec<String> {
 }
 
 /// A real oxplow over the project, as at boot.
-async fn booted(root: &Path) -> oxplow_app::Services {
-    let svc = oxplow_app::Services::in_memory(root).unwrap();
-    svc.extension_models.sync().await.unwrap();
-    svc.extension_commands.reconcile().await;
-    svc
+async fn booted(root: &Path) -> std::sync::Arc<oxplow_app::Services> {
+    oxplow_app::Services::in_memory(root).await.unwrap()
 }
 
 fn loaded(
@@ -100,7 +97,17 @@ async fn a_scaffolded_collector_checks_before_its_first_sync_and_runs() {
     assert!(tested(dir.path(), "open-items")
         .await
         .contains(&"example basic".to_string()));
-    let svc = booted(dir.path()).await;
+    // The extension's model reads its collector's entity, whose table a
+    // first run makes: so the host publishes the declared entities empty
+    // first (the extension would be held back without it).
+    let svc = oxplow_app::Services::in_memory_inactive(dir.path()).unwrap();
+    oxplow_app::collector_runner::publish_declared_empty(
+        &svc.db,
+        &svc.extension_catalog.get(dir.path()),
+    )
+    .await
+    .unwrap();
+    svc.initialize_extensions().await.unwrap();
     let ext = loaded(&svc, dir.path(), "open-items");
     let collector = &ext.collectors[0];
     // It runs for real: its entity, then its model, publish.
@@ -113,7 +120,10 @@ async fn a_scaffolded_collector_checks_before_its_first_sync_and_runs() {
         )
         .await
         .unwrap();
-    svc.extension_models.sync().await.unwrap();
+    svc.extension_activation
+        .activate(svc.clone())
+        .await
+        .unwrap();
     let lens = &ext.lenses[0];
     let run = oxplow_app::extensions::run_lens(
         &svc.sql,
@@ -227,7 +237,7 @@ async fn a_scaffolded_effect_checks_tests_and_once_approved_reacts() {
     assert!(tested(dir.path(), "done-notes")
         .await
         .contains(&"example basic".to_string()));
-    let svc = std::sync::Arc::new(booted(dir.path()).await);
+    let svc = booted(dir.path()).await;
     let ext = loaded(&svc, dir.path(), "done-notes");
     let decl = &ext.effects[0];
     let program = oxplow_app::effects::effect_program(&ext, decl);

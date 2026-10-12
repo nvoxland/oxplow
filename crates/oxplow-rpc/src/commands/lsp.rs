@@ -140,7 +140,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_installed_lsp_packages_dispatches_with_no_args() {
-        let (svc, _dir) = services();
+        let (svc, _dir) = services().await;
         let out = crate::dispatch("list_installed_lsp_packages", json!(null), &svc)
             .await
             .unwrap();
@@ -149,7 +149,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_lsp_servers_dispatches_with_no_args() {
-        let (svc, _dir) = services();
+        let (svc, _dir) = services().await;
         let out = crate::dispatch("list_lsp_servers", json!(null), &svc)
             .await
             .unwrap();
@@ -158,7 +158,7 @@ mod tests {
 
     #[tokio::test]
     async fn lsp_request_surfaces_self_describing_no_config() {
-        let (svc, _dir) = services();
+        let (svc, _dir) = services().await;
         let err = crate::dispatch(
             "lsp_request",
             json!({
@@ -186,7 +186,7 @@ mod tests {
 
     #[tokio::test]
     async fn respond_lsp_apply_edit_without_pending_token_is_a_no_op() {
-        let (svc, _dir) = services();
+        let (svc, _dir) = services().await;
         crate::dispatch(
             "respond_lsp_apply_edit",
             json!({ "token": 42, "applied": true, "failureReason": null }),

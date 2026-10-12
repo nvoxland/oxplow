@@ -103,7 +103,7 @@ mod tests {
     /// P5.B4 (tsk523): the neutral reads dispatch with revision strings.
     #[tokio::test]
     async fn the_vcs_reads_dispatch() {
-        let (svc, dir) = crate::test_support::services();
+        let (svc, dir) = crate::test_support::services().await;
         std::fs::write(dir.path().join("a.txt"), "one\n").unwrap();
         let git = |args: &[&str]| {
             let out = std::process::Command::new("git")

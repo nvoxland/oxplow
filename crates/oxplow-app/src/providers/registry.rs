@@ -646,16 +646,14 @@ impl Instance {
                 let registry = registry
                     .upgrade()
                     .ok_or_else(|| "the provider host is unavailable".to_string())?;
-                if registry.is_coordinated() {
-                    let configured = registry.scoped_instances();
-                    if !configured
-                        .get(&name)
-                        .is_some_and(|(current_scope, config)| {
-                            *current_scope == scope && config.enabled
-                        })
-                    {
-                        return Err("the provider instance is disabled or removed".into());
-                    }
+                let configured = registry.scoped_instances();
+                if !configured
+                    .get(&name)
+                    .is_some_and(|(current_scope, config)| {
+                        *current_scope == scope && config.enabled
+                    })
+                {
+                    return Err("the provider instance is disabled or removed".into());
                 }
                 let snapshot = registry
                     .deps
@@ -876,7 +874,7 @@ impl Instance {
         }
     }
 
-    fn is_stopped(&self) -> bool {
+    pub(super) fn is_stopped(&self) -> bool {
         self.stopped.load(std::sync::atomic::Ordering::SeqCst)
     }
 
@@ -1412,9 +1410,6 @@ pub trait CapabilityHost: Send + Sync {
     /// and synchronous publication action belong to one activation candidate.
     fn prepare(&self, instance: &Arc<Instance>) -> Result<PreparedProviderCapability, String>;
 
-    fn admit(&self, instance: &Arc<Instance>) -> Result<Value, String> {
-        Ok(self.prepare(instance)?.publish())
-    }
     /// Take a stopped instance's implementation out.
     fn retire(&self, id: &str);
 }
@@ -1589,17 +1584,11 @@ impl ProviderRegistry {
             .unwrap_or_else(|_| panic!("extension secret service is already installed"));
     }
 
-    /// Whether provider maps are owned by extension activation: from the
-    /// first activated generation on.
-    fn is_coordinated(&self) -> bool {
-        self.deps.activation.is_active()
-    }
-
     pub fn health(&self, instance: &str) -> Option<InstanceHealth> {
         self.health.lock().get(instance).cloned()
     }
 
-    fn set_state(&self, instance: &str, state: InstanceState) {
+    pub(super) fn set_state(&self, instance: &str, state: InstanceState) {
         self.health
             .lock()
             .entry(instance.to_string())
@@ -1999,12 +1988,8 @@ impl ProviderRegistry {
 
     /// Make the running instances match the project's config.
     pub async fn reconcile(&self) {
-        if self.is_coordinated() {
-            self.deps.catalog.changed();
-            return;
-        }
-        self.reconcile_pass().await;
-        self.reconciled.send_replace(true);
+        // Activation owns the running instances: ask it for a generation.
+        self.deps.catalog.changed();
     }
 
     /// Once its first reconcile has run — at once after that.
@@ -2013,81 +1998,12 @@ impl ProviderRegistry {
         let _ = done.wait_for(|d| *d).await;
     }
 
-    async fn reconcile_pass(&self) {
-        let _one = self.reconciling.lock().await;
-        let seen = self.global_mtime();
-        let configured = self.scoped_instances();
-        let extensions = self.extensions();
-        self.global.lock().reconciled_at = seen;
-        let running: Vec<String> = self.running.lock().await.keys().cloned().collect();
-        for name in running {
-            if !configured.get(&name).is_some_and(|(_, c)| c.enabled) {
-                self.stop(&name).await;
-            }
-        }
-        for (name, (scope, cfg)) in configured {
-            let Resolved {
-                ext,
-                spec,
-                id,
-                scope,
-            } = match Self::resolve_in(&extensions, &name, cfg.provider.as_deref(), scope)
-                .map_err(|why| format!("`{name}`: {why}"))
-            {
-                Ok(resolved) => resolved,
-                Err(reason) => {
-                    self.stop(&name).await;
-                    self.set_state(&name, InstanceState::Missing { reason });
-                    continue;
-                }
-            };
-            if !cfg.enabled {
-                self.set_state(&name, InstanceState::Off);
-                continue;
-            }
-            match self.disabled_reason(&name).await {
-                Ok(None) => {}
-                Ok(Some(reason)) => {
-                    self.stop(&name).await;
-                    self.set_state(&name, InstanceState::Disabled { reason });
-                    continue;
-                }
-                // Not knowing is not a yes: it stays off.
-                Err(e) => {
-                    self.stop(&name).await;
-                    self.set_state(
-                        &name,
-                        InstanceState::Failing {
-                            errors: vec![format!("couldn't read whether it was disabled: {e}")],
-                        },
-                    );
-                    continue;
-                }
-            }
-            if let Some(current) = self.get(&name).await {
-                if current.config == cfg.config
-                    && current.spec == spec
-                    && current.ext.path == ext.path
-                    && current.scope == scope
-                {
-                    continue;
-                }
-                self.stop(&name).await;
-            }
-            let _ = self
-                .enable_scoped(&ext, &spec, &id, scope, cfg.config)
-                .await;
-        }
-        // The config may name another active implementation.
-        let config = crate::config_service::read_config(&self.deps.config);
-        if let Err(e) = self.deps.capabilities.publish(&config, &self.deps.db).await {
-            tracing::warn!(error = %e, "restating the active implementations failed");
-        }
-    }
-
     /// Why `instance` is automatically disabled on this machine
     /// (`contribution_health`).
-    async fn disabled_reason(&self, instance: &str) -> Result<Option<String>, DomainError> {
+    pub(super) async fn disabled_reason(
+        &self,
+        instance: &str,
+    ) -> Result<Option<String>, DomainError> {
         self.contribution_health
             .disabled_reason(&contribution_key(instance))
             .await
@@ -2224,217 +2140,9 @@ impl ProviderRegistry {
         }))
     }
 
-    /// Start `ext`'s provider `spec` with `config` — its default instance
-    /// — and register what it declares ([`Self::enable_instance`]).
-    pub async fn enable(
-        &self,
-        ext: &Extension,
-        spec: &ProviderSpec,
-        config: Value,
-    ) -> Result<(), HostError> {
-        self.enable_instance(ext, spec, &spec.id, config).await
-    }
-
-    /// Start instance `id` of `ext`'s provider `spec` with `config` and
-    /// register what it declares, under `id`: its commands' namespace and
-    /// its capability provider. Consent, a matching handshake and a clean
-    /// `check` come first: refused, nothing is registered (a failed start
-    /// counts as a failure, [`crate::contribution_health`]).
-    pub async fn enable_instance(
-        &self,
-        ext: &Extension,
-        spec: &ProviderSpec,
-        id: &str,
-        config: Value,
-    ) -> Result<(), HostError> {
-        self.enable_scoped(ext, spec, id, Scope::Project, config)
-            .await
-    }
-
-    /// [`Self::enable_instance`] for an instance of `scope`.
-    async fn enable_scoped(
-        &self,
-        ext: &Extension,
-        spec: &ProviderSpec,
-        id: &str,
-        scope: Scope,
-        config: Value,
-    ) -> Result<(), HostError> {
-        let name = spec::instance_name(&ext.name, id);
-        if self.is_coordinated() {
-            return Err(HostError::Failed {
-                name,
-                message: "provider changes must use the extension configuration coordinator".into(),
-            });
-        }
-        let refuse = |message: String| HostError::Failed {
-            name: name.clone(),
-            message,
-        };
-        // What it is as configured can't run: its row says why (tsk840).
-        let refused = |reason: String| {
-            self.set_state(
-                &name,
-                InstanceState::Refused {
-                    reason: reason.clone(),
-                },
-            );
-            refuse(reason)
-        };
-        let bus = self
-            .bus
-            .upgrade()
-            .ok_or_else(|| refuse("the command bus is gone".into()))?;
-        if self.get(&name).await.is_some() {
-            return Err(refuse(format!("`{name}` is already running")));
-        }
-        let epoch = self.disable_epoch(&name);
-        if let Some(owner) = bus.namespace_owner(id) {
-            return Err(refused(format!(
-                "the command namespace `{id}` is already {owner}'s — give the instance another id"
-            )));
-        }
-        if self.hosts.values().any(|h| h.has(id)) {
-            return Err(refused(format!(
-                "`{id}` is already a provider — give the instance another id"
-            )));
-        }
-        let instance = match self.instance(ext, spec, id, scope, config).await {
-            Ok(i) => i,
-            Err(e) => {
-                self.start_failed(&name, None, e.clone()).await;
-                return Err(e);
-            }
-        };
-        let vocabulary = bus.vocabulary().current();
-        for t in &instance.declared.event_types {
-            if vocabulary.schema(&t.event_type, t.v) != Some(&t.schema) {
-                return Err(refused(format!(
-                    "it declares `{}@{}`, which isn't an event type oxplow knows with that schema \
-                     (a provider emits core types only, for now)",
-                    t.event_type, t.v
-                )));
-            }
-        }
-        let capability = self
-            .host_of(&instance)
-            .and_then(|host| host.prepare(&instance))
-            .map_err(&refused)?;
-        // Not over a disable that came in while this start was preparing:
-        // the disable's state stands, and `admit` refuses the start.
-        if self.disable_epoch(&name) == epoch {
-            self.set_state(&name, InstanceState::Checking);
-        }
-        match instance.start().await {
-            Ok(live) => {
-                let peer = live.conn.peer.clone();
-                *instance.live.lock().await = Some(live);
-                if let Err(error) = self.admit(instance.clone(), epoch, capability).await {
-                    instance.discard_unpublished().await;
-                    return Err(refuse(error));
-                }
-                instance.supervise(peer);
-                {
-                    let mut health = self.health.lock();
-                    let h = health
-                        .entry(name.clone())
-                        .or_insert_with(|| InstanceHealth::new(InstanceState::Ready));
-                    h.state = InstanceState::Ready;
-                    h.consecutive_failures = 0;
-                    h.last_ok_at = Some(now());
-                }
-                if let Err(e) = self
-                    .contribution_health
-                    .succeeded(&contribution_key(&name), None)
-                    .await
-                {
-                    tracing::warn!(instance = %name, error = %e, "recording its health failed");
-                }
-                // Its items, before the first scheduled read (P7.A3) — in
-                // the background: a large first read must not hold up the
-                // Enable button or every other reconcile (tsk716).
-                let me = self.me.clone();
-                tokio::spawn(async move {
-                    if let Some(registry) = me.upgrade() {
-                        registry.sync_started(&name).await;
-                    }
-                });
-                Ok(())
-            }
-            // It may come up: enabled and failing, its next call restarts
-            // it with backoff.
-            Err(e @ HostError::Failed { .. }) => {
-                if let Err(error) = self.admit(instance.clone(), epoch, capability).await {
-                    instance.discard_unpublished().await;
-                    return Err(refuse(error));
-                }
-                self.failed(&name, Some(&instance), e.to_string()).await;
-                Ok(())
-            }
-            Err(e) => {
-                self.start_failed(&name, None, e.clone()).await;
-                Err(e)
-            }
-        }
-    }
-
     /// How many times `instance` has been disabled.
     fn disable_epoch(&self, instance: &str) -> u64 {
         self.disables.lock().get(instance).copied().unwrap_or(0)
-    }
-
-    /// Register a started `instance` and count it running — unless it
-    /// was disabled since its start began (`epoch`): the disable wins.
-    /// Under the `running` lock, which a disable takes too.
-    async fn admit(
-        &self,
-        instance: Arc<Instance>,
-        epoch: u64,
-        capability: PreparedProviderCapability,
-    ) -> Result<(), String> {
-        let mut running = self.running.lock().await;
-        if self.disable_epoch(&instance.name) != epoch {
-            return Err(format!("`{}` was disabled while it started", instance.name));
-        }
-        if running.contains_key(&instance.name)
-            || self.hosts.values().any(|host| host.has(&instance.id))
-        {
-            return Err(format!(
-                "`{}` acquired another provider while it started",
-                instance.name
-            ));
-        }
-        let features = capability.publish();
-        self.publish(&instance, features).await;
-        instance
-            .admitted
-            .store(true, std::sync::atomic::Ordering::Release);
-        running.insert(instance.name.clone(), instance);
-        Ok(())
-    }
-
-    /// Its capability and `features` (as its capability's host read them)
-    /// in `v_capability_provider`, while it runs.
-    async fn publish(&self, instance: &Instance, features: Value) {
-        let capability = &instance.spec.capability;
-        self.deps.capabilities.set_external(
-            crate::capabilities::Implementation {
-                capability: capability.clone(),
-                id: instance.id.clone(),
-                title: instance.name.clone(),
-                extension: Some(instance.ext.name.clone()),
-                source: crate::capabilities::Source::External,
-                features,
-                fields: serde_json::to_value(&instance.spec.fields).unwrap_or_default(),
-                id_pattern: instance.spec.id_pattern.clone(),
-                config: serde_json::json!({}),
-            },
-            true,
-        );
-        let config = crate::config_service::read_config(&self.deps.config);
-        if let Err(e) = self.deps.capabilities.publish(&config, &self.deps.db).await {
-            tracing::warn!(instance = %instance.name, error = %e, "publishing a provider's features failed");
-        }
     }
 
     /// The host of `instance`'s capability. Every capability a spec may
@@ -2550,17 +2258,13 @@ impl ProviderRegistry {
     pub async fn stop(&self, instance: &str) -> bool {
         let running = {
             let mut instances = self.running.lock().await;
-            if self.is_coordinated() {
-                let Some(current) = instances.get(instance) else {
-                    return false;
-                };
-                if current.is_stopped() {
-                    return false;
-                }
-                self.halt_locked(&mut instances, instance)
-            } else {
-                instances.remove(instance)
+            let Some(current) = instances.get(instance) else {
+                return false;
+            };
+            if current.is_stopped() {
+                return false;
             }
+            self.halt_locked(&mut instances, instance)
         };
         let Some(running) = running else {
             return false;
@@ -2572,31 +2276,19 @@ impl ProviderRegistry {
     /// Stop every running instance at once, each process shut down the
     /// orderly way: what the daemon does before it exits.
     pub async fn shutdown_all(&self) {
-        let coordinated = self.is_coordinated();
         let all: Vec<Arc<Instance>> = {
             let mut running = self.running.lock().await;
-            if coordinated {
-                let names: Vec<_> = running.keys().cloned().collect();
-                names
-                    .iter()
-                    .filter_map(|name| self.halt_locked(&mut running, name))
-                    .collect()
-            } else {
-                std::mem::take(&mut *running).into_values().collect()
-            }
+            let names: Vec<_> = running.keys().cloned().collect();
+            names
+                .iter()
+                .filter_map(|name| self.halt_locked(&mut running, name))
+                .collect()
         };
         let mut stopping = tokio::task::JoinSet::new();
         for running in all {
-            let me = self.me.clone();
             stopping.spawn(async move {
-                if let Some(registry) = me.upgrade() {
-                    if coordinated {
-                        let ended = running.live.lock().await.take();
-                        running.end(ended).await;
-                    } else {
-                        registry.tear_down(running).await;
-                    }
-                }
+                let ended = running.live.lock().await.take();
+                running.end(ended).await;
             });
         }
         while stopping.join_next().await.is_some() {}
@@ -2604,42 +2296,13 @@ impl ProviderRegistry {
 
     /// Unregister a stopped instance and end its process.
     async fn tear_down(&self, running: Arc<Instance>) {
-        if self.is_coordinated() {
-            running
-                .stopped
-                .store(true, std::sync::atomic::Ordering::SeqCst);
-            running
-                .admitted
-                .store(false, std::sync::atomic::Ordering::Release);
-            self.deps.catalog.changed();
-            let ended = running.live.lock().await.take();
-            running.end(ended).await;
-            return;
-        }
-        if let Ok(host) = self.host_of(&running) {
-            host.retire(&running.id);
-        }
-        self.deps.capabilities.set_external(
-            crate::capabilities::Implementation {
-                capability: running.spec.capability.clone(),
-                id: running.id.clone(),
-                title: running.name.clone(),
-                extension: Some(running.ext.name.clone()),
-                source: crate::capabilities::Source::External,
-                features: Value::Null,
-                fields: serde_json::Value::Array(Vec::new()),
-                id_pattern: None,
-                config: serde_json::json!({}),
-            },
-            false,
-        );
-        let config = crate::config_service::read_config(&self.deps.config);
-        if let Err(e) = self.deps.capabilities.publish(&config, &self.deps.db).await {
-            tracing::warn!(instance = %running.name, error = %e, "withdrawing a provider's features failed");
-        }
         running
             .stopped
             .store(true, std::sync::atomic::Ordering::SeqCst);
+        running
+            .admitted
+            .store(false, std::sync::atomic::Ordering::Release);
+        self.deps.catalog.changed();
         let ended = running.live.lock().await.take();
         running.end(ended).await;
     }
@@ -3515,7 +3178,12 @@ impl ProviderRegistry {
     /// the state, health or enablement of the instance now running under
     /// its name (tsk836). `None`: an enable's first start, before the
     /// instance runs.
-    async fn start_failed(&self, instance: &str, made_by: Option<&Instance>, e: HostError) {
+    pub(super) async fn start_failed(
+        &self,
+        instance: &str,
+        made_by: Option<&Instance>,
+        e: HostError,
+    ) {
         let unstarted = match e {
             HostError::Unapproved(_) => InstanceState::Unapproved,
             HostError::Unconfigured { problems, .. } => InstanceState::Unconfigured {
@@ -3549,11 +3217,7 @@ impl ProviderRegistry {
         if !is_running(&running, made_by) {
             return None;
         }
-        if self.is_coordinated() {
-            self.halt_locked(&mut running, &made_by.name)
-        } else {
-            running.remove(&made_by.name)
-        }
+        self.halt_locked(&mut running, &made_by.name)
     }
 
     /// A start or call failed: count it ([`crate::contribution_health`]); the
@@ -3646,18 +3310,14 @@ impl ProviderRegistry {
             .lock()
             .entry(instance.to_string())
             .or_default() += 1;
-        if self.is_coordinated() {
-            let current = running.get(instance)?.clone();
-            current
-                .stopped
-                .store(true, std::sync::atomic::Ordering::SeqCst);
-            current
-                .admitted
-                .store(false, std::sync::atomic::Ordering::Release);
-            Some(current)
-        } else {
-            running.remove(instance)
-        }
+        let current = running.get(instance)?.clone();
+        current
+            .stopped
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        current
+            .admitted
+            .store(false, std::sync::atomic::Ordering::Release);
+        Some(current)
     }
 
     /// End what [`Self::halt_locked`] took, and show why.
@@ -3842,23 +3502,6 @@ impl HostError {
             _ => &[],
         }
     }
-}
-
-/// Keep the instances matching the extensions: once at boot, then
-/// whenever the primary worktree's extensions may have changed (the
-/// extension catalog's signal; an instance's own config arrives through
-/// the `config.providers` reactor).
-pub fn spawn_reconciler(state: Arc<crate::Services>) {
-    let mut changes = state.extension_catalog.changes();
-    tokio::spawn(async move {
-        state.providers.reconcile().await;
-        // Lagging only means it missed some: one pass covers them.
-        while let Ok(()) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) =
-            changes.recv().await
-        {
-            state.providers.reconcile().await;
-        }
-    });
 }
 
 /// What a provider is told of the run an `invoke` is part of.

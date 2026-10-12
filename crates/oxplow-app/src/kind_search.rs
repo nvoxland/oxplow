@@ -424,6 +424,18 @@ ref_kinds:
         );
     }
 
+    /// Publish the `pr` entity empty, so the models that read it compile
+    /// at the first generation (an entity table exists once something has
+    /// written to it), then activate.
+    async fn declare_entities(svc: &std::sync::Arc<crate::Services>) {
+        let root = svc.layout.project_dir.clone();
+        let snapshot = svc.extension_catalog.snapshot(&root);
+        collector_runner::publish_declared_empty(&svc.db, snapshot.extensions())
+            .await
+            .unwrap();
+        crate::test_fixtures::activate(svc).await;
+    }
+
     async fn collect(svc: &crate::Services) {
         let root = svc.layout.project_dir.clone();
         collector_runner::run_collector(
@@ -476,10 +488,9 @@ ref_kinds:
             &root,
             r#"[{"n": "12", "title": "Widget frobnicator", "body": "Adds the frobnication of widgets."}, {"n": "x1", "title": "Widget impostor", "body": "Not a pull request's id."}]"#,
         );
-        // The first sync publishes the `pr` entity its models read.
+        declare_entities(svc).await;
         collect(svc).await;
-        svc.extension_models.sync().await.unwrap();
-        svc.vocabulary_service.sync().await.unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
         let errors: Vec<String> = svc
             .listed_extensions(&root)
             .await
@@ -555,7 +566,7 @@ ref_kinds:
             "oxplow/extensions/acme/models/found.sql",
             "SELECT CAST('acme_pr:' || n AS TEXT) AS ref, CAST(title || ' (open)' AS TEXT) AS title, body FROM ref('pr')",
         );
-        svc.extension_models.sync().await.unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
         assert_eq!(
             found(svc, "open", &["13"]).await,
             vec![("13".to_string(), "Gadget polish (open)".to_string())]
@@ -563,7 +574,7 @@ ref_kinds:
 
         // No longer searchable: its entries leave.
         acme(&root, "");
-        svc.vocabulary_service.sync().await.unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
         assert_eq!(found(svc, "gadget", &[]).await, vec![]);
         let state = svc
             .db
@@ -593,9 +604,9 @@ ref_kinds:
             &root,
             r#"[{"n": "12", "title": "Widget frobnicator", "body": "Frobs."}]"#,
         );
+        declare_entities(svc).await;
         collect(svc).await;
-        svc.extension_models.sync().await.unwrap();
-        svc.vocabulary_service.sync().await.unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
         // Nothing heard the `ref_kind` write: the listener missed it.
         let assets = Assets::new(svc.db.clone(), Duration::from_millis(50));
         let mut lineage = crate::models_changed::Lineage::load(&svc.db).await.unwrap();
@@ -778,7 +789,9 @@ mod core_tests {
     async fn services() -> (Arc<Services>, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         git2::Repository::init(dir.path()).unwrap();
-        let svc = Arc::new(Services::in_memory(dir.path()).expect("in-memory services"));
+        let svc = Services::in_memory(dir.path())
+            .await
+            .expect("in-memory services");
         (svc, dir)
     }
 

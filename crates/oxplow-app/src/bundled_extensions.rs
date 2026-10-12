@@ -302,7 +302,7 @@ mod tests {
     #[tokio::test]
     async fn bundled_queries_read_only_published_views() {
         let f = crate::test_fixtures::services_with_effort().await;
-        f.svc.extension_models.sync().await.unwrap();
+        crate::test_fixtures::activate_with_problems(&f.svc).await;
         let bundled: Vec<&str> = super::BUNDLED.iter().map(|b| b.name).collect();
         let mut checked = 0;
         for ext in f.svc.extension_catalog.get(f._dir.path()).iter() {
@@ -610,7 +610,7 @@ mod tests {
         use oxplow_db::EffortStore as _;
         use oxplow_tasks::TaskStore as _;
         let f = crate::test_fixtures::services_with_task_effort().await;
-        f.svc.extension_models.sync().await.unwrap();
+        crate::test_fixtures::activate_with_problems(&f.svc).await;
         let describe = |text: &'static str| {
             let svc = f.svc.clone();
             let task = f.task;
@@ -1011,9 +1011,8 @@ mod tests {
             .await;
         }
         // As boot does: its models, its event types, its commands.
-        f.svc.extension_models.sync().await.unwrap();
-        f.svc.vocabulary_service.sync().await.unwrap();
-        f.svc.extension_commands.reconcile().await;
+        crate::test_fixtures::activate_with_problems(&f.svc).await;
+        crate::test_fixtures::activate(&f.svc).await;
         let tid = f.thread.value();
         // (group, title) per row, in display order.
         let lines = |rows: serde_json::Value| -> Vec<(String, String)> {
@@ -1110,7 +1109,7 @@ mod tests {
             )
             .await
             .unwrap();
-        f.svc.extension_models.sync().await.unwrap();
+        crate::test_fixtures::activate_with_problems(&f.svc).await;
         let tid = f.thread.value();
         let titles = |rows: serde_json::Value, col: usize| -> Vec<String> {
             rows.as_array()
@@ -1420,7 +1419,7 @@ mod tests {
         )
         .await
         .unwrap();
-        f.svc.extension_models.sync().await.unwrap();
+        crate::test_fixtures::activate_with_problems(&f.svc).await;
         let tree = run_bundled_lens(&f, "oxplow-bundled/uncommitted", &[("stream_id", 1)]).await;
         // (id, parent, label) per node.
         let nodes: Vec<(String, Option<String>, String)> = tree
@@ -1572,9 +1571,8 @@ mod tests {
             .await
             .unwrap();
         // As boot does: its models, its event types, its commands.
-        f.svc.extension_models.sync().await.unwrap();
-        f.svc.vocabulary_service.sync().await.unwrap();
-        f.svc.extension_commands.reconcile().await;
+        crate::test_fixtures::activate_with_problems(&f.svc).await;
+        crate::test_fixtures::activate(&f.svc).await;
         f
     }
 
@@ -2344,7 +2342,7 @@ mod tests {
     #[tokio::test]
     async fn the_interest_model_scores_a_change_like_the_old_formula() {
         let f = crate::test_fixtures::services_with_effort().await;
-        f.svc.extension_models.sync().await.unwrap();
+        crate::test_fixtures::activate_with_problems(&f.svc).await;
         f.svc
             .db
             .transaction(|tx| {
@@ -2457,7 +2455,7 @@ mod tests {
             })
             .await
             .unwrap();
-        f.svc.extension_models.sync().await.unwrap();
+        crate::test_fixtures::activate_with_problems(&f.svc).await;
         f.svc.assets.sync_models().await.unwrap();
         let read = || async {
             f.svc
@@ -2526,7 +2524,6 @@ mod tests {
             })
             .await
             .unwrap();
-        f.svc.metrics.seed_catalog().await;
         f.svc
             .metrics
             .run_effort_collectors(&f.thread, &f.effort, None, &|_| true)

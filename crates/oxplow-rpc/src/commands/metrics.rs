@@ -34,8 +34,7 @@ mod tests {
     /// catalog reads it back through SQL.
     #[tokio::test]
     async fn enabling_a_metric_shows_in_the_catalog() {
-        let (svc, _dir) = crate::test_support::services();
-        svc.metrics.seed_catalog().await;
+        let (svc, _dir) = crate::test_support::services().await;
         let enabled = |svc: &crate::RpcContext| {
             let svc = svc.clone();
             async move {
@@ -57,7 +56,7 @@ mod tests {
         )
         .await
         .unwrap();
-        svc.metrics.seed_catalog().await;
+        crate::test_support::publish(&svc).await;
         assert_eq!(enabled(&svc).await, json!(1));
         let err = crate::dispatch(
             "enable_metrics",

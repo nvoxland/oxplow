@@ -106,7 +106,7 @@ pub async fn select_thread(svc: &Services, req: SelectThreadRequest) -> Result<(
 mod tests {
     #[tokio::test]
     async fn list_threads_dispatches() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let out = crate::dispatch(
             "list_threads",
             serde_json::json!({"streamId": "str999999"}),
@@ -122,7 +122,7 @@ mod tests {
     /// whose selected thread was closed falls back to its writer.
     #[tokio::test]
     async fn a_closed_thread_leaves_the_thread_state() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let stream = svc.streams.ensure_primary().await.unwrap();
         let run = |name: &'static str, input: serde_json::Value| {
             let svc = svc.clone();
@@ -179,7 +179,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_thread_state_dispatches() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let out = crate::dispatch(
             "get_thread_state",
             serde_json::json!({"streamId": "str999999"}),

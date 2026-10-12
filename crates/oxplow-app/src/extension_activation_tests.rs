@@ -29,7 +29,7 @@ async fn project() -> (tempfile::TempDir, Arc<crate::Services>) {
     let dir = tempfile::tempdir().unwrap();
     crate::test_fixtures::init_git_repo(dir.path());
     write_ext(dir.path(), "alpha", 1, "");
-    let svc = Arc::new(crate::Services::in_memory(dir.path()).unwrap());
+    let svc = crate::Services::in_memory(dir.path()).await.unwrap();
     svc.extension_activation
         .activate(svc.clone())
         .await
@@ -216,7 +216,7 @@ async fn the_documented_examples_activate() {
             }
         }
     }
-    let svc = Arc::new(crate::Services::in_memory(dir.path()).unwrap());
+    let svc = crate::Services::in_memory(dir.path()).await.unwrap();
     svc.extension_activation
         .activate(svc.clone())
         .await

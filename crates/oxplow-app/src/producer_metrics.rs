@@ -505,7 +505,7 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
 /// in/out slice `oxplow.tokens` by `oxplow.token_kind`; test pass/fail slice
 /// `oxplow.test_case` by `oxplow.status`; analysis errors/warnings filter
 /// `oxplow.lint_hit` by severity; coverage is a `ratio` over `oxplow.coverage`.
-/// Seeded beside the built-in gauge specs (`MetricsService::seed_catalog`);
+/// Seeded beside the built-in gauge specs (the metric catalog generation);
 /// consumed by the engine at the read-flip (tsk26). Surface fields (title/unit/
 /// direction/display/category) come from [`builtin_producer_metrics`].
 pub fn builtin_producer_specs() -> Vec<NewMetricSpec> {

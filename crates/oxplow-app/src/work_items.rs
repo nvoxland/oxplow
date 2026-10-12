@@ -2,7 +2,7 @@
 //!
 //! - [`built_in_provider`], the factory for a built-in work list
 //!   (`oxplow:tasks`, oxplow's own tasks, from `oxplow-tasks`), and
-//!   [`register_built_ins`], which registers the ones the project's
+//!   [`prepare_built_ins`], which registers the ones the project's
 //!   extensions declare;
 //! - [`WorkItems`], a typed client over the `work_item.*` commands: the
 //!   one write surface for every provider (the conformance suite and
@@ -106,14 +106,6 @@ pub fn prepare_built_ins(
         }
     }
     PreparedWorkItems { changes }
-}
-
-pub fn register_built_ins(
-    registry: &oxplow_domain::work_items::WorkItemsRegistry,
-    declared: &[crate::capabilities::Implementation],
-    db: &oxplow_db::Database,
-) {
-    prepare_built_ins(declared, db).publish(registry);
 }
 
 /// None as a work list: a sink. Every verb succeeds with `{ tracked:
@@ -538,7 +530,7 @@ mod tests {
             .unwrap()
             .personal_active_providers
             .insert("work_items".into(), oxplow_domain::capability::NONE.into());
-        crate::capabilities::refresh(svc).await.unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
         for view in ["v_work_item", "v_work_item_link", "v_work_item_comment"] {
             assert_eq!(
                 rows(svc, &format!("SELECT count(*) FROM {view}")).await,

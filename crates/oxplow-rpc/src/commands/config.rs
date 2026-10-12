@@ -146,7 +146,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_config_dispatches_with_no_args() {
-        let (svc, _dir) = services();
+        let (svc, _dir) = services().await;
         let out = crate::dispatch("get_config", json!(null), &svc)
             .await
             .unwrap();
@@ -185,7 +185,7 @@ mod tests {
     /// returned config says.
     #[tokio::test]
     async fn settings_writes_are_the_persons_config_commands() {
-        let (svc, dir) = services();
+        let (svc, dir) = services().await;
         for (command, args) in [
             ("set_agents", json!({ "agents": ["claude", "codex"] })),
             ("set_agent_prompt_append", json!({ "text": "Be brief." })),

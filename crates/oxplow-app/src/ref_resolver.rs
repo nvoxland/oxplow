@@ -282,7 +282,7 @@ mod tests {
     #[tokio::test]
     async fn resolves_task_title_and_status() {
         let dir = git_repo_with_commit("init", "");
-        let services = Services::in_memory(dir.path()).unwrap();
+        let services = Services::in_memory(dir.path()).await.unwrap();
         let task = crate::test_fixtures::file_item(&services, serde_json::json!({ "title": "Fix the flaky test", "body": "It fails on CI only.\nSecond line.", "state": "in_progress" })).await;
 
         let summary = resolve_ref(&services, "work_item", &format!("oxplow:{}", task)).await;
@@ -301,7 +301,7 @@ mod tests {
     #[tokio::test]
     async fn a_work_item_resolves_from_the_active_list_only() {
         let dir = git_repo_with_commit("init", "");
-        let services = Services::in_memory(dir.path()).unwrap();
+        let services = Services::in_memory(dir.path()).await.unwrap();
         let task = crate::test_fixtures::file_item(
             &services,
             serde_json::json!({ "title": "Fix the flaky test" }),
@@ -326,7 +326,7 @@ mod tests {
     #[tokio::test]
     async fn unknown_task_id_is_bare() {
         let dir = git_repo_with_commit("init", "");
-        let services = Services::in_memory(dir.path()).unwrap();
+        let services = Services::in_memory(dir.path()).await.unwrap();
         let summary = resolve_ref(&services, "work_item", "oxplow:tsk999999").await;
         assert_eq!(summary.title, None);
         assert_eq!(summary.detail, None);
@@ -336,7 +336,7 @@ mod tests {
     #[tokio::test]
     async fn resolves_commit_subject_and_stats() {
         let dir = git_repo_with_commit("Add the widget", "Longer rationale here.");
-        let services = Services::in_memory(dir.path()).unwrap();
+        let services = Services::in_memory(dir.path()).await.unwrap();
         let sha = head_sha(dir.path());
 
         let summary = resolve_ref(&services, "commit", &sha).await;
@@ -356,7 +356,7 @@ mod tests {
     #[tokio::test]
     async fn legacy_kind_names_are_not_resolved() {
         let dir = git_repo_with_commit("Add the widget", "");
-        let services = Services::in_memory(dir.path()).unwrap();
+        let services = Services::in_memory(dir.path()).await.unwrap();
         let sha = head_sha(dir.path());
         for (kind, id) in [
             ("git-commit", sha.as_str()),
@@ -371,7 +371,7 @@ mod tests {
     #[tokio::test]
     async fn unknown_kind_is_bare() {
         let dir = git_repo_with_commit("init", "");
-        let services = Services::in_memory(dir.path()).unwrap();
+        let services = Services::in_memory(dir.path()).await.unwrap();
         let summary = resolve_ref(&services, "mystery", "whatever").await;
         assert_eq!(summary.kind, "mystery");
         assert_eq!(summary.id, "whatever");
@@ -382,7 +382,7 @@ mod tests {
     #[tokio::test]
     async fn resolves_file_size_and_head() {
         let dir = git_repo_with_commit("init", "");
-        let services = Services::in_memory(dir.path()).unwrap();
+        let services = Services::in_memory(dir.path()).await.unwrap();
         // a.rs is `fn main() {}\n` (13 bytes) created by the fixture.
         let summary = resolve_ref(&services, "file", "a.rs").await;
         assert_eq!(summary.kind, "file");
@@ -395,7 +395,7 @@ mod tests {
     #[tokio::test]
     async fn missing_file_is_bare() {
         let dir = git_repo_with_commit("init", "");
-        let services = Services::in_memory(dir.path()).unwrap();
+        let services = Services::in_memory(dir.path()).await.unwrap();
         let summary = resolve_ref(&services, "file", "does/not/exist.rs").await;
         assert_eq!(summary.detail, None);
         assert_eq!(summary.body_excerpt, None);
@@ -407,7 +407,7 @@ mod tests {
         std::fs::create_dir(dir.path().join("sub")).unwrap();
         std::fs::write(dir.path().join("sub/x.rs"), "x").unwrap();
         std::fs::write(dir.path().join("sub/y.rs"), "y").unwrap();
-        let services = Services::in_memory(dir.path()).unwrap();
+        let services = Services::in_memory(dir.path()).await.unwrap();
         let summary = resolve_ref(&services, "dir", "sub").await;
         assert_eq!(summary.detail.as_deref(), Some("2 entries"));
         let names = summary.body_excerpt.unwrap();
@@ -421,7 +421,7 @@ mod tests {
     async fn resolves_wiki_title_and_lead() {
         use oxplow_db::wiki_page_store::WikiPage;
         let dir = git_repo_with_commit("init", "");
-        let services = Services::in_memory(dir.path()).unwrap();
+        let services = Services::in_memory(dir.path()).await.unwrap();
         let now = oxplow_domain::Timestamp::now();
         let page = WikiPage {
             slug: "architecture".into(),
@@ -452,7 +452,7 @@ mod tests {
     async fn resolves_finding_kind_and_location() {
         use oxplow_db::analytics_stores::CodeQualityFinding;
         let dir = git_repo_with_commit("init", "");
-        let services = Services::in_memory(dir.path()).unwrap();
+        let services = Services::in_memory(dir.path()).await.unwrap();
         let scan = services
             .code_quality_store
             .create_scan("complexity", "all", "working", "all")
@@ -484,7 +484,7 @@ mod tests {
     #[tokio::test]
     async fn resolve_refs_preserves_order() {
         let dir = git_repo_with_commit("init", "");
-        let services = Services::in_memory(dir.path()).unwrap();
+        let services = Services::in_memory(dir.path()).await.unwrap();
         let refs = vec![
             CommentTarget {
                 kind: "file".into(),

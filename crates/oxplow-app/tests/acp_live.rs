@@ -32,7 +32,7 @@ async fn a_real_adapter_answers_a_prompt() {
         .unwrap_or_else(|| panic!("{bin} is not installed"));
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().canonicalize().unwrap();
-    let svc = Arc::new(Services::in_memory(&root).unwrap());
+    let svc = Services::in_memory(&root).await.unwrap();
     let stream = svc.streams.ensure_primary().await.unwrap();
     // An ACP thread names a known ACP agent; the session below launches the
     // adapter under test whatever the thread names.

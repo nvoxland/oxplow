@@ -101,7 +101,7 @@ mod tests {
     /// working tree and a commit here — and a malformed one is refused.
     #[tokio::test]
     async fn reads_and_diffs_take_a_revision() {
-        let (svc, dir) = crate::test_support::services();
+        let (svc, dir) = crate::test_support::services().await;
         std::fs::write(dir.path().join("a.txt"), "one\n").unwrap();
         let git = |args: &[&str]| {
             let out = std::process::Command::new("git")

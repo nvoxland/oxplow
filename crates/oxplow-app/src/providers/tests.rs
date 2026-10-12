@@ -101,7 +101,14 @@ fn program(fx: &EffortFixture, ext: &Extension) -> exec_consent::ProjectProgram 
     .expect("the provider is listed")
 }
 
-fn approve(fx: &EffortFixture, ext: &Extension) {
+/// The person approves the program, which publishes a generation that can
+/// start it (the catalog change an approval raises).
+async fn approve(fx: &EffortFixture, ext: &Extension) {
+    approve_without_activating(fx, ext);
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
+}
+
+fn approve_without_activating(fx: &EffortFixture, ext: &Extension) {
     let p = program(fx, ext);
     let config = fx.svc.config.read().unwrap().clone();
     exec_consent::approve_program(
@@ -122,9 +129,10 @@ async fn approved(hooks: &str) -> (EffortFixture, Extension) {
     let fx = services_with_effort().await;
     write_extension(&fx.svc.layout.project_dir, hooks);
     let ext = extension(&fx.svc.layout.project_dir);
-    approve(&fx, &ext);
+    approve(&fx, &ext).await;
     // The fake is the project's tracker: where every create files.
-    make_active(&fx, "fake");
+    make_active(&fx, "fake").await;
+    crate::test_fixtures::activate(&fx.svc).await;
     (fx, ext)
 }
 
@@ -148,7 +156,19 @@ fn configure(fx: &EffortFixture, enabled: bool, config: serde_json::Value) {
 /// files (tsk1058).
 /// `provider` the active work list, as a `oxplow.config.set` would leave it:
 /// the config, and the capability rows the interface reads.
-fn make_active(fx: &EffortFixture, provider: &str) {
+async fn make_active(fx: &EffortFixture, provider: &str) {
+    // Unchanged, no new generation: the running instances keep running.
+    let unchanged = fx
+        .svc
+        .config
+        .read()
+        .unwrap()
+        .active_providers
+        .get("work_items")
+        .is_some_and(|current| current == provider);
+    if unchanged {
+        return;
+    }
     fx.svc
         .config
         .write()
@@ -156,6 +176,42 @@ fn make_active(fx: &EffortFixture, provider: &str) {
         .active_providers
         .insert("work_items".into(), provider.into());
     republish(fx);
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
+}
+
+/// Enable `spec`'s default instance with `config`, as the person's
+/// configuration does: write its entry, then publish the generation that
+/// starts it. A refused or failing start shows in its health, not here.
+async fn enable_on(
+    svc: &std::sync::Arc<crate::Services>,
+    ext: &Extension,
+    spec: &spec::ProviderSpec,
+    config: serde_json::Value,
+) {
+    svc.config.write().unwrap().extension_instances.insert(
+        spec::instance_name(&ext.name, &spec.id),
+        oxplow_config::ExtensionInstanceConfig {
+            enabled: true,
+            config,
+            sync_minutes: None,
+            provider: None,
+        },
+    );
+    crate::test_fixtures::activate_with_problems(svc).await;
+}
+
+/// Turn `instance` off in the project's configuration and publish the
+/// generation without it: it stops, and what it registered goes.
+async fn turn_off(svc: &std::sync::Arc<crate::Services>, instance: &str) {
+    {
+        let mut config = svc.config.write().unwrap();
+        config
+            .extension_instances
+            .get_mut(instance)
+            .expect("the instance is configured")
+            .enabled = false;
+    }
+    crate::test_fixtures::activate_with_problems(svc).await;
 }
 
 fn republish(fx: &EffortFixture) {
@@ -196,13 +252,8 @@ async fn an_unapproved_provider_is_refused_and_registers_nothing() {
     assert_eq!(listed.name, INSTANCE);
     assert!(!listed.approved);
 
-    let refused = fx
-        .svc
-        .providers
-        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-        .await
-        .unwrap_err();
-    assert_eq!(refused, HostError::Unapproved(INSTANCE.into()));
+    // The generation activates; the unapproved instance stays off.
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     assert!(!running(&fx.svc, "fake"));
     assert!(fx.svc.work_items.get("fake").is_err());
     assert_eq!(
@@ -215,14 +266,11 @@ async fn an_unapproved_provider_is_refused_and_registers_nothing() {
 async fn edited_declarations_need_approving_again() {
     let (fx, ext) = approved("").await;
     let providers = &fx.svc.providers;
-    providers
-        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-        .await
-        .unwrap();
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     // Its start's first read, in the background (tsk716).
     first_read(&fx).await;
     assert!(running(&fx.svc, "fake"));
-    assert!(providers.stop(INSTANCE).await);
+    turn_off(&fx.svc, INSTANCE).await;
     assert!(!running(&fx.svc, "fake"));
 
     // A widened declaration is a new version: shown unapproved, refused.
@@ -233,34 +281,25 @@ async fn edited_declarations_need_approving_again() {
     std::fs::write(&file, serde_json::to_string(&declared).unwrap()).unwrap();
     let ext = extension(&project);
     assert!(!program(&fx, &ext).approved);
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
+    assert!(!running(&fx.svc, "fake"));
     assert_eq!(
-        providers
-            .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-            .await
-            .unwrap_err(),
-        HostError::Unapproved(INSTANCE.into())
+        providers.health(INSTANCE).unwrap().state,
+        InstanceState::Unapproved
     );
 }
 
 #[tokio::test]
 async fn a_provider_must_answer_with_its_approved_declarations() {
     let (fx, ext) = approved("bad-declarations").await;
-    let err = fx
-        .svc
-        .providers
-        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-        .await
-        .unwrap_err();
-    assert!(
-        matches!(&err, HostError::DeclarationsChanged { detail, .. } if detail.contains("/commands")),
-        "{err}"
-    );
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     assert!(!running(&fx.svc, "fake"));
     // Not what was approved: off, and logged, until a person looks.
-    assert!(matches!(
-        fx.svc.providers.health(INSTANCE).unwrap().state,
-        InstanceState::Disabled { .. }
-    ));
+    let state = fx.svc.providers.health(INSTANCE).unwrap().state;
+    assert!(
+        matches!(&state, InstanceState::Disabled { reason } if reason.contains("/commands")),
+        "{state:?}"
+    );
     assert_eq!(logged(&fx, "contribution.disabled").await.len(), 1);
 }
 
@@ -291,8 +330,12 @@ async fn an_unconfigured_instance_cannot_be_enabled() {
         .set_instance(&Actor::Human, INSTANCE, true, json!({ "team": "core" }))
         .await
         .unwrap();
-    assert_eq!(view.health.state, InstanceState::Ready);
     assert!(view.enabled);
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
+    assert_eq!(
+        providers.health(INSTANCE).unwrap().state,
+        InstanceState::Ready
+    );
     assert!(running(&fx.svc, "fake"));
     let written =
         std::fs::read_to_string(oxplow_config::config_path(&fx.svc.layout.project_dir)).unwrap();
@@ -304,7 +347,12 @@ async fn an_unconfigured_instance_cannot_be_enabled() {
         .set_instance(&Actor::Human, INSTANCE, false, json!({ "team": "core" }))
         .await
         .unwrap();
-    assert_eq!(view.health.state, InstanceState::Off);
+    assert!(!view.enabled);
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
+    assert_eq!(
+        providers.health(INSTANCE).unwrap().state,
+        InstanceState::Off
+    );
     assert!(!running(&fx.svc, "fake"));
 }
 
@@ -319,7 +367,7 @@ async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it()
 
     // Every start's check fails (each process begins with fail-next:3):
     // the reconcile's start is the first failure, two calls the rest.
-    providers.reconcile().await;
+    crate::test_fixtures::activate(&fx.svc).await;
     assert!(matches!(
         providers.health(INSTANCE).unwrap().state,
         InstanceState::Failing { .. }
@@ -342,6 +390,7 @@ async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it()
         panic!("{health:?}");
     };
     assert!(reason.contains("3 failures in a row"), "{reason}");
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     assert!(!running(&fx.svc, "fake"));
     let disabled = logged(&fx, "contribution.disabled").await;
     assert_eq!(disabled.len(), 1);
@@ -350,7 +399,7 @@ async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it()
     assert_eq!(disabled[0]["reason"], reason.as_str());
 
     // The log keeps it off.
-    providers.reconcile().await;
+    crate::test_fixtures::activate(&fx.svc).await;
     assert!(matches!(
         providers.health(INSTANCE).unwrap().state,
         InstanceState::Disabled { .. }
@@ -376,7 +425,7 @@ async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it()
         Err(oxplow_domain::CommandError::Denied { .. })
     ));
     write_extension(&fx.svc.layout.project_dir, "");
-    approve(&fx, &extension(&fx.svc.layout.project_dir));
+    approve(&fx, &extension(&fx.svc.layout.project_dir)).await;
     let enabled = fx
         .svc
         .commands
@@ -389,6 +438,7 @@ async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it()
         .await
         .unwrap();
     assert_eq!(enabled.result["state"], "ok", "{}", enabled.result);
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     assert_eq!(
         fx.svc.providers.health(INSTANCE).unwrap().state,
         InstanceState::Ready
@@ -401,11 +451,7 @@ async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it()
 #[tokio::test]
 async fn the_suite_finds_a_read_that_doesnt_restate_the_writes() {
     let (fx, ext) = approved("stale-read").await;
-    fx.svc
-        .providers
-        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-        .await
-        .unwrap();
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     // Its start's first read, in the background (tsk716).
     first_read(&fx).await;
     let provider = fx.svc.work_items.get("fake").unwrap();
@@ -434,11 +480,7 @@ async fn the_suite_finds_a_read_that_doesnt_restate_the_writes() {
 async fn the_suite_finds_a_provider_that_forgets_its_keys() {
     for (hooks, finds) in [("forget-keys", true), ("plain-writes", false)] {
         let (fx, ext) = approved(hooks).await;
-        fx.svc
-            .providers
-            .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-            .await
-            .unwrap();
+        enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
         first_read(&fx).await;
         let provider = fx.svc.work_items.get("fake").unwrap();
         let findings = suite(
@@ -462,11 +504,7 @@ async fn the_suite_finds_a_provider_that_forgets_its_keys() {
 #[tokio::test]
 async fn the_work_items_suite_passes_through_the_host_over_the_fake() {
     let (fx, ext) = approved("").await;
-    fx.svc
-        .providers
-        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-        .await
-        .unwrap();
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     // Its start's first read, in the background (tsk716).
     first_read(&fx).await;
     let provider = fx.svc.work_items.get("fake").unwrap();
@@ -515,15 +553,10 @@ async fn the_work_items_suite_passes_through_the_host_over_the_fake() {
 #[tokio::test]
 async fn work_item_commands_write_another_providers_items_through_its_process() {
     let (fx, ext) = approved("").await;
-    fx.svc
-        .providers
-        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-        .await
-        .unwrap();
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     // Its start's first read, in the background (tsk716).
     first_read(&fx).await;
     // Its extra command is its extension's, declared over its operation.
-    fx.svc.extension_commands.reconcile().await;
     let estimate = fx
         .svc
         .commands
@@ -649,11 +682,7 @@ async fn work_item_commands_write_another_providers_items_through_its_process() 
 #[tokio::test(flavor = "multi_thread")]
 async fn an_outside_item_is_filed_on_the_thread_named_or_the_agents() {
     let (fx, ext) = approved("").await;
-    fx.svc
-        .providers
-        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-        .await
-        .unwrap();
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     first_read(&fx).await;
     let thread_of = |item: String| {
         let svc = fx.svc.clone();
@@ -708,11 +737,7 @@ async fn an_outside_item_is_filed_on_the_thread_named_or_the_agents() {
 #[tokio::test]
 async fn a_composite_writes_another_providers_item_as_steps() {
     let (fx, ext) = approved("").await;
-    fx.svc
-        .providers
-        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-        .await
-        .unwrap();
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     first_read(&fx).await;
     let item = fx
         .svc
@@ -767,11 +792,7 @@ async fn a_composite_writes_another_providers_item_as_steps() {
 #[tokio::test]
 async fn an_external_verb_input_is_checked_and_stays_on_its_provider() {
     let (fx, ext) = approved("").await;
-    fx.svc
-        .providers
-        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-        .await
-        .unwrap();
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     // Its start's first read, in the background (tsk716).
     first_read(&fx).await;
     let run = |input: serde_json::Value, name: &'static str| {
@@ -869,11 +890,7 @@ async fn an_external_verb_input_is_checked_and_stays_on_its_provider() {
 async fn a_running_instance_publishes_its_features() {
     let (fx, ext) = approved("").await;
     let store = oxplow_db::SqliteCapabilityStore::new(fx.svc.db.clone());
-    fx.svc
-        .providers
-        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-        .await
-        .unwrap();
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     // Its start's first read, in the background (tsk716).
     first_read(&fx).await;
     let fake = store
@@ -887,7 +904,7 @@ async fn a_running_instance_publishes_its_features() {
     assert_eq!(fake.extension.as_deref(), Some("tracker"));
     let declared = fx.svc.work_items.get("fake").unwrap().features;
     assert_eq!(fake.features, serde_json::to_value(declared).unwrap());
-    assert!(fx.svc.providers.stop(INSTANCE).await);
+    turn_off(&fx.svc, INSTANCE).await;
     let stopped = store
         .list()
         .await
@@ -915,14 +932,10 @@ async fn a_provider_reads_the_host_through_what_it_needs() {
         }
         let ext = extension(&root);
         assert_eq!(ext.providers[0].needs.is_empty(), !needs);
-        approve(&fx, &ext);
-        make_active(&fx, "fake");
-        fx.svc
-            .providers
-            .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-            .await
-            .unwrap();
-        fx.svc.extension_commands.reconcile().await;
+        approve(&fx, &ext).await;
+        make_active(&fx, "fake").await;
+        enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
+        crate::test_fixtures::activate(&fx.svc).await;
         let item = fx
             .svc
             .work_items_client()
@@ -977,13 +990,9 @@ async fn a_verbs_host_reads_are_recorded_with_its_run() {
     let text = std::fs::read_to_string(&manifest).unwrap();
     std::fs::write(&manifest, format!("{text}    needs: [sql.read]\n")).unwrap();
     let ext = extension(&root);
-    approve(&fx, &ext);
-    make_active(&fx, "fake");
-    fx.svc
-        .providers
-        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-        .await
-        .unwrap();
+    approve(&fx, &ext).await;
+    make_active(&fx, "fake").await;
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     let item = fx
         .svc
         .work_items_client()
@@ -1081,11 +1090,7 @@ async fn declaration_impact_compare_the_files_with_what_runs() {
     let (fx, ext) = approved("").await;
     let first = fx.svc.providers.declaration_impact(INSTANCE).await.unwrap();
     assert_eq!(first.change, crate::extension_impact::Change::Added);
-    fx.svc
-        .providers
-        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-        .await
-        .unwrap();
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     // Its start's first read, in the background (tsk716).
     first_read(&fx).await;
     let path = fx
@@ -1124,11 +1129,7 @@ fn a_coverage_runs_profile_path_reaches_the_provider() {
 #[tokio::test]
 async fn declaration_impact_compare_against_the_last_approved_copy() {
     let (fx, ext) = approved("").await;
-    fx.svc
-        .providers
-        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-        .await
-        .unwrap();
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     // Its start's first read, in the background (tsk716).
     first_read(&fx).await;
     let project = fx.svc.layout.project_dir.clone();
@@ -1142,7 +1143,7 @@ async fn declaration_impact_compare_against_the_last_approved_copy() {
         ),
     )
     .unwrap();
-    fx.svc.providers.stop(INSTANCE).await;
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     assert!(fx.svc.providers.get(INSTANCE).await.is_none());
     let effect = fx.svc.providers.declaration_impact(INSTANCE).await.unwrap();
     assert_eq!(effect.change, crate::extension_impact::Change::Changed);
@@ -1160,11 +1161,7 @@ async fn declaration_impact_compare_against_the_last_approved_copy() {
 #[tokio::test]
 async fn reading_the_approved_copy_waits_for_a_start_replacing_it() {
     let (fx, ext) = approved("").await;
-    fx.svc
-        .providers
-        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-        .await
-        .unwrap();
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     first_read(&fx).await;
     let copies = fx
         .svc
@@ -1255,7 +1252,7 @@ async fn provider_args_stay_inside_the_approved_folder() {
     std::fs::create_dir_all(dir.join("lib")).unwrap();
     std::fs::write(dir.join("lib/main.py"), "good()").unwrap();
     let ext = extension(&project);
-    approve(&fx, &ext);
+    approve(&fx, &ext).await;
     assert!(program(&fx, &ext).approved);
     std::fs::write(dir.join("lib/main.py"), "evil()").unwrap();
     assert!(!program(&fx, &ext).approved);
@@ -1348,7 +1345,7 @@ async fn an_adapter_providers_approval_covers_its_mapping_pins_and_server() {
     let dir = write_adapter_extension(&project);
     for file in ["mcp/x.star", "mcp/tools.json", "bin/server"] {
         let ext = extension(&project);
-        approve(&fx, &ext);
+        approve(&fx, &ext).await;
         assert!(program(&fx, &ext).approved);
         let path = dir.join(file);
         let text = std::fs::read_to_string(&path).unwrap();
@@ -1382,12 +1379,9 @@ async fn a_provider_runs_from_its_verified_copy() {
     )
     .unwrap();
     let ext = extension(&project);
-    approve(&fx, &ext);
+    approve(&fx, &ext).await;
     let providers = &fx.svc.providers;
-    providers
-        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-        .await
-        .unwrap();
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     // Its start's first read, in the background (tsk716).
     first_read(&fx).await;
     let copies = fx
@@ -1414,10 +1408,7 @@ async fn a_provider_runs_from_its_verified_copy() {
     assert!(providers.stop(INSTANCE).await);
     let copied = ran_in.join("bin/provider");
     std::fs::write(&copied, "#!/bin/sh\necho tampered\nexit 1\n").unwrap();
-    providers
-        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-        .await
-        .unwrap();
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     // Its start's first read, in the background (tsk716).
     first_read(&fx).await;
     assert_eq!(
@@ -1501,16 +1492,13 @@ fn a_provider_event_names_only_its_own_refs() {
 async fn a_hung_check_times_out_and_the_instance_can_still_stop() {
     let (fx, ext) = approved("slow-check:30000").await;
     let providers = &fx.svc.providers;
-    let enabled = tokio::time::timeout(
+    // A start that merely failed stays enabled, and the generation activates.
+    tokio::time::timeout(
         std::time::Duration::from_secs(10),
-        providers.enable(&ext, &ext.providers[0], json!({ "team": "core" })),
+        enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })),
     )
     .await
-    .expect("enable returns once check times out");
-    assert!(
-        enabled.is_ok(),
-        "a start that merely failed stays enabled: {enabled:?}"
-    );
+    .expect("activation returns once the check times out");
     let health = providers.health(INSTANCE).unwrap();
     let InstanceState::Failing { errors } = &health.state else {
         panic!("{health:?}");
@@ -1530,10 +1518,7 @@ async fn a_hung_check_times_out_and_the_instance_can_still_stop() {
 async fn a_hung_invoke_times_out_and_counts() {
     let (fx, ext) = approved("").await;
     let providers = &fx.svc.providers;
-    providers
-        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-        .await
-        .unwrap();
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     // Its start's first read, in the background (tsk716).
     first_read(&fx).await;
     set_hooks(&fx, "slow:30000").await;
@@ -1561,18 +1546,14 @@ async fn a_disable_while_starting_keeps_the_instance_off() {
     let providers = fx.svc.providers.clone();
     let spec = ext.providers[0].clone();
     let starting = {
-        let (providers, ext) = (providers.clone(), ext.clone());
-        tokio::spawn(async move {
-            providers
-                .enable(&ext, &spec, json!({ "team": "core" }))
-                .await
-        })
+        let (svc, ext) = (fx.svc.clone(), ext.clone());
+        tokio::spawn(async move { enable_on(&svc, &ext, &spec, json!({ "team": "core" })).await })
     };
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     providers
         .disable(INSTANCE, None, "a person turned it off".into())
         .await;
-    let _ = starting.await.unwrap();
+    starting.await.unwrap();
     assert!(!running(&fx.svc, "fake"));
     assert!(providers.get(INSTANCE).await.is_none());
     assert!(matches!(
@@ -1597,7 +1578,7 @@ async fn an_unreadable_disable_record_keeps_the_instance_off() {
         })
         .await
         .unwrap();
-    fx.svc.providers.reconcile().await;
+    crate::test_fixtures::activate(&fx.svc).await;
     assert!(!running(&fx.svc, "fake"));
     let health = fx.svc.providers.health(INSTANCE).unwrap();
     assert!(
@@ -1617,14 +1598,15 @@ async fn approving_a_program_starts_its_enabled_instance() {
     write_extension(&fx.svc.layout.project_dir, "");
     let ext = extension(&fx.svc.layout.project_dir);
     configure(&fx, true, json!({ "team": "core" }));
-    fx.svc.providers.reconcile().await;
+    crate::test_fixtures::activate(&fx.svc).await;
     assert!(
         fx.svc.providers.get(INSTANCE).await.is_none(),
         "not approved yet"
     );
 
-    approve(&fx, &ext);
+    approve(&fx, &ext).await;
     fx.svc.providers.approved(INSTANCE).await;
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     assert!(
         fx.svc.providers.get(INSTANCE).await.is_some(),
         "started on approval"
@@ -1639,7 +1621,7 @@ async fn approving_a_program_starts_its_enabled_instance() {
 async fn approving_updated_declarations_restarts_the_instance() {
     let (fx, _ext) = approved("").await;
     configure(&fx, true, json!({ "team": "core" }));
-    fx.svc.providers.reconcile().await;
+    crate::test_fixtures::activate(&fx.svc).await;
     assert!(running(&fx.svc, "fake"));
 
     // The provider updates: new behaviour and new declarations, approved.
@@ -1650,9 +1632,12 @@ async fn approving_updated_declarations_restarts_the_instance() {
         serde_json::to_string_pretty(&oxplow_provider_fake::bad_declarations()).unwrap(),
     )
     .unwrap();
-    approve(&fx, &extension(&project));
+    // The approval is recorded, then the registry is told (it re-baselines
+    // what the running instance was enabled with) before a generation
+    // starts the instance on the new declarations.
+    approve_without_activating(&fx, &extension(&project));
     fx.svc.providers.approved(INSTANCE).await;
-
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     let running = fx.svc.providers.get(INSTANCE).await.expect("running");
     assert_eq!(running.declared, oxplow_provider_fake::bad_declarations());
     assert_eq!(
@@ -1690,6 +1675,8 @@ async fn declaration_impact_of_unreadable_declarations_is_an_error() {
         "{ not json",
     )
     .unwrap();
+    let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
+    assert!(problems.contains_key(EXT), "{problems:?}");
     let err = fx
         .svc
         .providers
@@ -1697,8 +1684,8 @@ async fn declaration_impact_of_unreadable_declarations_is_an_error() {
         .await
         .unwrap_err();
     assert!(
-        matches!(err, oxplow_domain::DomainError::NotFound),
-        "{err:?}"
+        err.to_string().contains("provider.json"),
+        "an error naming the file, never an empty diff: {err:?}"
     );
     let errors = crate::extensions::load_extensions(&fx.svc.layout.project_dir)
         .into_iter()
@@ -1997,11 +1984,7 @@ async fn recorded_for(fx: &EffortFixture, item: &str) -> usize {
 #[tokio::test]
 async fn a_read_streams_records_into_work_item_and_keeps_its_cursor() {
     let (fx, ext) = approved("").await;
-    fx.svc
-        .providers
-        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-        .await
-        .unwrap();
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     // Its start's first read, in the background (tsk716).
     first_read(&fx).await;
     let first = first_read(&fx).await;
@@ -2075,11 +2058,7 @@ async fn enabling_returns_before_the_first_read_finishes() {
     // Under the in-memory 2 s call timeout, so the read itself succeeds.
     let (fx, ext) = approved("slow:1500").await;
     let started = std::time::Instant::now();
-    fx.svc
-        .providers
-        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-        .await
-        .unwrap();
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     assert!(
         started.elapsed() < std::time::Duration::from_millis(1000),
         "enable waited {:?} for the first read",
@@ -2109,11 +2088,7 @@ async fn first_read(fx: &EffortFixture) -> oxplow_db::CollectorState {
 #[tokio::test]
 async fn concurrent_syncs_of_one_collector_record_each_item_once() {
     let (fx, ext) = approved("").await;
-    fx.svc
-        .providers
-        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-        .await
-        .unwrap();
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     // Its start's first read, in the background (tsk716).
     first_read(&fx).await;
     let refs = three_items(&fx).await;
@@ -2151,11 +2126,7 @@ async fn concurrent_syncs_of_one_collector_record_each_item_once() {
 #[tokio::test]
 async fn a_failed_read_keeps_what_its_checkpoints_covered() {
     let (fx, ext) = approved("").await;
-    fx.svc
-        .providers
-        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-        .await
-        .unwrap();
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     // Its start's first read, in the background (tsk716).
     first_read(&fx).await;
     let refs = three_items(&fx).await;
@@ -2207,11 +2178,7 @@ async fn a_failed_read_keeps_what_its_checkpoints_covered() {
 #[tokio::test]
 async fn a_silent_read_is_cancelled_and_counts() {
     let (fx, ext) = approved("").await;
-    fx.svc
-        .providers
-        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-        .await
-        .unwrap();
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     // Its start's first read, in the background (tsk716).
     first_read(&fx).await;
     set_hooks(&fx, "slow:5000").await;
@@ -2244,7 +2211,7 @@ async fn a_silent_read_is_cancelled_and_counts() {
 async fn scheduled_syncs_run_due_collectors_as_the_system() {
     let (fx, _ext) = approved("").await;
     configure(&fx, true, json!({ "team": "core" }));
-    fx.svc.providers.reconcile().await;
+    crate::test_fixtures::activate(&fx.svc).await;
     // Its start's first read, in the background (tsk716).
     first_read(&fx).await;
     // Starting read it once; it isn't due again for five minutes.
@@ -2328,7 +2295,7 @@ async fn the_fakes_hooks_are_replaced_not_merged() {
 async fn create_on_fake(
     fx: &EffortFixture,
 ) -> Result<oxplow_domain::CommandOutcome, oxplow_domain::CommandError> {
-    make_active(fx, "fake");
+    make_active(fx, "fake").await;
     fx.svc
         .commands
         .run(
@@ -2342,11 +2309,7 @@ async fn create_on_fake(
 
 async fn enabled_fake() -> (EffortFixture, Extension) {
     let (fx, ext) = approved("").await;
-    fx.svc
-        .providers
-        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-        .await
-        .unwrap();
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     // Its start's first read, in the background (tsk716).
     first_read(&fx).await;
     (fx, ext)
@@ -2495,8 +2458,8 @@ async fn an_effect_doesnt_hear_its_own_external_write_echoed_by_a_read() {
     )
     .unwrap();
     let ext = extension(&project);
-    approve(&fx, &ext);
-    make_active(&fx, "fake");
+    approve(&fx, &ext).await;
+    make_active(&fx, "fake").await;
     let config = fx.svc.config.read().unwrap().clone();
     let decl = &ext.effects[0];
     let effect = crate::effects::effect_program(&ext, decl);
@@ -2510,11 +2473,7 @@ async fn an_effect_doesnt_hear_its_own_external_write_echoed_by_a_read() {
         &effect.hash(&project).unwrap(),
     )
     .unwrap();
-    fx.svc
-        .providers
-        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-        .await
-        .unwrap();
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     first_read(&fx).await;
     crate::effects::approved(&fx.svc.db, &decl.name())
         .await
@@ -2636,12 +2595,13 @@ async fn removing_an_instance_leaves_nothing_behind() {
         .join("extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
     std::fs::write(&manifest, format!("{text}    credentials: [FAKE_TOKEN]\n")).unwrap();
-    approve(&fx, &extension(&project));
+    approve(&fx, &extension(&project)).await;
     let providers = &fx.svc.providers;
     providers
         .add_instance(&Actor::Human, SECOND, "fake", Scope::Project)
         .await
         .unwrap();
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     providers
         .set_credential(SECOND, "FAKE_TOKEN", Some("t0ken"))
         .unwrap();
@@ -2649,6 +2609,7 @@ async fn removing_an_instance_leaves_nothing_behind() {
         .set_instance(&Actor::Human, SECOND, true, json!({ "team": "second" }))
         .await
         .unwrap();
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     let states = oxplow_db::SqliteProviderCollectorStore::new(fx.svc.db.clone());
     for _ in 0..200 {
         if states
@@ -2681,12 +2642,20 @@ async fn removing_an_instance_leaves_nothing_behind() {
 
     // Its provider goes from the extension.
     let text = std::fs::read_to_string(&manifest).unwrap();
-    std::fs::write(&manifest, text.replace("- id: fake", "- id: fake_renamed")).unwrap();
-    providers.reconcile().await;
+    // (Its command goes with it: an edit that leaves a command naming a
+    // provider that isn't there is held back, not applied.)
+    std::fs::write(
+        &manifest,
+        text.replace("- id: fake", "- id: fake_renamed")
+            .replace("provider: fake\n", "provider: fake_renamed\n"),
+    )
+    .unwrap();
+    crate::test_fixtures::activate(&fx.svc).await;
     providers
         .remove_instance(&Actor::Human, SECOND)
         .await
         .unwrap();
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
 
     let config = fx.svc.config.read().unwrap().clone();
     assert!(!config.extension_instances.contains_key(SECOND));
@@ -2721,7 +2690,7 @@ async fn removing_an_instance_leaves_nothing_behind() {
     })
     .unwrap()
     .unwrap();
-    providers.reconcile().await;
+    crate::test_fixtures::activate(&fx.svc).await;
     let lost = providers
         .list()
         .await
@@ -2737,6 +2706,7 @@ async fn removing_an_instance_leaves_nothing_behind() {
         .remove_instance(&Actor::Human, "tracker/fake_lost")
         .await
         .unwrap();
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     assert!(oxplow_config::GlobalInstances::load(&global)
         .unwrap()
         .instances
@@ -2754,7 +2724,7 @@ async fn a_refused_enable_says_why() {
         .register_namespace("fake_second", "a test", Vec::new())
         .unwrap();
     configure_named(&fx, SECOND, Some("fake"), json!({ "team": "second" }));
-    fx.svc.providers.reconcile().await;
+    crate::test_fixtures::activate(&fx.svc).await;
     match fx.svc.providers.health(SECOND).map(|h| h.state) {
         Some(InstanceState::Refused { reason }) => {
             assert!(
@@ -2837,12 +2807,14 @@ async fn enabling_two_instances_at_once_keeps_both() {
             .set_instance(&Actor::Human, INSTANCE, true, json!({ "team": "core" }))
             .await
     });
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     tokio::time::sleep(std::time::Duration::from_millis(150)).await;
     fx.svc
         .providers
         .set_instance(&Actor::Human, SECOND, true, json!({ "team": "second" }))
         .await
         .unwrap();
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     first.await.unwrap().unwrap();
     let written = fx.svc.config.read().unwrap().extension_instances.clone();
     for name in [INSTANCE, SECOND] {
@@ -2859,7 +2831,7 @@ async fn two_instances_of_one_provider_run_side_by_side() {
     let (fx, _ext) = approved("").await;
     configure(&fx, true, json!({ "team": "core" }));
     configure_named(&fx, SECOND, Some("fake"), json!({ "team": "second" }));
-    fx.svc.providers.reconcile().await;
+    crate::test_fixtures::activate(&fx.svc).await;
     for name in [INSTANCE, SECOND] {
         assert_eq!(
             fx.svc.providers.health(name).map(|h| h.state),
@@ -2871,25 +2843,24 @@ async fn two_instances_of_one_provider_run_side_by_side() {
     assert!(running(&fx.svc, "fake_second"));
 
     let items = fx.svc.work_items_client();
-    let new = |provider: &str| {
-        make_active(&fx, provider);
-        crate::work_items::NewItem {
-            title: "theirs".into(),
-            ..Default::default()
-        }
+    let new = crate::work_items::NewItem {
+        title: "theirs".into(),
+        ..Default::default()
     };
     // Each instance numbers its own items: the instance is in the ref.
+    make_active(&fx, "fake_second").await;
     assert_eq!(
         items
-            .create(&Actor::Human, new("fake_second"))
+            .create(&Actor::Human, new.clone())
             .await
             .unwrap()
             .expect("the list keeps it"),
         "work_item:fake_second:W-1"
     );
+    make_active(&fx, "fake").await;
     assert_eq!(
         items
-            .create(&Actor::Human, new("fake"))
+            .create(&Actor::Human, new.clone())
             .await
             .unwrap()
             .expect("the list keeps it"),
@@ -2919,10 +2890,10 @@ async fn two_instances_of_one_provider_run_side_by_side() {
     assert!(second.approved, "one approval: the program's");
 
     // Stopping one leaves the other.
-    assert!(fx.svc.providers.stop(SECOND).await);
+    turn_off(&fx.svc, SECOND).await;
     assert!(!running(&fx.svc, "fake_second"));
     assert!(running(&fx.svc, "fake"));
-    assert!(items.create(&Actor::Human, new("fake")).await.is_ok());
+    assert!(items.create(&Actor::Human, new).await.is_ok());
 }
 
 /// P9.B1: a credential is an instance's — set for one, another instance
@@ -2939,7 +2910,7 @@ async fn an_instance_credential_is_its_own() {
     let text = std::fs::read_to_string(&manifest).unwrap();
     std::fs::write(&manifest, format!("{text}    credentials: [FAKE_TOKEN]\n")).unwrap();
     let ext = extension(&project);
-    approve(&fx, &ext);
+    approve(&fx, &ext).await;
     fx.svc
         .providers
         .set_credential(SECOND, "FAKE_TOKEN", Some("s3cret"))
@@ -2959,7 +2930,7 @@ async fn an_instance_credential_is_its_own() {
         undeclared.to_string().contains("FAKE_TOKEN"),
         "{undeclared}"
     );
-    fx.svc.providers.reconcile().await;
+    crate::test_fixtures::activate(&fx.svc).await;
     assert_eq!(
         fx.svc.providers.health(SECOND).map(|h| h.state),
         Some(InstanceState::Ready)
@@ -2991,7 +2962,7 @@ async fn an_instance_credential_is_its_own() {
 async fn a_named_instance_says_which_provider_it_is() {
     let (fx, _ext) = approved("").await;
     configure_named(&fx, SECOND, None, json!({ "team": "second" }));
-    fx.svc.providers.reconcile().await;
+    crate::test_fixtures::activate(&fx.svc).await;
     match fx.svc.providers.health(SECOND).map(|h| h.state) {
         Some(InstanceState::Missing { reason }) => {
             assert!(
@@ -3045,6 +3016,7 @@ async fn a_named_instance_says_which_provider_it_is() {
         .remove_instance(&Actor::Human, "tracker/acme")
         .await
         .unwrap();
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     assert!(providers
         .list()
         .await
@@ -3067,23 +3039,24 @@ async fn sibling_project(
         write_extension(dir.path(), hooks);
     }
     let global = fx.svc.layout.state_dir.join("global-config");
-    let svc = std::sync::Arc::new(
+    let svc = {
         crate::Services::in_memory_on_machine(
             dir.path(),
             global,
             fx.svc.secrets.clone(),
             crate::providers::host::process_env(),
         )
-        .unwrap(),
-    );
+        .await
+        .unwrap()
+    };
     if with_tracker {
-        approve_in(&svc);
+        approve_in(&svc).await;
     }
     (svc, dir)
 }
 
 /// Approve the tracker's provider program as it is in `svc`'s project.
-fn approve_in(svc: &crate::Services) {
+async fn approve_in(svc: &std::sync::Arc<crate::Services>) {
     let ext = extension(&svc.layout.project_dir);
     let config = svc.config.read().unwrap().clone();
     let program = exec_consent::list(
@@ -3105,6 +3078,7 @@ fn approve_in(svc: &crate::Services) {
         program.version.as_deref().unwrap(),
     )
     .unwrap();
+    crate::test_fixtures::activate_with_problems(svc).await;
 }
 
 /// The tracker's provider in `root` declares the credential `FAKE_TOKEN`.
@@ -3127,12 +3101,13 @@ async fn a_global_credential_change_restarts_it_in_every_project() {
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, "needs:FAKE_TOKEN");
     declare_token(&project);
-    approve(&fx, &extension(&project));
+    approve(&fx, &extension(&project)).await;
     let providers = &fx.svc.providers;
     providers
         .add_instance(&Actor::Human, SHARED, "fake", Scope::Global)
         .await
         .unwrap();
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     providers
         .set_credential(SHARED, "FAKE_TOKEN", Some("one"))
         .unwrap();
@@ -3140,11 +3115,12 @@ async fn a_global_credential_change_restarts_it_in_every_project() {
         .set_instance(&Actor::Human, SHARED, true, json!({ "team": "shared" }))
         .await
         .unwrap();
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     let (other, _other_dir) = sibling_project(&fx, "needs:FAKE_TOKEN", false).await;
     write_extension(&other.layout.project_dir, "needs:FAKE_TOKEN");
     declare_token(&other.layout.project_dir);
-    approve_in(&other);
-    other.providers.reconcile().await;
+    approve_in(&other).await;
+    crate::test_fixtures::activate(&other).await;
     assert_eq!(state_of(&other, SHARED).await, Some(InstanceState::Ready));
     let before = other.providers.get(SHARED).await.unwrap();
     assert!(
@@ -3156,7 +3132,9 @@ async fn a_global_credential_change_restarts_it_in_every_project() {
         .set_credential(SHARED, "FAKE_TOKEN", Some("two"))
         .unwrap();
     providers.credential_changed(SHARED).await;
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     assert!(other.providers.reconcile_if_global_changed().await);
+    crate::test_fixtures::activate_with_problems(&other).await;
     let after = other.providers.get(SHARED).await.unwrap();
     assert!(
         !std::sync::Arc::ptr_eq(&before, &after),
@@ -3192,6 +3170,7 @@ async fn a_global_instance_runs_in_every_project_with_the_extension() {
         .set_instance(&Actor::Human, SHARED, true, json!({ "team": "shared" }))
         .await
         .unwrap();
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     // It is in the machine's file, not the project's.
     assert!(fx.svc.config.read().unwrap().extension_instances.is_empty());
     let global = fx.svc.layout.state_dir.join("global-config");
@@ -3200,7 +3179,7 @@ async fn a_global_instance_runs_in_every_project_with_the_extension() {
     assert_eq!(state_of(&fx.svc, SHARED).await, Some(InstanceState::Ready));
 
     let (other, _other_dir) = sibling_project(&fx, "", true).await;
-    other.providers.reconcile().await;
+    crate::test_fixtures::activate(&other).await;
     let there = other
         .providers
         .list()
@@ -3215,7 +3194,7 @@ async fn a_global_instance_runs_in_every_project_with_the_extension() {
     assert!(running(&other, "fake_shared"));
 
     let (bare, _bare_dir) = sibling_project(&fx, "", false).await;
-    bare.providers.reconcile().await;
+    crate::test_fixtures::activate(&bare).await;
     assert_eq!(
         state_of(&bare, SHARED).await,
         None,
@@ -3237,8 +3216,10 @@ async fn a_global_instance_runs_in_every_project_with_the_extension() {
         .remove_instance(&Actor::Human, SHARED)
         .await
         .unwrap();
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     assert_eq!(state_of(&fx.svc, SHARED).await, None);
     assert!(other.providers.reconcile_if_global_changed().await);
+    crate::test_fixtures::activate_with_problems(&other).await;
     assert_eq!(state_of(&other, SHARED).await, None);
     assert!(!running(&other, "fake_shared"));
 }
@@ -3255,12 +3236,14 @@ async fn a_global_instance_is_turned_off_in_one_project() {
         .add_instance(&Actor::Human, SHARED, "fake", Scope::Global)
         .await
         .unwrap();
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     providers
         .set_instance(&Actor::Human, SHARED, true, json!({ "team": "shared" }))
         .await
         .unwrap();
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     let (other, _other_dir) = sibling_project(&fx, "", true).await;
-    other.providers.reconcile().await;
+    crate::test_fixtures::activate(&other).await;
     assert_eq!(state_of(&other, SHARED).await, Some(InstanceState::Ready));
 
     let agent = Actor::Agent {
@@ -3274,6 +3257,7 @@ async fn a_global_instance_is_turned_off_in_one_project() {
         .off_here(&Actor::Human, SHARED)
         .await
         .unwrap();
+    crate::test_fixtures::activate_with_problems(&other).await;
     assert_eq!(
         (view.scope, view.overridden, view.enabled),
         (Scope::Project, true, false)
@@ -3293,6 +3277,7 @@ async fn a_global_instance_is_turned_off_in_one_project() {
         .remove_instance(&Actor::Human, SHARED)
         .await
         .unwrap();
+    crate::test_fixtures::activate_with_problems(&other).await;
     assert_eq!(state_of(&other, SHARED).await, Some(InstanceState::Ready));
 }
 
@@ -3306,12 +3291,14 @@ async fn a_project_entry_overrides_a_global_instance_whole() {
         .add_instance(&Actor::Human, SHARED, "fake", Scope::Global)
         .await
         .unwrap();
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     providers
         .set_instance(&Actor::Human, SHARED, true, json!({ "team": "shared" }))
         .await
         .unwrap();
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     let (other, _other_dir) = sibling_project(&fx, "", true).await;
-    other.providers.reconcile().await;
+    crate::test_fixtures::activate(&other).await;
     assert_eq!(state_of(&other, SHARED).await, Some(InstanceState::Ready));
 
     // The other project turns it off for itself.
@@ -3323,7 +3310,7 @@ async fn a_project_entry_overrides_a_global_instance_whole() {
             ..Default::default()
         },
     );
-    other.providers.reconcile().await;
+    crate::test_fixtures::activate(&other).await;
     let there = other
         .providers
         .list()
@@ -3361,12 +3348,13 @@ async fn a_project_instance_keeps_its_credentials_beside_a_global_one() {
     let text = std::fs::read_to_string(&manifest).unwrap();
     std::fs::write(&manifest, format!("{text}    credentials: [FAKE_TOKEN]\n")).unwrap();
     let ext = extension(&project);
-    approve(&fx, &ext);
+    approve(&fx, &ext).await;
     let providers = &fx.svc.providers;
     providers
         .add_instance(&Actor::Human, SHARED, "fake", Scope::Project)
         .await
         .unwrap();
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     providers
         .set_credential(SHARED, "FAKE_TOKEN", Some("the project's"))
         .unwrap();
@@ -3374,6 +3362,7 @@ async fn a_project_instance_keeps_its_credentials_beside_a_global_one() {
         .set_instance(&Actor::Human, SHARED, true, json!({ "team": "core" }))
         .await
         .unwrap();
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     let account = crate::collector_runner::instance_credential_account(
         &fx.svc.providers.deps.project,
         EXT,
@@ -3406,6 +3395,7 @@ async fn a_project_instance_keeps_its_credentials_beside_a_global_one() {
         .set_instance(&Actor::Human, SHARED, true, json!({ "team": "core" }))
         .await
         .expect("its own credential is set");
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     assert_eq!(state_of(&fx.svc, SHARED).await, Some(InstanceState::Ready));
 
     // The global one goes: nothing of this project's goes with it.
@@ -3440,12 +3430,13 @@ async fn a_global_instances_credential_is_shared_across_projects() {
     write_extension(&project, "needs:FAKE_TOKEN");
     credentialed(&project);
     let ext = extension(&project);
-    approve(&fx, &ext);
+    approve(&fx, &ext).await;
     let providers = &fx.svc.providers;
     providers
         .add_instance(&Actor::Human, SHARED, "fake", Scope::Global)
         .await
         .unwrap();
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     providers
         .set_credential(SHARED, "FAKE_TOKEN", Some("s3cret"))
         .unwrap();
@@ -3453,6 +3444,7 @@ async fn a_global_instances_credential_is_shared_across_projects() {
         .set_instance(&Actor::Human, SHARED, true, json!({ "team": "shared" }))
         .await
         .unwrap();
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     assert_eq!(state_of(&fx.svc, SHARED).await, Some(InstanceState::Ready));
 
     // Another project: the same extension, approved there; nothing set there.
@@ -3461,15 +3453,14 @@ async fn a_global_instances_credential_is_shared_across_projects() {
     write_extension(dir.path(), "needs:FAKE_TOKEN");
     credentialed(dir.path());
     let global = fx.svc.layout.state_dir.join("global-config");
-    let other = std::sync::Arc::new(
-        crate::Services::in_memory_on_machine(
-            dir.path(),
-            global,
-            fx.svc.secrets.clone(),
-            crate::providers::host::process_env(),
-        )
-        .unwrap(),
-    );
+    let other = crate::Services::in_memory_on_machine(
+        dir.path(),
+        global,
+        fx.svc.secrets.clone(),
+        crate::providers::host::process_env(),
+    )
+    .await
+    .unwrap();
     let other_ext = extension(dir.path());
     let config = other.config.read().unwrap().clone();
     let program = exec_consent::list(
@@ -3500,7 +3491,7 @@ async fn a_global_instances_credential_is_shared_across_projects() {
             ..Default::default()
         },
     );
-    other.providers.reconcile().await;
+    crate::test_fixtures::activate(&other).await;
     assert_eq!(state_of(&other, SHARED).await, Some(InstanceState::Ready));
     assert!(matches!(
         state_of(&other, INSTANCE).await,
@@ -3516,11 +3507,11 @@ async fn a_global_instances_credential_is_shared_across_projects() {
 async fn a_call_finishing_after_its_instance_stopped_changes_nothing() {
     let (fx, ext) = approved("").await;
     configure(&fx, true, json!({ "team": "core" }));
-    fx.svc.providers.reconcile().await;
+    crate::test_fixtures::activate(&fx.svc).await;
     first_read(&fx).await;
     let was_running = fx.svc.providers.get(INSTANCE).await.unwrap();
     configure(&fx, false, json!({ "team": "core" }));
-    fx.svc.providers.reconcile().await;
+    crate::test_fixtures::activate(&fx.svc).await;
     let state = || {
         fx.svc
             .providers
@@ -3542,11 +3533,7 @@ async fn a_call_finishing_after_its_instance_stopped_changes_nothing() {
 
     // Running again, it is a new instance: the old one's late results
     // still aren't its.
-    fx.svc
-        .providers
-        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-        .await
-        .unwrap();
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     first_read(&fx).await;
     fx.svc
         .providers
@@ -3565,13 +3552,13 @@ async fn a_call_finishing_after_its_instance_stopped_changes_nothing() {
 async fn a_late_read_on_a_stopped_instance_doesnt_touch_its_successor() {
     let (fx, _ext) = approved("").await;
     configure(&fx, true, json!({ "team": "core" }));
-    fx.svc.providers.reconcile().await;
+    crate::test_fixtures::activate(&fx.svc).await;
     first_read(&fx).await;
     let was_running = fx.svc.providers.get(INSTANCE).await.unwrap();
     configure(&fx, false, json!({ "team": "core" }));
-    fx.svc.providers.reconcile().await;
+    crate::test_fixtures::activate(&fx.svc).await;
     configure(&fx, true, json!({ "team": "core" }));
-    fx.svc.providers.reconcile().await;
+    crate::test_fixtures::activate(&fx.svc).await;
     let successor = fx.svc.providers.get(INSTANCE).await.unwrap();
     assert!(!std::sync::Arc::ptr_eq(&was_running, &successor));
     // The folder isn't what was approved any more.
@@ -3705,8 +3692,9 @@ async fn signing_in(hooks: &str, more: &str) -> (EffortFixture, OAuthSim) {
     let sim = OAuthSim::start().await;
     let project = fx.svc.layout.project_dir.clone();
     write_oauth_extension(&project, hooks, &sim.authorize_url, &sim.token_url, more);
-    approve(&fx, &extension(&project));
-    make_active(&fx, "fake");
+    approve(&fx, &extension(&project)).await;
+    make_active(&fx, "fake").await;
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     (fx, sim)
 }
 
@@ -3751,6 +3739,7 @@ async fn a_sign_in_whose_account_changed_meanwhile_is_refused() {
         .add_instance(&Actor::Human, SHARED, "fake", Scope::Global)
         .await
         .unwrap();
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     let page = providers
         .begin_sign_in(SHARED, "FAKE_TOKEN", REDIRECT_PORT)
         .await
@@ -3804,6 +3793,8 @@ async fn sign_in(fx: &EffortFixture, name: &str) -> Option<String> {
     let error = tokio::time::timeout(std::time::Duration::from_secs(20), heard)
         .await
         .expect("the renderer hears the sign-in finished");
+    // The saved credential asks for a generation that starts the instance.
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     assert_eq!(
         completion,
         match &error {
@@ -3847,7 +3838,7 @@ async fn signing_in_starts_the_instance_on_the_access_token_alone() {
     let (fx, sim) = signing_in("accepts:FAKE_TOKEN=at-2", "      - PLAIN\n").await;
     let providers = &fx.svc.providers;
     configure(&fx, true, json!({ "team": "core" }));
-    providers.reconcile().await;
+    crate::test_fixtures::activate(&fx.svc).await;
     let (path, message) = unconfigured_at(&fx);
     assert_eq!(path, "/credentials/FAKE_TOKEN");
     assert!(message.contains("isn't signed in"), "{message}");
@@ -3895,6 +3886,7 @@ async fn signing_in_starts_the_instance_on_the_access_token_alone() {
         .set_credential(INSTANCE, "FAKE_TOKEN", None)
         .unwrap();
     providers.credential_changed(INSTANCE).await;
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     assert_eq!(unconfigured_at(&fx).0, "/credentials/FAKE_TOKEN");
     assert!(fx.svc.work_items.get("fake").is_err());
 }
@@ -3910,7 +3902,7 @@ async fn a_lapsed_token_is_renewed_before_the_instance_starts() {
     assert_eq!(sign_in(&fx, "FAKE_TOKEN").await, None);
     sim.set_ttl(3600);
     configure(&fx, true, json!({ "team": "core" }));
-    fx.svc.providers.reconcile().await;
+    crate::test_fixtures::activate(&fx.svc).await;
     assert_eq!(
         fx.svc.providers.health(INSTANCE).map(|h| h.state),
         Some(InstanceState::Ready)
@@ -4000,7 +3992,8 @@ async fn signed_in_twice(hooks: &str) -> (EffortFixture, OAuthSim) {
         sim.authorize_url, sim.token_url
     );
     write_oauth_extension(&project, hooks, &sim.authorize_url, &sim.token_url, &other);
-    approve(&fx, &extension(&project));
+    approve(&fx, &extension(&project)).await;
+    make_active(&fx, "fake").await;
     configure(&fx, true, json!({ "team": "core" }));
     assert_eq!(sign_in(&fx, "FAKE_TOKEN").await, None);
     assert_eq!(sign_in(&fx, "OTHER_TOKEN").await, None);
@@ -4020,7 +4013,7 @@ async fn a_slow_exchange_holds_up_only_its_own_sign_in() {
         sim.authorize_url, sim.token_url
     );
     write_oauth_extension(&project, "", &sim.authorize_url, &sim.token_url, &other);
-    approve(&fx, &extension(&project));
+    approve(&fx, &extension(&project)).await;
     configure(&fx, true, json!({ "team": "core" }));
     let page = fx
         .svc
@@ -4226,6 +4219,13 @@ async fn an_unnamed_auth_beside_a_pasted_key_renews_nothing() {
 #[tokio::test]
 async fn an_auth_renews_only_the_credential_it_names() {
     let (fx, sim) = signed_in_twice("").await;
+    // A refused token restarts the instance through the owner of
+    // generations, as it does in the app.
+    fx.svc.extension_activation.spawn(&fx.svc);
+    // Its first generation (from the sign-ins' requests) comes before the
+    // hook is set: the hook is the running instance's.
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    first_read(&fx).await;
     set_hooks(&fx, "accepts:FAKE_TOKEN=never").await;
     // Renewed and tried again on a fresh process (which starts without
     // the hook), so the call lands.
@@ -4317,6 +4317,8 @@ async fn a_revoked_sign_in_stops_the_instance_and_says_sign_in_again() {
     set_hooks(&fx, "accepts:FAKE_TOKEN=never").await;
     let err = create_on_fake(&fx).await.unwrap_err().to_string();
     assert!(err.contains("sign in again"), "{err}");
+    // The next generation can't start it without its credential.
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     let (path, message) = unconfigured_at(&fx);
     assert_eq!(path, "/credentials/FAKE_TOKEN");
     assert!(message.contains("sign in again"), "{message}");
@@ -4361,7 +4363,7 @@ async fn a_client_secret_goes_to_the_token_endpoint_and_not_to_the_process() {
         .unwrap_err()
         .to_string();
     assert!(refused.contains("set `CLIENT_SECRET` first"), "{refused}");
-    providers.reconcile().await;
+    crate::test_fixtures::activate(&fx.svc).await;
     assert_eq!(unconfigured_at(&fx).0, "/credentials/CLIENT_SECRET");
     providers
         .set_credential(INSTANCE, "CLIENT_SECRET", Some("s3cret"))
@@ -4425,6 +4427,7 @@ async fn a_newer_sign_in_replaces_the_one_under_way() {
         .remove_instance(&Actor::Human, INSTANCE)
         .await
         .unwrap();
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     let refused = complete(&fx, "FAKE_TOKEN", &browse(&third).await)
         .await
         .unwrap_err()
@@ -4514,6 +4517,7 @@ async fn a_sign_in_whose_endpoints_changed_meanwhile_sends_nothing() {
         "https://elsewhere.example/token",
         "",
     );
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     let failed = complete(&fx, "FAKE_TOKEN", &redirect).await.unwrap();
     assert!(
         matches!(&failed, SignInCompletion::Failed { error } if error.contains("approv")),
@@ -4597,7 +4601,7 @@ async fn a_sign_in_whose_approved_endpoints_changed_meanwhile_sends_nothing() {
         "",
     );
     // A person approves the new endpoints before the redirect comes back.
-    approve(&fx, &extension(&fx.svc.layout.project_dir));
+    approve(&fx, &extension(&fx.svc.layout.project_dir)).await;
     let failed = complete(&fx, "FAKE_TOKEN", &redirect).await.unwrap();
     assert!(
         matches!(&failed, SignInCompletion::Failed { error } if error.contains("signs in changed")),
@@ -4768,7 +4772,7 @@ async fn a_url_servers_approval_covers_the_url_its_pins_mapping_and_credentials(
     let approved_now = |fx: &EffortFixture| {
         std::fs::write(dir.join("extension.yaml"), &manifest).unwrap();
         let ext = extension(&project);
-        approve(fx, &ext);
+        approve_without_activating(fx, &ext);
         assert!(program(fx, &ext).approved);
     };
     for (from, to) in [
@@ -4819,6 +4823,7 @@ async fn sign_in_is_refused_until_the_endpoints_are_approved() {
         "https://elsewhere.example/token",
         "",
     );
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     let refused = fx
         .svc
         .providers
@@ -4843,6 +4848,7 @@ async fn sign_in_is_refused_until_the_endpoints_are_approved() {
     assert!(!view.approved);
     // Approved as it is now, it signs in.
     write_oauth_extension(&project, "", &sim.authorize_url, &sim.token_url, "");
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     assert_eq!(sign_in(&fx, "FAKE_TOKEN").await, None);
 }
 
@@ -4886,6 +4892,7 @@ async fn removing_a_project_replacement_ends_its_sign_in() {
         .add_instance(&Actor::Human, SHARED, "fake", Scope::Global)
         .await
         .unwrap();
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     configure_named(&fx, SHARED, Some("fake"), json!({ "team": "mine" }));
     let page = providers
         .begin_sign_in(SHARED, "FAKE_TOKEN", REDIRECT_PORT)
@@ -4895,6 +4902,7 @@ async fn removing_a_project_replacement_ends_its_sign_in() {
         .remove_instance(&Actor::Human, SHARED)
         .await
         .unwrap();
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     let refused = providers
         .complete_sign_in(SHARED, "FAKE_TOKEN", &browse(&page).await)
         .await
@@ -4994,8 +5002,8 @@ async fn with_effect(hooks: &str, script: &str) -> TaskEffortFixture {
     .unwrap();
     std::fs::write(dir.join("file.star"), script).unwrap();
     let ext = extension(&project);
-    approve(&fx, &ext);
-    make_active(&fx, "fake");
+    approve(&fx, &ext).await;
+    make_active(&fx, "fake").await;
     let decl = ext.effects[0].clone();
     let program = crate::effects::effect_program(&ext, &decl);
     let config = fx.svc.config.read().unwrap().clone();
@@ -5012,11 +5020,7 @@ async fn with_effect(hooks: &str, script: &str) -> TaskEffortFixture {
     crate::effects::approved(&fx.svc.db, &decl.name())
         .await
         .unwrap();
-    fx.svc
-        .providers
-        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-        .await
-        .unwrap();
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     first_read(&fx).await;
     fx
 }
@@ -5188,7 +5192,7 @@ async fn a_retry_whose_provider_went_away_is_not_sent() {
     let fx = with_effect("lose-reply", FILE_ON_FAKE).await;
     react(&fx).await;
     assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
-    assert!(fx.svc.providers.stop(INSTANCE).await);
+    turn_off(&fx.svc, INSTANCE).await;
     assert_eq!(
         crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(11))
             .await
@@ -5571,6 +5575,22 @@ async fn a_cut_off_attempt_found_an_hour_late_is_a_persons() {
     assert_eq!(effect_failures(&fx).await, 1);
 }
 
+/// `provider` the active work-items tracker (none: oxplow's own list),
+/// published as a generation.
+async fn set_active(fx: &EffortFixture, provider: Option<&str>) {
+    {
+        let mut config = fx.svc.config.write().unwrap();
+        match provider {
+            Some(p) => config
+                .active_providers
+                .insert("work_items".into(), p.into()),
+            None => config.active_providers.remove("work_items"),
+        };
+    }
+    republish(fx);
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
+}
+
 /// tsk1058: every item goes to the tracker active when it's filed — a
 /// retry too, not wherever the first attempt went (that pin, tsk999, is
 /// gone). Pointed at oxplow's own list meanwhile, which keeps no
@@ -5581,22 +5601,10 @@ async fn a_retry_files_on_the_tracker_active_when_sent() {
     let unnamed = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"from effect\"}}]}\n";
     let fx = with_effect("lose-reply", unnamed).await;
     crate::effect_triggers::register(&fx.svc);
-    let set_active = |provider: Option<&str>| {
-        {
-            let mut config = fx.svc.config.write().unwrap();
-            match provider {
-                Some(p) => config
-                    .active_providers
-                    .insert("work_items".into(), p.into()),
-                None => config.active_providers.remove("work_items"),
-            };
-        }
-        republish(&fx);
-    };
-    set_active(Some("fake"));
+    set_active(&fx, Some("fake")).await;
     let ev = react(&fx).await;
     assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
-    set_active(None);
+    set_active(&fx, None).await;
     assert_eq!(
         crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(11))
             .await
@@ -5756,7 +5764,7 @@ async fn the_retry_loop_sends_a_due_retry() {
     // The loop waits for the first reconcile; the config keeps the
     // instance it enabled.
     configure(&fx, true, json!({ "team": "core" }));
-    fx.svc.providers.reconcile().await;
+    crate::test_fixtures::activate(&fx.svc).await;
     crate::effect_triggers::spawn_auto_retry(&fx.svc);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     loop {
@@ -5818,6 +5826,7 @@ async fn a_retry_that_cant_run_is_dropped() {
                 std::fs::write(dir.join("extension.yaml"), &manifest[..cut]).unwrap();
             }
         }
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
         assert_eq!(
             crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(11))
                 .await
@@ -5838,17 +5847,19 @@ async fn a_retry_that_cant_run_is_dropped() {
 /// retries' first tick) waits for the registry's first reconcile.
 #[tokio::test]
 async fn the_first_reconcile_is_waited_for() {
-    let fx = services_with_effort().await;
+    let dir = tempfile::tempdir().unwrap();
+    crate::test_fixtures::init_git_repo(dir.path());
+    let svc = crate::Services::in_memory_inactive(dir.path()).unwrap();
     let waited = tokio::time::timeout(
         std::time::Duration::from_millis(100),
-        fx.svc.providers.first_reconciled(),
+        svc.providers.first_reconciled(),
     )
     .await;
     assert!(waited.is_err(), "not before it has run");
-    fx.svc.providers.reconcile().await;
+    svc.initialize_extensions().await.unwrap();
     tokio::time::timeout(
         std::time::Duration::from_secs(1),
-        fx.svc.providers.first_reconciled(),
+        svc.providers.first_reconciled(),
     )
     .await
     .expect("at once after it has");
@@ -5914,7 +5925,7 @@ async fn a_stop_shuts_the_process_down_gracefully() {
     let file = marker.path().join("shut-down");
     let (fx, _ext) = approved(&format!("shutdown-file:{}", file.display())).await;
     configure(&fx, true, json!({ "team": "core" }));
-    fx.svc.providers.reconcile().await;
+    crate::test_fixtures::activate(&fx.svc).await;
     first_read(&fx).await;
     assert!(fx.svc.providers.stop(INSTANCE).await);
     assert!(file.is_file(), "the provider was told to shut down");
@@ -5926,7 +5937,7 @@ async fn a_stop_shuts_the_process_down_gracefully() {
 async fn a_process_that_wont_exit_is_killed_after_its_grace() {
     let (fx, _ext) = approved("ignore-shutdown").await;
     configure(&fx, true, json!({ "team": "core" }));
-    fx.svc.providers.reconcile().await;
+    crate::test_fixtures::activate(&fx.svc).await;
     first_read(&fx).await;
     let stopped = tokio::time::timeout(
         std::time::Duration::from_secs(5),
@@ -5959,7 +5970,7 @@ async fn syncs(fx: &EffortFixture) -> i64 {
 async fn a_change_the_provider_announces_is_read_now() {
     let (fx, _ext) = approved("").await;
     configure(&fx, true, json!({ "team": "core" }));
-    fx.svc.providers.reconcile().await;
+    crate::test_fixtures::activate(&fx.svc).await;
     first_read(&fx).await;
     let before = syncs(&fx).await;
     let instance = fx.svc.providers.get(INSTANCE).await.unwrap();
@@ -5989,7 +6000,7 @@ async fn a_change_the_provider_announces_is_read_now() {
 async fn a_process_that_exits_is_restarted_and_counted() {
     let (fx, _ext) = approved("").await;
     configure(&fx, true, json!({ "team": "core" }));
-    fx.svc.providers.reconcile().await;
+    crate::test_fixtures::activate(&fx.svc).await;
     first_read(&fx).await;
     let instance = fx.svc.providers.get(INSTANCE).await.unwrap();
     let (peer, _) = instance.connection().await.unwrap();
@@ -6015,11 +6026,7 @@ async fn a_process_that_exits_is_restarted_and_counted() {
 #[tokio::test]
 async fn a_read_must_checkpoint_within_its_limit() {
     let (fx, ext) = approved("").await;
-    fx.svc
-        .providers
-        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-        .await
-        .unwrap();
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     first_read(&fx).await;
     for _ in 0..101 {
         create_on_fake(&fx).await.unwrap();
@@ -6051,11 +6058,16 @@ async fn shutting_down_ends_every_process_gracefully() {
     let file = marker.path().join("shut-down");
     let (fx, _ext) = approved(&format!("shutdown-file:{}", file.display())).await;
     configure(&fx, true, json!({ "team": "core" }));
-    fx.svc.providers.reconcile().await;
+    crate::test_fixtures::activate(&fx.svc).await;
     first_read(&fx).await;
     fx.svc.providers.shutdown_all().await;
     assert!(file.is_file(), "the provider was told to shut down");
-    assert!(fx.svc.providers.get(INSTANCE).await.is_none());
+    assert!(fx
+        .svc
+        .providers
+        .get(INSTANCE)
+        .await
+        .is_none_or(|instance| instance.is_stopped()));
 }
 
 /// A provider's `needs` are the scopes its `host/call`s reach — a
@@ -6122,12 +6134,8 @@ async fn running_policy(hooks: &str) -> (EffortFixture, Extension) {
         .find(|e| e.name == "steward")
         .expect("the policy extension loads");
     assert_eq!(ext.errors, Vec::<String>::new());
-    approve(&fx, &ext);
-    fx.svc
-        .providers
-        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-        .await
-        .unwrap();
+    approve(&fx, &ext).await;
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     fx.svc
         .commands
         .run(
@@ -6142,7 +6150,7 @@ async fn running_policy(hooks: &str) -> (EffortFixture, Extension) {
 }
 
 /// `id` as the project's effort policy.
-fn choose_policy(fx: &EffortFixture, id: &str) {
+async fn choose_policy(fx: &EffortFixture, id: &str) {
     fx.svc
         .config
         .write()
@@ -6150,6 +6158,7 @@ fn choose_policy(fx: &EffortFixture, id: &str) {
         .active_providers
         .insert("effort_policy".into(), id.into());
     republish(fx);
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
 }
 
 /// A task filed on the fixture's thread, moved by the thread's agent to
@@ -6181,7 +6190,7 @@ async fn agent_moves(fx: &EffortFixture, item: &str, to: &str) {
 }
 
 async fn file_task(fx: &EffortFixture) -> String {
-    make_active(fx, "oxplow");
+    make_active(fx, "oxplow").await;
     let out = fx
         .svc
         .commands
@@ -6275,7 +6284,7 @@ async fn a_provider_is_the_projects_effort_policy() {
         "{:?}",
         listed.rows
     );
-    choose_policy(&fx, "fake");
+    choose_policy(&fx, "fake").await;
     let task = file_task(&fx).await;
     agent_moves(&fx, &task, "in_progress").await;
     let (efforts, source) = policy_efforts(&fx).await;
@@ -6309,7 +6318,7 @@ fn fake_policy_state(fx: &EffortFixture) -> serde_json::Value {
 #[tokio::test]
 async fn a_policy_provider_is_told_the_run_it_reacts_in() {
     let (fx, _ext) = running_policy("").await;
-    choose_policy(&fx, "fake");
+    choose_policy(&fx, "fake").await;
     let task = file_task(&fx).await;
     agent_moves(&fx, &task, "in_progress").await;
     let context = fake_policy_state(&fx)["last_context"].clone();
@@ -6332,7 +6341,7 @@ async fn a_policy_provider_is_told_the_run_it_reacts_in() {
 async fn a_provider_policy_not_chosen_hears_nothing() {
     let (fx, _ext) = running_policy("").await;
     for chosen in ["oxplow", "none"] {
-        choose_policy(&fx, chosen);
+        choose_policy(&fx, chosen).await;
         let task = file_task(&fx).await;
         agent_moves(&fx, &task, "in_progress").await;
         agent_moves(&fx, &task, "done").await;
@@ -6345,7 +6354,7 @@ async fn a_provider_policy_not_chosen_hears_nothing() {
 #[tokio::test]
 async fn a_provider_policy_composing_no_command_runs_nothing() {
     let (fx, _ext) = running_policy("bogus-react").await;
-    choose_policy(&fx, "fake");
+    choose_policy(&fx, "fake").await;
     let task = file_task(&fx).await;
     agent_moves(&fx, &task, "in_progress").await;
     assert!(reacts(&fx) > 0, "it was asked");
@@ -6372,9 +6381,8 @@ async fn a_provider_policy_composing_no_command_runs_nothing() {
 #[tokio::test]
 async fn a_stopped_provider_policy_resolves_to_none() {
     let (fx, _ext) = running_policy("").await;
-    choose_policy(&fx, "fake");
-    assert!(fx.svc.providers.stop(POLICY).await);
-    republish(&fx);
+    choose_policy(&fx, "fake").await;
+    turn_off(&fx.svc, POLICY).await;
     let config = crate::config_service::read_config(&fx.svc.config);
     assert_eq!(fx.svc.capabilities.active(&config, "effort_policy"), "none");
     assert!(!fx.svc.effort_policies.has("fake"));
@@ -6426,12 +6434,8 @@ async fn running_harness(hooks: &str) -> (EffortFixture, Extension) {
         .find(|e| e.name == "conductor")
         .expect("the harness extension loads");
     assert_eq!(ext.errors, Vec::<String>::new());
-    approve(&fx, &ext);
-    fx.svc
-        .providers
-        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-        .await
-        .unwrap();
+    approve(&fx, &ext).await;
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     (fx, ext)
 }
 
@@ -6457,11 +6461,11 @@ async fn a_harness_provider_is_a_registered_harness() {
         .iter()
         .any(|l| l.id == "fake" && l.settings[0].key == "model"));
 
-    crate::capabilities::refresh(&fx.svc).await.unwrap();
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     assert!(fx.svc.harnesses.has("fake"), "a reload keeps it");
     assert!(fx.svc.harnesses.has("claude"), "beside the built-ins");
 
-    assert!(fx.svc.providers.stop(HARNESS).await);
+    turn_off(&fx.svc, HARNESS).await;
     assert!(!fx.svc.harnesses.has("fake"));
 }
 
@@ -6649,7 +6653,7 @@ async fn running_snapshots(
         .find(|e| e.name == "shutter")
         .expect("the snapshots extension loads");
     assert_eq!(ext.errors, Vec::<String>::new());
-    approve(&fx, &ext);
+    approve(&fx, &ext).await;
     let stream = oxplow_domain::StreamId::new(1);
     let capture = std::sync::Arc::new(
         crate::snapshot_capture::SnapshotCaptureService::new(
@@ -6667,11 +6671,7 @@ async fn running_snapshots(
     fx.svc
         .snapshot_captures
         .insert_for_test(stream, capture.clone());
-    fx.svc
-        .providers
-        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-        .await
-        .unwrap();
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     choose_snapshots(&fx, "shutter").await;
     (fx, stream, capture)
 }
@@ -6684,12 +6684,7 @@ async fn choose_snapshots(fx: &EffortFixture, id: &str) {
         .unwrap()
         .active_providers
         .insert(crate::snapshots::CAPABILITY.into(), id.into());
-    let config = crate::config_service::read_config(&fx.svc.config);
-    fx.svc
-        .capabilities
-        .publish(&config, &fx.svc.db)
-        .await
-        .unwrap();
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     fx.svc
         .event_pump
         .settle(&["snapshots.switch"], std::time::Duration::from_secs(10))
@@ -6874,24 +6869,15 @@ async fn a_knowledge_provider_keeps_pages_and_core_records_them() {
         .find(|e| e.name == "shelf")
         .expect("the knowledge extension loads");
     assert_eq!(ext.errors, Vec::<String>::new());
-    approve(&fx, &ext);
-    fx.svc
-        .providers
-        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
-        .await
-        .unwrap();
+    approve(&fx, &ext).await;
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     fx.svc
         .config
         .write()
         .unwrap()
         .active_providers
         .insert(crate::knowledge::CAPABILITY.into(), "shelf".into());
-    let config = crate::config_service::read_config(&fx.svc.config);
-    fx.svc
-        .capabilities
-        .publish(&config, &fx.svc.db)
-        .await
-        .unwrap();
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     fx.svc
         .event_pump
         .settle(

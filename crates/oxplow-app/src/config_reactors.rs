@@ -271,6 +271,8 @@ mod tests {
                 .settle(&[METRICS], Duration::from_secs(5))
                 .await
         );
+        // The reactor asked for a generation; the owner publishes it.
+        crate::test_fixtures::activate(&f.svc).await;
         assert!(svc
             .fact_store
             .get_spec("work.ready_now")

@@ -1058,13 +1058,16 @@ mod tests {
     const MARK_DONE: &str = "  - id: mark-done\n    summary: Mark a finished item.\n    on: [work_item.state_changed]\n    where: { to: done }\n    needs: [sql.read]\n    entry: mark.star\n";
     const MARK: &str = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_work_item WHERE ref = :work_item\", \"params\": {\"work_item\": x[\"event\"][\"payload\"][\"work_item\"]}})\n    ref = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": ref, \"title\": rows[0][\"title\"] + \" (done)\"}}]}\n";
 
-    fn extension(root: &Path, effects: &str, files: &[(&str, &str)]) {
-        let dir = root.join("oxplow/extensions/acme");
+    /// Write extension `acme` into the project and publish the generation
+    /// that carries it.
+    async fn extension(svc: &std::sync::Arc<Services>, effects: &str, files: &[(&str, &str)]) {
+        let dir = svc.layout.project_dir.join("oxplow/extensions/acme");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("extension.yaml"), format!("{HEAD}{effects}")).unwrap();
         for (name, body) in files {
             std::fs::write(dir.join(name), body).unwrap();
         }
+        crate::test_fixtures::activate(svc).await;
     }
 
     /// A person approves every effect of `acme` as it is now.
@@ -1124,7 +1127,7 @@ mod tests {
     async fn an_approved_effect_reacts_once_with_its_run_caused_by_the_event() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
-        extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
+        extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
         approve(svc).await;
         let before = title(&fx).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
@@ -1163,7 +1166,7 @@ mod tests {
         let svc = &fx.svc;
         let stamp = "  - id: stamp\n    summary: Stamp the event's seq.\n    on: [work_item.state_changed]\n    where: { to: done }\n    needs: [sql.read]\n    entry: stamp.star\n";
         let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT seq, type FROM v_event WHERE id = :event_id AND seq = :event_seq\", \"params\": {\"event_id\": x[\"event\"][\"id\"], \"event_seq\": x[\"event\"][\"seq\"]}})\n    ref = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": ref, \"title\": rows[0][\"type\"] + \" #\" + str(rows[0][\"seq\"])}}]}\n";
-        extension(&svc.layout.project_dir, stamp, &[("stamp.star", script)]);
+        extension(svc, stamp, &[("stamp.star", script)]).await;
         approve(svc).await;
         let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
         EffectTriggers::new(Arc::downgrade(svc))
@@ -1206,7 +1209,7 @@ mod tests {
     async fn the_folder_is_hashed_once_per_catalog_load() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
-        extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
+        extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
         approve(svc).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
         for _ in 0..2 {
@@ -1221,6 +1224,7 @@ mod tests {
             format!("{MARK}# edited\n"),
         )
         .unwrap();
+        crate::test_fixtures::activate(svc).await;
         let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
         consumer.handle(&ev).await.unwrap();
         assert_eq!(consumer.folder_hashes(), 2);
@@ -1238,10 +1242,11 @@ mod tests {
         let fx = crate::test_fixtures::services_with_effort().await;
         let svc = &fx.svc;
         extension(
-            &svc.layout.project_dir,
+            svc,
             &format!("{MARK_DONE}    after: [no.such.consumer]\n"),
             &[("mark.star", MARK)],
-        );
+        )
+        .await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
         for _ in 0..3 {
             assert!(consumer.after().is_empty());
@@ -1268,7 +1273,7 @@ mod tests {
     async fn an_effect_never_reacts_to_the_past_or_to_what_where_excludes() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
-        extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
+        extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
         let early = log(svc, state_changed(&fx, CanonicalState::Done)).await;
         consumer.handle(&early).await.unwrap();
@@ -1288,7 +1293,7 @@ mod tests {
     async fn an_interrupted_reaction_is_failed_not_sent_again() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
-        extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
+        extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
         approve(svc).await;
         let before = title(&fx).await;
         let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
@@ -1308,7 +1313,7 @@ mod tests {
     async fn a_cut_off_backfill_or_automatic_attempt_is_recovered_at_start() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
-        extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
+        extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
         approve(svc).await;
         register(svc);
         let claim = |ev: &StoredEvent, origin| {
@@ -1428,7 +1433,7 @@ mod tests {
     async fn an_effect_step_sends_the_same_key_on_every_attempt() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
-        extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", PROBE)]);
+        extension(svc, MARK_DONE, &[("mark.star", PROBE)]).await;
         approve(svc).await;
         register(svc);
         let keys: Arc<parking_lot::Mutex<Vec<Option<String>>>> = Arc::default();
@@ -1473,11 +1478,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         const TWO_STEPS: &str = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.probe.note\", \"input\": {\"n\": 1}}, {\"name\": \"oxplow.probe.write\", \"input\": {\"n\": 2}}]}\n";
-        extension(
-            &svc.layout.project_dir,
-            MARK_DONE,
-            &[("mark.star", TWO_STEPS)],
-        );
+        extension(svc, MARK_DONE, &[("mark.star", TWO_STEPS)]).await;
         approve(svc).await;
         register(svc);
         let keys: Arc<parking_lot::Mutex<Vec<Option<String>>>> = Arc::default();
@@ -1564,7 +1565,7 @@ mod tests {
     async fn a_person_retries_an_interrupted_reaction() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
-        extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
+        extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
         approve(svc).await;
         register(svc);
         let before = title(&fx).await;
@@ -1642,7 +1643,7 @@ mod tests {
     async fn a_retry_needs_a_current_approval_and_an_enabled_effect() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
-        extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
+        extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
         approve(svc).await;
         register(svc);
         let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
@@ -1668,10 +1669,11 @@ mod tests {
 
         // Edited since it was approved: a person approves it first.
         extension(
-            &svc.layout.project_dir,
+            svc,
             MARK_DONE,
             &[("mark.star", &format!("{MARK}# edited\n"))],
-        );
+        )
+        .await;
         let refused = retry(svc, &human, &ev, true).await.unwrap_err();
         assert!(refused.to_string().contains("approv"), "{refused}");
         assert_eq!(
@@ -1704,7 +1706,7 @@ mod tests {
         let svc = &fx.svc;
         let bang = "  - id: bang\n    summary: Add a bang.\n    on: [work_item.edited]\n    needs: [sql.read]\n    entry: bang.star\n";
         let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_work_item WHERE ref = :work_item\", \"params\": {\"work_item\": x[\"event\"][\"payload\"][\"work_item\"]}})\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": x[\"event\"][\"payload\"][\"work_item\"], \"title\": rows[0][\"title\"] + \"!\"}}]}\n";
-        extension(&svc.layout.project_dir, bang, &[("bang.star", script)]);
+        extension(svc, bang, &[("bang.star", script)]).await;
         approve(svc).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
         let r = oxplow_tasks::work_item_ref(fx.task);
@@ -1781,10 +1783,11 @@ mod tests {
         let svc = &fx.svc;
         let script = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.delete\", \"input\": {\"ref\": x[\"event\"][\"payload\"][\"work_item\"]}}]}\n";
         extension(
-            &svc.layout.project_dir,
+            svc,
             &MARK_DONE.replace("entry: mark.star", "entry: drop.star"),
             &[("drop.star", script)],
-        );
+        )
+        .await;
         approve(svc).await;
         let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
         EffectTriggers::new(Arc::downgrade(svc))
@@ -1813,10 +1816,11 @@ mod tests {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         extension(
-            &svc.layout.project_dir,
+            svc,
             MARK_DONE,
             &[("mark.star", "def transform(x):\n    return 1 // 0\n")],
-        );
+        )
+        .await;
         approve(svc).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
         for _ in 0..3 {
@@ -1870,8 +1874,7 @@ mod tests {
         let propose = MARK_DONE
             .replace("id: mark-done", "id: proposes")
             .replace("entry: mark.star", "entry: drop.star");
-        extension(
-            &svc.layout.project_dir,
+        extension(svc,
             &format!("{skip}{propose}"),
             &[
                 ("skip.star", "def transform(x):\n    return {\"skip\": \"not today\"}\n"),
@@ -1880,7 +1883,7 @@ mod tests {
                     "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.delete\", \"input\": {\"ref\": x[\"event\"][\"payload\"][\"work_item\"]}}]}\n",
                 ),
             ],
-        );
+        ).await;
         approve(svc).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
         for _ in 0..3 {
@@ -1959,7 +1962,7 @@ mod tests {
                 "def transform(x):\n    e = x[\"event\"]\n    return {{\"commands\": [{{\"name\": \"oxplow.work_item.update\", \"input\": {{\"ref\": \"{task}\", \"title\": \"#%d v%d by %s\" % (e[\"payload\"][\"number\"], e[\"v\"], e[\"payload\"][\"by\"])}}}}]}}\n"
             ),
         );
-        svc.vocabulary_service.sync().await.unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
         // The subscriber is `acme`; `effects()` lists the owner first.
         let config = svc.config.read().unwrap().clone();
         let (ext, decl) = effects(svc)
@@ -1990,7 +1993,7 @@ mod tests {
             "oxplow/extensions/acme-pr/extension.yaml",
             &owner(&format!("{v1}{v2}")),
         );
-        svc.vocabulary_service.sync().await.unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
         let consumer = Arc::new(EffectTriggers::new(Arc::downgrade(svc)));
         assert!(consumer.handles("acme_pr.merged"));
         crate::event_pump::run_async_handler(
@@ -2064,7 +2067,7 @@ mod tests {
         use crate::commands::effect::BACKFILL_PLAN;
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
-        extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
+        extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
         register(svc);
         let past = log(svc, state_changed(&fx, CanonicalState::Done)).await;
         approve(svc).await;
@@ -2127,7 +2130,7 @@ mod tests {
     async fn a_backfill_plan_reads_past_what_where_excludes() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
-        extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
+        extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
         for _ in 0..5 {
             log(svc, state_changed(&fx, CanonicalState::Blocked)).await;
         }
@@ -2173,7 +2176,7 @@ mod tests {
         let svc = &fx.svc;
         let bang = "  - id: bang\n    summary: Add a bang.\n    on: [work_item.edited]\n    needs: [sql.read]\n    entry: bang.star\n";
         let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_work_item WHERE ref = :work_item\", \"params\": {\"work_item\": x[\"event\"][\"payload\"][\"work_item\"]}})\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": x[\"event\"][\"payload\"][\"work_item\"], \"title\": rows[0][\"title\"] + \"!\"}}]}\n";
-        extension(&svc.layout.project_dir, bang, &[("bang.star", script)]);
+        extension(svc, bang, &[("bang.star", script)]).await;
         register(svc);
         let r = oxplow_tasks::work_item_ref(fx.task);
         let edited = |source: &str| {
@@ -2202,7 +2205,7 @@ mod tests {
         use crate::commands::effect::{BACKFILL, BACKFILL_PLAN};
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
-        extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
+        extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
         register(svc);
         let before = title(&fx).await;
         // Before its approval: three it would react to, one its `where`
@@ -2303,7 +2306,7 @@ mod tests {
         use crate::commands::effect::{backfill, Range, BACKFILL, BACKFILL_PLAN};
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
-        extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", MARK)]);
+        extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
         register(svc);
         let mut past = Vec::new();
         for _ in 0..3 {
@@ -2355,7 +2358,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         let quiet = "def transform(x):\n    return {\"skip\": \"nothing to do\"}\n";
-        extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", quiet)]);
+        extension(svc, MARK_DONE, &[("mark.star", quiet)]).await;
         register(svc);
         for _ in 0..3 {
             log(svc, state_changed(&fx, CanonicalState::Done)).await;
@@ -2364,13 +2367,14 @@ mod tests {
         let (ext, decl) = find_effect(svc, "acme/mark-done").unwrap();
         // The script changes under the run: the approval was of another.
         extension(
-            &svc.layout.project_dir,
+            svc,
             MARK_DONE,
             &[(
                 "mark.star",
                 "def transform(x):\n    return {\"skip\": \"changed\"}\n",
             )],
-        );
+        )
+        .await;
         let out = crate::commands::effect::backfill(
             svc,
             &ext,
@@ -2397,7 +2401,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         let broken = "def transform(x):\n    return 1 // 0\n";
-        extension(&svc.layout.project_dir, MARK_DONE, &[("mark.star", broken)]);
+        extension(svc, MARK_DONE, &[("mark.star", broken)]).await;
         register(svc);
         for _ in 0..5 {
             log(svc, state_changed(&fx, CanonicalState::Done)).await;

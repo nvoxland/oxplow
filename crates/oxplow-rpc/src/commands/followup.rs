@@ -30,7 +30,7 @@ pub async fn remove_followup(svc: &Services, id: String) -> Result<(), IpcError>
 mod tests {
     #[tokio::test]
     async fn list_followups_dispatches() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let out = crate::dispatch(
             "list_followups",
             serde_json::json!({"threadId": "thr999999"}),
@@ -43,7 +43,7 @@ mod tests {
 
     #[tokio::test]
     async fn add_followup_dispatches() {
-        let (svc, _dir) = crate::test_support::services();
+        let (svc, _dir) = crate::test_support::services().await;
         let out = crate::dispatch(
             "add_followup",
             serde_json::json!({"threadId": "thr1", "body": "check this later"}),
