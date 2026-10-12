@@ -138,15 +138,15 @@ saying so (`oxplow_ai::config::DROPPED_ROLES`; project.yaml's
   adapter checks Rust-built requests before calling a provider. It rejects
   image and tool content, tool declarations and conversation shapes it
   cannot preserve before calling the provider. `UnsupportedFeature` carries
-  whether support is unknown (images/tools on a legacy provider) or
+  whether support is unknown (images/tools on a text-only provider) or
   unsupported by the text adapter (conversation shapes it cannot preserve).
-  Providers with native transport may override it. Because legacy replies
+  Providers with native transport may override it. Because text-only replies
   carry neither a finish reason nor usage provenance, the adapter returns
-  unknown for both; positive legacy token counts are preserved, with
+  unknown for both; positive text-path token counts are preserved, with
   non-positive sentinel counts left unknown. Native typed providers may
   report observed or estimated usage. New typed usage has
   optional input/output counts and an explicit `unknown`, `observed` or
-  `estimated` source; legacy `Completion` and `Decision` token fields remain
+  `estimated` source; the text path's `Completion` and `Decision` token fields remain
   unchanged.
 - **Discovery from extension hosts.** Collectors declare `ai.discover` and
   call `ai_capabilities(role = "main")` for the selected model or
@@ -173,8 +173,8 @@ saying so (`oxplow_ai::config::DROPPED_ROLES`; project.yaml's
   under the role's provider/model binding. `AiService::complete_typed_as`
   refuses a request for a different model and known unsupported features
   before fetching a key. Optional usage counts and their provenance remain
-  in `ai_call.response` and `ai_result.output`; legacy numeric aggregates
-  include only observed usage on this path, using their historical zero
+  in `ai_call.response` and `ai_result.output`; the numeric aggregates
+  include only observed usage on this path, using their zero
   sentinel for missing/non-observed values. Estimates never become observed
   usage, and known zero remains distinct from missing in the typed payload.
   Tool calls/results are ordered data and do not execute a tool automatically.
@@ -198,14 +198,14 @@ saying so (`oxplow_ai::config::DROPPED_ROLES`; project.yaml's
     (oxplow's answer shapes, a noul as `probability`; parsed by
     `parse_answers`) or `{ error }`. `usage` is `{ input, output }`. Both
     are pure and sandboxed (`run_starlark_fn`, 5 s each).
-    With `ops: [completeTyped]` (or alongside the legacy ops), `request`
+    With `ops: [completeTyped]` (or alongside the text `complete`/`decide` ops), `request`
     receives `{op: completeTyped, model, request}` with the complete V1
     envelope; `response` receives `{op: completeTyped, model, body}` and
     returns a full V1 typed response, including usage provenance and finish
     reason. The same credential substitution, consent and transport rules
-    apply. Without that opt-in, typed completion uses the conservative legacy
+    apply. Without that opt-in, typed completion uses the conservative
     text adapter. The shipped Anthropic and OpenAI-compatible mappings opt into
-    `completeTyped` alongside legacy completion. They preserve conversation
+    `completeTyped` alongside text completion. They preserve conversation
     history, tool definitions and tool calls/results, optional observed usage
     (zero is retained) and finish categories. Image assets still require a host
     resolver and are refused. Anthropic requires initial text-only system
@@ -213,7 +213,7 @@ saying so (`oxplow_ai::config::DROPPED_ROLES`; project.yaml's
     requires result-only tool messages and refuses text after a tool call in an
     assistant message, since that transport separates content from calls.
     Unsupported response blocks fail instead of disappearing. Neither mapping
-    executes a returned tool. OpenRouter/TypeSafe keep their legacy mappings.
+    executes a returned tool. OpenRouter/TypeSafe stay text-only (`complete`/`decide`).
     Transport contracts: [OpenAI chat](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)
     and [Anthropic tool calls](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls).
   - **The host does the call.** `path` is relative to the instance's base

@@ -2336,7 +2336,7 @@ def response(x):
 
     /// The text helpers and the typed call share one provider and one
     /// record; a typed text call over a text-only provider keeps the
-    /// legacy usage as unknown-provenance counts.
+    /// text-path usage as unknown-provenance counts.
     #[tokio::test]
     async fn text_helpers_and_the_typed_call_share_the_path() {
         let reply = json!({"choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": "hello"}}],
