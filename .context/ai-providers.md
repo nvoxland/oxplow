@@ -246,6 +246,26 @@ saying so (`oxplow_ai::config::DROPPED_ROLES`; project.yaml's
     gets `{ op, model, state }` and returns the whole V1 reply. The key is
     taken out of every event before `delta` sees it. Without
     `streamTyped` a stream is the whole reply at once.
+    The shipped Anthropic, OpenAI and OpenAI-compatible mappings opt in
+    (`ops: [complete, completeTyped, streamTyped]`); their `request` is the
+    `completeTyped` body plus the vendor's stream switch, and `response`
+    gives what `completeTyped` gives for the same content (same finish
+    mapping and usage rules). Anthropic folds the Messages events:
+    `message_start` (input usage with cache counts), `content_block_start`
+    (a text block, or a tool_use block's id and name), `content_block_delta`
+    (`text_delta` is a `text` delta at once; `input_json_delta` fragments
+    are buffered per block), `content_block_stop` (a tool_use block's
+    buffer is decoded into one `toolCall` delta), `message_delta` (stop
+    reason, output usage) and `message_stop`; `ping` is ignored and an
+    `error` event ends the call with its message. Chat completions folds
+    `choices[0].delta.content` as text, `delta.tool_calls` fragments by
+    `index` (the calls are handed over whole when the finish reason
+    arrives), the final usage chunk (no choices; the body asks for it with
+    `stream_options.include_usage`) and `[DONE]`; a refusal, audio or
+    legacy `function_call` delta is refused as the whole reply refuses it.
+    A stream that ends before the message is whole (no `message_stop`, no
+    finish reason, a tool call still open) is an error, never a partial
+    reply. OpenRouter and TypeSafe don't stream natively.
     Transport contracts: [OpenAI chat](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)
     and [Anthropic tool calls](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls).
   - **The host does the call.** `path` is relative to the instance's base

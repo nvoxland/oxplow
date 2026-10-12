@@ -1155,6 +1155,334 @@ def response(x):
         );
     }
 
+    fn shipped_stream(script: &str, base_url: &str) -> Arc<dyn ModelProvider> {
+        scripted(
+            "x",
+            "X",
+            "p.star",
+            script,
+            &json!({ "baseUrl": base_url, "ops": ["complete", "completeTyped", "streamTyped"] }),
+            open(),
+        )
+        .unwrap()
+    }
+
+    fn named_event(event: &str, data: Value) -> String {
+        format!("event: {event}\ndata: {data}\n\n")
+    }
+
+    /// A recorded Messages API stream: text, a tool call whose input
+    /// arrives in fragments, more text, usage with cache counts.
+    fn anthropic_events() -> Vec<String> {
+        let ev = |data: Value| {
+            let kind = data["type"].as_str().unwrap().to_string();
+            named_event(&kind, data)
+        };
+        vec![
+            ev(
+                json!({ "type": "message_start", "message": { "id": "msg_1", "role": "assistant",
+                "content": [], "stop_reason": null,
+                "usage": { "input_tokens": 10, "cache_creation_input_tokens": 5,
+                           "cache_read_input_tokens": 100, "output_tokens": 1 } } }),
+            ),
+            ev(json!({ "type": "content_block_start", "index": 0,
+                "content_block": { "type": "text", "text": "" } })),
+            "event: ping\ndata: {\"type\": \"ping\"}\n\n".into(),
+            ev(json!({ "type": "content_block_delta", "index": 0,
+                "delta": { "type": "text_delta", "text": "on" } })),
+            ev(json!({ "type": "content_block_delta", "index": 0,
+                "delta": { "type": "text_delta", "text": "e" } })),
+            ev(json!({ "type": "content_block_stop", "index": 0 })),
+            ev(json!({ "type": "content_block_start", "index": 1,
+                "content_block": { "type": "tool_use", "id": "t1", "name": "grep", "input": {} } })),
+            ev(json!({ "type": "content_block_delta", "index": 1,
+                "delta": { "type": "input_json_delta", "partial_json": "" } })),
+            ev(json!({ "type": "content_block_delta", "index": 1,
+                "delta": { "type": "input_json_delta", "partial_json": "{\"q\": " } })),
+            ev(json!({ "type": "content_block_delta", "index": 1,
+                "delta": { "type": "input_json_delta", "partial_json": "\"x\"}" } })),
+            ev(json!({ "type": "content_block_stop", "index": 1 })),
+            ev(json!({ "type": "content_block_start", "index": 2,
+                "content_block": { "type": "text", "text": "" } })),
+            ev(json!({ "type": "content_block_delta", "index": 2,
+                "delta": { "type": "text_delta", "text": "two" } })),
+            ev(json!({ "type": "content_block_stop", "index": 2 })),
+            ev(json!({ "type": "message_delta",
+                "delta": { "stop_reason": "tool_use", "stop_sequence": null },
+                "usage": { "output_tokens": 7 } })),
+            ev(json!({ "type": "message_stop" })),
+        ]
+    }
+
+    /// A recorded chat-completions stream: text, a tool call whose
+    /// arguments arrive in fragments, the finish reason, then the usage
+    /// chunk (no choices) and `[DONE]`.
+    fn openai_chunks() -> Vec<String> {
+        let chunk = |delta: Value, finish: Value| {
+            sse_data(json!({ "id": "c", "object": "chat.completion.chunk",
+                "choices": [{ "index": 0, "delta": delta, "finish_reason": finish }] }))
+        };
+        vec![
+            chunk(json!({ "role": "assistant", "content": "" }), Value::Null),
+            chunk(json!({ "content": "check" }), Value::Null),
+            chunk(json!({ "content": "ing" }), Value::Null),
+            chunk(
+                json!({ "tool_calls": [{ "index": 0, "id": "c1", "type": "function",
+                    "function": { "name": "a", "arguments": "" } }] }),
+                Value::Null,
+            ),
+            chunk(
+                json!({ "tool_calls": [{ "index": 0, "function": { "arguments": "{\"n\":" } }] }),
+                Value::Null,
+            ),
+            chunk(
+                json!({ "tool_calls": [{ "index": 0, "function": { "arguments": "1}" } }] }),
+                Value::Null,
+            ),
+            chunk(
+                json!({ "tool_calls": [{ "index": 1, "id": "c2", "type": "function",
+                    "function": { "name": "b", "arguments": "{}" } }] }),
+                Value::Null,
+            ),
+            chunk(json!({}), json!("tool_calls")),
+            sse_data(json!({ "id": "c", "choices": [],
+                "usage": { "prompt_tokens": 20, "completion_tokens": 9 } })),
+            "data: [DONE]\n\n".into(),
+        ]
+    }
+
+    /// What `stream_typed` over `chunks` gives, with the deltas it handed
+    /// over.
+    async fn streamed(
+        script: &str,
+        path: &'static str,
+        chunks: Vec<String>,
+    ) -> (TypedResponseV1, Vec<StreamDeltaV1>) {
+        let (base, seen, _) =
+            oxplow_ai_fake::mock_sse(path, chunks, Duration::from_millis(1), Duration::ZERO).await;
+        let mut deltas = Vec::new();
+        let reply = shipped_stream(script, &base)
+            .stream_typed(
+                &at(&base, Some("sk-test-key")),
+                &user_text("go"),
+                &Cancel::default(),
+                &mut |d| deltas.push(d),
+            )
+            .await
+            .unwrap();
+        let (_, headers, body) = seen.lock().unwrap()[0].clone();
+        assert_eq!(body["stream"], true);
+        assert_eq!(body["messages"][0]["content"][0]["text"], "go");
+        assert!(headers.contains_key("x-api-key") || headers.contains_key("authorization"));
+        (reply, deltas)
+    }
+
+    /// The shipped Anthropic mapping folds the Messages API's events: text
+    /// as it comes, a tool call once its input is whole, and the reply is
+    /// what the non-streamed mapping gives for the same content.
+    #[tokio::test]
+    async fn the_anthropic_mapping_streams_what_it_completes() {
+        let (reply, deltas) = streamed(ANTHROPIC, "/v1/messages", anthropic_events()).await;
+        let whole = json!({ "stop_reason": "tool_use",
+            "content": [
+                { "type": "text", "text": "one" },
+                { "type": "tool_use", "id": "t1", "name": "grep", "input": { "q": "x" } },
+                { "type": "text", "text": "two" } ],
+            "usage": { "input_tokens": 10, "cache_creation_input_tokens": 5,
+                       "cache_read_input_tokens": 100, "output_tokens": 7 } });
+        let (base, _) = mock("/v1/messages", 200, whole).await;
+        let expected = shipped_typed(ANTHROPIC, &base)
+            .complete_typed(&at(&base, None), &user_text("go"))
+            .await
+            .unwrap();
+        assert_eq!(reply, expected);
+        assert_eq!(
+            deltas,
+            [
+                StreamDeltaV1::Text { text: "on".into() },
+                StreamDeltaV1::Text { text: "e".into() },
+                StreamDeltaV1::ToolCall {
+                    id: "t1".into(),
+                    name: "grep".into(),
+                    arguments: json!({ "q": "x" })
+                },
+                StreamDeltaV1::Text { text: "two".into() },
+            ]
+        );
+    }
+
+    /// The shipped OpenAI mapping folds chat-completions chunks the same
+    /// way: tool calls whole when the finish reason arrives, usage from the
+    /// chunk that has no choices.
+    #[tokio::test]
+    async fn the_openai_mapping_streams_what_it_completes() {
+        let (reply, deltas) = streamed(OPENAI, "/chat/completions", openai_chunks()).await;
+        let whole = json!({ "choices": [{ "finish_reason": "tool_calls", "message": {
+                "role": "assistant", "content": "checking",
+                "tool_calls": [
+                    { "id": "c1", "type": "function", "function": { "name": "a", "arguments": "{\"n\":1}" } },
+                    { "id": "c2", "type": "function", "function": { "name": "b", "arguments": "{}" } } ] } }],
+            "usage": { "prompt_tokens": 20, "completion_tokens": 9 } });
+        let (base, _) = mock("/chat/completions", 200, whole).await;
+        let expected = shipped_typed(OPENAI, &base)
+            .complete_typed(&at(&base, None), &user_text("go"))
+            .await
+            .unwrap();
+        assert_eq!(reply, expected);
+        let (base, seen, _) = oxplow_ai_fake::mock_sse(
+            "/chat/completions",
+            openai_chunks(),
+            Duration::from_millis(1),
+            Duration::ZERO,
+        )
+        .await;
+        shipped_stream(OPENAI, &base)
+            .stream_typed(
+                &at(&base, None),
+                &user_text("go"),
+                &Cancel::default(),
+                &mut |_| {},
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            seen.lock().unwrap()[0].2["stream_options"],
+            json!({ "include_usage": true })
+        );
+        assert_eq!(
+            deltas,
+            [
+                StreamDeltaV1::Text {
+                    text: "check".into()
+                },
+                StreamDeltaV1::Text { text: "ing".into() },
+                StreamDeltaV1::ToolCall {
+                    id: "c1".into(),
+                    name: "a".into(),
+                    arguments: json!({ "n": 1 })
+                },
+                StreamDeltaV1::ToolCall {
+                    id: "c2".into(),
+                    name: "b".into(),
+                    arguments: json!({})
+                },
+            ]
+        );
+    }
+
+    /// An `error` event ends an Anthropic stream with its message; a
+    /// stream that stops short of `message_stop` is not a reply.
+    #[tokio::test]
+    async fn the_anthropic_mapping_refuses_an_errored_or_truncated_stream() {
+        let mut events = anthropic_events();
+        events.truncate(4);
+        events.push(named_event(
+            "error",
+            json!({ "type": "error", "error": { "type": "overloaded_error", "message": "Overloaded" } }),
+        ));
+        let (base, _, _) = oxplow_ai_fake::mock_sse(
+            "/v1/messages",
+            events,
+            Duration::from_millis(1),
+            Duration::ZERO,
+        )
+        .await;
+        let err = shipped_stream(ANTHROPIC, &base)
+            .stream_typed(
+                &at(&base, None),
+                &user_text("go"),
+                &Cancel::default(),
+                &mut |_| {},
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Overloaded"), "{err}");
+        let mut events = anthropic_events();
+        events.truncate(6);
+        let (base, _, _) = oxplow_ai_fake::mock_sse(
+            "/v1/messages",
+            events,
+            Duration::from_millis(1),
+            Duration::ZERO,
+        )
+        .await;
+        let err = shipped_stream(ANTHROPIC, &base)
+            .stream_typed(
+                &at(&base, None),
+                &user_text("go"),
+                &Cancel::default(),
+                &mut |_| {},
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("ended"), "{err}");
+    }
+
+    /// An OpenAI stream carrying a refusal fails as the whole reply does.
+    #[tokio::test]
+    async fn the_openai_mapping_refuses_a_refusal() {
+        let chunks = vec![sse_data(json!({ "choices": [{ "index": 0,
+            "delta": { "refusal": "no" }, "finish_reason": null }] }))];
+        let (base, _, _) = oxplow_ai_fake::mock_sse(
+            "/chat/completions",
+            chunks,
+            Duration::from_millis(1),
+            Duration::ZERO,
+        )
+        .await;
+        let err = shipped_stream(OPENAI, &base)
+            .stream_typed(
+                &at(&base, None),
+                &user_text("go"),
+                &Cancel::default(),
+                &mut |_| {},
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("unsupported"), "{err}");
+    }
+
+    /// Cancelled mid-stream, each mapping returns what had arrived.
+    #[tokio::test]
+    async fn the_shipped_mappings_report_the_partial_text_when_cancelled() {
+        let anthropic = {
+            let mut events = anthropic_events();
+            events.truncate(5);
+            ("/v1/messages", ANTHROPIC, events)
+        };
+        let openai = {
+            let mut chunks = openai_chunks();
+            chunks.truncate(3);
+            ("/chat/completions", OPENAI, chunks)
+        };
+        for (path, script, chunks) in [anthropic, openai] {
+            let (base, _, _) = oxplow_ai_fake::mock_sse(
+                path,
+                chunks,
+                Duration::from_millis(5),
+                Duration::from_secs(30),
+            )
+            .await;
+            let cancel = Cancel::default();
+            let stopper = cancel.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(400)).await;
+                stopper.cancel();
+            });
+            let err = shipped_stream(script, &base)
+                .stream_typed(&at(&base, None), &user_text("go"), &cancel, &mut |_| {})
+                .await
+                .unwrap_err();
+            let AiError::Cancelled { partial, .. } = err else {
+                panic!("{err:?}")
+            };
+            let oxplow_ai::parts::PartV1::Text { text } = &partial.parts[0] else {
+                panic!("{partial:?}")
+            };
+            assert!(text == "one" || text == "checking", "{text}");
+        }
+    }
+
     /// A reply part the mapping cannot represent is an error, not a drop.
     #[tokio::test]
     async fn the_shipped_mappings_refuse_parts_they_cannot_represent() {
