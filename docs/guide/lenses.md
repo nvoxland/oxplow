@@ -279,7 +279,11 @@ oxplow.connect().then((component) => {
 (`tokens`). The kit stylesheet has a few classes in oxplow's look:
 `ox-muted`, `ox-small`, `ox-mono`, `ox-heading`, `ox-link`, `ox-card`,
 `ox-badge`, `ox-button` (add `ox-primary` for the one main action),
-`ox-table`, `ox-num`, the states `ox-ok`, `ox-waiting`, `ox-running` and
+`ox-table`, `ox-num`, forms (`ox-form` a stack of `ox-field`s, each an
+`ox-label` over an `ox-input`, `ox-select` or `ox-textarea`, with an
+`ox-error` under a field that is wrong), drag and drop (`ox-drag` for what
+can be picked up, plus `ox-dragging` while it is; `ox-drop-target` for
+where it may land), the states `ox-ok`, `ox-waiting`, `ox-running` and
 `ox-bad`, and chart series `ox-series-1` to `ox-series-8` (a `fill` for
 SVG, a `background` otherwise). They only work after `applyTheme()`. A
 request that fails rejects with `{ code, message }`. Types for the

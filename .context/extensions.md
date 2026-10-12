@@ -2058,8 +2058,11 @@ load then ends the component and its table shows.
 **The kit's stylesheet** (P11, tsk961). `/component-lib/oxplow-kit.css`
 (`assets/oxplow-kit.css`, served beside the library as `text/css`, and
 named in every bundle's CSP `style-src`) is a few `ox-` classes in
-oxplow's look — text, card, badge, buttons, table, states, chart
-series — that read only the theme's tokens (`kitSheet.test.ts`: every
+oxplow's look — text, card, badge, buttons, forms (`ox-form`, `ox-field`,
+`ox-label`, `ox-input`/`ox-select`/`ox-textarea` with the accent focus
+ring, `ox-error`), drag and drop (`ox-drag`, `ox-dragging`,
+`ox-drop-target`, the Work board's dashed accent drop look), table,
+states, chart series — that read only the theme's tokens (`kitSheet.test.ts`: every
 `var(--x)` is one the app's root defines, and no literal color). A
 bundle links it and calls `component.applyTheme()`, which sets each of
 `init`'s `tokens` on the frame's root through the CSSOM — no `<style>`

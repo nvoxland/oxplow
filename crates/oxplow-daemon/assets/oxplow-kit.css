@@ -63,6 +63,32 @@ body {
 .ox-button.ox-primary:hover { background: var(--button-primary-bg-hover); }
 .ox-button:disabled { opacity: 0.45; cursor: not-allowed; }
 
+/* Forms: a stack of fields, each a label over a control. */
+.ox-form { display: flex; flex-direction: column; gap: 10px; }
+.ox-field { display: flex; flex-direction: column; gap: 3px; }
+.ox-label { color: var(--text-secondary); font-size: var(--text-xs); }
+.ox-input,
+.ox-select,
+.ox-textarea {
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  background: var(--surface-app);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: 3px 8px;
+}
+.ox-textarea { resize: vertical; min-height: 4em; }
+.ox-input:focus,
+.ox-select:focus,
+.ox-textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft-bg); }
+.ox-error { color: var(--severity-critical); font-size: var(--text-xs); }
+
+/* Drag and drop: what can be picked up, and where it may land. */
+.ox-drag { cursor: grab; }
+.ox-dragging { opacity: 0.5; }
+.ox-drop-target { border: 1px dashed var(--accent); box-shadow: 0 0 0 2px var(--accent-soft-bg); }
+
 /* Tables */
 .ox-table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
 .ox-table th,
