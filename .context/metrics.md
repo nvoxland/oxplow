@@ -862,7 +862,10 @@ NOT a store method — it lives in `metric_engine::aggregate_facts`.
   refuses a bare key to slice or filter by (`series_in_stream` →
   `bare_dimension`, tsk989), naming the conformed one — a bare key would
   read nothing, an empty slice that looks like no data — and the built-in
-  metrics declare only conformed keys. Project config
+  metrics declare only conformed keys. A namespaced key a `dimensions:` entry
+  doesn't declare is not refused: it is recorded and slices like a declared
+  one, and the entry only names it in `v_dimension`
+  (`a_namespaced_dimension_key_need_not_be_declared_to_slice`). Project config
   refuses one in `sliceableDims` or
   `filter.dimEq` (`subject`, the raw-subject pseudo-dimension, aside). V166
   renamed stored bare `language` facts and specs' bare dims, dropped the
@@ -1324,7 +1327,16 @@ reached through `run_command`, audited like every command):
   (`fact_store::record_facts_tx`); after commit it clears the fact memo
   (the change loop announces `MetricSamplesChanged` for the measure).
 - `oxplow.metric.rebuild { force }` — `BestEffort` over
-  `MetricsService::rebuild_baseline`, the whole-tree baseline boot runs.
+  `MetricsService::rebuild_baseline`, the whole-tree baseline boot runs. Its
+  `BaselineReport` carries `excluded: [{ path, reason }]`: the snapshot files
+  the collectors were not given, `oversize` (over `snapshotMaxFileBytes`, or
+  stored by stat only), `binary` (a NUL byte) or `unreadable`
+  (`file_map_from_rows` builds a `Corpus` of the text and what it left out; a
+  sweep logs a warning naming them and `SweepReport.excluded` carries them).
+  **A per-path metric reads an excluded path as rescanned clean** — it is in
+  the snapshot's scanned set, so its old fact is superseded by the empty
+  restatement — which is why the exclusion is reported rather than silent.
+  Oversize files can also be listed from `v_snapshot_file` (`storage`).
 - `oxplow.metric.scaffold { name, language?, glob?, origin? }` — a `Read`: the
   files of a code metric extension (`{ name, dir, files: [{ path, content }] }`),
   which the agent writes with its own tools; then `extension check` and

@@ -74,6 +74,68 @@ const TREE_SWEEP_FILE_THRESHOLD: usize = 100;
 pub struct SweepReport {
     pub ran: usize,
     pub failed: Vec<String>,
+    /// Files the collectors were not given (see [`ExcludedFile`]).
+    pub excluded: Vec<ExcludedFile>,
+}
+
+/// Why a snapshot file was not given to collectors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum ExcludedReason {
+    /// Over `snapshotMaxFileBytes`: snapshotted by stat only, or too large to read.
+    Oversize,
+    /// Holds a NUL byte, so isn't text.
+    Binary,
+    /// Its content couldn't be read.
+    Unreadable,
+}
+
+impl ExcludedReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ExcludedReason::Oversize => "oversize",
+            ExcludedReason::Binary => "binary",
+            ExcludedReason::Unreadable => "unreadable",
+        }
+    }
+}
+
+/// A file in the snapshot that collectors scanning it did not see. A
+/// per-path metric treats a path it was handed no text for as rescanned
+/// clean, so the exclusion is reported, never silent.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, specta::Type)]
+pub struct ExcludedFile {
+    pub path: String,
+    pub reason: ExcludedReason,
+}
+
+/// The text a collector run is given for a snapshot, and the snapshot's
+/// files it is not given.
+#[derive(Default)]
+struct Corpus {
+    files: HashMap<String, String>,
+    excluded: Vec<ExcludedFile>,
+}
+
+impl Corpus {
+    /// Say, once per sweep, which files the collectors will not see.
+    fn warn_if_excluded(&self, what: &str) {
+        if self.excluded.is_empty() {
+            return;
+        }
+        let shown: Vec<String> = self
+            .excluded
+            .iter()
+            .take(5)
+            .map(|e| format!("{} ({})", e.path, e.reason.as_str()))
+            .collect();
+        tracing::warn!(
+            count = self.excluded.len(),
+            "{what}: files left out of the scan (oversize files are over snapshotMaxFileBytes): {}{}",
+            shown.join(", "),
+            if self.excluded.len() > shown.len() { ", …" } else { "" }
+        );
+    }
 }
 
 /// A collector that records facts, as the fact engine runs it (P7.B3): one
@@ -326,7 +388,7 @@ impl crate::services::TreeSource for MetricsService {
         if let Some((_, tree)) = cached.filter(|(id, _)| *id == snapshot) {
             return Ok(tree);
         }
-        let tree = Arc::new(self.build_full_file_map(snapshot).await);
+        let tree = Arc::new(self.build_full_file_map(snapshot).await.files);
         *self.last_tree.lock().unwrap_or_else(|e| e.into_inner()) = Some((snapshot, tree.clone()));
         Ok(tree)
     }
@@ -1471,6 +1533,7 @@ impl MetricsService {
             snapshot_id: Some(snapshot_id),
             collectors_run: sweep.ran,
             failed: sweep.failed,
+            excluded: sweep.excluded,
         })
     }
 
@@ -1652,10 +1715,13 @@ impl MetricsService {
             // for a deferred run, every file recorded since the collector
             // last finished (`span_from`): what running on each snapshot
             // between would have scanned.
-            let files = Arc::new(match span_from {
+            let corpus = match span_from {
                 Some(after) => self.build_span_file_map(after, snapshot_id).await,
                 None => self.build_file_map(snapshot_id).await,
-            });
+            };
+            corpus.warn_if_excluded("snapshot collectors");
+            report.excluded.extend(corpus.excluded);
+            let files = Arc::new(corpus.files);
             let mut ctx = self
                 .snapshot_context(stream_id.value(), None, SNAPSHOT_TAKEN, snapshot_id)
                 .await;
@@ -1667,7 +1733,15 @@ impl MetricsService {
         if !full_gauges.is_empty() {
             // The reconstructed whole tree as-of this snapshot — the baseline
             // corpus. Built only when something actually needs baselining.
-            let files = Arc::new(self.build_full_file_map(snapshot_id).await);
+            let corpus = self.build_full_file_map(snapshot_id).await;
+            corpus.warn_if_excluded("snapshot collectors (whole tree)");
+            // Both phases may leave the same file out; say it once.
+            for e in corpus.excluded {
+                if !report.excluded.contains(&e) {
+                    report.excluded.push(e);
+                }
+            }
+            let files = Arc::new(corpus.files);
             let mut ctx = self
                 .snapshot_context(stream_id.value(), None, SNAPSHOT_TAKEN, snapshot_id)
                 .await;
@@ -1804,6 +1878,7 @@ impl MetricsService {
         SweepReport {
             ran: to_run.len(),
             failed,
+            excluded: Vec::new(),
         }
     }
 
@@ -1840,10 +1915,7 @@ impl MetricsService {
             Ok(Some(e)) => e.end_snapshot_id,
             _ => None,
         };
-        let files = Arc::new(match snapshot_id {
-            Some(sid) => self.build_file_map(sid).await,
-            None => HashMap::new(),
-        });
+        let files = self.snapshot_files(snapshot_id, "effort collectors").await;
         let mut ctx = self
             .snapshot_context(
                 stream_val,
@@ -1937,10 +2009,7 @@ impl MetricsService {
             .await
             .ok()
             .flatten();
-        let files = Arc::new(match snapshot_id {
-            Some(sid) => self.build_file_map(sid).await,
-            None => HashMap::new(),
-        });
+        let files = self.snapshot_files(snapshot_id, "event collectors").await;
         let mut ctx = self
             .snapshot_context(stream_val, None, "on", snapshot_id.unwrap_or(0))
             .await;
@@ -2017,10 +2086,7 @@ impl MetricsService {
             .await
             .ok()
             .flatten();
-        let files = Arc::new(match snapshot_id {
-            Some(sid) => self.build_file_map(sid).await,
-            None => HashMap::new(),
-        });
+        let files = self.snapshot_files(snapshot_id, "collector run").await;
         // Asked for explicitly: say why it can't run (an unapproved program,
         // a missing script) instead of quietly recording nothing.
         let mut ctx = self
@@ -2070,7 +2136,7 @@ impl MetricsService {
     /// Build the snapshot file map (repo-relative path → UTF-8 content) for
     /// `snapshot_id`, skipping deleted/oversize/binary/over-large files. The
     /// blob reads are blocking I/O, so they run on a blocking thread.
-    async fn build_file_map(&self, snapshot_id: i64) -> HashMap<String, String> {
+    async fn build_file_map(&self, snapshot_id: i64) -> Corpus {
         let files = self
             .snapshot_store
             .list_files_for_snapshot(snapshot_id)
@@ -2079,11 +2145,26 @@ impl MetricsService {
         self.file_map_from_rows(files).await
     }
 
+    /// The text of `snapshot_id`'s own files (none without a snapshot), the
+    /// files left out logged as a warning naming `what` ran without them.
+    async fn snapshot_files(
+        &self,
+        snapshot_id: Option<i64>,
+        what: &str,
+    ) -> Arc<HashMap<String, String>> {
+        let Some(snapshot_id) = snapshot_id else {
+            return Arc::default();
+        };
+        let corpus = self.build_file_map(snapshot_id).await;
+        corpus.warn_if_excluded(what);
+        Arc::new(corpus.files)
+    }
+
     /// Build the RECONSTRUCTED whole-tree file map as-of `snapshot_id` (the
     /// latest row per path ≤ the snapshot, tombstones excluded) — the baseline
     /// corpus (tsk71). Same content pipeline as [`Self::build_file_map`]; only
     /// the listing differs.
-    async fn build_span_file_map(&self, after: i64, to: i64) -> HashMap<String, String> {
+    async fn build_span_file_map(&self, after: i64, to: i64) -> Corpus {
         let files = self
             .snapshot_store
             .list_span_files(after, to)
@@ -2092,7 +2173,7 @@ impl MetricsService {
         self.file_map_from_rows(files).await
     }
 
-    async fn build_full_file_map(&self, snapshot_id: i64) -> HashMap<String, String> {
+    async fn build_full_file_map(&self, snapshot_id: i64) -> Corpus {
         let files = self
             .snapshot_store
             .list_tree_files_at(snapshot_id)
@@ -2102,37 +2183,42 @@ impl MetricsService {
     }
 
     /// Read each row's content (blob store or git odb) into a path→text map,
-    /// skipping deleted/oversize/binary/over-large files.
-    async fn file_map_from_rows(
-        &self,
-        files: Vec<oxplow_db::FileSnapshot>,
-    ) -> HashMap<String, String> {
+    /// leaving out deleted files, and the oversize, binary and unreadable
+    /// ones — which the [`Corpus`] lists as excluded, since a per-path
+    /// metric reads a path it was given no text for as rescanned clean.
+    async fn file_map_from_rows(&self, files: Vec<oxplow_db::FileSnapshot>) -> Corpus {
         let content = self.content.clone();
         let max_bytes = self.max_file_bytes();
         tokio::task::spawn_blocking(move || {
-            let mut map = HashMap::new();
+            let mut corpus = Corpus::default();
+            let mut exclude = |path: String, reason| {
+                corpus.excluded.push(ExcludedFile { path, reason });
+            };
             for f in files {
-                if matches!(
-                    f.storage,
-                    SnapshotStorage::Deleted | SnapshotStorage::Oversize
-                ) {
+                if f.storage == SnapshotStorage::Deleted {
                     continue;
                 }
-                if f.size_bytes as u64 > max_bytes {
+                if f.storage == SnapshotStorage::Oversize || f.size_bytes as u64 > max_bytes {
+                    exclude(f.path, ExcludedReason::Oversize);
                     continue;
                 }
                 let Some(hash) = f.blob_hash.as_deref() else {
+                    exclude(f.path, ExcludedReason::Unreadable);
                     continue;
                 };
                 match content.read(f.storage, hash) {
-                    // Skip binary blobs (NUL byte) — gauges read text.
-                    Ok(bytes) if !bytes.contains(&0) => {
-                        map.insert(f.path, String::from_utf8_lossy(&bytes).into_owned());
+                    // Skip binary blobs (NUL byte) — collectors read text.
+                    Ok(bytes) if bytes.contains(&0) => exclude(f.path, ExcludedReason::Binary),
+                    Ok(bytes) => {
+                        corpus
+                            .files
+                            .insert(f.path, String::from_utf8_lossy(&bytes).into_owned());
                     }
-                    _ => continue,
+                    Err(_) => exclude(f.path, ExcludedReason::Unreadable),
                 }
             }
-            map
+            corpus.excluded.sort_by(|a, b| a.path.cmp(&b.path));
+            corpus
         })
         .await
         .unwrap_or_default()
@@ -3605,6 +3691,9 @@ pub struct BaselineReport {
     /// Gauges that failed during the sweep (empty on success). Non-empty means those
     /// metrics will read stale/empty — a visible failure, not a silent one.
     pub failed: Vec<String>,
+    /// Snapshot files the collectors were not given: over the size limit,
+    /// binary or unreadable. Their metrics read as if the file were clean.
+    pub excluded: Vec<ExcludedFile>,
 }
 
 /// `metrics.entity_states` (P7.B6): re-capture state entity metrics when

@@ -129,6 +129,8 @@ pub mod metric_findings;
 pub mod metric_grid;
 pub mod metric_scaffold;
 pub mod metric_visibility;
+#[cfg(test)]
+mod metrics_authoring_tests;
 pub mod metrics_service;
 pub mod models_changed;
 pub mod net_sandbox;

@@ -69,6 +69,52 @@ the view. It can also
 slice a metric's history by worktree, thread, effort, task, or commit,
 and roll it up by day, week, or month, e.g. "tokens per task per week".
 
+## Writing your own
+
+Ask your agent for what you want counted:
+
+> Track how many functions in the Rust crates are over a complexity of
+> 10, by top-level folder, and link me to the worst one in each file.
+
+The agent scaffolds a metric extension and changes it to fit. From a
+terminal the same scaffold is:
+
+```
+oxplow extension new metric complex-fns --language rust --glob 'src/**/*.rs'
+```
+
+That writes `oxplow/extensions/complex-fns/` with:
+
+- a measure with one fact per file, so a change that touches three files
+  rescans three files and keeps the rest;
+- a collector that runs after each snapshot and counts the functions over
+  a limit (`LIMIT` at the top of the script);
+- an `area` dimension, the top folder of each path, so you can split the
+  metric by folder;
+- the metric itself, lower is better, split by area;
+- a lens in the launcher (Code) listing the files, each row linking to the
+  worst function's line;
+- a fixture: a small set of files and the facts the collector must return.
+
+The agent runs `oxplow extension check` and `oxplow extension test` on it,
+so the fixture is what proves the collector is right. Both pass as
+scaffolded and fail if an edit breaks the script or makes its facts differ
+from the fixture. A real run fails, and says why, when a fact is on a
+measure the extension doesn't define or doesn't list for that collector,
+or carries a dimension key without the extension's namespace. The script
+is Starlark and reads only the snapshot, so an extension's collector
+doesn't need your approval.
+
+Files over `snapshotMaxFileBytes` (5 MiB by default) and binary files
+aren't given to collectors. A rebuild reports which ones were left out.
+The metric reads such a file as clean, so check that list if a number
+looks low.
+
+The `/oxplow:new-metric` skill walks the same path with more structure.
+A metric that has to run an external program, or parse a report a tool
+writes, goes in `.oxplow/project.yaml` instead (below); the external
+program needs your approval first.
+
 ## Where the numbers come from
 
 Collection and analysis also extend beyond these built-in examples.
@@ -79,7 +125,7 @@ team-relevant category, or any other declared breakdown. The goal is
 understanding the software and its development, not only measuring agent
 collaboration. See [Lenses and extensions](lenses.md).
 
-Four config blocks in `.oxplow/project.yaml`:
+A metric extension and `.oxplow/project.yaml` take the same four blocks:
 
 - `measures` -- what is being counted, and how it aggregates.
 - `collectors` -- the script that produces the raw numbers, and when it
@@ -92,6 +138,13 @@ Four config blocks in `.oxplow/project.yaml`:
   target, direction.
 - `dimensions` -- the axes you can slice by (package, language,
   branch, and any you add).
+
+A metric extension's metrics are on while the extension is enabled, and
+your `.oxplow/project.yaml` can still turn one off or change its target.
+An extension's collectors run Starlark or jq only, never an external
+program.
+
+A file with a `gauges` block doesn't load: write `collectors` instead.
 
 Test results and coverage arrive separately, through
 [collection](#collection) -- oxplow watches the test commands you
@@ -110,34 +163,6 @@ extension syncs in. Two ship built in:
 Both can be split by priority. Ask your agent for more, for example
 "median time from a PR opening to merging, per week" over an extension's
 pull requests.
-
-## Letting the agent write them
-
-Metrics are authored by the agent, not through a form. Ask for what
-you want counted:
-
-> Track how many `unwrap()` calls are in the Rust crates, and set a
-> target of zero.
-
-The agent asks oxplow for a template of the measure/collector/metric trio
-plus the collector script. It writes the script like any other edit (under
-a task, in its own worktree) and adds the config entries. A collector runs
-a program, so oxplow asks you to confirm that part. Then the agent runs
-the metric to confirm it produces a number. The `/oxplow:new-metric` skill walks
-the same path with more structure.
-
-This is deliberate: a metric is a small program, and describing what
-you want counted is faster than filling in four config blocks by
-hand.
-
-An [extension](lenses.md) can ship metrics too: the same `measures`,
-`metrics` and `collectors` blocks in its `extension.yaml`, with the
-collector script inside the extension. They're on while the extension is
-enabled, and your `.oxplow/project.yaml` can still turn one off or change
-its target. An extension's metric collectors run Starlark or jq only,
-never an external program.
-
-A file with a `gauges` block doesn't load: write `collectors` instead.
 
 ## Collection
 
