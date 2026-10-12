@@ -710,16 +710,20 @@ mod tests {
         let target = dir.path().join("hello.txt");
         std::fs::write(&target, b"hello").unwrap();
 
-        let evt = timeout(Duration::from_secs(2), rx.recv())
-            .await
-            .expect("event")
-            .expect("event ok");
         // macOS resolves /var/folders to /private/var/folders — compare
-        // canonicalized paths so the test is stable across platforms.
-        assert_eq!(
-            evt.path.canonicalize().unwrap(),
-            target.canonicalize().unwrap()
-        );
+        // canonicalized paths so the test is stable across platforms. It
+        // can also report the freshly made directory itself first.
+        let target = target.canonicalize().unwrap();
+        timeout(Duration::from_secs(2), async {
+            loop {
+                let evt = rx.recv().await.expect("event ok");
+                if evt.path.canonicalize().ok().as_ref() == Some(&target) {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("an event for the new file");
     }
 
     #[tokio::test]

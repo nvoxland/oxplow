@@ -742,7 +742,9 @@ pub struct CommandBus {
         Arc<crate::capabilities::CapabilityRegistry>,
         Arc<std::sync::RwLock<oxplow_config::OxplowConfig>>,
     )>,
-    activation: std::sync::OnceLock<Arc<crate::extension_activation::ExtensionActivation>>,
+    /// The project's activation boundary; a bus built alone has its own,
+    /// which nothing has activated.
+    activation: Arc<crate::extension_activation::ExtensionActivation>,
 }
 
 impl CommandBus {
@@ -767,29 +769,16 @@ impl CommandBus {
             configuration_host: None,
             jobs_host: None,
             capabilities: None,
-            activation: std::sync::OnceLock::new(),
+            activation: Arc::new(crate::extension_activation::ExtensionActivation::new()),
         }
     }
 
     pub fn with_activation(
-        self,
+        mut self,
         activation: Arc<crate::extension_activation::ExtensionActivation>,
-    ) -> Result<Self, CommandError> {
-        self.adopt_activation(activation)?;
-        Ok(self)
-    }
-
-    pub(crate) fn adopt_activation(
-        &self,
-        activation: Arc<crate::extension_activation::ExtensionActivation>,
-    ) -> Result<(), CommandError> {
-        let installed = self.activation.get_or_init(|| activation.clone());
-        if !Arc::ptr_eq(installed, &activation) {
-            return Err(CommandError::Denied {
-                reason: "command bus already belongs to another activation boundary".into(),
-            });
-        }
-        Ok(())
+    ) -> Self {
+        self.activation = activation;
+        self
     }
 
     /// Offer and run a command only while what it needs is active and,
@@ -1172,23 +1161,24 @@ impl CommandBus {
         confirmed: bool,
         origin: RunOrigin,
     ) -> Result<CommandOutcome, CommandError> {
-        if let Some(activation) = self.activation.get() {
-            let run = activation.pin_run(run).await.map_err(CommandError::from)?;
-            let pin = run
-                .host_generation::<crate::extension_activation::GenerationPin>()
-                .expect("pinned command context")
-                .clone();
-            return activation
-                .read_pinned(
-                    &pin,
-                    Box::pin(self.lookup_and_run(&run, name, input, confirmed, origin)),
-                )
-                .await
-                .map_err(CommandError::from)?;
-        }
+        let run = self
+            .activation
+            .pin_run(run)
+            .await
+            .map_err(CommandError::from)?;
+        let pin = run
+            .host_generation::<crate::extension_activation::GenerationPin>()
+            .expect("pinned command context")
+            .clone();
         // Boxed: a command's run is a large future, and an effect or a
         // provider call nests runs, which overflows a debug thread's stack.
-        Box::pin(self.lookup_and_run(run, name, input, confirmed, origin)).await
+        self.activation
+            .read_pinned(
+                &pin,
+                Box::pin(self.lookup_and_run(&run, name, input, confirmed, origin)),
+            )
+            .await
+            .map_err(CommandError::from)?
     }
 
     async fn lookup_and_run(
@@ -1221,22 +1211,22 @@ impl CommandBus {
         confirmed: bool,
         origin: RunOrigin,
     ) -> Result<CommandOutcome, CommandError> {
-        if let Some(activation) = self.activation.get() {
-            let run = activation.pin_run(run).await.map_err(CommandError::from)?;
-            let pin = run
-                .host_generation::<crate::extension_activation::GenerationPin>()
-                .expect("pinned command context")
-                .clone();
-            return activation
-                .read_pinned(
-                    &pin,
-                    self.run_pipeline(&run, command, input, confirmed, origin),
-                )
-                .await
-                .map_err(CommandError::from)?;
-        }
-        self.run_pipeline(run, command, input, confirmed, origin)
+        let run = self
+            .activation
+            .pin_run(run)
             .await
+            .map_err(CommandError::from)?;
+        let pin = run
+            .host_generation::<crate::extension_activation::GenerationPin>()
+            .expect("pinned command context")
+            .clone();
+        self.activation
+            .read_pinned(
+                &pin,
+                self.run_pipeline(&run, command, input, confirmed, origin),
+            )
+            .await
+            .map_err(CommandError::from)?
     }
 
     async fn run_pipeline(

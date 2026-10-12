@@ -3290,12 +3290,18 @@ pub(crate) mod tests {
             json!({ "choices": [{ "message": { "content": reply.to_string() } }], "usage": { "prompt_tokens": 4, "completion_tokens": 2 } }),
         )
         .await;
-        let ai = std::sync::Arc::new(crate::ai_service::AiService::new(
-            crate::ai_service::test_providers(),
-            std::sync::Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
-            std::sync::Arc::new(oxplow_db::SqliteAiCallStore::new(db.clone())),
-            Some(state.join("global-config")),
-        ));
+        // One project boundary: the layer and the model calls share it.
+        let activation =
+            std::sync::Arc::new(crate::extension_activation::ExtensionActivation::new());
+        let ai = std::sync::Arc::new(
+            crate::ai_service::AiService::new(
+                crate::ai_service::test_providers(),
+                std::sync::Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
+                std::sync::Arc::new(oxplow_db::SqliteAiCallStore::new(db.clone())),
+                Some(state.join("global-config")),
+            )
+            .with_activation(activation.clone()),
+        );
         ai.save_provider(
             ProviderConfig {
                 id: "m".into(),
@@ -3323,7 +3329,7 @@ pub(crate) mod tests {
             secrets: &secrets,
             db: db.clone(),
             vocabulary: VocabularyHandle::core(),
-            layer: crate::sql_gateway::SqlGateway::new(db.clone()),
+            layer: crate::sql_gateway::SqlGateway::new(db.clone()).with_activation(activation),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
             ai: std::sync::Arc::new(crate::ai_compute::AiCompute::new(
                 ai,

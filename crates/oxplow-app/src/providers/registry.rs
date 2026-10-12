@@ -78,6 +78,9 @@ pub struct HostDeps {
     pub secrets: Arc<dyn SecretStore>,
     pub config: Arc<RwLock<oxplow_config::OxplowConfig>>,
     pub catalog: Arc<ExtensionCatalog>,
+    /// The project's activation boundary: once it has activated a
+    /// generation, provider maps are published through it.
+    pub activation: Arc<crate::extension_activation::ExtensionActivation>,
     pub db: Database,
     pub log: SqliteEventLogStore,
     pub host_env: host::HostEnv,
@@ -643,10 +646,7 @@ impl Instance {
                 let registry = registry
                     .upgrade()
                     .ok_or_else(|| "the provider host is unavailable".to_string())?;
-                if registry
-                    .coordinated
-                    .load(std::sync::atomic::Ordering::Acquire)
-                {
+                if registry.is_coordinated() {
                     let configured = registry.scoped_instances();
                     if !configured
                         .get(&name)
@@ -1068,26 +1068,24 @@ impl Instance {
         input: Value,
         idempotency_key: Option<String>,
     ) -> Result<InvokeResult, CommandError> {
-        if let Some(activation) = self
-            .registry
-            .upgrade()
-            .and_then(|registry| registry.activation.get().cloned())
-        {
-            let run = activation.pin_run(run).await.map_err(CommandError::from)?;
-            let pin = run
-                .host_generation::<crate::extension_activation::GenerationPin>()
-                .expect("pinned provider context")
-                .clone();
-            return activation
-                .read_pinned(
-                    &pin,
-                    self.invoke_owned(&run, command, input, idempotency_key),
-                )
-                .await
-                .map_err(CommandError::from)?;
-        }
-        self.invoke_owned(run, command, input, idempotency_key)
+        let Some(registry) = self.registry.upgrade() else {
+            return self
+                .invoke_owned(run, command, input, idempotency_key)
+                .await;
+        };
+        let activation = &registry.deps.activation;
+        let run = activation.pin_run(run).await.map_err(CommandError::from)?;
+        let pin = run
+            .host_generation::<crate::extension_activation::GenerationPin>()
+            .expect("pinned provider context")
+            .clone();
+        activation
+            .read_pinned(
+                &pin,
+                self.invoke_owned(&run, command, input, idempotency_key),
+            )
             .await
+            .map_err(CommandError::from)?
     }
 
     async fn invoke_owned(
@@ -1432,9 +1430,6 @@ pub struct ProviderRegistry {
     health: parking_lot::Mutex<BTreeMap<String, InstanceHealth>>,
     /// One reconcile at a time.
     reconciling: Arc<tokio::sync::Mutex<()>>,
-    /// When true, provider maps are owned by coordinated extension activation.
-    coordinated: std::sync::atomic::AtomicBool,
-    activation: std::sync::OnceLock<Arc<crate::extension_activation::ExtensionActivation>>,
     extension_secrets: std::sync::OnceLock<Arc<crate::extension_secrets::ExtensionSecrets>>,
     /// Set once its first reconcile has run: what waits for the
     /// instances the config names to be up (tsk915).
@@ -1570,8 +1565,6 @@ impl ProviderRegistry {
             running: Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
             health: parking_lot::Mutex::new(BTreeMap::new()),
             reconciling: Arc::new(tokio::sync::Mutex::new(())),
-            coordinated: std::sync::atomic::AtomicBool::new(false),
-            activation: std::sync::OnceLock::new(),
             extension_secrets: std::sync::OnceLock::new(),
             reconciled: tokio::sync::watch::Sender::new(false),
             disables: parking_lot::Mutex::new(BTreeMap::new()),
@@ -1596,24 +1589,10 @@ impl ProviderRegistry {
             .unwrap_or_else(|_| panic!("extension secret service is already installed"));
     }
 
-    /// Transfer live provider map publication to extension activation.
-    pub(crate) fn adopt_activation(
-        &self,
-        activation: Arc<crate::extension_activation::ExtensionActivation>,
-    ) -> Result<(), DomainError> {
-        let installed = self.activation.get_or_init(|| activation.clone());
-        if !Arc::ptr_eq(installed, &activation) {
-            return Err(DomainError::Invalid(
-                "provider registry already belongs to another activation boundary".into(),
-            ));
-        }
-        self.coordinated
-            .store(true, std::sync::atomic::Ordering::Release);
-        Ok(())
-    }
-
+    /// Whether provider maps are owned by extension activation: from the
+    /// first activated generation on.
     fn is_coordinated(&self) -> bool {
-        self.coordinated.load(std::sync::atomic::Ordering::Acquire)
+        self.deps.activation.is_active()
     }
 
     pub fn health(&self, instance: &str) -> Option<InstanceHealth> {

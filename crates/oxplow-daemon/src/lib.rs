@@ -98,6 +98,21 @@ async fn require_token(
 }
 
 /// A fresh random UI token (256 bits from the OS generator).
+/// Each thread's stack: a command, effect, collector or model call nests
+/// the others, and a debug build's futures for those nestings outgrow
+/// tokio's 2 MiB default. Tests get the same through `RUST_MIN_STACK` in
+/// `.cargo/config.toml`.
+pub const THREAD_STACK: usize = 8 * 1024 * 1024;
+
+/// The daemon's runtime: multi-threaded, with [`THREAD_STACK`] per thread.
+pub fn runtime() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(THREAD_STACK)
+        .build()
+        .expect("the daemon's runtime starts")
+}
+
 pub fn new_token() -> String {
     format!(
         "{}{}",

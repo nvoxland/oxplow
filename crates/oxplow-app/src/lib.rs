@@ -536,8 +536,9 @@ pub struct Services {
     pub extension_catalog: Arc<extension_catalog::ExtensionCatalog>,
     pub jobs: Arc<extension_jobs::ExtensionJobs>,
     pub extension_secrets: Arc<extension_secrets::ExtensionSecrets>,
-    /// Shared publication and reader boundary. Boot adopts it after publishing
-    /// a repairable baseline; standalone Services keep legacy fixture behavior.
+    /// Shared publication and reader boundary. Every service that reads a
+    /// generation holds it; boot activates the first one (a repairable
+    /// baseline), and until then they serve the current load.
     pub extension_activation: Arc<extension_activation::ExtensionActivation>,
     /// Custom components' bundles as their frames loaded them, by version
     /// (tsk984): what the daemon serves a frame, and what its invoke names.
@@ -924,7 +925,10 @@ impl Services {
         let thread_note_store = Arc::new(SqliteThreadNoteStore::new(db.clone()));
         let task_link_store = Arc::new(SqliteTaskLinkStore::new(db.clone()));
         let event_log_store = Arc::new(SqliteEventLogStore::new(db.clone(), vocabulary.clone()));
-        let sql = sql_gateway::SqlGateway::new(db.clone()).with_vocabulary(vocabulary.clone());
+        let extension_activation = Arc::new(extension_activation::ExtensionActivation::new());
+        let sql = sql_gateway::SqlGateway::new(db.clone())
+            .with_vocabulary(vocabulary.clone())
+            .with_activation(extension_activation.clone());
         let event_bus = EventBus::new();
         let ref_moves = ref_moves::RefMoves::new(event_bus.clone());
         let event_pump = Arc::new(event_pump::EventPump::new(
@@ -1058,6 +1062,7 @@ impl Services {
                 Arc::new(oxplow_db::SqliteAiCallStore::new(db.clone())),
                 machine.config_dir.clone(),
             )
+            .with_activation(extension_activation.clone())
             // Read live, so project.yaml edits and reloads apply at once.
             .with_project_overrides(Arc::new(move || {
                 ai_service::project_overrides(
@@ -1211,20 +1216,28 @@ impl Services {
         // Every capability's implementations (`capabilities`): core's (the
         // VCS here, knowledge once it's built), what the project's
         // extensions declare, and running provider instances'.
-        let capabilities = Arc::new(capabilities::CapabilityRegistry::new(
-            vec![capabilities::Implementation {
-                capability: "vcs".into(),
-                id: vcs.rev_kind().into(),
-                title: vcs.rev_kind().into(),
-                extension: None,
-                source: capabilities::Source::Core,
-                features: serde_json::to_value(vcs.features()).unwrap_or(serde_json::Value::Null),
-                fields: serde_json::Value::Array(Vec::new()),
-                id_pattern: None,
-                config: serde_json::json!({}),
-            }],
-            vocabulary.clone(),
-        ));
+        let capabilities = Arc::new(
+            capabilities::CapabilityRegistry::new(
+                vec![capabilities::Implementation {
+                    capability: "vcs".into(),
+                    id: vcs.rev_kind().into(),
+                    title: vcs.rev_kind().into(),
+                    extension: None,
+                    source: capabilities::Source::Core,
+                    features: serde_json::to_value(vcs.features())
+                        .unwrap_or(serde_json::Value::Null),
+                    fields: serde_json::Value::Array(Vec::new()),
+                    id_pattern: None,
+                    config: serde_json::json!({}),
+                }],
+                vocabulary.clone(),
+            )
+            .with_project(
+                extension_catalog.clone(),
+                layout.project_dir.clone(),
+                extension_activation.clone(),
+            ),
+        );
         let declared = capabilities::declared_by(&extension_catalog.get(&layout.project_dir));
         capabilities.set_declared(declared.clone());
         // What's active, published before anything reads it: the work-item
@@ -1333,6 +1346,7 @@ impl Services {
                 agent_policy.clone(),
                 event_pump.clone(),
             )
+            .with_activation(extension_activation.clone())
             .with_state_host(extension_state::StateHost::new(
                 extension_catalog.clone(),
                 layout.project_dir.clone(),
@@ -1539,6 +1553,7 @@ impl Services {
                 secrets: machine.secrets.clone(),
                 config: config_arc.clone(),
                 catalog: extension_catalog.clone(),
+                activation: extension_activation.clone(),
                 db: db.clone(),
                 log: (*event_log_store).clone(),
                 host_env: machine.host_env.clone(),
@@ -1785,7 +1800,7 @@ impl Services {
             deps: advisory_deps,
         }));
         Ok(Self {
-            extension_activation: Arc::new(extension_activation::ExtensionActivation::new()),
+            extension_activation,
             jobs,
             config: config_arc,
             config_applied,

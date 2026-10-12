@@ -9,12 +9,10 @@
 
 use std::sync::Arc;
 
-#[tokio::main]
-async fn main() {
+fn main() {
     eprintln!("oxplow-daemon-sim: secrets are kept in memory — for tests only");
-    oxplow_daemon::run_main(
+    oxplow_daemon::runtime().block_on(oxplow_daemon::run_main(
         "oxplow-daemon-sim",
         Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
-    )
-    .await;
+    ));
 }

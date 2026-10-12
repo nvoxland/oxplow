@@ -2171,7 +2171,7 @@ choices; catalogue reads pin before joining declarations and stored specs.
 Production metric reseed requests the activation owner instead of writing a
 second catalog; the independent raw-catalog metric reactor is retired. State
 value recapture happens after publication in a reader scope, outside the
-publication transaction. Standalone metrics retain legacy seeding behavior.
+publication transaction. Until a generation is activated, metrics seed directly.
 No script, process, network call or capture executes inside catalog publication.
 Transaction-composable fact-store upserts preserve change-detected cube
 invalidation for capture-scope and promoted-dimension changes. Runtime

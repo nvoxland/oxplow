@@ -13,6 +13,10 @@
 cov = "llvm-cov nextest --workspace --no-fail-fast --lcov --output-path target/coverage/lcov.info"
 
 [env]
+# Test threads get the daemon's stack (`oxplow_daemon::THREAD_STACK`): a
+# debug build's nested command/effect/collector/model futures outgrow
+# tokio's 2 MiB default. `force` so a shell's smaller value doesn't win.
+RUST_MIN_STACK = { value = "8388608", force = true }
 # SQLite's built-in math functions (`log2`, `ln`, `pow`, …) in the bundled
 # build, so SQL models and lenses can use them (P7.B5: oxplow-bundled's
 # `change_interest` scores with `log2`).

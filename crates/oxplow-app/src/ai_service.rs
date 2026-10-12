@@ -158,7 +158,9 @@ pub struct AiService {
     /// The project's role assignments, read on every resolve so edits to
     /// `project.yaml` apply without syncing anything.
     overrides: OverridesSource,
-    activation: std::sync::OnceLock<Arc<crate::extension_activation::ExtensionActivation>>,
+    /// The project's activation boundary; a service built alone has its own,
+    /// which nothing has activated.
+    activation: Arc<crate::extension_activation::ExtensionActivation>,
     identity: Arc<()>,
 }
 
@@ -182,7 +184,7 @@ impl AiService {
             calls,
             config_dir,
             overrides: Arc::new(BTreeMap::new),
-            activation: std::sync::OnceLock::new(),
+            activation: Arc::new(crate::extension_activation::ExtensionActivation::new()),
             identity: Arc::new(()),
         }
     }
@@ -209,33 +211,22 @@ impl AiService {
         self
     }
 
-    pub(crate) fn adopt_activation(
-        &self,
+    pub fn with_activation(
+        mut self,
         activation: Arc<crate::extension_activation::ExtensionActivation>,
-    ) -> Result<(), oxplow_domain::DomainError> {
-        let adopted = self.activation.get_or_init(|| activation.clone());
-        if Arc::ptr_eq(adopted, &activation) {
-            Ok(())
-        } else {
-            Err(oxplow_domain::DomainError::Invalid(
-                "AI service already belongs to another extension activation".into(),
-            ))
-        }
+    ) -> Self {
+        self.activation = activation;
+        self
     }
 
     pub(crate) async fn read_generation<F: std::future::Future>(
         &self,
         future: F,
     ) -> Result<F::Output, AiServiceError> {
-        match self.activation.get() {
-            Some(activation) => activation
-                .read(self.read_configured(future))
-                .await
-                .map_err(|_| {
-                    AiServiceError::Config("extension activation is unavailable".into())
-                })?,
-            None => self.read_configured(future).await,
-        }
+        self.activation
+            .read(self.read_configured(future))
+            .await
+            .map_err(|_| AiServiceError::Config("extension activation is unavailable".into()))?
     }
 
     async fn read_configured<F: std::future::Future>(
@@ -258,23 +249,18 @@ impl AiService {
         run: &oxplow_domain::run::RunContext,
         future: F,
     ) -> Result<F::Output, AiServiceError> {
-        match self.activation.get() {
-            Some(activation) => {
-                let run = activation.pin_run(run).await.map_err(|_| {
-                    AiServiceError::Config("extension generation context is unavailable".into())
-                })?;
-                let pin = run
-                    .host_generation::<crate::extension_activation::GenerationPin>()
-                    .expect("pinned AI context");
-                activation
-                    .read_pinned(pin, self.read_configured(future))
-                    .await
-                    .map_err(|_| {
-                        AiServiceError::Config("extension generation context is unavailable".into())
-                    })?
-            }
-            None => self.read_configured(future).await,
-        }
+        let run = self.activation.pin_run(run).await.map_err(|_| {
+            AiServiceError::Config("extension generation context is unavailable".into())
+        })?;
+        let pin = run
+            .host_generation::<crate::extension_activation::GenerationPin>()
+            .expect("pinned AI context");
+        self.activation
+            .read_pinned(pin, self.read_configured(future))
+            .await
+            .map_err(|_| {
+                AiServiceError::Config("extension generation context is unavailable".into())
+            })?
     }
 
     /// Production metadata ingress; synchronous settings remains a standalone helper.

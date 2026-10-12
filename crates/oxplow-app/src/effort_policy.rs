@@ -817,7 +817,7 @@ mod tests {
                 capability: CAPABILITY.into(),
                 id: id.into(),
                 title: id.into(),
-                extension: Some("x".into()),
+                extension: None,
                 source: crate::capabilities::Source::External,
                 features: Value::Null,
                 fields: Value::Array(Vec::new()),

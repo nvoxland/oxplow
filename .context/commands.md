@@ -54,10 +54,13 @@ not a DB commit boundary.
 
 The native generation coordinator can reserve a checked command candidate and
 its extension owner metadata before SQL commit, then apply the replacement while
-retaining both locks through the remaining generation maps. Standalone command
-publication retains the existing optimistic checks. Boot adopts the shared
-generation reader boundary before extension consumers or requests are exposed.
-`CommandBus::with_activation` provides the optional ingress boundary: a pin is
+retaining both locks through the remaining generation maps. Until the first generation is
+activated, command publication keeps its optimistic checks. The command bus,
+SQL gateway, AI service, capability registry and provider registry are built
+holding the project's activation boundary (a part built alone has its own,
+which nothing has activated), so a pin is always available and means "the
+current load" before the first activation.
+`CommandBus::with_activation` sets the ingress boundary: a pin is
 attached before command lookup and retained through the entire pipeline, including
 prepared effect commands, compositions and post-commit projections. A standalone
 bus retains its previous behavior. Production Services adopt the same boundary

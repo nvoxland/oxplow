@@ -36,15 +36,14 @@ impl std::fmt::Debug for GenerationPin {
 }
 
 impl GenerationPin {
-    pub fn snapshot(&self) -> &Arc<CatalogSnapshot> {
-        self.state
-            .active
-            .as_ref()
-            .expect("validated generation pin")
+    /// The activated catalog, or `None` before the first activation: the
+    /// boundary then serves the current load.
+    pub fn snapshot(&self) -> Option<&Arc<CatalogSnapshot>> {
+        self.state.active.as_ref()
     }
 
-    pub fn generation(&self) -> &str {
-        self.snapshot().generation()
+    pub fn generation(&self) -> Option<&str> {
+        self.snapshot().map(|snapshot| snapshot.generation())
     }
 }
 
@@ -61,12 +60,21 @@ pub struct ExtensionActivation {
     activating: tokio::sync::Mutex<()>,
     requested: tokio::sync::Notify,
     spawned: std::sync::atomic::AtomicBool,
+    /// Set once the first generation is published; before it the boundary
+    /// serves the current load.
+    activated: std::sync::atomic::AtomicBool,
     problems: parking_lot::Mutex<VocabularyErrors>,
 }
 
 impl ExtensionActivation {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Whether a generation has been published: the owner of command,
+    /// provider and model publication from then on.
+    pub fn is_active(&self) -> bool {
+        self.activated.load(std::sync::atomic::Ordering::Acquire)
     }
 
     pub fn request(&self) {
@@ -103,17 +111,6 @@ impl ExtensionActivation {
                 "required extension baseline could not activate".into(),
             ));
         }
-        svc.sql.adopt_activation(svc.extension_activation.clone())?;
-        svc.ai.adopt_activation(svc.extension_activation.clone())?;
-        svc.commands
-            .adopt_activation(svc.extension_activation.clone())
-            .map_err(|_| DomainError::Invalid("command activation adoption failed".into()))?;
-        svc.capabilities.adopt_catalog(
-            svc.extension_catalog.clone(),
-            svc.layout.project_dir.clone(),
-        )?;
-        svc.providers
-            .adopt_activation(svc.extension_activation.clone())?;
         if let Err(error) = self.activate(svc.clone()).await {
             self.record_failure(&svc, error);
         }
@@ -205,7 +202,7 @@ impl ExtensionActivation {
             return Ok(pin);
         }
         let state = self.state.clone().read_owned().await;
-        if state.unavailable || state.active.is_none() {
+        if state.unavailable {
             return Err(DomainError::Invalid(
                 "extension activation is unavailable".into(),
             ));
@@ -220,7 +217,7 @@ impl ExtensionActivation {
     /// waiting. Reacquiring Tokio's fair lock there would deadlock the parent.
     pub async fn read<F: Future>(&self, future: F) -> Result<F::Output, DomainError> {
         let pin = self.pin().await?;
-        self.read_pinned(&pin, future).await
+        Box::pin(self.read_pinned(&pin, future)).await
     }
 
     pub async fn read_pinned<F: Future>(
@@ -240,7 +237,9 @@ impl ExtensionActivation {
         {
             pins.push(pin.clone());
         }
-        Ok(READERS.scope(pins, future).await)
+        // Boxed: a pinned read wraps whole command, AI and hook runs, which
+        // nest one another; inline, they overflow a debug thread's stack.
+        Ok(Box::pin(READERS.scope(pins, future)).await)
     }
 
     /// A retained context can carry the same pin across a spawned host task.
@@ -458,6 +457,9 @@ impl ExtensionActivation {
                     &svc, &knowledge, &snapshots,
                 );
                 boundary.active = Some(published.clone());
+                svc.extension_activation
+                    .activated
+                    .store(true, std::sync::atomic::Ordering::Release);
                 boundary.entities = entities;
                 boundary.unavailable = false;
                 Ok((published.clone(), retired))
