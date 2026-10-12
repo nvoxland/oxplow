@@ -3813,6 +3813,12 @@ their errors still reject the candidate. The held extensions and why are the
 activation's `problems` (Settings → Extensions), so the reason is visible
 while the last working version keeps running. A held extension's declarations
 are its last working ones; its scripts are read from disk as they are now.
+A failure later in staging that names one extension — a model whose SQL
+doesn't compile (checked inside the publication transaction, which rolls
+back), a provider or capability that can't stage — holds that extension the
+same way (`extension_catalog::Failed`) and the candidate is staged again; if
+its last working version fails too, it is left out. A failure that names no
+held-able extension (the host, a required bundled one) rejects the candidate.
 The active catalog is separate from raw candidate loads. Its
 `source_generation` preserves the raw fingerprint, while the core baseline has a
 distinct `core:<source_generation>` runtime identity. Runtime catalog reads use

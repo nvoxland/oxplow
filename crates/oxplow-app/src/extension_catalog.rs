@@ -70,11 +70,23 @@ impl CatalogSnapshot {
     /// none. The rest activate together, so one broken extension never holds
     /// back the others. Required bundled extensions are never replaced:
     /// their errors still block. Returns the held extensions and why.
+    ///
+    /// `failed` names extensions whose preparation failed in an earlier
+    /// attempt at this candidate: each is held the same way, and one whose
+    /// last working version failed too stays out.
     pub(crate) fn admitted(
         &self,
         published: Option<&CatalogSnapshot>,
+        failed: &Failed,
     ) -> (Arc<CatalogSnapshot>, BTreeMap<String, Vec<String>>) {
-        let can_load = |e: &Extension| e.errors.is_empty() && !e.public_contracts.blocked;
+        let can_load = |e: &Extension| {
+            e.errors.is_empty() && !e.public_contracts.blocked && !failed.0.contains_key(&e.name)
+        };
+        let may_keep_last = |e: &Extension| {
+            e.errors.is_empty()
+                && !e.public_contracts.blocked
+                && failed.0.get(&e.name).is_none_or(|f| f.keep_last)
+        };
         let mut held = BTreeMap::<String, Vec<String>>::new();
         let mut admitted: Vec<Extension> = Vec::with_capacity(self.extensions.len());
         for extension in self.extensions.iter() {
@@ -90,9 +102,12 @@ impl CatalogSnapshot {
             let last = published.and_then(|p| {
                 p.extensions()
                     .iter()
-                    .find(|e| e.name == extension.name && e.enabled && can_load(e))
+                    .find(|e| e.name == extension.name && e.enabled && may_keep_last(e))
             });
             let mut why = extension.errors.clone();
+            if let Some(f) = failed.0.get(&extension.name) {
+                why.extend(f.reasons.iter().cloned());
+            }
             match last {
                 Some(last) => {
                     why.push("its last working version stays active until these are fixed".into());
@@ -176,6 +191,56 @@ impl CatalogSnapshot {
             generation: format!("core:{}", self.source_generation()),
             source_generation: self.source_generation().to_string(),
         })
+    }
+}
+
+/// Extensions whose preparation failed while one candidate was staged
+/// (a model that doesn't compile, a provider that can't stage), held back
+/// as one that can't load is (`CatalogSnapshot::admitted`).
+#[derive(Default)]
+pub(crate) struct Failed(BTreeMap<String, FailedExtension>);
+
+struct FailedExtension {
+    reasons: Vec<String>,
+    /// Its last working version may stand in; false once that failed too.
+    keep_last: bool,
+}
+
+impl Failed {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
+    /// Hold the extensions `problems` names, if each is an enabled,
+    /// non-required extension of `snapshot` that can still be held (a
+    /// second failure takes its last working version out too). False when
+    /// the problems aren't one extension's to hold: the candidate fails.
+    pub(crate) fn hold(
+        &mut self,
+        snapshot: &CatalogSnapshot,
+        problems: &BTreeMap<String, Vec<String>>,
+    ) -> bool {
+        let holdable = |name: &String| {
+            !crate::bundled_extensions::is_required(name)
+                && snapshot
+                    .extensions()
+                    .iter()
+                    .any(|e| &e.name == name && e.enabled)
+                && self.0.get(name).is_none_or(|f| f.keep_last)
+        };
+        if problems.is_empty() || !problems.keys().all(holdable) {
+            return false;
+        }
+        for (name, reasons) in problems {
+            self.0
+                .entry(name.clone())
+                .and_modify(|f| f.keep_last = false)
+                .or_insert_with(|| FailedExtension {
+                    reasons: reasons.clone(),
+                    keep_last: true,
+                });
+        }
+        true
     }
 }
 
@@ -494,7 +559,7 @@ mod tests {
             &manifest("edited", "one"),
         );
         let catalog = ExtensionCatalog::new();
-        let (first, held) = catalog.snapshot(dir.path()).admitted(None);
+        let (first, held) = catalog.snapshot(dir.path()).admitted(None, &Failed::new());
         assert!(held.is_empty(), "{held:?}");
         assert_eq!(names(&first), ["edited:one", "good:one"]);
 
@@ -514,7 +579,9 @@ mod tests {
             "oxplow/extensions/fresh/extension.yaml",
             &format!("{}bogus: 1\n", manifest("fresh", "one")),
         );
-        let (next, held) = catalog.snapshot(dir.path()).admitted(Some(&first));
+        let (next, held) = catalog
+            .snapshot(dir.path())
+            .admitted(Some(&first), &Failed::new());
         assert_eq!(names(&next), ["edited:one", "good:two"]);
         assert_eq!(held.keys().collect::<Vec<_>>(), ["edited", "fresh"]);
         assert!(

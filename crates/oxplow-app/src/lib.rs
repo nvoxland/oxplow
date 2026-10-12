@@ -74,16 +74,18 @@ mod event_view_tests;
 pub mod events;
 pub mod exec_consent;
 pub mod extension_activation;
+#[cfg(test)]
+mod extension_activation_tests;
 pub mod extension_catalog;
 pub mod extension_commands;
 pub mod extension_configuration;
 pub mod extension_event_types;
 pub mod extension_generation;
 pub mod extension_impact;
-pub mod extension_job_ai;
-pub mod extension_job_authority;
 #[cfg(test)]
 mod extension_imports_tests;
+pub mod extension_job_ai;
+pub mod extension_job_authority;
 pub mod extension_job_dispatch;
 pub mod extension_job_operations;
 pub mod extension_job_scheduler;

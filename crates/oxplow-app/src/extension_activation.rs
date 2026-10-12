@@ -296,12 +296,171 @@ impl ExtensionActivation {
         let _one = self.activating.lock().await;
         let raw = svc.extension_catalog.snapshot(&svc.layout.project_dir);
         // An extension that can't load keeps its last working version (or
-        // stays out); the rest activate without it.
-        let (snapshot, held) = if core_only {
-            (raw.core_baseline(), VocabularyErrors::new())
-        } else {
-            raw.admitted(svc.extension_catalog.active().as_deref())
+        // stays out); the rest activate without it. One whose preparation
+        // fails (a model that doesn't compile, a provider that can't stage)
+        // is held the same way and the candidate prepared again.
+        let mut failed = crate::extension_catalog::Failed::new();
+        let (published, retired, held) = loop {
+            let (snapshot, held) = if core_only {
+                (raw.core_baseline(), VocabularyErrors::new())
+            } else {
+                raw.admitted(svc.extension_catalog.active().as_deref(), &failed)
+            };
+            let prepared = match Self::prepare(&svc, &snapshot, core_only).await {
+                Ok(prepared) => prepared,
+                Err(TxError::Aborted(problems))
+                    if !core_only && failed.hold(&snapshot, &problems) =>
+                {
+                    continue
+                }
+                Err(error) => return Err(error),
+            };
+            let Prepared {
+                commands,
+                adapters,
+                bundles,
+                providers,
+                metrics,
+                capabilities,
+                database,
+            } = prepared;
+            let db = svc.db.clone();
+            let published = snapshot.clone();
+            // Move the owned writer into the worker closure. Cancelling the async
+            // caller must not open readers while that worker can still commit.
+            let boundary = Mutex::new(self.state.clone().write_owned().await);
+            // Provider admission may hold this map while awaiting a DB write. Acquire
+            // it before the DB permit, otherwise the publication worker can deadlock.
+            let running = Mutex::new(svc.providers.reserve_running().await);
+            let providers = Mutex::new(providers);
+            let adapters = Mutex::new(Some(adapters));
+            let bundles = Mutex::new(Some(bundles));
+            let svc = svc.clone();
+            let outcome = db
+                .transaction_with_publication(move |publication| {
+                    let mut boundary = boundary.lock().unwrap_or_else(|error| error.into_inner());
+                    let mut commands = svc.extension_commands.reserve(&commands).map_err(|_| {
+                        rejected("command registry changed while activation was staged")
+                    })?;
+                    let config = svc
+                        .config
+                        .read()
+                        .map_err(|_| rejected("host configuration is unavailable"))?;
+                    let mut running = running.lock().unwrap_or_else(|error| error.into_inner());
+                    let mut providers = providers.lock().unwrap_or_else(|error| error.into_inner());
+                    let mut providers = svc
+                        .providers
+                        .reserve_generation(&mut providers, &mut running, &config)
+                        .map_err(TxError::Aborted)?;
+                    let knowledge = capabilities
+                        .selected("knowledge")
+                        .unwrap_or(oxplow_domain::capability::NONE)
+                        .to_string();
+                    let snapshots = capabilities
+                        .selected("snapshots")
+                        .unwrap_or(oxplow_domain::capability::NONE)
+                        .to_string();
+                    let mut capabilities = svc
+                        .capabilities
+                        .reserve_prepared(&capabilities, &config)
+                        .map_err(|_| {
+                            rejected(
+                                "capability registry or choices changed while activation was staged",
+                            )
+                        })?;
+                    if svc
+                        .extension_catalog
+                        .snapshot(&svc.layout.project_dir)
+                        .generation()
+                        != published.source_generation()
+                    {
+                        return Err(rejected("catalog changed while activation was staged"));
+                    }
+                    let vocabulary =
+                        database.replace_tx(publication.transaction()?, Timestamp::now())?;
+                    metrics.replace_tx(publication.transaction()?)?;
+                    providers
+                        .validate_vocabulary(&vocabulary)
+                        .map_err(TxError::Aborted)?;
+                    providers.validate_live().map_err(TxError::Aborted)?;
+                    let entities =
+                        crate::extension_models::entity_signature_tx(publication.transaction()?)?;
+                    // Set this before the commit attempt so an unwind in either commit
+                    // or publication cannot expose mismatched database/memory state.
+                    boundary.unavailable = true;
+                    if let Err(error) = publication.commit() {
+                        boundary.unavailable = false;
+                        return Err(TxError::Storage(error));
+                    }
+                    commands.apply();
+                    capabilities.apply();
+                    svc.vocabulary.swap(vocabulary);
+                    metrics.publish(&svc.metrics);
+                    providers.withdraw_maps();
+                    adapters
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner())
+                        .take()
+                        .expect("adapter candidate consumed only after successful commit")
+                        .publish_maps(&svc);
+                    svc.feeds.restate(published.extensions());
+                    bundles
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner())
+                        .take()
+                        .expect("bundle candidate consumed only after successful commit")
+                        .publish(&svc.component_bundles);
+                    svc.extension_catalog.publish_active(published.clone());
+                    // Admission enables callbacks and their live-owner checks.
+                    // Publish the matching owner catalog before starting them;
+                    // readers remain excluded by the owned generation writer.
+                    let retired = providers.apply();
+                    crate::extension_runtime_adapters::PreparedRuntimeAdapters::follow_selected(
+                        &svc, &knowledge, &snapshots,
+                    );
+                    boundary.active = Some(published.clone());
+                    svc.extension_activation
+                        .activated
+                        .store(true, std::sync::atomic::Ordering::Release);
+                    boundary.entities = entities;
+                    boundary.unavailable = false;
+                    Ok((published.clone(), retired))
+                })
+                .await;
+            match outcome {
+                Ok((published, retired)) => break (published, retired, held),
+                // A model or vocabulary that doesn't compile is checked in
+                // the transaction, which rolled back: nothing was applied.
+                Err(TxError::Aborted(problems))
+                    if !core_only && failed.hold(&snapshot, &problems) => {}
+                Err(error) => return Err(error),
+            }
         };
+        retired.finish().await;
+        if !core_only {
+            *self.problems.lock() = held;
+        }
+        Ok(published)
+    }
+}
+
+struct Prepared {
+    commands: crate::extension_commands::StagedExtensionCommands,
+    adapters: crate::extension_runtime_adapters::PreparedRuntimeAdapters,
+    bundles: crate::component_bundles::PreparedComponentBundles,
+    providers: crate::providers::registry::PreparedProviderGeneration,
+    metrics: crate::metrics_service::PreparedMetricCatalog,
+    capabilities: crate::capabilities::PreparedCapabilities,
+    database: crate::extension_generation::PreparedExtensionDatabase,
+}
+
+impl ExtensionActivation {
+    /// Stage every registry's candidate for `snapshot`, outside SQL.
+    async fn prepare(
+        svc: &Arc<Services>,
+        snapshot: &Arc<CatalogSnapshot>,
+        core_only: bool,
+    ) -> Result<Prepared, TxError<VocabularyErrors>> {
         let disabled = oxplow_config::disabled_extensions(&svc.layout.project_dir);
         let blocked: VocabularyErrors = snapshot
             .extensions()
@@ -318,7 +477,7 @@ impl ExtensionActivation {
         }
         let commands = svc
             .extension_commands
-            .stage(&snapshot)
+            .stage(snapshot)
             .await
             .map_err(|problems| {
                 TxError::Aborted(
@@ -329,7 +488,7 @@ impl ExtensionActivation {
                 )
             })?;
         let adapters =
-            crate::extension_runtime_adapters::PreparedRuntimeAdapters::prepare(&svc, &snapshot)
+            crate::extension_runtime_adapters::PreparedRuntimeAdapters::prepare(svc, snapshot)
                 .map_err(TxError::Aborted)?;
         let bundle_root = svc.layout.project_dir.clone();
         let bundle_snapshot = snapshot.clone();
@@ -343,133 +502,35 @@ impl ExtensionActivation {
         .map_err(|_| rejected("component bundle preparation failed"))?
         .map_err(TxError::Aborted)?;
         let providers = if core_only {
-            svc.providers.prepare_core_generation(&snapshot).await
+            svc.providers.prepare_core_generation(snapshot).await
         } else {
-            svc.providers.prepare_generation(&snapshot).await
+            svc.providers.prepare_generation(snapshot).await
         }
         .map_err(TxError::Aborted)?;
         let config = crate::config_service::read_config(&svc.config);
         let metrics: crate::metrics_service::PreparedMetricCatalog = svc
             .metrics
-            .prepare_generation(&snapshot, &config, core_only)
+            .prepare_generation(snapshot, &config, core_only)
             .map_err(TxError::Aborted)?;
         let capabilities = svc
             .capabilities
-            .prepare_with_external(&snapshot, &config, providers.implementations())
+            .prepare_with_external(snapshot, &config, providers.implementations())
             .map_err(TxError::Aborted)?;
         let database =
             crate::extension_generation::PreparedExtensionDatabase::prepare_with_capabilities(
-                &snapshot,
+                snapshot,
                 &capabilities,
             )
             .map_err(TxError::Aborted)?;
-        let db = svc.db.clone();
-        let published = snapshot.clone();
-        // Move the owned writer into the worker closure. Cancelling the async
-        // caller must not open readers while that worker can still commit.
-        let boundary = Mutex::new(self.state.clone().write_owned().await);
-        // Provider admission may hold this map while awaiting a DB write. Acquire
-        // it before the DB permit, otherwise the publication worker can deadlock.
-        let running = Mutex::new(svc.providers.reserve_running().await);
-        let providers = Mutex::new(providers);
-        let adapters = Mutex::new(Some(adapters));
-        let bundles = Mutex::new(Some(bundles));
-        let (published, retired) = db
-            .transaction_with_publication(move |publication| {
-                let mut boundary = boundary.lock().unwrap_or_else(|error| error.into_inner());
-                let mut commands = svc.extension_commands.reserve(&commands).map_err(|_| {
-                    rejected("command registry changed while activation was staged")
-                })?;
-                let config = svc
-                    .config
-                    .read()
-                    .map_err(|_| rejected("host configuration is unavailable"))?;
-                let mut running = running.lock().unwrap_or_else(|error| error.into_inner());
-                let mut providers = providers.lock().unwrap_or_else(|error| error.into_inner());
-                let mut providers = svc
-                    .providers
-                    .reserve_generation(&mut providers, &mut running, &config)
-                    .map_err(TxError::Aborted)?;
-                let knowledge = capabilities
-                    .selected("knowledge")
-                    .unwrap_or(oxplow_domain::capability::NONE)
-                    .to_string();
-                let snapshots = capabilities
-                    .selected("snapshots")
-                    .unwrap_or(oxplow_domain::capability::NONE)
-                    .to_string();
-                let mut capabilities = svc
-                    .capabilities
-                    .reserve_prepared(&capabilities, &config)
-                    .map_err(|_| {
-                        rejected(
-                            "capability registry or choices changed while activation was staged",
-                        )
-                    })?;
-                if svc
-                    .extension_catalog
-                    .snapshot(&svc.layout.project_dir)
-                    .generation()
-                    != published.source_generation()
-                {
-                    return Err(rejected("catalog changed while activation was staged"));
-                }
-                let vocabulary =
-                    database.replace_tx(publication.transaction()?, Timestamp::now())?;
-                metrics.replace_tx(publication.transaction()?)?;
-                providers
-                    .validate_vocabulary(&vocabulary)
-                    .map_err(TxError::Aborted)?;
-                providers.validate_live().map_err(TxError::Aborted)?;
-                let entities =
-                    crate::extension_models::entity_signature_tx(publication.transaction()?)?;
-                // Set this before the commit attempt so an unwind in either commit
-                // or publication cannot expose mismatched database/memory state.
-                boundary.unavailable = true;
-                if let Err(error) = publication.commit() {
-                    boundary.unavailable = false;
-                    return Err(TxError::Storage(error));
-                }
-                commands.apply();
-                capabilities.apply();
-                svc.vocabulary.swap(vocabulary);
-                metrics.publish(&svc.metrics);
-                providers.withdraw_maps();
-                adapters
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner())
-                    .take()
-                    .expect("adapter candidate consumed only after successful commit")
-                    .publish_maps(&svc);
-                svc.feeds.restate(published.extensions());
-                bundles
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner())
-                    .take()
-                    .expect("bundle candidate consumed only after successful commit")
-                    .publish(&svc.component_bundles);
-                svc.extension_catalog.publish_active(published.clone());
-                // Admission enables callbacks and their live-owner checks.
-                // Publish the matching owner catalog before starting them;
-                // readers remain excluded by the owned generation writer.
-                let retired = providers.apply();
-                crate::extension_runtime_adapters::PreparedRuntimeAdapters::follow_selected(
-                    &svc, &knowledge, &snapshots,
-                );
-                boundary.active = Some(published.clone());
-                svc.extension_activation
-                    .activated
-                    .store(true, std::sync::atomic::Ordering::Release);
-                boundary.entities = entities;
-                boundary.unavailable = false;
-                Ok((published.clone(), retired))
-            })
-            .await?;
-        retired.finish().await;
-        if !core_only {
-            *self.problems.lock() = held;
-        }
-        Ok(published)
+        Ok(Prepared {
+            commands,
+            adapters,
+            bundles,
+            providers,
+            metrics,
+            capabilities,
+            database,
+        })
     }
 }
 
