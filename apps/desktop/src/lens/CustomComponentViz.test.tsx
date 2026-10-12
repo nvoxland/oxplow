@@ -8,14 +8,21 @@ import type { LensRun } from "../tauri-bridge/generated/bindings.js";
 const realApi = await import("../api.js");
 const loads: string[] = [];
 let loadFails: string | null = null;
+let version = "v-1";
+const listeners = new Set<(event: Record<string, unknown>) => void>();
 mock.module("../api.js", () => ({
   ...realApi,
   loadComponent: async (id: string) => {
     loads.push(id);
     if (loadFails) throw new Error(loadFails);
-    return "v-1";
+    return version;
+  },
+  subscribeOxplowEvents: (listener: (event: Record<string, unknown>) => void) => {
+    listeners.add(listener);
+    return () => listeners.delete(listener);
   },
 }));
+const emit = (event: Record<string, unknown>) => listeners.forEach((l) => l(event));
 
 const { CustomComponentViz } = await import("./CustomComponentViz.js");
 
@@ -23,6 +30,7 @@ afterEach(() => {
   cleanup();
   loads.length = 0;
   loadFails = null;
+  version = "v-1";
 });
 
 const run = (custom: LensRun["lens"]["custom"]) =>
@@ -131,4 +139,27 @@ test("a stream switch keeps the same frame", async () => {
   view.rerender(props("str2"));
   expect(view.getByTestId("custom-component-frame")).toBe(frame);
   expect(loads).toEqual(["x/burn"]);
+});
+
+// A hot update reaches a mounted component: when the activated extensions
+// change, its bundle is loaded again — a new version is a new frame (its
+// old one would be refused "reload its lens"), the same version keeps the
+// frame it has.
+test("an activated change reloads its bundle: a new version is a new frame", async () => {
+  const view = render(
+    <CustomComponentViz run={run({ component: "burndown", props: null })} streamId="str1" fallback={fallback} base="http://127.0.0.1:9" />,
+  );
+  const first = await view.findByTestId("custom-component-frame");
+  emit({ kind: "extensionsChanged" });
+  await waitFor(() => expect(loads).toEqual(["x/burn", "x/burn"]));
+  expect(view.getByTestId("custom-component-frame")).toBe(first);
+
+  version = "v-2";
+  emit({ kind: "modelsChanged", models: ["v_x"] });
+  emit({ kind: "extensionsChanged" });
+  await waitFor(() =>
+    expect(view.getByTestId("custom-component-frame").getAttribute("src")).toBe("http://127.0.0.1:9/components/v/v-2/"),
+  );
+  expect(loads).toEqual(["x/burn", "x/burn", "x/burn"]);
+  expect(view.getByTestId("custom-component-frame")).not.toBe(first);
 });

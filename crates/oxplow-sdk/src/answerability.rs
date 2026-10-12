@@ -476,12 +476,7 @@ mod tests {
         let command = |name: &str| svc.commands.spec(name).map(|s| s.input_schema);
         let mut asked = 0;
         for b in oxplow_app::bundled_extensions::BUNDLED {
-            let file_of = |name: &str| {
-                b.files
-                    .iter()
-                    .find(|(p, _)| *p == name)
-                    .map(|(_, text)| text.to_string())
-            };
+            let file_of = |name: &str| b.file(name).map(str::to_string);
             let Some(yaml) = file_of("questions.yaml") else {
                 continue;
             };

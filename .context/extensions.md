@@ -1803,9 +1803,9 @@ component's own code may not. A component that declares no commands
 only shows and reads, and isn't a program.
 
 **What runs is what was approved** (tsk984). Before it shows a frame the
-host loads the component's bundle (`load_component`, from the worktree
-of the stream the lens is shown in — never the primary's for a stream
-that's gone) into `Services::component_bundles`
+host loads the component's bundle (`load_component`, from the main
+worktree, as the lens itself is: the RPCs read the project's extensions
+whatever the stream) into `Services::component_bundles`
 (`component_bundles.rs`): every file of the folder, read once, keyed by
 its **version** — the component's approval hash over exactly those files
 and its commands (`ProjectProgram::component_hash`, the same function
@@ -1819,6 +1819,29 @@ read as served — the extension's path joined with the manifest's
 `bundle` — so a spelling that differs from the disk's only in case still
 covers every file. The snapshots kept are the 16 newest; an older
 frame's invoke is refused with "reload its lens".
+
+**A hot update reaches a mounted frame.** Activation stages every
+enabled extension's bundles into the generation it publishes
+(`PreparedComponentBundles`), each stamped with that generation; a frame
+whose snapshot belongs to a generation that is no longer active has its
+`query` and `invoke` refused with "reload its lens". The host loads the
+bundle again on every `extensionsChanged` (sent after an activation
+publishes, `CustomComponentViz`): the same version keeps the frame it
+has, a new one mounts a new frame — and that version acts only once a
+person approves its code; the old approval doesn't carry over
+(`an_activated_edit_needs_a_reload_and_its_own_approval`).
+
+**Bundled and project components share one runtime.** A bundled
+extension's files are embedded as bytes (`bundled_extensions.rs`,
+`include_bytes!`), so its component's assets ship as they are; its
+bundle is found from the embedded paths (`Embedded::bundle_stat`),
+staged, hashed (the same `component_hash` over `bundled:<name>/…`),
+served at `/components/v/<version>/` under the same CSP, and — when it
+declares `commands` — listed on Programs and approved like a project's.
+What still differs by origin, none of it about components: a bundled
+advisory needs no approval, the `oxplow` command namespace is reserved
+for bundled extensions, and a bundled extension's name wins a clash with
+a project one's.
 
 ```yaml
 custom_components:
@@ -1944,8 +1967,8 @@ Programs. The host's own re-run (`onUpdate`, at the lens's params) is
 asked again with a selected filter rather than drawn over it; a pull
 request whose dates can't be read is left out and counted in a note,
 never blanking the rest; a rejected `connect()` is said in the status
-(tsk1008) — a component author's model for each. The loader no longer limits components to private extensions
-(a bundled one is still an error: its bundle is never served). The
+(tsk1008) — a component author's model for each. The loader no longer limits components to private extensions,
+nor to project ones. The
 browser suite's `specs/components/pr-lifetimes.spec.ts` runs it in
 Chromium **and WebKit** (the engines of browser mode and the macOS
 window; the suite's one WebKit project): the frame loads, the filters
@@ -1986,8 +2009,8 @@ component — and it is read from the **version under check**: the
 candidate of a review (`ReviewSide::read`), the folder on disk for a
 plain check. A version without the built page (a revision's tree) has
 nothing to lint; loading reports a bundle with no `index.html`. A
-component in an extension that comes with oxplow is an error too: the
-daemon never serves a bundled extension's bundle. The scan is a
+bundled extension's pages are linted from its embedded files, the same
+way. The scan is a
 start-tag reader, comments skipped and raw-text elements (`script`,
 `style`, `textarea`, `title`) read to their close, not a full HTML
 parser.

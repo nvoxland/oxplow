@@ -1378,7 +1378,13 @@ mod tests {
         let leak = |files: Vec<(&'static str, &'static str)>| -> &'static crate::bundled_extensions::BundledExtension {
             Box::leak(Box::new(crate::bundled_extensions::BundledExtension {
                 name: "acme",
-                files: Box::leak(files.into_boxed_slice()),
+                files: Box::leak(
+                    files
+                        .into_iter()
+                        .map(|(p, t)| (p, t.as_bytes()))
+                        .collect::<Vec<_>>()
+                        .into_boxed_slice(),
+                ),
                 required: false,
             }))
         };

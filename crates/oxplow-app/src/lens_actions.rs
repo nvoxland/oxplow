@@ -960,6 +960,64 @@ actions:
         assert_eq!(state(&fx.svc, fx.task).await, "done");
     }
 
+    /// A hot update: once a changed bundle is activated, a frame still on
+    /// the old version can't act — it's told to reload — and the version
+    /// it reloads at acts only once a person approves that code; the old
+    /// approval doesn't carry over.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_activated_edit_needs_a_reload_and_its_own_approval() {
+        let (fx, root) = component_fixture().await;
+        let activate = || async {
+            fx.svc
+                .extension_activation
+                .activate(fx.svc.clone())
+                .await
+                .expect("activates");
+        };
+        activate().await;
+        let old = load_board(&fx, &root);
+        approve_board(&fx, &root);
+
+        std::fs::write(
+            root.join("oxplow/extensions/acme/components/board/index.html"),
+            "<!doctype html><p>2</p>",
+        )
+        .unwrap();
+        activate().await;
+        refused(
+            invoke_component_command(
+                &fx.svc,
+                &root,
+                board_invoke(&fx, "oxplow.work_item.transition", &old),
+            )
+            .await
+            .unwrap_err(),
+            "reload its lens",
+        );
+        let new = load_board(&fx, &root);
+        assert_ne!(new, old);
+        refused(
+            invoke_component_command(
+                &fx.svc,
+                &root,
+                board_invoke(&fx, "oxplow.work_item.transition", &new),
+            )
+            .await
+            .unwrap_err(),
+            "approval",
+        );
+        assert_ne!(state(&fx.svc, fx.task).await, "done");
+        approve_board(&fx, &root);
+        invoke_component_command(
+            &fx.svc,
+            &root,
+            board_invoke(&fx, "oxplow.work_item.transition", &new),
+        )
+        .await
+        .unwrap();
+        assert_eq!(state(&fx.svc, fx.task).await, "done");
+    }
+
     /// tsk984: the bundle is read as it is served — the extension's folder
     /// joined with the manifest's `bundle` — so on a case-insensitive disk a
     /// spelling that differs only in case still covers every file it

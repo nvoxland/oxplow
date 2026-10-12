@@ -9,11 +9,12 @@
 import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 
-import { invokeComponentCommand, loadComponent, recordUsage, runComponentQuery } from "../api.js";
+import { invokeComponentCommand, loadComponent, recordUsage, runComponentQuery, subscribeOxplowEvents } from "../api.js";
 import { CommandConfirm } from "../components/CommandConfirm.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { remoteBaseUrl } from "../tauri-bridge/transport.js";
 import type { LensRun } from "../tauri-bridge/generated/bindings.js";
+import { lensDefinitionChanged } from "./lensRerun.js";
 import {
   componentBundleUrl,
   componentNavigationTarget,
@@ -53,9 +54,18 @@ export function CustomComponentViz({
   const lensId = run.lens.id;
   // The bundle its frame runs, loaded for the lens (from the main
   // worktree, whatever the stream): the daemon serves the frame that
-  // snapshot, by its version, and the frame invokes with it.
+  // snapshot, by its version, and the frame invokes with it. Loaded again
+  // when the activated extensions change — a hot update: a new version
+  // mounts a new frame, the same one keeps the frame it has.
   const loadKey = base && component ? lensId : null;
   const [loaded, setLoaded] = useState<{ key: string; version?: string; error?: string } | null>(null);
+  const [activations, setActivations] = useState(0);
+  useEffect(() => {
+    if (loadKey === null) return;
+    return subscribeOxplowEvents((event) => {
+      if (lensDefinitionChanged(event as Record<string, unknown>)) setActivations((n) => n + 1);
+    });
+  }, [loadKey]);
   useEffect(() => {
     if (loadKey === null) return;
     let live = true;
@@ -70,9 +80,9 @@ export function CustomComponentViz({
     return () => {
       live = false;
     };
-    // `loadKey` names the lens it loads for.
+    // `loadKey` names the lens it loads for; `activations` loads it again.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadKey]);
+  }, [loadKey, activations]);
   const current = loaded?.key === loadKey ? loaded : null;
   const version = current?.version ?? null;
   const src = base && version ? componentBundleUrl(base, version) : null;

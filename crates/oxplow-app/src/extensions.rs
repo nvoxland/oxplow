@@ -1696,18 +1696,15 @@ pub(crate) struct Embedded(pub(crate) &'static crate::bundled_extensions::Bundle
 
 impl ExtensionFiles for Embedded {
     fn read(&self, rel: &str) -> Option<String> {
-        self.0
-            .files
-            .iter()
-            .find(|(p, _)| *p == rel)
-            .map(|(_, c)| (*c).to_string())
+        self.0.file(rel).map(str::to_string)
     }
     fn paths(&self) -> std::io::Result<Vec<String>> {
         Ok(self.0.files.iter().map(|(p, _)| (*p).to_string()).collect())
     }
     fn bytes(&self, rel: &str) -> std::io::Result<Vec<u8>> {
-        self.read(rel)
-            .map(String::into_bytes)
+        self.0
+            .bytes(rel)
+            .map(<[u8]>::to_vec)
             .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, rel.to_string()))
     }
     fn list(&self, dir: &str) -> Vec<String> {
@@ -1720,9 +1717,14 @@ impl ExtensionFiles for Embedded {
             .map(str::to_string)
             .collect()
     }
-    /// A bundled extension is shared: it has no custom components.
-    fn bundle_stat(&self, _rel: &str) -> custom_components::BundleLook {
-        custom_components::BundleLook::Absent
+    /// From the embedded paths, as a folder's is from the disk. Every file
+    /// it ships is here, so a bundle with none is absent, not unknown.
+    fn bundle_stat(&self, rel: &str) -> custom_components::BundleLook {
+        match custom_components::look_in_paths(rel, self.0.files.iter().map(|(p, b)| (*p, b.len())))
+        {
+            custom_components::BundleLook::Unknown => custom_components::BundleLook::Absent,
+            found => found,
+        }
     }
 }
 
@@ -4382,6 +4384,47 @@ pub fn scaffold_manifest(m: &ManifestScaffold<'_>) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// A bundled extension's files are bytes, so a component's assets
+    /// ship with oxplow as they are; its bundle is found from the embedded
+    /// paths as a folder's is from the disk.
+    #[test]
+    fn an_embedded_extension_holds_a_component_bundle() {
+        static FILES: &[(&str, &[u8])] = &[
+            ("extension.yaml", b"manifest: 2\nname: e\n"),
+            ("components/c/index.html", b"<!doctype html>"),
+            (
+                "components/c/logo.png",
+                &[0x89, b'P', b'N', b'G', 0xff, 0x00],
+            ),
+        ];
+        static EXT: crate::bundled_extensions::BundledExtension =
+            crate::bundled_extensions::BundledExtension {
+                name: "e",
+                files: FILES,
+                required: false,
+            };
+        let files = Embedded(&EXT);
+        assert_eq!(
+            files.bytes("components/c/logo.png").unwrap(),
+            vec![0x89, b'P', b'N', b'G', 0xff, 0x00]
+        );
+        assert_eq!(files.read("components/c/logo.png"), None, "not text");
+        assert_eq!(
+            files.read("extension.yaml").as_deref(),
+            Some("manifest: 2\nname: e\n")
+        );
+        let custom_components::BundleLook::Found(stat) = files.bundle_stat("components/c") else {
+            panic!("{:?}", files.bundle_stat("components/c"));
+        };
+        assert!(stat.has_index);
+        assert_eq!((stat.files, stat.bytes), (2, 21));
+        assert_eq!(
+            files.bundle_stat("components/none"),
+            custom_components::BundleLook::Absent,
+            "every embedded file is known: a missing bundle is absent"
+        );
+    }
 
     /// A malformed list entry is reported on its own line — the shape
     /// error too, which has no name to find it by — in every list block.

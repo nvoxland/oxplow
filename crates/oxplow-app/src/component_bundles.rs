@@ -84,10 +84,6 @@ impl PreparedComponentBundles {
         let mut total_bytes = 0u64;
 
         for ext in snapshot.extensions().iter().filter(|ext| ext.enabled) {
-            // Bundled components are deliberately not served by this host.
-            if ext.origin == "bundled" {
-                continue;
-            }
             for component in &ext.custom_components {
                 count += 1;
                 if count > MAX_GENERATION_BUNDLES {
@@ -238,12 +234,6 @@ fn build_snapshot(
     component: &CustomComponent,
     generation: Option<String>,
 ) -> Result<Arc<BundleSnapshot>, DomainError> {
-    if ext.origin == "bundled" {
-        return Err(DomainError::Invalid(format!(
-            "`{}` comes with oxplow, and its components aren't served",
-            ext.name
-        )));
-    }
     let program = component_program(ext, component);
     let files = read_bundle(root, &program)?;
     let version = program
