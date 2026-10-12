@@ -1349,8 +1349,19 @@ impl OxplowMcp {
         let ctx = self
             .lens_context(stream.as_deref(), p.thread_id.as_deref())
             .await?;
-        let run = oxplow_app::extensions::run_lens(
+        // Through its extension's models as that stream has them, compiled
+        // and published nowhere: a lens over a model the author hasn't
+        // published yet answers.
+        let extension = p.id.split_once('/').map_or(p.id.as_str(), |(ext, _)| ext);
+        let overlay = oxplow_app::extensions::lens_overlay(
             &self.services.sql,
+            &self.services.extension_catalog,
+            &root,
+            extension,
+        )
+        .await;
+        let run = oxplow_app::extensions::run_lens(
+            &self.services.sql.with_overlay(overlay),
             &self.services.extension_catalog,
             &root,
             &p.id,
@@ -1462,6 +1473,52 @@ impl OxplowMcp {
             Some(&self.services.sql),
             Some(self.services.commands.as_ref()),
             None,
+        )
+        .await
+        .map_err(|e| match e {
+            oxplow_sdk::SdkError::NotFound(_) => McpError::invalid_params(
+                format!(
+                    "no extension `{}` under oxplow/extensions/ in that stream",
+                    p.name
+                ),
+                None,
+            ),
+            other => internal(other),
+        })?;
+        json_result(&report)
+    }
+
+    #[tool(
+        description = "Preview a whole extension in a throwaway oxplow: what `oxplow extension \
+                       test` runs, never touching this project's data. It checks the extension, \
+                       activates it with the project's other extensions, and runs every intent \
+                       example that has a fixture — lenses, collectors, commands, effects, \
+                       events, jobs and components — with model calls answered by the fixture's \
+                       replies, never a real provider. Returns `{ ok, errors, warnings, ran, … }`; \
+                       run it after `validate_extension` and before handing the extension over."
+    )]
+    async fn preview_extension(
+        &self,
+        extensions: rmcp::model::Extensions,
+        params: Parameters<ValidateExtensionParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        check_optional_stream("preview_extension", p.stream_id.as_deref())?;
+        // Omitted: the caller's own stream.
+        let stream = self
+            .stream_or_callers(&caller_of(&extensions), p.stream_id.clone())
+            .await;
+        let root = self
+            .services
+            .worktrees
+            .resolve(stream.as_deref())
+            .await
+            .into_local_path();
+        let report = oxplow_sdk::extension_test::test_extension_in(
+            &root,
+            &p.name,
+            false,
+            oxplow_app::providers::host::process_env(),
         )
         .await
         .map_err(|e| match e {
@@ -2728,6 +2785,7 @@ const READ_ONLY_TOOLS: &[&str] = &[
     "get_lens",
     "run_lens",
     "validate_extension",
+    "preview_extension",
     "query_sql",
     "app_version",
     "list_streams",

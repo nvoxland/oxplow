@@ -3444,6 +3444,25 @@ async fn model_overlay(
 /// A version as a review reads it: its lenses rendered on its own models'
 /// overlay, nothing checked — the earlier side of a review is what it was,
 /// not a candidate (tsk791).
+/// The temp views a lens of extension `name` under `root` reads through:
+/// its models and the other enabled extensions' — and their collectors'
+/// entities, empty, where none is published — compiled as `check` does
+/// and published nowhere. So an author's lens over a model they haven't
+/// published yet (a worktree's, or before the next activation) answers
+/// rather than "no such table". Empty when the extension doesn't load.
+pub async fn lens_overlay(
+    layer: &crate::sql_gateway::SqlGateway,
+    catalog: &crate::extension_catalog::ExtensionCatalog,
+    root: &Path,
+    name: &str,
+) -> Vec<oxplow_db::TempView> {
+    let Ok(ext) = catalog.named(root, name) else {
+        return Vec::new();
+    };
+    let candidate = catalog.candidate(root, ext);
+    model_overlay(layer, &candidate).await.0
+}
+
 async fn read_side(
     layer: &crate::sql_gateway::SqlGateway,
     catalog: &crate::extension_catalog::ExtensionCatalog,

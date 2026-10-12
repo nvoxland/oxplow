@@ -129,7 +129,7 @@ pub async fn test_extension_in(
 /// An intent example's fixture (`fixtures/<name>.yaml`): `None` when it
 /// has none; the parsed document, or why it isn't one.
 fn example_fixture(
-    read: &dyn Fn(&str) -> Option<String>,
+    read: &(dyn Fn(&str) -> Option<String> + Sync),
     rel: &str,
     example: &str,
 ) -> Option<(String, Result<Value, String>)> {

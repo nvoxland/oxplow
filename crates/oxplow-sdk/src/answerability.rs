@@ -206,11 +206,11 @@ pub fn names(text: &str, name: &str) -> bool {
 /// What the check needs from its host.
 pub struct Checker<'a> {
     /// A skill's (or an extension file's) text by name.
-    pub skill_text: &'a dyn Fn(&str) -> Option<String>,
+    pub skill_text: &'a (dyn Fn(&str) -> Option<String> + Sync),
     /// Where the SQL runs; `None` skips running it (a warning).
     pub sql: Option<&'a SqlGateway>,
     /// A command's input schema by name.
-    pub command_schema: &'a dyn Fn(&str) -> Option<Value>,
+    pub command_schema: &'a (dyn Fn(&str) -> Option<Value> + Sync),
 }
 
 /// What checking a file found: `<file>: question N (…): what — fix`
@@ -313,7 +313,7 @@ pub async fn check(file: &str, questions: &[Question], c: &Checker<'_>) -> Check
 pub async fn live(
     file: &str,
     questions: &[Question],
-    skill_text: &dyn Fn(&str) -> Option<String>,
+    skill_text: &(dyn Fn(&str) -> Option<String> + Sync),
     catalog: &[String],
     ai: &AiService,
 ) -> Vec<String> {

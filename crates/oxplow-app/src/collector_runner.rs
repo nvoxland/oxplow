@@ -2282,6 +2282,50 @@ pub async fn publish_declared_empty(
 /// Every entity the enabled `extensions`' collectors declare, as the table
 /// it is stored in: what activation creates (empty, once) so the models
 /// over an entity compile before its collector first runs.
+/// Publish `rows` into entities `ext` declares, by entity name, replacing
+/// what each held — what a preview seeds before running a lens example
+/// over them (`oxplow extension test`'s `rows:`). The rows are coerced to
+/// the declared columns as a collector's run's are. Never on a project's
+/// own database: it replaces what was collected.
+pub async fn publish_declared_rows(
+    db: &oxplow_db::Database,
+    ext: &crate::extensions::Extension,
+    rows: &BTreeMap<String, Vec<serde_json::Value>>,
+) -> Result<(), DomainError> {
+    let mut writes = Vec::new();
+    for (name, entity_rows) in rows {
+        let declared = ext.collectors.iter().find_map(|spec| {
+            spec.entities
+                .iter()
+                .find(|e| &e.name == name)
+                .map(|entity| (spec, entity))
+        });
+        let Some((_, entity)) = declared else {
+            let names: Vec<&str> = ext
+                .collectors
+                .iter()
+                .flat_map(|c| c.entities.iter().map(|e| e.name.as_str()))
+                .collect();
+            return Err(DomainError::Invalid(format!(
+                "`{}` declares no entity `{name}` (it declares: {})",
+                ext.name,
+                if names.is_empty() {
+                    "none".to_string()
+                } else {
+                    names.join(", ")
+                }
+            )));
+        };
+        let coerced = coerce_rows(entity, entity_rows.clone()).map_err(DomainError::Invalid)?;
+        writes.push((
+            entity_table(&ext.name, entity),
+            EntityWrite::Replace(coerced),
+        ));
+    }
+    db.transaction(move |tx| oxplow_db::collector_store::write_rows_tx(tx, &writes).map(|_| ()))
+        .await
+}
+
 pub(crate) fn declared_entity_tables(
     extensions: &[crate::extensions::Extension],
 ) -> Vec<EntityTable> {
@@ -2453,6 +2497,56 @@ pub(crate) mod tests {
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    /// A preview seeds an entity its extension declares; one it doesn't
+    /// is refused, naming the ones it does.
+    #[tokio::test]
+    async fn rows_are_published_into_a_declared_entity() {
+        let dir = tempfile::tempdir().unwrap();
+        let ext_dir = dir.path().join("oxplow/extensions/my-gh");
+        std::fs::create_dir_all(&ext_dir).unwrap();
+        std::fs::write(
+            ext_dir.join("extension.yaml"),
+            "manifest: 2\nname: my-gh\nintent:\n  purpose: p\ncollectors:\n  - id: gh\n    runtime: starlark\n    entry: gh.star\n    entities:\n      - name: pr\n        key: number\n        columns: { number: int, title: text }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            ext_dir.join("gh.star"),
+            "def transform(x):\n    return {}\n",
+        )
+        .unwrap();
+        let ext = crate::extensions::load_extensions(dir.path())
+            .into_iter()
+            .find(|e| e.name == "my-gh")
+            .unwrap();
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        let db = oxplow_db::Database::in_memory();
+        let rows = BTreeMap::from([(
+            "pr".to_string(),
+            vec![
+                json!({"number": 1, "title": "a"}),
+                json!({"number": 2, "title": "b"}),
+            ],
+        )]);
+        publish_declared_rows(&db, &ext, &rows).await.unwrap();
+        let n: i64 = db
+            .read(|c| {
+                c.query_row("SELECT count(*) FROM v_my_gh_pr", [], |r| r.get(0))
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(n, 2);
+        let err =
+            publish_declared_rows(&db, &ext, &BTreeMap::from([("issue".to_string(), vec![])]))
+                .await
+                .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("declares no entity `issue` (it declares: pr)"),
+            "{err}"
+        );
     }
 
     #[test]
