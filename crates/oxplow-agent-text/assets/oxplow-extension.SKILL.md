@@ -45,6 +45,11 @@ failure after your edit is yours:
   `wiki:…`), and a `knowledge_pages` collector of the same rows;
 - `effect` — a script reacting to a logged event by composing commands
   (private; runs only once a person approves it);
+- `job` — model work that runs on its own, outside any transaction: its
+  reply streams into `v_job_output`, its model may call tools you
+  declare, a person can cancel it, and an effect on its
+  `contribution.job.completed` writes what it found (runs once a person
+  approves it; "Jobs" below);
 - `component` — a custom component (private): its `viz: custom` lens and
   a web bundle on oxplow's client library;
 - `policy` — an effort policy written as a script (`implementations:`,
@@ -440,10 +445,14 @@ names the file and line and says what to change.
      throwaway and delivered: your effects (approved there) react for
      real and their commands run. `expect: { effects: [{ id, state }],
      commands: [names] }` (only the keys you name are compared);
-   - a job: `input: { job: <id>, intentKey, request }` — run through your
-     commands over `jobs.write/enqueue` and `jobs.read/snapshot` (declare
-     both), approved there, its model call answered by `model.replies`;
-     `expect: { state: succeeded, result? }`;
+   - a job: `input: { job: <id>, intentKey, request, cancel? }` — run
+     through your commands over `jobs.write/enqueue` and
+     `jobs.read/snapshot` (declare both), approved there, its model rounds
+     answered by `model.replies` (a string, or `{ text?, toolCalls?: [{
+     name, arguments }], chunkDelayMs? }` — a reply with tool calls makes
+     the job run them and ask again); `cancel: true` cancels it through
+     your `jobs.write/cancel` command once it has written. `expect: {
+     state, result?, text?, toolCalls?, output?: [{ kind }] }`;
    - a component: `input: { component: <id>, lens?, queries?: [{ asset,
      params? }], invokes?: [{ command, input?, approved? }] }` — what its
      frame would ask; `expect: { queries: [{ rows }], invokes: [{ ok,
@@ -713,6 +722,44 @@ Rules:
   `"deleted": {"<name>": [key, …]}` for removed ones.
 - **Unmentioned entities.** One the run doesn't return is left as it was.
 - **Default.** `sync: replace` makes each run restate everything.
+
+## Jobs
+
+When the answer needs a model to read, think and maybe look things up —
+a review, a summary over many items — declare a **job** rather than
+calling a model from a collector:
+
+```yaml
+jobs:
+  - { id: review, description: Review the TODOs., version: 1, operation: ai.complete_typed,
+      needs: [ai.compute, sql.read], tools: [todos.in_file], max_tool_rounds: 4, timeout: 120 }
+commands:
+  - { name: review.ask, summary: Ask for a review., scope: jobs.write, op: enqueue, invokers: { human: true, agent: true, lens: true } }
+  - { name: review.cancel, summary: Stop it., scope: jobs.write, op: cancel, invokers: { human: true, agent: true, lens: true } }
+  - { name: review.result, summary: Read it., scope: jobs.read, op: snapshot, invokers: { human: true, agent: true, lens: true } }
+  - name: todos.in_file              # a tool: reads, admits a job, says its input
+    summary: The TODO comments in one file.
+    entry: commands/todos_in_file.star
+    needs: [sql.read]
+    input_schema: { type: object, required: [path], properties: { path: { type: string } } }
+    access: read
+    invokers: { human: false, agent: false, lens: false, job: true }
+effects:
+  - { id: publish, on: [contribution.job.completed], entry: effects/publish.star, needs: [jobs.read] }
+```
+
+- `review.ask` takes `{ job, intentKey, request: { schemaVersion: 1,
+  role, messages } }` — no model: the role's is used.
+- A tool only reads; the model calls it as `todos_in_file`, and with
+  `sql.read` it also has `query_sql` over the `v_*` models. A job never
+  writes: the effect on its end does (`scope("jobs.read", { id })` gives
+  it the result, `{ parts, … }`; its event's `outcome` is `succeeded`,
+  `failed`, `cancelled` or `interrupted`).
+- Show it running with a lens over `v_job_output` (`WHERE job_id = :id`):
+  it updates as the model writes. oxplow's own Jobs lens lists every job
+  with Cancel.
+- `examples/extensions/triage/` in the oxplow repo has one, with its
+  fixtures (a tool round, a cancel).
 
 ## Health and repair
 

@@ -32,6 +32,55 @@ pub enum PartV1 {
     },
 }
 
+/// One piece of a streamed reply, as the provider produces it: text as
+/// it arrives, a tool call once its arguments are whole (providers send
+/// argument JSON in fragments; only the mapping knows when one is done).
+/// The stream's final [`TypedResponseV1`] holds the same content, folded.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "type",
+    deny_unknown_fields
+)]
+pub enum StreamDeltaV1 {
+    Text {
+        text: String,
+    },
+    ToolCall {
+        id: String,
+        name: String,
+        arguments: Value,
+    },
+}
+
+impl StreamDeltaV1 {
+    /// The deltas a whole reply is, in order: one per text part (a run of
+    /// adjacent text parts is one) and one per tool call.
+    pub fn of(parts: &[PartV1]) -> Vec<StreamDeltaV1> {
+        let mut deltas: Vec<StreamDeltaV1> = Vec::new();
+        for part in parts {
+            match part {
+                PartV1::Text { text } => match deltas.last_mut() {
+                    Some(StreamDeltaV1::Text { text: last }) => last.push_str(text),
+                    _ => deltas.push(StreamDeltaV1::Text { text: text.clone() }),
+                },
+                PartV1::ToolCall {
+                    id,
+                    name,
+                    arguments,
+                } => deltas.push(StreamDeltaV1::ToolCall {
+                    id: id.clone(),
+                    name: name.clone(),
+                    arguments: arguments.clone(),
+                }),
+                PartV1::Image { .. } | PartV1::ToolResult { .. } => {}
+            }
+        }
+        deltas
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum MessageRoleV1 {
@@ -146,6 +195,56 @@ struct TypedResponseV1Repr {
 impl TypedResponseV1 {
     pub fn validate_version(&self) -> Result<(), SchemaVersionError> {
         check_v1("typed response", self.schema_version)
+    }
+
+    /// What a stream had produced when it stopped early: its parts so far,
+    /// no finish reason, usage unknown.
+    pub fn partial(parts: Vec<PartV1>) -> Self {
+        Self {
+            schema_version: 1,
+            parts,
+            finish_reason: FinishReasonV1::Unknown,
+            usage: UsageV1 {
+                input_tokens: None,
+                output_tokens: None,
+                source: UsageSourceV1::Unknown,
+            },
+        }
+    }
+}
+
+/// Fold deltas into parts as a stream goes: adjacent text joins, each tool
+/// call is its own part. What a cancelled stream reports it had.
+#[derive(Debug, Clone, Default)]
+pub struct DeltaFold {
+    parts: Vec<PartV1>,
+}
+
+impl DeltaFold {
+    pub fn push(&mut self, delta: &StreamDeltaV1) {
+        match delta {
+            StreamDeltaV1::Text { text } => match self.parts.last_mut() {
+                Some(PartV1::Text { text: last }) => last.push_str(text),
+                _ => self.parts.push(PartV1::Text { text: text.clone() }),
+            },
+            StreamDeltaV1::ToolCall {
+                id,
+                name,
+                arguments,
+            } => self.parts.push(PartV1::ToolCall {
+                id: id.clone(),
+                name: name.clone(),
+                arguments: arguments.clone(),
+            }),
+        }
+    }
+
+    pub fn parts(&self) -> &[PartV1] {
+        &self.parts
+    }
+
+    pub fn into_partial(self) -> TypedResponseV1 {
+        TypedResponseV1::partial(self.parts)
     }
 }
 

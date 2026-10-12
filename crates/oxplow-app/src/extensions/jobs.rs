@@ -9,6 +9,17 @@ use super::manifest_v2::{at, item_lines, key_line};
 const MAX_JOBS: usize = 128;
 const MAX_DESCRIPTION_BYTES: usize = 4096;
 
+/// Model rounds a job with tools runs at most, by default and at most.
+pub const DEFAULT_TOOL_ROUNDS: u32 = 4;
+pub const MAX_TOOL_ROUNDS: u32 = 16;
+/// How long a job may run, in seconds, by default and at most.
+pub const DEFAULT_TIMEOUT_SECS: u32 = 120;
+pub const MAX_TIMEOUT_SECS: u32 = 600;
+
+/// The tool a job with `sql.read` offers its model besides its own: a
+/// read-only query over the published models, as MCP `query_sql` is.
+pub const QUERY_SQL_TOOL: &str = "query_sql";
+
 #[derive(
     Debug,
     Clone,
@@ -53,6 +64,29 @@ pub struct JobDecl {
     pub operation: JobOperationKind,
     pub needs: Vec<String>,
     pub replay: JobReplay,
+    /// The extension's commands its model may call, as the model sees them.
+    pub tools: Vec<JobTool>,
+    pub max_tool_rounds: u32,
+    /// Seconds it may run before it fails.
+    pub timeout: u32,
+}
+
+/// One of a job's tools: the command it runs and the name the model calls
+/// it by (its local name, `.` as `_`: model APIs allow no dots).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct JobTool {
+    pub name: String,
+    pub command: String,
+    /// A script command: what it answers is its script's `result` (the
+    /// commands it composed are its own business).
+    pub script: bool,
+}
+
+impl JobDecl {
+    /// Whether its model may read the published models (`query_sql`).
+    pub fn reads_sql(&self) -> bool {
+        self.needs.iter().any(|need| need == "sql.read")
+    }
 }
 
 /// The on-disk shape, with unknown fields refused by serde.
@@ -66,9 +100,28 @@ pub struct JobFile {
     needs: Vec<String>,
     #[serde(default)]
     replay: JobReplay,
+    /// This extension's commands (their names as declared, without the
+    /// namespace) the model may call; each says `invokers: { job: true }`.
+    #[serde(default)]
+    tools: Vec<String>,
+    /// Model rounds at most (1–16, default 4): a round that calls tools
+    /// is followed by another with their results.
+    #[serde(default)]
+    max_tool_rounds: Option<u32>,
+    /// Seconds it may run (1–600, default 120) before it fails.
+    #[serde(default)]
+    timeout: Option<u32>,
 }
 
-pub fn parse_jobs(value: &Value, file: &str, manifest: &str) -> (Vec<JobDecl>, Vec<String>) {
+/// `jobs:`, checked against the extension's `commands` (in `namespace`):
+/// a tool is one of them that admits a job and says its input.
+pub fn parse_jobs(
+    value: &Value,
+    file: &str,
+    manifest: &str,
+    namespace: &str,
+    commands: &[crate::extension_commands::ExtensionCommand],
+) -> (Vec<JobDecl>, Vec<String>) {
     let block = key_line(manifest, "jobs");
     let Some(items) = value.as_sequence() else {
         return (Vec::new(), vec![at(file, block, "`jobs` must be a list")]);
@@ -100,20 +153,94 @@ pub fn parse_jobs(value: &Value, file: &str, manifest: &str) -> (Vec<JobDecl>, V
             errors.push(at(file, line, "job description exceeds 4096 bytes"));
         } else if raw.version == 0 {
             errors.push(at(file, line, "job version must be positive"));
-        } else if raw.needs.len() != 1 || raw.needs[0] != "ai.compute" {
-            errors.push(at(file, line, "job needs must be exactly [ai.compute]"));
+        } else if !needs_hold(&raw.needs) {
+            errors.push(at(
+                file,
+                line,
+                "job needs are [ai.compute], or [ai.compute, sql.read] to let its model query",
+            ));
         } else if jobs.iter().any(|job| job.id == raw.id) {
             errors.push(at(file, line, "job id is declared twice"));
+        } else if raw
+            .max_tool_rounds
+            .is_some_and(|n| !(1..=MAX_TOOL_ROUNDS).contains(&n))
+        {
+            errors.push(at(file, line, "job max_tool_rounds is 1 to 16"));
+        } else if raw
+            .timeout
+            .is_some_and(|n| !(1..=MAX_TIMEOUT_SECS).contains(&n))
+        {
+            errors.push(at(file, line, "job timeout is 1 to 600 seconds"));
         } else {
-            jobs.push(JobDecl {
-                id: raw.id,
-                description: raw.description,
-                version: raw.version,
-                operation: raw.operation,
-                needs: raw.needs,
-                replay: raw.replay,
-            });
+            match tools(&raw, namespace, commands) {
+                Ok(tools) => jobs.push(JobDecl {
+                    id: raw.id,
+                    description: raw.description,
+                    version: raw.version,
+                    operation: raw.operation,
+                    needs: raw.needs,
+                    replay: raw.replay,
+                    tools,
+                    max_tool_rounds: raw.max_tool_rounds.unwrap_or(DEFAULT_TOOL_ROUNDS),
+                    timeout: raw.timeout.unwrap_or(DEFAULT_TIMEOUT_SECS),
+                }),
+                Err(e) => errors.push(at(file, line, &e)),
+            }
         }
     }
     (jobs, errors)
+}
+
+/// `[ai.compute]`, or with `sql.read` besides.
+pub(crate) fn needs_hold(needs: &[String]) -> bool {
+    let mut sorted: Vec<&str> = needs.iter().map(String::as_str).collect();
+    sorted.sort_unstable();
+    sorted == ["ai.compute"] || sorted == ["ai.compute", "sql.read"]
+}
+
+/// A job's `tools`, each one of `commands` that admits a job and says its
+/// input; their model-facing names distinct, and none `query_sql`.
+fn tools(
+    raw: &JobFile,
+    namespace: &str,
+    commands: &[crate::extension_commands::ExtensionCommand],
+) -> Result<Vec<JobTool>, String> {
+    let mut out: Vec<JobTool> = Vec::new();
+    for local in &raw.tools {
+        let command = format!("{namespace}.{local}");
+        let Some(declared) = commands.iter().find(|c| c.name == command) else {
+            return Err(format!(
+                "job tool `{local}` is none of this extension's commands"
+            ));
+        };
+        if !declared.invokers.job {
+            return Err(format!(
+                "job tool `{local}` doesn't admit a job: its command says `invokers: {{ job: true }}`"
+            ));
+        }
+        if !declared.access.reads_only() {
+            return Err(format!(
+                "job tool `{local}` writes: a tool only reads (`access: read`); write from an \
+                 effect on the job's `contribution.job.completed`"
+            ));
+        }
+        if declared.input_schema.is_none() {
+            return Err(format!(
+                "job tool `{local}` has no `input_schema`: the model is told what it takes"
+            ));
+        }
+        let name = local.replace('.', "_");
+        if name == QUERY_SQL_TOOL || out.iter().any(|t| t.name == name) {
+            return Err(format!("job tool `{local}` is named like another tool"));
+        }
+        out.push(JobTool {
+            name,
+            command,
+            script: matches!(
+                declared.handler,
+                crate::extension_commands::CommandHandler::Script { .. }
+            ),
+        });
+    }
+    Ok(out)
 }

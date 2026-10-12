@@ -213,6 +213,12 @@ pub const SCOPES: &[Scope] = &[
         summary: "Dismiss a hint oxplow showed.",
     },
     Scope {
+        id: "jobs.manage",
+        access: Access::Write,
+        host: Host::Daemon,
+        summary: "Stop any extension's durable job: a person's cancel, whichever extension started it.",
+    },
+    Scope {
         id: "jobs.read",
         access: Access::Read,
         host: Host::Daemon,

@@ -919,7 +919,8 @@ pub fn job_program(
         env: Vec::new(),
         credentials: Vec::new(),
         network: Vec::new(),
-        commands: Vec::new(),
+        // The commands its model may call.
+        commands: job.tools.iter().map(|tool| tool.command.clone()).collect(),
         scopes: job.needs.clone(),
         tree: Some(ext.path.trim_end_matches('/').into()),
         remote: false,

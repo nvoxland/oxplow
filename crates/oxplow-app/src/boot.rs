@@ -49,7 +49,9 @@ pub async fn run_boot_orchestration(
     // leaves core usable; a failed required baseline prevents serving.
     state.extension_activation.initialize(state.clone()).await?;
     state.extension_activation.spawn(state);
-    state.jobs.spawn(state.extension_activation.clone());
+    state
+        .jobs
+        .spawn(state.extension_activation.clone(), state.commands.clone());
 
     // Start the file-snapshot manager's watcher loop for every
     // registered stream, plus per-stream VcsRefsChanged listeners so a

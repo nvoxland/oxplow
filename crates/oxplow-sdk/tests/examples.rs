@@ -308,6 +308,8 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
          sql.read: declared, used\n  \
          tree.read: implied, used\n  \
          ai.compute: declared, used — a person approves it\n\
+         command `triage.todos.in_file` (commands/todos_in_file.star):\n  \
+         sql.read: declared, used\n\
          effect `publish-summary` (effects/publish_summary.star):\n  \
          jobs.read: declared, used\n"
     );
@@ -324,6 +326,8 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
     // and what only the app shows.
     for example in [
         "summary-published",
+        "summary-with-evidence",
+        "summary-cancelled",
         "summary-to-the-wiki",
         "summary-delivered",
         "todo-board",

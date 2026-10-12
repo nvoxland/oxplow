@@ -20,9 +20,19 @@
 //!
 //! A reply the host maps itself: 401/403 is `Auth`, 429 `RateLimited`,
 //! anything else not 2xx `Http`. Its declaration's `config` is
-//! `{ baseUrl?, ops? }`: `ops` lists what it answers natively, `complete`
-//! (the default) and `decide`; without `decide` a typed question is asked
-//! as a chat.
+//! `{ baseUrl?, ops?, models? }`: `ops` lists what it answers natively,
+//! `complete` (the default), `completeTyped`, `streamTyped` and `decide`;
+//! without `decide` a typed question is asked as a chat.
+//!
+//! One that streams (`streamTyped`) defines a third function, `delta(x)`:
+//! `request` gets `{ op: streamTyped, model, request }` and asks the
+//! vendor for a stream; the host reads the reply's server-sent events and
+//! hands each batch that arrived together to `delta` as `{ op, model,
+//! events: [{ event, data }], state }`, which returns `{ deltas, state }`
+//! (`deltas` are `StreamDeltaV1`s; `state` is the script's own fold,
+//! carried to the next batch); at the end `response` gets `{ op, model,
+//! state }` and returns the whole V1 reply. Cancelling drops the
+//! connection; what the deltas had said is the partial reply.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -30,10 +40,11 @@ use std::time::Duration;
 
 use oxplow_ai::capabilities::{CapabilitySnapshotV1, ModelCatalogV1};
 use oxplow_ai::client::{
-    complete_typed_via_text, decide_via_chat, parse_answers, AiError, CompleteRequest, Completion,
-    DecideRequest, Decision, Http, ModelProvider, ProviderInstance, Question,
+    complete_typed_via_text, decide_via_chat, parse_answers, stream_whole, unless_cancelled,
+    AiError, Cancel, CompleteRequest, Completion, DecideRequest, Decision, Http, ModelProvider,
+    OnDelta, ProviderInstance, Question,
 };
-use oxplow_ai::parts::{TypedRequestV1, TypedResponseV1};
+use oxplow_ai::parts::{DeltaFold, StreamDeltaV1, TypedRequestV1, TypedResponseV1};
 use serde_json::{json, Value};
 
 /// How long one of the script's functions may run.
@@ -41,6 +52,9 @@ const SCRIPT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The functions a provider script defines.
 pub const FUNCTIONS: &[&str] = &["request", "response"];
+
+/// What one that streams (`ops: [streamTyped]`) defines besides.
+pub const STREAM_FUNCTIONS: &[&str] = &["request", "response", "delta"];
 
 /// Whether the script may run now: a person approved it as it is
 /// (`ProgramKind::AiProvider`), or why not. Asked before every call, so an
@@ -65,6 +79,7 @@ pub struct Scripted {
     base_url: Option<String>,
     complete: bool,
     complete_typed: bool,
+    stream_typed: bool,
     decide: bool,
     models: ModelCatalogV1,
     script: Arc<str>,
@@ -95,13 +110,20 @@ pub fn scripted(
     let ops = c.ops.unwrap_or_else(|| vec!["complete".into()]);
     if let Some(other) = ops
         .iter()
-        .find(|o| !["complete", "decide", "completeTyped"].contains(&o.as_str()))
+        .find(|o| !["complete", "decide", "completeTyped", "streamTyped"].contains(&o.as_str()))
     {
         return Err(format!(
-            "config: `ops` lists `{other}`; it answers `complete`, `completeTyped` and `decide`"
+            "config: `ops` lists `{other}`; it answers `complete`, `completeTyped`, \
+             `streamTyped` and `decide`"
         ));
     }
-    oxplow_script::runtime::check_starlark_defines(entry, script, FUNCTIONS)
+    let stream_typed = ops.iter().any(|o| o == "streamTyped");
+    let functions = if stream_typed {
+        STREAM_FUNCTIONS
+    } else {
+        FUNCTIONS
+    };
+    oxplow_script::runtime::check_starlark_defines(entry, script, functions)
         .map_err(|e| format!("`{entry}` {e}"))?;
     Ok(Arc::new(Scripted {
         kind: id.to_string(),
@@ -109,6 +131,7 @@ pub fn scripted(
         base_url: c.base_url,
         complete: ops.iter().any(|o| o == "complete"),
         complete_typed: ops.iter().any(|o| o == "completeTyped"),
+        stream_typed,
         decide: ops.iter().any(|o| o == "decide"),
         models,
         script: script.into(),
@@ -154,6 +177,31 @@ impl Scripted {
         instance: &ProviderInstance<'_>,
         x: Value,
     ) -> Result<Option<Value>, AiError> {
+        let Some(call) = self.prepare(instance, x).await? else {
+            return Ok(None);
+        };
+        let reply = self
+            .http
+            .post_with(instance.id, &call.url, call.headers, call.body)
+            .await;
+        match reply {
+            Ok(mut value) => {
+                if let Some(key) = instance.key.filter(|key| !key.is_empty()) {
+                    redact_key(&mut value, key);
+                }
+                Ok(Some(value))
+            }
+            Err(error) => Err(redacted(error, instance.key)),
+        }
+    }
+
+    /// `request(x)`, checked and ready to send: under the base URL, the key
+    /// spliced in, the gate asked; `None` when the script declined.
+    async fn prepare(
+        &self,
+        instance: &ProviderInstance<'_>,
+        x: Value,
+    ) -> Result<Option<Call>, AiError> {
         let id = instance.id;
         let bad = |detail: String| AiError::BadResponse {
             provider: id.to_string(),
@@ -208,29 +256,127 @@ impl Scripted {
             provider: id.to_string(),
             message,
         })?;
-        let reply = self.http.post_with(id, &url, headers, body).await;
-        match reply {
-            Ok(mut value) => {
-                if let Some(key) = instance.key.filter(|key| !key.is_empty()) {
-                    redact_key(&mut value, key);
-                }
-                Ok(Some(value))
+        Ok(Some(Call { url, headers, body }))
+    }
+
+    /// `request` sent as a stream, each batch of events folded by `delta`
+    /// (the script's own `state` carried from one batch to the next) into
+    /// the deltas handed to `on_delta`, and the whole reply `response`
+    /// makes of the last `state`.
+    async fn stream(
+        &self,
+        instance: &ProviderInstance<'_>,
+        req: &TypedRequestV1,
+        cancel: &Cancel,
+        on_delta: OnDelta<'_>,
+    ) -> Result<TypedResponseV1, AiError> {
+        let id = instance.id;
+        let bad = |detail: String| AiError::BadResponse {
+            provider: id.to_string(),
+            detail,
+        };
+        let x = json!({ "op": "streamTyped", "model": req.model, "request": req });
+        let call = self
+            .prepare(instance, x)
+            .await?
+            .ok_or_else(|| bad("its request declined a streamed completion".into()))?;
+        let mut fold = DeltaFold::default();
+        let mut stream = unless_cancelled(
+            cancel,
+            self.http
+                .post_stream(id, &call.url, call.headers, call.body),
+        )
+        .await
+        .map_err(|stop| stop.error(id, TypedResponseV1::partial(Vec::new())))?
+        .map_err(|e| redacted(e, instance.key))?;
+        let mut state = Value::Null;
+        loop {
+            let events = match stream.next_batch_until(cancel).await {
+                Err(stop) => return Err(stop.error(id, fold.into_partial())),
+                Ok(batch) => match batch.map_err(|e| redacted(e, instance.key))? {
+                    Some(events) => events,
+                    None => break,
+                },
+            };
+            let mut events = serde_json::to_value(events).expect("events serialize");
+            if let Some(key) = instance.key.filter(|key| !key.is_empty()) {
+                redact_key(&mut events, key);
             }
-            Err(AiError::Http {
+            let out = self
+                .call(
+                    id,
+                    "delta",
+                    json!({ "op": "streamTyped", "model": req.model, "events": events,
+                            "state": state }),
+                )
+                .await?;
+            if let Some(e) = out.get("error") {
+                return Err(bad(e.as_str().unwrap_or("its stream isn't usable").into()));
+            }
+            state = out.get("state").cloned().unwrap_or(Value::Null);
+            let deltas: Vec<StreamDeltaV1> =
+                serde_json::from_value(out.get("deltas").cloned().unwrap_or(json!([])))
+                    .map_err(|e| bad(format!("its `delta` gave deltas that are not V1: {e}")))?;
+            for delta in deltas {
+                fold.push(&delta);
+                on_delta(delta);
+            }
+            if cancel.is_cancelled() {
+                return Err(AiError::Cancelled {
+                    provider: id.to_string(),
+                    partial: Box::new(fold.into_partial()),
+                });
+            }
+        }
+        let response = self
+            .call(
+                id,
+                "response",
+                json!({ "op": "streamTyped", "model": req.model, "state": state }),
+            )
+            .await?;
+        typed_response(id, response)
+    }
+}
+
+/// A request ready to send.
+struct Call {
+    url: String,
+    headers: Vec<(String, String)>,
+    body: Value,
+}
+
+/// `error` with the key taken out of an HTTP error's body.
+fn redacted(error: AiError, key: Option<&str>) -> AiError {
+    match (error, key.filter(|key| !key.is_empty())) {
+        (
+            AiError::Http {
                 provider,
                 status,
                 body,
-            }) => Err(AiError::Http {
-                provider,
-                status,
-                body: instance
-                    .key
-                    .filter(|key| !key.is_empty())
-                    .map_or(body.clone(), |key| body.replace(key, "[redacted]")),
-            }),
-            Err(error) => Err(error),
-        }
+            },
+            Some(key),
+        ) => AiError::Http {
+            provider,
+            status,
+            body: body.replace(key, "[redacted]"),
+        },
+        (error, _) => error,
     }
+}
+
+/// A script's typed reply: its `{ error }`, or a V1 response.
+fn typed_response(provider: &str, response: Value) -> Result<TypedResponseV1, AiError> {
+    if let Some(e) = response.get("error") {
+        return Err(AiError::BadResponse {
+            provider: provider.into(),
+            detail: e.as_str().unwrap_or("its reply isn't usable").to_string(),
+        });
+    }
+    serde_json::from_value(response).map_err(|e| AiError::BadResponse {
+        provider: provider.into(),
+        detail: format!("its typed response is not V1: {e}"),
+    })
 }
 
 /// The host never hands an echoed credential back to a mapping script.
@@ -331,16 +477,21 @@ impl ModelProvider for Scripted {
                 }),
             )
             .await?;
-        if let Some(e) = response.get("error") {
-            return Err(AiError::BadResponse {
-                provider: instance.id.into(),
-                detail: e.as_str().unwrap_or("its reply isn't usable").to_string(),
-            });
+        typed_response(instance.id, response)
+    }
+
+    async fn stream_typed(
+        &self,
+        instance: &ProviderInstance<'_>,
+        req: &TypedRequestV1,
+        cancel: &Cancel,
+        on_delta: OnDelta<'_>,
+    ) -> Result<TypedResponseV1, AiError> {
+        req.validate_version()?;
+        if !self.stream_typed {
+            return stream_whole(self, instance, req, cancel, on_delta).await;
         }
-        serde_json::from_value(response).map_err(|e| AiError::BadResponse {
-            provider: instance.id.into(),
-            detail: format!("its typed response is not V1: {e}"),
-        })
+        self.stream(instance, req, cancel, on_delta).await
     }
 
     async fn complete(
@@ -1045,5 +1196,162 @@ def response(x):
             .await
             .unwrap_err();
         assert!(err.to_string().contains("no assistant content"), "{err}");
+    }
+
+    /// A streaming script that folds `{"t": text}` and `{"call": {...}}`
+    /// events, so the host's half is what's under test.
+    const STREAM: &str = r#"
+def request(x):
+    return {"path": "/stream", "headers": {"authorization": "Bearer {{key}}"},
+            "body": {"model": x["model"], "stream": True}}
+
+def delta(x):
+    s = x["state"] or {"text": "", "calls": []}
+    text = s["text"]
+    calls = list(s["calls"])
+    out = []
+    for e in x["events"]:
+        if e["data"] == "[DONE]":
+            continue
+        d = json.decode(e["data"])
+        if "t" in d:
+            text += d["t"]
+            out.append({"type": "text", "text": d["t"]})
+        if "call" in d:
+            c = {"type": "toolCall", "id": d["call"]["id"], "name": d["call"]["name"],
+                 "arguments": d["call"]["arguments"]}
+            calls.append(c)
+            out.append(c)
+    return {"deltas": out, "state": {"text": text, "calls": calls}}
+
+def response(x):
+    s = x["state"]
+    parts = ([{"type": "text", "text": s["text"]}] if s["text"] else []) + s["calls"]
+    return {"schemaVersion": 1, "parts": parts,
+            "finishReason": "toolCalls" if s["calls"] else "stop",
+            "usage": {"inputTokens": None, "outputTokens": None, "source": "unknown"}}
+"#;
+
+    fn stream_ops() -> Value {
+        json!({ "ops": ["streamTyped"] })
+    }
+
+    fn sse_data(data: Value) -> String {
+        format!("data: {data}\n\n")
+    }
+
+    /// The host reads the events, `delta` turns them into deltas as they
+    /// come, and `response` makes the whole reply of its fold. The key is
+    /// spliced into the request and taken out of what came back.
+    #[tokio::test]
+    async fn a_streaming_script_folds_events_into_deltas_and_a_reply() {
+        let (base, seen, _) = oxplow_ai_fake::mock_sse(
+            "/stream",
+            vec![
+                sse_data(json!({ "t": "hel" })),
+                sse_data(json!({ "t": "lo k1" })),
+                sse_data(
+                    json!({ "call": { "id": "c1", "name": "look", "arguments": { "p": 1 } } }),
+                ),
+                "data: [DONE]\n\n".into(),
+            ],
+            Duration::from_millis(10),
+            Duration::ZERO,
+        )
+        .await;
+        let p = scripted("x", "X", "p.star", STREAM, &stream_ops(), open()).unwrap();
+        let mut deltas = Vec::new();
+        let reply = p
+            .stream_typed(
+                &at(&base, Some("k1")),
+                &user_text("hi"),
+                &Cancel::default(),
+                &mut |d| deltas.push(d),
+            )
+            .await
+            .unwrap();
+        let text: String = deltas
+            .iter()
+            .filter_map(|d| match d {
+                StreamDeltaV1::Text { text } => Some(text.as_str()),
+                StreamDeltaV1::ToolCall { .. } => None,
+            })
+            .collect();
+        assert_eq!(text, "hello [redacted]");
+        assert!(
+            matches!(deltas.last(), Some(StreamDeltaV1::ToolCall { name, .. }) if name == "look")
+        );
+        assert_eq!(
+            reply.finish_reason,
+            oxplow_ai::parts::FinishReasonV1::ToolCalls
+        );
+        assert_eq!(reply.parts.len(), 2);
+        let (_, headers, body) = seen.lock().unwrap()[0].clone();
+        assert_eq!(headers["authorization"], "Bearer k1");
+        assert_eq!(body["stream"], true);
+    }
+
+    /// Cancelled mid-stream, the call stops at once with what the deltas
+    /// had said, and the connection is let go.
+    #[tokio::test]
+    async fn a_cancelled_streaming_script_reports_what_had_come() {
+        let chunks = (0..40)
+            .map(|i| sse_data(json!({ "t": format!("{i} ") })))
+            .collect();
+        let (base, _, written) = oxplow_ai_fake::mock_sse(
+            "/stream",
+            chunks,
+            Duration::from_millis(100),
+            Duration::from_secs(30),
+        )
+        .await;
+        let p = scripted("x", "X", "p.star", STREAM, &stream_ops(), open()).unwrap();
+        let cancel = Cancel::default();
+        let stopper = cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(450)).await;
+            stopper.cancel();
+        });
+        let err = p
+            .stream_typed(&at(&base, None), &user_text("hi"), &cancel, &mut |_| {})
+            .await
+            .unwrap_err();
+        let AiError::Cancelled { partial, .. } = err else {
+            panic!("{err:?}")
+        };
+        let oxplow_ai::parts::PartV1::Text { text } = &partial.parts[0] else {
+            panic!("{partial:?}")
+        };
+        assert!(text.starts_with("0 1 "), "{text}");
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        let at_end = written.load(std::sync::atomic::Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(written.load(std::sync::atomic::Ordering::SeqCst), at_end);
+        assert!(at_end < 40);
+    }
+
+    /// A script that says it streams must define `delta`; one that doesn't
+    /// stream answers a stream with its whole reply at once.
+    #[tokio::test]
+    async fn streaming_needs_delta_and_otherwise_comes_whole() {
+        let err = scripted("x", "X", "p.star", TYPED, &stream_ops(), open())
+            .err()
+            .unwrap();
+        assert!(err.contains("`delta`"), "{err}");
+        let reply = json!({ "schemaVersion": 1, "parts": [{ "type": "text", "text": "all" }],
+            "finishReason": "stop",
+            "usage": { "inputTokens": null, "outputTokens": null, "source": "unknown" } });
+        let (base, _) = mock("/typed", 200, reply).await;
+        let p = scripted("x", "X", "p.star", TYPED, &typed_ops(), open()).unwrap();
+        let mut deltas = Vec::new();
+        p.stream_typed(
+            &at(&base, None),
+            &user_text("hi"),
+            &Cancel::default(),
+            &mut |d| deltas.push(d),
+        )
+        .await
+        .unwrap();
+        assert_eq!(deltas, [StreamDeltaV1::Text { text: "all".into() }]);
     }
 }

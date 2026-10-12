@@ -1,0 +1,27 @@
+title: Job Output
+description: What a job produced as it ran, in order — its model's text as it streamed, each tool it called and what the tool answered, and each round's tokens.
+params: [{ name: job_id }]
+query: |
+  SELECT o.attempt,
+         o.seq,
+         o.at,
+         o.kind,
+         CASE o.kind
+           WHEN 'text' THEN o.text
+           WHEN 'tool_call' THEN json_extract(o.data, '$.name') || ' ' || json(json_extract(o.data, '$.arguments'))
+           WHEN 'tool_result' THEN COALESCE('error: ' || json_extract(o.data, '$.error'),
+                                            json(json_extract(o.data, '$.result')))
+           WHEN 'usage' THEN printf('%d in, %d out', json_extract(o.data, '$.inputTokens'),
+                                    json_extract(o.data, '$.outputTokens'))
+         END AS content
+  FROM v_job_output o
+  WHERE o.job_id = :job_id
+  ORDER BY o.attempt, o.seq
+viz: table
+columns:
+  - { key: attempt, label: Attempt }
+  - { key: at, label: At }
+  - { key: kind, label: Kind }
+  - { key: content, label: Content }
+empty: Nothing yet — it hasn't started, or it is waiting for its model.
+hidden: true

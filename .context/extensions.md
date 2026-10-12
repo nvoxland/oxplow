@@ -1222,9 +1222,13 @@ and one calling MCP read identical `file:line: what — fix` lines.
   }`: appended to the throwaway's log and delivered; the extension's
   effects, approved there, react for real — `expect: { effects: [{ id,
   state }], commands }`, read from `v_effect_run` and `command.executed`),
-  a job (`{ job, intentKey, request }`: through the extension's commands
-  over `jobs.write/enqueue` and `jobs.read/snapshot`, approved there —
-  `expect: { state, result? }`; naming `effects`, `commands` or `pages`
+  a job (`{ job, intentKey, request, cancel? }`: through the extension's
+  commands over `jobs.write/enqueue` and `jobs.read/snapshot`, approved
+  there; `cancel: true` cancels it through `jobs.write/cancel` once it
+  has written — `expect: { state, result?, text?, toolCalls?, output? }`,
+  `output` its rows `[{ kind, … }]` ("Jobs"); a model reply is a string
+  or `{ text?, toolCalls?: [{ name, arguments }], chunkDelayMs? }`;
+  naming `effects`, `commands` or `pages`
   also approves its effects and delivers the `contribution.job.completed`
   the job logs, asked in a thread: the effects that reacted, the commands
   they ran and which of the named wiki refs now exist), a component (`{ component, queries?,
@@ -3827,64 +3831,6 @@ captured with the last committed capability candidate; staging remains based on
 the frozen candidate state. External instance metadata is captured; process and
 adapter lifetimes are staged by the separate provider/runtime-adapter owners.
 
-## Durable job store boundary
-
-`extension_job_store.rs` supplies private intent, fenced lifecycle and attempt/
-observation persistence. Ownership and replay policy remain host-derived;
-arguments supply neither. Duplicate contribution/intent compares exact immutable
-owner/version/generation/contract/operation/invoker/request, and retains the
-original scheduling RunId. A changed delivery conflicts instead of dispatching
-new work. Transition helpers require a transaction, CAS the old lifecycle and
-revision, and restore attempt changes on any rejection; rollback failures must
-abort the outer transaction. Async wrappers retry only storage contention.
-
-History reads paginate by attempt or observation time/id within row and payload
-budgets. Restart listings use updated-time/id cursors and omit request data,
-including a separate queued-intent scan. Late evidence can only append against
-an original attempt/fence; it cannot change current success or publish through
-a new handler. The store starts no workers and conveys no authority. The public
-author path and dispatcher use it through separate host-owned services. The host
-must persist enough trusted actor/anchors/cause context to resume; an
-invoker label and originating RunId alone cannot reconstruct authority.
-
-## Durable job invocation provenance
-
-Restart context is a dedicated private versioned record, not reconstructed from
-extension_run or an invoker label. Its strict scheduling Actor includes lens
-on_behalf_of and agent session/thread/stream identity; anchors, canonical subjects
-and cause remain explicit. Context is bounded, unknown nested fields reject, and
-actor/anchor identities must agree. Grants/approval/guard/cancel/credentials and
-job argument JSON cannot supply or replace these fields. Pure domain types and
-atomic backend intent/context persistence are implemented. Duplicate delivery
-must preserve scheduling provenance; missing context is never reconstructed from
-telemetry or backfilled from a redelivery. Public scheduling and dispatch now
-use this context. Migration execution has not been validated.
-
-Host execution identity is the job and attempt/fence. `Actor::job` derives a
-dedicated actor from that validated identity; its separate invoker is refused by
-all existing generic bus declarations. Jobs cannot confirm or create proposals.
-`RunContext::job` creates a new run/cancel/budget with no granted services and
-links the originating run as provenance, without inheriting its actor/authority.
-Only the host authority resolver attaches current declarations/approvals and
-live guards. The immutable operation registry binds the full owner/package/
-generation/contract and operation, retains replay policy, and pins the handler.
-JobWork validates that run actor, attempt, anchors, subjects, cause and parent
-agree with its private provenance. Its `job:<id>:<operation>` idempotency key
-stays stable across attempts and comes from the host, never request JSON.
-
-`JobAuthorityHost` rechecks exact current descriptors, declared scope bounds,
-current thread/stream and writer state, and requires current approval for paid
-AI. Its grant resolver is a trusted host integration, not a persisted grant.
-Publication checks current thread state on the caller's DB connection along
-with live ownership/consent. The initial operation surface accepts declared
-host services; raw process authority needs a separate consent adapter. The
-typed AI operation uses current Programs consent and a bounded startup scheduler.
-Draft migrations have not been executed.
-Absent validated restart context or exact retained operation code makes a job
-undispatchable. Current active-generation and live-grant checks still apply;
-scheduling provenance is not authority. Provider cancel/timeout alone cannot
-assert stopped execution.
-
 Provider resolution captures config/provider choice with project/global credential
 scope in one merged mapping, and uses one catalog declaration snapshot per
 generation. A disabled bundled owner cannot be shadowed by a project namesake.
@@ -3968,32 +3914,7 @@ different activated generation must reload before invoking a query or command;
 a bundle of another root (a stream's lens) is built from that root's files. This check requires the owning
 runtime reader scope for atomicity with command or query execution.
 
-## One-attempt durable job dispatch
-
-`ExtensionJobDispatcher::run_one` is integrated as a host helper. It reads a
-bounded intent/context, finds an exact immutable operation registration and
-checks its replay policy, resolves fresh authority, CAS claims, then resolves
-authority again before starting work. The worker future and cancellation waits
-run outside transactions. Metadata polls do not select private requests.
-Thirty-second leases renew every ten seconds; supervision polls every 250 ms
-and requests cancellation after sixty seconds, with a five-second grace.
-Any exit signals the run cancellation token. Only trusted actual stop evidence
-can confirm cancellation. No automatic operation retry is introduced.
-
-Completion uses a transaction/savepoint with live owner/grant and current
-thread/stream and applicable actor-policy checks before and after the fenced result transition.
-Stale/revoked/expired completions append original-attempt evidence, never publish
-through another generation. Logical conflicts are bounded retries; storage
-contention preserves its storage classification. Ambiguous outcomes recover
-only after lease expiry, never as stopped. Waiting for expiry is bounded by
-monotonic time: clock rollback cannot hold a dispatcher slot indefinitely; an
-Interrupted dispatcher return can leave the durable row awaiting expiry recovery.
-Terminal aggregate rows are immutable, including late cancellation requests.
-Public scheduling, owned result reads, a concrete AI grant resolver and bounded
-startup scheduling now use this dispatcher. Runtime restart and cancellation
-validation remain pending.
-
-### Runtime ingress and entity refresh
+## Runtime ingress and entity refresh
 
 Extension listings enter the same generation scope as commands and SQL. A failed
 candidate adds owner diagnostics to the committed metadata; newly discovered
@@ -4014,61 +3935,122 @@ not restart providers; changed entity schemas request one coherent candidate.
 Provider initial sync and entity-state metric recapture do not themselves emit
 collector-run completion events.
 
-JobAuthorityHost accepts this project's trusted activation owner. Dispatch takes
-a fresh reader before durable lookup/claim, resolves live ownership/grants and
-attaches the pin to the newly host-derived execution RunContext. Persisted
-provenance never contains that pin. The reader remains through execution and
-fenced publication, and worker service calls re-enter with it. Bounded restart
-recovery pages advance over already-interrupted rows, CAS-fence expired running
-attempts and expose counts/cursors only. Recovery proves interruption; it does
-not prove stop or replay an operation. The first concrete operation, grant
-resolver and boot scheduler are described below.
+## Jobs
 
-## Declared durable job author path
+A **job** is model work an extension asks for that runs outside any
+transaction and outlives a restart (`operation: ai.complete_typed`). It
+streams its reply as it comes, may call tools the extension declares,
+can be cancelled mid-reply, and says how it ended with an event. The
+declaration is `extensions/jobs.rs`; intent, snapshot, cancel and the
+end event `extension_jobs.rs`; what runs `extension_job_runner.rs`;
+claiming, supervising and publishing `extension_job_dispatch.rs`,
+`extension_job_scheduler.rs` and `extension_job_authority.rs`.
 
-A stable `jobs:` declaration names a local id, description, positive operation
-contract version, `operation: ai.complete_typed`, exactly `needs: [ai.compute]`,
-and `replay: never | idempotent` (default never). At most 128 jobs belong to one
-package. The descriptor is `<extension>/job/<id>`, with native contract version
-enforced for public exports. Import guards can withhold a job; initial scheduling
-resolves only a job in the calling contribution's own package.
+```yaml
+jobs:
+  - id: review
+    description: Review the change's TODOs.
+    version: 1                        # the declaration's own contract version
+    operation: ai.complete_typed
+    needs: [ai.compute, sql.read]     # ai.compute; sql.read adds the query_sql tool
+    tools: [evidence.lookup]          # this extension's commands the model may call
+    max_tool_rounds: 4                # model rounds at most, 1–16 (default 4)
+    timeout: 300                      # seconds, 1–600 (default 120)
+    replay: never                     # or idempotent
+commands:
+  - { name: review.ask, summary: …, scope: jobs.write, op: enqueue, invokers: { human: true, agent: true, lens: true } }
+  - { name: review.cancel, summary: …, scope: jobs.write, op: cancel, invokers: { human: true, agent: true, lens: true } }
+  - { name: review.result, summary: …, scope: jobs.read, op: snapshot, invokers: { human: true, agent: true, lens: true } }
+  - name: evidence.lookup             # a tool: reads, admits a job, says its input
+    summary: The TODOs in one file.
+    entry: commands/evidence_lookup.star
+    needs: [sql.read]
+    input_schema: { type: object, required: [path], properties: { path: { type: string } } }
+    access: read
+    invokers: { human: false, agent: false, lens: false, job: true }
+```
 
-Declare native commands over `jobs.write/enqueue`, `jobs.write/cancel` and
-`jobs.read/snapshot`. Enqueue input is `{job, intentKey, request}`; the request is
-`{schemaVersion:1, role, messages, tools?}` with no model, endpoint or credential.
-Intent and original provenance commit together, and the private request field
-is omitted from audits and parent compositions/proposals. Queue capacity is
-1024 queued/running jobs per project and 256 per package; exact duplicates remain
-valid at capacity. Owner, generation, operation/replay and contract metadata are
-derived by the host, not accepted in the request. Result/cancel inputs are `{id}`
-and require current caller ownership; confined actors cannot reach another
-stream's jobs. Result reads preserve original job/version attribution and never
-return original request data.
-
-Pure commands/effects continue composing intent commands; they never acquire
-AI execution merely by scheduling. A declared job has its own Programs approval
-over the reviewed manifest and declaration. Every dispatch resolves current
-owner and consent into a fresh Job RunContext. The operation runs outside SQL,
-under the configured role and current provider approval; it has no raw process
-or automatic tool execution. Role binding, cache lookup and result attribution
-share a captured key-free AI configuration.
-
-The published registry joins PreparedRuntimeAdapters. Boot starts one bounded
-scheduler after coherent readiness: four dispatch slots, metadata pages of 64,
-one-second polling and five-second failure backoff. Mid-page capacity preserves
-the next unread cursor so unapproved early jobs cannot starve later ones.
-Expired attempts become interrupted; no automatic replay is performed. Shutdown
-interrupts scans and cancels workers, preserving uncertainty until recovery.
-Dropping HTTP work cannot prove remote execution stopped.
-
-A successful fenced completion appends `contribution.job.completed@1` in the
-same transaction, with job identity, original contribution/version, execution
-run and attempt fence, outcome and original anchors/cause. Requests/results stay
-out of that event. Consumers declare `jobs.read` and use
-`scope("jobs.read", {id})` to fetch an owned result before composing their next
-commands. Transactional composers use their existing connection; worker readers
-re-enter their retained generation. Jobs still need runtime validation, and
-the drafted persistence migrations have not been executed in this workspace.
+- **A tool** is one of the extension's own commands that admits a job
+  (`invokers.job`), only reads (`access: read`) and has an
+  `input_schema`; anything else is a load error. The model calls it by
+  its local name with `.` as `_` (`evidence_lookup`: model APIs allow no
+  dots); its description is the command's `summary`, its parameters the
+  schema. `query_sql` is reserved: with `sql.read` the model gets it, a
+  read-only query over the published models (as MCP `query_sql`; 200
+  rows). Core's commands admit no job, so a model reads oxplow through
+  `query_sql` and never writes: a job's writes come from an effect on
+  its end.
+- **Approval.** A job is a program (Settings → Data → Programs: "Job
+  `<ext>/<id>`", the tools its model may call). Its hash covers
+  `extension.yaml`, so a changed declaration — a new tool — asks again.
+  Until approved its intent waits, queued; nothing is sent. Every model
+  call also needs its AI provider's approval.
+- **Enqueue** (`jobs.write/enqueue`): `{ job, intentKey, request }`,
+  `request` `{ schemaVersion: 1, role, messages, tools? }` — never a
+  model, endpoint or credential: the role's model is bound when it runs.
+  A job that declares `tools` takes none in its request. One intent key
+  is one job (asking again returns it). At most 1024 queued or running
+  in a project, 256 per extension. The request stays private (it isn't
+  in the audit or any model).
+- **Running.** The scheduler (four at a time, polling each second)
+  claims a queued job, resolves its authority afresh — the declaration
+  and approval as they are now, the thread's writer gate — and runs it
+  as `Actor::Job` (`job:<id>:<attempt>:<fence>`) on a run of its own,
+  linked to the run that asked. Each model round streams on the role
+  (`AiCompute::stream_typed`, a recorded computation: the same request
+  reads its recorded answer, replayed at once). What comes is the
+  attempt's **output** (`extension_job_output`, `v_job_output`): text
+  coalesced into a row every 100 ms (or 4 KiB), each tool call and what
+  it answered, each round's usage. Each write is its own short
+  transaction — none is held while the model writes — and the table
+  refuses rows for an attempt that has closed, so a worker that lost
+  its attempt adds nothing.
+- **Tool rounds.** A reply with tool calls (from a job that declares
+  tools) runs them, at most 16 a round: `query_sql`, or the command
+  through `commands.run_in` on the job's run — the bus admits the job
+  as a job, validates the input against the schema and re-checks every
+  child a script composes (none of core's admits a job). A refusal, an
+  invalid input, an unknown tool or a failure answers the model with
+  `{ error }`, and the job goes on; a script tool answers its script's
+  `result`; more than 64 KiB is refused. The calls and their answers go
+  back to the model as its next round. Past `max_tool_rounds` the job
+  fails (`tool rounds exhausted`). A job without tools keeps any tool
+  calls in its reply as data.
+- **Its result**: `{ parts, finishReason, rounds, usage: { inputTokens,
+  outputTokens }, aiCalls }` — `parts` is the last round's reply; a
+  failure adds `error`; a cancelled job keeps the parts it had, with
+  `stopped: cancelled`. `jobs.read/snapshot` returns `{ id, job,
+  version, state, attempt, cancellationRequested, text, toolCalls,
+  result }`, `text` being what the current attempt has streamed so far.
+- **Cancel.** `jobs.write/cancel` (the extension's own jobs) or
+  `oxplow.job.cancel` (a person's, any job: `invokers` human and lens).
+  A queued job ends at once. A running one has its run cancelled: the
+  model's connection is dropped within 100 ms
+  (`oxplow_ai::client::unless_cancelled`), the attempt closes
+  `cancelled` with what had come, and the call's `v_ai_call` row is
+  `error: cancelled` with that partial reply. Revoking the job (its
+  approval, its extension disabled) stops it the same way.
+- **Limits.** Past its `timeout` a job fails (`timed out after Ns`),
+  keeping its output; the dispatcher stops a worker still running 15 s
+  later. The lease is 30 s, renewed every 10 s: an attempt whose lease
+  ran out (oxplow stopped) is `interrupted` when recovery finds it.
+  Nothing replays an interrupted job yet, `idempotent` or not.
+- **Its end** is the event `contribution.job.completed@1 { job_id,
+  contribution, version, attempt, fence, outcome: succeeded | failed |
+  cancelled | interrupted }`, logged in the transaction that ended it
+  (however it ended: completion, cancel, recovery) with the anchors and
+  cause the job was asked with. It carries no request or result: an
+  effect reads the result with `scope("jobs.read", { id })` and writes
+  what it says (the triage example's `publish-summary`).
+- **Seeing jobs.** `v_job` (state, attempt, rounds, tool calls, tokens
+  so far) and `v_job_output` are published models, so a lens or
+  component over them follows a job live. oxplow-bundled's **Jobs** lens
+  (Activity) lists the running and the last day's, with Cancel; a row
+  opens its **Job Output**.
+- **What a job can't do**: drive an agent session, ask a person (a
+  command that needs confirmation is refused, never proposed), write
+  (its tools read), run core's commands, or call a model its approval
+  and the AI provider's don't allow.
 
 ## Host-owned secret references
 

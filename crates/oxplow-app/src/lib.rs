@@ -90,7 +90,10 @@ pub mod extension_job_ai;
 pub mod extension_job_authority;
 pub mod extension_job_dispatch;
 pub mod extension_job_operations;
+pub(crate) mod extension_job_runner;
 pub mod extension_job_scheduler;
+#[cfg(test)]
+mod extension_job_stream_tests;
 pub mod extension_jobs;
 #[cfg(test)]
 mod extension_jobs_tests;

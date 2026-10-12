@@ -94,7 +94,8 @@ async fn start(svc: &Arc<crate::Services>, approve_jobs: bool) {
         .expect("the extension activates");
     let problems = svc.extension_activation.problems();
     assert!(problems.is_empty(), "{problems:?}");
-    svc.jobs.spawn(svc.extension_activation.clone());
+    svc.jobs
+        .spawn(svc.extension_activation.clone(), svc.commands.clone());
 }
 
 fn approve(svc: &crate::Services, kind: crate::exec_consent::ProgramKind) {

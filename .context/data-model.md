@@ -5,57 +5,41 @@ What this doc covers: the SQLite tables, their store classes, and the
 `sort_index` queue invariant for tasks. If you're adding a new persisted concept, also
 read [ipc-and-stores.md](./ipc-and-stores.md).
 
-## Durable extension job persistence
+## Extension jobs
 
-The pure lifecycle is in `oxplow-domain/src/extension_job.rs`; migration
-`V52__extension_jobs.sql` reserves private jobs, per-dispatch attempts and
-append-only late outcome observations. `SqliteExtensionJobStore` and its transaction-composable helpers are integrated;
-a first declared typed-AI operation, fresh consent resolution, bounded boot
-scheduler and fenced completion event are now wired. Runtime validation remains
-unexecuted. No job SQL model or public RPC
-exposes these rows. Installation/generation registry changes cannot cascade
-into history deletion.
+What a job is and how it runs: [extensions.md](./extensions.md) "Jobs".
+The lifecycle is pure in `oxplow-domain/src/extension_job.rs`; the store is
+`oxplow-db/src/extension_job_store.rs`. Tables (V52, V56):
 
-Intent uniqueness is `(contribution_id, intent_key)`. Exact optional package
-version, generation, public contract version, operation, invoker, replay policy
-and canonical request JSON are immutable comparison fields. Changed delivery
-input conflicts; a fresh delivery RunId does not replace the original. Rows
-start at revision one; transitions increment revision exactly once and CAS the
-prior revision and lifecycle. SQL checks mirror reachable domain states and
-attempt/fence relations, while triggers preserve attribution, request and first
-cancellation time. Application validation additionally checks canonical UUIDs,
-identifiers, JSON depth and byte bounds. Expiry yields interruption, never proof
-of cancellation. Execution and cancellation waits occur outside transactions.
+- **`extension_job`** — one row per job: owner (`contribution_id`, package
+  version, generation, contract version), operation, invoker, the run that
+  asked (`run_id`), `intent_key` (`UNIQUE (contribution_id, intent_key)`:
+  one intent is one job), replay policy, `state` (`queued`, `running`,
+  `succeeded`, `failed`, `cancelled`, `interrupted`), `attempt` and `fence`,
+  the lease, the first cancellation request, `revision` and the private
+  `request_json` (≤ 1 MiB). Every transition is a revision CAS
+  (`transition_tx`); triggers keep identity, the request and the first
+  cancellation time immutable, and an ended row frozen.
+- **`extension_job_context`** — the job's immutable provenance (the asking
+  actor, anchors, subjects, cause), written with the intent; a dispatch
+  without it doesn't run. No grant or credential is in it.
+- **`extension_job_attempt`** — one row per attempt, its odd fence kept
+  after recovery; closed once (succeeded, failed, cancelled with stop
+  evidence, interrupted) with its result (≤ 1 MiB).
+- **`extension_job_output`** (V56) — what an attempt produced as it ran,
+  `(job_id, attempt, seq)`: `kind` `text` | `tool_call` | `tool_result` |
+  `usage`, `content_json` (≤ 256 KiB). Append-only; a trigger refuses rows
+  for an attempt that isn't open, so a worker that lost its attempt writes
+  nothing. Written by `append_output` in short transactions of its own.
+- **`extension_job_observation`** — late-outcome evidence: a worker that
+  finished after its attempt was fenced off records what it had here, never
+  on the job.
 
-Succeeded, failed and cancelled aggregate rows reject further transitions,
-including new cancellation requests; the draft SQL trigger enforces this too.
-Metadata point reads share the recovery decoder and never select request JSON.
-
-Attempt rows retain the original claimed odd fence even after recovery invalidates
-the aggregate fence. They close once with actual completion/stopped cancellation
-or interrupted recovery; closed outcomes cannot be rewritten. Request/result/
-evidence JSON is capped at 1 MiB per value. Late observations reference the exact
-original `(job_id, attempt, fence)` and are immutable independent history; they
-cannot change current lifecycle, relabel ownership or authorize publication.
-History pages accept limits of 1..256 and stop at 4 MiB of serialized payload
-with a next cursor, excluding lookahead payloads. Recovery and queued-work pages
-use `(updated_at_ms, id)` cursors and list metadata without loading private
-requests. Separate queued enumeration preserves committed but undispatched
-intent after restart; old interrupted rows cannot starve later recovery pages.
-The store validates decoded canonical IDs, reachable state/token/time invariants
-and positive revisions; borrowed SQLite text is bounded before allocation or
-JSON decoding. Canonical JSON uses sorted object keys, a depth/traversal guard
-and an exact allocation-free count before allocating the bounded serialization.
-Transition CAS checks prior revision/state/attempt/fence/lease/cancellation/time
-and publishes attempt changes inside a savepoint; all normal error paths
-explicitly roll back and propagate rollback failure to abort the outer transaction.
-Enqueue collisions compare immutable input rather than overwriting. Async wrappers
-own transactions and retry only storage contention; typed conflict/lifecycle
-rejection is not Busy. Observation recording has both sync and async helpers. A store validates
-persistence and fences; only the host can grant execution or private access.
-Both sync/async enqueue, transition and observation write entry points are
-on the thin-caller deny lists. The schema is drafted; migration/runtime validation
-has not run. No store operation executes a worker or resolves authority.
+Published as **`v_job`** (no request, no result: state, attempt, the current
+attempt's model rounds, tool calls and tokens) and **`v_job_output`**. A
+job's request and result are read only through its extension's
+`jobs.read/snapshot`. The writers are on the thin-caller clippy deny lists:
+jobs change through their commands and the dispatcher.
 
 ## Extension state persistence
 
@@ -2426,34 +2410,6 @@ the docs in one diff:
 - [agent-model.md](./agent-model.md) — how the agent acts on this data.
 - [git-integration.md](./git-integration.md) — `gitCommitAll` for the
   Files-panel commit button (user-driven).
-
-## Durable job restart context
-
-The private jobs migration now drafts extension_job_context alongside intent
-and attempt history. Each immutable context row belongs to one job and its
-original RunId, with JSON object/schema_version and 64 KiB checks; an insertion
-trigger requires the parent's same origin. The host validates strict nested
-scheduling Actor/anchors, canonical subject/cause identities and version before
-writing/reading. No grant or credential state is serialized, and no model exposes
-the context. The pure types and backend enqueue/read integration are implemented;
-the dispatcher/public scheduling integration remains pending. The draft migration
-has not been executed.
-
-Context must join intent atomically and survive independently of completed
-extension_run retention. Duplicate delivery preserves original provenance and
-rejects changed scheduling identity/anchors/subjects/cause. Missing or invalid
-context fails closed at dispatch; historical run telemetry is not a fallback.
-Execution identity is a job plus attempt/fence, separate from scheduling Actor.
-Worker authority must be resolved from current live owner/grants/gates.
-
-`extension_job_store::enqueue_with_context_tx` wraps intent and context in one
-savepoint, with explicit rollback on caught errors. Context origin must match
-the scheduling job. Duplicate input additionally compares Actor, anchors,
-subjects and cause, excluding only the new delivery's RunId; it preserves the
-original row. Missing context cannot be backfilled by redelivery. `get_context_tx`
-checks borrowed stored-byte limits before allocation, exact parent linkage and
-normalized strict V1 JSON before returning private attribution. Async wrappers
-exist, but no authority or worker wake is supplied by the backend.
 
 ## Private extension configuration overrides
 

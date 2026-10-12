@@ -567,7 +567,20 @@ Prerequisites: Compose declared host services through the shared context.
 
 #### Expose cancellable AI streams and tool lifecycles through jobs
 
-Status: planned.
+Status: working end to end. A job's model rounds stream (`stream_typed`,
+SSE through a script's `delta`, the whole reply at once from a provider
+that doesn't stream) into its attempt's output (`v_job_output`, `v_job`);
+cancelling drops the model's connection and the job ends `cancelled`
+with what it had, its call recorded as cancelled; a job's declared
+`tools` (its extension's read-only commands admitting `invokers.job`, and
+`query_sql` with `sql.read`) run under the job's run and answer the model,
+for at most `max_tool_rounds`; `timeout` fails it; its end is
+`contribution.job.completed` with every outcome. A person cancels any job
+(`oxplow.job.cancel`, the bundled Jobs lens). Still to do: the vendor
+streaming mappings (Anthropic, OpenAI) and the hardening tests (lease
+expiry, revocation and generation change mid-run, restart, capacity).
+Nothing replays an interrupted job. See [extensions.md](./extensions.md)
+"Jobs" and [ai-providers.md](./ai-providers.md) "Streaming and cancelling".
 
 Scope: Build AI streaming on durable job identity with cancellation, incremental output and completion/error events. Route model-requested tool operations through explicitly granted host commands/services with bounded recursion and usage. Keep interactive sessions and their input authority separate from model inference.
 

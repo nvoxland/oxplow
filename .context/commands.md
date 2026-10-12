@@ -83,7 +83,7 @@ ids. A command declares (`oxplow_domain::commands::CommandSpec`):
 | Field | Meaning |
 |---|---|
 | `input_schema` | JSON Schema; the bus validates the input first and names the failing field, plus what the schema accepts there (`InputValidator::check`: an object's fields, required first, for an unknown or missing one; the choices for a bad enum value), so a caller fixes it in one more call |
-| `invokers` | which surfaces may run it: `human`, `agent`, `lens` |
+| `invokers` | which surfaces may run it: `human`, `agent`, `lens`, `job` (a model's tool call inside one of its extension's jobs; `false` unless said, and no constant — `Invokers::ALL` included — admits a job, so none of core's commands does) |
 | `confirm` | `Never`, `Always`, or `Destructive` — a person confirms; an agent never can. A command that only reads (`View` / `Read`) may not ask (`Command::new` / `with_confirm_for` refuse it — so a read or view scope's command can't declare `confirm`): it runs unrecorded, so nothing would resolve its proposal |
 | `undoable` | the handler returns an inverse call that `undo` applies |
 | `lifecycle` | `Stable` / `Experimental` |
@@ -96,14 +96,16 @@ ids. A command declares (`oxplow_domain::commands::CommandSpec`):
 `Lens { lens_id, on_behalf_of }`, `System`. Its `source()` (`human`,
 `agent:thr3`, `lens:acme/x`) is what the event and audit record.
 
-`Actor::Job` is host-derived from a validated job/attempt/fence identity. It
-has its own source, carries the trusted provenance thread/stream for gates and
-is confined to that stream. It cannot confirm or create a proposal. Its separate
-`Invoker::Job` is refused by every existing `Invokers` declaration, including
-`ALL`; no generic command admission is widened. A lens wrapping a Job retains
-Job admission and its thread/stream confinement rather than acquiring Lens rights. Trusted registered job operations
-use their own execution surface. Writer-bound commands from gated actors now
-fail closed when the actor lacks a thread, rather than passing an absent gate.
+`Actor::Job` is host-derived from a validated job/attempt/fence identity
+(source `job:<id>:<attempt>:<fence>`): what a job's model tool calls run
+as ([extensions.md](./extensions.md) "Jobs"). It carries the thread and
+stream the job was asked in, for the gates, and is confined to that
+stream. It cannot confirm or create a proposal: a command that asks is
+refused. `Invoker::Job` is admitted only by `invokers.job`, which an
+extension declares on the read-only commands its jobs name as `tools`;
+every child a script composes is re-checked, and none of core's admits a
+job. A lens wrapping a Job keeps Job admission and its confinement. A
+writer-bound command from a gated actor without a thread is refused.
 
 ## Offering a command to a person
 
@@ -411,12 +413,14 @@ skipping.
    (audited as `invalid`).
 2. **Invoker check** — the spec's `invokers` must admit the actor's surface
    → `Denied` (audited).
-3. **Agent policy** — for an agent-driven run (an agent, or a lens
-   acting for one, nested runs included), `AgentPolicy::check_command(
-   thread, spec, may_write)` (`agent_policy.rs`) → `Denied` (audited).
-   A spec with `invokers.agent: false` is denied here — so a lens acting
-   for an agent can't run what the agent can't, and gets no proposal
-   (tsk729): this is the one place that rule lives. A `Write`
+3. **Agent policy** — for a thread-gated run (an agent, an effect, a
+   job, or a lens acting for one, nested runs included),
+   `AgentPolicy::check_command(invoker, thread, spec, may_write)`
+   (`agent_policy.rs`) → `Denied` (audited). A spec with
+   `invokers.agent: false` is denied here to all but a job (which step 2
+   admitted as a job) — so a lens acting for an agent can't run what the
+   agent can't, and gets no proposal (tsk729): this is the one place that
+   rule lives. A `Write`
    command needs a thread that may write: the bus asks its `WriteGate`
    (`Services` wires "the thread exists and is its stream's writer"), so
    a queued or closed thread can read but not change state (tsk437

@@ -170,6 +170,30 @@ test("programRow shows a component with the commands it may run", () => {
   expect(m.approveTitle).toContain("every file of its bundle");
 });
 
+test("programRow shows a job with the tools its model may call", () => {
+  const job = (commands: string[], scopes: string[]) =>
+    programRow({
+      kind: "job",
+      name: "triage/review",
+      program: "ai.complete_typed",
+      args: [],
+      env: [],
+      credentials: [],
+      network: [],
+      scopes,
+      commands,
+      tree: "oxplow/extensions/triage",
+      remote: false,
+      approved: false,
+    });
+  const m = job(["triage.todos.lookup"], ["ai.compute", "sql.read"]);
+  expect(m.label).toBe("Job triage/review");
+  expect(m.command).toBe("ai.complete_typed\nits model may call: triage.todos.lookup, query_sql");
+  expect(m.status).toBe("Not approved: queued work waits");
+  expect(m.approveTitle).toContain("lets the model call triage.todos.lookup, query_sql");
+  expect(job([], ["ai.compute"]).command).toBe("ai.complete_typed");
+});
+
 // tsk953: a bundled extension's effect is approved like any other; its
 // files come with oxplow, so a new oxplow that changes them asks again.
 test("programRow says a bundled effect asks again when a new oxplow changes it", () => {

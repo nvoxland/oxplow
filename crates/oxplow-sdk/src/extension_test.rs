@@ -27,6 +27,7 @@
 //!
 //! Every finding is a `file:line: what — fix` line.
 
+use oxplow_ai::fixture::FixtureReply;
 use oxplow_domain::events::EventView;
 use std::path::Path;
 use std::sync::Arc;
@@ -277,22 +278,27 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
 }
 
 /// The example's `model: { replies: [...] }` — what the fixture model
-/// answers its model calls with, in turn; none when it gives none. `None`,
-/// with the error reported, when it isn't that shape.
-fn model_replies(ex: &Example<'_>, report: &mut TestReport) -> Option<Vec<String>> {
+/// answers its model calls with, in turn (a string, or `{ text?,
+/// toolCalls?, chunkDelayMs? }`); none when it gives none. `None`, with
+/// the error reported, when it isn't that shape.
+fn model_replies(ex: &Example<'_>, report: &mut TestReport) -> Option<Vec<FixtureReply>> {
     let Some(model) = ex.input.get("model") else {
         return Some(Vec::new());
     };
-    match model.get("replies").and_then(Value::as_array) {
-        Some(replies) => Some(
-            replies
-                .iter()
-                .map(|r| match r {
-                    Value::String(s) => s.clone(),
-                    other => other.to_string(),
-                })
-                .collect(),
-        ),
+    let replies = model
+        .get("replies")
+        .filter(|r| r.is_array())
+        .map(|r| serde_json::from_value::<Vec<FixtureReply>>(r.clone()));
+    match replies {
+        Some(Ok(replies)) => Some(replies),
+        Some(Err(e)) => {
+            report.errors.push(format!(
+                "{}:1: example `{}`: a model reply is a string or `{{ text?, toolCalls?: \
+                 [{{ name, arguments }}], chunkDelayMs? }}`: {e}",
+                ex.shown, ex.name
+            ));
+            None
+        }
         None => {
             report.errors.push(format!(
                 "{}:1: example `{}`: `model` must be `{{ replies: [ … ] }}` — what the fixture \
@@ -461,8 +467,12 @@ async fn approve_effects(host: &Host, ext: &Extension) -> Result<(), String> {
 /// `jobs.write/enqueue` (`input: { job, intentKey, request, model? }`), the
 /// job approved here as a person would, and read its outcome through its
 /// `jobs.read/snapshot` command once it ends: against `expect` — `{ state,
-/// result?, effects?, commands?, pages? }` (`$any` matches). Its model call
-/// answers with the fixture model's replies. An expectation of `effects`,
+/// result?, text?, toolCalls?, output?, effects?, commands?, pages? }`
+/// (`$any` matches): its streamed `text`, how many tools its model called
+/// and its output rows (`[{ kind, … }]`, `v_job_output`). Its model calls
+/// answer with the fixture model's replies; with `cancel: true` in its
+/// input, the job is cancelled through the extension's `jobs.write/cancel`
+/// command once its first output is written. An expectation of `effects`,
 /// `commands` or `pages` delivers the `contribution.job.completed` the job
 /// logs to the extension's effects, approved here as a person would: the
 /// effects that reacted (`[{ id, state? }]`), the commands they ran
@@ -555,6 +565,46 @@ async fn job_example(
             .push(format!("{shown}:1: job `{id}`: {queued} names no job"));
         return;
     };
+    if ex.input.get("cancel") == Some(&json!(true)) {
+        let Some(cancel) = by_op("jobs.write", "cancel") else {
+            report.errors.push(format!(
+                "{shown}:1: job `{id}`: `cancel: true` needs a command over `jobs.write/cancel` \
+                 — fix: declare one (`scope: jobs.write, op: cancel`)"
+            ));
+            return;
+        };
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let snap = host
+                .svc
+                .commands
+                .run(&Actor::Human, &snapshot, json!({ "id": job }), false)
+                .await
+                .map(|out| out.result)
+                .unwrap_or(Value::Null);
+            let started = snap
+                .get("text")
+                .and_then(Value::as_str)
+                .is_some_and(|t| !t.is_empty());
+            let ended = snap.get("state").and_then(Value::as_str) != Some("running")
+                && snap.get("state").and_then(Value::as_str) != Some("queued");
+            if started || ended || tokio::time::Instant::now() >= deadline {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        if let Err(e) = host
+            .svc
+            .commands
+            .run(&asker, &cancel, json!({ "id": job }), false)
+            .await
+        {
+            report
+                .errors
+                .push(format!("{shown}:1: cancelling job `{id}`: {e}"));
+            return;
+        }
+    }
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
     let done = loop {
         let state = host
@@ -580,7 +630,42 @@ async fn job_example(
             }
         }
     };
-    let mut ended = json!({ "state": done.get("state"), "result": done.get("result") });
+    let output = host
+        .svc
+        .sql
+        .query_sql(
+            "SELECT kind, data FROM v_job_output WHERE job_id = ?1 ORDER BY attempt, seq",
+            vec![oxplow_db::SqlCell::Text(job.clone())],
+            None,
+        )
+        .await
+        .map(|r| {
+            r.rows
+                .iter()
+                .map(|row| {
+                    let mut out = match row.get(1) {
+                        Some(oxplow_db::SqlCell::Text(data)) => {
+                            serde_json::from_str(data).unwrap_or_else(|_| json!({}))
+                        }
+                        _ => json!({}),
+                    };
+                    if let (Some(oxplow_db::SqlCell::Text(kind)), Some(obj)) =
+                        (row.first(), out.as_object_mut())
+                    {
+                        obj.insert("kind".into(), json!(kind));
+                    }
+                    out
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let mut ended = json!({
+        "state": done.get("state"),
+        "result": done.get("result"),
+        "text": done.get("text"),
+        "toolCalls": done.get("toolCalls"),
+        "output": output,
+    });
     if delivers {
         let (effects, commands) = effect_outcome(host, logged, ">").await;
         ended["effects"] = Value::Array(effects);
@@ -618,8 +703,8 @@ async fn job_example(
     if let Some((path, want, got)) = first_mismatch(&ex.expect, &got) {
         report.errors.push(format!(
             "{shown}:1: job `{id}` ended {got} at `{path}`, the example expects {want} — fix: \
-             the job's request, or the example's `expect` (`{{ state, result?, effects?, commands?, \
-             pages? }}`)"
+             the job's request, or the example's `expect` (`{{ state, result?, text?, toolCalls?, \
+             output?, effects?, commands?, pages? }}`)"
         ));
     }
 }

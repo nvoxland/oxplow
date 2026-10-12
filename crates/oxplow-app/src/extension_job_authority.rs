@@ -93,7 +93,7 @@ impl JobGrantResolver for DeclaredJobGrants {
         // it acquires no generic command or workspace writer admission.
         if descriptor.id.kind != oxplow_domain::contribution::ContributionKind::Job
             || descriptor.id != owner.contribution
-            || descriptor.needs != ["ai.compute"]
+            || !crate::extensions::jobs::needs_hold(&descriptor.needs)
         {
             return Err(JobAuthorityError::Denied);
         }
@@ -349,7 +349,11 @@ impl JobAuthorityHost {
         .map_err(|_| JobAuthorityError::Denied)?
         .authorized(permission.authority)
         .guarded(live.clone())
-        .within(Budget::default().with_ceiling(Duration::from_secs(60)));
+        // A job's own `timeout` (at most 10 min) fails it first; this is
+        // the run's outer bound.
+        .within(Budget::default().with_ceiling(Duration::from_secs(
+            u64::from(crate::extensions::jobs::MAX_TIMEOUT_SECS) + 60,
+        )));
         let run = match &self.activation {
             Some(activation) => activation
                 .pin_run(&run)

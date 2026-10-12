@@ -8,8 +8,9 @@ use std::{io, io::Write};
 use oxplow_domain::{
     contribution::ContributionId,
     extension_job::{
-        AttemptFence, Completion, ExtensionJob, IntentKey, JobEvent, JobId, JobOwner, JobState,
-        JobTransition, ReplayPolicy, TransitionError,
+        AttemptFence, Completion, ExtensionJob, IntentKey, JobEvent, JobId, JobOutput,
+        JobOutputKind, JobOwner, JobState, JobTransition, NewJobOutput, ReplayPolicy,
+        TransitionError,
     },
     extension_job_context::JobInvocationContext,
     run::RunId,
@@ -158,6 +159,23 @@ impl SqliteExtensionJobStore {
         self.db
             .transaction_or(move |tx| {
                 enqueue_with_context_tx(tx, &new_job, &context).map_err(store_tx_error)
+            })
+            .await
+            .map_err(map_store_tx_error)
+    }
+
+    /// [`append_output_tx`] in its own short transaction: a running job
+    /// writes its output this way, never holding a transaction while it
+    /// waits on a model.
+    pub async fn append_output(
+        &self,
+        id: JobId,
+        token: AttemptFence,
+        rows: Vec<NewJobOutput>,
+    ) -> StoreResult<u64> {
+        self.db
+            .transaction_or(move |tx| {
+                append_output_tx(tx, &id, token, &rows).map_err(store_tx_error)
             })
             .await
             .map_err(map_store_tx_error)
@@ -554,6 +572,103 @@ pub fn transition_tx(
         current.revision = next_revision;
         Ok(current)
     })
+}
+
+/// Most bytes one output row keeps (the column's own limit).
+pub const MAX_OUTPUT_BYTES: usize = 262_144;
+
+/// Append `rows` to an open attempt's output, after what it has; their
+/// sequence numbers follow on. Refused once the attempt is closed (the
+/// table's own trigger), so a worker that lost its attempt adds nothing.
+pub fn append_output_tx(
+    conn: &Connection,
+    job_id: &JobId,
+    token: AttemptFence,
+    rows: &[NewJobOutput],
+) -> StoreResult<u64> {
+    ensure_transaction(conn)?;
+    let fence = i64::try_from(token.fence).map_err(|_| ExtensionJobStoreError::InvalidData)?;
+    let mut seq: i64 = conn
+        .query_row(
+            "SELECT COALESCE(max(seq), 0) FROM extension_job_output
+              WHERE job_id = ?1 AND attempt = ?2",
+            params![job_id.as_str(), i64::from(token.attempt)],
+            |row| row.get(0),
+        )
+        .map_err(map_sql_err)?;
+    let mut insert = conn
+        .prepare_cached(
+            "INSERT INTO extension_job_output
+                (job_id, attempt, fence, seq, kind, at_ms, content_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        )
+        .map_err(map_sql_err)?;
+    for row in rows {
+        let content =
+            serde_json::to_string(&row.content).map_err(|_| ExtensionJobStoreError::InvalidData)?;
+        if content.len() > MAX_OUTPUT_BYTES || row.at_ms < 0 {
+            return Err(ExtensionJobStoreError::InvalidData);
+        }
+        seq += 1;
+        insert
+            .execute(params![
+                job_id.as_str(),
+                i64::from(token.attempt),
+                fence,
+                seq,
+                row.kind.as_str(),
+                row.at_ms,
+                content
+            ])
+            .map_err(map_sql_err)?;
+    }
+    Ok(u64::try_from(seq).unwrap_or(0))
+}
+
+/// An attempt's output after `after_seq`, in order, at most `limit` rows.
+pub fn output_tx(
+    conn: &Connection,
+    job_id: &JobId,
+    attempt: u32,
+    after_seq: u64,
+    limit: usize,
+) -> StoreResult<Vec<JobOutput>> {
+    let mut stmt = conn
+        .prepare_cached(
+            "SELECT seq, kind, at_ms, content_json FROM extension_job_output
+              WHERE job_id = ?1 AND attempt = ?2 AND seq > ?3
+              ORDER BY seq LIMIT ?4",
+        )
+        .map_err(map_sql_err)?;
+    let rows = stmt
+        .query_map(
+            params![
+                job_id.as_str(),
+                i64::from(attempt),
+                i64::try_from(after_seq).map_err(|_| ExtensionJobStoreError::InvalidData)?,
+                i64::try_from(limit.min(MAX_PAGE_ITEMS * 16)).unwrap_or(i64::MAX)
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            },
+        )
+        .map_err(map_sql_err)?;
+    rows.map(|row| {
+        let (seq, kind, at_ms, content) = row.map_err(map_sql_err)?;
+        Ok(JobOutput {
+            seq: u64::try_from(seq).map_err(|_| ExtensionJobStoreError::InvalidData)?,
+            kind: JobOutputKind::parse(&kind).ok_or(ExtensionJobStoreError::InvalidData)?,
+            at_ms,
+            content: serde_json::from_str(&content)
+                .map_err(|_| ExtensionJobStoreError::InvalidData)?,
+        })
+    })
+    .collect()
 }
 
 pub fn record_observation_tx(

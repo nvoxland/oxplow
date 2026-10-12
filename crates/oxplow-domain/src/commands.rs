@@ -12,30 +12,39 @@ use crate::events::validate_type_name;
 use crate::ids::{AgentSessionId, StreamId, ThreadId};
 use crate::{DomainError, EventId};
 
-/// Which surfaces may invoke a command.
+/// Which surfaces may invoke a command. `job` is a model's tool call
+/// inside a durable job: only a command its extension declared for that
+/// (`job: true`) and a job of the same extension names in its `tools`.
+/// No constant admits a job; core's commands never do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, JsonSchema)]
 pub struct Invokers {
     pub human: bool,
     pub agent: bool,
     pub lens: bool,
+    #[serde(default)]
+    pub job: bool,
 }
 
 impl Invokers {
+    /// Every interactive surface: a person, an agent, a lens.
     pub const ALL: Invokers = Invokers {
         human: true,
         agent: true,
         lens: true,
+        job: false,
     };
     pub const HUMAN_ONLY: Invokers = Invokers {
         human: true,
         agent: false,
         lens: false,
+        job: false,
     };
     /// A person, directly or through a lens — never an agent.
     pub const NO_AGENT: Invokers = Invokers {
         human: true,
         agent: false,
         lens: true,
+        job: false,
     };
 
     pub fn allows(&self, invoker: Invoker) -> bool {
@@ -43,16 +52,17 @@ impl Invokers {
             Invoker::Human => self.human,
             Invoker::Agent => self.agent,
             Invoker::Lens => self.lens,
-            // Jobs have no generic command surface. An explicit job command
-            // policy can be added separately without widening these floors.
-            Invoker::Job => false,
+            Invoker::Job => self.job,
         }
     }
 
     /// Whether this admits no one `floor` doesn't: a declaration narrows
     /// an operation's floor, never widens it.
     pub fn within(&self, floor: &Invokers) -> bool {
-        (!self.human || floor.human) && (!self.agent || floor.agent) && (!self.lens || floor.lens)
+        (!self.human || floor.human)
+            && (!self.agent || floor.agent)
+            && (!self.lens || floor.lens)
+            && (!self.job || floor.job)
     }
 
     /// Who it admits, for a message: `human, lens`; `no one`.
@@ -61,6 +71,7 @@ impl Invokers {
             (self.human, "human"),
             (self.agent, "agent"),
             (self.lens, "lens"),
+            (self.job, "job"),
         ]
         .into_iter()
         .filter_map(|(on, name)| on.then_some(name))

@@ -15,6 +15,12 @@ intent:
     - name: summary-published
       input: { job: summarize }
       expect: the job succeeds with the model's answer
+    - name: summary-with-evidence
+      input: { job: summarize }
+      expect: the model looks closer at src/lib.rs, then answers; both are the job's output
+    - name: summary-cancelled
+      input: { job: summarize }
+      expect: cancelled while it streams, the job ends cancelled with what it had written
     - name: summary-delivered
       input: { job: summarize }
       expect: the job succeeds, its completion reaches publish-summary, and the triage-summary page is written
@@ -63,14 +69,19 @@ collectors:
     facts: [triage.todos, triage.open_items]
 # A person asks for a summary of the TODOs (`triage.summary.ask`); a model
 # answers it as a durable job, outside any transaction, once a person has
-# approved the job; when it finishes, `publish-summary` writes the answer
-# to the wiki.
+# approved the job. Its answer streams into `v_job_output` as it comes; it
+# may look closer at a file (`todos.in_file`) or query oxplow's models
+# (`query_sql`, from `sql.read`) before it answers. When it finishes,
+# `publish-summary` writes the answer to the wiki.
 jobs:
   - id: summarize
     description: Summarize the code's TODO comments for a person.
     version: 1
     operation: ai.complete_typed
-    needs: [ai.compute]
+    needs: [ai.compute, sql.read]
+    tools: [todos.in_file]
+    max_tool_rounds: 4
+    timeout: 120
 commands:
   - name: summary.ask
     summary: Ask a model to summarize the TODO comments; returns the job.
@@ -78,10 +89,23 @@ commands:
     op: enqueue
     invokers: { human: true, agent: true, lens: true }
   - name: summary.result
-    summary: A summary job's state and, once it ends, its answer.
+    summary: A summary job's state, what it has written so far and, once it ends, its answer.
     scope: jobs.read
     op: snapshot
     invokers: { human: true, agent: true, lens: true }
+  - name: summary.cancel
+    summary: Stop a summary job; it keeps what it had written.
+    scope: jobs.write
+    op: cancel
+    invokers: { human: true, agent: true, lens: true }
+  # A tool for the summary's model, never a person's command: it only reads.
+  - name: todos.in_file
+    summary: The TODO comments in one file, with the line of each and what it asks for (bug, cleanup or feature).
+    entry: commands/todos_in_file.star
+    needs: [sql.read]
+    input_schema: { type: object, required: [path], properties: { path: { type: string, description: "A repo-relative file." } }, additionalProperties: false }
+    access: read
+    invokers: { human: false, agent: false, lens: false, job: true }
 effects:
   - id: publish-summary
     summary: When a summary job succeeds, write its answer to the wiki page `triage-summary`.

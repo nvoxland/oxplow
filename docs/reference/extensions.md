@@ -311,7 +311,9 @@ commands:
 
 ### Jobs
 
-Declare a durable job and expose its host operations through native commands:
+A job is model work that runs outside any transaction and survives a
+restart. Its reply streams in as it comes, its model may call tools you
+declare, and it can be cancelled mid-reply:
 
 ```yaml
 jobs:
@@ -319,28 +321,60 @@ jobs:
     description: Summarize a review
     version: 1
     operation: ai.complete_typed
-    needs: [ai.compute]
+    needs: [ai.compute, sql.read]   # sql.read also gives the model query_sql
+    tools: [todos.in_file]          # your commands its model may call
+    max_tool_rounds: 4              # 1–16, default 4
+    timeout: 120                    # seconds, 1–600, default 120
     replay: never
 commands:
   - { name: summary.start, summary: Start a summary, scope: jobs.write, op: enqueue, invokers: { human: true, agent: true, lens: true } }
   - { name: summary.cancel, summary: Cancel a summary, scope: jobs.write, op: cancel, invokers: { human: true, agent: true, lens: true } }
   - { name: summary.status, summary: Read a summary, scope: jobs.read, op: snapshot, invokers: { human: true, agent: true, lens: true } }
+  - name: todos.in_file
+    summary: The TODO comments in one file.
+    entry: commands/todos_in_file.star
+    needs: [sql.read]
+    input_schema: { type: object, required: [path], properties: { path: { type: string } } }
+    access: read
+    invokers: { human: false, agent: false, lens: false, job: true }
 ```
 
 `enqueue` takes `{job, intentKey, request}`. For this operation, `request`
 is `{schemaVersion: 1, role, messages, tools?}`; the host chooses the model
-for the role. The request is private and limited to 1 MiB and 64 nesting
-levels. `cancel` and `snapshot` take `{id}`. The returned job ID is the
-one to use for either call. The host records intent before a worker starts,
-and a person approves each job declaration in Settings -> Data -> Programs
-before it can spend an AI provider key. `replay` defaults to `never`; an
-interrupted attempt is not retried automatically.
+for the role, and a job that declares `tools` takes none here. The request
+is private and limited to 1 MiB and 64 nesting levels. `cancel` and
+`snapshot` take `{id}`. The host records intent before a worker starts, and
+a person approves each job declaration in Settings -> Data -> Programs
+before it can spend an AI provider key; changing the declaration asks
+again.
+
+- **Tools.** Each is one of your commands that says `invokers: { job:
+  true }`, only reads (`access: read`) and has an `input_schema`. The
+  model calls it by its name with `.` as `_` (`todos_in_file`) and sees
+  its `summary` and schema. Its input is checked against the schema; a
+  refusal or error is answered to the model as `{error}` and the job goes
+  on. A script tool answers its script's `result`. With `sql.read` the
+  model also has `query_sql`, a read-only query over the published `v_*`
+  models. After `max_tool_rounds` rounds the job fails. A job never
+  writes: write from an effect on its end.
+- **Output.** What the model writes, each tool call and its answer, and
+  each round's tokens are the job's output as they happen: the
+  `v_job_output` model (a lens over it updates live), and `text` in the
+  `snapshot`. `v_job` lists every job and its state.
+- **Its result** (`snapshot`'s `result`, once it ends): `{parts,
+  finishReason, rounds, usage, aiCalls}`; a failure adds `error`; a
+  cancelled job keeps what it had, with `stopped: cancelled`.
+- **Cancel** stops a running job at once — its model call is dropped —
+  and it ends `cancelled`. A person can stop any job from the Jobs lens.
+  Past its `timeout` a job fails. An attempt cut off by a restart is
+  `interrupted`; nothing retries it.
 
 A script declaring `needs: [jobs.read]` can call
 `scope("jobs.read", {"id": job_id})` for its extension's result. The
-`contribution.job.completed` event carries the job ID and outcome, with no
-request or result body; read the result through `jobs.read`. An agent or
-effect that composes `enqueue` does not acquire the job's AI permission.
+`contribution.job.completed` event carries the job ID and `outcome`
+(`succeeded`, `failed`, `cancelled` or `interrupted`), with no request or
+result body; read the result through `jobs.read`. An agent or effect that
+composes `enqueue` does not acquire the job's AI permission.
 
 ### Effects
 

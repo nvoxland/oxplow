@@ -8440,5 +8440,145 @@
         "run_id"
       ]
     }
+  },
+  "job": {
+    "1": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "The job (a UUIDv7): what `jobs.read/snapshot`, `jobs.write/cancel` and `oxplow.job.cancel` take."
+        },
+        {
+          "name": "job",
+          "type": "TEXT",
+          "doc": "Its declaration: `<extension>/job/<id>` (`v_contribution.id`)."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension it belongs to."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "The extension's declared `version:` when it was started; NULL when it declares none."
+        },
+        {
+          "name": "contract_version",
+          "type": "INTEGER",
+          "doc": "The job declaration's own `version:`."
+        },
+        {
+          "name": "operation",
+          "type": "TEXT",
+          "doc": "What it runs: `ai.complete_typed`."
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "doc": "`queued`, `running`, `succeeded`, `failed`, `cancelled` or `interrupted` (it stopped without a known end: oxplow restarted, or it lost its lease)."
+        },
+        {
+          "name": "attempt",
+          "type": "INTEGER",
+          "doc": "Its current attempt, 0 before the first starts."
+        },
+        {
+          "name": "cancellation_requested",
+          "type": "INT",
+          "doc": "1 once someone asked it to stop."
+        },
+        {
+          "name": "invoker",
+          "type": "TEXT",
+          "doc": "Who started it, as an event source: `human`, `agent:thr3`, `effect:<ext>/<id>`, …"
+        },
+        {
+          "name": "run_id",
+          "type": "TEXT",
+          "doc": "The run that started it (`v_extension_run.run_id`)."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "When it was started (RFC 3339)."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "When its state last changed (RFC 3339)."
+        },
+        {
+          "name": "ai_calls",
+          "type": "INT",
+          "doc": "Model rounds its current attempt has finished."
+        },
+        {
+          "name": "tool_calls",
+          "type": "INT",
+          "doc": "Tools the model called in its current attempt."
+        },
+        {
+          "name": "input_tokens",
+          "type": "INT",
+          "doc": "Input tokens its current attempt's rounds reported (observed usage only)."
+        },
+        {
+          "name": "output_tokens",
+          "type": "INT",
+          "doc": "Output tokens likewise."
+        }
+      ],
+      "key": [
+        "id"
+      ]
+    }
+  },
+  "job_output": {
+    "1": {
+      "columns": [
+        {
+          "name": "job_id",
+          "type": "TEXT",
+          "doc": "The job (`v_job.id`)."
+        },
+        {
+          "name": "attempt",
+          "type": "INTEGER",
+          "doc": "Its attempt."
+        },
+        {
+          "name": "seq",
+          "type": "INTEGER",
+          "doc": "Order within the attempt, from 1."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`text`, `tool_call`, `tool_result` or `usage`."
+        },
+        {
+          "name": "at",
+          "type": "TEXT",
+          "doc": "When it was written (RFC 3339)."
+        },
+        {
+          "name": "text",
+          "type": "TEXT",
+          "doc": "A `text` row's text; NULL for the rest."
+        },
+        {
+          "name": "data",
+          "type": "TEXT",
+          "doc": "The row as JSON: `{ text }`, a tool call `{ id, name, arguments }`, a tool result `{ callId, result }` or `{ callId, error }`, usage `{ inputTokens, outputTokens, source, aiCallId }`."
+        }
+      ],
+      "key": [
+        "job_id",
+        "attempt",
+        "seq"
+      ]
+    }
   }
 }

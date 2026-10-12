@@ -67,6 +67,12 @@ impl TypedAiJobRequest {
         self.role
     }
 
+    /// The tools its request declares (a job that declares its own takes
+    /// none here).
+    pub fn tools(&self) -> &[ToolDefinitionV1] {
+        &self.tools
+    }
+
     pub fn request_for_model(&self, model: &str) -> TypedRequestV1 {
         TypedRequestV1 {
             schema_version: 1,

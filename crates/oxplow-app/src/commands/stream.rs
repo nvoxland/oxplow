@@ -152,6 +152,7 @@ pub fn create_worktree_op(deps: StreamDeps) -> Op {
         human: true,
         agent: true,
         lens: false,
+        job: false,
     })
 }
 

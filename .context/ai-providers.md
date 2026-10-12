@@ -180,6 +180,27 @@ saying so (`oxplow_ai::config::DROPPED_ROLES`; project.yaml's
   Tool calls/results are ordered data and do not execute a tool automatically.
   Image input/output is currently refused at the app boundary because there
   is no authorized asset resolver; no reference is treated as a path or URL.
+- **Streaming and cancelling.** `ModelProvider::stream_typed(instance,
+  req, cancel, on_delta)` is `complete_typed` with the reply handed to
+  `on_delta` as it arrives (`parts::StreamDeltaV1`: `text` as it comes, a
+  `toolCall` once its arguments are whole), until `cancel` (the run's
+  `oxplow_domain::run::Cancel`) is asked: then the call is dropped — its
+  connection with it, which is what stops a provider — and the error is
+  `AiError::Cancelled { partial }`, what had arrived. A stream silent for
+  60 s fails `AiError::Timeout`. By default a provider "streams" its
+  whole reply at once, at the end (`client::stream_whole`): every
+  provider can, so nothing gates on the model's `streaming` capability.
+  The transport is `Http::post_stream` → `SseStream` (server-sent events,
+  `Accept: text/event-stream`; the status is read first and mapped as
+  `post`'s; no total timeout, the idle one instead; events that arrive
+  within 50 ms are one batch). `AiService::stream_typed_as` is
+  `complete_typed_as` streamed, and records **every** exit — a cancelled
+  call's `ai_call` row is `ok: false`, `error: cancelled`, its response
+  the partial reply. `AiCompute::stream_typed` is the recorded
+  computation: a recorded answer is handed over at once, whole, with no
+  call; a cancelled or failed stream is never the recorded answer. A
+  job's rounds use it ([extensions.md](./extensions.md) "Jobs");
+  collectors don't stream.
 - **Scripted providers.** Every model provider is a Starlark script an
   extension declares — oxplow's own too: `oxplow-foundation`'s
   `implementations:` name `providers/{anthropic,openai_compatible,openrouter,typesafe}.star`
@@ -214,6 +235,17 @@ saying so (`oxplow_ai::config::DROPPED_ROLES`; project.yaml's
     assistant message, since that transport separates content from calls.
     Unsupported response blocks fail instead of disappearing. Neither mapping
     executes a returned tool. OpenRouter/TypeSafe stay text-only (`complete`/`decide`).
+    With `ops: [streamTyped]` the script defines a third function,
+    `delta(x)` (checked at load): `request` gets `{ op: streamTyped,
+    model, request }` and asks the vendor for a stream (its own `stream:
+    true`); the host reads the reply's events and hands each batch to
+    `delta` as `{ op, model, events: [{ event, data }], state }`, which
+    returns `{ deltas, state }` — `deltas` are `StreamDeltaV1`s, `state`
+    the script's own fold (text so far, tool-call argument fragments,
+    usage, stop reason), carried to the next batch; at the end `response`
+    gets `{ op, model, state }` and returns the whole V1 reply. The key is
+    taken out of every event before `delta` sees it. Without
+    `streamTyped` a stream is the whole reply at once.
     Transport contracts: [OpenAI chat](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)
     and [Anthropic tool calls](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls).
   - **The host does the call.** `path` is relative to the instance's base
@@ -297,7 +329,9 @@ saying so (`oxplow_ai::config::DROPPED_ROLES`; project.yaml's
   an event body). What a provider adapter wraps around a request
   (`decide_via_chat`'s JSON instructions, an API's own envelope) is the
   adapter's, not part of it.
-- Tests use `oxplow_ai_fake::mock` (the dev-only `oxplow-ai-fake` crate,
+- Tests use `oxplow_ai_fake::mock` and `mock_sse` (a reply as timed
+  server-sent event chunks, held open so a reader can be cancelled
+  mid-stream) (the dev-only `oxplow-ai-fake` crate,
   not a feature of `oxplow-ai`, so no build compiles it two ways —
   working-in-this-repo.md "Builds and `target/`"), a local axum server
   standing in for a provider. `Services::in_memory` gets
@@ -488,3 +522,16 @@ the model when dispatching, and records the full typed result under the same
 captured configuration as the cache key. Anthropic observed input counts include
 uncached input plus reported cache reads/creation; missing input remains unknown.
 See [Anthropic token accounting](https://platform.claude.com/docs/en/build-with-claude/prompt-caching).
+
+## The fixture model
+
+`oxplow_ai::fixture::FixtureModel` (kind `fixture`, registered with
+`ModelProviders::register_host`, never declared) answers in-process from a
+list of replies, each a string or `FixtureReply { text, tool_calls,
+chunk_delay }` (in a fixture: `{ text?, toolCalls?: [{ name, arguments }],
+chunkDelayMs? }`); the last repeats. A typed call takes any conversation,
+tools included: the reply's text, then its tool calls (ids `call-<n>`,
+finish `toolCalls`). Streamed, the text comes a word at a time, each after
+`chunk_delay`, honouring cancel. `asked()` / `asked_typed()` are what it
+was asked. The SDK's throwaway preview binds every role to it, and the
+job tests run on it.

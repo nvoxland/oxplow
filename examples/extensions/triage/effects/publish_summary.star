@@ -6,10 +6,10 @@ def transform(x):
     payload = x["event"]["payload"]
     if payload["contribution"] != "triage/job/summarize":
         return {"skip": "another job finished"}
-    if payload["outcome"] != "ok":
+    if payload["outcome"] != "succeeded":
         return {"skip": "the summary didn't complete"}
     job = scope("jobs.read", {"id": payload["job_id"]})
-    answer = (job.get("result") or {}).get("value") or {}
+    answer = job.get("result") or {}
     text = "".join([p.get("text", "") for p in answer.get("parts", []) if p.get("type") == "text"])
     if not text.strip():
         return {"skip": "the model answered nothing"}

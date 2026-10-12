@@ -2136,7 +2136,8 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             ext.errors.extend(errors);
         }
         if let Some(v) = &m.jobs {
-            let (jobs, errors) = jobs::parse_jobs(v, &file, &manifest);
+            let (jobs, errors) =
+                jobs::parse_jobs(v, &file, &manifest, &ext.namespace, &ext.commands);
             ext.jobs = jobs;
             ext.errors.extend(errors);
         }

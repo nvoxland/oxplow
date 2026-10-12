@@ -284,6 +284,12 @@ commands:
     op: retry
     invokers: { human: true, agent: false, lens: false }
     confirm: always
+  # jobs.manage
+  - name: job.cancel
+    summary: "Stop a running or queued job, whichever extension started it (`v_job`). A queued one ends at once; a running one drops its model call and ends `cancelled` with what it had written."
+    scope: jobs.manage
+    op: cancel
+    invokers: { human: true, agent: false, lens: true }
   # extensions.enable
   - name: contribution.enable
     summary: "Enable a disabled extension provider, collector or effect on this machine again, clearing an automatic disable (a provider's process restarts, a system the bus doesn't own)."

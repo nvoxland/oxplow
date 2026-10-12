@@ -1305,7 +1305,8 @@ impl CommandBus {
             gates.may_write = may_write;
             let gated = may_write.filter(|_| spec.access.needs_writer());
             if let PolicyDecision::Deny { reason, .. } =
-                self.policy.check_command(thread_id.as_ref(), spec, gated)
+                self.policy
+                    .check_command(actor.invoker(), thread_id.as_ref(), spec, gated)
             {
                 let err = CommandError::Denied { reason };
                 self.audit_only(run, spec, &input, Outcome::Denied, Some(err.to_string()))

@@ -469,18 +469,32 @@ impl Envelope {
 // Core types, v1
 // ---------------------------------------------------------------------------
 
-/// A fenced job completion. Result/request values remain private job data;
-/// consumers read them through their contribution's authorized job service.
+/// A job ended, however it ended. What it was asked and answered stay
+/// private job data: a consumer reads them through its extension's
+/// `jobs.read` (`scope("jobs.read", { id })`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ContributionJobCompletedV1 {
     pub job_id: String,
     pub contribution: String,
     pub version: Option<u32>,
-    pub run_id: String,
+    /// Its last attempt (0 when it was cancelled before one started).
     pub attempt: u32,
     pub fence: u64,
-    pub outcome: CommandOutcome,
+    pub outcome: JobOutcome,
+}
+
+/// How a job ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum JobOutcome {
+    Succeeded,
+    Failed,
+    /// Someone asked it to stop, and it did.
+    Cancelled,
+    /// It stopped without a known end: oxplow restarted, or it lost its
+    /// lease.
+    Interrupted,
 }
 
 pub struct ContributionJobCompleted;

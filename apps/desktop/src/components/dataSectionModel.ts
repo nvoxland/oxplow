@@ -174,13 +174,20 @@ function baseRow(p: ProjectProgram): BaseRow {
     };
   }
   if (p.kind === "job") {
+    // Its model may call these commands, and query the published models
+    // when it reads SQL.
+    const tools = [...p.commands, ...(p.scopes.includes("sql.read") ? ["query_sql"] : [])];
     return {
       key: `job:${p.name}`,
       label: `Job ${p.name}`,
-      command: p.program,
+      command: [p.program, tools.length > 0 ? `its model may call: ${tools.join(", ")}` : null]
+        .filter((line): line is string => line !== null)
+        .join("\n"),
       status: p.approved ? "Approved on this machine" : "Not approved: queued work waits",
       approved: p.approved,
-      approveTitle: `Lets ${p.name} use your configured AI models for queued work. Changing the extension manifest or this operation requires approval again.`,
+      approveTitle: `Lets ${p.name} use your configured AI models for queued work${
+        tools.length > 0 ? `, and lets the model call ${tools.join(", ")} while it works (they only read)` : ""
+      }. Changing the extension manifest or this operation requires approval again.`,
       showsSource: true,
     };
   }

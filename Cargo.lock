@@ -4361,6 +4361,7 @@ dependencies = [
  "async-trait",
  "keyring",
  "oxplow-ai-fake",
+ "oxplow-domain",
  "oxplow-workspace-hack",
  "reqwest",
  "serde",
@@ -4378,6 +4379,7 @@ name = "oxplow-ai-fake"
 version = "0.7.0"
 dependencies = [
  "axum",
+ "futures",
  "oxplow-workspace-hack",
  "serde_json",
  "tokio",

@@ -100,6 +100,8 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-bundled", "lenses/go-to.yaml"),
             ext_file!("oxplow-bundled", "lenses/history-graph.yaml"),
             ext_file!("oxplow-bundled", "lenses/inferred-decisions.yaml"),
+            ext_file!("oxplow-bundled", "lenses/job-output.yaml"),
+            ext_file!("oxplow-bundled", "lenses/jobs.yaml"),
             ext_file!("oxplow-bundled", "lenses/page-visits-by-day.yaml"),
             ext_file!("oxplow-bundled", "lenses/planning.yaml"),
             ext_file!("oxplow-bundled", "lenses/quality.yaml"),

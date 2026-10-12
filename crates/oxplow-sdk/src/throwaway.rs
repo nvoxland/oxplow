@@ -84,14 +84,20 @@ impl Host {
     pub(crate) fn start_runtime(&self) -> Result<(), String> {
         oxplow_app::effect_triggers::register(&self.svc);
         oxplow_app::collector_triggers::register(&self.svc);
-        self.svc.jobs.spawn(self.svc.extension_activation.clone());
+        self.svc.jobs.spawn(
+            self.svc.extension_activation.clone(),
+            self.svc.commands.clone(),
+        );
         self.answer_with(Vec::new())
     }
 
     /// Model calls from here on answer with `replies` in turn (the last
     /// repeats; none: an empty answer), every role bound to the fixture
     /// model.
-    pub(crate) fn answer_with(&self, replies: Vec<String>) -> Result<(), String> {
+    pub(crate) fn answer_with(
+        &self,
+        replies: Vec<oxplow_ai::fixture::FixtureReply>,
+    ) -> Result<(), String> {
         self.svc
             .ai
             .providers()

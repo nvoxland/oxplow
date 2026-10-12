@@ -3735,11 +3735,17 @@ export type IntentPrompt = {
 	about?: string | null,
 };
 
-// Which surfaces may invoke a command.
+/**
+ *  Which surfaces may invoke a command. `job` is a model's tool call
+ *  inside a durable job: only a command its extension declared for that
+ *  (`job: true`) and a job of the same extension names in its `tools`.
+ *  No constant admits a job; core's commands never do.
+ */
 export type Invokers = {
 	human: boolean,
 	agent: boolean,
 	lens: boolean,
+	job?: boolean,
 };
 
 /**
@@ -3779,11 +3785,30 @@ export type JobDecl = {
 	operation: JobOperationKind,
 	needs: string[],
 	replay: JobReplay,
+	// The extension's commands its model may call, as the model sees them.
+	tools: JobTool[],
+	max_tool_rounds: number,
+	// Seconds it may run before it fails.
+	timeout: number,
 };
 
 export type JobOperationKind = "ai.complete_typed";
 
 export type JobReplay = "never" | "idempotent";
+
+/**
+ *  One of a job's tools: the command it runs and the name the model calls
+ *  it by (its local name, `.` as `_`: model APIs allow no dots).
+ */
+export type JobTool = {
+	name: string,
+	command: string,
+	/**
+	 *  A script command: what it answers is its script's `result` (the
+	 *  commands it composed are its own business).
+	 */
+	script: boolean,
+};
 
 export type KeyedDiff = {
 	key: string[],

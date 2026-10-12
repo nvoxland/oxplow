@@ -547,6 +547,106 @@ impl AiService {
         site: CallSite<'_>,
         request: &TypedRequestV1,
     ) -> Result<(TypedResponseV1, Option<i64>), AiServiceError> {
+        let typed = self.prepare_typed(role, request).await?;
+        let started = Instant::now();
+        let result = typed
+            .model_provider
+            .complete_typed(&instance(&typed.provider, typed.key.as_deref()), request)
+            .await;
+        self.finish_typed(role, site, request, &typed, started, result)
+            .await
+    }
+
+    /// [`Self::complete_typed_as`], the reply handed to `on_delta` as it
+    /// arrives, until `cancel` is asked. Every exit is recorded: a
+    /// cancelled call's row keeps what had arrived (`error: cancelled`).
+    pub async fn stream_typed_as(
+        &self,
+        role: Role,
+        site: CallSite<'_>,
+        request: &TypedRequestV1,
+        cancel: &oxplow_ai::client::Cancel,
+        on_delta: oxplow_ai::client::OnDelta<'_>,
+    ) -> Result<(TypedResponseV1, Option<i64>), AiServiceError> {
+        self.read_generation(async {
+            let typed = self.prepare_typed(role, request).await?;
+            let started = Instant::now();
+            let result = typed
+                .model_provider
+                .stream_typed(
+                    &instance(&typed.provider, typed.key.as_deref()),
+                    request,
+                    cancel,
+                    on_delta,
+                )
+                .await;
+            self.finish_typed(role, site, request, &typed, started, result)
+                .await
+        })
+        .await?
+    }
+
+    /// A typed call's reply checked and recorded.
+    async fn finish_typed(
+        &self,
+        role: Role,
+        site: CallSite<'_>,
+        request: &TypedRequestV1,
+        typed: &TypedCall,
+        started: Instant,
+        result: Result<TypedResponseV1, AiError>,
+    ) -> Result<(TypedResponseV1, Option<i64>), AiServiceError> {
+        let provider = &typed.provider;
+        let result = result.and_then(|response| {
+            response.validate_version()?;
+            if response
+                .parts
+                .iter()
+                .any(|part| matches!(part, PartV1::Image { .. }))
+            {
+                return Err(AiError::UnsupportedFeature {
+                    provider: provider.id.clone(),
+                    feature: "imageAssetResolution".into(),
+                    support: oxplow_ai::capabilities::CapabilitySupport::Unsupported,
+                });
+            }
+            Ok(response)
+        });
+        let stored_request = ModelRequest::Typed(request);
+        let outcome = result.as_ref().map(|response| {
+            // The aggregate columns count observed usage only. Optional
+            // counts and provenance are preserved in the complete payload.
+            let (input, output) = observed_counts(response);
+            (
+                input,
+                output,
+                serde_json::to_value(response).expect("response serializes"),
+            )
+        });
+        let call_id = self
+            .record(
+                Attempt {
+                    role,
+                    site,
+                    provider,
+                    binding: &typed.binding,
+                    started,
+                    request: &stored_request,
+                },
+                outcome,
+            )
+            .await;
+        Ok((result?, call_id))
+    }
+
+    /// What a typed call needs once it is allowed: the role's provider,
+    /// binding and key, after the request's model, parts and the model's
+    /// declared features were checked.
+    async fn prepare_typed(
+        &self,
+        role: Role,
+        request: &TypedRequestV1,
+    ) -> Result<TypedCall, AiServiceError> {
         request.validate_version().map_err(AiError::from)?;
         let (provider, binding) = self.resolve(role)?;
         if request.model != binding.model {
@@ -610,50 +710,12 @@ impl AiService {
             }
         }
         let key = self.key(&provider)?;
-        let started = Instant::now();
-        let result = model_provider
-            .complete_typed(&instance(&provider, key.as_deref()), request)
-            .await
-            .and_then(|response| {
-                response.validate_version()?;
-                if response
-                    .parts
-                    .iter()
-                    .any(|part| matches!(part, PartV1::Image { .. }))
-                {
-                    return Err(AiError::UnsupportedFeature {
-                        provider: provider.id.clone(),
-                        feature: "imageAssetResolution".into(),
-                        support: oxplow_ai::capabilities::CapabilitySupport::Unsupported,
-                    });
-                }
-                Ok(response)
-            });
-        let stored_request = ModelRequest::Typed(request);
-        let outcome = result.as_ref().map(|response| {
-            // The aggregate columns count observed usage only. Optional
-            // counts and provenance are preserved in the complete payload.
-            let (input, output) = observed_counts(response);
-            (
-                input,
-                output,
-                serde_json::to_value(response).expect("response serializes"),
-            )
-        });
-        let call_id = self
-            .record(
-                Attempt {
-                    role,
-                    site,
-                    provider: &provider,
-                    binding: &binding,
-                    started,
-                    request: &stored_request,
-                },
-                outcome,
-            )
-            .await;
-        Ok((result?, call_id))
+        Ok(TypedCall {
+            provider,
+            binding,
+            model_provider,
+            key,
+        })
     }
 
     /// Answer typed questions about `state` with the model `role` is bound to.
@@ -861,6 +923,18 @@ impl AiService {
         } = attempt;
         let (error, (input_tokens, output_tokens, response)) = match outcome {
             Ok((i, o, r)) => (None, (i, o, Some(r))),
+            // A cancelled stream keeps what had arrived.
+            Err(e @ AiError::Cancelled { partial, .. }) => {
+                let (i, o) = observed_counts(partial);
+                (
+                    Some(e),
+                    (
+                        i,
+                        o,
+                        Some(serde_json::to_value(partial).expect("parts serialize")),
+                    ),
+                )
+            }
             Err(e) => (Some(e), (0, 0, None)),
         };
         let call = NewAiCall {
@@ -886,6 +960,14 @@ impl AiService {
             }
         }
     }
+}
+
+/// A typed call ready to send: see [`AiService::prepare_typed`].
+struct TypedCall {
+    provider: ProviderConfig,
+    binding: RoleBinding,
+    model_provider: Arc<dyn oxplow_ai::client::ModelProvider>,
+    key: Option<String>,
 }
 
 /// Typed payloads retain optional counts and provenance. The numeric

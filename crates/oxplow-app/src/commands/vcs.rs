@@ -143,6 +143,7 @@ where
         human: true,
         agent: true,
         lens: false,
+        job: false,
     })
     .confirm_at_least(confirm)
 }

@@ -9,6 +9,7 @@ use std::sync::Arc;
 pub fn ops(jobs: Arc<ExtensionJobs>) -> Vec<Op> {
     let enqueue = jobs.clone();
     let snapshot = jobs.clone();
+    let manage = jobs.clone();
     vec![
         Op::new(
             "jobs.write",
@@ -37,6 +38,20 @@ pub fn ops(jobs: Arc<ExtensionJobs>) -> Vec<Op> {
                 })
             })),
         ),
+        Op::new(
+            "jobs.manage",
+            "cancel",
+            schema::<JobInput>(),
+            false,
+            Handler::Tx(Arc::new(move |ctx, input| {
+                let input = serde_json::from_value(input).map_err(|_| invalid())?;
+                Ok(HandlerOutput {
+                    result: manage.cancel_any(ctx, &input)?,
+                    ..Default::default()
+                })
+            })),
+        )
+        .open_to(oxplow_domain::Invokers::NO_AGENT),
         Op::new(
             "jobs.read",
             "snapshot",

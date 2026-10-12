@@ -147,35 +147,42 @@ impl AiCompute {
         Self { ai, results }
     }
 
-    pub(crate) async fn complete_job(
+    /// The model `role` is bound to now: what a job's request names.
+    pub(crate) fn model_for(&self, role: Role) -> Result<String, AiComputeError> {
+        Ok(self.ai.binding_for(role)?.model)
+    }
+
+    /// One model round of a job: its request streamed on `role` (a
+    /// recorded computation like any other, so a retried job's identical
+    /// round reads the recorded answer), under the job run's authority.
+    pub(crate) async fn stream_job_round(
         &self,
         run: &oxplow_domain::run::RunContext,
-        input: crate::extension_job_ai::TypedAiJobRequest,
+        role: Role,
+        request: &TypedRequestV1,
+        on_delta: oxplow_ai::client::OnDelta<'_>,
     ) -> Result<Recorded<TypedResponseV1>, AiComputeError> {
+        let refused = || AiComputeError::BadOutput("job AI authority was refused".into());
         if !matches!(
             run.decide_service("ai.compute"),
             oxplow_domain::grant::Decision::Allowed
         ) {
-            return Err(AiComputeError::BadOutput(
-                "job AI authority was refused".into(),
-            ));
+            return Err(refused());
         }
         let name = format!("job:{}", run.actor().source());
         self.ai
             .read_run(run, async {
-                let binding = self.ai.binding_for(input.role())?;
-                let request = input.request_for_model(&binding.model);
-                run.check_authority().map_err(|_| {
-                    AiComputeError::BadOutput("job AI authority was refused".into())
-                })?;
+                run.check_authority().map_err(|_| refused())?;
                 run.used_ai();
-                self.complete_typed(
+                self.stream_typed(
                     Caller {
                         name: &name,
                         run: Some(run.run().as_str()),
                     },
-                    input.role(),
-                    &request,
+                    role,
+                    request,
+                    run.cancel(),
+                    on_delta,
                 )
                 .await
             })
@@ -286,6 +293,53 @@ impl AiCompute {
             Ok((response, input, output, call))
         })
         .await
+    }
+
+    /// [`Self::complete_typed`], streamed: the reply goes to `on_delta` as
+    /// it arrives, until `cancel` is asked. A recorded answer is handed
+    /// over whole, at once, with no call. A cancelled or failed stream is
+    /// never recorded as the answer (its call row keeps what came).
+    pub async fn stream_typed(
+        &self,
+        caller: impl Into<Caller<'_>>,
+        role: Role,
+        request: &TypedRequestV1,
+        cancel: &oxplow_ai::client::Cancel,
+        on_delta: oxplow_ai::client::OnDelta<'_>,
+    ) -> Result<Recorded<TypedResponseV1>, AiComputeError> {
+        request
+            .validate_version()
+            .map_err(oxplow_ai::client::AiError::from)
+            .map_err(AiServiceError::from)?;
+        let caller = caller.into();
+        let op = Op {
+            name: "completeTyped",
+            role,
+            caller,
+            args: serde_json::to_value(request).expect("request serializes"),
+            request: ModelRequest::Typed(request),
+        };
+        let mut on_delta = on_delta;
+        let mut streamed = false;
+        let recorded = {
+            let (sink, streamed) = (&mut on_delta, &mut streamed);
+            self.recorded(op, |hash| async move {
+                *streamed = true;
+                let (response, call) = self
+                    .ai
+                    .stream_typed_as(role, site(caller, &hash), request, cancel, &mut **sink)
+                    .await?;
+                let (input, output) = crate::ai_service::observed_counts(&response);
+                Ok((response, input, output, call))
+            })
+            .await?
+        };
+        if !streamed {
+            for delta in oxplow_ai::parts::StreamDeltaV1::of(&recorded.value.parts) {
+                on_delta(delta);
+            }
+        }
+        Ok(recorded)
     }
 
     /// Which of `labels` fits `text` (the `decide` role).

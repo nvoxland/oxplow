@@ -151,7 +151,12 @@ pub struct RegisteredJobOperation {
     key: JobOperationKey,
     replay_policy: ReplayPolicy,
     handler: Arc<dyn JobOperation>,
+    max_runtime: std::time::Duration,
 }
+
+/// How long a worker runs before the dispatcher stops it, unless its
+/// registration says otherwise.
+pub const DEFAULT_MAX_RUNTIME: std::time::Duration = std::time::Duration::from_secs(60);
 
 impl RegisteredJobOperation {
     pub fn new(
@@ -165,7 +170,18 @@ impl RegisteredJobOperation {
             key,
             replay_policy,
             handler,
+            max_runtime: DEFAULT_MAX_RUNTIME,
         })
+    }
+
+    /// Stopped by the dispatcher past `max_runtime`.
+    pub fn with_max_runtime(mut self, max_runtime: std::time::Duration) -> Self {
+        self.max_runtime = max_runtime;
+        self
+    }
+
+    pub fn max_runtime(&self) -> std::time::Duration {
+        self.max_runtime
     }
 
     pub fn key(&self) -> &JobOperationKey {

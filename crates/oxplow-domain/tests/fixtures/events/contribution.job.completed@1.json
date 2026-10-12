@@ -1,9 +1,8 @@
 {
   "job_id": "job-1",
-  "contribution": "example.nightly",
-  "run_id": "run-1",
+  "contribution": "example/job/nightly",
   "attempt": 1,
   "fence": 1,
-  "outcome": "ok",
+  "outcome": "cancelled",
   "version": 3
 }

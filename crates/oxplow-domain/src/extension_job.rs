@@ -127,6 +127,58 @@ pub enum Completion {
     Failed,
 }
 
+/// What one row of a running job's output is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JobOutputKind {
+    /// Streamed reply text: `{ text }`, a coalesced run of deltas.
+    Text,
+    /// A tool the model called: `{ id, name, arguments }`.
+    ToolCall,
+    /// What the tool answered: `{ callId, result }` or `{ callId, error }`.
+    ToolResult,
+    /// A model round's usage: `{ inputTokens, outputTokens, source, aiCallId }`.
+    Usage,
+}
+
+impl JobOutputKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            JobOutputKind::Text => "text",
+            JobOutputKind::ToolCall => "tool_call",
+            JobOutputKind::ToolResult => "tool_result",
+            JobOutputKind::Usage => "usage",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Self> {
+        Some(match name {
+            "text" => JobOutputKind::Text,
+            "tool_call" => JobOutputKind::ToolCall,
+            "tool_result" => JobOutputKind::ToolResult,
+            "usage" => JobOutputKind::Usage,
+            _ => return None,
+        })
+    }
+}
+
+/// One row of output, as written: its sequence number is the store's.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NewJobOutput {
+    pub kind: JobOutputKind,
+    pub at_ms: i64,
+    pub content: serde_json::Value,
+}
+
+/// One row of output, as read.
+#[derive(Debug, Clone, PartialEq)]
+pub struct JobOutput {
+    pub seq: u64,
+    pub kind: JobOutputKind,
+    pub at_ms: i64,
+    pub content: serde_json::Value,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AttemptFence {

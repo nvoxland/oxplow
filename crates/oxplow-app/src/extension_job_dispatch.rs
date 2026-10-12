@@ -29,7 +29,6 @@ use crate::{
 
 const CLAIM_LEASE_MS: i64 = 30_000;
 const RENEW_EVERY: Duration = Duration::from_secs(10);
-const MAX_RUNTIME: Duration = Duration::from_secs(60);
 const CANCEL_GRACE: Duration = Duration::from_secs(5);
 const POLL_EVERY: Duration = Duration::from_millis(250);
 const MAX_CAS_RETRIES: usize = 4;
@@ -115,8 +114,7 @@ impl ExtensionJobDispatcher {
                 continue;
             }
             match self
-                .store
-                .transition(
+                .transition_announced(
                     candidate.job.id.clone(),
                     candidate.revision,
                     JobEvent::RecoverExpired { now_ms: now_ms() },
@@ -197,8 +195,7 @@ impl ExtensionJobDispatcher {
         }
 
         let claimed = match self
-            .store
-            .transition(
+            .transition_announced(
                 id.clone(),
                 stored.revision,
                 JobEvent::Claim {
@@ -295,7 +292,7 @@ impl ExtensionJobDispatcher {
                 }
                 if latest.job.cancellation_requested_at_ms.is_some()
                     || execution.run().check_authority().is_err()
-                    || now.duration_since(started) >= MAX_RUNTIME
+                    || now.duration_since(started) >= registration.max_runtime()
                 {
                     if cancellation_at.is_none() {
                         self.request_cancellation(&id).await?;
@@ -389,33 +386,12 @@ impl ExtensionJobDispatcher {
                         )
                         .map_err(PublishFailure::Store)?;
                         if let Some(vocabulary) = &vocabulary {
-                            use oxplow_domain::events::schema::{
-                                CommandOutcome, ContributionJobCompleted,
-                                ContributionJobCompletedV1,
-                            };
-                            let run = savepoint_execution.run();
-                            let payload = ContributionJobCompletedV1 {
-                                job_id: job_id.as_str().into(),
-                                contribution: completed.job.owner.contribution.to_string(),
-                                version: completed.job.owner.contract_version,
-                                run_id: run.run().as_str().into(),
-                                attempt: token.attempt,
-                                fence: token.fence,
-                                outcome: match outcome {
-                                    Completion::Succeeded => CommandOutcome::Ok,
-                                    Completion::Failed => CommandOutcome::Error,
-                                },
-                            };
-                            let vocabulary = vocabulary.current();
-                            let events = oxplow_db::EventCtx::system(&vocabulary, "extension-jobs");
-                            let mut event = events
-                                .typed::<ContributionJobCompleted>(&payload)
-                                .with_anchors(run.anchors().clone())
-                                .with_subject(run.subject().iter().cloned());
-                            if let Some(cause) = run.cause() {
-                                event = event.with_cause(cause.clone());
-                            }
-                            events.append(tx, &event).map_err(PublishFailure::Storage)?;
+                            crate::extension_jobs::announce_tx(
+                                tx,
+                                &vocabulary.current(),
+                                &completed.job,
+                            )
+                            .map_err(PublishFailure::Storage)?;
                         }
                         savepoint_execution
                             .check_publication(tx)
@@ -517,8 +493,7 @@ impl ExtensionJobDispatcher {
                 return Ok(());
             }
             match self
-                .store
-                .transition(
+                .transition_announced(
                     id.clone(),
                     current.revision,
                     JobEvent::RequestCancellation { now_ms: now_ms() },
@@ -581,6 +556,36 @@ impl ExtensionJobDispatcher {
         }
     }
 
+    /// A transition, and when it ends the job, its
+    /// `contribution.job.completed` — in one transaction.
+    async fn transition_announced(
+        &self,
+        id: JobId,
+        expected_revision: u64,
+        event: JobEvent,
+        result: Option<Value>,
+    ) -> Result<StoredExtensionJob, ExtensionJobStoreError> {
+        let vocabulary = self.vocabulary.clone();
+        self.db
+            .transaction_or(move |tx| {
+                let changed = transition_tx(tx, &id, expected_revision, &event, result.as_ref())
+                    .map_err(|e| match e {
+                        ExtensionJobStoreError::Storage(storage) => TxError::Storage(storage),
+                        other => TxError::Aborted(other),
+                    })?;
+                if let Some(vocabulary) = &vocabulary {
+                    crate::extension_jobs::announce_tx(tx, &vocabulary.current(), &changed.job)
+                        .map_err(TxError::Storage)?;
+                }
+                Ok(changed)
+            })
+            .await
+            .map_err(|e| match e {
+                TxError::Storage(storage) => ExtensionJobStoreError::Storage(storage),
+                TxError::Aborted(reason) => reason,
+            })
+    }
+
     async fn record_late(
         &self,
         id: &JobId,
@@ -611,8 +616,7 @@ impl ExtensionJobDispatcher {
         for _ in 0..MAX_CAS_RETRIES {
             let latest = self.store.metadata(id.clone()).await?;
             match self
-                .store
-                .transition(
+                .transition_announced(
                     id.clone(),
                     latest.revision,
                     event_at(event.clone(), now_ms()),
@@ -637,8 +641,7 @@ impl ExtensionJobDispatcher {
         for _ in 0..MAX_CAS_RETRIES {
             let latest = self.store.metadata(id.clone()).await?;
             match self
-                .store
-                .transition(
+                .transition_announced(
                     id.clone(),
                     latest.revision,
                     event_at(event.clone(), now_ms()),

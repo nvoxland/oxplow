@@ -1,21 +1,34 @@
 {
   "$defs": {
-    "CommandOutcome": {
-      "description": "How a command run ended.",
-      "enum": [
-        "ok",
-        "denied",
-        "invalid",
-        "error"
-      ],
-      "type": "string"
+    "JobOutcome": {
+      "description": "How a job ended.",
+      "oneOf": [
+        {
+          "enum": [
+            "succeeded",
+            "failed"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "cancelled",
+          "description": "Someone asked it to stop, and it did.",
+          "type": "string"
+        },
+        {
+          "const": "interrupted",
+          "description": "It stopped without a known end: oxplow restarted, or it lost its\nlease.",
+          "type": "string"
+        }
+      ]
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "A fenced job completion. Result/request values remain private job data;\nconsumers read them through their contribution's authorized job service.",
+  "description": "A job ended, however it ended. What it was asked and answered stay\nprivate job data: a consumer reads them through its extension's\n`jobs.read` (`scope(\"jobs.read\", { id })`).",
   "properties": {
     "attempt": {
+      "description": "Its last attempt (0 when it was cancelled before one started).",
       "format": "uint32",
       "minimum": 0,
       "type": "integer"
@@ -32,10 +45,7 @@
       "type": "string"
     },
     "outcome": {
-      "$ref": "#/$defs/CommandOutcome"
-    },
-    "run_id": {
-      "type": "string"
+      "$ref": "#/$defs/JobOutcome"
     },
     "version": {
       "format": "uint32",
@@ -49,7 +59,6 @@
   "required": [
     "job_id",
     "contribution",
-    "run_id",
     "attempt",
     "fence",
     "outcome"
