@@ -160,6 +160,15 @@ Things I keep forgetting. Read this before adding any UI.
   strip collapsing — doesn't fire on the same key.
 - **Disabled submit button when invalid** rather than erroring on
   submit. Show required-field hints inline.
+  `SchemaForm` also takes `fields` (show only these top-level fields,
+  in order; the rest keep their `initial` value and are still
+  submitted), `fixed` (shown as read-only text, `<prefix>-<field>-fixed`,
+  submitted unchanged, never focused) and `serverErrors` (a host's
+  message per top-level field, under the field like a client error and
+  cleared when that field is edited; one for a field not shown appears
+  once above the submit button as `<prefix>-form-error`). Server errors
+  never disable submit; client errors still do. All three are keyed on
+  their content, so a re-read keeps what was typed.
 - **Autofocus the first input** in any inline edit / prompt strip
   when it mounts (and select existing text so the user can replace
   it with a single keystroke). A *page* that opens on its own (not from

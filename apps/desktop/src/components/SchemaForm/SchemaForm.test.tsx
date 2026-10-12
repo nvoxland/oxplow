@@ -78,3 +78,85 @@ test("an edit survives a fresh copy of the same starting value", () => {
   view.rerender(<SchemaForm schema={schema} initial={{ title: "Saved elsewhere" }} testIdPrefix="f" />);
   expect(title().value).toBe("Saved elsewhere");
 });
+
+const wide = {
+  type: "object",
+  required: ["title"],
+  properties: {
+    title: { type: "string" },
+    note: { type: "string" },
+    ref: { type: "string" },
+  },
+};
+
+test("`fields` renders only those, in that order; the others are still submitted", () => {
+  const submitted: unknown[] = [];
+  const { getByTestId, queryByTestId, container } = render(
+    <SchemaForm
+      schema={wide}
+      initial={{ title: "T", note: "hidden", ref: "r:1" }}
+      fields={["note", "title", "nope"]}
+      onSubmit={(v) => submitted.push(v)}
+      testIdPrefix="f"
+    />,
+  );
+  expect(queryByTestId("f-ref")).toBe(null);
+  const ids = [...container.querySelectorAll("input")].map((i) => i.dataset.testid);
+  expect(ids).toEqual(["f-note", "f-title"]);
+  fireEvent.change(getByTestId("f-note"), { target: { value: "shown" } });
+  fireEvent.submit(getByTestId("f"));
+  expect(submitted).toEqual([{ title: "T", note: "shown", ref: "r:1" }]);
+});
+
+test("a `fixed` field shows its value as text, is not an input, and is submitted unchanged", () => {
+  const submitted: unknown[] = [];
+  const { getByTestId, queryByTestId, container } = render(
+    <SchemaForm schema={wide} initial={{ title: "T", ref: "r:1" }} fixed={["ref"]} onSubmit={(v) => submitted.push(v)} testIdPrefix="f" />,
+  );
+  expect(getByTestId("f-ref-fixed").textContent).toContain("r:1");
+  expect(queryByTestId("f-ref")).toBe(null);
+  // The first editable field takes the focus, not the fixed one above it.
+  expect(document.activeElement).toBe(getByTestId("f-title"));
+  expect(container.querySelectorAll("input").length).toBe(2);
+  fireEvent.keyDown(getByTestId("f-title"), { key: "Escape" });
+  fireEvent.submit(getByTestId("f"));
+  expect(submitted).toEqual([{ title: "T", ref: "r:1" }]);
+});
+
+test("a server error shows under its field until that field is edited; submit stays enabled", () => {
+  const view = render(
+    <SchemaForm schema={wide} initial={{ title: "T" }} serverErrors={{ title: "taken" }} onSubmit={() => {}} testIdPrefix="f" />,
+  );
+  expect(view.getByTestId("f-title-error").textContent).toBe("taken");
+  expect((view.getByTestId("f-submit") as HTMLButtonElement).disabled).toBe(false);
+  // A re-read of the same errors keeps it cleared once edited.
+  fireEvent.change(view.getByTestId("f-note"), { target: { value: "n" } });
+  expect(view.queryByTestId("f-title-error")).not.toBe(null);
+  fireEvent.change(view.getByTestId("f-title"), { target: { value: "T2" } });
+  expect(view.queryByTestId("f-title-error")).toBe(null);
+  view.rerender(
+    <SchemaForm schema={wide} initial={{ title: "T" }} serverErrors={{ title: "taken" }} onSubmit={() => {}} testIdPrefix="f" />,
+  );
+  expect(view.queryByTestId("f-title-error")).toBe(null);
+  view.rerender(
+    <SchemaForm schema={wide} initial={{ title: "T" }} serverErrors={{ title: "taken again" }} onSubmit={() => {}} testIdPrefix="f" />,
+  );
+  expect(view.getByTestId("f-title-error").textContent).toBe("taken again");
+});
+
+test("a server error for a field that isn't shown appears once above the submit button", () => {
+  const { getByTestId, queryByTestId } = render(
+    <SchemaForm
+      schema={wide}
+      initial={{ title: "T", ref: "r:1" }}
+      fields={["title"]}
+      serverErrors={{ ref: "no such ref", zzz: "unknown" }}
+      onSubmit={() => {}}
+      testIdPrefix="f"
+    />,
+  );
+  expect(queryByTestId("f-ref-error")).toBe(null);
+  expect(getByTestId("f-form-error").textContent).toContain("no such ref");
+  expect(getByTestId("f-form-error").textContent).toContain("unknown");
+  expect((getByTestId("f-submit") as HTMLButtonElement).disabled).toBe(false);
+});
