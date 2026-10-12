@@ -903,7 +903,6 @@ mod tests {
             active_providers: Default::default(),
             personal_active_providers: Default::default(),
             personal_new_thread_session: None,
-            replacements_off: Default::default(),
             replacements: Default::default(),
             event_retention: Default::default(),
             ai_roles: Default::default(),

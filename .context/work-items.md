@@ -159,7 +159,13 @@ the graph's `<provider>:<id>`), comments targeting `work_item` /
 `<provider>:<id>`, and the feature-gated actions above. The item's own
 list's extension may add its state view (`work_item.detail.state`,
 `Replaceable`), beside the state pill — never instead of it, so an item
-can always move. The `work_item.detail.body` / `.sidebar` slots get
+can always move. **Custom views** need no provider: any extension may
+replace the Board (`work_item.board`), the Tasks list (`work_item.list`)
+or an item's editor — its title and body (`work_item.detail`) — with a
+lens or component over `v_work_item` that changes items only through the
+interface commands, so it works with whichever list is active; the person
+picks whose shows (`replacements`, Settings → Integrations).
+[extensions.md](./extensions.md) "Replacements" has the contracts. The `work_item.detail.body` / `.sidebar` slots get
 `{ ref }`. Link…'s link type is free text (default `relates_to`): the
 provider names its own types.
 

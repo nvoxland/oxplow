@@ -1541,29 +1541,46 @@ sub-component** — never a whole page:
 ```yaml
 ui:
   replacements:
-    - { target: vcs.history.graph, lens: history-graph }
+    - { target: vcs.history.graph, lens: history-graph, version: 1 }
 ```
 
 The targets are one table, `oxplow_domain::replaceable::REPLACEABLE`:
 each a `target`, the `capability` it belongs to, whether it is **bound to
-a provider**, and its **props contract** — the params the replacement
-lens is given instead of any host state.
+a provider**, its contract's **version**, and its **props contract** —
+the params the replacement lens is given instead of any host state. The
+table is published as `v_replaceable` (restated with the vocabulary,
+`replaceable_store`) and generated into the reference
+(`the_reference_lists_every_replaceable_view`), so an author reads the
+contracts where everything else is. A declaration's optional `version:`
+must be the contract's: a changed contract refuses it rather than handing
+it props it doesn't know.
 
 | Target | Core component | Capability | Bound | Props |
 |---|---|---|---|---|
-| `work_item.board` | the Board's columns of cards (`WorkBoard`) | `work_items` | yes | `scope` (`thread` / `backlog` / `all`), `thread_id` (the thread when `scope` is `thread`, else null) |
+| `work_item.board` | the Board's columns of cards (`WorkBoard`, `BoardPage`) | `work_items` | no | `scope` (`thread` / `backlog` / `all`), `thread_id` (the thread when `scope` is `thread`, else null) |
+| `work_item.list` | the Tasks page's list (`TasksList`, `TasksPage`): the scope picker, detail pane and backlog drawer stay oxplow's; the lens's `stream_id` is the scope's stream | `work_items` | no | `scope` (`thread` / `stream` / `all`), `thread_id` (the thread when `scope` is `thread`, else null) |
+| `work_item.detail` | a work item's editor, its title and body (`TaskDetail`, `WorkItemPage`): the rail (state pill, Move To, fields, Delete), Comment / Link, slots and activity stay oxplow's | `work_items` | no | `ref` (the item) |
 | `work_item.detail.state` | a work item's State (`WorkItemPage`'s rail; P10) — never its Move To, which stays oxplow's canonical states, so a replacement can't strand an item (tsk919) | `work_items` | yes | `ref` (the item) |
 | `vcs.history.graph` | Git History's commits (`HistoryPanel`): oxplow's own is a plain list (`CommitList`) | `vcs` | no | `head_sha` (the stream's head), `reveal_sha` (a commit to scroll to and mark, or null), `limit` |
 
-**Bound or not.** A bound target shows a provider's thing, so only the
-extension of the deciding provider replaces it (below). An unbound target
-is one core owns — `vcs` is oxplow's own implementation, with no provider
-row (`v_capability_provider.extension` NULL) — so any extension may
-replace it, a shared or bundled one included. With one enabled extension
-replacing it, that one shows; with several, the one the person chose —
-`replacements: { <target>: <extension> }`, a person-only project key
-validated against the table (an unbound target only: a bound one's
-provider decides); several and no choice keeps oxplow's own.
+**Bound or not.** A bound target shows one provider's own thing — the
+state control lists that tracker's states — so only the extension of the
+provider whose item it shows replaces it (below). Every other target is a
+**view**: the Board, the list and the editor show the capability as a
+whole, reading `v_work_item` and changing items through the interface
+commands (`oxplow.work_item.update`, `transition`, `reorder`, `move`), so
+they work with whichever list is active and any extension may bring one —
+a view needs no provider. Choosing a presentation is separate from
+installing a work list.
+
+**Whose shows** is the person's: `replacements: { <target>: <extension> |
+oxplow }`, one person-only project key validated against the table. An
+extension chosen shows (an unbound target only); `oxplow` keeps oxplow's
+own (any target); unlisted is the default — the only extension replacing
+it, several and no choice keeping oxplow's own, and for a bound target
+its provider's extension's. Settings → Integrations lists each replaced
+target with that choice (a `<select>`: Default, oxplow's own, each
+extension), with or without provider instances.
 
 Every target has a label a person reads — its `label` in the same table
 ("board", "state control", "history graph"), carried on each
@@ -1584,33 +1601,23 @@ everywhere. Valid ones are `Extension.ui.replacements` (`UiReplacement {
 id: <ext>/<target>, extension, target, capability, boundToProvider,
 lensId, label }`).
 
-**A person can turn one off**: the project key `replacementsOff:
-[work_item.board]` (person-only, like `activeProviders` — it decides
-what renders a core region; validated against the table, an unknown
-target is an error listing the real ones). Listed, oxplow's own
-component shows. Settings → Integrations lists the replaced components
-under the active-provider chooser, each with "Always use oxplow's own
-<component>" (`oxplow.config.set` / `oxplow.config.unset` as the person).
-
 **At render** (`lens/useReplacement.ts`, `components/Replaceable.tsx`).
 A core page wraps the component: `<Replaceable target props streamId
 fallback={<WorkBoard …/>}>` (`BoardPage`). `useReplacement` reads the
 enabled extensions' replacements of the target and, only when one
 exists, what decides it:
-- **bound**: only the deciding provider's extension replaces — the
-  candidate whose `extension` is that provider's row's. A component
-  showing one provider's thing passes it (`<Replaceable
-  provider={item.provider}>` on `work_item.detail.state`): the **item's
-  own provider** decides, whichever is active, so another provider's item
-  never gets a lens that sends this one's states (tsk918). A component
-  showing the capability as a whole (the Board) passes none: the
-  **active** row decides, here and not at load, since the active provider
-  changes with `activeProviders` and no reload;
+- **bound**: the host passes the provider of the thing it shows
+  (`<Replaceable provider={item.provider}>` on `work_item.detail.state`):
+  the **item's own provider** decides, whichever is active, so another
+  provider's item never gets a lens that sends this one's states
+  (tsk918). Which extension brings it is read from
+  `v_capability_provider` here, not at load, so installing or switching
+  one needs no reload;
 - **unbound**: the person's choice (`replacements`), or the only
   candidate; no provider is read;
-- no candidate, a deciding provider no extension brings (oxplow's own),
-  several unbound candidates and no choice, or the target turned off →
-  `fallback`, untouched;
+- no candidate, a provider no extension brings (oxplow's own), several
+  unbound candidates and no choice, or `oxplow` chosen → `fallback`,
+  untouched;
 - chosen → its lens runs with the props it declares (`childParams`) and
   renders through `LensResultView` (the one render path: kit, or `viz:
   custom` with its sandbox and "custom" badge) under a **"replaced by
@@ -1634,11 +1641,12 @@ custom one when its component says `ready` (`onCustomReady` → `shown`),
 so one that never loads isn't counted. A replacement is a lens, so
 its text rendering is the lens's; agents read work items from
 `v_work_item` either way. The capability smoke test renders the Board
-with every enhancement off (no `replacement-*`), and with two extensions
-replacing it shows that only the active provider's does; a work item's
-state control, with two extensions replacing it, shows the item's own
-provider's, not the active one's; Git History shows the plain list, and
-oxplow-bundled's graph when it replaces it.
+with every enhancement off (no `replacement-*`), and an extension's view
+replacing it with no provider of its own; a work item's editor replaced
+with the rail still oxplow's; a work item's state control, with two
+extensions replacing it, shows the item's own provider's, not the active
+one's; Git History shows the plain list, and oxplow-bundled's graph when
+it replaces it.
 
 **The first real one: the history graph.** oxplow-bundled's
 `history-graph` component (`components/history-graph/`, classic scripts

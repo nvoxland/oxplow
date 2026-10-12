@@ -19,6 +19,8 @@ import type { TabRef } from "../tabs/tabState.js";
 import { type Stream, type Thread } from "../api.js";
 import { useStreamThreads } from "./useStreamThreads.js";
 import { readWorkList, type WorkList } from "../workItems.js";
+import { Replaceable } from "../components/Replaceable.js";
+import { threadRowId } from "../modelIds.js";
 import { unionReads, useRerunOnChange } from "../lens/lensRerun.js";
 
 export type TasksPageProps =
@@ -51,6 +53,28 @@ export const TASKS_PAGE_SECTIONS: TaskSectionKind[] = [
 ];
 
 const NOOP_ASYNC = async () => {};
+
+/** The `work_item.list` contract's props for a scope: `scope` is
+ *  `thread`, `stream` or `all`; `thread_id` the thread's row id when it is
+ *  `thread` (the current thread's for the default scope), else null.
+ *  Exported for tests. */
+export function listScope(
+  scope: TasksScope,
+  activeThreadId: string | null,
+): { scope: "thread" | "stream" | "all"; thread_id: number | null } {
+  switch (scope.kind) {
+    case "currentThread":
+      return activeThreadId
+        ? { scope: "thread", thread_id: threadRowId(activeThreadId) }
+        : { scope: "all", thread_id: null };
+    case "thread":
+      return { scope: "thread", thread_id: threadRowId(scope.threadId) };
+    case "stream":
+      return { scope: "stream", thread_id: null };
+    case "all":
+      return { scope: "all", thread_id: null };
+  }
+}
 
 /**
  * Tasks page with a scope switcher above the list. Scope modes:
@@ -237,13 +261,26 @@ export function TasksPage({
           <div style={{ padding: "4px 10px", color: "var(--muted)", fontSize: "var(--text-xs)" }}>Loading…</div>
         ) : null}
         <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "row" }}>
-          <TasksList
-            {...listProps}
-            visibleSections={TASKS_PAGE_SECTIONS}
-            sectionItemLimit={{ done: PREVIEW_LIMIT }}
-            extraSectionLinks={{ done: viewAllDone }}
-            hideBacklogChip
-          />
+          {/* The list is replaceable (`work_item.list`): an extension's
+              view of the scope's items. The scope picker, the detail pane
+              and the backlog drawer stay oxplow's. */}
+          <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+            <Replaceable
+              target="work_item.list"
+              props={listScope(scope, rest.activeThreadId ?? null)}
+              streamId={scope.kind === "stream" || scope.kind === "thread" ? scope.streamId : currentStreamId}
+              onOpenPage={onOpenPage}
+              fallback={
+                <TasksList
+                  {...listProps}
+                  visibleSections={TASKS_PAGE_SECTIONS}
+                  sectionItemLimit={{ done: PREVIEW_LIMIT }}
+                  extraSectionLinks={{ done: viewAllDone }}
+                  hideBacklogChip
+                />
+              }
+            />
+          </div>
           <TaskDetailPane threadWork={effectiveThreadWork} />
         </div>
         {rest.profile.features.lists ? (

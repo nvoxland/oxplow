@@ -1,13 +1,15 @@
 //! The core sub-components an extension may replace (`ui.replacements`;
 //! `.context/extensions.md` "Replacements"): each a named target of one
-//! capability with a **props contract** — the params its replacement lens
-//! gets, and must declare, instead of any host state.
+//! capability with a **versioned props contract** — the params its
+//! replacement lens gets, and must declare, instead of any host state.
 //! (The viewer's stream isn't a prop: any lens declaring `stream_id` gets
 //! it, as everywhere.)
 //! Whole pages are never replaceable.
 //!
 //! One table for the extension loader (which checks a declaration against
-//! it) and the project config (whose `replacementsOff` names targets).
+//! it), the project config (whose `replacements` names targets), and
+//! `v_replaceable`, which publishes it so an author finds the contracts
+//! where everything else is: in SQL.
 
 /// One replaceable sub-component.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,10 +20,14 @@ pub struct Replaceable {
     pub capability: &'static str,
     /// Whether only the extension of a provider of `capability` may
     /// replace it — the provider of the thing it shows (a work item's),
-    /// else the capability's **active** one. An unbound target (one core
-    /// owns, as the history graph) may be replaced by any extension; the
-    /// person chooses among several (`replacements:`).
+    /// else the capability's **active** one. An unbound target may be
+    /// replaced by any extension; the person chooses among several
+    /// (`replacements:`).
     pub bound_to_provider: bool,
+    /// The contract's version: bumped when `props` or their meaning
+    /// change. A declaration may pin it (`version:`); one pinned to
+    /// another version doesn't load.
+    pub version: u32,
     /// What the replacement is given, by name; its lens declares each.
     pub props: &'static [&'static str],
     /// What a person calls it ("board"): the one name the UI shows it by.
@@ -32,22 +38,50 @@ pub struct Replaceable {
 pub const REPLACEABLE: &[Replaceable] = &[
     // The Board's columns of cards (`WorkBoard`): `scope` is `thread`,
     // `backlog` or `all`; `thread_id` the thread when `scope` is `thread`,
-    // else null.
+    // else null. A view of the capability as a whole, so any extension
+    // may bring one: it reads `v_work_item` and runs the interface verbs
+    // (`oxplow.work_item.transition`, `reorder`, `update`, …), whichever
+    // list is active.
     Replaceable {
         target: "work_item.board",
         capability: "work_items",
-        bound_to_provider: true,
+        bound_to_provider: false,
+        version: 1,
         props: &["scope", "thread_id"],
         label: "board",
+    },
+    // The Tasks page's list (`TasksList`): `scope` is `thread`, `stream`
+    // or `all`; `thread_id` the thread when `scope` is `thread`, else
+    // null. Its `stream_id` is the scope's stream. The page's scope
+    // picker, detail pane and backlog drawer stay oxplow's.
+    Replaceable {
+        target: "work_item.list",
+        capability: "work_items",
+        bound_to_provider: false,
+        version: 1,
+        props: &["scope", "thread_id"],
+        label: "list",
+    },
+    // A work item's editor (`TaskDetail`: its title and body): `ref` is
+    // the item. The page's rail (the state pill and Move To, fields,
+    // Delete), its Comment and Link, slots and activity stay oxplow's.
+    Replaceable {
+        target: "work_item.detail",
+        capability: "work_items",
+        bound_to_provider: false,
+        version: 1,
+        props: &["ref"],
+        label: "detail editor",
     },
     // A work item's state control (`WorkItemPage`'s State; its Move To is
     // never replaced, so an item can always move — tsk919): `ref` is the
     // item (P10). The item's own provider's extension replaces it,
-    // whichever is active (tsk918).
+    // whichever is active (tsk918): it shows that provider's own states.
     Replaceable {
         target: "work_item.detail.state",
         capability: "work_items",
         bound_to_provider: true,
+        version: 1,
         props: &["ref"],
         label: "state control",
     },
@@ -59,10 +93,14 @@ pub const REPLACEABLE: &[Replaceable] = &[
         target: "vcs.history.graph",
         capability: "vcs",
         bound_to_provider: false,
+        version: 1,
         props: &["head_sha", "reveal_sha", "limit"],
         label: "history graph",
     },
 ];
+
+/// The `replacements:` value that keeps oxplow's own component.
+pub const OXPLOWS_OWN: &str = "oxplow";
 
 /// The replaceable sub-component named `target`.
 pub fn replaceable(target: &str) -> Option<&'static Replaceable> {
@@ -76,4 +114,44 @@ pub fn targets() -> String {
         .map(|r| r.target)
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every target is its own name and label, versioned from 1, with
+    /// at least one prop; `stream_id` is never one.
+    #[test]
+    fn the_table_holds() {
+        let mut targets: Vec<&str> = REPLACEABLE.iter().map(|r| r.target).collect();
+        let mut labels: Vec<&str> = REPLACEABLE.iter().map(|r| r.label).collect();
+        targets.sort_unstable();
+        labels.sort_unstable();
+        targets.dedup();
+        labels.dedup();
+        assert_eq!(targets.len(), REPLACEABLE.len());
+        assert_eq!(labels.len(), REPLACEABLE.len());
+        for r in REPLACEABLE {
+            assert!(r.version >= 1, "{}", r.target);
+            assert!(!r.props.is_empty(), "{}", r.target);
+            assert!(!r.props.contains(&"stream_id"), "{}", r.target);
+            assert!(
+                r.target
+                    .starts_with(&format!("{}.", r.capability.trim_end_matches('s')))
+                    || r.capability == "vcs",
+                "{}",
+                r.target
+            );
+        }
+        assert_eq!(
+            replaceable("work_item.board").map(|r| r.bound_to_provider),
+            Some(false)
+        );
+        assert_eq!(
+            replaceable("work_item.detail.state").map(|r| r.bound_to_provider),
+            Some(true)
+        );
+        assert!(replaceable("vcs.conflict.resolver").is_none());
+    }
 }

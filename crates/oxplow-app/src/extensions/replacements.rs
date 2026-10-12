@@ -5,12 +5,13 @@
 //! ```yaml
 //! ui:
 //!   replacements:
-//!     - { target: work_item.board, lens: board }
+//!     - { target: work_item.board, lens: board, version: 1 }
 //! ```
 //!
 //! Checked here: the target exists, the lens is the extension's and
-//! declares every prop of the target's contract, and — for a target bound
-//! to its capability's provider — the extension brings a provider of it.
+//! declares every prop of the target's contract, a pinned `version:` is
+//! the contract's, and — for a target bound to its capability's provider
+//! — the extension brings a provider of it.
 //! *Which* replacement renders is decided when the component renders (the
 //! active provider changes without a reload; the person's choice for an
 //! unbound target is config), so that rule is the renderer's.
@@ -37,6 +38,8 @@ pub struct UiReplacement {
     pub bound_to_provider: bool,
     /// The lens that renders instead, given the target's props.
     pub lens_id: String,
+    /// The contract's version it was written against (the table's).
+    pub version: u32,
     /// What a person calls the target (`board`), from its table.
     pub label: String,
 }
@@ -47,6 +50,11 @@ pub struct UiReplacement {
 pub(crate) struct ReplacementFile {
     target: String,
     lens: String,
+    /// The props contract's version it was written against; checked
+    /// against the table's, so a changed contract refuses it rather than
+    /// handing it props it doesn't know.
+    #[serde(default)]
+    version: Option<u32>,
 }
 
 /// Parse `ui.replacements` against the extension's lenses and the
@@ -108,6 +116,13 @@ pub fn parse_replacements(
                         missing.join(", "),
                         t.target
                     ))
+                } else if r.version.is_some_and(|v| v != t.version) {
+                    Some(format!(
+                        "`{}` is at version {} of its props contract, not {} (`v_replaceable`)",
+                        t.target,
+                        t.version,
+                        r.version.unwrap_or_default()
+                    ))
                 } else if t.bound_to_provider && !capabilities.iter().any(|c| c == t.capability) {
                     Some(format!(
                         "only an extension that brings a `{}` provider may replace `{}` \
@@ -135,6 +150,7 @@ pub fn parse_replacements(
             capability: t.capability.to_string(),
             bound_to_provider: t.bound_to_provider,
             lens_id: l.id.clone(),
+            version: t.version,
             label: t.label.to_string(),
         });
     }
@@ -232,14 +248,19 @@ mod tests {
                 target: "work_item.board".into(),
                 capability: "work_items".into(),
                 lens_id: "tracker/board".into(),
+                version: 1,
                 label: "board".into(),
-                bound_to_provider: true,
+                bound_to_provider: false,
             }]
         );
         for (entry, says) in [
             (
                 "{ target: vcs.conflict.resolver, lens: board }",
-                "isn't a replaceable component (work_item.board, work_item.detail.state, vcs.history.graph)",
+                "isn't a replaceable component (work_item.board, work_item.list, work_item.detail, work_item.detail.state, vcs.history.graph)",
+            ),
+            (
+                "{ target: work_item.board, lens: board, version: 2 }",
+                "`work_item.board` is at version 1 of its props contract, not 2",
             ),
             (
                 "{ target: work_item.board, lens: nope }",
@@ -305,19 +326,41 @@ mod tests {
         assert_eq!(distinct.len(), labels.len(), "{labels:?}");
     }
 
+    /// A bound target (the state control: a provider's own states) needs
+    /// the extension to bring that provider; the Board, the list and the
+    /// detail editor are views of the capability as a whole, so any
+    /// extension may bring one, pinning the contract's version or not.
     #[test]
-    fn only_an_extension_bringing_a_provider_of_the_capability_may_replace() {
+    fn only_a_bound_target_needs_the_extension_to_bring_its_provider() {
         let ext = load(
             "private",
             "",
-            "    - { target: work_item.board, lens: board }\n",
+            "    - { target: work_item.detail.state, lens: state }\n",
         );
         let errs = said(&ext);
         assert!(
-            errs.contains("only an extension that brings a `work_items` provider may replace `work_item.board`"),
+            errs.contains("only an extension that brings a `work_items` provider may replace `work_item.detail.state`"),
             "{errs}"
         );
         assert!(ext.ui.replacements.is_empty());
+        let ext = load(
+            "private",
+            "",
+            "    - { target: work_item.board, lens: board, version: 1 }\n    - { target: work_item.list, lens: board }\n    - { target: work_item.detail, lens: state }\n",
+        );
+        assert_eq!(said(&ext), "");
+        assert_eq!(
+            ext.ui
+                .replacements
+                .iter()
+                .map(|r| (r.target.as_str(), r.bound_to_provider, r.version))
+                .collect::<Vec<_>>(),
+            vec![
+                ("work_item.board", false, 1),
+                ("work_item.list", false, 1),
+                ("work_item.detail", false, 1)
+            ]
+        );
     }
 
     #[test]
@@ -350,6 +393,34 @@ mod tests {
                 .map(|r| (r.target.as_str(), r.bound_to_provider))
                 .collect::<Vec<_>>(),
             vec![("vcs.history.graph", false)]
+        );
+    }
+
+    /// The reference's table of replaceable views, from the table: the
+    /// two can't drift. `OXPLOW_BLESS=1` rewrites it.
+    #[test]
+    fn the_reference_lists_every_replaceable_view() {
+        let mut table = String::from(
+            "| Target | What it is | Bound to a provider | Version | Props |\n|---|---|---|---|---|\n",
+        );
+        for r in oxplow_domain::replaceable::REPLACEABLE {
+            table.push_str(&format!(
+                "| `{}` | {} | {} | {} | {} |\n",
+                r.target,
+                r.label,
+                if r.bound_to_provider { "yes" } else { "no" },
+                r.version,
+                r.props
+                    .iter()
+                    .map(|p| format!("`{p}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        crate::test_fixtures::generated_section(
+            "docs/reference/extensions.md",
+            "replaceables",
+            &table,
         );
     }
 

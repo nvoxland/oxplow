@@ -3,7 +3,7 @@
 /// items go to is chosen under Settings → Capabilities) — its state, its config (a form
 /// from the provider's `config_schema`, P6.B2), Check, and Enable /
 /// Disable. Between the two, the core components an extension replaces
-/// (P9.A1), each with a switch back to oxplow's own (`replacementsOff`).
+/// (P9.A1), each with a choice of whose shows (`replacements`).
 /// Enabling checks first;
 /// an unapproved provider is approved under Data → Programs. See
 /// `.context/providers.md`.
@@ -41,6 +41,7 @@ import {
 import type { SignInCompletion, SignInState, UiReplacement } from "../tauri-bridge/generated/bindings.js";
 import { readsOf, useRerunOnChange } from "../lens/lensRerun.js";
 import { CredentialRow } from "./ExtensionsSection.js";
+import { OXPLOWS_OWN } from "../lens/useReplacement.js";
 import { InlineConfirm } from "./InlineConfirm.js";
 import {
   canRemoveInstance,
@@ -58,7 +59,7 @@ import { showToast } from "./toastStore.js";
 export function IntegrationsSection() {
   const [views, setViews] = useState<ProviderInstanceView[] | null>(null);
   const [replaced, setReplaced] = useState<UiReplacement[]>([]);
-  const [off, setOff] = useState<string[]>([]);
+  const [chosen, setChosen] = useState<Record<string, string>>({});
 
   const refresh = useCallback(async () => {
     try {
@@ -69,8 +70,12 @@ export function IntegrationsSection() {
       ]);
       setViews(listed);
       setReplaced(extensions.filter((e) => e.enabled).flatMap((e) => e.ui.replacements));
-      const turnedOff = settings.find((s) => s.key === "replacementsOff")?.value;
-      setOff(Array.isArray(turnedOff) ? turnedOff.map(String) : []);
+      const choices = settings.find((s) => s.key === "replacements")?.value;
+      setChosen(
+        choices !== null && typeof choices === "object" && !Array.isArray(choices)
+          ? Object.fromEntries(Object.entries(choices as Record<string, unknown>).map(([k, v]) => [k, String(v)]))
+          : {},
+      );
     } catch (e) {
       recordOpError({ label: "List integrations", message: String(e) });
       setViews([]);
@@ -94,16 +99,22 @@ export function IntegrationsSection() {
   useRerunOnChange(readsOf("v_contribution_health"), () => void refresh());
 
   if (views === null) return <div style={mutedStyle}>Loading…</div>;
+  // Replaced components don't need a provider (an extension's view of the
+  // Board needs none), so they're listed with or without instances.
+  const replacements = <Replacements replaced={replaced} chosen={chosen} onChanged={setChosen} />;
   if (views.length === 0) {
     return (
-      <div style={mutedStyle} data-testid="integrations-empty">
-        No extension declares an external provider. A private extension can bring one (its <code>providers:</code>).
+      <div data-testid="integrations-section">
+        {replacements}
+        <div style={mutedStyle} data-testid="integrations-empty">
+          No extension declares an external provider. A private extension can bring one (its <code>providers:</code>).
+        </div>
       </div>
     );
   }
   return (
     <div data-testid="integrations-section">
-      <Replacements replaced={replaced} off={off} onChanged={setOff} />
+      {replacements}
       {views.map((v) => (
         <IntegrationRow key={v.instance} view={v} onChanged={setViews} onCredentialChanged={() => void refresh()} />
       ))}
@@ -112,29 +123,32 @@ export function IntegrationsSection() {
   );
 }
 
-/** The core components an extension replaces, each with a switch back to
- *  oxplow's own: `replacementsOff`, a person-only key like
- *  `activeProviders`, so the click is the confirmation `oxplow.config.set` asks
- *  for. A replacement shows only while its extension's provider is the
- *  active one. */
+/** The core components extensions replace, each with a choice of whose
+ *  shows: `replacements`, a person-only key like `activeProviders`, so the
+ *  choice is the confirmation `oxplow.config.set` asks for. "Default" is
+ *  no entry: the only extension replacing it (several: oxplow's own); a
+ *  bound one (the state control) is its item's provider's extension's, and
+ *  can only be kept oxplow's. */
 function Replacements({
   replaced,
-  off,
+  chosen,
   onChanged,
 }: {
   replaced: UiReplacement[];
-  off: string[];
-  onChanged(off: string[]): void;
+  chosen: Record<string, string>;
+  onChanged(chosen: Record<string, string>): void;
 }) {
   const targets = [...new Set(replaced.map((r) => r.target))].sort();
   if (targets.length === 0) return null;
-  async function set(target: string, keepOxplows: boolean) {
-    const next = keepOxplows ? [...new Set([...off, target])].sort() : off.filter((t) => t !== target);
+  async function set(target: string, whose: string) {
+    const next = { ...chosen };
+    if (whose === "") delete next[target];
+    else next[target] = whose;
     try {
-      if (next.length === 0) {
-        await runCommand("oxplow.config.unset", { key: "replacementsOff" }, true);
+      if (Object.keys(next).length === 0) {
+        await runCommand("oxplow.config.unset", { key: "replacements" }, true);
       } else {
-        await runCommand("oxplow.config.set", { key: "replacementsOff", value: next }, true);
+        await runCommand("oxplow.config.set", { key: "replacements", value: next }, true);
       }
       onChanged(next);
     } catch (e) {
@@ -143,24 +157,38 @@ function Replacements({
   }
   return (
     <fieldset data-testid="integrations-replacements" style={fieldsetStyle}>
-      <legend style={mutedStyle}>Replaced components — an extension's own, while its external provider is the active one</legend>
+      <legend style={mutedStyle}>Replaced components — whose shows</legend>
       {targets.map((target) => {
-        const label = replaced.find((r) => r.target === target)?.label ?? target;
-        const by = replaced.filter((r) => r.target === target).map((r) => r.extension);
+        const candidates = replaced.filter((r) => r.target === target);
+        const label = candidates[0]?.label ?? target;
+        const bound = candidates[0]?.boundToProvider ?? false;
+        const fallback = bound
+          ? "its provider's extension's"
+          : candidates.length === 1
+            ? candidates[0].extension
+            : "oxplow's own (several replace it)";
         return (
           <label
             key={target}
             data-testid={`integrations-replacement-${target}`}
             style={{ display: "flex", gap: 6, alignItems: "center" }}
           >
-            <input
-              type="checkbox"
-              data-testid={`integrations-replacement-off-${target}`}
-              checked={off.includes(target)}
-              onChange={(e) => void set(target, e.target.checked)}
-            />
-            {`Always use oxplow's own ${label}`}
-            <span style={mutedStyle}>· replaced by {by.join(", ")}</span>
+            <span style={{ minWidth: 120 }}>{label}</span>
+            <select
+              data-testid={`integrations-replacement-choice-${target}`}
+              value={chosen[target] ?? ""}
+              onChange={(e) => void set(target, e.target.value)}
+            >
+              <option value="">Default — {fallback}</option>
+              <option value={OXPLOWS_OWN}>oxplow's own</option>
+              {bound
+                ? null
+                : candidates.map((c) => (
+                    <option key={c.extension} value={c.extension}>
+                      {c.extension}
+                    </option>
+                  ))}
+            </select>
           </label>
         );
       })}

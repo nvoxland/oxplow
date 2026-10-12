@@ -36,7 +36,6 @@ pub const HUMAN_ONLY_KEYS: &[&str] = &[
     "acpAgents",
     "extensionInstances",
     "activeProviders",
-    "replacementsOff",
     "replacements",
     "eventRetention",
     "scripts",

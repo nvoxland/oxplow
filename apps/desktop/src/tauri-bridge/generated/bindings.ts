@@ -4911,16 +4911,13 @@ export type OxplowConfig = {
 	 */
 	personalNewThreadSession: string | null,
 	/**
-	 *  Core components no extension's replacement may take over
-	 *  (`replacementsOff: [work_item.board]`): oxplow's own shows there
-	 *  even when the active provider's extension replaces it.
-	 */
-	replacementsOff: string[],
-	/**
-	 *  The person's choice among extensions replacing a target no provider
-	 *  binds (`replacements: { vcs.history.graph: oxplow-bundled }`): with
-	 *  one candidate it is chosen anyway; with several and no choice,
-	 *  oxplow's own shows.
+	 *  Whose component shows for a replaceable core sub-component, by
+	 *  target (`replacements: { work_item.board: task-views,
+	 *  vcs.history.graph: oxplow }`): an extension replacing it, or
+	 *  `oxplow` for oxplow's own. A target not listed shows its default:
+	 *  the only extension replacing it, or a bound target's provider's.
+	 *  Only `oxplow` may be chosen for a bound target (its provider's
+	 *  extension decides otherwise).
 	 */
 	replacements: { [key in string]: string },
 	/**
@@ -6291,6 +6288,8 @@ export type UiReplacement = {
 	boundToProvider: boolean,
 	// The lens that renders instead, given the target's props.
 	lensId: string,
+	// The contract's version it was written against (the table's).
+	version: number,
 	// What a person calls the target (`board`), from its table.
 	label: string,
 };

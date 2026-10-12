@@ -1,20 +1,20 @@
 /**
  * Which lens, if any, stands in for a core sub-component right now
  * (P9.A1, `.context/extensions.md` → "Replacements"). An extension
- * declares `ui.replacements: [{ target, lens }]`; it renders only while
- * the provider the component is for is that extension's, and while the
- * person hasn't listed the target in `replacementsOff`. A component
- * showing one provider's thing (a work item's state control) passes that
- * `provider`: its extension, and no other, may replace it (tsk918). One
- * showing the capability as a whole (the Board) passes none: the
- * capability's **active provider** decides — `v_capability_provider.active`,
- * which changes with `activeProviders` and no reload, so the choice is
- * made here, not at load. Either way there is one candidate.
+ * declares `ui.replacements: [{ target, lens }]`. The person says whose
+ * shows, by target (`replacements: { <target>: <extension> | "oxplow" }`);
+ * `"oxplow"` keeps oxplow's own wherever.
  *
- * A target core owns (`boundToProvider: false`, the history graph) has no
- * deciding provider: the one extension replacing it shows; among several,
- * the one the person chose (`replacements: { <target>: <extension> }`);
- * several and no choice keeps oxplow's own.
+ * A bound target (a work item's state control: a provider's own states)
+ * is given the provider of the thing it shows (`provider`, the item's,
+ * tsk918): only that provider's extension's replacement shows. Which
+ * extension brings a provider is read from `v_capability_provider` here,
+ * not at load, so installing or switching one needs no reload.
+ *
+ * An unbound target (the Board, the Tasks list, the detail editor, the
+ * history graph) has none: the person's chosen extension shows, or with
+ * no choice the only extension replacing it; several and no choice keeps
+ * oxplow's own.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -44,26 +44,24 @@ export type Replacement =
   /** The replacement couldn't load: oxplow's own, and why. */
   | { state: "failed"; replacement: UiReplacement; message: string };
 
-/** What the person said: the targets turned off (`replacementsOff`) and
- *  the extension chosen for a target no provider binds (`replacements`). */
-async function readChoices(): Promise<{ off: string[]; chosen: Record<string, string> }> {
+/** The `replacements` value that keeps oxplow's own component. */
+export const OXPLOWS_OWN = "oxplow";
+
+/** What the person said, by target: an extension, or `"oxplow"`. */
+async function readChoices(): Promise<Record<string, string>> {
   const settings = await effectiveConfig();
-  const off = settings.find((s) => s.key === "replacementsOff")?.value;
   const chosen = settings.find((s) => s.key === "replacements")?.value;
-  return {
-    off: Array.isArray(off) ? off.map(String) : [],
-    chosen:
-      chosen !== null && typeof chosen === "object" && !Array.isArray(chosen)
-        ? Object.fromEntries(Object.entries(chosen as Record<string, unknown>).map(([k, v]) => [k, String(v)]))
-        : {},
-  };
+  return chosen !== null && typeof chosen === "object" && !Array.isArray(chosen)
+    ? Object.fromEntries(Object.entries(chosen as Record<string, unknown>).map(([k, v]) => [k, String(v)]))
+    : {};
 }
 
 export function useReplacement(
   target: string,
   props: Record<string, SqlCell>,
   streamId: string | null,
-  /** The provider whose thing the component shows; none: the active one. */
+  /** The provider whose thing the component shows (a bound target's
+   *  decider; an unbound target takes none). */
   provider: string | null = null,
 ): Replacement {
   const exts = useExtensions();
@@ -79,17 +77,20 @@ export function useReplacement(
   // target reads no provider.
   const [owner, setOwner] = useState<string | null | undefined>(undefined);
   const [providerReads, setProviderReads] = useState<Reads>(NO_READS);
-  const [choices, setChoices] = useState<{ off: string[]; chosen: Record<string, string> } | undefined>(undefined);
+  const [choices, setChoices] = useState<Record<string, string> | undefined>(undefined);
   // Reads overlap (one per change): the newest one asked decides, however
   // they resolve (tsk857).
   const providersSeq = useRef(0);
   const readProviders = useCallback(async () => {
-    if (capability === null || !bound) return;
+    if (capability === null || !bound || provider === null) {
+      setOwner(null);
+      return;
+    }
     const mine = ++providersSeq.current;
     try {
       const out = await readCapabilityProviders(capability);
       if (providersSeq.current !== mine) return;
-      const deciding = out.providers.find((p) => (provider === null ? p.active : p.provider === provider));
+      const deciding = out.providers.find((p) => p.provider === provider);
       setOwner(deciding?.extension ?? null);
       setProviderReads(out.reads);
     } catch {
@@ -101,7 +102,7 @@ export function useReplacement(
     try {
       setChoices(await readChoices());
     } catch {
-      setChoices({ off: [], chosen: {} });
+      setChoices({});
     }
   }, []);
   useEffect(() => {
@@ -113,14 +114,18 @@ export function useReplacement(
     });
   }, [capability, readProviders, readOff]);
 
-  // Bound: the deciding provider's extension. Unbound: the person's
-  // choice, or the only candidate.
-  const decider = bound ? owner : (choices?.chosen[target] ?? (candidates.length === 1 ? candidates[0].extension : null));
+  // "oxplow": oxplow's own. Bound: the deciding provider's extension.
+  // Unbound: the person's choice, or the only candidate.
+  const said = choices?.[target];
+  const decider =
+    said === OXPLOWS_OWN
+      ? null
+      : bound
+        ? owner
+        : (said ?? (candidates.length === 1 ? candidates[0].extension : null));
   const known = choices !== undefined && (!bound || owner !== undefined);
   const chosen =
-    !known || decider === null || decider === undefined || choices.off.includes(target)
-      ? null
-      : (candidates.find((c) => c.extension === decider) ?? null);
+    !known || decider === null || decider === undefined ? null : (candidates.find((c) => c.extension === decider) ?? null);
   const lens = chosen === null ? null : ((exts ?? []).flatMap((e) => e.lenses).find((l) => l.id === chosen.lensId) ?? null);
 
   const [ran, setRan] = useState<{ id: string; key: string; run: LensRun | null; error: string | null } | null>(null);

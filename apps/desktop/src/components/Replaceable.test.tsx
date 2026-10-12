@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, expect, mock, test } from "bun:test";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 
-// P9.A1: a core sub-component (the Board) is replaced by the lens of the
-// capability's ACTIVE provider's extension — and only that one; oxplow's
-// own is what shows otherwise, and what a failed replacement falls back to.
+// A core sub-component is replaced by an extension's lens: an unbound one
+// (the Board) by the only extension replacing it or the person's choice; a
+// bound one (a work item's state control) by its provider's extension
+// only. Oxplow's own shows otherwise, and is what a failed replacement
+// falls back to.
 
 const realApi = await import("../api.js");
 const listeners = new Set<(e: Record<string, unknown>) => void>();
@@ -13,10 +15,9 @@ const emit = (event: Record<string, unknown>) =>
   });
 
 let extensions: unknown[] = [];
-/** The active work-items provider's extension (null: oxplow's own). */
-let activeExtension: string | null = null;
-let off: string[] = [];
-/** The person's choice among replacements of an unbound target. */
+/** The extension that brings the `fake` work-items provider (null: none). */
+let fakeExtension: string | null = null;
+/** The person's `replacements`, by target. */
 let chosen: Record<string, string> = {};
 let lensFails: string | null = null;
 /** How long each next active-provider read takes to answer (ms). */
@@ -27,9 +28,9 @@ const lensRuns: Array<[string, unknown]> = [];
 const usage: Array<Record<string, unknown>> = [];
 
 const providerRows = () => [
-  ["work_items", "oxplow", null, "{}", activeExtension === null ? 1 : 0],
-  ["work_items", "fake", "x", "{}", activeExtension === "x" ? 1 : 0],
-  ["work_items", "other", "y", "{}", activeExtension === "y" ? 1 : 0],
+  ["work_items", "oxplow", null, "{}", 1],
+  ["work_items", "fake", fakeExtension, "{}", 0],
+  ["work_items", "other", "y", "{}", 0],
 ];
 
 mock.module("../api.js", () => ({
@@ -39,10 +40,7 @@ mock.module("../api.js", () => ({
     listeners.add(l);
     return () => listeners.delete(l);
   },
-  effectiveConfig: async () => [
-    { key: "replacementsOff", value: off },
-    { key: "replacements", value: chosen },
-  ],
+  effectiveConfig: async () => [{ key: "replacements", value: chosen }],
   querySql: async (sql: string) => {
     if (!sql.includes("v_capability_provider")) {
       return { columns: [], rows: [], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} };
@@ -95,7 +93,7 @@ const replacing = (name: string) => ({
     commands: [],
     decorators: [],
     replacements: [
-      { id: `${name}/work_item.board`, extension: name, target: "work_item.board", capability: "work_items", boundToProvider: true, lensId: `${name}/board`, label: "board" },
+      { id: `${name}/work_item.board`, extension: name, target: "work_item.board", capability: "work_items", boundToProvider: false, lensId: `${name}/board`, label: "board", version: 1 },
     ],
   },
   lenses: [
@@ -103,15 +101,39 @@ const replacing = (name: string) => ({
   ],
 });
 
+/** Extension `name`, replacing a work item's state control. */
+const stating = (name: string) => ({
+  name,
+  enabled: true,
+  ui: {
+    slots: [],
+    commands: [],
+    decorators: [],
+    replacements: [
+      { id: `${name}/work_item.detail.state`, extension: name, target: "work_item.detail.state", capability: "work_items", boundToProvider: true, lensId: `${name}/state`, label: "state control", version: 1 },
+    ],
+  },
+  lenses: [{ id: `${name}/state`, params: [{ name: "ref", label: null, default: null }] }],
+});
+
 const PROPS = { scope: "all", thread_id: null };
 const board = () => (
   <Replaceable target="work_item.board" props={PROPS} streamId="str1" fallback={<div data-testid="core-board">oxplow's board</div>} />
 );
+const STATE_PROPS = { ref: "work_item:fake:1" };
+const state = (provider: string) => (
+  <Replaceable
+    target="work_item.detail.state"
+    props={STATE_PROPS}
+    streamId="str1"
+    provider={provider}
+    fallback={<div data-testid="core-state">oxplow's state</div>}
+  />
+);
 
 beforeEach(() => {
   extensions = [];
-  activeExtension = null;
-  off = [];
+  fakeExtension = null;
   chosen = {};
   lensFails = null;
   lensViz = "table";
@@ -125,8 +147,7 @@ afterEach(() => {
   // This file's `api.js` fakes outlive it (a module mock is process-wide):
   // leave them answering nothing, for whichever file runs next.
   extensions = [];
-  activeExtension = null;
-  off = [];
+  fakeExtension = null;
   chosen = {};
   lensFails = null;
 });
@@ -138,45 +159,71 @@ test("with nothing replacing it, the core component shows and no lens runs", asy
   expect(lensRuns).toEqual([]);
 });
 
-test("only the active provider's replacement renders, given the target's props", async () => {
-  extensions = [replacing("x"), replacing("y")];
-  activeExtension = "x";
-  const view = render(board());
-  const replaced = await waitFor(() => view.getByTestId("replacement-work_item.board"));
+// The Board is a view of the capability as a whole: any extension may
+// replace it. One shows by itself, given the target's props; among several
+// the person chooses; "oxplow" keeps oxplow's own.
+test("the Board shows its one replacement, or the person's choice among several", async () => {
+  extensions = [replacing("x")];
+  const one = render(board());
+  const replaced = await waitFor(() => one.getByTestId("replacement-work_item.board"));
   expect(replaced.textContent).toContain("replaced by x");
   expect(replaced.textContent).toContain("x/board row");
-  expect(view.queryByTestId("core-board")).toBeNull();
   expect(lensRuns).toEqual([["x/board", PROPS]]);
   expect(usage).toEqual([{ kind: "replacement", key: "x/work_item.board", streamId: "str1" }]);
+  cleanup();
+
+  extensions = [replacing("x"), replacing("y")];
+  lensRuns.length = 0;
+  const several = render(board());
+  await waitFor(() => expect(several.getByTestId("core-board")).toBeTruthy());
+  expect(lensRuns).toEqual([]);
+
+  chosen = { "work_item.board": "y" };
+  emit({ kind: "configChanged" });
+  await waitFor(() => expect(several.getByTestId("replacement-work_item.board").textContent).toContain("replaced by y"));
+
+  chosen = { "work_item.board": "oxplow" };
+  emit({ kind: "configChanged" });
+  await waitFor(() => expect(several.getByTestId("core-board")).toBeTruthy());
+  expect(several.container.querySelector('[data-testid^="replacement-"]')).toBeNull();
 });
 
-test("another provider's extension replaces nothing while it isn't the active one", async () => {
-  extensions = [replacing("x"), replacing("y")];
-  activeExtension = null;
-  const view = render(board());
-  await waitFor(() => expect(view.getByTestId("core-board")).toBeTruthy());
+// tsk918: a work item's state control is its own provider's: only that
+// provider's extension replaces it, however many extensions offer one.
+test("a state control is replaced only by its item's provider's extension", async () => {
+  extensions = [stating("x"), stating("y")];
+  fakeExtension = "x";
+  const view = render(state("fake"));
+  const replaced = await waitFor(() => view.getByTestId("replacement-work_item.detail.state"));
+  expect(replaced.textContent).toContain("replaced by x");
+  expect(lensRuns).toEqual([["x/state", STATE_PROPS]]);
+  cleanup();
+
+  // oxplow's own item: no extension brings oxplow's provider.
+  lensRuns.length = 0;
+  const own = render(state("oxplow"));
+  await waitFor(() => expect(own.getByTestId("core-state")).toBeTruthy());
   expect(lensRuns).toEqual([]);
 });
 
-test("the active provider changing swaps the component with no reload, and a person can turn it off", async () => {
-  extensions = [replacing("x"), replacing("y")];
-  const view = render(board());
-  await waitFor(() => expect(view.getByTestId("core-board")).toBeTruthy());
+test("the provider's extension changing swaps the component with no reload, and a person can keep oxplow's", async () => {
+  extensions = [stating("x"), stating("y")];
+  const view = render(state("fake"));
+  await waitFor(() => expect(view.getByTestId("core-state")).toBeTruthy());
 
-  activeExtension = "y";
+  fakeExtension = "y";
   emit({ kind: "modelsChanged", models: ["v_capability_provider"] });
-  await waitFor(() => expect(view.getByTestId("replacement-work_item.board").textContent).toContain("replaced by y"));
-  expect(view.queryByTestId("core-board")).toBeNull();
+  await waitFor(() => expect(view.getByTestId("replacement-work_item.detail.state").textContent).toContain("replaced by y"));
+  expect(view.queryByTestId("core-state")).toBeNull();
 
-  off = ["work_item.board"];
+  chosen = { "work_item.detail.state": "oxplow" };
   emit({ kind: "configChanged" });
-  await waitFor(() => expect(view.getByTestId("core-board")).toBeTruthy());
+  await waitFor(() => expect(view.getByTestId("core-state")).toBeTruthy());
   expect(view.container.querySelector('[data-testid^="replacement-"]')).toBeNull();
 });
 
 test("a replacement that can't load shows the core component and says why", async () => {
   extensions = [replacing("x")];
-  activeExtension = "x";
   lensFails = "no such view v_x_board";
   const view = render(board());
   const note = await waitFor(() => view.getByTestId("replacement-fallback"));
@@ -192,7 +239,6 @@ test("a replacement that can't load shows the core component and says why", asyn
 // note and oxplow's own — and isn't counted as shown.
 test("a custom replacement that can't load falls back outside its frame", async () => {
   extensions = [replacing("x")];
-  activeExtension = "x";
   lensViz = "custom";
   const view = render(board());
   const note = await waitFor(() => view.getByTestId("replacement-fallback"));
@@ -204,26 +250,26 @@ test("a custom replacement that can't load falls back outside its frame", async 
   expect(usage).toEqual([]);
 });
 
-// tsk857: reads of who is active can overlap (a change each); the newest
-// one asked decides, however they resolve.
-test("an older active-provider read answering late doesn't win", async () => {
-  extensions = [replacing("x"), replacing("y")];
-  activeExtension = "x";
-  const view = render(board());
-  await waitFor(() => expect(view.getByTestId("replacement-work_item.board").textContent).toContain("replaced by x"));
+// tsk857: reads of whose provider it is can overlap (a change each); the
+// newest one asked decides, however they resolve.
+test("an older provider read answering late doesn't win", async () => {
+  extensions = [stating("x"), stating("y")];
+  fakeExtension = "x";
+  const view = render(state("fake"));
+  await waitFor(() => expect(view.getByTestId("replacement-work_item.detail.state").textContent).toContain("replaced by x"));
 
   // A change starts a read once a burst is over (`COALESCE_MS`, 100).
   providerDelays.push(300, 0);
-  activeExtension = "y";
+  fakeExtension = "y";
   emit({ kind: "modelsChanged", models: ["v_capability_provider"] });
   // That read is under way (slow) when the next change is heard.
   await act(() => new Promise((r) => setTimeout(r, 150)));
-  activeExtension = null;
+  fakeExtension = null;
   emit({ kind: "modelsChanged", models: ["v_capability_provider"] });
-  await waitFor(() => expect(view.getByTestId("core-board")).toBeTruthy());
+  await waitFor(() => expect(view.getByTestId("core-state")).toBeTruthy());
   // The older read answers last.
   await act(() => new Promise((r) => setTimeout(r, 400)));
-  expect(view.getByTestId("core-board")).toBeTruthy();
+  expect(view.getByTestId("core-state")).toBeTruthy();
   expect(view.container.querySelector('[data-testid^="replacement-"]')).toBeNull();
 });
 
@@ -237,7 +283,7 @@ const graphing = (name: string) => ({
     commands: [],
     decorators: [],
     replacements: [
-      { id: `${name}/vcs.history.graph`, extension: name, target: "vcs.history.graph", capability: "vcs", boundToProvider: false, lensId: `${name}/graph`, label: "history graph" },
+      { id: `${name}/vcs.history.graph`, extension: name, target: "vcs.history.graph", capability: "vcs", boundToProvider: false, lensId: `${name}/graph`, label: "history graph", version: 1 },
     ],
   },
   lenses: [
@@ -269,7 +315,7 @@ test("an unbound target shows its one replacement, or the person's choice among 
   emit({ kind: "configChanged" });
   await waitFor(() => expect(several.getByTestId("replacement-vcs.history.graph").textContent).toContain("replaced by lanes"));
 
-  off = ["vcs.history.graph"];
+  chosen = { "vcs.history.graph": "oxplow" };
   emit({ kind: "configChanged" });
   await waitFor(() => expect(several.getByTestId("core-list")).toBeTruthy());
 });

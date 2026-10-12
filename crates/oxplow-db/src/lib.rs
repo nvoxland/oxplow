@@ -45,6 +45,7 @@ pub mod proposal_store;
 pub mod provider_collector_store;
 pub mod reasoning_store;
 pub mod ref_kind_store;
+pub mod replaceable_store;
 pub mod search_store;
 pub mod semantic_layer;
 pub mod snapshot_tree;

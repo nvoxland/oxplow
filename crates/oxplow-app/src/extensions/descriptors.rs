@@ -560,8 +560,9 @@ mod tests {
                 extension: "tracker".into(),
                 target: "work_item.board".into(),
                 capability: "work_items".into(),
-                bound_to_provider: true,
+                bound_to_provider: false,
                 lens_id: "tracker/board".into(),
+                version: 1,
                 label: "board".into(),
             });
         let d = describe(&ext)

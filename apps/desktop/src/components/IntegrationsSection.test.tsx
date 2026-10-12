@@ -9,7 +9,8 @@ import { formatShortDateTime } from "./format.js";
 const realApi = await import("../api.js");
 const ran: Array<[string, unknown, boolean]> = [];
 let active: unknown = null;
-let replacementsOff: string[] = [];
+let chosenReplacements: Record<string, string> = {};
+let noInstances = false;
 /** `tracker`'s `ui.replacements`. */
 let replacements: unknown[] = [];
 const credentialSaves: Array<[string, string, string | null]> = [];
@@ -55,7 +56,7 @@ const instance = {
 mock.module("../api.js", () => ({
   ...realApi,
   // A fresh copy each read, as over IPC.
-  listProviderInstances: async () => structuredClone([instance, ...more]),
+  listProviderInstances: async () => (noInstances ? [] : structuredClone([instance, ...more])),
   addProviderInstance: async (inst: string, provider: string, scope: string) => {
     added.push([inst, provider, scope]);
     more = [{ ...instance, instance: inst, instanceId: inst.split("/")[1], scope, enabled: false }];
@@ -73,7 +74,7 @@ mock.module("../api.js", () => ({
   },
   effectiveConfig: async () => [
     { key: "activeProviders", doc: "", value: active, origin: "default", extension: null, humanOnly: true, schema: {} },
-    { key: "replacementsOff", doc: "", value: replacementsOff, origin: "default", extension: null, humanOnly: true, schema: {} },
+    { key: "replacements", doc: "", value: chosenReplacements, origin: "default", extension: null, humanOnly: true, schema: {} },
   ],
   // Nothing unless a test declares a replacement: this fake outlives the
   // file (a module mock is process-wide).
@@ -157,7 +158,8 @@ afterEach(async () => {
   shellPresent = true;
   instance.credentials = STATIC_CREDENTIALS;
   active = null;
-  replacementsOff = [];
+  chosenReplacements = {};
+  noInstances = false;
   replacements = [];
 });
 
@@ -173,30 +175,44 @@ test("Sync Now runs provider.sync for that collector", async () => {
   );
 });
 
-// P9.A1: a person can keep oxplow's own component where an extension
-// replaces it — `replacementsOff`, a person's `oxplow.config.set` like the active
-// provider.
-test("a replaced component can be turned back to oxplow's own", async () => {
+// A person chooses whose replaced component shows — an extension, oxplow's
+// own, or the default — through `replacements`, a person's
+// `oxplow.config.set` like the active provider; listed even with no
+// provider instance.
+test("a person chooses whose replaced component shows", async () => {
   const none = render(<IntegrationsSection />);
   await waitFor(() => none.getByTestId("integrations-section"));
   expect(none.queryByTestId("integrations-replacements")).toBeNull();
   cleanup();
 
   replacements = [
-    { id: "tracker/work_item.board", extension: "tracker", target: "work_item.board", capability: "work_items", lensId: "tracker/board", label: "board" },
+    { id: "tracker/work_item.board", extension: "tracker", target: "work_item.board", capability: "work_items", boundToProvider: false, lensId: "tracker/board", label: "board", version: 1 },
   ];
   const view = render(<IntegrationsSection />);
   const row = await waitFor(() => view.getByTestId("integrations-replacement-work_item.board"));
-  expect(row.textContent).toContain("tracker");
-  const box = view.getByTestId("integrations-replacement-off-work_item.board") as HTMLInputElement;
-  expect(box.checked).toBe(false);
-  fireEvent.click(box);
+  expect(row.textContent).toContain("board");
+  const choice = view.getByTestId("integrations-replacement-choice-work_item.board") as HTMLSelectElement;
+  expect(choice.value).toBe("");
+  expect([...choice.options].map((o) => o.value)).toEqual(["", "oxplow", "tracker"]);
+  fireEvent.change(choice, { target: { value: "oxplow" } });
   await waitFor(() =>
-    expect(ran).toEqual([["oxplow.config.set", { key: "replacementsOff", value: ["work_item.board"] }, true]]),
+    expect(ran).toEqual([["oxplow.config.set", { key: "replacements", value: { "work_item.board": "oxplow" } }, true]]),
   );
-  await waitFor(() => expect(box.checked).toBe(true));
-  fireEvent.click(box);
-  await waitFor(() => expect(ran[1]).toEqual(["oxplow.config.unset", { key: "replacementsOff" }, true]));
+  await waitFor(() => expect(choice.value).toBe("oxplow"));
+  fireEvent.change(choice, { target: { value: "" } });
+  await waitFor(() => expect(ran[1]).toEqual(["oxplow.config.unset", { key: "replacements" }, true]));
+});
+
+// A replaced component needs no provider (an extension's Board doesn't), so
+// the choice is there with no instance at all.
+test("replaced components are listed with no provider instance", async () => {
+  noInstances = true;
+  replacements = [
+    { id: "views/work_item.board", extension: "views", target: "work_item.board", capability: "work_items", boundToProvider: false, lensId: "views/board", label: "board", version: 1 },
+  ];
+  const view = render(<IntegrationsSection />);
+  await waitFor(() => view.getByTestId("integrations-replacement-work_item.board"));
+  expect(view.getByTestId("integrations-empty")).toBeTruthy();
 });
 
 // P9.B1: a provider's credential is an instance's own — saved under the

@@ -378,6 +378,34 @@ A script declaring `needs: [jobs.read]` can call
 result body; read the result through `jobs.read`. An agent or effect that
 composes `enqueue` does not acquire the job's AI permission.
 
+### Replacing a core view
+
+A lens can stand in for one of these core views (`ui.replacements: [{
+target, lens, version? }]`). Its lens declares every prop as a `param`
+and gets them instead of any host state; `version`, when given, must be
+the contract's (a changed contract refuses an old declaration instead of
+handing it props it doesn't know). An unbound view may be replaced by
+any extension — a person picks whose shows in Settings → Integrations
+(the project's `replacements: { <target>: <extension> | oxplow }`); a
+bound one only by the extension of the provider whose item it shows.
+The same table is the `v_replaceable` model.
+
+<!-- replaceables:begin (generated from oxplow_domain::replaceable::REPLACEABLE; bless with OXPLOW_BLESS=1) -->
+| Target | What it is | Bound to a provider | Version | Props |
+|---|---|---|---|---|
+| `work_item.board` | board | no | 1 | `scope`, `thread_id` |
+| `work_item.list` | list | no | 1 | `scope`, `thread_id` |
+| `work_item.detail` | detail editor | no | 1 | `ref` |
+| `work_item.detail.state` | state control | yes | 1 | `ref` |
+| `vcs.history.graph` | history graph | no | 1 | `head_sha`, `reveal_sha`, `limit` |
+<!-- replaceables:end -->
+
+A view of work items reads `v_work_item` and changes items only through
+the interface commands (`oxplow.work_item.update`, `transition`,
+`reorder`, `move`, …), so it works with whichever list is active; the
+active list's `features` (`v_capability_provider`) say which of them it
+takes.
+
 ### Effects
 
 ```yaml

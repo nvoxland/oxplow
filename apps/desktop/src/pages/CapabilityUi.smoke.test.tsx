@@ -243,62 +243,48 @@ test("the file diff's header strip is plain, and a mount gets the file and its r
   await waitFor(() => expect(view.container.innerHTML).toContain('data-testid="diff.file.header-x/co"'));
 });
 
-// P9.A1: the Board is replaceable — by the active work-items provider's
-// extension only, given the Board's props and nothing else.
-test("the active provider's extension replaces the Board; another's doesn't", async () => {
-  const replacing = (name: string) => ({
-    name,
-    enabled: true,
-    ui: {
-      slots: [],
-      commands: [],
-      decorators: [],
-      replacements: [{ id: `${name}/work_item.board`, extension: name, target: "work_item.board", capability: "work_items", boundToProvider: true, lensId: `${name}/board`, label: "board" }],
-    },
-    lenses: [{ id: `${name}/board`, params: ["scope", "thread_id"].map((p) => ({ name: p, label: null, default: null })) }],
-  });
-  extensions = [replacing("x"), replacing("y")];
-  const realQuery = answers.querySql!;
-  let active = "oxplow";
-  answers.querySql = async (...args) => {
-    if (!String(args[0]).includes("v_capability_provider")) return realQuery(...args);
-    return ok({
-      columns: ["capability", "provider", "extension", "features", "active"],
-      rows: [
-        ["work_items", "oxplow", null, "{}", active === "oxplow" ? 1 : 0],
-        ["work_items", "fake", "x", "{}", active === "fake" ? 1 : 0],
-        ["work_items", "other", "y", "{}", 0],
-      ],
-      truncated: false,
-      reads: { models: ["v_capability_provider"], tables: [], measures: [] },
-      freshness: [],
-    });
-  };
-  try {
-    // Installed but not active: oxplow's own Board, and no replacement lens runs.
-    const own = mount("page:board", <BoardPage threadId={null} streamId="str1" onOpenPage={() => {}} />);
-    await waitFor(() => expect(own.getByTestId("work-board").textContent).toContain("Their bug"));
-    expect(own.container.querySelector('[data-testid^="replacement-"]')).toBeNull();
-    expect(lensRuns).toEqual([]);
-    cleanup();
-
-    active = "fake";
-    const replaced = mount("page:board", <BoardPage threadId={null} streamId="str1" onOpenPage={() => {}} />);
-    await waitFor(() => expect(replaced.getByTestId("replacement-work_item.board").textContent).toContain("replaced by x"));
-    expect(replaced.queryByTestId("work-board")).toBeNull();
-    expect(lensRuns).toEqual([["x/board", { scope: "all", thread_id: null }]]);
-    // The page's own chrome — its scope picker — is still oxplow's.
-    expect(replaced.getByTestId("board-scope")).toBeTruthy();
-  } finally {
-    answers.querySql = realQuery;
-  }
+/** Extension `name`, replacing `target` with its `lens`, which takes `params`. */
+const replacing = (name: string, target: string, lens: string, params: string[], label: string) => ({
+  name,
+  enabled: true,
+  ui: {
+    slots: [],
+    commands: [],
+    decorators: [],
+    replacements: [
+      { id: `${name}/${target}`, extension: name, target, capability: "work_items", boundToProvider: false, lensId: `${name}/${lens}`, label, version: 1 },
+    ],
+  },
+  lenses: [{ id: `${name}/${lens}`, params: params.map((p) => ({ name: p, label: null, default: null })) }],
 });
 
+// The Board is a view of the capability as a whole: an extension replaces
+// it without bringing a provider, given the Board's props and nothing else;
+// the page's own chrome stays oxplow's.
+test("an extension's view replaces the Board, whichever list is active", async () => {
+  extensions = [replacing("views", "work_item.board", "board", ["scope", "thread_id"], "board")];
+  const replaced = mount("page:board", <BoardPage threadId={null} streamId="str1" onOpenPage={() => {}} />);
+  await waitFor(() => expect(replaced.getByTestId("replacement-work_item.board").textContent).toContain("replaced by views"));
+  expect(replaced.queryByTestId("work-board")).toBeNull();
+  expect(lensRuns).toEqual([["views/board", { scope: "all", thread_id: null }]]);
+  expect(replaced.getByTestId("board-scope")).toBeTruthy();
+});
 
-// P10 (K4): a work item's state control (State and Move To) is the second
-// replaceable component, given the item's ref and nothing else. Which
-// extension replaces it is the **item's own provider's**, not the active
-// one's: another provider's item never gets a lens that sends that
+// A work item's editor (its title and body) is replaceable; the rail — the
+// state pill and Move To — and the rest of the page stay oxplow's, so an
+// item can always move whatever the editor offers.
+test("an extension's editor replaces a work item's title and body, and the rail stays", async () => {
+  extensions = [replacing("views", "work_item.detail", "edit", ["ref"], "detail editor")];
+  const page = mount("work_item:fake:W-1", <WorkItemPage workItemRef="work_item:fake:W-1" stream={null} thread={null} onOpenPage={() => {}} />);
+  const replaced = await waitFor(() => page.getByTestId("replacement-work_item.detail"));
+  expect(replaced.textContent).toContain("replaced by views");
+  expect(lensRuns).toEqual([["views/edit", { ref: "work_item:fake:W-1" }]]);
+  expect(page.getByLabelText("State")).toBeTruthy();
+  expect(replaced.contains(page.getByLabelText("State"))).toBe(false);
+  // Oxplow's own title field isn't there; the lens is.
+  expect(page.queryByPlaceholderText("Untitled")).toBeNull();
+});
+
 // provider's states (tsk918).
 test("a work item's own provider's extension replaces its state control, not the active one's", async () => {
   const stateLens = (name: string) => ({

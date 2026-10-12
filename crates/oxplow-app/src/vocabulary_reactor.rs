@@ -274,6 +274,7 @@ fn build_tx(
     restate_tx(tx, &rows, now)?;
     let kinds = register_kinds(declared, &mut errors);
     oxplow_db::ref_kind_store::restate_tx(tx, &kind_rows(&kinds, declared))?;
+    oxplow_db::replaceable_store::restate_tx(tx)?;
     Ok((Vocabulary::new(events, kinds), errors))
 }
 

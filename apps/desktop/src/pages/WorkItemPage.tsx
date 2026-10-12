@@ -249,13 +249,24 @@ export function WorkItemPage({
       commentsNav={stream ? <CommentNavigator targetKind="work_item" targetId={commentTarget} /> : undefined}
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-        <TaskDetail
-          item={item}
-          onUpdateTask={update}
-          comments={
-            stream
-              ? { streamId: stream.id, threadId: item.threadId, targetKind: "work_item", targetId: commentTarget }
-              : undefined
+        {/* The editor (title and body) is replaceable (`work_item.detail`);
+            the rail — the state pill and Move To, fields, Delete — and
+            everything below stay oxplow's. */}
+        <Replaceable
+          target="work_item.detail"
+          props={{ ref: item.ref }}
+          streamId={streamId}
+          onOpenPage={onOpenPage}
+          fallback={
+            <TaskDetail
+              item={item}
+              onUpdateTask={update}
+              comments={
+                stream
+                  ? { streamId: stream.id, threadId: item.threadId, targetKind: "work_item", targetId: commentTarget }
+                  : undefined
+              }
+            />
           }
         />
         {prompt === "comment" ? (
