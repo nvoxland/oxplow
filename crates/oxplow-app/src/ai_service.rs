@@ -1888,3 +1888,474 @@ mod tests {
         );
     }
 }
+
+/// The typed surface end to end: discovery from declared metadata, mixed
+/// text/tool parts through a provider, usage provenance, refused
+/// modalities, and the recorded provenance. No real network or keychain.
+#[cfg(test)]
+mod typed_tests {
+    use super::*;
+    use oxplow_ai::capabilities::CapabilitySupport;
+    use oxplow_ai::parts::{FinishReasonV1, MessageRoleV1, MessageV1, ToolDefinitionV1};
+    use oxplow_ai::secrets::{MemorySecrets, SecretError};
+    use oxplow_ai_fake::{mock, Seen};
+    use oxplow_db::Database;
+    use serde_json::{json, Value};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Counts keychain reads, so a test can say none happened.
+    #[derive(Default)]
+    struct WatchedSecrets {
+        inner: MemorySecrets,
+        gets: AtomicUsize,
+    }
+
+    impl SecretStore for WatchedSecrets {
+        fn get(&self, name: &str) -> Result<Option<String>, SecretError> {
+            self.gets.fetch_add(1, Ordering::SeqCst);
+            self.inner.get(name)
+        }
+        fn set(&self, name: &str, value: &str) -> Result<(), SecretError> {
+            self.inner.set(name, value)
+        }
+        fn delete(&self, name: &str) -> Result<(), SecretError> {
+            self.inner.delete(name)
+        }
+    }
+
+    /// Hands the mock's body back as the V1 response, whatever it says.
+    const PASS_THROUGH: &str = r#"
+def request(x):
+    return {"path": "/typed", "headers": {"authorization": "Bearer {{key}}"}, "body": x["request"]}
+
+def response(x):
+    return x["body"]
+"#;
+
+    fn snapshot(model: &str, tools: &str, image: &str) -> Value {
+        json!({ "schemaVersion": 1, "model": model, "modelKnown": true,
+                "text": "supported", "image": image, "toolCalling": tools,
+                "streaming": "unknown",
+                "contextTokens": { "value": 8000, "unit": "tokens" }, "outputTokens": null })
+    }
+
+    struct Fixture {
+        svc: AiService,
+        db: Database,
+        secrets: Arc<WatchedSecrets>,
+        seen: Seen,
+    }
+
+    /// A service whose `summarize` role is model `m` of provider `p`
+    /// (kind `fake`, the pass-through script with `models` declared, or
+    /// the shipped `openai_compatible` when `shipped`), answering `reply`.
+    async fn fixture(kind: &str, models: Option<Value>, reply: Value) -> Fixture {
+        let path = if kind == "fake" {
+            "/typed"
+        } else {
+            "/chat/completions"
+        };
+        let (base, seen) = mock(path, 200, reply).await;
+        let mut config = json!({ "ops": ["complete", "completeTyped"] });
+        if let Some(models) = models {
+            config["models"] = models;
+        }
+        let open: oxplow_ai_providers::Gate = Arc::new(|| Ok(()));
+        let fake =
+            oxplow_ai_providers::scripted("fake", "Fake", "f.star", PASS_THROUGH, &config, open)
+                .unwrap();
+        let providers = ModelProviders::default();
+        providers.set(vec![
+            fake,
+            test_providers().get("openai_compatible").unwrap(),
+        ]);
+        let dir = tempfile::tempdir().unwrap();
+        AiConfig {
+            providers: vec![ProviderConfig {
+                id: "p".into(),
+                kind: kind.into(),
+                base_url: Some(base.clone()),
+            }],
+            roles: BTreeMap::from([(
+                Role::Summarize,
+                RoleBinding {
+                    provider: "p".into(),
+                    model: "m".into(),
+                },
+            )]),
+        }
+        .save(dir.path())
+        .unwrap();
+        let secrets = Arc::new(WatchedSecrets::default());
+        let bound = StoredKey {
+            key: "sk-typed-key".into(),
+            endpoint: base,
+        };
+        secrets.set("p", &bound.encode()).unwrap();
+        let db = Database::in_memory();
+        let calls = Arc::new(SqliteAiCallStore::new(db.clone()));
+        let svc = AiService::new(providers, secrets.clone(), calls, Some(dir.path().into()));
+        // The config dir must outlive the service.
+        std::mem::forget(dir);
+        Fixture {
+            svc,
+            db,
+            secrets,
+            seen,
+        }
+    }
+
+    fn typed_reply(source: &str) -> Value {
+        json!({ "schemaVersion": 1, "finishReason": "toolCalls",
+            "parts": [
+                { "type": "text", "text": "first" },
+                { "type": "toolCall", "id": "c1", "name": "grep", "arguments": { "q": "x" } },
+                { "type": "text", "text": "last" } ],
+            "usage": { "inputTokens": 11, "outputTokens": 6, "source": source } })
+    }
+
+    fn mixed_request() -> TypedRequestV1 {
+        TypedRequestV1 {
+            schema_version: 1,
+            model: "m".into(),
+            tools: vec![ToolDefinitionV1 {
+                name: "grep".into(),
+                description: Some("search".into()),
+                parameters: json!({ "type": "object" }),
+            }],
+            messages: vec![
+                MessageV1 {
+                    role: MessageRoleV1::User,
+                    parts: vec![PartV1::Text {
+                        text: "find x".into(),
+                    }],
+                },
+                MessageV1 {
+                    role: MessageRoleV1::Assistant,
+                    parts: vec![PartV1::ToolCall {
+                        id: "c0".into(),
+                        name: "grep".into(),
+                        arguments: json!({ "q": "y" }),
+                    }],
+                },
+                MessageV1 {
+                    role: MessageRoleV1::Tool,
+                    parts: vec![PartV1::ToolResult {
+                        call_id: "c0".into(),
+                        result: json!(["hit"]),
+                    }],
+                },
+            ],
+        }
+    }
+
+    fn text_request(text: &str) -> TypedRequestV1 {
+        TypedRequestV1 {
+            schema_version: 1,
+            model: "m".into(),
+            tools: Vec::new(),
+            messages: vec![MessageV1 {
+                role: MessageRoleV1::User,
+                parts: vec![PartV1::Text { text: text.into() }],
+            }],
+        }
+    }
+
+    fn image_request() -> TypedRequestV1 {
+        let mut req = text_request("see");
+        req.messages[0].parts.push(PartV1::Image {
+            asset_ref: "asset:1".into(),
+            media_type: "image/png".into(),
+        });
+        req
+    }
+
+    async fn call_rows(db: &Database) -> Value {
+        let out = crate::sql_gateway::SqlGateway::new(db.clone())
+            .query_sql(
+                "SELECT ok, input_tokens, output_tokens, request_hash, response_hash FROM v_ai_call ORDER BY id",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        serde_json::to_value(&out.rows).unwrap()
+    }
+
+    #[tokio::test]
+    async fn discovery_returns_declared_metadata_without_network_or_keychain() {
+        let models = json!([
+            snapshot("m", "supported", "unknown"),
+            snapshot("other", "unsupported", "supported")
+        ]);
+        let fx = fixture("fake", Some(models), typed_reply("observed")).await;
+        let snap = fx.svc.capabilities(Role::Summarize).await.unwrap();
+        assert_eq!(snap.model.as_deref(), Some("m"));
+        assert_eq!(snap.tool_calling, CapabilitySupport::Supported);
+        assert_eq!(snap.image, CapabilitySupport::Unknown);
+        assert_eq!(snap.context_tokens.as_ref().map(|l| l.value), Some(8000));
+        assert_eq!(
+            snap.output_tokens, None,
+            "an undeclared limit stays unknown"
+        );
+        let catalog = fx.svc.models(Role::Summarize).await.unwrap();
+        assert!(catalog.catalog_known);
+        assert_eq!(catalog.models.len(), 2);
+
+        assert_eq!(
+            fx.secrets.gets.load(Ordering::SeqCst),
+            0,
+            "no keychain read"
+        );
+        assert!(fx.seen.lock().unwrap().is_empty(), "no network call");
+        assert_eq!(call_rows(&fx.db).await, json!([]), "nothing recorded");
+    }
+
+    /// A provider that declares nothing, or doesn't list the model, is
+    /// unknown across the board, with no guess from the model's name.
+    #[tokio::test]
+    async fn undeclared_metadata_stays_unknown() {
+        let fx = fixture("openai_compatible", None, json!({})).await;
+        let snap = fx.svc.capabilities(Role::Summarize).await.unwrap();
+        assert_eq!(
+            snap,
+            oxplow_ai::capabilities::CapabilitySnapshotV1::unknown("m")
+        );
+        assert!(!fx.svc.models(Role::Summarize).await.unwrap().catalog_known);
+
+        let listing_others = json!([snapshot("other", "supported", "supported")]);
+        let fx = fixture("fake", Some(listing_others), json!({})).await;
+        let snap = fx.svc.capabilities(Role::Summarize).await.unwrap();
+        assert!(!snap.model_known);
+        assert_eq!(snap.image, CapabilitySupport::Unknown);
+        assert_eq!(fx.secrets.gets.load(Ordering::SeqCst), 0);
+        assert!(fx.seen.lock().unwrap().is_empty());
+    }
+
+    /// Mixed text and tool parts return in the provider's order with the
+    /// finish category; observed usage fills the aggregate columns.
+    #[tokio::test]
+    async fn a_mixed_typed_call_returns_ordered_parts_and_observed_usage() {
+        let fx = fixture("fake", None, typed_reply("observed")).await;
+        let request = mixed_request();
+        let (response, id) = fx
+            .svc
+            .complete_typed_as(Role::Summarize, CallSite::new("test"), &request)
+            .await
+            .unwrap();
+        assert!(id.is_some());
+        assert!(matches!(response.parts.as_slice(),
+            [PartV1::Text { text: a }, PartV1::ToolCall { id, name, .. }, PartV1::Text { text: b }]
+            if a == "first" && id == "c1" && name == "grep" && b == "last"));
+        assert_eq!(response.finish_reason, FinishReasonV1::ToolCalls);
+        assert_eq!(response.usage.source, UsageSourceV1::Observed);
+
+        // The provider got the whole ordered request and the stored key.
+        let (_, headers, body) = fx.seen.lock().unwrap()[0].clone();
+        assert_eq!(headers["authorization"], "Bearer sk-typed-key");
+        assert_eq!(body, serde_json::to_value(&request).unwrap());
+
+        // The call keeps its request hash and the exact response, and the
+        // aggregate columns count the observed usage.
+        let rows = call_rows(&fx.db).await;
+        assert_eq!(rows[0][0], 1);
+        assert_eq!(
+            (rows[0][1].clone(), rows[0][2].clone()),
+            (json!(11), json!(6))
+        );
+        assert_eq!(rows[0][3], ModelRequest::Typed(&request).hash());
+        let stored = oxplow_db::event_content_store::read(&fx.db, rows[0][4].as_str().unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        let stored: TypedResponseV1 = serde_json::from_slice(&stored).unwrap();
+        assert_eq!(stored, response);
+    }
+
+    /// Estimated usage is kept as estimated in the payload and never
+    /// leaks into the observed aggregates.
+    #[tokio::test]
+    async fn estimated_usage_is_not_counted_as_observed() {
+        let fx = fixture("fake", None, typed_reply("estimated")).await;
+        let (response, _) = fx
+            .svc
+            .complete_typed_as(Role::Summarize, CallSite::new("test"), &mixed_request())
+            .await
+            .unwrap();
+        assert_eq!(response.usage.source, UsageSourceV1::Estimated);
+        assert_eq!(response.usage.input_tokens, Some(11));
+        assert_eq!(observed_counts(&response), (0, 0));
+        let rows = call_rows(&fx.db).await;
+        assert_eq!(
+            (rows[0][1].clone(), rows[0][2].clone()),
+            (json!(0), json!(0))
+        );
+        let stored = oxplow_db::event_content_store::read(&fx.db, rows[0][4].as_str().unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        let stored: Value = serde_json::from_slice(&stored).unwrap();
+        assert_eq!(stored["usage"]["source"], "estimated");
+        assert_eq!(stored["usage"]["inputTokens"], 11);
+    }
+
+    /// An image is refused at the app boundary, naming the feature: no
+    /// key read, no request, no call row.
+    #[tokio::test]
+    async fn an_image_part_is_refused_before_anything_happens() {
+        let fx = fixture("fake", None, typed_reply("observed")).await;
+        let err = fx
+            .svc
+            .complete_typed_as(Role::Summarize, CallSite::new("test"), &image_request())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, AiServiceError::Call(AiError::UnsupportedFeature { feature, support, .. })
+                if feature == "imageAssetResolution" && *support == CapabilitySupport::Unsupported),
+            "{err}"
+        );
+        assert_eq!(fx.secrets.gets.load(Ordering::SeqCst), 0);
+        assert!(fx.seen.lock().unwrap().is_empty());
+        assert_eq!(call_rows(&fx.db).await, json!([]));
+    }
+
+    /// A modality the model's declared metadata rules out fails before the
+    /// key is fetched or a request is sent; an unknown one is attempted.
+    #[tokio::test]
+    async fn a_declared_unsupported_tool_call_fails_clearly() {
+        let models = json!([snapshot("m", "unsupported", "unknown")]);
+        let fx = fixture("fake", Some(models), typed_reply("observed")).await;
+        let err = fx
+            .svc
+            .complete_typed_as(Role::Summarize, CallSite::new("test"), &mixed_request())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, AiServiceError::Call(AiError::UnsupportedFeature { feature, support, .. })
+                if feature == "toolCalling" && *support == CapabilitySupport::Unsupported),
+            "{err}"
+        );
+        assert_eq!(fx.secrets.gets.load(Ordering::SeqCst), 0);
+        assert!(fx.seen.lock().unwrap().is_empty());
+        // Plain text is still fine for that model.
+        fx.svc
+            .complete_typed_as(Role::Summarize, CallSite::new("test"), &text_request("hi"))
+            .await
+            .unwrap();
+        assert_eq!(fx.seen.lock().unwrap().len(), 1);
+    }
+
+    /// A request for another model, or another schema version, is refused
+    /// instead of reaching the provider.
+    #[tokio::test]
+    async fn a_request_must_name_the_roles_model_and_a_known_version() {
+        let fx = fixture("fake", None, typed_reply("observed")).await;
+        let other_model = TypedRequestV1 {
+            model: "other".into(),
+            ..text_request("hi")
+        };
+        let err = fx
+            .svc
+            .complete_typed_as(Role::Summarize, CallSite::new("t"), &other_model)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("role's configured model"), "{err}");
+        let stale = TypedRequestV1 {
+            schema_version: 2,
+            ..text_request("hi")
+        };
+        let err = fx
+            .svc
+            .complete_typed_as(Role::Summarize, CallSite::new("t"), &stale)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("schemaVersion 2"), "{err}");
+        assert!(fx.seen.lock().unwrap().is_empty());
+    }
+
+    /// A provider that answers with an image part is refused, not trimmed.
+    #[tokio::test]
+    async fn an_image_in_a_response_is_refused() {
+        let reply = json!({ "schemaVersion": 1, "finishReason": "stop",
+            "parts": [{ "type": "image", "assetRef": "a", "mediaType": "image/png" }],
+            "usage": { "inputTokens": null, "outputTokens": null, "source": "unknown" } });
+        let fx = fixture("fake", None, reply).await;
+        let err = fx
+            .svc
+            .complete_typed_as(Role::Summarize, CallSite::new("t"), &text_request("hi"))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("imageAssetResolution"), "{err}");
+        // The failed attempt is still recorded.
+        assert_eq!(call_rows(&fx.db).await[0][0], 0);
+    }
+
+    /// The text helpers and the typed call share one provider and one
+    /// record; a typed text call over a text-only provider keeps the
+    /// legacy usage as unknown-provenance counts.
+    #[tokio::test]
+    async fn text_helpers_and_the_typed_call_share_the_path() {
+        let reply = json!({"choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": "hello"}}],
+                           "usage": {"prompt_tokens": 10, "completion_tokens": 5}});
+        let fx = fixture("openai_compatible", None, reply).await;
+        let c = fx
+            .svc
+            .complete(Role::Summarize, "core", None, "hi", false)
+            .await
+            .unwrap();
+        assert_eq!(
+            (c.text.as_str(), c.input_tokens, c.output_tokens),
+            ("hello", 10, 5)
+        );
+        let qs = BTreeMap::from([(
+            "ok".to_string(),
+            oxplow_ai::client::Question::Noul {
+                instructions: "ok?".into(),
+            },
+        )]);
+        // Not a JSON answer, so decide reports the shape problem, but it
+        // went through the same provider.
+        assert!(fx
+            .svc
+            .decide(Role::Summarize, "core", "s", &qs)
+            .await
+            .is_err());
+
+        let (typed, _) = fx
+            .svc
+            .complete_typed_as(Role::Summarize, CallSite::new("core"), &text_request("hi"))
+            .await
+            .unwrap();
+        assert_eq!(
+            typed.parts,
+            vec![PartV1::Text {
+                text: "hello".into()
+            }]
+        );
+        assert_eq!(typed.finish_reason, FinishReasonV1::Stop);
+        assert_eq!(
+            (
+                typed.usage.input_tokens,
+                typed.usage.output_tokens,
+                typed.usage.source
+            ),
+            (Some(10), Some(5), UsageSourceV1::Observed)
+        );
+        let rows = call_rows(&fx.db).await;
+        assert_eq!(rows.as_array().unwrap().len(), 3);
+        assert_eq!(
+            rows[0][3],
+            ModelRequest::Complete {
+                system: None,
+                prompt: "hi",
+                json: false
+            }
+            .hash()
+        );
+        assert_eq!(rows[2][3], ModelRequest::Typed(&text_request("hi")).hash());
+        assert_eq!(
+            (rows[2][1].clone(), rows[2][2].clone()),
+            (json!(10), json!(5))
+        );
+    }
+}

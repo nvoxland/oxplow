@@ -947,4 +947,116 @@ mod tests {
             input_hash("y", &json!({ "a": 1 }))
         );
     }
+    fn typed_request(text: &str) -> TypedRequestV1 {
+        use oxplow_ai::parts::{MessageRoleV1, MessageV1, PartV1};
+        TypedRequestV1 {
+            schema_version: 1,
+            model: "x".into(),
+            tools: Vec::new(),
+            messages: vec![MessageV1 {
+                role: MessageRoleV1::User,
+                parts: vec![PartV1::Text { text: text.into() }],
+            }],
+        }
+    }
+
+    /// A typed computation is recorded with its full request and response
+    /// under the role's binding: asked twice, one call, and the cached
+    /// answer is the same ordered parts with the same usage provenance.
+    #[tokio::test]
+    async fn a_typed_completion_is_recorded_and_cached_with_provenance() {
+        use oxplow_ai::parts::{FinishReasonV1, PartV1, UsageSourceV1};
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let reply = json!({ "choices": [{ "finish_reason": "tool_calls", "message": {
+            "role": "assistant", "content": "checking",
+            "tool_calls": [{ "id": "c1", "type": "function",
+                             "function": { "name": "grep", "arguments": "{\"q\":\"x\"}" } }] } }],
+            "usage": { "prompt_tokens": 7, "completion_tokens": 3 } });
+        with_model(&fx.svc, Role::Summarize, reply).await;
+        let request = typed_request("find x");
+        let first = fx
+            .svc
+            .ai_compute
+            .complete_typed("test", Role::Summarize, &request)
+            .await
+            .unwrap();
+        assert!(!first.cached);
+        assert_eq!((first.input_tokens, first.output_tokens), (7, 3));
+        assert!(matches!(first.value.parts.as_slice(),
+            [PartV1::Text { text }, PartV1::ToolCall { name, arguments, .. }]
+            if text == "checking" && name == "grep" && arguments["q"] == "x"));
+        assert_eq!(first.value.finish_reason, FinishReasonV1::ToolCalls);
+        assert_eq!(first.value.usage.source, UsageSourceV1::Observed);
+
+        let second = fx
+            .svc
+            .ai_compute
+            .complete_typed("test", Role::Summarize, &request)
+            .await
+            .unwrap();
+        assert!(second.cached);
+        assert_eq!(second.value, first.value);
+        assert_eq!(second.ai_call_id, first.ai_call_id);
+        assert_eq!(calls(&fx.svc).await.len(), 1);
+
+        // The result and its call are keyed by the same typed request.
+        let keys = fx
+            .svc
+            .sql
+            .query_sql(
+                "SELECT r.request_hash, c.request_hash FROM v_ai_result r \
+                 JOIN v_ai_call c ON c.id = r.ai_call_id",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        let want = ModelRequest::Typed(&request).hash();
+        assert_eq!(
+            serde_json::to_value(&keys.rows).unwrap(),
+            json!([[want, want]])
+        );
+
+        // Different parts are another computation.
+        let other = fx
+            .svc
+            .ai_compute
+            .complete_typed("test", Role::Summarize, &typed_request("find y"))
+            .await
+            .unwrap();
+        assert!(!other.cached);
+    }
+
+    /// Images are refused before a call or a recorded result exists, and an
+    /// unknown schema version never reaches the provider.
+    #[tokio::test]
+    async fn a_typed_completion_refuses_images_and_unknown_versions() {
+        use oxplow_ai::parts::PartV1;
+        let fx = crate::test_fixtures::services_with_effort().await;
+        with_model(&fx.svc, Role::Summarize, chat("never sent")).await;
+        let mut with_image = typed_request("see");
+        with_image.messages[0].parts.push(PartV1::Image {
+            asset_ref: "asset:1".into(),
+            media_type: "image/png".into(),
+        });
+        let err = fx
+            .svc
+            .ai_compute
+            .complete_typed("test", Role::Summarize, &with_image)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("imageAssetResolution"), "{err}");
+        let stale = TypedRequestV1 {
+            schema_version: 2,
+            ..typed_request("hi")
+        };
+        let err = fx
+            .svc
+            .ai_compute
+            .complete_typed("test", Role::Summarize, &stale)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("schemaVersion 2"), "{err}");
+        assert!(calls(&fx.svc).await.is_empty());
+    }
 }

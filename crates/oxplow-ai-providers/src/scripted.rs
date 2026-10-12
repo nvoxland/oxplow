@@ -331,6 +331,12 @@ impl ModelProvider for Scripted {
                 }),
             )
             .await?;
+        if let Some(e) = response.get("error") {
+            return Err(AiError::BadResponse {
+                provider: instance.id.into(),
+                detail: e.as_str().unwrap_or("its reply isn't usable").to_string(),
+            });
+        }
         serde_json::from_value(response).map_err(|e| AiError::BadResponse {
             provider: instance.id.into(),
             detail: format!("its typed response is not V1: {e}"),
@@ -688,5 +694,356 @@ def response(x):
         .err()
         .unwrap();
         assert!(err.contains("`embed`"), "{err}");
+    }
+    const ANTHROPIC: &str =
+        include_str!("../../../extensions/oxplow-foundation/providers/anthropic.star");
+    const OPENAI: &str =
+        include_str!("../../../extensions/oxplow-foundation/providers/openai_compatible.star");
+
+    /// A script that answers `completeTyped` with a fixed V1 reply, so the
+    /// host path (not a vendor mapping) is what is under test.
+    const TYPED: &str = r#"
+def request(x):
+    return {"path": "/typed", "body": x["request"]}
+
+def response(x):
+    return x["body"]
+"#;
+
+    fn typed_ops() -> Value {
+        json!({ "ops": ["completeTyped"] })
+    }
+
+    fn user_text(text: &str) -> TypedRequestV1 {
+        use oxplow_ai::parts::{MessageRoleV1, MessageV1, PartV1};
+        TypedRequestV1 {
+            schema_version: 1,
+            model: "m".into(),
+            tools: Vec::new(),
+            messages: vec![MessageV1 {
+                role: MessageRoleV1::User,
+                parts: vec![PartV1::Text { text: text.into() }],
+            }],
+        }
+    }
+
+    fn snapshot(model: &str, tools: &str) -> Value {
+        json!({ "schemaVersion": 1, "model": model, "modelKnown": true,
+                "text": "supported", "image": "unknown", "toolCalling": tools,
+                "streaming": "unknown",
+                "contextTokens": { "value": 1000, "unit": "tokens" }, "outputTokens": null })
+    }
+
+    /// Declared `config.models` are the whole discovery answer: no script
+    /// run, no key, no request. A model the config doesn't list, and a
+    /// provider with no `models`, stay unknown.
+    #[tokio::test]
+    async fn discovery_reads_declared_metadata_and_nothing_else() {
+        let (base, seen) = mock("/chat", 200, json!({})).await;
+        let ran = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = ran.clone();
+        let counting: Gate = Arc::new(move || {
+            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        });
+        let config =
+            json!({ "models": [snapshot("a", "supported"), snapshot("b", "unsupported")] });
+        let p = scripted("x", "X", "p.star", CHAT, &config, counting).unwrap();
+        let instance = at(&base, None);
+
+        let a = p.discover(&instance, "a").await.unwrap();
+        assert!(a.model_known);
+        assert_eq!(
+            a.tool_calling,
+            oxplow_ai::capabilities::CapabilitySupport::Supported
+        );
+        assert_eq!(a.context_tokens.as_ref().map(|l| l.value), Some(1000));
+        // A limit the declaration leaves out is unknown, not zero.
+        assert_eq!(a.output_tokens, None);
+        let b = p.discover(&instance, "b").await.unwrap();
+        assert_eq!(
+            b.tool_calling,
+            oxplow_ai::capabilities::CapabilitySupport::Unsupported
+        );
+        assert_eq!(
+            p.discover(&instance, "c").await.unwrap(),
+            CapabilitySnapshotV1::unknown("c")
+        );
+
+        let catalog = p.discover_models(&instance).await.unwrap();
+        assert!(catalog.catalog_known);
+        assert_eq!(catalog.models.len(), 2);
+
+        let bare = scripted("y", "Y", "p.star", CHAT, &json!({}), open()).unwrap();
+        assert_eq!(
+            bare.discover_models(&instance).await.unwrap(),
+            ModelCatalogV1::unknown()
+        );
+        let empty = scripted("z", "Z", "p.star", CHAT, &json!({ "models": [] }), open()).unwrap();
+        let known_empty = empty.discover_models(&instance).await.unwrap();
+        assert!(known_empty.catalog_known && known_empty.models.is_empty());
+
+        assert!(seen.lock().unwrap().is_empty(), "no network call");
+        assert_eq!(
+            ran.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "no script ran"
+        );
+    }
+
+    #[test]
+    fn declared_models_must_be_resolved_and_unique() {
+        let dup = json!({ "models": [snapshot("a", "supported"), snapshot("a", "supported")] });
+        let err = scripted("x", "X", "p.star", CHAT, &dup, open())
+            .err()
+            .unwrap();
+        assert!(err.contains("config models"), "{err}");
+        let mut unresolved = snapshot("a", "supported");
+        unresolved["modelKnown"] = json!(false);
+        let err = scripted(
+            "x",
+            "X",
+            "p.star",
+            CHAT,
+            &json!({ "models": [unresolved] }),
+            open(),
+        )
+        .err()
+        .unwrap();
+        assert!(err.contains("config models"), "{err}");
+        let mut stale = snapshot("a", "supported");
+        stale["schemaVersion"] = json!(9);
+        let err = scripted(
+            "x",
+            "X",
+            "p.star",
+            CHAT,
+            &json!({ "models": [stale] }),
+            open(),
+        )
+        .err()
+        .unwrap();
+        assert!(err.contains("config"), "{err}");
+    }
+
+    /// A `completeTyped` script returns the V1 shape; ordered parts, finish
+    /// category and usage with its provenance reach the caller untouched.
+    #[tokio::test]
+    async fn a_typed_script_returns_ordered_parts_finish_and_usage() {
+        let reply = json!({ "schemaVersion": 1, "finishReason": "toolCalls",
+            "parts": [
+                { "type": "text", "text": "looking" },
+                { "type": "toolCall", "id": "c1", "name": "grep", "arguments": { "q": "x" } },
+                { "type": "text", "text": "done" } ],
+            "usage": { "inputTokens": 0, "outputTokens": null, "source": "estimated" } });
+        let (base, seen) = mock("/typed", 200, reply).await;
+        let p = scripted("x", "X", "p.star", TYPED, &typed_ops(), open()).unwrap();
+        let r = p
+            .complete_typed(&at(&base, None), &user_text("hi"))
+            .await
+            .unwrap();
+        use oxplow_ai::parts::{FinishReasonV1, PartV1, UsageSourceV1};
+        assert_eq!(r.finish_reason, FinishReasonV1::ToolCalls);
+        assert!(matches!(r.parts.as_slice(),
+            [PartV1::Text { text: a }, PartV1::ToolCall { id, .. }, PartV1::Text { text: b }]
+            if a == "looking" && id == "c1" && b == "done"));
+        assert_eq!(r.usage.source, UsageSourceV1::Estimated);
+        assert_eq!(r.usage.input_tokens, Some(0), "known zero stays zero");
+        assert_eq!(r.usage.output_tokens, None);
+        assert_eq!(
+            seen.lock().unwrap()[0].2["messages"][0]["parts"][0]["text"],
+            "hi"
+        );
+    }
+
+    /// A reply that isn't V1 (a wrong version, an unknown part kind) is a
+    /// clear error, not a silently trimmed response.
+    #[tokio::test]
+    async fn a_typed_reply_that_is_not_v1_is_refused() {
+        let p = scripted("x", "X", "p.star", TYPED, &typed_ops(), open()).unwrap();
+        for bad in [
+            json!({ "schemaVersion": 2, "parts": [], "finishReason": "stop",
+                    "usage": { "inputTokens": null, "outputTokens": null, "source": "unknown" } }),
+            json!({ "schemaVersion": 1, "parts": [{ "type": "audio" }], "finishReason": "stop",
+                    "usage": { "inputTokens": null, "outputTokens": null, "source": "unknown" } }),
+        ] {
+            let (base, _) = mock("/typed", 200, bad).await;
+            let err = p
+                .complete_typed(&at(&base, None), &user_text("hi"))
+                .await
+                .unwrap_err();
+            assert!(err.to_string().contains("not V1"), "{err}");
+        }
+    }
+
+    /// Without `completeTyped` the text adapter runs: text works, an image
+    /// is refused before anything is sent.
+    #[tokio::test]
+    async fn a_text_only_script_refuses_an_image_part() {
+        use oxplow_ai::parts::{MessageRoleV1, MessageV1, PartV1};
+        let (base, seen) = mock("/chat", 200, json!({ "out": "ok", "in_t": 2, "out_t": 1 })).await;
+        let p = scripted("x", "X", "p.star", CHAT, &json!({}), open()).unwrap();
+        let r = p
+            .complete_typed(&at(&base, None), &user_text("hi"))
+            .await
+            .unwrap();
+        assert_eq!(r.parts, vec![PartV1::Text { text: "ok".into() }]);
+        let mut with_image = user_text("hi");
+        with_image.messages.push(MessageV1 {
+            role: MessageRoleV1::User,
+            parts: vec![PartV1::Image {
+                asset_ref: "a".into(),
+                media_type: "image/png".into(),
+            }],
+        });
+        let before = seen.lock().unwrap().len();
+        let err = p
+            .complete_typed(&at(&base, None), &with_image)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AiError::UnsupportedFeature { .. }), "{err}");
+        assert_eq!(seen.lock().unwrap().len(), before);
+    }
+
+    fn shipped_typed(script: &str, base_url: &str) -> Arc<dyn ModelProvider> {
+        scripted(
+            "x",
+            "X",
+            "p.star",
+            script,
+            &json!({ "baseUrl": base_url, "ops": ["complete", "completeTyped"] }),
+            open(),
+        )
+        .unwrap()
+    }
+
+    /// The shipped Anthropic mapping reads content blocks in order and
+    /// counts cache reads and writes as input.
+    #[tokio::test]
+    async fn the_anthropic_mapping_reads_ordered_blocks_and_cached_input() {
+        let body = json!({ "stop_reason": "tool_use",
+            "content": [
+                { "type": "text", "text": "one" },
+                { "type": "tool_use", "id": "t1", "name": "grep", "input": { "q": "x" } },
+                { "type": "text", "text": "two" } ],
+            "usage": { "input_tokens": 10, "cache_creation_input_tokens": 5,
+                       "cache_read_input_tokens": 100, "output_tokens": 7 } });
+        let (base, seen) = mock("/v1/messages", 200, body).await;
+        let p = shipped_typed(ANTHROPIC, &base);
+        let mut req = user_text("go");
+        req.tools.push(oxplow_ai::parts::ToolDefinitionV1 {
+            name: "grep".into(),
+            description: Some("search".into()),
+            parameters: json!({ "type": "object" }),
+        });
+        let r = p
+            .complete_typed(&at(&base, Some("sk-test-key")), &req)
+            .await
+            .unwrap();
+        use oxplow_ai::parts::{FinishReasonV1, PartV1, UsageSourceV1};
+        assert!(matches!(r.parts.as_slice(),
+            [PartV1::Text { text: a }, PartV1::ToolCall { id, name, arguments }, PartV1::Text { text: b }]
+            if a == "one" && id == "t1" && name == "grep" && arguments["q"] == "x" && b == "two"));
+        assert_eq!(r.finish_reason, FinishReasonV1::ToolCalls);
+        assert_eq!(r.usage.input_tokens, Some(115));
+        assert_eq!(r.usage.output_tokens, Some(7));
+        assert_eq!(r.usage.source, UsageSourceV1::Observed);
+        let (_, headers, sent) = seen.lock().unwrap()[0].clone();
+        assert_eq!(headers["x-api-key"], "sk-test-key");
+        assert_eq!(
+            sent["tools"][0]["input_schema"],
+            json!({ "type": "object" })
+        );
+        assert_eq!(sent["messages"][0]["content"][0]["text"], "go");
+    }
+
+    /// Usage the provider omits stays unknown rather than becoming zero.
+    #[tokio::test]
+    async fn the_anthropic_mapping_leaves_missing_usage_unknown() {
+        let body =
+            json!({ "stop_reason": "max_tokens", "content": [{ "type": "text", "text": "t" }] });
+        let (base, _) = mock("/v1/messages", 200, body).await;
+        let r = shipped_typed(ANTHROPIC, &base)
+            .complete_typed(&at(&base, None), &user_text("go"))
+            .await
+            .unwrap();
+        use oxplow_ai::parts::{FinishReasonV1, UsageSourceV1};
+        assert_eq!(r.finish_reason, FinishReasonV1::Length);
+        assert_eq!((r.usage.input_tokens, r.usage.output_tokens), (None, None));
+        assert_eq!(r.usage.source, UsageSourceV1::Unknown);
+    }
+
+    /// The shipped OpenAI mapping puts the text before the tool calls the
+    /// message carries, with the finish category and prompt/completion usage.
+    #[tokio::test]
+    async fn the_openai_mapping_reads_text_then_calls_and_usage() {
+        let body = json!({ "choices": [{ "finish_reason": "tool_calls", "message": {
+                "role": "assistant", "content": "checking",
+                "tool_calls": [
+                    { "id": "c1", "type": "function", "function": { "name": "a", "arguments": "{\"n\":1}" } },
+                    { "id": "c2", "type": "function", "function": { "name": "b", "arguments": "{}" } } ] } }],
+            "usage": { "prompt_tokens": 20, "completion_tokens": 9 } });
+        let (base, seen) = mock("/chat/completions", 200, body).await;
+        let r = shipped_typed(OPENAI, &base)
+            .complete_typed(&at(&base, Some("sk-test-key")), &user_text("go"))
+            .await
+            .unwrap();
+        use oxplow_ai::parts::{FinishReasonV1, PartV1, UsageSourceV1};
+        assert!(matches!(r.parts.as_slice(),
+            [PartV1::Text { text }, PartV1::ToolCall { id: i1, arguments, .. }, PartV1::ToolCall { id: i2, .. }]
+            if text == "checking" && i1 == "c1" && arguments["n"] == 1 && i2 == "c2"));
+        assert_eq!(r.finish_reason, FinishReasonV1::ToolCalls);
+        assert_eq!(
+            (r.usage.input_tokens, r.usage.output_tokens),
+            (Some(20), Some(9))
+        );
+        assert_eq!(r.usage.source, UsageSourceV1::Observed);
+        assert_eq!(
+            seen.lock().unwrap()[0].1["authorization"],
+            "Bearer sk-test-key"
+        );
+    }
+
+    /// A reply part the mapping cannot represent is an error, not a drop.
+    #[tokio::test]
+    async fn the_shipped_mappings_refuse_parts_they_cannot_represent() {
+        let (base, _) = mock(
+            "/v1/messages",
+            200,
+            json!({ "content": [{ "type": "thinking", "thinking": "hm" }] }),
+        )
+        .await;
+        let err = shipped_typed(ANTHROPIC, &base)
+            .complete_typed(&at(&base, None), &user_text("go"))
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("not V1") || err.to_string().contains("unsupported"),
+            "{err}"
+        );
+    }
+    /// A script's own `{error}` for a typed call reads as it does for text:
+    /// its message, not a complaint about the V1 shape.
+    #[tokio::test]
+    async fn a_typed_script_error_is_reported_as_the_scripts_message() {
+        let (base, _) = mock("/typed", 200, json!({ "error": "no assistant message" })).await;
+        let p = scripted("x", "X", "p.star", TYPED, &typed_ops(), open()).unwrap();
+        let err = p
+            .complete_typed(&at(&base, None), &user_text("hi"))
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err,
+            AiError::BadResponse {
+                provider: "p".into(),
+                detail: "no assistant message".into()
+            }
+        );
+        let (base, _) = mock("/v1/messages", 200, json!({ "content": "nope" })).await;
+        let err = shipped_typed(ANTHROPIC, &base)
+            .complete_typed(&at(&base, None), &user_text("hi"))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("no assistant content"), "{err}");
     }
 }

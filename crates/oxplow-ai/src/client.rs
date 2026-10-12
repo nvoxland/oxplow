@@ -630,4 +630,192 @@ mod tests {
         };
         assert_eq!(custom.base_url_or("https://x"), "http://h:1/v1");
     }
+    /// A legacy text provider that keeps what it was asked and counts calls.
+    struct Recorder {
+        calls: std::sync::Mutex<Vec<(Option<String>, String, String)>>,
+        reply: Completion,
+    }
+
+    impl Recorder {
+        fn new(input_tokens: i64, output_tokens: i64) -> Self {
+            Self {
+                calls: Default::default(),
+                reply: Completion {
+                    text: "answer".into(),
+                    input_tokens,
+                    output_tokens,
+                },
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ModelProvider for Recorder {
+        fn kind(&self) -> &str {
+            "rec"
+        }
+        fn title(&self) -> &str {
+            "Rec"
+        }
+        fn default_base_url(&self) -> Option<&str> {
+            None
+        }
+        async fn complete(
+            &self,
+            _: &ProviderInstance<'_>,
+            req: &CompleteRequest<'_>,
+        ) -> Result<Completion, AiError> {
+            self.calls.lock().unwrap().push((
+                req.system.map(str::to_string),
+                req.prompt.to_string(),
+                req.model.to_string(),
+            ));
+            Ok(self.reply.clone())
+        }
+    }
+
+    fn msg(role: MessageRoleV1, parts: Vec<PartV1>) -> crate::parts::MessageV1 {
+        crate::parts::MessageV1 { role, parts }
+    }
+
+    fn text(t: &str) -> PartV1 {
+        PartV1::Text { text: t.into() }
+    }
+
+    fn typed(messages: Vec<crate::parts::MessageV1>) -> TypedRequestV1 {
+        TypedRequestV1 {
+            schema_version: 1,
+            model: "m".into(),
+            messages,
+            tools: Vec::new(),
+        }
+    }
+
+    /// A provider with no discovery reports unknown, never a guess, and
+    /// asks nothing of the model to do it.
+    #[tokio::test]
+    async fn a_legacy_provider_discovers_unknown_without_a_call() {
+        let p = Recorder::new(1, 1);
+        let snap = p
+            .discover(&instance(), "claude-looks-capable")
+            .await
+            .unwrap();
+        assert_eq!(snap, CapabilitySnapshotV1::unknown("claude-looks-capable"));
+        assert_eq!(snap.image, CapabilitySupport::Unknown);
+        assert_eq!(
+            p.discover_models(&instance()).await.unwrap(),
+            ModelCatalogV1::unknown()
+        );
+        assert!(p.calls.lock().unwrap().is_empty());
+    }
+
+    /// System text and one user message become the text call; their text
+    /// is kept, and legacy replies carry no finish reason or usage source.
+    #[tokio::test]
+    async fn typed_text_runs_over_the_legacy_text_path() {
+        let p = Recorder::new(12, 4);
+        let req = typed(vec![
+            msg(MessageRoleV1::System, vec![text("be "), text("brief")]),
+            msg(MessageRoleV1::System, vec![text("really")]),
+            msg(MessageRoleV1::User, vec![text("hel"), text("lo")]),
+        ]);
+        let r = p.complete_typed(&instance(), &req).await.unwrap();
+        assert_eq!(
+            p.calls.lock().unwrap()[0],
+            (
+                Some("be brief\n\nreally".into()),
+                "hello".into(),
+                "m".into()
+            )
+        );
+        assert_eq!(r.parts, vec![text("answer")]);
+        assert_eq!(r.finish_reason, FinishReasonV1::Unknown);
+        assert_eq!(r.usage.source, UsageSourceV1::Unknown);
+        assert_eq!(
+            (r.usage.input_tokens, r.usage.output_tokens),
+            (Some(12), Some(4))
+        );
+    }
+
+    /// The legacy zero sentinel means "not reported", not a known zero.
+    #[tokio::test]
+    async fn legacy_sentinel_counts_stay_unknown() {
+        let p = Recorder::new(0, -1);
+        let req = typed(vec![msg(MessageRoleV1::User, vec![text("q")])]);
+        let r = p.complete_typed(&instance(), &req).await.unwrap();
+        assert_eq!((r.usage.input_tokens, r.usage.output_tokens), (None, None));
+    }
+
+    /// What the text path cannot carry is refused, naming the feature, and
+    /// nothing is sent.
+    #[tokio::test]
+    async fn the_text_adapter_refuses_what_it_would_drop() {
+        let p = Recorder::new(1, 1);
+        let user = |parts| msg(MessageRoleV1::User, parts);
+        let image = PartV1::Image {
+            asset_ref: "a".into(),
+            media_type: "image/png".into(),
+        };
+        let call = PartV1::ToolCall {
+            id: "c".into(),
+            name: "n".into(),
+            arguments: serde_json::json!({}),
+        };
+        let mut with_tools = typed(vec![user(vec![text("q")])]);
+        with_tools.tools.push(crate::parts::ToolDefinitionV1 {
+            name: "n".into(),
+            description: None,
+            parameters: serde_json::json!({}),
+        });
+        let cases = [
+            (
+                typed(vec![user(vec![text("q"), image])]),
+                "image",
+                CapabilitySupport::Unknown,
+            ),
+            (
+                typed(vec![user(vec![call])]),
+                "toolCalling",
+                CapabilitySupport::Unknown,
+            ),
+            (with_tools, "toolCalling", CapabilitySupport::Unknown),
+            (
+                typed(vec![user(vec![text("a")]), user(vec![text("b")])]),
+                "conversation",
+                CapabilitySupport::Unsupported,
+            ),
+            (
+                typed(vec![
+                    user(vec![text("a")]),
+                    msg(MessageRoleV1::Assistant, vec![text("b")]),
+                ]),
+                "conversation",
+                CapabilitySupport::Unsupported,
+            ),
+            (
+                typed(vec![msg(MessageRoleV1::System, vec![text("only system")])]),
+                "userMessage",
+                CapabilitySupport::Unsupported,
+            ),
+        ];
+        for (req, want_feature, want_support) in cases {
+            match p.complete_typed(&instance(), &req).await {
+                Err(AiError::UnsupportedFeature {
+                    feature, support, ..
+                }) => {
+                    assert_eq!((feature.as_str(), support), (want_feature, want_support));
+                }
+                other => panic!("expected an unsupported {want_feature}: {other:?}"),
+            }
+        }
+        let stale = TypedRequestV1 {
+            schema_version: 2,
+            ..typed(vec![msg(MessageRoleV1::User, vec![text("q")])])
+        };
+        assert!(matches!(
+            p.complete_typed(&instance(), &stale).await,
+            Err(AiError::UnsupportedSchemaVersion(_))
+        ));
+        assert!(p.calls.lock().unwrap().is_empty(), "nothing was sent");
+    }
 }

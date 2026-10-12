@@ -165,3 +165,151 @@ impl<'de> Deserialize<'de> for TypedResponseV1 {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn request() -> TypedRequestV1 {
+        TypedRequestV1 {
+            schema_version: 1,
+            model: "m".into(),
+            messages: vec![
+                MessageV1 {
+                    role: MessageRoleV1::User,
+                    parts: vec![
+                        PartV1::Text {
+                            text: "look".into(),
+                        },
+                        PartV1::Image {
+                            asset_ref: "asset:1".into(),
+                            media_type: "image/png".into(),
+                        },
+                    ],
+                },
+                MessageV1 {
+                    role: MessageRoleV1::Assistant,
+                    parts: vec![PartV1::ToolCall {
+                        id: "c1".into(),
+                        name: "grep".into(),
+                        arguments: json!({ "q": "x" }),
+                    }],
+                },
+                MessageV1 {
+                    role: MessageRoleV1::Tool,
+                    parts: vec![PartV1::ToolResult {
+                        call_id: "c1".into(),
+                        result: json!([1, 2]),
+                    }],
+                },
+            ],
+            tools: vec![ToolDefinitionV1 {
+                name: "grep".into(),
+                description: None,
+                parameters: json!({ "type": "object" }),
+            }],
+        }
+    }
+
+    /// Every part kind survives a round trip, in order, with the wire
+    /// names the scripts read (`toolCall`, `callId`, `assetRef`).
+    #[test]
+    fn a_request_round_trips_with_its_schema_version() {
+        let req = request();
+        let wire = serde_json::to_value(&req).unwrap();
+        assert_eq!(wire["schemaVersion"], 1);
+        let kinds: Vec<_> = wire["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|m| m["parts"].as_array().unwrap())
+            .map(|p| p["type"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(kinds, ["text", "image", "toolCall", "toolResult"]);
+        assert_eq!(wire["messages"][0]["parts"][1]["assetRef"], "asset:1");
+        assert_eq!(wire["messages"][2]["parts"][0]["callId"], "c1");
+        assert_eq!(wire["messages"][2]["role"], "tool");
+        assert_eq!(serde_json::from_value::<TypedRequestV1>(wire).unwrap(), req);
+    }
+
+    #[test]
+    fn a_request_without_tools_omits_them_and_reads_back_empty() {
+        let req = TypedRequestV1 {
+            tools: Vec::new(),
+            ..request()
+        };
+        let wire = serde_json::to_value(&req).unwrap();
+        assert!(wire.get("tools").is_none());
+        assert_eq!(serde_json::from_value::<TypedRequestV1>(wire).unwrap(), req);
+    }
+
+    #[test]
+    fn a_response_round_trips_with_finish_reason_and_usage() {
+        let response = TypedResponseV1 {
+            schema_version: 1,
+            parts: vec![
+                PartV1::Text { text: "a".into() },
+                PartV1::ToolCall {
+                    id: "c".into(),
+                    name: "n".into(),
+                    arguments: json!({}),
+                },
+            ],
+            finish_reason: FinishReasonV1::ToolCalls,
+            usage: UsageV1 {
+                input_tokens: Some(0),
+                output_tokens: None,
+                source: UsageSourceV1::Estimated,
+            },
+        };
+        let wire = serde_json::to_value(&response).unwrap();
+        assert_eq!(wire["finishReason"], "toolCalls");
+        assert_eq!(wire["usage"]["source"], "estimated");
+        // A known zero stays zero; a missing count stays null.
+        assert_eq!(wire["usage"]["inputTokens"], 0);
+        assert!(wire["usage"]["outputTokens"].is_null());
+        assert_eq!(
+            serde_json::from_value::<TypedResponseV1>(wire).unwrap(),
+            response
+        );
+    }
+
+    #[test]
+    fn an_unknown_schema_version_is_refused() {
+        let mut wire = serde_json::to_value(request()).unwrap();
+        wire["schemaVersion"] = json!(2);
+        let err = serde_json::from_value::<TypedRequestV1>(wire)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("schemaVersion 2 is unsupported"), "{err}");
+
+        let wire = json!({ "schemaVersion": 0, "parts": [], "finishReason": "stop",
+                           "usage": { "inputTokens": null, "outputTokens": null, "source": "unknown" } });
+        let err = serde_json::from_value::<TypedResponseV1>(wire)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("typed response schemaVersion 0"), "{err}");
+
+        // A Rust-built value is checked by `validate_version`.
+        let stale = TypedRequestV1 {
+            schema_version: 7,
+            ..request()
+        };
+        assert_eq!(stale.validate_version().unwrap_err().actual, 7);
+        assert!(request().validate_version().is_ok());
+    }
+
+    #[test]
+    fn an_unknown_part_kind_or_field_is_refused() {
+        let part = json!({ "type": "audio", "data": "x" });
+        assert!(serde_json::from_value::<PartV1>(part).is_err());
+        let part = json!({ "type": "text", "text": "a", "extra": 1 });
+        assert!(serde_json::from_value::<PartV1>(part).is_err());
+        let wire = json!({ "schemaVersion": 1, "model": "m", "messages": [], "stream": true });
+        assert!(serde_json::from_value::<TypedRequestV1>(wire).is_err());
+        let wire = json!({ "schemaVersion": 1, "model": "m",
+            "messages": [{ "role": "robot", "parts": [] }] });
+        assert!(serde_json::from_value::<TypedRequestV1>(wire).is_err());
+    }
+}
