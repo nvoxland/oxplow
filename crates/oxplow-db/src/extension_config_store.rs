@@ -416,3 +416,242 @@ fn map_tx_error(error: TxError<ConfigStoreError>) -> ConfigStoreError {
         TxError::Aborted(error) => error,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn store() -> SqliteExtensionConfigStore {
+        SqliteExtensionConfigStore::new(Database::in_memory())
+    }
+
+    fn ns(extension: &str, scope: Scope) -> ConfigNamespace {
+        ConfigNamespace::new(extension.into(), scope).unwrap()
+    }
+
+    fn refused(result: Result<ConfigSnapshot, ConfigStoreError>) {
+        match result {
+            Err(ConfigStoreError::InvalidData) => {}
+            Err(other) => panic!("expected InvalidData, got {other:?}"),
+            Ok(_) => panic!("expected a refusal"),
+        }
+    }
+
+    #[tokio::test]
+    async fn an_override_layer_writes_and_reads_back_canonically() {
+        let store = store();
+        let space = ns("notes", Scope::Project);
+        assert!(store.read(space.clone()).await.unwrap().is_none());
+
+        let written = store
+            .compare_exchange(
+                space.clone(),
+                None,
+                2,
+                json!({"b": 1, "a": {"y": 2, "x": 3}}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            written.stamp(),
+            Stamp {
+                schema_version: 2,
+                revision: 1
+            }
+        );
+
+        let read = store.read(space.clone()).await.unwrap().unwrap();
+        assert_eq!(read.values(), &json!({"a": {"x": 3, "y": 2}, "b": 1}));
+        assert_eq!(read.stamp(), written.stamp());
+
+        // A reset is an empty object at the next revision, not a delete.
+        let reset = store
+            .compare_exchange(space.clone(), Some(read.stamp()), 2, json!({}))
+            .await
+            .unwrap();
+        assert_eq!(reset.stamp().revision, 2);
+        assert_eq!(
+            store.read(space).await.unwrap().unwrap().values(),
+            &json!({})
+        );
+    }
+
+    #[tokio::test]
+    async fn project_and_personal_layers_are_separate_rows() {
+        let store = store();
+        store
+            .compare_exchange(
+                ns("notes", Scope::Project),
+                None,
+                1,
+                json!({"who": "project"}),
+            )
+            .await
+            .unwrap();
+        store
+            .compare_exchange(
+                ns("notes", Scope::Personal),
+                None,
+                1,
+                json!({"who": "personal"}),
+            )
+            .await
+            .unwrap();
+        let project = store
+            .read(ns("notes", Scope::Project))
+            .await
+            .unwrap()
+            .unwrap();
+        let personal = store
+            .read(ns("notes", Scope::Personal))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(project.values(), &json!({"who": "project"}));
+        assert_eq!(personal.values(), &json!({"who": "personal"}));
+        assert!(store
+            .read(ns("other", Scope::Project))
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn a_stale_stamp_is_refused_with_the_current_one() {
+        let store = store();
+        let space = ns("notes", Scope::Project);
+        let first = store
+            .compare_exchange(space.clone(), None, 1, json!({"a": 1}))
+            .await
+            .unwrap();
+        let second = store
+            .compare_exchange(space.clone(), Some(first.stamp()), 1, json!({"a": 2}))
+            .await
+            .unwrap();
+        for stale in [Some(first.stamp()), None] {
+            match store
+                .compare_exchange(space.clone(), stale, 1, json!({"a": 3}))
+                .await
+            {
+                Err(ConfigStoreError::Conflict { actual }) => {
+                    assert_eq!(actual, Some(second.stamp()));
+                }
+                Err(other) => panic!("expected a conflict, got {other:?}"),
+                Ok(_) => panic!("expected a conflict"),
+            }
+        }
+        assert_eq!(
+            store.read(space).await.unwrap().unwrap().values(),
+            &json!({"a": 2})
+        );
+    }
+
+    #[tokio::test]
+    async fn the_schema_version_cannot_decrease_but_inspect_reports_it() {
+        let store = store();
+        let space = ns("notes", Scope::Project);
+        let first = store
+            .compare_exchange(space.clone(), None, 3, json!({}))
+            .await
+            .unwrap();
+        refused(
+            store
+                .compare_exchange(space.clone(), Some(first.stamp()), 2, json!({}))
+                .await,
+        );
+        let inspected = store
+            .db
+            .read_or({
+                let space = space.clone();
+                move |conn| inspect_tx(conn, &space).map_err(TxError::Aborted)
+            })
+            .await
+            .unwrap();
+        assert_eq!(inspected, Some(first.stamp()));
+    }
+
+    #[tokio::test]
+    async fn values_must_be_a_bounded_object() {
+        let store = store();
+        let space = ns("notes", Scope::Project);
+        for not_object in [json!(1), json!("s"), json!(null), json!([1])] {
+            refused(
+                store
+                    .compare_exchange(space.clone(), None, 1, not_object)
+                    .await,
+            );
+        }
+        refused(
+            store
+                .compare_exchange(
+                    space.clone(),
+                    None,
+                    1,
+                    json!({"blob": "x".repeat(MAX_CONFIG_BYTES)}),
+                )
+                .await,
+        );
+        let mut deep = json!(1);
+        for _ in 0..=MAX_CONFIG_DEPTH {
+            deep = json!({"n": deep});
+        }
+        refused(store.compare_exchange(space.clone(), None, 1, deep).await);
+        refused(
+            store
+                .compare_exchange(space.clone(), None, 0, json!({}))
+                .await,
+        );
+        refused(
+            store
+                .compare_exchange(
+                    space.clone(),
+                    Some(Stamp {
+                        schema_version: 1,
+                        revision: 0,
+                    }),
+                    1,
+                    json!({}),
+                )
+                .await,
+        );
+        assert!(ConfigNamespace::new("Not Valid".into(), Scope::Project).is_err());
+        assert!(store.read(space).await.unwrap().is_none());
+    }
+
+    #[test]
+    fn a_write_needs_a_caller_owned_transaction() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(include_str!("../migrations/V53__extension_config.sql"))
+            .unwrap();
+        let space = ns("notes", Scope::Project);
+        // Autocommit: refused before touching the table.
+        assert!(matches!(
+            compare_exchange_tx(&conn, &space, None, 1, &json!({})),
+            Err(ConfigStoreError::TransactionRequired)
+        ));
+        conn.execute_batch("BEGIN").unwrap();
+        compare_exchange_tx(&conn, &space, None, 1, &json!({})).unwrap();
+        conn.execute_batch("COMMIT").unwrap();
+        assert!(read_tx(&conn, &space).unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn overrides_survive_reopening_the_same_database_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("local.sqlite");
+        let space = ns("notes", Scope::Personal);
+        let stamp = {
+            let store = SqliteExtensionConfigStore::new(Database::open(&path).unwrap());
+            store
+                .compare_exchange(space.clone(), None, 1, json!({"theme": "dark"}))
+                .await
+                .unwrap()
+                .stamp()
+        };
+        let store = SqliteExtensionConfigStore::new(Database::open(&path).unwrap());
+        let read = store.read(space).await.unwrap().unwrap();
+        assert_eq!(read.stamp(), stamp);
+        assert_eq!(read.values(), &json!({"theme": "dark"}));
+    }
+}

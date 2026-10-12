@@ -93,6 +93,8 @@ pub mod extension_jobs;
 #[cfg(test)]
 mod extension_jobs_tests;
 pub mod extension_models;
+#[cfg(test)]
+mod extension_private_state_tests;
 pub mod extension_ref_kinds;
 pub mod extension_runtime_adapters;
 pub mod extension_secrets;
@@ -1939,31 +1941,23 @@ impl Services {
         secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
         host_env: providers::host::HostEnv,
     ) -> Result<Self, AppInitError> {
-        Self::on_machine(project_dir, global_dir, secrets, host_env, |_| {
-            Ok(Database::in_memory())
-        })
+        Self::on_machine_with_database(
+            project_dir,
+            global_dir,
+            secrets,
+            host_env,
+            Database::in_memory(),
+        )
     }
 
-    /// [`Self::in_memory_on_machine`] over the project's database file
-    /// (`.oxplow/local.sqlite`), so a test can stop and start the project
-    /// on the same records — a restart.
-    pub fn on_disk_on_machine(
+    /// [`Self::in_memory_on_machine`] over a database the caller opened: a
+    /// test's file, reopened to see what survives a restart.
+    pub(crate) fn on_machine_with_database(
         project_dir: impl Into<PathBuf>,
         global_dir: PathBuf,
         secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
         host_env: providers::host::HostEnv,
-    ) -> Result<Self, AppInitError> {
-        Self::on_machine(project_dir, global_dir, secrets, host_env, |layout| {
-            Database::open(&layout.state_db_path).map_err(AppInitError::from)
-        })
-    }
-
-    fn on_machine(
-        project_dir: impl Into<PathBuf>,
-        global_dir: PathBuf,
-        secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
-        host_env: providers::host::HostEnv,
-        open: impl FnOnce(&AppLayout) -> Result<Database, AppInitError>,
+        db: Database,
     ) -> Result<Self, AppInitError> {
         let project_dir = project_dir.into();
         let state_dir = project_dir.join(".oxplow");
@@ -1991,7 +1985,6 @@ impl Services {
             lsp_request_timeout: std::time::Duration::from_secs(2),
             host_env,
         };
-        let db = open(&layout)?;
         Self::build(layout, config, db, machine)
     }
 

@@ -227,11 +227,12 @@ async fn a_recorded_job_runs_after_a_restart() {
         Arc::new(oxplow_ai::secrets::MemorySecrets::default());
     let open = || {
         Arc::new(
-            crate::Services::on_disk_on_machine(
+            crate::Services::on_machine_with_database(
                 dir.path(),
                 global.clone(),
                 secrets.clone(),
                 crate::providers::host::process_env(),
+                oxplow_db::Database::open(dir.path().join("restart.sqlite")).unwrap(),
             )
             .unwrap(),
         )

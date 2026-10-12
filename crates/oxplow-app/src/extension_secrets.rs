@@ -162,3 +162,111 @@ fn secret_failure() -> DomainError {
 pub(crate) fn account(project: &str, extension: &str, reference: &SecretRef) -> String {
     format!("extension-secret:{project}:{extension}:{}", reference.id())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oxplow_ai::secrets::MemorySecrets;
+    use oxplow_domain::extension_secret::SecretRef;
+
+    /// A project with enabled extension `alpha`, over a memory keychain the
+    /// test can inspect. The real keychain is never touched.
+    async fn fixture() -> (crate::Services, Arc<MemorySecrets>, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        crate::test_fixtures::init_git_repo(dir.path());
+        let ext = dir.path().join("oxplow/extensions/alpha");
+        std::fs::create_dir_all(&ext).unwrap();
+        std::fs::write(
+            ext.join("extension.yaml"),
+            "manifest: 2\nname: alpha\nintent:\n  purpose: p\n",
+        )
+        .unwrap();
+        let keychain = Arc::new(MemorySecrets::default());
+        let svc = crate::Services::in_memory_on_machine(
+            dir.path(),
+            dir.path().join(".oxplow/global-config"),
+            keychain.clone(),
+            crate::providers::host::process_env(),
+        )
+        .unwrap();
+        (svc, keychain, dir)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_saved_secret_lives_in_the_keychain_and_only_its_reference_comes_back() {
+        let (svc, keychain, dir) = fixture().await;
+        let secrets = &svc.extension_secrets;
+        let reference = secrets.save("alpha", None, "s3cr3t-value").await.unwrap();
+        assert!(secrets.is_set("alpha", &reference).await.unwrap());
+
+        let project = crate::collector_runner::project_key(dir.path());
+        assert_eq!(
+            keychain
+                .get(&account(&project, "alpha", &reference))
+                .unwrap()
+                .as_deref(),
+            Some("s3cr3t-value")
+        );
+        assert!(!format!("{reference:?}").contains(reference.id()));
+
+        // Rotating under the same reference replaces the value; another
+        // extension's account for it is a different slot.
+        let same = secrets
+            .save("alpha", Some(reference.clone()), "rotated")
+            .await
+            .unwrap();
+        assert_eq!(same, reference);
+        assert_eq!(
+            keychain
+                .get(&account(&project, "alpha", &reference))
+                .unwrap()
+                .as_deref(),
+            Some("rotated")
+        );
+        assert!(!secrets
+            .is_set("alpha", &SecretRef::generate())
+            .await
+            .unwrap());
+
+        secrets.revoke("alpha", &reference).unwrap();
+        assert!(!secrets.is_set("alpha", &reference).await.unwrap());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rotation_and_revocation_bump_a_watched_revision() {
+        let (svc, _keychain, _dir) = fixture().await;
+        let secrets = &svc.extension_secrets;
+        let reference = secrets.save("alpha", None, "one").await.unwrap();
+        let watched = secrets.watch("alpha", &reference);
+        let before = watched.load(Ordering::Acquire);
+        secrets
+            .save("alpha", Some(reference.clone()), "two")
+            .await
+            .unwrap();
+        let rotated = watched.load(Ordering::Acquire);
+        assert!(rotated > before);
+        secrets.revoke("alpha", &reference).unwrap();
+        assert!(watched.load(Ordering::Acquire) > rotated);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_secret_needs_a_current_owner_and_a_sane_value() {
+        let (svc, keychain, _dir) = fixture().await;
+        let secrets = &svc.extension_secrets;
+        for owner in ["ghost", "Not Valid", ""] {
+            assert!(
+                secrets.save(owner, None, "v").await.is_err(),
+                "{owner:?} owns nothing"
+            );
+        }
+        assert!(secrets.save("alpha", None, "").await.is_err());
+        assert!(secrets
+            .save("alpha", None, &"x".repeat(MAX_SECRET_BYTES + 1))
+            .await
+            .is_err());
+        assert!(
+            keychain.get("anything").unwrap().is_none(),
+            "nothing was stored for a refused save"
+        );
+    }
+}
