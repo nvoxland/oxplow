@@ -200,6 +200,7 @@ impl WorkItems {
             native_state: item.native_state,
             native: item.native,
             thread: None,
+            links: Vec::new(),
         })
         .expect("input serializes");
         let out = self.run(actor, work_item::CREATE, input).await?;
@@ -247,6 +248,22 @@ impl WorkItems {
         self.run(
             actor,
             work_item::LINK,
+            json!({ "ref": from, "target": to, "link_type": link_type }),
+        )
+        .await
+    }
+
+    /// Remove `from`'s `link_type` link to `to`.
+    pub async fn unlink(
+        &self,
+        actor: &Actor,
+        from: &str,
+        to: &str,
+        link_type: &str,
+    ) -> Result<CommandOutcome, CommandError> {
+        self.run(
+            actor,
+            work_item::UNLINK,
             json!({ "ref": from, "target": to, "link_type": link_type }),
         )
         .await
@@ -404,10 +421,16 @@ impl EventConsumer for WorkItemsProjection {
             // The set is restated whole, but a link already there keeps
             // when it was made: only the ones the record dropped go.
             for l in links {
+                // The target's kind, read through the grammar: a link to
+                // what isn't a ref is the provider's mistake, and dropped.
+                let Some(kind) = oxplow_domain::refs::build::kind_of(&l.target) else {
+                    tracing::warn!(item = %item.item_ref, target = %l.target, "a link's target isn't a ref");
+                    continue;
+                };
                 conn.execute(
-                    "INSERT OR IGNORE INTO work_item_link (from_ref, to_ref, link_type, created_at)
-                     VALUES (?1, ?2, ?3, ?4)",
-                    rusqlite::params![item.item_ref, l.target, l.link_type, at],
+                    "INSERT OR IGNORE INTO work_item_link (from_ref, to_ref, to_kind, link_type, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    rusqlite::params![item.item_ref, l.target, kind, l.link_type, at],
                 )
                 .map_err(|e| DomainError::Invalid(format!("link `{}`: {e}", l.link_type)))?;
             }

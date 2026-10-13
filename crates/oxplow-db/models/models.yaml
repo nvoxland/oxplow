@@ -1281,17 +1281,16 @@
     - { accepted_values: { column: state, values: [todo, in_progress, blocked, done, canceled] } }
     - { relationships: { column: parent_ref, to: work_item, field: ref } }
 - name: work_item_link
-  version: 1
-  description: "Links between the active work list's items (`oxplow.work_item.link`)."
+  version: 2
+  description: "Links from the active work list's items (`oxplow.work_item.link`): to another item (`blocks`, `relates_to`, …) or to any ref (`about` a collector, an effort, a file). A target needn't resolve — what it names may have been deleted or its extension removed — so join it to its kind's model when you need it there."
   columns:
     - { name: "from_ref", type: "TEXT", doc: "The item the link is from." }
-    - { name: "to_ref", type: "TEXT", doc: "The item it points at." }
-    - { name: "link_type", type: "TEXT", doc: "`blocks` (from must finish before to starts), `discovered_from`, `relates_to`, `duplicates`, `supersedes` or `replies_to`." }
+    - { name: "to_ref", type: "TEXT", doc: "What it points at: any ref." }
+    - { name: "to_kind", type: "TEXT", doc: "The target's kind (`work_item`, `collector`, `effort`, …). (v2)" }
+    - { name: "link_type", type: "TEXT", doc: "The list's own link type; oxplow's tasks: `blocks` (from must finish before to starts), `discovered_from`, `relates_to`, `duplicates`, `supersedes`, `replies_to` or `about` (the item is about the target)." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
   tests:
-    - { accepted_values: { column: link_type, values: [blocks, relates_to, discovered_from, duplicates, supersedes, replies_to] } }
     - { relationships: { column: from_ref, to: work_item, field: ref } }
-    - { relationships: { column: to_ref, to: work_item, field: ref } }
 - name: work_item_comment
   version: 1
   description: "Comments on the active work list's items (`oxplow.work_item.comment`)."

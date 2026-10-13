@@ -133,10 +133,11 @@ pub struct WorkItemsFeatures {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LinkRecord {
-    /// The item it points at (`work_item:<provider>:<id>`).
+    /// What it points at: another item (`work_item:<provider>:<id>`), or
+    /// any ref the item is about (`collector:triage/hot`, `effort:eff12`).
     pub target: String,
-    /// `blocks`, `discovered_from`, `relates_to`, `duplicates`,
-    /// `supersedes` or `replies_to`.
+    /// The list's own type (oxplow: `blocks`, `discovered_from`,
+    /// `relates_to`, `duplicates`, `supersedes`, `replies_to`, `about`).
     pub link_type: String,
 }
 
@@ -609,6 +610,10 @@ pub struct WorkItemCreateInput {
     /// for a person (oxplow's backlog).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
+    /// Its links, made with it (needs `links`): what it is `about`, what
+    /// it blocks.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub links: Vec<LinkRecord>,
 }
 
 /// Edit an item's fields and, optionally, its state — one run. Absent
@@ -634,17 +639,20 @@ pub struct WorkItemUpdateInput {
     pub native: Option<Value>,
 }
 
-/// A typed link from one item to another of the same provider.
+/// A typed link from an item to another item of the same provider, or to
+/// any ref (`about` it) — and, as `unlink`'s input, that link's removal.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkItemLinkInput {
     /// The item linked from.
     #[serde(rename = "ref")]
     pub item_ref: String,
-    /// The item linked to (the same provider's).
+    /// What it links to: an item of the same provider, or any ref of a
+    /// registered kind. Only an item is checked to exist; anything else
+    /// may dangle.
     pub target: String,
     /// The provider names its own types (oxplow: blocks, relates_to,
-    /// discovered_from, duplicates, supersedes, replies_to).
+    /// discovered_from, duplicates, supersedes, replies_to, about).
     pub link_type: String,
 }
 

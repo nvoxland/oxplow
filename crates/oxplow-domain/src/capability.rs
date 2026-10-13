@@ -164,6 +164,10 @@ pub const WORK_ITEMS: ProviderContract = ProviderContract {
             needs: Need::Feature("links"),
         },
         Verb {
+            name: "unlink",
+            needs: Need::Feature("links"),
+        },
+        Verb {
             name: "comment",
             needs: Need::Feature("comments"),
         },
@@ -660,7 +664,7 @@ mod tests {
         );
         assert_eq!(
             work.required(&serde_json::json!({"links": true, "lists": true, "comments": false})),
-            ["create", "update", "transition", "link", "move"]
+            ["create", "update", "transition", "link", "unlink", "move"]
         );
         assert!(work.verb("reorder").is_some() && work.verb("estimate").is_none());
         let policy = contract("effort_policy").unwrap();

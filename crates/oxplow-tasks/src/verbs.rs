@@ -159,6 +159,26 @@ pub fn create_tx(
         author: task_author(actor),
     };
     let id = store::insert_tx(conn, &item).map_err(CommandError::from)?;
+    // Its links, made with it. A backlog task's need the caller's thread.
+    for (n, link) in input.links.iter().enumerate() {
+        let at = |e: CommandError| match e {
+            CommandError::Invalid { field, message } => CommandError::Invalid {
+                field: field.map(|f| format!("/links/{n}{f}")),
+                message,
+            },
+            other => other,
+        };
+        link_target_tx(conn, &link.target).map_err(at)?;
+        let link_type = link_type_of(&link.link_type).map_err(at)?;
+        let link_thread = actor.thread_id().or(thread).ok_or_else(|| {
+            invalid_at(
+                &format!("/links/{n}"),
+                "a backlog task's links need a thread: file it from one".into(),
+            )
+        })?;
+        crate::satellite::create_link_tx(conn, link_thread, id, &link.target, link_type)
+            .map_err(CommandError::from)?;
+    }
     Ok(Answer {
         result: json!({ "ref": work_item_ref(id) }),
         inverse: None,
@@ -299,28 +319,52 @@ pub fn transition_tx(
     })
 }
 
-/// `link`: a typed link between two live tasks. It belongs to a thread:
-/// the caller's, else the linked task's, else the target's.
+/// What a link points at: an oxplow task, which must be live (`Some`),
+/// or any other ref, which may dangle (`None`). Another list's item is
+/// refused; whether a ref's kind is registered is core's to check.
+fn link_target_tx(
+    conn: &rusqlite::Connection,
+    target: &str,
+) -> Result<Option<TaskId>, CommandError> {
+    match oxplow_domain::refs::build::kind_of(target) {
+        None => Err(invalid_at(
+            "/target",
+            format!("`{target}` isn't a ref (<kind>:<id>)"),
+        )),
+        Some(kind) if kind == oxplow_domain::refs::kind::WORK_ITEM => {
+            let to = task_ref(target, "/target")?;
+            live_task_tx(conn, to, target, "/target")?;
+            Ok(Some(to))
+        }
+        Some(_) => Ok(None),
+    }
+}
+
+fn link_type_of(raw: &str) -> Result<TaskLinkType, CommandError> {
+    serde_json::from_value(Value::String(raw.to_string())).map_err(|_| {
+        invalid_at(
+            "/link_type",
+            format!(
+                "`{raw}` isn't an oxplow link type (blocks, relates_to, discovered_from, \
+                 duplicates, supersedes, replies_to, about)"
+            ),
+        )
+    })
+}
+
+/// `link`: a typed link from a live task to another live task, or to any
+/// ref it is `about`. It belongs to a thread: the caller's, else the
+/// task's, else the linked task's. Linking twice is one link. Undone by
+/// `unlink`.
 pub fn link_tx(
     conn: &rusqlite::Connection,
     actor: &Actor,
     input: WorkItemLinkInput,
 ) -> Result<Answer, CommandError> {
     let from = task_ref(&input.item_ref, "/ref")?;
-    let to = task_ref(&input.target, "/target")?;
     live_task_tx(conn, from, &input.item_ref, "/ref")?;
-    live_task_tx(conn, to, &input.target, "/target")?;
-    let link_type: TaskLinkType = serde_json::from_value(Value::String(input.link_type.clone()))
-        .map_err(|_| {
-            invalid_at(
-                "/link_type",
-                format!(
-                    "`{}` isn't an oxplow link type (blocks, relates_to, discovered_from, \
-                     duplicates, supersedes, replies_to)",
-                    input.link_type
-                ),
-            )
-        })?;
+    let to = link_target_tx(conn, &input.target)?;
+    let link_type = link_type_of(&input.link_type)?;
     let thread = match actor.thread_id() {
         Some(t) => t,
         None => {
@@ -329,19 +373,45 @@ pub fn link_tx(
                     .map_err(CommandError::from)?
                     .and_then(|t| t.thread_id))
             };
-            on(from)?.or(on(to)?).ok_or_else(|| {
+            let target_thread = match to {
+                Some(to) => on(to)?,
+                None => None,
+            };
+            on(from)?.or(target_thread).ok_or_else(|| {
                 invalid_at(
                     "/ref",
-                    "a link between two backlog tasks needs a thread: run it from one".into(),
+                    "a link from a backlog task needs a thread: run it from one".into(),
                 )
             })?
         }
     };
-    crate::satellite::create_link_tx(conn, thread, from, to, link_type)
+    let added = crate::satellite::create_link_tx(conn, thread, from, &input.target, link_type)
         .map_err(CommandError::from)?;
     Ok(Answer {
-        result: json!({ "ref": input.item_ref }),
-        inverse: None,
+        result: json!({ "ref": input.item_ref, "linked": added }),
+        inverse: added.then(|| CommandCall {
+            name: "unlink".into(),
+            input: serde_json::to_value(&input).expect("input serializes"),
+        }),
+        changed: vec![from],
+    })
+}
+
+/// `unlink`: remove a task's link. Undone by `link`, when there was one.
+pub fn unlink_tx(
+    conn: &rusqlite::Connection,
+    input: WorkItemLinkInput,
+) -> Result<Answer, CommandError> {
+    let from = task_ref(&input.item_ref, "/ref")?;
+    let link_type = link_type_of(&input.link_type)?;
+    let removed = crate::satellite::delete_link_tx(conn, from, &input.target, link_type)
+        .map_err(CommandError::from)?;
+    Ok(Answer {
+        result: json!({ "ref": input.item_ref, "unlinked": removed }),
+        inverse: removed.then(|| CommandCall {
+            name: "link".into(),
+            input: serde_json::to_value(&input).expect("input serializes"),
+        }),
         changed: vec![from],
     })
 }

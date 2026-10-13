@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use oxplow_domain::{NoteId, ThreadId, Timestamp};
 
-use crate::ids::{TaskId, TaskLinkId};
+use crate::ids::TaskId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -46,7 +46,8 @@ pub enum TaskAuthor {
     Agent,
 }
 
-/// The relationship type between two tasks.
+/// The relationship of a link from a task: to another item, or (`about`)
+/// to what the task is about — any ref.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskLinkType {
@@ -56,6 +57,7 @@ pub enum TaskLinkType {
     Duplicates,
     Supersedes,
     RepliesTo,
+    About,
 }
 
 /// A task row.
@@ -94,16 +96,6 @@ impl Task {
         self.status = to;
         self.updated_at = now;
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TaskLink {
-    pub id: TaskLinkId,
-    pub thread_id: ThreadId,
-    pub from_item_id: TaskId,
-    pub to_item_id: TaskId,
-    pub link_type: TaskLinkType,
-    pub created_at: Timestamp,
 }
 
 /// A comment on an oxplow task (`task_note:<id>`; a `oxplow.work_item.comment`).

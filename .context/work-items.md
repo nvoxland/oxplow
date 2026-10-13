@@ -30,8 +30,12 @@ list at a time, whichever implementation it is, and nothing with none.
 deleted: a deleted item isn't a live one, so the model's parent
 relationship holds; tsk572), and (V17) `thread_id` — the list it's on, a
 thread's or the backlog (NULL) — `rank` on that list and `closed_at`.
-`v_work_item_link` is its links (`blocks`, `discovered_from`,
-`relates_to`, `duplicates`, `supersedes`, `replies_to`),
+`v_work_item_link` is its links (`to_ref`, its `to_kind`, `link_type`):
+to another item of the list (`blocks`, `discovered_from`, `relates_to`,
+`duplicates`, `supersedes`, `replies_to`), or `about` any ref — what the
+item is about (`collector:triage/hot`, `effort:eff12`). A link's target
+needn't resolve; it may name something deleted or an extension's kind
+since uninstalled (refs.md "Using refs"),
 `v_work_item_comment` its comments. Core reads work items only through
 these: `get_thread_context`'s items, a work item's ref summary
 (`ref_resolver`), a `[[…]]` link's check (`link_check`) and search
@@ -217,8 +221,8 @@ service or models.
   provider every `create` files on, resolved each time by the capability
   registry from the config as it is now — no copy, so a person's choice
   applies to the very next `create` (see below).
-- **`VERBS`**: `create`, `update`, `transition`, `link`, `comment`,
-  `delete` — the capability's verbs.
+- **`VERBS`**: `create`, `update`, `transition`, `link`, `unlink`,
+  `comment`, `delete` — the capability's verbs.
 
 **One write surface: the dispatching `work_item.*`** (P7.A1;
 `commands/work_item.rs`). Each verb is an `External` command
@@ -265,7 +269,13 @@ provider (a provider's verb receives the same input, less `create`'s
   native_state?, native? }`;
 - `transition { ref, to, native_state? }` — `to` canonical; a
   `native_state` must map to it;
-- `link { ref, target, link_type }` (the provider names its link types),
+- `link { ref, target, link_type }` / `unlink` (same input): the provider
+  names its link types, and **every list with `links` takes `about` to
+  any ref** (the conformance suite checks it). A target that is an item
+  must be the same list's and is checked to exist; any other target
+  must be a ref of a kind the running vocabulary has, and may dangle.
+  `link` and `unlink` undo each other. `create` takes `links: [{ target,
+  link_type }]`, made with the item (oxplow: in one transaction);
   `comment { ref, body }`, `delete { ref }` (Destructive; only with
   `features.delete`).
 
@@ -296,7 +306,8 @@ anchored to the actor's thread. A list logs none of them itself
 | `create` | `work_item.created@2 { work_item, state }`, `work_item.state_changed@1 { work_item, to }` |
 | `update` | `work_item.edited@2 { work_item, fields }` naming what the input set — `title`, `body`, `parent`, `native.<name>` — and `state_changed` when the state moved |
 | `transition` | `state_changed` when the state moved |
-| `link` | `work_item.linked@2 { work_item, target, link_type }` (subject both) |
+| `link` | `work_item.linked@2 { work_item, target, link_type }` (subject both), unless the link was already there (`result.linked: false`) |
+| `unlink` | `work_item.unlinked@1 { work_item, target, link_type }` (subject both), unless there was none (`result.unlinked: false`) |
 | `comment` | `work_item.commented@2 { work_item, comment? }` — `comment` is the list's own id for it, when the answer names one (`result.comment`; oxplow: `not<n>`, the fake: `c<n>`) |
 | `delete` | `work_item.deleted@2 { work_item }` |
 | `reorder` / `move` | `edited` naming `rank` / `list` and `rank` |

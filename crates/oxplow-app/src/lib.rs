@@ -213,7 +213,7 @@ pub use hook_ingest::{
     HookEnvelope, HookIngestError, HookIngestService, IngestOutcome, ToolDecision,
 };
 pub use oxplow_lsp::{LspError, LspProxy};
-use oxplow_tasks::{SqliteTaskLinkStore, SqliteTaskStore};
+use oxplow_tasks::SqliteTaskStore;
 
 use oxplow_domain::vocabulary::VocabularyHandle;
 use std::path::PathBuf;
@@ -531,7 +531,6 @@ pub struct Services {
     pub agent_session_store: Arc<SqliteAgentSessionStore>,
     pub task_store: Arc<SqliteTaskStore>,
     pub thread_note_store: Arc<SqliteThreadNoteStore>,
-    pub task_link_store: Arc<SqliteTaskLinkStore>,
     /// The event log (`.context/data-model.md` "event_log"). Producers
     /// append inside their own transaction via `event_log_store::append_tx`;
     /// this handle is for reads and the pump.
@@ -950,7 +949,6 @@ impl Services {
         let comment_store = Arc::new(SqliteCommentStore::new(db.clone(), vocabulary.clone()));
         let task_store = Arc::new(SqliteTaskStore::new(db.clone()));
         let thread_note_store = Arc::new(SqliteThreadNoteStore::new(db.clone()));
-        let task_link_store = Arc::new(SqliteTaskLinkStore::new(db.clone()));
         let event_log_store = Arc::new(SqliteEventLogStore::new(db.clone(), vocabulary.clone()));
         let extension_activation = Arc::new(extension_activation::ExtensionActivation::new());
         let sql = sql_gateway::SqlGateway::new(db.clone())
@@ -1457,7 +1455,8 @@ impl Services {
             commands::work_item::transition_op(work_items.clone(), db.clone()),
             commands::work_item::update_op(work_items.clone(), link_deps.clone()),
             commands::work_item::create_op(work_items.clone(), link_deps.clone()),
-            commands::work_item::link_op(work_items.clone()),
+            commands::work_item::link_op(work_items.clone(), link_deps.clone()),
+            commands::work_item::unlink_op(work_items.clone(), link_deps.clone()),
             commands::work_item::comment_op(work_items.clone()),
             commands::work_item::reorder_op(work_items.clone()),
             commands::work_item::move_op(work_items.clone()),
@@ -1803,7 +1802,6 @@ impl Services {
             agent_session_store,
             task_store,
             thread_note_store,
-            task_link_store,
             event_log_store,
             sql,
             model_watermarks,
@@ -2271,6 +2269,7 @@ mod tests {
                 "oxplow.work_item.move",
                 "oxplow.work_item.reorder",
                 "oxplow.work_item.transition",
+                "oxplow.work_item.unlink",
                 "oxplow.work_item.update",
             ]
         );
@@ -2363,6 +2362,7 @@ mod tests {
                 "work_items.write/move",
                 "work_items.write/reorder",
                 "work_items.write/transition",
+                "work_items.write/unlink",
                 "work_items.write/update",
             ]
         );

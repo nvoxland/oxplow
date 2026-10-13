@@ -30,6 +30,7 @@ use oxplow_domain::events::schema::{
     EventType as _, WorkItemCommented, WorkItemCommentedV2, WorkItemCreated, WorkItemCreatedV2,
     WorkItemDeleted, WorkItemDeletedV2, WorkItemEdited, WorkItemEditedV2, WorkItemLinked,
     WorkItemLinkedV2, WorkItemRecorded, WorkItemStateChanged, WorkItemStateChangedV1,
+    WorkItemUnlinked, WorkItemUnlinkedV1,
 };
 use oxplow_domain::events::Envelope;
 use oxplow_domain::work_items::{
@@ -87,11 +88,9 @@ pub(crate) fn with_loose_refs(
         let Some(raw) = input.get(key).and_then(Value::as_str) else {
             continue;
         };
-        // A ref stays as it is; `parent_ref: ""` means no parent.
-        if raw.is_empty()
-            || oxplow_domain::refs::build::kind_of(raw).as_deref()
-                == Some(oxplow_domain::refs::kind::WORK_ITEM)
-        {
+        // A ref stays as it is (a link's target may be any ref);
+        // `parent_ref: ""` means no parent.
+        if raw.is_empty() || oxplow_domain::refs::build::kind_of(raw).is_some() {
             continue;
         }
         let canonical = registry
@@ -216,7 +215,75 @@ fn create_target(
         )?;
         belongs(&provider, parent, "/parent_ref")?;
     }
+    if !input.links.is_empty() {
+        supports(&provider, provider.features.links, "links", "/links")?;
+        for (n, link) in input.links.iter().enumerate() {
+            target_belongs(&provider, &link.target, &format!("/links/{n}/target"))?;
+        }
+    }
     Ok(provider)
+}
+
+/// A link's target: an item must be `provider`'s own; any other ref is
+/// the item's to point at (its kind is checked against the vocabulary
+/// when the command runs, [`check_link_targets`]).
+fn target_belongs(
+    provider: &WorkItemsProvider,
+    target: &str,
+    field: &str,
+) -> Result<(), CommandError> {
+    match oxplow_domain::refs::build::kind_of(target) {
+        None => Err(invalid_at(
+            field,
+            format!("`{target}` isn't a ref (<kind>:<id>)"),
+        )),
+        Some(kind) if kind == oxplow_domain::refs::kind::WORK_ITEM => {
+            belongs(provider, target, field)
+        }
+        Some(_) => Ok(()),
+    }
+}
+
+/// The link targets an input names, with their fields: a `link` /
+/// `unlink`'s `target`, a `create`'s `links[n].target`.
+fn link_targets(verb: &str, input: &Value) -> Vec<(String, String)> {
+    match verb {
+        "link" | "unlink" => input["target"]
+            .as_str()
+            .map(|t| vec![("/target".to_string(), t.to_string())])
+            .unwrap_or_default(),
+        "create" => input["links"]
+            .as_array()
+            .map(|links| {
+                links
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(n, l)| {
+                        l["target"]
+                            .as_str()
+                            .map(|t| (format!("/links/{n}/target"), t.to_string()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
+/// Every link target is a ref of a kind the running vocabulary has (an
+/// uninstalled extension's kind is refused when linking — a link already
+/// made to it may dangle).
+fn check_link_targets(
+    vocabulary: &oxplow_domain::vocabulary::VocabularyHandle,
+    verb: &str,
+    input: &Value,
+) -> Result<(), CommandError> {
+    let current = vocabulary.current();
+    for (field, target) in link_targets(verb, input) {
+        oxplow_domain::refs::validate_ref(&current.kinds, &target)
+            .map_err(|e| invalid_at(&field, e.to_string()))?;
+    }
+    Ok(())
 }
 
 fn update_target(
@@ -257,7 +324,7 @@ fn link_target(
     let input: WorkItemLinkInput = parse(input.clone())?;
     let provider = provider_of_ref(registry, &input.item_ref, "/ref")?;
     supports(&provider, provider.features.links, "links", "/ref")?;
-    belongs(&provider, &input.target, "/target")?;
+    target_belongs(&provider, &input.target, "/target")?;
     Ok(provider)
 }
 
@@ -328,7 +395,7 @@ pub(crate) fn provider_for(
         "create" => create_target,
         "update" => update_target,
         "transition" => ref_target,
-        "link" => link_target,
+        "link" | "unlink" => link_target,
         "comment" => comment_target,
         "delete" => delete_target,
         "reorder" => reorder_target,
@@ -357,6 +424,9 @@ fn dispatching(
         Box::pin(async move {
             let mut input = with_loose_refs(&registry, input)?;
             let provider = target(&registry, &input)?;
+            if let Some(links) = &links {
+                check_link_targets(&links.vocabulary, verb, &input)?;
+            }
             let mut thread = None;
             if verb == "create" {
                 if let Value::Object(fields) = &mut input {
@@ -583,12 +653,27 @@ fn canonical_events(
                 events.push(edited(fields));
             }
         }
-        "link" => {
+        // A link already there, or none to remove, changed nothing.
+        "link" if result["linked"] != json!(false) => {
             let target = input["target"].as_str().unwrap_or_default().to_string();
             events.push(
                 Envelope::typed::<WorkItemLinked>(
                     source,
                     &WorkItemLinkedV2 {
+                        work_item: item_ref.clone(),
+                        target: target.clone(),
+                        link_type: input["link_type"].as_str().unwrap_or_default().into(),
+                    },
+                )
+                .with_subject([item_ref.clone(), target]),
+            );
+        }
+        "unlink" if result["unlinked"] != json!(false) => {
+            let target = input["target"].as_str().unwrap_or_default().to_string();
+            events.push(
+                Envelope::typed::<WorkItemUnlinked>(
+                    source,
+                    &WorkItemUnlinkedV1 {
                         work_item: item_ref.clone(),
                         target: target.clone(),
                         link_type: input["link_type"].as_str().unwrap_or_default().into(),
@@ -708,13 +793,23 @@ pub fn update_op(registry: WorkItemsRegistry, links: LinkDeps) -> Op {
 // ---- oxplow.work_item.link ----
 
 pub const LINK: &str = "oxplow.work_item.link";
+pub const UNLINK: &str = "oxplow.work_item.unlink";
 
-pub fn link_op(registry: WorkItemsRegistry) -> Op {
+/// `link` and `unlink` undo each other.
+pub fn link_op(registry: WorkItemsRegistry, links: LinkDeps) -> Op {
     let shape = Shape {
         schema: schema::<WorkItemLinkInput>(),
-        undoable: false,
+        undoable: true,
     };
-    dispatching(shape, registry, "link", link_target, None, None)
+    dispatching(shape, registry, "link", link_target, Some(links), None)
+}
+
+pub fn unlink_op(registry: WorkItemsRegistry, links: LinkDeps) -> Op {
+    let shape = Shape {
+        schema: schema::<WorkItemLinkInput>(),
+        undoable: true,
+    };
+    dispatching(shape, registry, "unlink", link_target, Some(links), None)
 }
 
 // ---- oxplow.work_item.comment ----
@@ -1386,6 +1481,150 @@ mod tests {
 
     /// `oxplow.work_item.link` and `oxplow.work_item.comment` write the link and the
     /// note, each with its event, caused by the run.
+    /// A link may point at any ref: a work item says what it is `about`
+    /// (a collector), and the link reads back with its target's kind, as
+    /// an edge of the target's backlinks, and as the item's record. It is
+    /// undone by `unlink`, which undoes back to the link; a target of an
+    /// unregistered kind is refused, another list's item still is. The
+    /// target needn't exist: a ref may dangle.
+    #[tokio::test]
+    async fn an_item_links_about_any_ref_and_unlinks() {
+        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let agent = Actor::Agent {
+            session_id: None,
+            thread_id: Some(fx.thread),
+            stream_id: None,
+        };
+        let item = work_item_ref(fx.task);
+        let about = json!({ "ref": item, "target": "collector:gone/hot", "link_type": "about" });
+        let linked = fx
+            .svc
+            .commands
+            .run(&agent, LINK, about.clone(), false)
+            .await
+            .unwrap();
+        let link_rows = || async {
+            fx.svc
+                .sql
+                .query_sql(
+                    "SELECT to_ref, to_kind, link_type FROM v_work_item_link WHERE from_ref = ?1",
+                    vec![oxplow_db::SqlCell::Text(item.clone())],
+                    None,
+                )
+                .await
+                .unwrap()
+                .rows
+        };
+        fx.svc.event_pump.run_once().await.unwrap();
+        assert_eq!(
+            serde_json::to_value(link_rows().await).unwrap(),
+            json!([["collector:gone/hot", "collector", "about"]])
+        );
+        let backlinks = fx
+            .svc
+            .page_ref_store
+            .list_backlinks("collector", "gone/hot", None)
+            .await
+            .unwrap();
+        assert_eq!(
+            backlinks.len(),
+            1,
+            "the collector's backlinks name the item"
+        );
+
+        // Undo is an unlink; undoing that links again.
+        let undone = fx
+            .svc
+            .commands
+            .undo(&Actor::Human, linked.audit_id.unwrap(), false)
+            .await
+            .unwrap();
+        fx.svc.event_pump.run_once().await.unwrap();
+        assert!(link_rows().await.is_empty());
+        fx.svc
+            .commands
+            .undo(&Actor::Human, undone.audit_id.unwrap(), false)
+            .await
+            .unwrap();
+        fx.svc.event_pump.run_once().await.unwrap();
+        assert_eq!(link_rows().await.len(), 1);
+        fx.svc
+            .commands
+            .run(&agent, UNLINK, about, false)
+            .await
+            .unwrap();
+        fx.svc.event_pump.run_once().await.unwrap();
+        assert!(link_rows().await.is_empty());
+        let events = fx.svc.event_log_store.read_after(0, 500).await.unwrap();
+        assert!(events
+            .iter()
+            .any(|e| e.envelope.event_type == "work_item.unlinked"));
+
+        for (target, why) in [
+            ("nope:x", "an unregistered kind"),
+            ("work_item:fake:W-1", "another list's item"),
+            ("collector", "not a ref"),
+        ] {
+            let err = fx
+                .svc
+                .commands
+                .run(
+                    &agent,
+                    LINK,
+                    json!({ "ref": item, "target": target, "link_type": "about" }),
+                    false,
+                )
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(&err, CommandError::Invalid { field, .. } if field.as_deref() == Some("/target")),
+                "{why}: {err:?}"
+            );
+        }
+    }
+
+    /// An item is filed with its links, in one change.
+    #[tokio::test]
+    async fn an_item_is_created_with_its_links() {
+        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let agent = Actor::Agent {
+            session_id: None,
+            thread_id: Some(fx.thread),
+            stream_id: None,
+        };
+        let created = fx
+            .svc
+            .commands
+            .run(
+                &agent,
+                CREATE,
+                json!({
+                    "title": "Repair collector:triage/hot",
+                    "links": [{ "target": "collector:triage/hot", "link_type": "about" }],
+                }),
+                false,
+            )
+            .await
+            .unwrap();
+        fx.svc.event_pump.run_once().await.unwrap();
+        let item = created.result["ref"].as_str().unwrap().to_string();
+        let rows = fx
+            .svc
+            .sql
+            .query_sql(
+                "SELECT to_ref, link_type FROM v_work_item_link WHERE from_ref = ?1",
+                vec![oxplow_db::SqlCell::Text(item)],
+                None,
+            )
+            .await
+            .unwrap()
+            .rows;
+        assert_eq!(
+            serde_json::to_value(rows).unwrap(),
+            json!([["collector:triage/hot", "about"]])
+        );
+    }
+
     #[tokio::test]
     async fn links_and_comments_are_commands_with_their_events() {
         let fx = crate::test_fixtures::services_with_task_effort().await;

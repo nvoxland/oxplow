@@ -49,12 +49,12 @@ pub fn record_tx(conn: &rusqlite::Connection, id: TaskId) -> Result<WorkItemReco
     let (state, native_state) = state_pair(status, completed);
     let links = rows(
         conn,
-        "SELECT to_item_id, link_type FROM task_link WHERE from_item_id = ?1
+        "SELECT to_ref, link_type FROM task_link WHERE from_item_id = ?1
          ORDER BY created_at, id",
         id,
         |r| {
             Ok(LinkRecord {
-                target: work_item_ref(TaskId::new(r.get(0)?)),
+                target: r.get(0)?,
                 link_type: r.get(1)?,
             })
         },

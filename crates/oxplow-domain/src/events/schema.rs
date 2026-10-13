@@ -207,6 +207,8 @@ impl EventSchemaRegistry {
         r.register::<WorkItemCreated>()
             .expect("core type registers");
         r.register::<WorkItemLinked>().expect("core type registers");
+        r.register::<WorkItemUnlinked>()
+            .expect("core type registers");
         r.register::<WorkItemCommented>()
             .expect("core type registers");
         r.register::<WorkItemRecorded>()
@@ -2229,14 +2231,14 @@ impl EventType for WorkItemEdited {
     type Payload = WorkItemEditedV2;
 }
 
-/// `work_item.linked@2`: a typed link from one item to another of the
-/// same list.
+/// `work_item.linked@2`: a typed link from an item to another of the
+/// same list, or to any ref it is about.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkItemLinkedV2 {
     /// The item linked from (`work_item:<list>:<id>`).
     pub work_item: String,
-    /// The item linked to.
+    /// What it links to: an item, or any ref.
     pub target: String,
     /// One of the list's own link types.
     pub link_type: String,
@@ -2247,6 +2249,25 @@ impl EventType for WorkItemLinked {
     const TYPE: &'static str = "work_item.linked";
     const V: u32 = 2;
     type Payload = WorkItemLinkedV2;
+}
+
+/// `work_item.unlinked@1`: an item's link was removed
+/// (`oxplow.work_item.unlink`, or undoing a link).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemUnlinkedV1 {
+    /// The item linked from (`work_item:<list>:<id>`).
+    pub work_item: String,
+    /// What it linked to.
+    pub target: String,
+    pub link_type: String,
+}
+
+pub struct WorkItemUnlinked;
+impl EventType for WorkItemUnlinked {
+    const TYPE: &'static str = "work_item.unlinked";
+    const V: u32 = 1;
+    type Payload = WorkItemUnlinkedV1;
 }
 
 /// `work_item.commented@2`: a comment was added to an item.
@@ -2732,6 +2753,7 @@ mod tests {
                 ("work_item.linked", 2),
                 ("work_item.recorded", 2),
                 ("work_item.state_changed", 1),
+                ("work_item.unlinked", 1),
             ]
         );
         assert_eq!(r.latest("work_item.created"), Some(2));

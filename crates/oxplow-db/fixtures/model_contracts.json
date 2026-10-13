@@ -8395,6 +8395,36 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "from_ref",
+          "type": "TEXT",
+          "doc": "The item the link is from."
+        },
+        {
+          "name": "to_ref",
+          "type": "TEXT",
+          "doc": "What it points at: any ref."
+        },
+        {
+          "name": "to_kind",
+          "type": "TEXT",
+          "doc": "The target's kind (`work_item`, `collector`, `effort`, …). (v2)"
+        },
+        {
+          "name": "link_type",
+          "type": "TEXT",
+          "doc": "The list's own link type; oxplow's tasks: `blocks` (from must finish before to starts), `discovered_from`, `relates_to`, `duplicates`, `supersedes`, `replies_to` or `about` (the item is about the target)."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        }
+      ],
+      "key": []
     }
   },
   "work_item_comment": {

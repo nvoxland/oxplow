@@ -663,9 +663,15 @@ commands:
     confirm: destructive
     needs: [work_items.delete]
   - name: work_item.link
-    summary: "Link one work item to another of the same provider, by a link type the provider names (oxplow: blocks, relates_to, discovered_from, duplicates, supersedes, replies_to)."
+    summary: "Link a work item to another of the same provider, or to any ref it is `about` (`collector:triage/hot`, `effort:eff12`, `file:src/a.rs`), by a link type the provider names (oxplow: blocks, relates_to, discovered_from, duplicates, supersedes, replies_to, about). Only an item target must exist; a ref may name something since gone. Undone by work_item.unlink."
     scope: work_items.write
     op: link
+    invokers: { human: true, agent: true, lens: true }
+    needs: [work_items.links]
+  - name: work_item.unlink
+    summary: "Remove a work item's link (`ref`, `target`, `link_type`, as it was linked). Undone by work_item.link."
+    scope: work_items.write
+    op: unlink
     invokers: { human: true, agent: true, lens: true }
     needs: [work_items.links]
   - name: work_item.move

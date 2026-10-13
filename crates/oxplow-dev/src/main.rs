@@ -29,11 +29,13 @@ oxplow-dev task create <title> [--body B] [--parent ID] [--state todo|in_progres
 oxplow-dev task transition <id> <todo|in_progress|blocked|done|canceled>
 oxplow-dev task update <id> [--title T] [--body B] [--parent ID]
 oxplow-dev task comment <id> <body>
-oxplow-dev task link <id> <target-id> <blocks|discovered_from|relates_to|duplicates|supersedes|replies_to>
+oxplow-dev task link <id> <target> <blocks|discovered_from|relates_to|duplicates|supersedes|replies_to|about>
+oxplow-dev task unlink <id> <target> <link type>
 
 oxplow-dev --help                            this
 
-<id> is a task's id (tsk12) or ref (work_item:oxplow:tsk12). The project is
+<id> is a task's id (tsk12) or ref (work_item:oxplow:tsk12); a link's
+<target> is a task too, or any ref the task is `about` (collector:x/y). The project is
 the current directory's (or --project <dir>); the acting thread is
 --thread <thrN>, else $OXPLOW_THREAD_ID, else none (as a person).";
 
@@ -133,8 +135,9 @@ impl Tasks {
         for op in [
             w::transition_op(work_items.clone(), db.clone()),
             w::create_op(work_items.clone(), links.clone()),
-            w::update_op(work_items.clone(), links),
-            w::link_op(work_items.clone()),
+            w::update_op(work_items.clone(), links.clone()),
+            w::link_op(work_items.clone(), links.clone()),
+            w::unlink_op(work_items.clone(), links),
             w::comment_op(work_items.clone()),
         ] {
             bus.add_op(op).map_err(|e| e.to_string())?;
@@ -203,12 +206,13 @@ impl Tasks {
                 input.insert("body".into(), json!(arg(2, "<body>")?));
                 self.command("oxplow.work_item.comment", input).await
             }
-            Some("link") => {
+            Some(verb @ ("link" | "unlink")) => {
                 let mut input = Map::new();
                 input.insert("ref".into(), json!(arg(1, "<id>")?));
-                input.insert("target".into(), json!(arg(2, "<target-id>")?));
+                input.insert("target".into(), json!(arg(2, "<target>")?));
                 input.insert("link_type".into(), json!(arg(3, "<link type>")?));
-                self.command("oxplow.work_item.link", input).await
+                self.command(&format!("oxplow.work_item.{verb}"), input)
+                    .await
             }
             _ => Err(format!("usage:\n{USAGE}")),
         }

@@ -23,6 +23,10 @@ readable identity, its **ref**, `<kind>:<id>[@rev][#frag]`
 2. **Links are refs, and may dangle.** Store the ref string. Extensions
    come and go and records get deleted; a ref nothing resolves is a dead
    link, shown as its raw text, never an error. Reads never fail on one.
+   A work item says what it is about with a link `about` any ref
+   (`oxplow.work_item.link { ref, target, link_type: about }`, or
+   `create { links }`); find the items about a thing by that link
+   (`v_work_item_link.to_ref`), never by a title or a naming convention.
 3. **Two things stay strict:** the grammar (a malformed ref is refused at
    every write) and the event log (an event's subject must name a
    registered kind).

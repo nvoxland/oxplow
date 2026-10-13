@@ -47,8 +47,10 @@ rather than filing a new one.
 The same commands change any list's items, by canonical ref
 (`work_item:<provider>:<id>`): `oxplow.work_item.transition { ref, to,
 native_state? }`, `oxplow.work_item.update { ref, title?, body?, parent_ref?,
-state?, native? }`, `oxplow.work_item.link { ref, target, link_type }`,
-`oxplow.work_item.comment { ref, body }`. The active list's own ids work as
+state?, native? }`, `oxplow.work_item.link { ref, target, link_type }`
+(and `oxplow.work_item.unlink`, the same input),
+`oxplow.work_item.comment { ref, body }`. `oxplow.work_item.create` takes
+`links: [{ target, link_type }]` too. The active list's own ids work as
 refs too (oxplow's tasks: `tsk12`). `list_commands` shows only what the
 active list supports.
 
@@ -62,6 +64,10 @@ Link types:
 - **duplicates**: the same work as the target; close the duplicate.
 - **supersedes**: replaces the target, which is stale.
 - **replies_to**: a threaded response to the target.
+- **about**: what the item is about — any ref, not only another item
+  (`effort:eff12`, `file:src/a.rs`, `collector:triage/hot`). Find the
+  items about something with `v_work_item_link WHERE to_ref = :ref AND
+  link_type = 'about'`, never by matching titles.
 
 ## Reading items
 

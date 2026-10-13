@@ -18,11 +18,11 @@ pub mod satellite;
 pub mod store;
 pub mod verbs;
 
-pub use ids::{TaskId, TaskLinkId};
+pub use ids::TaskId;
 pub use model::{
-    Task, TaskActorKind, TaskAuthor, TaskLink, TaskLinkType, TaskNote, TaskPriority, TaskStatus,
+    Task, TaskActorKind, TaskAuthor, TaskLinkType, TaskNote, TaskPriority, TaskStatus,
 };
 pub use provider::OxplowTasks;
 pub use refs::{task_of_work_item_ref, work_item_id, work_item_ref, PROVIDER};
-pub use satellite::{SqliteTaskLinkStore, SqliteTaskNoteStore, TaskLinkStore, TaskNoteStore};
+pub use satellite::{SqliteTaskNoteStore, TaskNoteStore};
 pub use store::{SqliteTaskStore, TaskStore};

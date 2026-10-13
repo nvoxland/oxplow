@@ -47,11 +47,11 @@
       "description": "One of an item's links, as its provider records it.",
       "properties": {
         "link_type": {
-          "description": "`blocks`, `discovered_from`, `relates_to`, `duplicates`,\n`supersedes` or `replies_to`.",
+          "description": "The list's own type (oxplow: `blocks`, `discovered_from`,\n`relates_to`, `duplicates`, `supersedes`, `replies_to`, `about`).",
           "type": "string"
         },
         "target": {
-          "description": "The item it points at (`work_item:<provider>:<id>`).",
+          "description": "What it points at: another item (`work_item:<provider>:<id>`), or\nany ref the item is about (`collector:triage/hot`, `effort:eff12`).",
           "type": "string"
         }
       },

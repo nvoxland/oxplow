@@ -1,14 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`work_item.linked@2`: a typed link from one item to another of the\nsame list.",
+  "description": "`work_item.linked@2`: a typed link from an item to another of the\nsame list, or to any ref it is about.",
   "properties": {
     "link_type": {
       "description": "One of the list's own link types.",
       "type": "string"
     },
     "target": {
-      "description": "The item linked to.",
+      "description": "What it links to: an item, or any ref.",
       "type": "string"
     },
     "work_item": {

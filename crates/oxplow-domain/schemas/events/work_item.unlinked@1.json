@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`work_item.unlinked@1`: an item's link was removed\n(`oxplow.work_item.unlink`, or undoing a link).",
+  "properties": {
+    "link_type": {
+      "type": "string"
+    },
+    "target": {
+      "description": "What it linked to.",
+      "type": "string"
+    },
+    "work_item": {
+      "description": "The item linked from (`work_item:<list>:<id>`).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "work_item",
+    "target",
+    "link_type"
+  ],
+  "title": "WorkItemUnlinkedV1",
+  "type": "object"
+}

@@ -307,6 +307,30 @@ pub async fn suite(
             );
         }
     }
+    // 5b. A list with links takes `about` to any ref — one that names
+    // nothing too — and removes a link with `unlink`.
+    if features.links {
+        let about = "effort:eff999999";
+        match items.link(actor, &item, about, "about").await {
+            Err(e) => fail("links", format!("link `about` {about}: {e}")),
+            Ok(_) => {
+                probe.settle().await;
+                let link = (about.to_string(), "about".to_string());
+                if !probe.links(&item).await.contains(&link) {
+                    fail("links", "the `about` link isn't in v_work_item_link".into());
+                }
+                match items.unlink(actor, &item, about, "about").await {
+                    Err(e) => fail("links", format!("unlink `about` {about}: {e}")),
+                    Ok(_) => {
+                        probe.settle().await;
+                        if probe.links(&item).await.contains(&link) {
+                            fail("links", "unlink left the link in v_work_item_link".into());
+                        }
+                    }
+                }
+            }
+        }
+    }
     if features.comments && commented.is_ok() {
         let comments = probe.comments(&item).await;
         if !comments.iter().any(|c| c == "a conformance comment") {

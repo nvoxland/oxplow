@@ -420,12 +420,13 @@ pub fn work_item_link_edges(id: &str, links: &[(String, String)]) -> Vec<PageRef
     links
         .iter()
         .filter_map(|(target, link_type)| {
-            let target = oxplow_domain::refs::build::work_item_id_of_ref(target)?;
+            // Any ref: another item, or what the item is about.
+            let target = oxplow_domain::refs::grammar::CanonicalRef::parse(target).ok()?;
             Some(PageRefEdge::new(
                 KIND_WORK_ITEM,
                 id,
-                KIND_WORK_ITEM,
-                target,
+                &target.kind,
+                &target.id,
                 format!("{RT_LINK_PREFIX}{link_type}"),
             ))
         })

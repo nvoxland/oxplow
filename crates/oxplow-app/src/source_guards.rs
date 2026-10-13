@@ -995,7 +995,6 @@ fn task_implementation_readers() -> BTreeSet<String> {
         "TaskService",
         "task_store",
         "SqliteTaskNoteStore",
-        "SqliteTaskLinkStore",
     ];
     let mut out = BTreeSet::new();
     for (path, text) in production_sources() {

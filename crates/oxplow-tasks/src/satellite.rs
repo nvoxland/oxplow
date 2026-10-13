@@ -7,11 +7,11 @@
 use async_trait::async_trait;
 use rusqlite::params;
 
-use crate::ids::{TaskId, TaskLinkId};
+use crate::ids::TaskId;
 use oxplow_db::{map_sql_err, string_to_ts, ts_to_string, Database};
 use oxplow_domain::{DomainError, NoteId, ThreadId, Timestamp};
 
-use crate::model::{TaskLink, TaskLinkType, TaskNote};
+use crate::model::{TaskLinkType, TaskNote};
 
 fn link_type_to_str(t: TaskLinkType) -> &'static str {
     match t {
@@ -21,18 +21,7 @@ fn link_type_to_str(t: TaskLinkType) -> &'static str {
         TaskLinkType::Duplicates => "duplicates",
         TaskLinkType::Supersedes => "supersedes",
         TaskLinkType::RepliesTo => "replies_to",
-    }
-}
-
-fn str_to_link_type(s: &str) -> Result<TaskLinkType, DomainError> {
-    match s {
-        "blocks" => Ok(TaskLinkType::Blocks),
-        "relates_to" => Ok(TaskLinkType::RelatesTo),
-        "discovered_from" => Ok(TaskLinkType::DiscoveredFrom),
-        "duplicates" => Ok(TaskLinkType::Duplicates),
-        "supersedes" => Ok(TaskLinkType::Supersedes),
-        "replies_to" => Ok(TaskLinkType::RepliesTo),
-        other => Err(DomainError::Invalid(format!("unknown link type: {other}"))),
+        TaskLinkType::About => "about",
     }
 }
 
@@ -60,36 +49,48 @@ pub fn add_task_note_tx(
     })
 }
 
-/// A typed link from `from` to `to`, made in `thread` — the core of
-/// `oxplow.work_item.link`.
+/// A typed link from task `from` to any ref `to` (another item, or what
+/// the item is `about`), made in `thread` — the core of
+/// `oxplow.work_item.link`. Linking twice is one link: whether this one
+/// is new.
 pub fn create_link_tx(
     conn: &rusqlite::Connection,
     thread: ThreadId,
     from: TaskId,
-    to: TaskId,
+    to: &str,
     link_type: TaskLinkType,
-) -> Result<TaskLink, DomainError> {
-    let now = Timestamp::now();
-    conn.execute(
-        "INSERT INTO task_link (thread_id, from_item_id, to_item_id, link_type, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![
-            thread.value(),
-            from.value(),
-            to.value(),
-            link_type_to_str(link_type),
-            ts_to_string(now),
-        ],
-    )
-    .map_err(map_sql_err)?;
-    Ok(TaskLink {
-        id: TaskLinkId::new(conn.last_insert_rowid()),
-        thread_id: thread,
-        from_item_id: from,
-        to_item_id: to,
-        link_type,
-        created_at: now,
-    })
+) -> Result<bool, DomainError> {
+    let added = conn
+        .execute(
+            "INSERT OR IGNORE INTO task_link (thread_id, from_item_id, to_ref, link_type, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                thread.value(),
+                from.value(),
+                to,
+                link_type_to_str(link_type),
+                ts_to_string(Timestamp::now()),
+            ],
+        )
+        .map_err(map_sql_err)?;
+    Ok(added > 0)
+}
+
+/// Remove `from`'s link of `link_type` to `to` — the core of
+/// `oxplow.work_item.unlink`: whether there was one.
+pub fn delete_link_tx(
+    conn: &rusqlite::Connection,
+    from: TaskId,
+    to: &str,
+    link_type: TaskLinkType,
+) -> Result<bool, DomainError> {
+    let removed = conn
+        .execute(
+            "DELETE FROM task_link WHERE from_item_id = ?1 AND to_ref = ?2 AND link_type = ?3",
+            params![from.value(), to, link_type_to_str(link_type)],
+        )
+        .map_err(map_sql_err)?;
+    Ok(removed > 0)
 }
 
 // ---------------- Task comments ----------------
@@ -138,80 +139,6 @@ impl TaskNoteStore for SqliteTaskNoteStore {
                 conn.prepare("SELECT * FROM task_note WHERE task_id = ?1 ORDER BY created_at ASC")?;
             let rows = stmt.query_map(params![item.value()], row_to_note)?;
             rows.collect::<rusqlite::Result<Vec<_>>>()
-        })
-        .await
-    }
-}
-
-// ---------------- Task links ----------------
-
-#[derive(Clone)]
-pub struct SqliteTaskLinkStore {
-    db: Database,
-}
-
-impl SqliteTaskLinkStore {
-    pub fn new(db: Database) -> Self {
-        Self { db }
-    }
-}
-
-fn row_to_link(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskLink> {
-    let id: i64 = row.get("id")?;
-    let thread_id: i64 = row.get("thread_id")?;
-    let from_item_id: i64 = row.get("from_item_id")?;
-    let to_item_id: i64 = row.get("to_item_id")?;
-    let link_type: String = row.get("link_type")?;
-    let created_at: String = row.get("created_at")?;
-    let map_err = |e: DomainError| {
-        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
-    };
-    Ok(TaskLink {
-        id: TaskLinkId::new(id),
-        thread_id: ThreadId::new(thread_id),
-        from_item_id: TaskId::new(from_item_id),
-        to_item_id: TaskId::new(to_item_id),
-        link_type: str_to_link_type(&link_type).map_err(map_err)?,
-        created_at: string_to_ts(&created_at).map_err(map_err)?,
-    })
-}
-
-#[async_trait]
-pub trait TaskLinkStore: Send + Sync {
-    // Links are made by the `oxplow.work_item.link` command
-    // ([`create_link_tx`]).
-    async fn list_outgoing(&self, item: TaskId) -> Result<Vec<TaskLink>, DomainError>;
-    async fn list_incoming(&self, item: TaskId) -> Result<Vec<TaskLink>, DomainError>;
-    async fn delete(&self, id: TaskLinkId) -> Result<(), DomainError>;
-}
-
-#[async_trait]
-impl TaskLinkStore for SqliteTaskLinkStore {
-    async fn list_outgoing(&self, item: TaskId) -> Result<Vec<TaskLink>, DomainError> {
-        crate::db::read(&self.db, move |conn| {
-            let mut stmt = conn.prepare(
-                "SELECT * FROM task_link WHERE from_item_id = ?1 ORDER BY created_at ASC",
-            )?;
-            let rows = stmt.query_map(params![item.value()], row_to_link)?;
-            rows.collect::<rusqlite::Result<Vec<_>>>()
-        })
-        .await
-    }
-
-    async fn list_incoming(&self, item: TaskId) -> Result<Vec<TaskLink>, DomainError> {
-        crate::db::read(&self.db, move |conn| {
-            let mut stmt = conn
-                .prepare("SELECT * FROM task_link WHERE to_item_id = ?1 ORDER BY created_at ASC")?;
-            let rows = stmt.query_map(params![item.value()], row_to_link)?;
-            rows.collect::<rusqlite::Result<Vec<_>>>()
-        })
-        .await
-    }
-
-    async fn delete(&self, id: TaskLinkId) -> Result<(), DomainError> {
-        crate::db::write(&self.db, move |conn| {
-            conn.execute("DELETE FROM task_link WHERE id = ?1", params![id.value()])?;
-            Ok(())
         })
         .await
     }
@@ -339,9 +266,17 @@ mod tests {
             .await
             .unwrap();
         add_note(&db, from_id, "blocked by tsk99 see [[src/app.rs]]", "u").await;
-        db.transaction(move |tx| create_link_tx(tx, tid, from_id, to_id, TaskLinkType::Blocks))
-            .await
-            .unwrap();
+        db.transaction(move |tx| {
+            create_link_tx(
+                tx,
+                tid,
+                from_id,
+                &crate::refs::work_item_ref(to_id),
+                TaskLinkType::Blocks,
+            )
+        })
+        .await
+        .unwrap();
         let counts: (i64, i64, i64) = crate::db::read(&db, |c| {
             c.query_row(
                 "SELECT (SELECT count(*) FROM work_item_comment),
@@ -369,38 +304,5 @@ mod tests {
         let comments = record.comments.unwrap();
         assert_eq!(comments.len(), 1);
         assert_eq!(comments[0].body, "blocked by tsk99 see [[src/app.rs]]");
-    }
-
-    #[tokio::test]
-    async fn link_round_trip_and_directionality() {
-        let (db, tid, from_id) = fixture().await;
-        let items = SqliteTaskStore::new(db.clone());
-        let to = Task {
-            id: TaskId::placeholder(),
-            thread_id: Some(tid),
-            parent_id: None,
-            title: "y".into(),
-            description: String::new(),
-            status: TaskStatus::Ready,
-            priority: TaskPriority::Medium,
-            sort_index: 1,
-            created_by: TaskActorKind::User,
-            created_at: now(),
-            updated_at: now(),
-            completed_at: None,
-            deleted_at: None,
-            note_count: 0,
-            author: Some(TaskAuthor::User),
-        };
-        let to_id = items.insert(&to).await.unwrap();
-        let store = SqliteTaskLinkStore::new(db.clone());
-        db.transaction(move |tx| create_link_tx(tx, tid, from_id, to_id, TaskLinkType::Blocks))
-            .await
-            .unwrap();
-        let outgoing = store.list_outgoing(from_id).await.unwrap();
-        let incoming = store.list_incoming(to_id).await.unwrap();
-        assert_eq!(outgoing.len(), 1);
-        assert_eq!(incoming.len(), 1);
-        assert_eq!(outgoing[0].link_type, TaskLinkType::Blocks);
     }
 }

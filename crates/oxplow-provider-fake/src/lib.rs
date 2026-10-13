@@ -403,7 +403,14 @@ fn declared(idempotent_writes: bool) -> InitializeResult {
             transition,
             command(
                 "link",
-                "Link one work item to another.",
+                "Link a work item to another, or to any ref it is about.",
+                json!({ "type": "object", "required": ["ref", "target", "link_type"],
+                        "additionalProperties": false,
+                        "properties": { "ref": string, "target": string, "link_type": string } }),
+            ),
+            command(
+                "unlink",
+                "Remove a work item's link.",
                 json!({ "type": "object", "required": ["ref", "target", "link_type"],
                         "additionalProperties": false,
                         "properties": { "ref": string, "target": string, "link_type": string } }),
@@ -1157,7 +1164,7 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
             w.items.insert(n, Item { record, rev });
             (result, events)
         }
-        "update" | "transition" | "link" | "comment" | "delete" | "estimate" => {
+        "update" | "transition" | "link" | "unlink" | "comment" | "delete" | "estimate" => {
             let item_ref = str_field(&input, "ref")?;
             let n = number_of(&w.id, &item_ref)?;
             w.rev += 1;
@@ -1209,13 +1216,33 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
                     item.record.native_state = native_of(state).into();
                 }
                 "link" => {
-                    item.record
-                        .links
-                        .get_or_insert_with(Vec::new)
-                        .push(LinkRecord {
-                            target: str_field(&input, "target")?,
-                            link_type: str_field(&input, "link_type")?,
+                    let link = LinkRecord {
+                        target: str_field(&input, "target")?,
+                        link_type: str_field(&input, "link_type")?,
+                    };
+                    let links = item.record.links.get_or_insert_with(Vec::new);
+                    if !links.contains(&link) {
+                        links.push(link);
+                        inverse = Some(CommandCall {
+                            command: "unlink".into(),
+                            input: input.clone(),
                         });
+                    }
+                }
+                "unlink" => {
+                    let link = LinkRecord {
+                        target: str_field(&input, "target")?,
+                        link_type: str_field(&input, "link_type")?,
+                    };
+                    let links = item.record.links.get_or_insert_with(Vec::new);
+                    let before = links.len();
+                    links.retain(|l| l != &link);
+                    if links.len() < before {
+                        inverse = Some(CommandCall {
+                            command: "link".into(),
+                            input: input.clone(),
+                        });
+                    }
                 }
                 "comment" => {
                     let comments = item.record.comments.get_or_insert_with(Vec::new);

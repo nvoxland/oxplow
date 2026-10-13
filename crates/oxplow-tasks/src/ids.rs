@@ -91,7 +91,6 @@ macro_rules! prefixed_id {
 }
 
 prefixed_id!(TaskId, "tsk", "task id");
-prefixed_id!(TaskLinkId, "lnk", "task-link id");
 
 #[cfg(test)]
 mod tests {
@@ -107,7 +106,6 @@ mod tests {
             TaskId::new(42)
         );
         assert!(serde_json::from_str::<TaskId>("\"thr1\"").is_err());
-        assert_eq!(TaskLinkId::new(3).to_string(), "lnk3");
     }
 
     #[test]
