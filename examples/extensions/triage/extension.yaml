@@ -76,6 +76,13 @@ collectors:
 # may look closer at a file (`todos.in_file`) or query oxplow's models
 # (`query_sql`, from `sql.read`) before it answers. When it finishes,
 # `publish-summary` writes the answer to the wiki.
+# The model that sorts each TODO: bind `triage/sort` in Settings → AI, or
+# it uses your Decide model.
+ai_profiles:
+  - id: sort
+    description: Sorts each TODO comment as a bug, cleanup or feature.
+    fallback: decide
+
 jobs:
   - id: summarize
     description: Summarize the code's TODO comments for a person.

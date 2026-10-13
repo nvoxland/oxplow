@@ -39,6 +39,15 @@ intent:
       input: { lens: reviews }
       expect: one row per review the job examples started
 
+# The model the review asks for: a person binds `effort-review/review` in
+# Settings → AI; until then it uses their Summarize model. The review calls
+# a tool, so the bound model must support tool calling.
+ai_profiles:
+  - id: review
+    description: Reviews one finished effort from the evidence oxplow collected about it.
+    fallback: summarize
+    features: [tool_calling]
+
 # The review: one model conversation per effort. The model must call the
 # `effort.evidence` tool first (the prompt says so); it may also query
 # oxplow's models itself (`query_sql`, from `sql.read`).

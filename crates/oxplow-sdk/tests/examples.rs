@@ -415,7 +415,7 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
         .unwrap();
     svc.ai
         .set_role(
-            &Role::DECIDE,
+            &Role::parse("triage/sort").expect("a profile role"),
             Some(RoleBinding {
                 provider: "m".into(),
                 model: "x".into(),
@@ -500,6 +500,17 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
         assert!(decided.contains(scope), "{scope}: {decided}");
     }
     assert!(!decided.contains("denied"), "{decided}");
+
+    // The sort asked for its own profile, which the person bound.
+    let calls = svc
+        .sql
+        .query_sql("SELECT DISTINCT role FROM v_ai_call", vec![], None)
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(&calls.rows).unwrap(),
+        serde_json::json!([["triage/sort"]])
+    );
 
     // Its decisions command reads the TODOs through the metric
     // (`metric_findings('triage.todos')`), as its board's lens does.
@@ -641,7 +652,7 @@ async fn the_effort_review_example_reviews_evidence_and_can_be_cancelled() {
         .unwrap();
     svc.ai
         .set_role(
-            &Role::SUMMARIZE,
+            &Role::parse("effort-review/review").expect("a profile role"),
             Some(RoleBinding {
                 provider: "fixture".into(),
                 model: "fixture".into(),
@@ -751,6 +762,10 @@ async fn the_effort_review_example_reviews_evidence_and_can_be_cancelled() {
             .any(|o| o["kind"] == json!("diff-coverage") && o["metric_value"] == json!(80.0)),
         "{evidence}"
     );
+
+    // The review asked for its own profile, which the person bound.
+    let roles = until_row(&svc, "SELECT DISTINCT role FROM v_ai_call").await;
+    assert_eq!(roles, [json!("effort-review/review")]);
 
     // The review is commented on the work item, and published.
     let comment = until_row(

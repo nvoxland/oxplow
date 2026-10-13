@@ -71,6 +71,10 @@ Fixed while building them:
   unlisted one failed with a bare "not found"; `extension check` now
   warns for an unlisted fixture, and `extension test` for an example with
   no fixture, each naming the file and the fix.
+- Three fixed AI roles: a job asked for `main`, `summarize` or `decide`.
+  An extension now declares `ai_profiles:` (effort-review's `review`,
+  triage's `sort`); a person binds `<extension>/<id>` in Settings → AI,
+  else its fallback role's model is used.
 - A command script couldn't read `metric_grid()` / `metric_findings()`,
   so triage rebuilt the latest TODOs from `v_fact`; a command's script
   now reads through the SQL gateway, as an effect's does, and triage
@@ -88,8 +92,6 @@ Still open:
 - **Event order matters and isn't obvious.** `effort.closed` comes before
   the effort's evidence is refreshed; a reviewer must listen for
   `effort.finished`.
-- **Three fixed AI roles.** A job asks for `main`, `summarize` or
-  `decide`; an extension can't declare its own profile yet.
 - **No diff text** in any `v_*` model: a review sees per-file and
   per-function statistics, not the hunks.
 - **Not all evidence can be made in a fixture**: `setup` reaches what

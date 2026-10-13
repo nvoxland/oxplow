@@ -23,7 +23,7 @@ def transform(x):
             "intentKey": "review:" + effort,
             "request": {
                 "schemaVersion": 1,
-                "role": "summarize",
+                "role": "review",
                 "messages": [
                     {"role": "system", "parts": [{"type": "text", "text": SYSTEM}]},
                     {"role": "user", "parts": [{"type": "text", "text": "Review " + effort + "."}]},

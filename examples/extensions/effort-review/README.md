@@ -38,14 +38,16 @@ cancelled review is still commented, marked as cancelled.
 | `jobs.read`, `sql.read` | `publish-review` | reading the review back, and the effort's work item |
 
 It runs no program, reads no files, opens no network connection and holds
-no credentials: the model is whichever one you put on the **Summarize**
-role, through your own AI provider. Sharing the folder shares nothing of
+no credentials: the model is whichever one you bind to the AI profile
+**effort-review/review** in Settings → AI, or your **Summarize** model when
+you bind none, through your own AI provider. Sharing the folder shares nothing of
 yours.
 
 ## Use it
 
 1. Copy this folder to `oxplow/extensions/effort-review/`.
-2. Settings → AI: give the **Summarize** role a model.
+2. Settings → AI: bind **effort-review/review** to a model (it needs tool
+   calling), or give the **Summarize** role one and it is used instead.
 3. Settings → Data → Programs: approve **Job effort-review/review** and
    the two effects. Until the job is approved, a review waits as
    `queued` on the Jobs page and nothing is sent to a model.

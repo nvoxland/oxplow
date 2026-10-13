@@ -12,7 +12,7 @@ def transform(input):
         for m in markers(f["text"], f["language"]):
             if m["kind"] != "TODO":
                 continue
-            kind = ai_classify(m["text"], KINDS)["label"]
+            kind = ai_classify(m["text"], KINDS, role = "sort")["label"]
             facts.append({
                 "measure": "triage.todos",
                 "value": 1,
