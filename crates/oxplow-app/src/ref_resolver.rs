@@ -37,6 +37,10 @@ pub struct RefSummary {
     /// A lead excerpt of the body — task description, commit message
     /// body, wiki lead — capped so it stays cheap in the agent's context.
     pub body_excerpt: Option<String>,
+    /// Whether anything resolved it. A ref whose kind or row is gone —
+    /// an uninstalled extension's, a deleted record's — is a dead link:
+    /// shown as its raw ref, never an error.
+    pub resolved: bool,
 }
 
 impl RefSummary {
@@ -49,6 +53,7 @@ impl RefSummary {
             title: None,
             detail: None,
             body_excerpt: None,
+            resolved: false,
         }
     }
 }
@@ -58,20 +63,68 @@ impl RefSummary {
 const EXCERPT_LEN: usize = 280;
 
 /// Resolve a single `(kind,id)` reference into a [`RefSummary`].
-/// Hydrates the canonical ref kinds (`.context/refs.md`) — `work_item`,
-/// `commit`, `file`, `dir`, `wiki`, `finding`; any other kind returns a
-/// bare summary (its canonical id is its own meaningful display). New
-/// kinds slot in as additional arms.
+/// `work_item`, `commit`, `file`, `dir`, `wiki` and `finding` have richer
+/// resolvers; any other kind resolves through the model that owns it
+/// (`oxplow_db::ref_models` for core's, the `resolve` view an extension's
+/// `ref_kinds:` names), by its `ref` and title. Anything else — an
+/// unknown kind, a row that's gone — comes back `resolved: false`.
 pub async fn resolve_ref(services: &Services, kind: &str, id: &str) -> RefSummary {
-    match kind {
+    let mut summary = match kind {
         "work_item" => resolve_work_item(services, id).await,
         "commit" => resolve_commit(services, id).await,
         "file" => resolve_file(services, id).await,
         "dir" => resolve_directory(services, id).await,
         "wiki" => resolve_wiki(services, id).await,
         "finding" => resolve_finding(services, id).await,
-        _ => RefSummary::bare(kind, id),
-    }
+        _ => resolve_owned(services, kind, id).await,
+    };
+    summary.resolved = summary.title.is_some() || summary.detail.is_some();
+    summary
+}
+
+/// A kind some model owns: its title, by its ref.
+async fn resolve_owned(services: &Services, kind: &str, id: &str) -> RefSummary {
+    let mut summary = RefSummary::bare(kind, id);
+    let Ok(parsed) = oxplow_domain::refs::grammar::CanonicalRef::new(kind, id, None, None) else {
+        return summary;
+    };
+    let text = |cell: &oxplow_db::SqlCell| match cell {
+        oxplow_db::SqlCell::Text(t) => Some(t.clone()),
+        oxplow_db::SqlCell::Int(i) => Some(i.to_string()),
+        _ => None,
+    };
+    let (view, title) = match oxplow_db::ref_models::owner_of(kind) {
+        Some(m) => (m.view.to_string(), m.title.to_string()),
+        None => {
+            // An extension's kind names the view that resolves it.
+            let row = services
+                .sql
+                .query_sql(
+                    "SELECT resolve FROM v_ref_kind WHERE kind = ?1 AND resolve IS NOT NULL",
+                    vec![oxplow_db::SqlCell::Text(kind.to_string())],
+                    None,
+                )
+                .await
+                .ok()
+                .and_then(|out| out.rows.into_iter().next());
+            match row.as_ref().and_then(|r| text(&r[0])) {
+                Some(view) => (view, "title".to_string()),
+                None => return summary,
+            }
+        }
+    };
+    let found = services
+        .sql
+        .query_sql(
+            &format!("SELECT \"{title}\" FROM \"{view}\" WHERE ref = ?1 LIMIT 1"),
+            vec![oxplow_db::SqlCell::Text(parsed.to_string())],
+            None,
+        )
+        .await
+        .ok()
+        .and_then(|out| out.rows.into_iter().next());
+    summary.title = found.as_ref().and_then(|r| text(&r[0]));
+    summary
 }
 
 /// Resolve a batch of refs in order (used for a comment's `context_chain`
@@ -92,7 +145,10 @@ async fn resolve_work_item(services: &Services, id: &str) -> RefSummary {
         .sql
         .query_sql(
             "SELECT title, state, body FROM v_work_item WHERE ref = ?1",
-            vec![oxplow_db::SqlCell::Text(format!("work_item:{id}"))],
+            vec![oxplow_db::SqlCell::Text(oxplow_domain::refs::build::of(
+                oxplow_domain::refs::kind::WORK_ITEM,
+                id,
+            ))],
             None,
         )
         .await
@@ -365,6 +421,28 @@ mod tests {
         ] {
             let summary = resolve_ref(&services, kind, id).await;
             assert_eq!(summary.title, None, "{kind} should be bare");
+        }
+    }
+
+    /// Any kind a core model owns resolves through that model's `ref`
+    /// and title; a ref nothing resolves — its kind gone, its row gone —
+    /// is a dead link, not an error.
+    #[tokio::test]
+    async fn a_kind_resolves_through_its_owning_model_or_is_unresolved() {
+        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let id = fx.effort.to_string();
+        let summary = resolve_ref(&fx.svc, "effort", &id).await;
+        assert!(summary.resolved, "{summary:?}");
+        assert!(summary.title.is_some(), "{summary:?}");
+
+        for (kind, id) in [
+            ("effort", "eff999"),
+            ("collector", "gone/x"),
+            ("mystery", "x"),
+        ] {
+            let summary = resolve_ref(&fx.svc, kind, id).await;
+            assert!(!summary.resolved, "{kind}:{id} {summary:?}");
+            assert_eq!(summary.title, None);
         }
     }
 

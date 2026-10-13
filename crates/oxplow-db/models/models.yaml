@@ -53,7 +53,7 @@
     - { name: "detail", type: "", doc: "What it's waiting on (the question, the permission asked), or why it stopped." }
     - { name: "since", type: "TEXT", doc: "When it moved to this status (RFC 3339)." }
 - name: agent_turn
-  version: 2
+  version: 3
   description: "Agent turns: each human prompt and the agent's answer, per thread and agent session. start_snapshot_id → snapshot_id is what the turn changed (the snapshot the worktree was at when it opened and when it ended)."
   columns:
     - { name: "id", type: "INTEGER", doc: "Turn id." }
@@ -66,6 +66,7 @@
     - { name: "ended_at", type: "TEXT", doc: "RFC 3339 timestamp; NULL while running." }
     - { name: "start_snapshot_id", type: "INTEGER", doc: "Snapshot the worktree was at when the turn opened (v_snapshot.id); NULL if the stream had none yet." }
     - { name: "snapshot_id", type: "INTEGER", doc: "Snapshot the worktree was at when the turn ended (v_snapshot.id); NULL while running." }
+    - { name: "ref", type: "TEXT", doc: "`turn:trn<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)" }
   tests:
     - { not_null: id }
     - { unique: id }
@@ -254,7 +255,7 @@
     - { name: "skips_before", type: "INTEGER", doc: "Skip markers on the base side." }
     - { name: "skips_after", type: "INTEGER", doc: "Skip markers on the head side." }
 - name: claim
-  version: 4
+  version: 5
   description: "Claims the agent made about its work (\"tests pass\", \"no behavior change\"), and whether anything backs them."
   columns:
     - { name: "id", type: "INTEGER", doc: "Claim id." }
@@ -268,6 +269,7 @@
     - { name: "evidence_ref", type: "TEXT", doc: "What backs it (`run:<id>`, a test, a file, or `reviewer` when a person verified it with `oxplow.effort.verify_claim`); NULL if nothing was cited." }
     - { name: "verified", type: "", doc: "1 if it cites evidence, or is `tests_pass` and its effort's latest test run (in `v_test_run`) passed with at least one test; else 0." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "ref", type: "TEXT", doc: "`claim:<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v5)" }
 - name: code_quality_finding
   version: 1
   description: "Findings from code-quality scans, e.g. duplicated blocks, each with its scan's tool and time."
@@ -299,7 +301,7 @@
     - { not_null: id }
     - { unique: id }
 - name: comment
-  version: 1
+  version: 2
   description: "Comment threads anchored to a page (file, wiki page, task…). `intent` says who should act."
   columns:
     - { name: "id", type: "INTEGER", doc: "Comment id." }
@@ -318,8 +320,9 @@
     - { name: "resolved_at", type: "TEXT", doc: "Set when resolved." }
     - { name: "body", type: "TEXT", doc: "Text of the first message." }
     - { name: "message_count", type: "", doc: "Number of messages in the thread." }
+    - { name: "ref", type: "TEXT", doc: "`comment:cmt<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)" }
 - name: commit
-  version: 1
+  version: 2
   description: "Commits the indexer has read: the last 500 reachable from every stream's head, kept as heads move. A stream's history is a recursive read over `parents` from its branch's `v_branch.head_sha`."
   columns:
     - { name: "sha", type: "TEXT", doc: "Full commit sha." }
@@ -331,6 +334,7 @@
     - { name: "first_parent", type: "", doc: "First parent's sha; NULL for a root commit." }
     - { name: "parent_count", type: "", doc: "Number of parents (2+ for a merge)." }
     - { name: "parents", type: "TEXT", doc: "Every parent's sha, as a JSON array (first parent first)." }
+    - { name: "ref", type: "TEXT", doc: "`commit:<sha>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)" }
 - name: commit_file
   version: 1
   description: "Files each commit changed, against its first parent."
@@ -385,7 +389,7 @@
     - { not_null: id }
     - { unique: id }
 - name: decision
-  version: 3
+  version: 4
   description: "Decisions: forks the agent resolved while working (what it chose, what it didn't, why), recorded by the agent or inferred by oxplow. What a reviewer most wants to check."
   columns:
     - { name: "id", type: "INTEGER", doc: "Decision id." }
@@ -400,6 +404,7 @@
     - { name: "why", type: "TEXT", doc: "The reasoning." }
     - { name: "provenance", type: "TEXT", doc: "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed — a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`oxplow.effort.confirm_decision` / `oxplow.effort.dismiss_decision`)." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "ref", type: "TEXT", doc: "`decision:<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v4)" }
   tests:
     - { not_null: id }
     - { unique: id }
@@ -420,7 +425,7 @@
     - { name: "end_col", type: "INTEGER", doc: "End column (1-based)." }
     - { name: "updated_at", type: "TEXT", doc: "When the server last published this file (RFC 3339)." }
 - name: effort
-  version: 5
+  version: 6
   description: "Efforts: one span of a thread's work between a start and an end snapshot, opened and closed by oxplow and linked to a work item when there is one (.context/work-tracking.md). At most one is open per thread."
   columns:
     - { name: "id", type: "INTEGER", doc: "Effort id." }
@@ -434,6 +439,7 @@
     - { name: "summary", type: "", doc: "What shipped: the summary `oxplow.effort.report` recorded, else the final message of the last agent turn in the effort." }
     - { name: "title", type: "", doc: "Its own title, else its work item's, else the first line of its first prompt. (v2)" }
     - { name: "closed_by", type: "TEXT", doc: "What closed it: `commit`, `switch`, `person`, `agent` or `system`; NULL while open. (v2)" }
+    - { name: "ref", type: "TEXT", doc: "`effort:eff<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v6)" }
 - name: effort_file
   version: 4
   description: "Files each effort changed, with how they changed: claimed by an edit tool, or observed changing during one of its thread's turns."
@@ -485,7 +491,7 @@
     - { name: "local_snapshot_id", type: "INTEGER", doc: "Snapshot it was captured against." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
 - name: event
-  version: 2
+  version: 3
   description: "The event log: every activity and state change, oldest first by `seq`, written in the same transaction as the change it records (.context/data-model.md \"event_log\")."
   columns:
     - { name: "seq", type: "INTEGER", doc: "Insert order — the delivery order consumers checkpoint on." }
@@ -506,6 +512,7 @@
     - { name: "payload_expired_at", type: "TEXT", doc: "When retention replaced the payload with `{}` (the envelope stays); NULL while it's kept." }
     - { name: "cause", type: "TEXT", doc: "The event id that caused this one." }
     - { name: "dedupe_key", type: "TEXT", doc: "Emitter-derived key; unique." }
+    - { name: "ref", type: "TEXT", doc: "`event:<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)" }
 - name: event_checkpoint
   version: 1
   description: "How far each event consumer has read."
@@ -842,7 +849,7 @@
   tests:
     - { not_null: extension }
 - name: snapshot
-  version: 1
+  version: 2
   description: "Snapshots: point-in-time captures of a stream's worktree, used to bracket efforts and diffs."
   columns:
     - { name: "id", type: "INTEGER", doc: "Snapshot id." }
@@ -851,6 +858,7 @@
     - { name: "revision", type: "TEXT", doc: "The VCS revision the captured tree equals (`git:<sha>`): set when the workspace was clean at the head; NULL otherwise." }
     - { name: "branch", type: "TEXT", doc: "Branch when captured, if known." }
     - { name: "tree_hash", type: "TEXT", doc: "Whole-tree identity: two snapshots with the same tree_hash hold the same files. NULL before V96." }
+    - { name: "ref", type: "TEXT", doc: "`snapshot:<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)" }
   tests:
     - { not_null: id }
     - { unique: id }
@@ -891,7 +899,7 @@
     - { name: "contents", type: "INTEGER", doc: "1 when the take kept file contents; 0 when it recorded identities only ('Track changes only'): a read of that snapshot answers 'no contents', not 'expired'. (v2)" }
     - { name: "handle", type: "TEXT", doc: "A snapshot provider's own name for the state the take marked, which core hands back to it as the next mark's parent; NULL for takes by oxplow's own capture. (v3)" }
 - name: stream
-  version: 1
+  version: 2
   description: "Streams: parallel lines of work, each its own git worktree. Exactly one is `primary` (the repo itself)."
   columns:
     - { name: "id", type: "INTEGER", doc: "Stream id." }
@@ -902,6 +910,7 @@
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "archived_at", type: "TEXT", doc: "Set when the stream was archived; NULL while live." }
+    - { name: "ref", type: "TEXT", doc: "`stream:str<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)" }
   tests:
     - { not_null: id }
     - { unique: id }
@@ -991,7 +1000,7 @@
     - { name: "captured_at", type: "TEXT", doc: "When it was recorded (RFC 3339)." }
     - { name: "turn_id", type: "INTEGER", doc: "The agent turn it ran in (v_agent_turn.id), if it ran in one." }
 - name: thread
-  version: 2
+  version: 3
   description: "Threads: independent lines of the person's work inside a stream. A thread needs no agent and may have several: its agent sessions are v_agent_session rows."
   columns:
     - { name: "id", type: "INTEGER", doc: "Thread id." }
@@ -1003,11 +1012,12 @@
     - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "closed_at", type: "TEXT", doc: "Set when the thread was closed." }
     - { name: "archived_at", type: "TEXT", doc: "Set when the thread was archived." }
+    - { name: "ref", type: "TEXT", doc: "`thread:thr<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)" }
   tests:
     - { not_null: id }
     - { unique: id }
 - name: agent_session
-  version: 3
+  version: 4
   description: "Agent sessions: the agent slots a person opened on a thread — a terminal agent, an ACP chat, or a one-shot action. The row is the slot, not the process: a harness process ending leaves it open; closing the session, its thread or its stream's archive closes it."
   columns:
     - { name: "id", type: "INTEGER", doc: "Session id (its ref is `agent_session:ses<id>`)." }
@@ -1025,6 +1035,7 @@
     - { name: "pid", type: "INTEGER", doc: "OS pid of the process the daemon spawned for it, rewritten on every spawn; NULL for a session with no process of its own (a chat) or not yet spawned. May be dead or reused: read it with last_seen_at. (v2)" }
     - { name: "last_seen_at", type: "TEXT", doc: "The newest hook seen from it, to the 30 s (RFC 3339); NULL before the first. A live agent has a recent one and a pid that exists. (v2)" }
     - { name: "stopped_by_user_at", type: "TEXT", doc: "When the person deliberately stopped it; NULL once started again, and after a crash or backend restart (which resume when the tab is shown). A stopped session is not spawned until a person starts it. (v3)" }
+    - { name: "ref", type: "TEXT", doc: "`agent_session:ses<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v4)" }
   tests:
     - { not_null: id }
     - { unique: id }
@@ -1070,7 +1081,7 @@
     - { not_null: subject }
     - { relationships: { column: stream_id, to: stream, field: id } }
 - name: collector_run
-  version: 2
+  version: 3
   description: "Each collector's last run: its outcome, the row counts it wrote and its checkpoint. A collector is owned by an extension, the project (`project`) or oxplow (`built-in`)."
   columns:
     - { name: "owner", type: "TEXT", doc: "The extension that declares it, `project` for `.oxplow/project.yaml`, or `built-in`." }
@@ -1082,6 +1093,7 @@
     - { name: "cursor_json", type: "TEXT", doc: "Its checkpoint: the opaque state its script or provider read returned last." }
     - { name: "last_event_id", type: "INTEGER", doc: "The seq of the last trigger event it ran for." }
     - { name: "run_id", type: "TEXT", doc: "Its last run (`v_extension_run.run_id`); NULL for a run before runs were recorded. (v2)" }
+    - { name: "ref", type: "TEXT", doc: "`collector:<owner>/<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)" }
   tests:
     - { not_null: owner }
     - { not_null: id }
@@ -1202,7 +1214,7 @@
     - { not_null: id }
     - { unique: id }
 - name: thread_note
-  version: 1
+  version: 2
   description: "A thread's notes: the capture pad an agent writes as it works (`oxplow.knowledge.add_note`; ref `thread_note:not<n>`)."
   columns:
     - { name: "id", type: "INTEGER", doc: "Note id (`not<n>`)." }
@@ -1210,6 +1222,7 @@
     - { name: "body", type: "TEXT", doc: "Markdown body." }
     - { name: "author", type: "TEXT", doc: "Who wrote it (`agent`, `user`, …)." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "ref", type: "TEXT", doc: "`thread_note:not<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)" }
   tests:
     - { not_null: id }
     - { unique: id }

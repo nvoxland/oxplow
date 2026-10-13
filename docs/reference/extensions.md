@@ -313,6 +313,13 @@ commands:
   one the answer carries a `warning`. This rule also applies to effects,
   effort policies and provider host calls. A complete result does not
   prove every source was collected.
+- Refs are carried, not assembled. Every script has `ref`:
+  `ref.build(kind, id, rev=, frag=)` makes one (`ref.build("file",
+  f["path"])`), and `ref.parse(r)` (`{kind, id, rev, frag}`),
+  `ref.id(r, kind=)`, `ref.kind(r)` and `ref.is_ref(v)` read one. In SQL,
+  select a model's `ref` column and compare refs to refs (`WHERE ref =
+  :ref`); don't concatenate `'effort:eff' || id` or slice a ref. A ref
+  can outlive what it names, so store it even when the thing may go.
 - `ui` says how a person meets it. `about` offers it on that kind of
   ref's page and rows. `input` binds `{{stream}}`, `{{thread}}`,
   `{{ref}}` or `{{ref.id}}`, each as a whole string. `form` opens a

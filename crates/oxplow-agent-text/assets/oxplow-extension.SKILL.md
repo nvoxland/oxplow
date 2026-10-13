@@ -332,7 +332,7 @@ empty: Nothing is waiting on you.
   the query must return even when `columns:` doesn't show it (select a
   ref for the action and leave it out of `columns:`) —
   e.g. `{ id: finish, label: Finish, command: oxplow.work_item.transition,
-  row: true, input: { ref: "work_item:oxplow:tsk{{row.id}}", to: done } }`,
+  row: true, input: { ref: "{{row.ref}}", to: done } }`,
   or `{ id: sync, label: Sync PRs, command: oxplow.collector.sync, input:
   { owner: github, id: prs } }`. With `group: <value>` (on a lens with
   `group`), the action is a button in that group's heading instead — it
@@ -525,6 +525,26 @@ ordinary project files, so they go through the normal task/effort flow
   2. Read the definition with `get_lens`.
   3. Change the file.
   4. Validate and run it again.
+
+## Refs in scripts and SQL
+
+Everything in oxplow has one identity, its ref (`effort:eff12`,
+`work_item:oxplow:tsk42`, `file:src/a.rs`, `collector:triage/todos`).
+Carry refs; never assemble or dissect them:
+
+- **In SQL**, select the model's `ref` column (`v_effort.ref`,
+  `v_decision.ref`, `v_thread.ref`, `v_work_item.ref`, …) and compare
+  refs to refs: `WHERE ref = :ref`. Never `'effort:eff' || id` or
+  `substr(ref, …)`.
+- **In a script**, build with `ref.build("file", f["path"])` and read
+  with `ref.parse(r)` / `ref.id(r, kind = "effort")` (which refuses a ref
+  of another kind) / `ref.kind(r)` / `ref.is_ref(v)`. Never
+  `"effort:eff" + str(id)` or `r[len("effort:eff"):]`.
+- **In a lens action's input**, pass a row's ref column
+  (`{ ref: "{{row.ref}}" }`), not a ref rebuilt from an id.
+- **A ref may dangle.** The thing it names can be deleted, or its
+  extension removed; store the ref anyway, and expect a reader to show it
+  as unresolved rather than fail.
 
 ## Publishing models
 

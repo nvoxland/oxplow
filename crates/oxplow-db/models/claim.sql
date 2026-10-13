@@ -13,5 +13,6 @@ SELECT c.id, c.thread_id, c.work_item, c.effort_id, c.turn_id, c.agent_session_i
          ) THEN 1
          ELSE 0
        END AS verified,
-       c.created_at
+       c.created_at,
+       CAST('claim:' || c.id AS TEXT) AS ref
 FROM source('claim') c

@@ -2006,7 +2006,8 @@ mod tests {
                 "worktree_path",
                 "created_at",
                 "updated_at",
-                "archived_at"
+                "archived_at",
+                "ref"
             ]
         );
         let (owner, version): (String, i64) = conn
@@ -2016,7 +2017,7 @@ mod tests {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .unwrap();
-        assert_eq!((owner.as_str(), version), ("core", 1));
+        assert_eq!((owner.as_str(), version), ("core", 2));
         let input: (String, String) = conn
             .query_row(
                 "SELECT input, kind FROM model_input WHERE view = 'v_stream'",

@@ -25,6 +25,7 @@ SELECT e.id, e.work_item,
              AND (e.ended_at IS NULL OR t.started_at <= e.ended_at)
            ORDER BY t.started_at LIMIT 1)
        ) AS title,
-       e.closed_by
+       e.closed_by,
+       CAST('effort:eff' || e.id AS TEXT) AS ref
 FROM source('effort') e
 LEFT JOIN source('threads') th ON th.id = e.thread_id

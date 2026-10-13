@@ -8,6 +8,44 @@ tsk404); the TS parser, tab ids, wikilink hrefs and comment anchors
 (P1.3, tsk405); shell routes as `page:<name>[?params]` and the
 `Record<PageKind, …>` render registry (P1.3b, tsk418).
 
+## Using refs (read this first)
+
+oxplow is a web of things that link to each other. Every thing has one
+readable identity, its **ref**, `<kind>:<id>[@rev][#frag]`
+(`effort:eff12`, `file:src/a.rs@git:HEAD#L3`, `work_item:oxplow:tsk42`,
+`collector:triage/todos`). The rules:
+
+1. **The owner spells a ref; everyone else carries it.** A ref is minted
+   in exactly one place per language and passed along verbatim. Nothing
+   rebuilds one from an id (`"effort:eff" + id`, `'decision:' || id`) or
+   takes one apart by hand (`strip_prefix("wiki:")`, `split(':')`,
+   `ref[len("effort:eff"):]`).
+2. **Links are refs, and may dangle.** Store the ref string. Extensions
+   come and go and records get deleted; a ref nothing resolves is a dead
+   link, shown as its raw text, never an error. Reads never fail on one.
+3. **Two things stay strict:** the grammar (a malformed ref is refused at
+   every write) and the event log (an event's subject must name a
+   registered kind).
+
+| Where | Build | Read |
+|---|---|---|
+| Rust | `oxplow_domain::refs::build::{effort_ref, file_ref, wiki_ref, …}` — one per core kind; `of(kind, id)` / `at(kind, id, rev, frag)` for a kind known only at run time; a work list builds its own items' refs (`oxplow_tasks::work_item_ref`) | `build::parse_as::<T>(r, kind)` (typed id), `id_of(r, kind)` (decoded id), `parse_kind(r, kind)` (keeps rev and frag), `kind_of(r)`; kind names are `refs::kind::{EFFORT, FILE, …}` |
+| SQL (models, lenses, scripts' queries) | the owning model's `ref` column (`oxplow_db::ref_models::REF_MODELS`: `v_effort.ref`, `v_decision.ref`, `v_thread.ref`, …) — the only SQL that spells a prefix | `SELECT ref`, `WHERE ref = :ref`, `JOIN … ON x.ref = y.subject_ref`; never `'kind:' || id`, never `substr` on a ref |
+| Starlark (commands, effects, collectors, policies) | `ref.build(kind, id, rev=, frag=)` (`id` a string or an int) | `ref.parse(r)` → `{kind, id, rev, frag}`, `ref.id(r, kind=)`, `ref.kind(r)`, `ref.is_ref(v)` |
+| TS (desktop) | `refs/ref.ts` builders (`effortRef`, `wikiRef`, `pageRef`, `refOf`, …) | `parseRef`, `idOf`, `isRefOfKind` |
+
+**Resolving.** `ref_resolver::resolve_ref` names any ref: richer
+resolvers for `work_item`, `commit`, `file`, `dir`, `wiki` and
+`finding`; any other core kind through its owning model's title column
+(`REF_MODELS`); an extension's kind through the `resolve` view its
+`ref_kinds:` names. Nothing resolves it → `resolved: false`.
+
+**Guards.** `refs/refs.guard.test.ts` (TS) and the Rust and SQL/Starlark
+source guards refuse a hand-built or hand-parsed ref outside the owning
+place. When one fires, the fix is the builder or reader above — or, when
+a kind has none, adding it to `refs::build` / `ref_models` — never a
+string.
+
 ## The grammar (built)
 
 ```

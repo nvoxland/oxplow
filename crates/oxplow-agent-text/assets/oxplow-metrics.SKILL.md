@@ -219,7 +219,7 @@ def transform(input):
             c += len(regex_find(r"(?i)\b(TODO|FIXME)\b", cm["text"]))
         if c > 0:
             facts.append({"measure": "repo.todo_count", "value": c,
-                          "subject": "file:" + f["path"], "path": f["path"],
+                          "subject": ref.build("file", f["path"]), "path": f["path"],
                           "dims": {"oxplow.language": "rust"}})
     return {"facts": facts}
 ```

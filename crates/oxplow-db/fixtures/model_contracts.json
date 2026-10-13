@@ -266,6 +266,66 @@
         }
       ],
       "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Turn id."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread the turn ran in."
+        },
+        {
+          "name": "agent_session_id",
+          "type": "INTEGER",
+          "doc": "The agent session it ran in (v_agent_session.id); NULL for a turn no session claims (a hook from an agent oxplow didn't start)."
+        },
+        {
+          "name": "prompt",
+          "type": "TEXT",
+          "doc": "What the human typed."
+        },
+        {
+          "name": "answer",
+          "type": "TEXT",
+          "doc": "The agent's final answer, once the turn ended."
+        },
+        {
+          "name": "session_id",
+          "type": "TEXT",
+          "doc": "The harness session id, when it reported one."
+        },
+        {
+          "name": "started_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "ended_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp; NULL while running."
+        },
+        {
+          "name": "start_snapshot_id",
+          "type": "INTEGER",
+          "doc": "Snapshot the worktree was at when the turn opened (v_snapshot.id); NULL if the stream had none yet."
+        },
+        {
+          "name": "snapshot_id",
+          "type": "INTEGER",
+          "doc": "Snapshot the worktree was at when the turn ended (v_snapshot.id); NULL while running."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`turn:trn<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
+        }
+      ],
+      "key": []
     }
   },
   "ai_call": {
@@ -1503,6 +1563,71 @@
         }
       ],
       "key": []
+    },
+    "5": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Claim id."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread it was made in."
+        },
+        {
+          "name": "work_item",
+          "type": "TEXT",
+          "doc": "The work item it was made on (`work_item:<provider>:<id>`), if any."
+        },
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "Effort, if one was open."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "Turn it happened in (v_agent_turn.id), when known."
+        },
+        {
+          "name": "agent_session_id",
+          "type": "INTEGER",
+          "doc": "The agent session that made it (v_agent_session.id); NULL when not recorded. (v4)"
+        },
+        {
+          "name": "statement",
+          "type": "TEXT",
+          "doc": "The claim in words."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`tests_pass`, `no_behavior_change`, `handles_case` or `other`."
+        },
+        {
+          "name": "evidence_ref",
+          "type": "TEXT",
+          "doc": "What backs it (`run:<id>`, a test, a file, or `reviewer` when a person verified it with `oxplow.effort.verify_claim`); NULL if nothing was cited."
+        },
+        {
+          "name": "verified",
+          "type": "",
+          "doc": "1 if it cites evidence, or is `tests_pass` and its effort's latest test run (in `v_test_run`) passed with at least one test; else 0."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`claim:<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v5)"
+        }
+      ],
+      "key": []
     }
   },
   "code_quality_finding": {
@@ -1699,6 +1824,96 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Comment id."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "Stream the comment was made in."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread it was made in, if any."
+        },
+        {
+          "name": "target_kind",
+          "type": "TEXT",
+          "doc": "Kind of page it is anchored to: `file`, `wiki`, `task`, …"
+        },
+        {
+          "name": "target_id",
+          "type": "TEXT",
+          "doc": "Id of that page (path, slug, task id…)."
+        },
+        {
+          "name": "quote",
+          "type": "TEXT",
+          "doc": "The selected text the comment is anchored to."
+        },
+        {
+          "name": "intent",
+          "type": "TEXT",
+          "doc": "`note` (for me) or `followup` (for the agent to act on)."
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "doc": "`open` or `resolved`."
+        },
+        {
+          "name": "orphaned",
+          "type": "INTEGER",
+          "doc": "1 when the quote can no longer be found in the page."
+        },
+        {
+          "name": "author",
+          "type": "TEXT",
+          "doc": "Who started it."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "last_activity_at",
+          "type": "TEXT",
+          "doc": "Time of the newest message."
+        },
+        {
+          "name": "resolved_at",
+          "type": "TEXT",
+          "doc": "Set when resolved."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Text of the first message."
+        },
+        {
+          "name": "message_count",
+          "type": "",
+          "doc": "Number of messages in the thread."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`comment:cmt<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
+        }
+      ],
+      "key": []
     }
   },
   "commit": {
@@ -1748,6 +1963,61 @@
           "name": "parents",
           "type": "TEXT",
           "doc": "Every parent's sha, as a JSON array (first parent first)."
+        }
+      ],
+      "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "sha",
+          "type": "TEXT",
+          "doc": "Full commit sha."
+        },
+        {
+          "name": "author",
+          "type": "TEXT",
+          "doc": "Author name."
+        },
+        {
+          "name": "email",
+          "type": "TEXT",
+          "doc": "Author email."
+        },
+        {
+          "name": "committed_at",
+          "type": "TEXT",
+          "doc": "Commit time (RFC 3339)."
+        },
+        {
+          "name": "subject",
+          "type": "TEXT",
+          "doc": "First line of the message."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "The rest of the message."
+        },
+        {
+          "name": "first_parent",
+          "type": "",
+          "doc": "First parent's sha; NULL for a root commit."
+        },
+        {
+          "name": "parent_count",
+          "type": "",
+          "doc": "Number of parents (2+ for a merge)."
+        },
+        {
+          "name": "parents",
+          "type": "TEXT",
+          "doc": "Every parent's sha, as a JSON array (first parent first)."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`commit:<sha>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
         }
       ],
       "key": []
@@ -2090,6 +2360,76 @@
           "name": "created_at",
           "type": "TEXT",
           "doc": "RFC 3339 timestamp."
+        }
+      ],
+      "key": []
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Decision id."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread it was made in."
+        },
+        {
+          "name": "work_item",
+          "type": "TEXT",
+          "doc": "The work item being worked on (`work_item:<provider>:<id>`), if any."
+        },
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "Effort it was made during, if one was open."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "Turn it happened in (v_agent_turn.id), when known."
+        },
+        {
+          "name": "question",
+          "type": "TEXT",
+          "doc": "What had to be decided."
+        },
+        {
+          "name": "choice",
+          "type": "TEXT",
+          "doc": "What was chosen."
+        },
+        {
+          "name": "alternatives",
+          "type": "TEXT",
+          "doc": "Options not taken, as a JSON array of strings."
+        },
+        {
+          "name": "confidence",
+          "type": "TEXT",
+          "doc": "`low`, `medium` or `high`."
+        },
+        {
+          "name": "why",
+          "type": "TEXT",
+          "doc": "The reasoning."
+        },
+        {
+          "name": "provenance",
+          "type": "TEXT",
+          "doc": "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed — a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`oxplow.effort.confirm_decision` / `oxplow.effort.dismiss_decision`)."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`decision:<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v4)"
         }
       ],
       "key": []
@@ -2464,6 +2804,71 @@
           "name": "closed_by",
           "type": "TEXT",
           "doc": "What closed it: `commit`, `switch`, `person`, `agent` or `system`; NULL while open. (v2)"
+        }
+      ],
+      "key": []
+    },
+    "6": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Effort id."
+        },
+        {
+          "name": "work_item",
+          "type": "TEXT",
+          "doc": "The work item it's linked to, as a canonical ref (`work_item:oxplow:tsk42`, `work_item:issues:ENG-12`); NULL while unlinked. (v2: nullable)"
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread that did the work."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "That thread's stream."
+        },
+        {
+          "name": "started_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "ended_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp; NULL while the effort is open."
+        },
+        {
+          "name": "start_snapshot_id",
+          "type": "INTEGER",
+          "doc": "Snapshot at the start (v_snapshot.id)."
+        },
+        {
+          "name": "end_snapshot_id",
+          "type": "INTEGER",
+          "doc": "Snapshot at the end; NULL while open."
+        },
+        {
+          "name": "summary",
+          "type": "",
+          "doc": "What shipped: the summary `oxplow.effort.report` recorded, else the final message of the last agent turn in the effort."
+        },
+        {
+          "name": "title",
+          "type": "",
+          "doc": "Its own title, else its work item's, else the first line of its first prompt. (v2)"
+        },
+        {
+          "name": "closed_by",
+          "type": "TEXT",
+          "doc": "What closed it: `commit`, `switch`, `person`, `agent` or `system`; NULL while open. (v2)"
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`effort:eff<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v6)"
         }
       ],
       "key": []
@@ -3004,6 +3409,106 @@
           "name": "dedupe_key",
           "type": "TEXT",
           "doc": "Emitter-derived key; unique."
+        }
+      ],
+      "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "seq",
+          "type": "INTEGER",
+          "doc": "Insert order — the delivery order consumers checkpoint on."
+        },
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "Public identity (UUIDv7; sorts by time)."
+        },
+        {
+          "name": "type",
+          "type": "TEXT",
+          "doc": "`namespace.name`, e.g. `work_item.state_changed`."
+        },
+        {
+          "name": "v",
+          "type": "INTEGER",
+          "doc": "Schema version of `type`."
+        },
+        {
+          "name": "at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "doc": "What emitted it: `human`, `agent:thr3`, `task_service`, …"
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "Anchor, when known."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Anchor, when known."
+        },
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "Anchor, when known."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "Anchor (agent_turn), when known."
+        },
+        {
+          "name": "snapshot_id",
+          "type": "INTEGER",
+          "doc": "Anchor, when known."
+        },
+        {
+          "name": "agent_session_id",
+          "type": "INTEGER",
+          "doc": "Anchor (v_agent_session.id): the agent session it happened in, when known."
+        },
+        {
+          "name": "subject",
+          "type": "TEXT",
+          "doc": "JSON array of the canonical refs the event is about."
+        },
+        {
+          "name": "payload",
+          "type": "TEXT",
+          "doc": "JSON, validated against `type@v`'s schema."
+        },
+        {
+          "name": "payload_hash",
+          "type": "TEXT",
+          "doc": "Content hash when the body lives in the content store."
+        },
+        {
+          "name": "payload_expired_at",
+          "type": "TEXT",
+          "doc": "When retention replaced the payload with `{}` (the envelope stays); NULL while it's kept."
+        },
+        {
+          "name": "cause",
+          "type": "TEXT",
+          "doc": "The event id that caused this one."
+        },
+        {
+          "name": "dedupe_key",
+          "type": "TEXT",
+          "doc": "Emitter-derived key; unique."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`event:<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         }
       ],
       "key": []
@@ -4170,6 +4675,46 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Snapshot id."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "Stream captured."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "revision",
+          "type": "TEXT",
+          "doc": "The VCS revision the captured tree equals (`git:<sha>`): set when the workspace was clean at the head; NULL otherwise."
+        },
+        {
+          "name": "branch",
+          "type": "TEXT",
+          "doc": "Branch when captured, if known."
+        },
+        {
+          "name": "tree_hash",
+          "type": "TEXT",
+          "doc": "Whole-tree identity: two snapshots with the same tree_hash hold the same files. NULL before V96."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`snapshot:<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
+        }
+      ],
+      "key": []
     }
   },
   "snapshot_file": {
@@ -4498,6 +5043,56 @@
           "name": "archived_at",
           "type": "TEXT",
           "doc": "Set when the stream was archived; NULL while live."
+        }
+      ],
+      "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Stream id."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`primary` (the repo) or `worktree`."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Display name."
+        },
+        {
+          "name": "branch",
+          "type": "TEXT",
+          "doc": "Git branch currently checked out in the worktree."
+        },
+        {
+          "name": "worktree_path",
+          "type": "TEXT",
+          "doc": "Absolute path of the stream's worktree."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "archived_at",
+          "type": "TEXT",
+          "doc": "Set when the stream was archived; NULL while live."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`stream:str<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
         }
       ],
       "key": []
@@ -5286,6 +5881,61 @@
         }
       ],
       "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Thread id."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "Owning stream (v_stream.id)."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Display name."
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "doc": "`active` (the stream's writer), `queued` (read-only) or `closed`."
+        },
+        {
+          "name": "sort_index",
+          "type": "INTEGER",
+          "doc": "Order within the stream."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "closed_at",
+          "type": "TEXT",
+          "doc": "Set when the thread was closed."
+        },
+        {
+          "name": "archived_at",
+          "type": "TEXT",
+          "doc": "Set when the thread was archived."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`thread:thr<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
+        }
+      ],
+      "key": []
     }
   },
   "asset": {
@@ -5524,6 +6174,61 @@
           "name": "run_id",
           "type": "TEXT",
           "doc": "Its last run (`v_extension_run.run_id`); NULL for a run before runs were recorded. (v2)"
+        }
+      ],
+      "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "owner",
+          "type": "TEXT",
+          "doc": "The extension that declares it, `project` for `.oxplow/project.yaml`, or `built-in`."
+        },
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "The collector's id within its owner (may be dotted: `repo.scan_clone`)."
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "doc": "`ok`, `error`, `needs_approval` (an exec collector a person hasn't approved), or `skipped` (the loop guard refused its run for an event; `error` says why)."
+        },
+        {
+          "name": "last_run_at",
+          "type": "TEXT",
+          "doc": "When it last ran (RFC 3339)."
+        },
+        {
+          "name": "error",
+          "type": "TEXT",
+          "doc": "The last run's error, when it failed."
+        },
+        {
+          "name": "row_counts_json",
+          "type": "TEXT",
+          "doc": "Rows per entity after the last successful run, as JSON."
+        },
+        {
+          "name": "cursor_json",
+          "type": "TEXT",
+          "doc": "Its checkpoint: the opaque state its script or provider read returned last."
+        },
+        {
+          "name": "last_event_id",
+          "type": "INTEGER",
+          "doc": "The seq of the last trigger event it ran for."
+        },
+        {
+          "name": "run_id",
+          "type": "TEXT",
+          "doc": "Its last run (`v_extension_run.run_id`); NULL for a run before runs were recorded. (v2)"
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`collector:<owner>/<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         }
       ],
       "key": []
@@ -7798,6 +8503,41 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Note id (`not<n>`)."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread it's on."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Markdown body."
+        },
+        {
+          "name": "author",
+          "type": "TEXT",
+          "doc": "Who wrote it (`agent`, `user`, …)."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`thread_note:not<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
+        }
+      ],
+      "key": []
     }
   },
   "agent_session": {
@@ -8017,6 +8757,91 @@
           "name": "stopped_by_user_at",
           "type": "TEXT",
           "doc": "When the person deliberately stopped it; NULL once started again, and after a crash or backend restart (which resume when the tab is shown). A stopped session is not spawned until a person starts it. (v3)"
+        }
+      ],
+      "key": []
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Session id (its ref is `agent_session:ses<id>`)."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread it's on (v_thread.id)."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`terminal` (a harness in a PTY), `chat` (an ACP agent) or `action` (a one-shot session)."
+        },
+        {
+          "name": "harness",
+          "type": "TEXT",
+          "doc": "What runs in it: `claude`, `codex`, `opencode`, or `acp` (an Agent Client Protocol agent)."
+        },
+        {
+          "name": "acp_agent",
+          "type": "TEXT",
+          "doc": "For an `acp` session, which ACP agent it runs (`claude`, `gemini`, a project `acpAgents` name); NULL otherwise."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "What the person called it; empty until renamed."
+        },
+        {
+          "name": "resume_session_id",
+          "type": "TEXT",
+          "doc": "The harness's own session id, to resume it; empty when unknown."
+        },
+        {
+          "name": "host",
+          "type": "TEXT",
+          "doc": "The host it runs on; NULL is the local machine."
+        },
+        {
+          "name": "opened_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "closed_at",
+          "type": "TEXT",
+          "doc": "When its slot was closed; NULL while open."
+        },
+        {
+          "name": "closed_reason",
+          "type": "TEXT",
+          "doc": "`closed` (closed itself), `thread_closed` or `stream_archived`; NULL while open."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "pid",
+          "type": "INTEGER",
+          "doc": "OS pid of the process the daemon spawned for it, rewritten on every spawn; NULL for a session with no process of its own (a chat) or not yet spawned. May be dead or reused: read it with last_seen_at. (v2)"
+        },
+        {
+          "name": "last_seen_at",
+          "type": "TEXT",
+          "doc": "The newest hook seen from it, to the 30 s (RFC 3339); NULL before the first. A live agent has a recent one and a pid that exists. (v2)"
+        },
+        {
+          "name": "stopped_by_user_at",
+          "type": "TEXT",
+          "doc": "When the person deliberately stopped it; NULL once started again, and after a crash or backend restart (which resume when the tab is shown). A stopped session is not spawned until a person starts it. (v3)"
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`agent_session:ses<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v4)"
         }
       ],
       "key": []
