@@ -743,6 +743,10 @@ services it lists in `needs:`. `list_services` (MCP) describes them:
   snapshot's files. A fact collector has it without declaring it.
 - `ai.compute`: the `ai_*` builtins. A person approves the script. An
   entity collector that calls one has it without declaring it.
+- `ai.discover`: `scope("ai.discover", {role})` says whether a model
+  serves a role (a built-in or your extension's `ai_profiles` id) —
+  `{role, model: {provider, model} | null, problem}` — without spending.
+  An effect uses it to skip, with a reason, when no model is bound.
 
 Rules:
 

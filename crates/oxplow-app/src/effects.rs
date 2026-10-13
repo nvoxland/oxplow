@@ -420,7 +420,8 @@ pub async fn run_over(
         let read = Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(layer.run(q)));
         let calls = crate::scope_calls::Calls::new(&run, &needs, read)
             .with_state_source(layer.state_source(), &runtime)
-            .with_configuration_source(layer.configuration_source(), &runtime);
+            .with_configuration_source(layer.configuration_source(), &runtime)
+            .with_ai_source(layer.ai_source());
         let mut calls = match &answers {
             Some(answers) => calls.with_answers(answers),
             None => calls,

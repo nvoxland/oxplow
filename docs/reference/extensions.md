@@ -231,6 +231,13 @@ collectors:
 - A fact collector reads the tree without declaring it, and a
   collector whose script calls a model builtin asks a model without
   declaring it. Everything else is declared.
+- An effect or command that declares `needs: [ai.discover]` can ask
+  whether a model serves a role without spending anything:
+  `scope("ai.discover", {"role": "review"})` answers `{role, model:
+  {provider, model}, problem: null}` when one does (a bare profile id is
+  your extension's; an unbound profile reports its fallback's model), or
+  `{role, model: null, problem}` saying why not. Use it to skip when no
+  model is bound.
 - Declare `needs: [ai.discover]` to read `ai_capabilities(role = "main")`
   or `ai_models(role = "main")` in a collector. Missing metadata is unknown.
   Discovery reads no keys, makes no paid calls and works in pure previews.

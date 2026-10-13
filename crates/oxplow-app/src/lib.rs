@@ -1242,6 +1242,7 @@ impl Services {
         // they stand, and the catalog generation it ran against.
         let feeds = Arc::new(collection_coverage::Feeds::default());
         let sql = sql.with_collection(sql_gateway::Collection {
+            ai: ai.clone(),
             jobs: jobs.clone(),
             feeds: feeds.clone(),
             db: db.clone(),

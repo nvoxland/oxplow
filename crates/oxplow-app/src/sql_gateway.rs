@@ -38,6 +38,7 @@ pub struct SqlGateway {
 /// generation (`crate::collection_coverage`).
 pub struct Collection {
     pub jobs: std::sync::Arc<crate::extension_jobs::ExtensionJobs>,
+    pub ai: std::sync::Arc<crate::ai_service::AiService>,
     pub feeds: std::sync::Arc<crate::collection_coverage::Feeds>,
     pub db: Database,
     pub catalog: std::sync::Arc<crate::extension_catalog::ExtensionCatalog>,
@@ -162,6 +163,12 @@ impl SqlGateway {
         self.collection
             .as_ref()
             .map(|resources| resources.jobs.clone())
+    }
+
+    pub(crate) fn ai_source(&self) -> Option<std::sync::Arc<crate::ai_service::AiService>> {
+        self.collection
+            .as_ref()
+            .map(|resources| resources.ai.clone())
     }
 
     pub(crate) fn configuration_source(

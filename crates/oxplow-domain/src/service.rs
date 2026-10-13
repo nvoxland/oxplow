@@ -34,6 +34,7 @@ pub const CALLABLE: &[&str] = &[
     "state.read",
     "extension_config.read",
     "jobs.read",
+    "ai.discover",
 ];
 
 /// Every service, by scope.

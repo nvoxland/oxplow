@@ -1030,6 +1030,7 @@ pub(crate) async fn run_script(
         let mut calls = crate::scope_calls::Calls::new(&composing, &needs, read)
             .with_state_source(layer.state_source(), &runtime)
             .with_jobs_source(layer.jobs_source(), &runtime)
+            .with_ai_source(layer.ai_source())
             .with_configuration_source(layer.configuration_source(), &runtime);
         let reaction = effects::run_script(&script, event, given, &mut calls)?;
         Ok((reaction, composing.trace().summary()))

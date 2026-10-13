@@ -95,6 +95,41 @@ pub type ConfigurationReader<'a> = dyn FnMut() -> Result<
 pub type JobReader<'a> =
     dyn FnMut(crate::extension_jobs::JobInput) -> Result<Value, oxplow_domain::CommandError> + 'a;
 
+/// Whether a model serves a role: given the role as the script names it,
+/// its answer (`{ role, model, problem }`).
+pub type AiReader<'a> = dyn FnMut(String) -> Result<Value, String> + 'a;
+
+/// `ai.discover`'s answer for `name` as `extension` means it: the role
+/// qualified, and the model it is bound to now or why none is.
+fn discover(
+    ai: &crate::ai_service::AiService,
+    extension: Option<&str>,
+    name: &str,
+) -> Result<Value, String> {
+    use crate::ai_service::AiServiceError;
+    let role = match extension {
+        Some(extension) => oxplow_ai::config::Role::parse_in(extension, name)?,
+        None => oxplow_ai::config::Role::parse(name)?,
+    };
+    match ai.binding_for(&role) {
+        Ok(binding) => Ok(serde_json::json!({
+            "role": role.to_string(),
+            "model": { "provider": binding.provider, "model": binding.model },
+            "problem": null,
+        })),
+        Err(
+            e @ (AiServiceError::NotConfigured(_)
+            | AiServiceError::ProfileNotConfigured { .. }
+            | AiServiceError::UndeclaredProfile(_)),
+        ) => Ok(serde_json::json!({
+            "role": role.to_string(),
+            "model": null,
+            "problem": e.to_string(),
+        })),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 /// One run's scope calls, counted on its context's trace.
 pub struct Calls<'a> {
     needs: &'a [String],
@@ -103,6 +138,7 @@ pub struct Calls<'a> {
     state: Option<Box<StateReader<'a>>>,
     configuration: Option<Box<ConfigurationReader<'a>>>,
     jobs: Option<Box<JobReader<'a>>>,
+    ai: Option<Box<AiReader<'a>>>,
     /// Answers standing in for a scope's own, in call order (an
     /// example's); a scope without any is served for real.
     answers: BTreeMap<String, VecDeque<Value>>,
@@ -119,6 +155,7 @@ impl<'a> Calls<'a> {
             state: None,
             configuration: None,
             jobs: None,
+            ai: None,
             answers: BTreeMap::new(),
             busy: None,
         }
@@ -195,6 +232,30 @@ impl<'a> Calls<'a> {
         }
     }
 
+    /// Answer `ai.discover` with `ai`.
+    pub fn with_ai_reader(mut self, ai: Box<AiReader<'a>>) -> Self {
+        self.ai = Some(ai);
+        self
+    }
+
+    /// `ai.discover` over the app's AI settings: whether the role (a
+    /// built-in, or one of the run's extension's profiles by its id) is
+    /// bound to a model. It reads settings only: no key, no probe, no spend.
+    pub fn with_ai_source(
+        self,
+        source: Option<std::sync::Arc<crate::ai_service::AiService>>,
+    ) -> Self {
+        match source {
+            Some(source) => {
+                let extension = self.run.extension().map(str::to_string);
+                self.with_ai_reader(Box::new(move |name| {
+                    discover(&source, extension.as_deref(), &name)
+                }))
+            }
+            None => self,
+        }
+    }
+
     pub fn with_answers(mut self, answers: &BTreeMap<String, Vec<Value>>) -> Self {
         self.answers = answers
             .iter()
@@ -245,6 +306,20 @@ impl<'a> Calls<'a> {
         } else {
             None
         };
+        let ai_role = if id == "ai.discover" {
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Args {
+                role: String,
+            }
+            Some(
+                serde_json::from_value::<Args>(args.clone())
+                    .map_err(|_| "`ai.discover` takes { role }".to_string())?
+                    .role,
+            )
+        } else {
+            None
+        };
         if !matches!(id, "state.read" | "extension_config.read") || self.answers.contains_key(id) {
             self.run.trace().count(id);
             self.run.used_scope(id);
@@ -265,6 +340,12 @@ impl<'a> Calls<'a> {
                 job_input.expect("parsed job input"),
             )
             .map_err(|error| error.to_string()),
+            "ai.discover" => self
+                .ai
+                .as_mut()
+                .ok_or("ai.discover is unavailable where this script runs")?(
+                ai_role.expect("parsed ai.discover role"),
+            ),
             _ => unreachable!("checked callable service"),
         }
     }
@@ -686,5 +767,138 @@ mod tests {
         })
         .await
         .unwrap();
+    }
+    /// A service with `summarize` bound and the profile `acme/review`
+    /// declared (unbound).
+    fn ai_service(dir: &tempfile::TempDir) -> std::sync::Arc<crate::ai_service::AiService> {
+        use oxplow_ai::config::{AiConfig, BuiltinRole, Role, RoleBinding};
+        let mut cfg = AiConfig::default();
+        cfg.providers.push(crate::ai_service::ProviderConfig {
+            id: "or".into(),
+            kind: "openrouter".into(),
+            base_url: Some("http://unused".into()),
+        });
+        cfg.roles.insert(
+            Role::SUMMARIZE,
+            RoleBinding {
+                provider: "or".into(),
+                model: "m".into(),
+            },
+        );
+        cfg.save(dir.path()).unwrap();
+        let svc = crate::ai_service::AiService::new(
+            Default::default(),
+            std::sync::Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
+            std::sync::Arc::new(oxplow_db::SqliteAiCallStore::new(
+                oxplow_db::Database::in_memory(),
+            )),
+            Some(dir.path().into()),
+        );
+        svc.set_profiles(std::sync::Arc::new(|| {
+            vec![crate::ai_service::AiProfile {
+                extension: "acme".into(),
+                name: "review".into(),
+                description: "Reviews.".into(),
+                fallback: BuiltinRole::Summarize,
+                features: vec![],
+            }]
+        }));
+        std::sync::Arc::new(svc)
+    }
+
+    fn acme_run() -> RunContext {
+        use oxplow_domain::contribution::{ContributionId, ContributionKind};
+        RunContext::contribution(
+            oxplow_domain::run::ContributionRef {
+                id: ContributionId::new("acme", ContributionKind::Effect, "e"),
+                version: None,
+                generation: None,
+            },
+            oxplow_domain::Actor::Human,
+            oxplow_domain::run::Mode::External,
+        )
+    }
+
+    /// `ai.discover` says whether a model serves a role, and why not when
+    /// none does; a bare profile name is the run's extension's.
+    #[test]
+    fn ai_discover_reports_a_bound_role_and_an_unbound_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let (needs, run, mut asked) = (needs(&["ai.discover"]), acme_run(), vec![]);
+        let mut calls =
+            Calls::new(&run, &needs, reader(&mut asked)).with_ai_source(Some(ai_service(&dir)));
+        let bound = calls
+            .serve("ai.discover", json!({ "role": "summarize" }))
+            .unwrap();
+        assert_eq!(
+            bound,
+            json!({ "role": "summarize", "model": { "provider": "or", "model": "m" }, "problem": null })
+        );
+        // The profile is unbound: its fallback's model serves it.
+        let profile = calls
+            .serve("ai.discover", json!({ "role": "review" }))
+            .unwrap();
+        assert_eq!(profile["role"], "acme/review");
+        assert_eq!(profile["model"], json!({ "provider": "or", "model": "m" }));
+        // `decide` has no model; an undeclared profile says so.
+        let unbound = calls
+            .serve("ai.discover", json!({ "role": "decide" }))
+            .unwrap();
+        assert_eq!(unbound["model"], json!(null));
+        assert!(unbound["problem"]
+            .as_str()
+            .unwrap()
+            .contains("`decide` role"));
+        let undeclared = calls
+            .serve("ai.discover", json!({ "role": "nothing" }))
+            .unwrap();
+        assert_eq!(undeclared["role"], "acme/nothing");
+        assert!(undeclared["problem"]
+            .as_str()
+            .unwrap()
+            .contains("no active extension declares"));
+        drop(calls);
+        assert_eq!(
+            run.trace().summary(),
+            [("ai.discover".to_string(), 4)].into()
+        );
+    }
+
+    #[test]
+    fn ai_discover_needs_its_scope_its_args_and_a_reader() {
+        let (none, run, mut asked) = (needs(&["sql.read"]), acme_run(), vec![]);
+        let mut calls = Calls::new(&run, &none, reader(&mut asked));
+        let err = calls
+            .serve("ai.discover", json!({ "role": "main" }))
+            .unwrap_err();
+        assert!(
+            err.contains("`ai.discover` isn't in the command's `needs`"),
+            "{err}"
+        );
+        let (declared, mut asked) = (needs(&["ai.discover"]), vec![]);
+        let mut calls = Calls::new(&run, &declared, reader(&mut asked));
+        let err = calls.serve("ai.discover", json!({})).unwrap_err();
+        assert!(err.contains("`ai.discover` takes { role }"), "{err}");
+        let err = calls
+            .serve("ai.discover", json!({ "role": "main" }))
+            .unwrap_err();
+        assert!(err.contains("ai.discover is unavailable"), "{err}");
+    }
+
+    #[test]
+    fn ai_discover_answers_stand_in() {
+        let (needs, run, mut asked) = (needs(&["ai.discover"]), acme_run(), vec![]);
+        let answers = [(
+            "ai.discover".to_string(),
+            vec![json!({ "role": "review", "model": null, "problem": "none" })],
+        )]
+        .into();
+        let mut calls = Calls::new(&run, &needs, reader(&mut asked)).with_answers(&answers);
+        assert_eq!(
+            calls
+                .serve("ai.discover", json!({ "role": "review" }))
+                .unwrap()["problem"],
+            "none"
+        );
     }
 }
