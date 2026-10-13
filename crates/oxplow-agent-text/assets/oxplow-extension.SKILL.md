@@ -457,6 +457,10 @@ names the file and line and says what to change.
      params? }], invokes?: [{ command, input?, approved? }] }` — what its
      frame would ask; `expect: { queries: [{ rows }], invokes: [{ ok,
      refused? }] }` (an invoke is refused until `approved: true`);
+   - a form lens (`viz: form`): `input: { form: <lens>, params? }` — opens
+     it as a person would; `expect: { values?, fixed?, fields? }` (the
+     values its fields start from, the read-only fields, the shown ones,
+     `null` for all);
    - a collector: `input: { collector: <id>, rows: [...], event? }`
      (`rows` stands in for its `input` query; `event` is the event an
      `on:` collector reacts to), `expect: { entities: { <name>: n } }` —

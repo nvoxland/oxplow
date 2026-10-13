@@ -1242,7 +1242,10 @@ and one calling MCP read identical `file:line: what — fix` lines.
   they ran and which of the named wiki refs now exist), a component (`{ component, queries?,
   invokes? }`: `load_component`, `run_component_query`,
   `invoke_component_command` as its frame would — `expect: { queries:
-  [{ rows }], invokes: [{ ok, refused? }] }`), and the dry runs that
+  [{ rows }], invokes: [{ ok, refused? }] }`), a form lens (`{ form: <lens>,
+  params? }`: `lens_actions::form_start`, as a person opening it — `expect: {
+  values?, fixed?, fields? }`, the values the fields start from, the
+  read-only ones and the shown ones, `null` for all), and the dry runs that
   stay dry (`{ effect, event }`, `{ implementation, event }`, `{ command,
   input }`, a derived or fact collector, an event type, a wikilink). For
   the new forms only the keys `expect` names are compared
@@ -1683,6 +1686,23 @@ approve. Core keeps no lane code: `CommitList` (the fallback, and the Git
 dashboard's recent commits with their stats) is a plain list.
 `lens/historyGraph.test.ts` runs the bundle's own script against its page
 — lanes, merge lanes, child-before-parent order, filters, reveal, Cmd-click.
+
+**The example that proves views and forms: `examples/extensions/task-views`.**
+A private extension, no provider of its own, replacing `work_item.board`
+(the `swimlanes` component: a column per canonical state, drag a card to
+another column to `oxplow.work_item.transition` it, drag within a column to
+`reorder` it only when the active provider's `features` (a second hidden
+asset lens, `features`, over `v_capability_provider`) include `ordering`,
+click a title to rename it through an inline `<form>` with `ox-input` and a
+field refusal shown in `ox-error`, a click on a card `navigate`s, a
+Cmd/Ctrl-click opens a new tab, and a `DENIED` refusal is one line above
+the board), `work_item.list` (`compact-list`, a `viz: table` with Done and an
+`Edit…` form action) and `work_item.detail` (`edit-item`, a `viz: form`
+over `oxplow.work_item.update` with `ref` fixed). It reads `v_work_item` and
+changes items only through the interface commands, so it works with any
+list. `lens/swimlanes.test.ts` runs the bundle's script against its page;
+`oxplow-sdk/tests/examples.rs` checks it clean and runs its fixtures,
+including a `form:` one.
 
 ## Reviewing by impact
 

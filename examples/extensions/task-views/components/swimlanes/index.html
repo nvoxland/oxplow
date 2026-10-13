@@ -1,0 +1,11 @@
+<!doctype html>
+<meta charset="utf-8">
+<!-- oxplow's look: the kit's classes over the theme, which app.js applies. -->
+<link rel="stylesheet" href="/component-lib/oxplow-kit.css">
+<link rel="stylesheet" href="app.css">
+<p id="note" class="ox-muted ox-small" role="status" hidden></p>
+<div id="board" class="board"></div>
+<!-- oxplow's client library (it defines `oxplow`), then this bundle's own
+     script. Both are plain scripts: a sandboxed frame can't load modules. -->
+<script src="/component-lib/oxplow-component.js"></script>
+<script src="app.js"></script>

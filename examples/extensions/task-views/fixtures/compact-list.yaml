@@ -1,0 +1,7 @@
+# The list reads v_work_item; a fresh project has no items yet.
+input:
+  lens: compact-list
+  params: { scope: all }
+expect:
+  columns: [ref, title, state, updated_at]
+  rows: 0

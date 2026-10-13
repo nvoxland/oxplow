@@ -1,0 +1,10 @@
+# The board reads its cards and the active provider's features.
+input:
+  component: swimlanes
+  queries:
+    - { asset: swimlanes, params: { scope: all } }
+    - { asset: features }
+expect:
+  queries:
+    - { rows: 0 }
+    - { rows: 1 }

@@ -1,0 +1,8 @@
+# The editor's form: the item's title and body, its ref fixed.
+input:
+  form: edit-item
+  params: { ref: "work_item:oxplow:1" }
+expect:
+  values: { ref: "work_item:oxplow:1" }
+  fixed: [ref]
+  fields: [title, body]

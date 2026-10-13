@@ -1,0 +1,18 @@
+.board { display: flex; gap: 8px; align-items: flex-start; padding: 4px; }
+.lane {
+  flex: 1 1 0;
+  min-width: 150px;
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--surface-app);
+}
+.lane.ox-drop-target { border-color: var(--accent); }
+.lane h3 { margin: 0; font-size: var(--text-sm); }
+.card { display: flex; flex-direction: column; gap: 3px; font-size: var(--text-sm); }
+.card .title { cursor: text; }
+#note { margin: 4px; color: var(--severity-critical); }

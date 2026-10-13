@@ -501,3 +501,46 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
     }
     assert!(!decided.contains("denied"), "{decided}");
 }
+
+/// The task-views example replaces the Board, the Tasks list and the editor
+/// with no provider of its own. It checks clean and every one of its
+/// fixtures passes: the list, the board's reads and its refused update
+/// until approved, and the editor's form.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_task_views_example_checks_and_its_fixtures_pass() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    oxplow_app::vcs::GitProvider
+        .init_repository(root)
+        .await
+        .unwrap();
+    let example =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/task-views");
+    copy_dir(&example, &root.join("oxplow/extensions/task-views"));
+
+    let report = check(
+        root,
+        "task-views",
+        &ExtensionCatalog::new(),
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(report.ok, "{}", render_findings(&report, Format::Text));
+    let tested = test_extension(root, "task-views", false).await.unwrap();
+    assert_eq!(tested.errors, Vec::<String>::new());
+    for name in [
+        "compact-list",
+        "swimlanes-reads",
+        "swimlanes-needs-approval",
+        "edit-item",
+    ] {
+        assert!(
+            tested.ran.contains(&format!("example {name}")),
+            "{name}: {:?}",
+            tested.ran
+        );
+    }
+}

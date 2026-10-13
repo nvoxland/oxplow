@@ -1,0 +1,8 @@
+# Changing an item is refused until a person approves the board.
+input:
+  component: swimlanes
+  invokes:
+    - { command: oxplow.work_item.update, input: { ref: "work_item:oxplow:1", title: x } }
+expect:
+  invokes:
+    - { ok: false, refused: $any }
