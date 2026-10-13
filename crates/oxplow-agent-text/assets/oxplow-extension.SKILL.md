@@ -549,8 +549,8 @@ SELECT ref, title FROM ref('work_item') WHERE state = 'blocked'
 - It publishes as `v_<extension>_<name>` (dashes as underscores):
   `v_late_work_blocked` for extension `late-work`.
 - Read through `ref()` only: `ref('work_item')` is a core model (`v_work_item`),
-  `ref('blocked')` your own model or synced entity, and
-  `ref('other-ext/name')` another extension's. `source('<table>')` is only
+  `ref('blocked')` your own model or synced entity. Another extension's
+  model is read through an import (below). `source('<table>')` is only
   for your own source tables (`ext__<ext>__<entity>`).
 - `type` is what SQLite reports for the column (`PRAGMA table_info`);
   leave it out for a computed column (`count(*)`, an expression).
@@ -561,6 +561,33 @@ SELECT ref, title FROM ref('work_item') WHERE state = 'blocked'
 - Check runs the compile without publishing; oxplow publishes after
   the files change. A failing declared test shows in the extension's
   errors and `v_model_test`, and the view stays up.
+- **Let other extensions build on it** by exporting it:
+  `exports: [{ contribution: <ext>/model/<name>, version: 1, visibility:
+  stable }]` (the version is the model's). Unexported, it's yours alone.
+
+### Importing another extension's model
+
+Declare what you read, at the version you read it, and read it through
+the binding:
+
+```yaml
+imports:
+  - { id: reviews, contribution: effort-review/model/reviews, version: 1, optional: true }
+```
+
+```sql
+SELECT work_item, review FROM import_ref('reviews')
+```
+
+- `optional: true`: when the producer is missing, disabled or exports
+  another version, what reads the binding (a lens, a model, a slot that
+  mounts the lens) is withheld with a warning, and the rest of your
+  extension still loads. Without it, your whole extension is blocked.
+- `oxplow extension check` prints how each import resolved
+  (``import `reviews` → effort-review/model/reviews v1: available``, or
+  why not).
+- The producer bumping its model's version is a break: your import of
+  the old version goes unavailable until you change it.
 
 ## Contributing metrics
 
@@ -756,7 +783,14 @@ effects:
 ```
 
 - `review.ask` takes `{ job, intentKey, request: { schemaVersion: 1,
-  role, messages } }` — no model: the role's is used.
+  role, messages } }` — no model: the role's is used. The `intentKey` is
+  the job's **subject**, one job per key: put what it's about in it
+  (`review:effort:eff12`), and read it back as the snapshot's `intentKey`
+  (or `v_job.intent_key`) in the effect that publishes the answer.
+- To start one on an event, an effect composes your own `ask` command
+  (give it `invokers.agent: true`: an effect acts as an agent). Keep the
+  prompt in one script command that composes `ask`, so the effect and a
+  lens button share it.
 - A tool only reads; the model calls it as `todos_in_file`, and with
   `sql.read` it also has `query_sql` over the `v_*` models. A job never
   writes: the effect on its end does (`scope("jobs.read", { id })` gives
@@ -766,7 +800,12 @@ effects:
   it updates as the model writes. oxplow's own Jobs lens lists every job
   with Cancel.
 - `examples/extensions/triage/` in the oxplow repo has one, with its
-  fixtures (a tool round, a cancel).
+  fixtures (a tool round, a cancel); `examples/extensions/effort-review/`
+  starts one per finished effort, its tool reading the effort's evidence,
+  and comments the answer on the work item.
+- Your command namespace is your name with `-` as `_`: extension
+  `effort-review` has commands `effort_review.review.ask`, while its
+  contribution ids keep the dash (`effort-review/job/review`).
 
 ## Replacing a core view
 
