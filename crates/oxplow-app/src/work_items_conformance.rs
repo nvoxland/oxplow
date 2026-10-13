@@ -310,7 +310,7 @@ pub async fn suite(
     // 5b. A list with links takes `about` to any ref — one that names
     // nothing too — and removes a link with `unlink`.
     if features.links {
-        let about = "effort:eff999999";
+        let about = &oxplow_domain::refs::build::effort_ref(oxplow_domain::EffortId::new(999_999));
         match items.link(actor, &item, about, "about").await {
             Err(e) => fail("links", format!("link `about` {about}: {e}")),
             Ok(_) => {
