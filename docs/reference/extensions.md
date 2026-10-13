@@ -187,6 +187,7 @@ for managing references is not implemented yet.
 | `ref_kinds` | kinds of thing a ref can name |  |
 | `commands` | commands on oxplow's command bus | below |
 | `jobs` | durable host operations scheduled by an extension |  |
+| `ai_profiles` | a named model need an extension declares: bound by the person, or falling back to a built-in role |  |
 | `effects` | scripts that react to logged events | below |
 | `advisories` | guidance queries for the coding agent |  |
 | `skills` | skills and slash commands for the coding agent |  |
@@ -387,6 +388,25 @@ A script declaring `needs: [jobs.read]` can call
 (`succeeded`, `failed`, `cancelled` or `interrupted`), with no request or
 result body; read the result through `jobs.read`. An agent or effect that
 composes `enqueue` does not acquire the job's AI permission.
+
+### AI profiles
+
+A profile is a named model need your extension declares, so a job or
+script can ask for "the model that reviews" without naming one:
+
+```yaml
+ai_profiles:
+  - id: review                      # [a-z][a-z0-9_]*, unique in the extension
+    description: Reviews an effort's evidence.   # at most 4096 bytes
+    fallback: summarize             # main | summarize | decide (required)
+    features: [tool_calling]        # optional: text | tool_calling | streaming | image
+```
+
+The person binds `<extension>/<id>` to a model in Settings → AI; until
+they do, the `fallback` role's model serves it. `features` are what the
+bound model must support. Declaring a profile changes nothing by itself;
+`oxplow extension check` prints one line per profile saying what serves
+it.
 
 ### Replacing a core view
 

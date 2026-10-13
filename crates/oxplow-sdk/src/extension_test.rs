@@ -66,6 +66,8 @@ pub struct TestReport {
     pub ran: Vec<String>,
     /// How each of its `imports:` resolved here (`crate::import_lines`).
     pub imports: Vec<String>,
+    /// What serves each of its `ai_profiles:` (`crate::profile_lines`).
+    pub profiles: Vec<String>,
     /// The throwaway's activation generation the examples ran against.
     pub generation: Option<String>,
     /// What the extension contributes, by public id
@@ -125,6 +127,7 @@ pub async fn test_extension_in(
             .and_then(|pin| pin.generation().map(str::to_string))
             .or_else(|| Some(host.svc.extension_catalog.generation(&host.root))),
         imports: crate::import_lines(&checked.extension),
+        profiles: crate::profile_lines(&checked.extension),
         contributes: Vec::new(),
         unsupported: Vec::new(),
         left: Vec::new(),
@@ -2605,6 +2608,9 @@ pub fn render(report: &TestReport, format: crate::Format) -> String {
             }
             for i in &report.imports {
                 out.push_str(&format!("import {i}\n"));
+            }
+            for line in &report.profiles {
+                out.push_str(&format!("{line}\n"));
             }
             if !report.unsupported.is_empty() {
                 out.push_str(&format!(

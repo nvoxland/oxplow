@@ -16,6 +16,7 @@ use oxplow_db::{SqlCell, SqlQueryResult};
 use oxplow_domain::DomainError;
 use serde::{Deserialize, Serialize};
 
+pub mod ai_profiles;
 pub(crate) mod candidates;
 pub mod config;
 pub mod config_schema;
@@ -1127,6 +1128,8 @@ pub struct Extension {
     pub commands: Vec<crate::extension_commands::ExtensionCommand>,
     /// Durable host operations declared by this extension.
     pub jobs: Vec<jobs::JobDecl>,
+    /// Named model needs this extension declares.
+    pub ai_profiles: Vec<ai_profiles::AiProfileDecl>,
     /// Its `version:` (semver), when it declares one; required to share.
     pub version: Option<String>,
     /// Its contributions as descriptors (`extensions::descriptors`): the
@@ -1905,6 +1908,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         pages: Vec::new(),
         commands: Vec::new(),
         jobs: Vec::new(),
+        ai_profiles: Vec::new(),
         version: None,
         contributions: Vec::new(),
         configuration: None,
@@ -2175,6 +2179,11 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             let (jobs, errors) =
                 jobs::parse_jobs(v, &file, &manifest, &ext.namespace, &ext.commands);
             ext.jobs = jobs;
+            ext.errors.extend(errors);
+        }
+        if let Some(v) = &m.ai_profiles {
+            let (profiles, errors) = ai_profiles::parse_ai_profiles(v, &file, &manifest);
+            ext.ai_profiles = profiles;
             ext.errors.extend(errors);
         }
         if let Some(v) = &m.custom_components {
@@ -2946,6 +2955,7 @@ pub(super) fn clear_contributions(ext: &mut Extension) {
     ext.pages.clear();
     ext.commands.clear();
     ext.jobs.clear();
+    ext.ai_profiles.clear();
     ext.contributions.clear();
 }
 
@@ -6236,6 +6246,40 @@ commands:
                 && errs.contains("must define `transform`"),
             "{errs}"
         );
+    }
+
+    /// `ai_profiles:` load into the extension, each as a contribution
+    /// `<ext>/ai_profile/<id>`, and a mistake is an error at its line.
+    #[test]
+    fn ai_profiles_load_and_are_described() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("oxplow/extensions/x")).unwrap();
+        let manifest = "manifest: 2\nname: x\nintent:\n  purpose: p\nai_profiles:\n  - { id: review, description: Reviews., fallback: summarize, features: [tool_calling] }\n  - { id: bad, description: x, fallback: huge }\n";
+        std::fs::write(
+            d.path().join("oxplow/extensions/x/extension.yaml"),
+            manifest,
+        )
+        .unwrap();
+        let ext = load_extensions(d.path())
+            .into_iter()
+            .find(|e| e.name == "x")
+            .unwrap();
+        assert_eq!(ext.ai_profiles.len(), 1, "{:?}", ext.errors);
+        assert_eq!(ext.ai_profiles[0].id, "review");
+        assert!(
+            ext.errors
+                .iter()
+                .any(|e| e.contains("extension.yaml:7:") && e.contains("`fallback` is `main`")),
+            "{:?}",
+            ext.errors
+        );
+        let described: Vec<String> = ext
+            .contributions
+            .iter()
+            .map(|c| c.id.to_string())
+            .filter(|id| id.contains("ai_profile"))
+            .collect();
+        assert_eq!(described, ["x/ai_profile/review"]);
     }
 
     /// Oxplow ships two extensions: `oxplow-foundation`, its own commands

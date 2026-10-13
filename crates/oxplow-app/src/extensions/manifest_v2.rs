@@ -220,6 +220,11 @@ pub struct ManifestV2 {
     #[serde(default)]
     #[schemars(with = "Option<Vec<super::jobs::JobFile>>")]
     pub jobs: Option<Value>,
+    /// Named model needs: the person binds `<extension>/<id>` to a model,
+    /// else the fallback role's model serves it.
+    #[serde(default)]
+    #[schemars(with = "Option<Vec<super::ai_profiles::AiProfileFile>>")]
+    pub ai_profiles: Option<Value>,
     /// Full pages, each showing one of its lenses.
     #[serde(default)]
     #[schemars(with = "Option<Vec<super::PageFile>>")]

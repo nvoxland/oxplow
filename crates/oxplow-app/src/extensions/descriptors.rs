@@ -184,6 +184,13 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
         d.needs = job.needs.clone();
         out.push(d);
     }
+    for profile in &ext.ai_profiles {
+        out.push(new(
+            ContributionKind::AiProfile,
+            &profile.id,
+            RunsOn::Declared,
+        ));
+    }
     for a in &ext.advisories {
         let mut d = new(ContributionKind::Advisory, &a.id, RunsOn::Agent);
         d.needs = a.needs.clone();
@@ -325,6 +332,7 @@ fn remove(ext: &mut Extension, c: &Collision) {
             ext.commands.retain(|x| x.name != global)
         }
         ContributionKind::Job => ext.jobs.retain(|job| job.id != local),
+        ContributionKind::AiProfile => ext.ai_profiles.retain(|x| x.id != local),
         ContributionKind::Skill => ext.skills.retain(|x| x.name != local),
         ContributionKind::Implementation => {
             let global = c.global.as_str();

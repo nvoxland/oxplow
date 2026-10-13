@@ -4175,6 +4175,19 @@ commands:
   (its tools read), run core's commands, or call a model its approval
   and the AI provider's don't allow.
 
+### AI profiles (`ai_profiles:`)
+
+`extensions/ai_profiles.rs` parses `ai_profiles:` (`id` `[a-z][a-z0-9_]*`
+unique in the extension, `description` ≤ 4096 bytes, `fallback` one of
+the built-in roles `main | summarize | decide` (required), `features` of
+`text | tool_calling | streaming | image`) into `Extension.ai_profiles`
+(`AiProfileDecl`), each a contribution `<ext>/ai_profile/<id>`
+(`ContributionKind::AiProfile`, `RunsOn::Declared`). It is a declaration
+only: the person binds `<extension>/<id>` to a model, else the fallback
+role's model serves it; `features` are what a bound model must support.
+`extension check` and `extension test` print a line per profile
+(`oxplow_sdk::profile_lines`).
+
 ## Host-owned secret references
 
 `oxplow-domain/src/extension_secret.rs` defines a strict version-1 identity:

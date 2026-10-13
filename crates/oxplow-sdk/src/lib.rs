@@ -1154,6 +1154,33 @@ pub fn import_lines(ext: &Extension) -> Vec<String> {
         .collect()
 }
 
+/// One line per `ai_profiles:` entry: what serves it. For now every profile
+/// falls back to its built-in role's model.
+pub fn profile_lines(ext: &Extension) -> Vec<String> {
+    ext.ai_profiles
+        .iter()
+        .map(|p| {
+            let features = if p.features.is_empty() {
+                String::new()
+            } else {
+                let names: Vec<&str> = p
+                    .features
+                    .iter()
+                    .map(|f| match f {
+                        oxplow_ai::capabilities::ModelFeature::Text => "text",
+                        oxplow_ai::capabilities::ModelFeature::ToolCalling => "tool_calling",
+                        oxplow_ai::capabilities::ModelFeature::Streaming => "streaming",
+                        oxplow_ai::capabilities::ModelFeature::Image => "image",
+                    })
+                    .collect();
+                format!(" (needs {})", names.join(", "))
+            };
+            let role = format!("{:?}", p.fallback).to_lowercase();
+            format!("ai profile `{}` → falls back to `{role}`{features}", p.id)
+        })
+        .collect()
+}
+
 pub fn render_services(report: &CheckReport) -> String {
     use oxplow_app::services::Declared;
     let mut out = String::new();
@@ -1197,6 +1224,9 @@ pub fn render_findings(report: &CheckReport, format: Format) -> String {
             }
             for i in import_lines(&report.extension) {
                 out.push_str(&format!("import {i}\n"));
+            }
+            for line in profile_lines(&report.extension) {
+                out.push_str(&format!("{line}\n"));
             }
             let sql = match report.dry_run {
                 DryRun::Project => "its SQL dry-run against the project's database",
@@ -1621,6 +1651,38 @@ mod tests {
             .await,
             Err(SdkError::NotFound(_))
         ));
+    }
+
+    /// `check` prints a line per `ai_profiles:` entry: what serves it.
+    #[tokio::test]
+    async fn check_prints_a_line_per_ai_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "oxplow/extensions/prof/extension.yaml",
+            "manifest: 2\nname: prof\nsharing: private\nintent:\n  purpose: x\n  examples: [{ name: a }]\nai_profiles:\n  - { id: review, description: Reviews., fallback: summarize, features: [tool_calling, streaming] }\n  - { id: plain, description: Plain., fallback: main }\n",
+        );
+        let report = check(
+            dir.path(),
+            "prof",
+            &ExtensionCatalog::new(),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let text = render_findings(&report, Format::Text);
+        assert!(
+            text.contains(
+                "ai profile `review` → falls back to `summarize` (needs tool_calling, streaming)\n"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains("ai profile `plain` → falls back to `main`\n"),
+            "{text}"
+        );
     }
 
     /// A shared extension travels with the repository: a token in its

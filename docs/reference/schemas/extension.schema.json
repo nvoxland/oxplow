@@ -197,6 +197,17 @@
       },
       "default": null
     },
+    "ai_profiles": {
+      "description": "Named model needs: the person binds `<extension>/<id>` to a model,\nelse the fallback role's model serves it.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/AiProfileFile"
+      },
+      "default": null
+    },
     "pages": {
       "description": "Full pages, each showing one of its lenses.",
       "type": [
@@ -1983,6 +1994,60 @@
           "type": "string",
           "const": "idempotent"
         }
+      ]
+    },
+    "AiProfileFile": {
+      "description": "The on-disk shape, with unknown fields refused by serde.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "`[a-z][a-z0-9_]*`, unique in the extension.",
+          "type": "string"
+        },
+        "description": {
+          "description": "What the profile is for (at most 4096 bytes).",
+          "type": "string"
+        },
+        "fallback": {
+          "description": "The built-in role whose model serves it until a model is bound.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/FallbackFile"
+            }
+          ]
+        },
+        "features": {
+          "description": "What the bound model must support.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/FeatureFile"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "description",
+        "fallback"
+      ]
+    },
+    "FallbackFile": {
+      "description": "The built-in roles a profile may fall back to.",
+      "type": "string",
+      "enum": [
+        "main",
+        "summarize",
+        "decide"
+      ]
+    },
+    "FeatureFile": {
+      "description": "What a bound model must support.",
+      "type": "string",
+      "enum": [
+        "text",
+        "tool_calling",
+        "streaming",
+        "image"
       ]
     },
     "PageFile": {

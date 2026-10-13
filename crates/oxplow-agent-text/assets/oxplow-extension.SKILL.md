@@ -815,6 +815,14 @@ effects:
   `effort-review` has commands `effort_review.review.ask`, while its
   contribution ids keep the dash (`effort-review/job/review`).
 
+## AI profiles
+
+When a job or script needs "a model for X" that a person may want to
+choose, declare `ai_profiles: [{ id, description, fallback: main|summarize|decide,
+features? }]` rather than hard-coding a role; `oxplow extension check`
+shows what serves it. Until a person binds `<extension>/<id>` in Settings →
+AI, the fallback role's model is used.
+
 ## Replacing a core view
 
 When a person wants their own Board, Tasks list or work item editor, an
