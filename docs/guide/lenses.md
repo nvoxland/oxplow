@@ -308,7 +308,10 @@ oxplow.connect().then((component) => {
 can be picked up, plus `ox-dragging` while it is; `ox-drop-target` for
 where it may land), the states `ox-ok`, `ox-waiting`, `ox-running` and
 `ox-bad`, and chart series `ox-series-1` to `ox-series-8` (a `fill` for
-SVG, a `background` otherwise). They only work after `applyTheme()`. A
+SVG, a `background` otherwise). They only work after `applyTheme()`. `invoke`
+resolves with the command's result; a command your extension writes as
+a script answers `{ result, children }` — its script's own `result`, and
+the commands it composed. A
 request that fails rejects with `{ code, message, field? }` — `field` is
 the input a refused command names (`/title`), so your form can show the
 message under it. Types for the

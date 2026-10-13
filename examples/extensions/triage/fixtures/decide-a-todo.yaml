@@ -1,0 +1,8 @@
+# Deciding composes the state write, against the stamp it read (none yet).
+input:
+  command: triage.todos.decide
+  input: { path: src/lib.rs, line: 1, decision: wontfix }
+  answers:
+    state.read: [null]
+expect:
+  commands: [triage.state.set]

@@ -1,8 +1,18 @@
-# The board reads its own lens; it declares no commands.
+# The board reads its own lens. Its commands wait for a person's approval:
+# until then reading the decisions is refused; approved, a decision is
+# recorded in the extension's state and read back.
 input:
   component: todo-board
   queries:
     - { asset: todos }
+  invokes:
+    - { command: triage.todos.decisions }
+    - { command: triage.todos.decide, input: { path: src/lib.rs, line: 1, decision: fix-now }, approved: true }
+    - { command: triage.todos.decisions }
 expect:
   queries:
     - { rows: 0 }
+  invokes:
+    - { ok: false }
+    - { ok: true }
+    - { ok: true, result: { result: { decisions: { "src/lib.rs:1": fix-now } } } }

@@ -308,6 +308,11 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
          sql.read: declared, used\n  \
          tree.read: implied, used\n  \
          ai.compute: declared, used — a person approves it\n\
+         command `triage.todos.decide` (commands/decide.star):\n  \
+         state.read: declared, used\n\
+         command `triage.todos.decisions` (commands/decisions.star):\n  \
+         state.read: declared, used\n  \
+         sql.read: declared, used\n\
          command `triage.todos.in_file` (commands/todos_in_file.star):\n  \
          sql.read: declared, used\n\
          effect `publish-summary` (effects/publish_summary.star):\n  \
@@ -329,6 +334,7 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
         "summary-with-evidence",
         "summary-cancelled",
         "summary-to-the-wiki",
+        "decide-a-todo",
         "summary-delivered",
         "todo-board",
         "todos-and-open-work",

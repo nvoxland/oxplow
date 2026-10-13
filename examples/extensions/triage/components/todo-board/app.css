@@ -2,3 +2,4 @@ body { padding: 8px; }
 .board { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .column h3 { margin: 0 0 6px; }
 .card { cursor: pointer; margin-bottom: 6px; }
+.decide { margin-top: 6px; gap: 4px; }

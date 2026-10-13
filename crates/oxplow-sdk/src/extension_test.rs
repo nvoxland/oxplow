@@ -823,7 +823,7 @@ async fn component_example(
         )
         .await;
         invokes.push(match out {
-            Ok(_) => json!({ "ok": true }),
+            Ok(out) => json!({ "ok": true, "result": out.result }),
             Err(oxplow_domain::CommandError::Denied { reason }) => {
                 json!({ "ok": false, "refused": reason })
             }

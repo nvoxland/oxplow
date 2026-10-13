@@ -5,3 +5,13 @@ query: |
   FROM metric_findings('triage.todos')
   ORDER BY rule, path, line
 hidden: true
+actions:
+  # The kit's way to the same decision: a form beside each row, its file
+  # and line kept as the row's.
+  - id: decide
+    label: Decide…
+    command: triage.todos.decide
+    row: true
+    form: true
+    fixed: [path, line]
+    input: { path: "{{row.path}}", line: "{{row.line}}", decision: keep }

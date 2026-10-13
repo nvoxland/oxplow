@@ -288,6 +288,14 @@ imply SQL access. Service listings report declared callable services as potentia
 uses when a script names or aliases `scope`, rather than inferring every dynamic
 call argument.
 
+**A view of state.** Since state isn't in SQL, a view shows it through a
+command that reads it and returns it as its `result` (a component
+`invoke`s it; the triage example's `triage.todos.decisions`), and changes
+it through a script command that reads the stamp and composes the
+extension's own `state.write/compare_exchange` command with it
+(`triage.todos.decide`): the read and the swap land in one transaction,
+and a concurrent change refuses the second rather than losing it.
+
 Provider `host/call` serves the same state read using the provider contribution
 identity captured from an exact enabled catalog declaration at instance creation,
 with the catalog generation unchanged across approved-copy preparation,

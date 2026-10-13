@@ -29,7 +29,10 @@ intent:
       expect: publish-summary writes the triage-summary page
     - name: todo-board
       input: { component: todo-board }
-      expect: the board reads its lens
+      expect: the board reads its lens; approved, it records a decision on a TODO and reads it back
+    - name: decide-a-todo
+      input: { command: triage.todos.decide }
+      expect: deciding composes the state write against the stamp it read
     - name: todos-and-open-work
       input: { collector: todos }
       expect: one open-items fact and one TODO fact for src/lib.rs line 1, classified
@@ -98,6 +101,38 @@ commands:
     scope: jobs.write
     op: cancel
     invokers: { human: true, agent: true, lens: true }
+  # A person's call on each TODO — keep it, fix it now, or won't fix —
+  # kept in the extension's own private state (`state.write`), never in
+  # SQL: `decide` reads the state and composes `state.set` with the stamp
+  # it read, so two people deciding at once can't lose one's call (the
+  # second is refused and tries again); `decisions` reads them back
+  # beside the TODOs.
+  - name: state.set
+    summary: Replace this extension's decisions (compare-and-swap on the stamp read).
+    scope: state.write
+    op: compare_exchange
+    invokers: { human: false, agent: false, lens: true }
+  - name: todos.decide
+    summary: Decide what to do about one TODO comment — keep it, fix it now, or won't fix.
+    entry: commands/decide.star
+    needs: [state.read]
+    access: record
+    input_schema:
+      type: object
+      required: [path, line, decision]
+      additionalProperties: false
+      properties:
+        path: { type: string, description: "The file the TODO is in." }
+        line: { type: integer, description: "Its line." }
+        decision: { type: string, enum: [keep, fix-now, wontfix] }
+    invokers: { human: true, agent: true, lens: true }
+  - name: todos.decisions
+    summary: The TODO comments with the decision made on each, if any.
+    entry: commands/decisions.star
+    needs: [state.read, sql.read]
+    access: read
+    input_schema: { type: object, additionalProperties: false, properties: {} }
+    invokers: { human: true, agent: true, lens: true }
   # A tool for the summary's model, never a person's command: it only reads.
   - name: todos.in_file
     summary: The TODO comments in one file, with the line of each and what it asks for (bug, cleanup or feature).
@@ -112,9 +147,12 @@ effects:
     on: [contribution.job.completed]
     entry: effects/publish_summary.star
     needs: [jobs.read]
-# The TODOs as a board, grouped by what the model said they ask for. It
-# only shows and reads, so it isn't a program to approve.
+# The TODOs as a board, grouped by what the model said they ask for, each
+# card with a form to decide on it. It runs `decisions` and `decide`, so a
+# person approves it (Settings → Data → Programs); until then it shows the
+# board without the decisions.
 custom_components:
   - id: todo-board
     title: TODO board
     assets: [todos]
+    commands: [triage.todos.decisions, triage.todos.decide]

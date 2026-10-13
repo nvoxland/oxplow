@@ -31,6 +31,30 @@ collector `todos` (collectors/todos.star):
   ai.compute: declared, used — a person approves it
 ```
 
+## A summary job, and a board you decide on
+
+- **A job** (`jobs: summarize`): `triage.summary.ask` has a model summarize
+  the TODOs outside any transaction. Its reply streams into `v_job_output`
+  as it comes; its model may call `triage.todos.in_file` (a read-only
+  command that admits a job) or `query_sql` before answering; when it
+  ends, the `publish-summary` effect writes the answer to the wiki.
+  `triage.summary.cancel` stops it, keeping what it had written.
+- **Decisions in private state.** Each TODO can be marked keep, fix now
+  or won't fix. The decisions live in the extension's own state
+  (`state.write`), never in SQL: `triage.todos.decide` reads the state
+  and composes `triage.state.set` against the stamp it read, so two
+  people deciding at once can't lose one's call; `triage.todos.decisions`
+  reads them back beside the TODOs.
+- **The TODO board** (`components/todo-board`) shows the TODOs by kind,
+  each card with a form to decide on it. It runs the two commands above,
+  so you approve it in Settings → Data → Programs; until then it shows
+  the TODOs without decisions and says so. The `todos` lens has the same
+  decision as a row action, `Decide…`, which opens a form.
+
+A command composes inside oxplow's transaction, where `metric_findings()`
+can't be computed, so the commands read the TODO facts themselves
+(`v_fact`, the latest capture).
+
 ## Use it
 
 1. Copy this folder to `oxplow/extensions/triage/` in your repo.
