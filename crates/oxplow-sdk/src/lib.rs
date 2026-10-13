@@ -1140,28 +1140,14 @@ pub enum Format {
 /// author reads to see whether a contract it consumes is there, and what
 /// it withholds when it isn't.
 pub fn import_lines(ext: &Extension) -> Vec<String> {
-    use oxplow_app::extensions::imports::UnavailableReason as Why;
     ext.public_contracts
         .bindings
         .iter()
         .map(|b| {
-            let producer = &b.contribution.extension;
             let state = match &b.unavailable_reason {
                 None if b.available => "available".to_string(),
                 None => "unavailable".to_string(),
-                Some(why) => format!(
-                    "unavailable ({})",
-                    match why {
-                        Why::Missing => format!("{producer} or its contribution isn't here"),
-                        Why::Disabled => format!("{producer} is disabled"),
-                        Why::Blocked => format!("{producer} is blocked by its own imports"),
-                        Why::Private => format!("{producer} doesn't export it"),
-                        Why::Experimental => format!("{producer} exports it as experimental"),
-                        Why::Incompatible { actual } => format!("{producer} exports v{actual}"),
-                        Why::Ambiguous => "more than one producer has that name".to_string(),
-                        Why::Invalid => format!("{producer}'s declaration is invalid"),
-                    }
-                ),
+                Some(why) => format!("unavailable ({})", why.describe(&b.contribution.extension)),
             };
             format!("`{}` → {} v{}: {state}", b.id, b.contribution, b.version)
         })

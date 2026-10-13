@@ -197,7 +197,7 @@ async fn a_missing_required_producer_blocks_only_the_consumer() {
     activate(&svc).await;
     let why = problem(&svc, "cons");
     assert!(
-        why.contains("`dep`") && why.contains("gone/model/items") && why.contains("missing"),
+        why.contains("`dep`") && why.contains("gone/model/items") && why.contains("isn't here"),
         "{why}"
     );
     assert!(!readable(&svc, "v_cons_plain").await);
@@ -281,7 +281,7 @@ async fn a_private_export_is_not_importable() {
     activate(&svc).await;
     let why = problem(&svc, "cons");
     assert!(
-        why.contains("`dep`") && why.contains("not exported publicly"),
+        why.contains("`dep`") && why.contains("prod doesn't export it"),
         "{why}"
     );
     assert!(readable(&svc, "v_prod_items").await);

@@ -44,8 +44,8 @@ When effort-review is missing, disabled, or exports another version:
 ``import `reviews` → effort-review/model/reviews v1: available`` or
 `unavailable (effort-review is disabled)`, `(effort-review exports v2)`,
 `(effort-review or its contribution isn't here)`. `oxplow extension test`
-prints the same, and its fixtures for the two lenses can only run while
-the import is available.
+prints the same, and skips the fixtures for the two lenses with a warning
+saying the import withheld them and why.
 
 ## Test it
 

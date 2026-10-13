@@ -55,6 +55,11 @@ Fixed while building them:
   now check `expect: { result }`.
 - An author couldn't see how an import resolved; `extension check` and
   `extension test` now print one line per import.
+- Withheld contributions were reported unevenly: a lens fixture failed
+  with "not found", a dropped slot got no warning, and one cause got two
+  differently worded warnings. Now each unavailable import is one warning
+  naming everything it withheld, and `extension test` skips a withheld
+  target's fixture, saying why.
 
 Still open:
 
@@ -78,10 +83,6 @@ Still open:
   (`effort-review/job/review`, `v_effort_review_reviews`).
 - **A local variable named like a service builtin** (`files = …`) counts
   as using it, and a command script is refused for it.
-- **Withheld contributions are reported unevenly.** A consumer's lens
-  fixture fails with "not found" rather than "withheld: import
-  unavailable"; a dropped slot gets no warning of its own; the import's
-  warning and each withheld lens's are worded differently for one cause.
 - **A fixture runs only when its name is in `intent.examples`**, and an
   unlisted one fails with a bare "not found".
 - **A command script can't read `metric_grid()` / `metric_findings()`**:

@@ -107,7 +107,11 @@ A model or lens reads that binding with
 guard. An unavailable optional binding withholds the referring contribution;
 independent contributions remain usable. Explicit guards can name models,
 lenses, collectors, commands, effects, advisories, skills or providers. Their
-exports and dependent mounts are withheld too. Missing required imports and
+exports and dependent mounts are withheld too. Each unavailable optional
+import is one warning naming why and everything it withheld:
+`` optional import `items` for `maker/model/items` v1 is unavailable: maker
+is disabled; withheld: `review-ui/lens/items`, `review-ui/slot/work_item.detail.body-0` ``.
+Missing required imports and
 dependency cycles block the extension with source-located errors.
 
 Versions must match exactly. A model or event export must use its native
@@ -536,7 +540,9 @@ dry-runs its models, commands, lenses and advisories. Each finding is
 one line: `file:line: what — fix`. Each of its `imports:` gets a line
 saying how it resolved here: `` import `items` → maker/model/items v1:
 available ``, or `unavailable (maker exports v2)` and the like, which is
-when an optional import's guarded contributions are withheld.
+when an optional import's guarded contributions are withheld. `extension
+test` skips an example whose lens, job, command or other target was
+withheld, with a warning saying which import withheld it and why.
 `--impact` adds what your working
 tree's version changes against git `HEAD`. `--services` lists the
 services each script uses.

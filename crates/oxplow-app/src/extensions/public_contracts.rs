@@ -94,6 +94,14 @@ pub struct PublicBinding {
     pub references: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Withheld {
+    pub contribution: ContributionId,
+    /// The bindings (`imports[*].id`) whose unavailability withheld it.
+    pub imports: Vec<String>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicContracts {
@@ -104,8 +112,11 @@ pub struct PublicContracts {
     pub invalid: bool,
     pub blocked: bool,
     pub activation_index: Option<u32>,
+    /// What this load withheld, each with the unavailable imports that
+    /// withheld it (empty for a mount withheld with what it mounts from
+    /// another extension).
     #[serde(default)]
-    pub withheld: BTreeSet<ContributionId>,
+    pub withheld: Vec<Withheld>,
     #[serde(skip)]
     slots: Vec<(ContributionId, super::LensSlot)>,
 }
@@ -322,7 +333,10 @@ fn invalid(ext: &mut Extension, source: &DeclaredAt, message: String) {
     ));
 }
 
-fn candidate(ext: &Extension, withdrawn: &BTreeSet<ContributionId>) -> imports::Candidate {
+fn candidate(
+    ext: &Extension,
+    withdrawn: &BTreeMap<ContributionId, BTreeSet<String>>,
+) -> imports::Candidate {
     imports::Candidate {
         name: ext.name.clone(),
         enabled: ext.enabled,
@@ -339,7 +353,7 @@ fn candidate(ext: &Extension, withdrawn: &BTreeSet<ContributionId>) -> imports::
             .public_contracts
             .exports
             .iter()
-            .filter(|export| !withdrawn.contains(&export.contribution))
+            .filter(|export| !withdrawn.contains_key(&export.contribution))
             .map(|export| imports::Export {
                 id: export.contribution.clone(),
                 version: export.version,
@@ -374,7 +388,14 @@ pub(super) fn activate(extensions: &mut [Extension]) {
     resolve(extensions, true);
 }
 
-fn record_diagnostics(extensions: &mut [Extension], resolution: &imports::Resolution) {
+/// Records the resolution's diagnostics on their extensions. An optional
+/// import's warning names what its unavailability withheld (`causes`), and
+/// replaces the warning an earlier pass recorded for the same import.
+fn record_diagnostics(
+    extensions: &mut [Extension],
+    resolution: &imports::Resolution,
+    causes: &BTreeMap<ContributionId, BTreeSet<String>>,
+) {
     for diagnostic in &resolution.diagnostics {
         for ext in extensions
             .iter_mut()
@@ -385,21 +406,37 @@ fn record_diagnostics(extensions: &mut [Extension], resolution: &imports::Resolu
             } else {
                 diagnostic.source.file.clone()
             };
-            let message = manifest_v2::at(
-                &file,
-                diagnostic
-                    .source
-                    .line
-                    .and_then(|line| usize::try_from(line).ok()),
-                format!("{}: {}", diagnostic.code, diagnostic.message),
-            );
+            let at = |text: String| {
+                manifest_v2::at(
+                    &file,
+                    diagnostic
+                        .source
+                        .line
+                        .and_then(|line| usize::try_from(line).ok()),
+                    text,
+                )
+            };
+            let base = format!("{}: {}", diagnostic.code, diagnostic.message);
+            let withheld: Vec<_> = match (&diagnostic.binding, diagnostic.severity) {
+                (Some(binding), imports::Severity::Warning) => causes
+                    .iter()
+                    .filter(|(id, bindings)| id.extension == ext.name && bindings.contains(binding))
+                    .map(|(id, _)| format!("`{id}`"))
+                    .collect(),
+                _ => Vec::new(),
+            };
+            let message = if withheld.is_empty() {
+                at(base.clone())
+            } else {
+                at(format!("{base}; withheld: {}", withheld.join(", ")))
+            };
             let messages = match diagnostic.severity {
                 imports::Severity::Error => &mut ext.errors,
                 imports::Severity::Warning => &mut ext.warnings,
             };
-            if !messages.contains(&message) {
-                messages.push(message);
-            }
+            let earlier = at(base);
+            messages.retain(|m| m != &message && !m.starts_with(&earlier));
+            messages.push(message);
         }
     }
 }
@@ -410,9 +447,18 @@ fn resolve(extensions: &mut [Extension], publish: bool) {
         .filter(|ext| ext.public_contracts.invalid || ext.public_contracts.blocked)
         .map(|ext| ext.name.clone())
         .collect();
-    let mut withdrawn: BTreeSet<_> = extensions
+    // Each withheld contribution, with the unavailable imports that
+    // withheld it.
+    let mut causes: BTreeMap<ContributionId, BTreeSet<String>> = extensions
         .iter()
-        .flat_map(|ext| ext.public_contracts.withheld.iter().cloned())
+        .flat_map(|ext| {
+            ext.public_contracts.withheld.iter().map(|withheld| {
+                (
+                    withheld.contribution.clone(),
+                    withheld.imports.iter().cloned().collect(),
+                )
+            })
+        })
         .collect();
     let slots: BTreeMap<_, _> = extensions
         .iter()
@@ -424,11 +470,10 @@ fn resolve(extensions: &mut [Extension], publish: bool) {
             .filter(|ext| {
                 ext.origin != "project" || !crate::bundled_extensions::is_reserved(&ext.name)
             })
-            .map(|ext| candidate(ext, &withdrawn))
+            .map(|ext| candidate(ext, &causes))
             .collect();
         let resolution = imports::validate_with_blocked(&candidates, &blocked);
         blocked.extend(resolution.blocked.iter().cloned());
-        record_diagnostics(extensions, &resolution);
         let before: BTreeSet<_> = extensions
             .iter()
             .flat_map(|ext| {
@@ -462,20 +507,15 @@ fn resolve(extensions: &mut [Extension], publish: bool) {
                         .any(|descriptor| descriptor.id == guard.contribution)
                 {
                     remove_guarded(ext, &guard.contribution);
-                    let message = manifest_v2::at(
-                        &guard.source.file,
+                    causes.insert(
+                        guard.contribution.clone(),
                         guard
-                            .source
-                            .line
-                            .and_then(|line| usize::try_from(line).ok()),
-                        format!(
-                            "withheld `{}` because an import binding is unavailable",
-                            guard.contribution
-                        ),
+                            .imports
+                            .iter()
+                            .filter(|binding| unavailable.contains(binding.as_str()))
+                            .cloned()
+                            .collect(),
                     );
-                    if !ext.warnings.contains(&message) {
-                        ext.warnings.push(message);
-                    }
                 }
             }
         }
@@ -488,11 +528,38 @@ fn resolve(extensions: &mut [Extension], publish: bool) {
                     .map(|descriptor| descriptor.id.clone())
             })
             .collect();
-        withdrawn.extend(before.difference(&after).cloned());
+        // A mount withheld with what it mounts goes with its extension's
+        // unavailable imports.
+        for id in before.difference(&after) {
+            if !causes.contains_key(id) {
+                let bindings = causes
+                    .iter()
+                    .filter(|(other, _)| other.extension == id.extension)
+                    .flat_map(|(_, bindings)| bindings.iter().cloned())
+                    .collect();
+                causes.insert(id.clone(), bindings);
+            }
+        }
         if before == after {
             break resolution;
         }
     };
+    record_diagnostics(extensions, &resolution, &causes);
+    for ext in extensions.iter_mut() {
+        for (id, _) in causes
+            .iter()
+            .filter(|(id, bindings)| id.extension == ext.name && bindings.is_empty())
+        {
+            let message = manifest_v2::at(
+                &format!("{}/extension.yaml", ext.path.trim_end_matches('/')),
+                None,
+                format!("withheld `{id}`: what it mounts from another extension was withheld"),
+            );
+            if !ext.warnings.contains(&message) {
+                ext.warnings.push(message);
+            }
+        }
+    }
     let descriptors: BTreeMap<_, _> = extensions
         .iter()
         .filter(|ext| ext.enabled && !blocked.contains(&ext.name))
@@ -540,10 +607,13 @@ fn resolve(extensions: &mut [Extension], publish: bool) {
                 }
             })
             .collect();
-        ext.public_contracts.withheld = withdrawn
+        ext.public_contracts.withheld = causes
             .iter()
-            .filter(|id| id.extension == ext.name)
-            .cloned()
+            .filter(|(id, _)| id.extension == ext.name)
+            .map(|(id, bindings)| Withheld {
+                contribution: id.clone(),
+                imports: bindings.iter().cloned().collect(),
+            })
             .collect();
         if publish {
             if ext.public_contracts.blocked {

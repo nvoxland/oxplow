@@ -143,8 +143,14 @@ import read by a lens and a slot) are the working pair; their tests in
 `crates/oxplow-sdk/tests/examples.rs` cover available, disabled, missing
 and another version. `extension check` and `extension test` print one line per binding from
 `public_contracts.bindings` (`oxplow_sdk::import_lines`: available, or the
-`UnavailableReason` in words), so an author sees the resolution without
-reading the withheld-contribution warnings.
+`UnavailableReason::describe`, the one wording the load warning uses
+too). Withholding is reported once per cause: each unavailable optional
+import's warning lists what it withheld (guarded contributions, and the
+mounts, pages, panels and slots pruned with them), and
+`publicContracts.withheld` records each withheld identity with the bindings
+that withheld it. A mount withheld only because another extension's lens
+went gets its own warning. `extension test` skips an example whose target
+was withheld, with that cause, instead of failing it.
 
 The loader validates declarations and optional guards before legacy global-name
 collision pruning can hide duplicate identities or let a withheld contribution

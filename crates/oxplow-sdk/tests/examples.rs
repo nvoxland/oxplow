@@ -875,30 +875,57 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
     )
     .unwrap();
     let tested = test_extension(root, "review-badges", false).await.unwrap();
-    // The lenses and the slot are withheld, with the warning; the
-    // fixtures that name them can't run, which is all that errors.
+    // The lenses and the slot are withheld, named in the one warning for
+    // the import; the fixtures that test them are skipped, saying why.
     assert_eq!(
         tested.imports,
         ["`reviews` → effort-review/model/reviews v1: unavailable (effort-review is disabled)"]
     );
     assert!(tested.contributes.is_empty(), "{:?}", tested.contributes);
-    for lens in ["review-verdicts", "item-review"] {
+    let import_warnings: Vec<_> = tested
+        .warnings
+        .iter()
+        .filter(|w| w.contains("import `reviews`") && !w.contains("fixtures/"))
+        .collect();
+    assert_eq!(import_warnings.len(), 1, "{:?}", tested.warnings);
+    let warning = import_warnings[0];
+    assert!(
+        warning.contains(
+            "optional import `reviews` for `effort-review/model/reviews` v1 is unavailable: \
+             effort-review is disabled; withheld: "
+        ),
+        "{warning}"
+    );
+    for id in [
+        "`review-badges/lens/item-review`",
+        "`review-badges/lens/review-verdicts`",
+        "`review-badges/slot/work_item.detail.body-0`",
+    ] {
+        assert!(warning.contains(id), "{id}: {warning}");
+    }
+    assert!(
+        !tested
+            .warnings
+            .iter()
+            .any(|w| w.contains("because an import")),
+        "{:?}",
+        tested.warnings
+    );
+    assert_eq!(tested.errors, Vec::<String>::new());
+    for (example, lens) in [
+        ("review-verdicts", "review-verdicts"),
+        ("item-review", "item-review"),
+    ] {
         assert!(
             tested.warnings.iter().any(|w| w.contains(&format!(
-                "withheld `review-badges/lens/{lens}` because an import binding is unavailable"
+                "fixtures/{example}.yaml:1: example `{example}` isn't run: \
+                 `review-badges/lens/{lens}` is withheld because import `reviews` is \
+                 unavailable (effort-review is disabled)"
             ))),
-            "{lens}: {:?}",
+            "{example}: {:?}",
             tested.warnings
         );
     }
-    assert!(
-        tested
-            .errors
-            .iter()
-            .all(|e| e.contains("fixtures/") && e.contains("not found")),
-        "{:?}",
-        tested.errors
-    );
     let svc = oxplow_app::Services::in_memory(root).await.unwrap();
     let consumer = svc.extension_catalog.named(root, "review-badges").unwrap();
     assert!(consumer.ui.slots.is_empty(), "{:?}", consumer.ui.slots);
@@ -934,14 +961,7 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
         tested.imports,
         ["`reviews` → effort-review/model/reviews v1: unavailable (effort-review or its contribution isn't here)"]
     );
-    assert!(
-        tested
-            .errors
-            .iter()
-            .all(|e| e.contains("fixtures/") && e.contains("not found")),
-        "{:?}",
-        tested.errors
-    );
+    assert_eq!(tested.errors, Vec::<String>::new());
 }
 
 /// With both examples running in one oxplow, a review effort-review's job

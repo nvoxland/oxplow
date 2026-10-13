@@ -89,6 +89,25 @@ pub enum UnavailableReason {
     Invalid,
 }
 
+impl UnavailableReason {
+    /// Why an import of `producer`'s contribution is unavailable, in the
+    /// words every report uses (the load warning, `extension check`).
+    pub fn describe(&self, producer: &str) -> String {
+        match self {
+            Self::Missing => format!("{producer} or its contribution isn't here"),
+            Self::Disabled => format!("{producer} is disabled"),
+            Self::Blocked => format!("{producer} is blocked by its own imports"),
+            Self::Private => format!("{producer} doesn't export it"),
+            Self::Experimental => format!(
+                "{producer} exports it as experimental, which a shared extension can't import"
+            ),
+            Self::Incompatible { actual } => format!("{producer} exports v{actual}"),
+            Self::Ambiguous => "more than one producer has that name".to_string(),
+            Self::Invalid => format!("{producer}'s export is invalid"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum Severity {
@@ -531,7 +550,7 @@ pub fn validate_with_blocked(
                     severity,
                     code,
                     format!(
-                        "{} import `{}` for `{}` is unavailable: {}",
+                        "{} import `{}` for `{}` v{} is unavailable: {}",
                         if import.optional && !invalid_contract {
                             "optional"
                         } else {
@@ -539,7 +558,8 @@ pub fn validate_with_blocked(
                         },
                         import.binding,
                         import.target,
-                        reason_text(reason)
+                        import.version,
+                        reason.describe(&import.target.extension)
                     ),
                 );
                 if !import.optional || invalid_contract {
@@ -954,23 +974,6 @@ fn unavailable(reason: UnavailableReason) -> ImportStatus {
 
 fn set_unavailable(resolution: &mut Resolution, index: usize, reason: UnavailableReason) {
     resolution.imports[index].status = unavailable(reason);
-}
-
-fn reason_text(reason: &UnavailableReason) -> String {
-    match reason {
-        UnavailableReason::Missing => "the target is missing".into(),
-        UnavailableReason::Disabled => "the target extension is disabled".into(),
-        UnavailableReason::Blocked => "the target extension is blocked".into(),
-        UnavailableReason::Private => "the target is not exported publicly".into(),
-        UnavailableReason::Experimental => {
-            "an experimental export cannot be imported by a shared extension".into()
-        }
-        UnavailableReason::Incompatible { actual } => {
-            format!("the target exports contract version {actual}")
-        }
-        UnavailableReason::Ambiguous => "the target identity is ambiguous".into(),
-        UnavailableReason::Invalid => "the target export is invalid".into(),
-    }
 }
 
 fn valid_binding(binding: &str) -> bool {

@@ -5490,7 +5490,12 @@ export type PublicContracts = {
 	invalid: boolean,
 	blocked: boolean,
 	activationIndex: number | null,
-	withheld?: ContributionId[],
+	/**
+	 *  What this load withheld, each with the unavailable imports that
+	 *  withheld it (empty for a mount withheld with what it mounts from
+	 *  another extension).
+	 */
+	withheld?: Withheld[],
 };
 
 // What one version's collector made of an input.
@@ -6387,6 +6392,12 @@ export type VisitedPage = {
 	page_kind: string,
 	page_id: string,
 	visit_count: number,
+};
+
+export type Withheld = {
+	contribution: ContributionId,
+	// The bindings (`imports[*].id`) whose unavailability withheld it.
+	imports: string[],
 };
 
 // What a provider supports beyond create, update and transition.

@@ -219,6 +219,13 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
             input: doc.get("input").cloned().unwrap_or(Value::Null),
             expect: doc.get("expect").cloned().unwrap_or(Value::Null),
         };
+        if let Some(why) = withheld_target(ext, &ex.input) {
+            report.warnings.push(format!(
+                "{shown}:1: example `{}` isn't run: {why}",
+                example.name
+            ));
+            continue;
+        }
         if let Some(replies) = model_replies(&ex, report) {
             if let Err(e) = host.answer_with(replies) {
                 report
@@ -282,6 +289,56 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
             ));
         }
     }
+}
+
+/// Why an example's target isn't here: the lens, form, job, component,
+/// effect, collector or command it names was withheld because an import is
+/// unavailable. `None` when it's here, or wasn't withheld.
+fn withheld_target(ext: &Extension, input: &Value) -> Option<String> {
+    use oxplow_domain::contribution::ContributionKind as Kind;
+    let named = |key: &str| input.get(key).and_then(Value::as_str);
+    let command = named("command").map(|name| {
+        name.strip_prefix(&format!("{}.", ext.namespace))
+            .unwrap_or(name)
+    });
+    let target = [
+        (Kind::Lens, named("lens")),
+        (Kind::Lens, named("form")),
+        (Kind::Job, named("job")),
+        (Kind::CustomComponent, named("component")),
+        (Kind::Effect, named("effect")),
+        (Kind::Collector, named("collector")),
+        (Kind::Command, command),
+    ];
+    let withheld = ext.public_contracts.withheld.iter().find(|withheld| {
+        target.iter().any(|(kind, local)| {
+            withheld.contribution.kind == *kind
+                && Some(withheld.contribution.local.as_str()) == *local
+        })
+    })?;
+    let id = &withheld.contribution;
+    if withheld.imports.is_empty() {
+        return Some(format!(
+            "`{id}` is withheld because what it mounts from another extension was withheld"
+        ));
+    }
+    let lines = crate::import_lines(ext);
+    let why: Vec<_> = withheld
+        .imports
+        .iter()
+        .map(|binding| {
+            let state = ext
+                .public_contracts
+                .bindings
+                .iter()
+                .zip(&lines)
+                .find(|(b, _)| &b.id == binding)
+                .and_then(|(_, line)| line.split_once(": ").map(|(_, state)| state.to_owned()))
+                .unwrap_or_else(|| "unavailable".to_owned());
+            format!("import `{binding}` is {state}")
+        })
+        .collect();
+    Some(format!("`{id}` is withheld because {}", why.join(", and ")))
 }
 
 /// The example's `model: { replies: [...] }` — what the fixture model
