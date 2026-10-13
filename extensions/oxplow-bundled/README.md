@@ -18,8 +18,8 @@ The rest of this page is about the review packet.
   nothing backs it: no `evidence_ref`, and for a `tests_pass` claim no
   passing test run in the effort.
 - `v_decision` — the forks the agent resolved. `provenance = 'inferred'`
-  rows are oxplow's guesses from the conversation, until a person
-  confirms or dismisses them.
+  rows are a model's guesses from the conversation, until a person
+  confirms or dismisses them (below, "Decisions Oxplow Noticed").
 - `v_oxplow_bundled_deviation` (this extension's model) — files an effort
   changed outside the area its work item names. A file is in the area
   when the item's title or body names it, or one of its directories at
@@ -64,3 +64,22 @@ Verify a Claim With Evidence form for citing a test run or a file.
 All of these are a person's: an agent can read the packet, but it can't
 accept or reject its own work, verify its own claims or review its own
 decisions. Ask the person to.
+
+## Decisions Oxplow Noticed
+
+When an effort finishes, the `infer-decisions` effect asks a model which
+decisions the agent made without recording them. `effort.infer_decisions`
+digests the effort — its conversation, tool calls and the decisions it
+did record — into one prompt for the `decisions` job, and the
+`store-decisions` effect stores the reply as the effort's inferred
+decisions through oxplow's `oxplow.effort.replace_inferred_decisions`.
+
+- **The model** is the person's binding of `oxplow-bundled/decisions` in
+  Settings → AI, else their Main model. With neither, nothing is asked:
+  the effect skips and says where to bind one.
+- **Approve** the job `decisions` and the effects `infer-decisions` and
+  `store-decisions` (Settings → Data → Programs) before anything runs.
+- **Infer Again** on the list (`effort.infer_decisions { again: true }`)
+  asks once more, e.g. after binding another model; an unchanged prompt
+  on the same model reads the answer it already has.
+- A reply that isn't the JSON asked for is skipped, saying so.

@@ -5095,7 +5095,9 @@ mod tests {
         let thread = oxplow_domain::refs::build::thread_ref(caller_of(&me).thread_id.unwrap());
         let roles: serde_json::Value =
             serde_json::from_str(&text_payload(server.list_ai_roles().await.unwrap())).unwrap();
-        assert_eq!(roles["roles"].as_array().unwrap().len(), 3);
+        // The three built-ins, then oxplow-bundled's `decisions` profile.
+        assert_eq!(roles["roles"].as_array().unwrap().len(), 4);
+        assert_eq!(roles["roles"][3]["role"], "oxplow-bundled/decisions");
         assert_eq!(roles["roles"][0]["binding"], serde_json::Value::Null);
 
         // Unassigned role: a clear error, not a crash.

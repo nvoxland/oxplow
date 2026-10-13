@@ -44,7 +44,7 @@ Oxplow and extensions ask for a role, not a model:
 
 | Role | Used for |
 |---|---|
-| `main` | general reasoning, such as finding the decisions an effort made |
+| `main` | general reasoning |
 | `summarize` | summaries of sessions, efforts and changes |
 | `decide` | typed yes/no, choice and score questions (Jev fits well) |
 
@@ -64,11 +64,16 @@ one with that name. Settings → AI marks these roles "Set by this project".
 
 ## What oxplow uses them for
 
-- **Decisions Oxplow Noticed.** When an effort closes, the `main` model
-  reads that effort's conversation and tool calls and lists decisions the
-  agent made without recording them. They show on the effort's review,
-  next to the decisions the agent did record. They're guesses, and your
-  agent never sees them. Nothing runs until `main` has a model.
+- **Decisions Oxplow Noticed.** When an effort closes, a model reads that
+  effort's conversation and tool calls and lists decisions the agent made
+  without recording them. They show on the effort's review, next to the
+  decisions the agent did record. They're guesses, and your agent never
+  sees them. The model is the one you bind to `oxplow-bundled/decisions`
+  in Settings → AI, or your `main` model until you do. Nothing runs until
+  one of them has a model, and you approve its programs first (Settings →
+  Data → Programs: the `decisions` job and the `infer-decisions` and
+  `store-decisions` effects). **Infer Again** on the list asks once more,
+  say after you bind another model.
 
 ## What your agent can do
 

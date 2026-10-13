@@ -6382,6 +6382,10 @@ commands:
         assert_eq!(
             commands,
             [
+                "oxplow.decisions.ask",
+                "oxplow.decisions.status",
+                "oxplow.decisions.cancel",
+                "oxplow.effort.infer_decisions",
                 "oxplow.review.accept",
                 "oxplow.review.request_changes",
                 "oxplow.work.clear_finished"
@@ -6413,7 +6417,15 @@ commands:
             ]
         );
         let effects: Vec<&str> = b.effects.iter().map(|e| e.id.as_str()).collect();
-        assert_eq!(effects, ["verify-unchecked", "repair-disabled"]);
+        assert_eq!(
+            effects,
+            [
+                "verify-unchecked",
+                "repair-disabled",
+                "infer-decisions",
+                "store-decisions"
+            ]
+        );
         assert!(b
             .collectors
             .iter()

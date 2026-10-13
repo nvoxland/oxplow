@@ -1530,7 +1530,7 @@ and are registered by `crate::boot` — a test that wants them calls their
 | `advisories.post_tool` | async | `agent.tool.finished` | post-tool-use advisories, persisted as nudges | boot |
 | `advisories.turn_end` | async (after `effort.observe`) | `thread.checkpoint` | turn-end advisories (hints) for the effort holding the turn's end, persisted as undelivered nudges for the next prompt | `Services::new` |
 | `token_usage.turns` | async | `agent.turn.ended` | a turn's token rows (transcript tail or reported counts) | boot |
-| `effort.evidence` / `effort.decisions` / `effort.commits` | async | `effort.finished` | evidence rows, inferred decisions, the commits that hold its work linked to its task (`commit_links`, tsk1035) | boot.rs |
+| `effort.evidence` / `effort.commits` | async | `effort.finished` | evidence rows, the commits that hold its work linked to its task (`commit_links`, tsk1035) | boot.rs |
 | `search.index` | async | `snapshot.taken` | the search index's file contents (the other kinds are assets, `kind_search.rs`) | boot.rs |
 | `config.extensions` / `config.providers` / `config.metrics` | async | `config.changed` (`extensions`; `extensionInstances`, `activeProviders`; any key) | after the in-memory swap: the extension catalog's change signal; the provider registry reconciles; the metric catalog reseeds (P7.B6) | boot.rs |
 | `extension_models.entities` | async | `collector.synced` | the extension models compile again (a new entity may let one) (P7.B6) | boot.rs |
@@ -1593,8 +1593,9 @@ metrics stop when the effort already has its `effort-lifecycle` capture,
 
 **Effort reactors** (`crates/oxplow-app/src/effort_reactors.rs`, P2.6b)
 consume `effort.finished`, each its own async consumer registered at boot:
-`effort.evidence` (rebuild evidence rows), `effort.decisions` (infer
-decisions — a model call; failures logged). (`effort.gauges` is gone:
+`effort.evidence` (rebuild evidence rows) and `effort.commits`. Inferred
+decisions are oxplow-bundled's effects, not a reactor (ai-providers.md
+"Inferred decisions"). (`effort.gauges` is gone:
 `{ on: [effort.finished] }` fact collectors run from `collector.triggers`.)
 They hold `Services` weakly (the pump is part
 of it).

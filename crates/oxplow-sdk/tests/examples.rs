@@ -831,6 +831,179 @@ async fn the_effort_review_example_reviews_evidence_and_can_be_cancelled() {
     .await;
 }
 
+/// oxplow-bundled's inferred decisions over a real oxplow: when an effort
+/// finishes, `infer-decisions` asks the `decisions` job on the person's
+/// `oxplow-bundled/decisions` binding, and `store-decisions` stores the
+/// model's proposals as the effort's inferred decisions, through core's
+/// command. With no model bound to the profile or to Main, nothing is
+/// asked and the effect's skip says where to bind one.
+async fn inferred_decisions_run(
+    bound: bool,
+) -> (std::sync::Arc<oxplow_app::Services>, tempfile::TempDir) {
+    use oxplow_app::ai_service::{ProviderConfig, Role, RoleBinding};
+    use oxplow_app::exec_consent::{approve_every, ProgramKind};
+    use serde_json::json;
+
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    oxplow_app::vcs::GitProvider
+        .init_repository(root)
+        .await
+        .unwrap();
+    let svc = oxplow_app::Services::in_memory(root).await.unwrap();
+    if bound {
+        let reply = "```json\n{\"decisions\": [{\"question\": \"Which CSV library?\", \"choice\": \"csv crate\", \"alternatives\": [\"hand-rolled\"], \"confidence\": \"medium\"}]}\n```";
+        let replies: Vec<oxplow_ai::fixture::FixtureReply> =
+            serde_json::from_value(json!([reply])).unwrap();
+        let model = std::sync::Arc::new(oxplow_ai::fixture::FixtureModel::new(replies));
+        svc.ai.providers().register_host(model);
+        svc.ai
+            .save_provider(
+                ProviderConfig {
+                    id: "fixture".into(),
+                    kind: oxplow_ai::fixture::KIND.into(),
+                    base_url: None,
+                },
+                None,
+            )
+            .unwrap();
+        svc.ai
+            .set_role(
+                &Role::parse("oxplow-bundled/decisions").expect("a profile role"),
+                Some(RoleBinding {
+                    provider: "fixture".into(),
+                    model: "fixture".into(),
+                }),
+            )
+            .unwrap();
+    }
+    // A person approves the job and the effects.
+    approve_every(&svc, ProgramKind::Job).unwrap();
+    approve_every(&svc, ProgramKind::Effect).unwrap();
+    let ext = svc
+        .extension_catalog
+        .named(root, "oxplow-bundled")
+        .expect("oxplow-bundled is active");
+    for decl in &ext.effects {
+        oxplow_app::effects::approved(&svc.db, &decl.name())
+            .await
+            .unwrap();
+    }
+    svc.extension_activation
+        .activate(svc.clone())
+        .await
+        .expect("it activates");
+    oxplow_app::effect_triggers::register(&svc);
+    svc.event_pump.clone().spawn();
+    svc.jobs
+        .spawn(svc.extension_activation.clone(), svc.commands.clone());
+
+    // An effort on a work item in which the agent edited a file, finished.
+    svc.streams.ensure_primary().await.unwrap();
+    let item = as_person(
+        &svc,
+        "oxplow.work_item.create",
+        json!({ "title": "Add CSV export" }),
+    )
+    .await;
+    as_person(
+        &svc,
+        "oxplow.effort.open",
+        json!({ "thread": "thread:thr1", "work_item": item["ref"] }),
+    )
+    .await;
+    svc.tool_call_store
+        .record(oxplow_db::NewToolCall {
+            thread_id: 1,
+            effort_id: Some(1),
+            tool: "Edit".into(),
+            kind: "edit".into(),
+            path: Some("src/report.rs".into()),
+            detail: None,
+            ok: Some(true),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    as_person(
+        &svc,
+        "oxplow.effort.close",
+        json!({ "effort": "effort:eff1" }),
+    )
+    .await;
+    (svc, dir)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_bundled_extension_infers_an_efforts_decisions_on_its_profile() {
+    use serde_json::json;
+    let (svc, _dir) = inferred_decisions_run(true).await;
+    let stored = until_row(
+        &svc,
+        "SELECT question, choice, alternatives, confidence FROM v_decision \
+          WHERE effort_id = 1 AND provenance = 'inferred'",
+    )
+    .await;
+    assert_eq!(
+        stored,
+        [
+            json!("Which CSV library?"),
+            json!("csv crate"),
+            json!(r#"["hand-rolled"]"#),
+            json!("medium")
+        ]
+    );
+    // The prompt carried what the agent did; the call was on the profile.
+    let calls = until_row(&svc, "SELECT role, count(*) FROM v_ai_call GROUP BY role").await;
+    assert_eq!(calls, [json!("oxplow-bundled/decisions"), json!(1)]);
+    let jobs = until_row(
+        &svc,
+        "SELECT count(*) FROM v_job WHERE intent_key = 'decisions:effort:eff1'",
+    )
+    .await;
+    assert_eq!(jobs, [json!(1)]);
+    // A person's Infer Again is a new job (the effect's intent is its own);
+    // its unchanged request reads the recorded answer.
+    as_person(
+        &svc,
+        "oxplow.effort.infer_decisions",
+        json!({ "effort": "effort:eff1", "again": true }),
+    )
+    .await;
+    until_row(
+        &svc,
+        "SELECT 1 FROM v_job WHERE intent_key = 'decisions:effort:eff1@2' AND state = 'succeeded'",
+    )
+    .await;
+    let calls = until_row(&svc, "SELECT count(*) FROM v_ai_call").await;
+    assert_eq!(calls, [json!(1)], "the second job read the recorded answer");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn without_a_model_inferring_decisions_skips_and_says_where_to_bind_one() {
+    let (svc, _dir) = inferred_decisions_run(false).await;
+    let skipped = until_row(
+        &svc,
+        "SELECT reason FROM v_effect_run \
+          WHERE effect = 'oxplow-bundled/infer-decisions' AND state = 'skipped'",
+    )
+    .await;
+    let reason = skipped[0].as_str().unwrap();
+    assert!(
+        reason.contains("oxplow-bundled/decisions") && reason.contains("Settings → AI"),
+        "{reason}"
+    );
+    let jobs = svc
+        .sql
+        .query_sql("SELECT count(*) FROM v_job", vec![], None)
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(&jobs.rows).unwrap(),
+        serde_json::json!([[0]])
+    );
+}
+
 /// Both examples copied into one project.
 async fn review_project(with_producer: bool) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();

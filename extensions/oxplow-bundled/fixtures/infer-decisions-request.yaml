@@ -1,0 +1,13 @@
+# The effort's conversation, tool calls and recorded decisions become one
+# decisions job, keyed by the effort.
+input:
+  command: oxplow.effort.infer_decisions
+  input: { effort: "effort:eff7" }
+  answers:
+    sql.read:
+      - [{ work_item: "work_item:oxplow:tsk1", title: Add CSV export }]
+      - [{ prompt: Add CSV export to reports, answer: Done; used the csv crate. }]
+      - [{ tool: Bash, path: null, detail: cargo add csv, ok: 1 }, { tool: Edit, path: src/report.rs, detail: null, ok: 1 }]
+      - [{ question: Where does export live? }]
+expect:
+  commands: [oxplow.decisions.ask]

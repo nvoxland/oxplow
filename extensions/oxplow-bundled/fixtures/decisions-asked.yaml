@@ -1,0 +1,15 @@
+# The model answers with the JSON it was asked for; that is the job's
+# answer, for `store-decisions` to store.
+input:
+  job: decisions
+  intentKey: "decisions:effort:eff3"
+  request:
+    schemaVersion: 1
+    role: decisions
+    messages:
+      - { role: user, parts: [{ type: text, text: "Work item: Add CSV export" }] }
+  model:
+    replies: ['{"decisions": [{"question": "Which CSV library?", "choice": "csv crate", "confidence": "medium"}]}']
+expect:
+  state: succeeded
+  text: '{"decisions": [{"question": "Which CSV library?", "choice": "csv crate", "confidence": "medium"}]}'

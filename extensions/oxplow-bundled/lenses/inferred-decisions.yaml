@@ -1,5 +1,5 @@
 title: Decisions Oxplow Noticed
-description: Forks the agent seems to have resolved without recording them, proposed by your summarize model from the effort's conversation and tool calls. Guesses, not the agent's word; check the ones that matter.
+description: Forks the agent seems to have resolved without recording them, proposed by a model from the effort's conversation and tool calls — the one bound to `oxplow-bundled/decisions`, else your Main model. Guesses, not the agent's word; check the ones that matter.
 hidden: true    # needs a slot param (effort_id / change_id); shown on the diff
 params:
   - { name: effort_id, label: Effort }
@@ -20,4 +20,5 @@ columns:
 actions:
   - { id: confirm, label: Confirm, command: oxplow.effort.confirm_decision, input: { decision: "{{row.decision}}" }, row: true }
   - { id: dismiss, label: Dismiss, command: oxplow.effort.dismiss_decision, input: { decision: "{{row.decision}}" }, row: true }
-empty: Nothing inferred. Either the agent recorded its decisions, or no summarize model is assigned (Settings → AI).
+  - { id: infer, label: Infer Again, command: oxplow.effort.infer_decisions, input: { effort: "effort:eff{{param.effort_id}}", again: true } }
+empty: Nothing inferred. The agent recorded its decisions or made none worth noting; or no model serves `oxplow-bundled/decisions` (Settings → AI); or its programs aren't approved (Settings → Data → Programs).

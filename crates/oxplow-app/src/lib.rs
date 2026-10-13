@@ -115,7 +115,6 @@ pub mod harness_conformance;
 pub mod harnesses;
 pub mod hook_ingest;
 pub mod indexer;
-pub mod inferred_decisions;
 pub mod kind_search;
 pub mod knowledge;
 pub mod knowledge_conformance;
@@ -2383,6 +2382,7 @@ mod tests {
                 "oxplow.command.sequence",
                 // The bundled extension's script commands compose their
                 // calls per input.
+                "oxplow.effort.infer_decisions",
                 "oxplow.review.accept",
                 "oxplow.review.request_changes",
                 "oxplow.work.clear_finished",

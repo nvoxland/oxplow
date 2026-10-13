@@ -1,0 +1,11 @@
+# An effort with no turns and no tool calls asks nothing.
+input:
+  command: oxplow.effort.infer_decisions
+  input: { effort: "effort:eff7" }
+  answers:
+    sql.read:
+      - [{ work_item: null, title: "" }]
+      - []
+      - []
+expect:
+  commands: []

@@ -90,14 +90,15 @@ async fn observations(fx: &Fixture, id: &str) -> i64 {
         .expect("observations are counted")
 }
 
-/// The key the job's approval is recorded under.
+/// The key the fixture job's approval is recorded under (not a bundled
+/// extension's job).
 fn job_key(fx: &Fixture) -> String {
     let project = fx.svc.layout.project_dir.clone();
     let config = fx.svc.config.read().unwrap().clone();
     let extensions = fx.svc.extension_catalog.get(&project);
     crate::exec_consent::list(&fx.svc.approvals, &project, &config, &extensions)
         .into_iter()
-        .find(|p| p.kind == crate::exec_consent::ProgramKind::Job)
+        .find(|p| p.kind == crate::exec_consent::ProgramKind::Job && p.name.starts_with("triage/"))
         .expect("the job is a program")
         .key()
 }

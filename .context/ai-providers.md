@@ -101,7 +101,7 @@ ai:
 
 | Role | Used for |
 |---|---|
-| `main` | general reasoning: `extract` (an effort's inferred decisions, a collector's `ai_extract`) |
+| `main` | general reasoning: `extract` (a collector's `ai_extract`); the fallback of oxplow-bundled's `decisions` profile (inferred decisions) |
 | `summarize` | summaries of sessions, efforts, changes (`summarize`, MCP `ai_summarize`) |
 | `decide` | typed questions with probabilities, Jev-shaped (`classify`, `score`, `decide`, MCP `ai_decide`) |
 
@@ -434,8 +434,7 @@ column is what core's callers and the collector builtins default to.
 
 **The version follows the prompt.** There is no version constant to
 bump: an op's request carries its whole prompt — its instructions, its
-system text (`summarize_system`, `inferred_decisions::SYSTEM_PROMPT` as
-`extract`'s instructions) — so editing any of it is another
+system text (`summarize_system`, a job's system message) — so editing any of it is another
 `request_hash`, and the next ask computes afresh while the old results
 stay under theirs. (A provider adapter's own wording isn't in the
 request, so changing `decide_via_chat` doesn't.) The model is the
@@ -509,31 +508,59 @@ surface-parity manifest.
 
 ## Inferred decisions (current)
 
-The first built-in use of a role (`oxplow-app/src/inferred_decisions.rs`).
+When an effort finishes, a model proposes the decisions the agent made
+without recording them. The policy — when to ask, the prompt, which
+model, how the reply is read — is oxplow-bundled's, built only from what
+any extension has; core keeps the storage and the review.
 
-- The `effort.decisions` pump consumer (`effort_reactors.rs`) runs
-  `infer_for_effort` for each `effort.finished` — logged once the
-  effort's end snapshot is pinned — on its own loop, so a slow model
-  never delays other consumers.
-- Off until the `main` role has a model: `InferOutcome::Off`, no call.
-- It digests the effort: task title; the thread's turns that overlap the
-  effort's time window (`v_agent_turn` has no `effort_id`); its tool calls;
-  and decisions already recorded, so they aren't repeated. The digest is
-  capped at 40k characters, keeping the most recent turns.
-- It is a recorded `AiCompute::extract` (`reply_schema()`:
-  `{"decisions": [...]}`), so re-running an unchanged effort reads the
-  recorded answer instead of calling again. At most 8 are kept; entries
-  without a question or choice are skipped and a missing confidence
-  becomes `low`.
-- `SqliteReasoningStore::replace_inferred` swaps the effort's inferred rows
-  in one transaction, so a re-run replaces rather than piles up. Open
-  review lenses re-run on the `ModelsChanged` that commit makes
-  (`v_decision`).
-- Inferred rows are **never fed back to the agent** (the decisions block
-  and the missing-decisions hint read `provenance = 'recorded'` only).
-- Calls record caller `inferred-decisions` in `v_ai_call`.
-- The review packet shows them as "Decisions Oxplow Noticed", separate from
-  "Decisions Made".
+- **oxplow-bundled** declares the AI profile `decisions` (fallback
+  `main`), the job `decisions` (`ai.complete_typed`, `needs: [ai.compute]`,
+  no tools: the model reads only what the prompt gives it), the command
+  `oxplow.effort.infer_decisions { effort, again? }`
+  (`handlers/infer_decisions.star`) and two effects.
+- **`infer-decisions`** (on `effort.finished`) asks
+  `scope("ai.discover", { role: "decisions" })`; with no model bound to
+  the profile or to Main it *skips*, saying to bind one in Settings → AI —
+  in Delivery, counted against no health, nothing queued to fail.
+  Otherwise it composes `oxplow.effort.infer_decisions`.
+- **The command** digests the effort as the core reactor did: the work
+  item's title; the thread's turns overlapping the effort's window
+  (`v_agent_turn` has no `effort_id`); its tool calls; the decisions it
+  recorded, so they aren't repeated. Each prompt and answer is clipped to
+  2,000 characters, a tool's detail to 200, tool calls take at most a
+  quarter of the 40,000-character digest, and the newest are kept. Nothing
+  to read asks nothing. It enqueues the job with intent key
+  `decisions:<effort ref>` (a redelivery is the same job); `again: true`
+  (the lens's **Infer Again**) keys a new one, `…@<n>`. The system
+  message asks for JSON only (`{"decisions": [...]}`): a typed request has
+  no JSON mode.
+- The job's model call is a recorded computation keyed by its request,
+  so asking again about unchanged activity on the same binding reads the
+  recorded answer; rebinding the profile asks the new model.
+- **`store-decisions`** (on `contribution.job.completed`, `where: {
+  contribution: oxplow-bundled/job/decisions }`) reads the job, drops a
+  code fence, and skips — saying so — a reply that isn't a JSON object
+  with a `decisions` list (Starlark's `json.decode` has no fallback, so
+  the check is the object's braces; malformed JSON inside them fails the
+  run). Entries without a question or choice are dropped, strings are
+  clipped to the command's bounds, an unknown confidence is left out (it
+  becomes `low`), and at most 8 are kept. It calls core's
+  `oxplow.effort.replace_inferred_decisions`, even with none (clearing
+  stale ones).
+- **Core** keeps `oxplow.effort.replace_inferred_decisions`
+  (`commands/reasoning.rs`, the only writer of provenance `inferred`;
+  thread and work item are the effort's; recorded, confirmed and
+  dismissed rows stay; logs `effort.decisions_inferred@1 { effort,
+  work_item?, count }`), the review commands (confirm, dismiss, reopen:
+  a person's), and the rule that inferred rows are **never fed back to
+  the agent** (the decisions block and the missing-decisions hint read
+  `provenance = 'recorded'` only).
+- Calls record role `oxplow-bundled/decisions` in
+  `v_ai_call`. The review packet shows the rows as "Decisions Oxplow
+  Noticed", separate from "Decisions Made".
+- Disabling oxplow-bundled, revoking its programs or replacing them with
+  another extension's (an effect that calls the same command) needs no
+  core change. Pinned end to end in `oxplow-sdk/tests/examples.rs`.
 
 ## Settings → AI (current)
 

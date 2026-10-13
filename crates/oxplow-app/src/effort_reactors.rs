@@ -1,12 +1,10 @@
 //! The effort reactors: what happens once an effort's close is fully
 //! handled — the durable `effort.finished` the effort-lifecycle consumer
 //! logs after pinning the bracket. Each runs on the event pump as its own
-//! async consumer, so a slow one (a model call) never delays the others,
+//! async consumer, so a slow one never delays the others,
 //! and a restart delivers whatever was logged but not yet handled.
 //!
 //! - `effort.evidence` — rebuild the effort's evidence rows.
-//! - `effort.decisions` — infer the decisions it made (a model call;
-//!   failures are logged, the review packet just shows none).
 //! - `effort.commits` — link the commits made since it started that hold its
 //!   work to its task (tsk1035: committed before the task closed).
 //!
@@ -23,7 +21,6 @@ use crate::Services;
 #[derive(Clone, Copy)]
 enum Reaction {
     Evidence,
-    Decisions,
     Commits,
 }
 
@@ -34,7 +31,7 @@ struct EffortReactor {
 
 /// Register the reactors on `svc`'s pump (boot, before it spawns).
 pub fn register(svc: &Arc<Services>) {
-    for reaction in [Reaction::Evidence, Reaction::Decisions, Reaction::Commits] {
+    for reaction in [Reaction::Evidence, Reaction::Commits] {
         svc.event_pump.register_async(Arc::new(EffortReactor {
             reaction,
             services: Arc::downgrade(svc),
@@ -47,7 +44,6 @@ impl AsyncEventConsumer for EffortReactor {
     fn name(&self) -> &'static str {
         match self.reaction {
             Reaction::Evidence => "effort.evidence",
-            Reaction::Decisions => "effort.decisions",
             Reaction::Commits => "effort.commits",
         }
     }
@@ -64,12 +60,6 @@ impl AsyncEventConsumer for EffortReactor {
         let effort = crate::effort_lifecycle::effort_of(event)?;
         match self.reaction {
             Reaction::Evidence => crate::effort_evidence::refresh(&svc, effort.value()).await,
-            Reaction::Decisions => {
-                match crate::inferred_decisions::infer_for_effort(&svc, effort.value()).await {
-                    Ok(outcome) => tracing::debug!(%effort, ?outcome, "inferred decisions"),
-                    Err(error) => tracing::warn!(%effort, %error, "inferring decisions failed"),
-                }
-            }
             Reaction::Commits => crate::commit_links::link_effort(&svc, &effort).await?,
         }
         Ok(())

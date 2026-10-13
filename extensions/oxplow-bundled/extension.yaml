@@ -39,6 +39,27 @@ intent:
     - name: repair-skips-without-a-work-list
       input: { effect: repair-disabled, event: { type: contribution.disabled } }
       expect: nothing filed when no work list is running
+    - name: infer-decisions-asks
+      input: { effect: infer-decisions, event: { type: effort.finished } }
+      expect: a finished effort's decisions are asked about when a model serves the decisions profile
+    - name: infer-decisions-skips-unbound
+      input: { effect: infer-decisions, event: { type: effort.finished } }
+      expect: no model bound, nothing is asked and the skip says where to bind one
+    - name: infer-decisions-request
+      input: { command: oxplow.effort.infer_decisions }
+      expect: the effort's conversation, tool calls and recorded decisions become one decisions job keyed by the effort
+    - name: infer-decisions-nothing-to-read
+      input: { command: oxplow.effort.infer_decisions }
+      expect: an effort with no turns or tool calls asks nothing
+    - name: decisions-asked
+      input: { job: decisions }
+      expect: the model's JSON proposals are the job's answer
+    - name: decisions-stored
+      input: { effect: store-decisions, event: { type: contribution.job.completed } }
+      expect: the job's proposals replace the effort's inferred decisions
+    - name: decisions-not-json
+      input: { effect: store-decisions, event: { type: contribution.job.completed } }
+      expect: a reply in prose is skipped, saying so
 # oxplow's default work list and effort policy: built-ins of core's,
 # declared here so they are an extension's like any other. Disabled, both
 # fall to none. Snapshots can't be none: their default is core's own (it
@@ -284,6 +305,23 @@ event_types:
       v: 1
       schema: event_types/finished_cleared.v1.json
       summary: A person cleared a thread's Finished list in the Work panel. Subject — the thread.
+# Inferred decisions: when an effort finishes, a model reads what the agent
+# did and proposes the forks it resolved without recording them. They land
+# as the effort's inferred decisions (core's
+# `oxplow.effort.replace_inferred_decisions`), for a person to confirm or
+# dismiss on the review page; the agent never sees them. The model is the
+# person's `oxplow-bundled/decisions` binding, else their Main model.
+ai_profiles:
+  - id: decisions
+    description: Finds the forks a coding agent resolved during an effort without recording them.
+    fallback: main
+jobs:
+  - id: decisions
+    description: Read what the agent did during one effort and propose the decisions it made without recording them.
+    version: 1
+    operation: ai.complete_typed
+    needs: [ai.compute]
+    timeout: 120
 # Effects are programs: a person approves each before it reacts, bundled
 # or not. `repair-disabled` files nothing until it is approved (and stops
 # when the approval is taken back); `verify-unchecked` likewise.
@@ -298,7 +336,47 @@ effects:
     on: [contribution.disabled]
     entry: effects/repair_disabled.star
     needs: [sql.read]
+  - id: infer-decisions
+    summary: When an effort finishes, ask a model which decisions the agent made without recording them (skipped while no model serves the decisions profile).
+    on: [effort.finished]
+    entry: effects/infer_decisions.star
+    needs: [ai.discover]
+  - id: store-decisions
+    summary: When a decisions job ends, its proposals replace the effort's inferred decisions.
+    on: [contribution.job.completed]
+    where: { contribution: oxplow-bundled/job/decisions }
+    entry: effects/store_decisions.star
+    needs: [jobs.read]
 commands:
+  # The decisions job's lifecycle, through the host's jobs scope.
+  - name: decisions.ask
+    summary: Ask a model for one effort's unrecorded decisions; returns the job. The intent key `decisions:<effort ref>` makes it one job per effort.
+    scope: jobs.write
+    op: enqueue
+    invokers: { human: true, agent: true, lens: true }
+  - name: decisions.status
+    summary: A decisions job's state and, once it ends, its answer.
+    scope: jobs.read
+    op: snapshot
+    invokers: { human: true, agent: true, lens: true }
+  - name: decisions.cancel
+    summary: Stop a decisions job.
+    scope: jobs.write
+    op: cancel
+    invokers: { human: true, agent: true, lens: true }
+  - name: effort.infer_decisions
+    summary: Ask a model which decisions the agent made during one effort without recording them; they appear under Decisions Oxplow Noticed for review. One job per effort, unless `again`.
+    entry: handlers/infer_decisions.star
+    needs: [sql.read]
+    access: record
+    input_schema:
+      type: object
+      required: [effort]
+      additionalProperties: false
+      properties:
+        effort: { type: string, description: "The effort (`effort:eff<id>`)." }
+        again: { type: boolean, description: "Ask a new job even though one was asked for this effort (a changed binding or new activity answers afresh)." }
+    invokers: { human: true, agent: true, lens: true }
   - name: review.accept
     summary: Accept an effort's work — comment the review on its work item and mark it done. Refuses while a claim is unverified or an inferred decision unreviewed, unless forced.
     input_schema:

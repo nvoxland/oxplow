@@ -62,6 +62,8 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-bundled", "commands/work-next.md"),
             ext_file!("oxplow-bundled", "effects/verify_unchecked.star"),
             ext_file!("oxplow-bundled", "effects/repair_disabled.star"),
+            ext_file!("oxplow-bundled", "effects/infer_decisions.star"),
+            ext_file!("oxplow-bundled", "effects/store_decisions.star"),
             ext_file!("oxplow-bundled", "event_types/accepted.v1.json"),
             ext_file!("oxplow-bundled", "event_types/changes_requested.v1.json"),
             ext_file!("oxplow-bundled", "event_types/finished_cleared.v1.json"),
@@ -69,6 +71,19 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!(
                 "oxplow-bundled",
                 "fixtures/extension runs over the last week.yaml"
+            ),
+            ext_file!("oxplow-bundled", "fixtures/decisions-asked.yaml"),
+            ext_file!("oxplow-bundled", "fixtures/decisions-not-json.yaml"),
+            ext_file!("oxplow-bundled", "fixtures/decisions-stored.yaml"),
+            ext_file!("oxplow-bundled", "fixtures/infer-decisions-asks.yaml"),
+            ext_file!(
+                "oxplow-bundled",
+                "fixtures/infer-decisions-nothing-to-read.yaml"
+            ),
+            ext_file!("oxplow-bundled", "fixtures/infer-decisions-request.yaml"),
+            ext_file!(
+                "oxplow-bundled",
+                "fixtures/infer-decisions-skips-unbound.yaml"
             ),
             ext_file!("oxplow-bundled", "fixtures/repair-files-an-item.yaml"),
             ext_file!(
@@ -81,6 +96,7 @@ pub const BUNDLED: &[BundledExtension] = &[
             ),
             ext_file!("oxplow-bundled", "handlers/accept.star"),
             ext_file!("oxplow-bundled", "handlers/clear_finished.star"),
+            ext_file!("oxplow-bundled", "handlers/infer_decisions.star"),
             ext_file!("oxplow-bundled", "handlers/request_changes.star"),
             ext_file!("oxplow-bundled", "lenses/backlog-tasks.yaml"),
             ext_file!("oxplow-bundled", "lenses/change-co-change.yaml"),

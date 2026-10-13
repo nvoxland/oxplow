@@ -262,8 +262,8 @@ mod tests {
             .await
             .unwrap();
         // Only what comes with oxplow, each waiting for a person's
-        // approval: oxplow-bundled's effects and oxplow-foundation's AI
-        // provider scripts.
+        // approval: oxplow-bundled's effects and job and oxplow-foundation's
+        // AI provider scripts.
         let programs = out.as_array().unwrap();
         let names: Vec<&str> = programs
             .iter()
@@ -274,6 +274,9 @@ mod tests {
             vec![
                 "oxplow-bundled/verify-unchecked",
                 "oxplow-bundled/repair-disabled",
+                "oxplow-bundled/infer-decisions",
+                "oxplow-bundled/store-decisions",
+                "oxplow-bundled/decisions",
                 "oxplow-foundation/anthropic",
                 "oxplow-foundation/openai",
                 "oxplow-foundation/openai_compatible",
@@ -284,7 +287,7 @@ mod tests {
         );
         assert!(programs.iter().all(|p| p["approved"] == false), "{out}");
         assert!(
-            programs[2..].iter().all(|p| p["kind"] == "ai-provider"),
+            programs[5..].iter().all(|p| p["kind"] == "ai-provider"),
             "{out}"
         );
         let err = crate::dispatch(

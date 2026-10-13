@@ -126,7 +126,8 @@ mod tests {
         let st = crate::dispatch("ai_settings", json!({}), &svc)
             .await
             .unwrap();
-        assert_eq!(st["roles"].as_array().unwrap().len(), 3);
+        // The three built-ins, then oxplow-bundled's `decisions` profile.
+        assert_eq!(st["roles"].as_array().unwrap().len(), 4);
     }
 
     /// A role's binding is config (an `ai.roles.<role>` row in Settings'
