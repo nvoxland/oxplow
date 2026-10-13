@@ -3194,7 +3194,8 @@ impl FactRunner {
                             .as_ref()
                             .and_then(|layer| layer.configuration_source()),
                         &handle,
-                    );
+                    )
+                    .with_ai_source(layer.as_ref().and_then(|layer| layer.ai_source()));
                 let mut serve = |id: &str, args: serde_json::Value| calls.serve(id, args);
                 script(given.onto(ScriptRun::starlark(&text, input.clone()), Some(&mut serve)))
             }

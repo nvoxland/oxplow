@@ -868,7 +868,8 @@ pub fn extension_command(
             let mut calls = crate::scope_calls::Calls::new(run, &needs, read)
                 .with_state_source(sql.state_source(), runtime)
                 .with_configuration_source(sql.configuration_source(), runtime)
-                .with_jobs_source(sql.jobs_source(), runtime);
+                .with_jobs_source(sql.jobs_source(), runtime)
+                .with_ai_source(sql.ai_source());
             match compose_calls(&script, input.clone(), &mut calls)? {
                 Composed::Run { calls, events, .. }
                     if reads && !(calls.is_empty() && events.is_empty()) =>

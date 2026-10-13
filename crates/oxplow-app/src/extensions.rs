@@ -6248,6 +6248,31 @@ commands:
         );
     }
 
+    /// An effect or a command may declare `needs: [ai.discover]`: it loads
+    /// and its script can ask whether a model serves a role.
+    #[test]
+    fn a_script_can_declare_ai_discover() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("oxplow/extensions/x");
+        std::fs::create_dir_all(dir.join("effects")).unwrap();
+        std::fs::create_dir_all(dir.join("commands")).unwrap();
+        std::fs::write(
+            dir.join("extension.yaml"),
+            "manifest: 2\nname: x\nintent:\n  purpose: p\neffects:\n  - { id: e, summary: s, on: [effort.finished], entry: effects/e.star, needs: [ai.discover] }\ncommands:\n  - { name: c.go, summary: s, entry: commands/c.star, needs: [ai.discover], invokers: { human: true, agent: false, lens: true }, input_schema: { type: object, additionalProperties: false } }\n",
+        )
+        .unwrap();
+        let script = "def transform(x):\n    r = scope(\"ai.discover\", {\"role\": \"summarize\"})\n    if not r[\"model\"]:\n        return {\"skip\": r[\"problem\"]}\n    return {\"commands\": []}\n";
+        std::fs::write(dir.join("effects/e.star"), script).unwrap();
+        std::fs::write(dir.join("commands/c.star"), script).unwrap();
+        let ext = load_extensions(d.path())
+            .into_iter()
+            .find(|e| e.name == "x")
+            .unwrap();
+        assert_eq!(ext.errors, Vec::<String>::new());
+        assert_eq!(ext.effects.len(), 1);
+        assert_eq!(ext.commands.len(), 1);
+    }
+
     /// `ai_profiles:` load into the extension, each as a contribution
     /// `<ext>/ai_profile/<id>`, and a mistake is an error at its line.
     #[test]

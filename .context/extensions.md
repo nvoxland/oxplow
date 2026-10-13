@@ -2306,7 +2306,7 @@ uses):
 | `sql.read` | `scope("sql.read", …)` | no | any |
 | `tree.read` | `files`, `source_files`, `duplicate_blocks` | no | any |
 | `ai.compute` | `ai_classify`, `ai_score`, `ai_summarize`, `ai_extract`, `ai_complete` | a person's | external only |
-| `ai.discover` | `ai_capabilities`, `ai_models` | no | any, when the host supplies AI metadata |
+| `ai.discover` | `ai_capabilities`, `ai_models`; `scope("ai.discover", { role })` | no | any, when the host supplies AI metadata |
 
 - **Who may declare what** (checked at load): a Starlark collector's
   `needs:` any service (`check_declared`; another runtime has no
@@ -2319,6 +2319,18 @@ uses):
   at load, naming them). A provider's
   `needs` stay `scope()` calls (`check_callable`: `host/call` answers
   `sql.read`).
+- **`scope("ai.discover", { role })`** (callable from an effect, a command
+  or any composing script that declares it) says whether a model serves
+  `role` — a built-in, or the bare id of one of the run's extension's
+  `ai_profiles`, qualified as `Role::parse_in` does — without spending:
+  `{ role: "<qualified>", model: { provider, model }, problem: null }` when
+  bound (an unbound profile reports its fallback's binding), or `{ role,
+  model: null, problem: "<why>" }` when no model is bound or no active
+  extension declares the profile; any other settings failure is an error.
+  It reads settings only (`AiService::binding_for`): no key, no capability
+  probe. An effect uses it to skip, with a readable reason, instead of
+  failing for want of a model. `answers: { ai.discover: [...] }` stand in
+  for fixtures.
 - **What a kind implies:** a Starlark fact collector reads its tree
   (`CollectorSpec::service_needs` adds `tree.read`); an entity collector
   whose script names a model-calling builtin uses `ai.compute`. Discovery
