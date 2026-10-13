@@ -37,14 +37,10 @@ pub struct ContributionHealthRow {
     pub mean_ms: Option<f64>,
     pub next_due_at: Option<String>,
     pub updated_at: String,
-    /// The repair work item filed when it was last disabled.
-    pub repair_item: Option<String>,
-    /// The last `contribution.disabled` the repair consumer handled.
-    pub repair_seq: Option<i64>,
 }
 
 const SELECT: &str = "SELECT extension, contribution, kind, state, reason, consecutive_failures,
-        last_ok_at, last_error, mean_ms, next_due_at, updated_at, repair_item, repair_seq
+        last_ok_at, last_error, mean_ms, next_due_at, updated_at
         FROM contribution_health";
 
 /// The row a [`ContributionKey`] names, its parameters `:extension`, `:kind`,
@@ -64,8 +60,6 @@ fn row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ContributionHealthRow> {
         mean_ms: r.get(8)?,
         next_due_at: r.get(9)?,
         updated_at: r.get(10)?,
-        repair_item: r.get(11)?,
-        repair_seq: r.get(12)?,
     })
 }
 
@@ -213,27 +207,6 @@ pub fn set_next_due_tx(
         named_params! {
             ":extension": key.extension, ":kind": key.kind, ":contribution": key.contribution,
             ":due": next_due_at,
-        },
-    )
-    .map(|_| ())
-    .map_err(map_sql_err)
-}
-
-/// Record that the `contribution.disabled` at `seq` was handled, filing or
-/// commenting on `repair_item`.
-pub fn set_repair_tx(
-    c: &Connection,
-    key: &ContributionKey,
-    repair_item: &str,
-    seq: i64,
-) -> Result<(), DomainError> {
-    c.execute(
-        &format!(
-            "UPDATE contribution_health SET repair_item = :item, repair_seq = :seq WHERE {KEY}"
-        ),
-        named_params! {
-            ":extension": key.extension, ":kind": key.kind, ":contribution": key.contribution,
-            ":item": repair_item, ":seq": seq,
         },
     )
     .map(|_| ())

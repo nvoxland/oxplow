@@ -61,6 +61,7 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-bundled", "components/history-graph/index.html"),
             ext_file!("oxplow-bundled", "commands/work-next.md"),
             ext_file!("oxplow-bundled", "effects/verify_unchecked.star"),
+            ext_file!("oxplow-bundled", "effects/repair_disabled.star"),
             ext_file!("oxplow-bundled", "event_types/accepted.v1.json"),
             ext_file!("oxplow-bundled", "event_types/changes_requested.v1.json"),
             ext_file!("oxplow-bundled", "event_types/finished_cleared.v1.json"),
@@ -68,6 +69,15 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!(
                 "oxplow-bundled",
                 "fixtures/extension runs over the last week.yaml"
+            ),
+            ext_file!("oxplow-bundled", "fixtures/repair-files-an-item.yaml"),
+            ext_file!(
+                "oxplow-bundled",
+                "fixtures/repair-comments-on-the-open-item.yaml"
+            ),
+            ext_file!(
+                "oxplow-bundled",
+                "fixtures/repair-skips-without-a-work-list.yaml"
             ),
             ext_file!("oxplow-bundled", "handlers/accept.star"),
             ext_file!("oxplow-bundled", "handlers/clear_finished.star"),
@@ -2046,6 +2056,198 @@ mod tests {
         deliver_acceptance(&f).await;
         assert_eq!(follow_ups(&f).await.len(), 1);
         assert_eq!(last_reaction(&f).await, "skipped");
+    }
+
+    const REPAIR: &str = "oxplow-bundled/repair-disabled";
+
+    /// The repair items filed for the `work`/`hot` collector: (ref, title,
+    /// body).
+    async fn repair_items(svc: &std::sync::Arc<crate::Services>) -> Vec<(String, String, String)> {
+        let out = svc
+            .sql
+            .query_sql(
+                "SELECT ref, title, body FROM v_work_item WHERE title LIKE 'Repair work hot:%' ORDER BY ref",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        out.rows
+            .into_iter()
+            .map(|r| {
+                let text = |c: &oxplow_db::SqlCell| match c {
+                    oxplow_db::SqlCell::Text(t) => t.clone(),
+                    other => format!("{other:?}"),
+                };
+                (text(&r[0]), text(&r[1]), text(&r[2]))
+            })
+            .collect()
+    }
+
+    async fn repair_item_shown(svc: &std::sync::Arc<crate::Services>) -> oxplow_db::SqlCell {
+        svc.sql
+            .query_sql(
+                "SELECT repair_item FROM v_contribution_health WHERE extension = 'work'",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap()
+            .rows[0][0]
+            .clone()
+    }
+
+    async fn effect_states(svc: &std::sync::Arc<crate::Services>) -> Vec<String> {
+        svc.db
+            .read(|c| {
+                let mut st = c
+                    .prepare("SELECT state FROM effect_run WHERE effect = ?1 ORDER BY id")
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = st
+                    .query_map([REPAIR], |r| r.get(0))
+                    .map_err(oxplow_db::map_sql_err)?;
+                rows.collect::<rusqlite::Result<_>>()
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap()
+    }
+
+    /// A disabled contribution files one repair item whose body names what
+    /// failed and what to do; a repeat disable comments on the open item; a
+    /// closed one lets the next file a new item. The health view shows the
+    /// open one; a redelivery files nothing.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_disabled_contribution_files_a_repair_item_and_a_repeat_comments() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        crate::test_fixtures::approve_effect(&f.svc, REPAIR).await;
+
+        let first = crate::test_fixtures::disable_collector(
+            &f.svc,
+            "work",
+            "hot",
+            "3 failures in a row; the last: boom",
+        )
+        .await;
+        crate::test_fixtures::deliver(&f.svc, &first).await;
+        crate::test_fixtures::deliver(&f.svc, &first).await; // a redelivery
+        let items = repair_items(&f.svc).await;
+        assert_eq!(items.len(), 1, "{items:?}");
+        let (item, title, body) = items[0].clone();
+        assert_eq!(
+            title,
+            "Repair work hot: 3 failures in a row; the last: boom"
+        );
+        assert!(
+            body.contains("collector `hot` of the extension `work`")
+                && body.contains("oxplow extension check work"),
+            "{body}"
+        );
+        assert_eq!(
+            repair_item_shown(&f.svc).await,
+            oxplow_db::SqlCell::Text(item.clone())
+        );
+
+        let again = crate::test_fixtures::disable_collector(
+            &f.svc,
+            "work",
+            "hot",
+            "3 failures in a row; the last: boom again",
+        )
+        .await;
+        crate::test_fixtures::deliver(&f.svc, &again).await;
+        assert_eq!(
+            repair_items(&f.svc).await.len(),
+            1,
+            "the open item is reused"
+        );
+        let comments = f
+            .svc
+            .sql
+            .query_sql(
+                "SELECT count(*) FROM v_event WHERE type = 'work_item.commented'",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(comments.rows[0][0], oxplow_db::SqlCell::Int(1));
+
+        // Closed: the next disable files a new one.
+        f.svc
+            .work_items_client()
+            .transition(
+                &oxplow_domain::Actor::Human,
+                &item,
+                oxplow_domain::work_items::CanonicalState::Done,
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            repair_item_shown(&f.svc).await,
+            oxplow_db::SqlCell::Null(())
+        );
+        let third = crate::test_fixtures::disable_collector(
+            &f.svc,
+            "work",
+            "hot",
+            "3 failures in a row; the last: boom thrice",
+        )
+        .await;
+        crate::test_fixtures::deliver(&f.svc, &third).await;
+        assert_eq!(repair_items(&f.svc).await.len(), 2);
+    }
+
+    /// Core reports a disabled contribution whether or not the repair
+    /// effect runs: until a person approves it, and once they take the
+    /// approval back, no item is filed — and health still says disabled.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn without_the_repair_effect_approved_nothing_is_filed_and_core_still_reports() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let before = crate::test_fixtures::disable_collector(&f.svc, "work", "hot", "boom").await;
+        crate::test_fixtures::deliver(&f.svc, &before).await;
+        assert!(repair_items(&f.svc).await.is_empty(), "never approved");
+
+        crate::test_fixtures::approve_effect(&f.svc, REPAIR).await;
+        crate::test_fixtures::revoke_effect(&f.svc, REPAIR);
+        let after = crate::test_fixtures::disable_collector(&f.svc, "work", "hot", "boom").await;
+        crate::test_fixtures::deliver(&f.svc, &after).await;
+        assert!(repair_items(&f.svc).await.is_empty(), "approval taken back");
+
+        let health = f
+            .svc
+            .sql
+            .query_sql(
+                "SELECT state, reason FROM v_contribution_health WHERE extension = 'work'",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            health.rows[0][0],
+            oxplow_db::SqlCell::Text("disabled".into())
+        );
+    }
+
+    /// No running work list: the effect skips (not a failure that would
+    /// count against it) and files nowhere.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn with_no_running_work_list_the_repair_effect_skips() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        f.svc
+            .config
+            .write()
+            .unwrap()
+            .active_providers
+            .insert("work_items".into(), "tracker".into());
+        crate::test_fixtures::activate(&f.svc).await;
+        crate::test_fixtures::approve_effect(&f.svc, REPAIR).await;
+        let ev = crate::test_fixtures::disable_collector(&f.svc, "work", "hot", "boom").await;
+        crate::test_fixtures::deliver(&f.svc, &ev).await;
+        assert!(repair_items(&f.svc).await.is_empty());
+        assert_eq!(effect_states(&f.svc).await, ["skipped"]);
     }
 
     /// The state of the follow-up effect's latest reaction.

@@ -48,7 +48,6 @@ pub mod config_reactors;
 pub mod config_service;
 pub mod config_watch;
 pub mod contribution_health;
-pub mod contribution_repair;
 pub mod credential_lint;
 pub mod daemon_supervisor;
 pub mod dashboard_tiles;

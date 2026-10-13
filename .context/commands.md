@@ -514,7 +514,12 @@ proposal; `System` is asked (`NeedsConfirmation`). An effect's invoker is
 triggering event's thread and stream (`CommandBus::run_effect` takes the
 event's anchors), so an agent's gates apply to it there
 (`Actor::gated_thread`): the writer gate on that thread (a `Write`
-command reacting to a non-writer thread's event is refused), and VCS
+command reacting to a non-writer thread's event is refused; an effect
+whose event carries no thread — a project-level fact such as a
+contribution's health — acts for no thread and writes into no worktree, so
+the gate doesn't apply to it: `Actor::is_anchorless_effect`, step 3's
+"requires the actor's thread" refusal skips it; its approval, each
+command's invokers and its confirmation still hold), and VCS
 commands on that stream only (`Actor::confined_to_own_stream`; an event
 with no stream reaches no worktree). Its source is
 `effect:<extension>/<id>`, and only a

@@ -627,7 +627,14 @@ Prerequisites: Provide durable cancellable extension jobs outside database trans
 
 #### Extract work-item repair response from core contribution health
 
-Status: planned.
+Status: done. Core keeps detection and the health report; the bundled
+effect `oxplow-bundled/repair-disabled` files (or comments on) the repair
+item through `oxplow.work_item.create` / `comment` on the active work list,
+deduplicating by the open item's `Repair <extension> <contribution>:` title
+prefix (no stable work-item key exists yet), once a person approves it. An
+effect whose event carries no thread is an anchorless effect (no writer
+gate). `contribution_repair.rs`, the `contribution.repair` consumer and
+`contribution_health.repair_item`/`repair_seq` are gone (V58).
 
 Scope: Keep core contribution validation and health reporting, but move automatic repair-task creation and its wording/deduplication policy into a bundled effect. Use the public event envelope, command bus and selected work-list provider.
 

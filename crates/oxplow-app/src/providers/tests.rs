@@ -546,6 +546,47 @@ async fn the_work_items_suite_passes_through_the_host_over_the_fake() {
     assert!(health.mean_invoke_ms.is_some() && health.last_ok_at.is_some());
 }
 
+/// The repair item goes to whichever work list is active: with another
+/// provider's tracker chosen, the bundled repair effect files it there
+/// through `oxplow.work_item.create`, and the health view finds it.
+#[tokio::test]
+async fn a_repair_item_is_filed_on_the_active_alternate_provider() {
+    let (fx, ext) = approved("").await;
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
+    first_read(&fx).await;
+    crate::test_fixtures::approve_effect(&fx.svc, "oxplow-bundled/repair-disabled").await;
+    let event =
+        crate::test_fixtures::disable_collector(&fx.svc, "work", "hot", "3 failures: boom").await;
+    crate::test_fixtures::deliver(&fx.svc, &event).await;
+    // The provider's own ref, not oxplow's backlog.
+    let filed = fx
+        .svc
+        .sql
+        .query_sql(
+            "SELECT ref FROM v_work_item WHERE title LIKE 'Repair work hot:%'",
+            vec![],
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(filed.rows.len(), 1, "{:?}", filed.rows);
+    assert_eq!(
+        filed.rows[0][0],
+        oxplow_db::SqlCell::Text("work_item:fake:W-1".into())
+    );
+    let shown = fx
+        .svc
+        .sql
+        .query_sql(
+            "SELECT repair_item FROM v_contribution_health WHERE extension = 'work'",
+            vec![],
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(shown.rows[0][0], filed.rows[0][0]);
+}
+
 /// P7.A1: `work_item.*` is the one write surface — another provider's
 /// item moves through its process as `oxplow.work_item.transition`, one audit
 /// row, its `work_item.recorded` caused by the run. The provider's verbs

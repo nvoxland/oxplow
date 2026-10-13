@@ -2881,7 +2881,9 @@ too; `effects.rs`) are scripts that react
 to a logged event by composing commands, run as
 `Actor::Effect { effect: "<extension>/<id>" }` for the event's thread and
 stream — an agent's rights and gates there (the writer gate, its own
-stream's VCS), never a confirmation (commands.md "Only a person
+stream's VCS; an event with no thread, like a contribution's health, is
+an anchorless effect: no writer gate, since it writes into no worktree —
+its approval and each command's own invokers still apply), never a confirmation (commands.md "Only a person
 confirms"):
 
 ```yaml
@@ -3344,21 +3346,31 @@ Every contribution that runs — an external provider instance, a collector, an 
   included, a lost race to another delivery not; `skipped` and `proposed`
   never do, and a reaction whose commands ran starts the count over. Nothing cascades: a lens over its view still runs, carrying a
   warning (`LensRun.warnings`) that its rows aren't refreshing.
-- **Repairing.** The `contribution.repair` pump consumer files a work item on
-  the active work-items provider, as the system: title `Repair <extension>
-  <contribution>: <reason>`, body the repair prompt (`contribution_repair::render`,
-  golden `crates/oxplow-app/tests/fixtures/repair-prompt.md`: what failed,
-  its intent and declaration, its recent failures, what `extension check`
-  reports, its intent examples, `engine:` against the running oxplow, and
-  what to do). It goes to the active tracker like every item (tsk1058).
-  When that tracker can't take it — not running, or the very contribution
-  just disabled (tsk714) — the delivery fails naming it (retried, then a
-  dead letter in Delivery, beside the tracker's own alert); nothing is
-  filed in oxplow's list instead. A later
-  disable while the item is open comments on it;
-  once it's done or canceled the next disable files a new one
-  (`contribution_health.repair_item`, `v_contribution_health.repair_item` while open).
-  oxplow never sends it to an agent.
+- **Repairing.** Core detects and reports (the health row,
+  `contribution.disabled@1`, Settings → Extensions) with or without a work
+  list. Filing the repair item is the bundled effect
+  `oxplow-bundled/repair-disabled` (`effects/repair_disabled.star`, on
+  `contribution.disabled`, `needs: [sql.read]`): it composes
+  `oxplow.work_item.create` on the active work list — whichever provider
+  that is, never a task table — titled `Repair <extension> <contribution>:
+  <reason>`. Its body is what failed (the reason), where it is declared
+  (`v_contribution` file:line), its recent failures (a collector's failed
+  syncs, an effect's failed reactions, else the last error) and what to do.
+  It no longer carries the declaration YAML, `intent.purpose`, the
+  `extension check` output or the `engine:` line — none is readable through
+  `sql.read`; the item says to run `oxplow extension check`/`test`. A later
+  disable while the item is open comments on it (`oxplow.work_item.comment`);
+  once it is done or canceled the next disable files a new one. **The
+  open item is found by its title prefix** (`Repair <extension>
+  <contribution>:`) — a work item has no stable key an effect can set and a
+  view can match (no label, origin key or ref link) — and
+  `v_contribution_health.repair_item` is that open item, derived by the
+  same prefix (the table keeps no `repair_item`). With no running work list
+  (`none`, or the chosen tracker down) the effect skips; it is a bundled
+  effect like `verify-unchecked`, so **repair items appear once a person
+  approves it**, and revoking the approval or disabling the effect stops new
+  ones. It runs as an anchorless effect (the event has no thread), so the
+  writer gate doesn't apply. oxplow never sends the item to an agent.
 - **Enabling.** Only a person: `oxplow.contribution.enable { extension, kind,
   contribution }` (human-only). It names the kind — a provider and a
   collector may share an id; there must be a failed one of that kind (or

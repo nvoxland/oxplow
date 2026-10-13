@@ -333,23 +333,18 @@ async fn an_effect_is_held_to_its_events_threads_writer_gate() {
     )
     .await
     .unwrap();
-    // An effect with no thread can't be held to a writer gate, so a
-    // writer-bound command is refused outright.
-    let err = bus
-        .run(
-            &on(None),
-            "oxplow.kv.set",
-            json!({"k": "b", "v": "1"}),
-            false,
-        )
-        .await
-        .unwrap_err();
-    assert!(
-        matches!(&err, CommandError::Denied { reason }
-            if reason.contains("requires the actor's thread")),
-        "{err:?}"
-    );
-    assert_eq!(kv_value(&db, "b").await, None);
+    // An effect whose event carries no thread acts for no thread, so the
+    // writer gate doesn't apply to it (it writes into no worktree); an
+    // effect on a thread that may not write is still refused, above.
+    bus.run(
+        &on(None),
+        "oxplow.kv.set",
+        json!({"k": "b", "v": "1"}),
+        false,
+    )
+    .await
+    .unwrap();
+    assert_eq!(kv_value(&db, "b").await, Some("1".into()));
 }
 
 /// A job with no thread is denied a writer-bound command. Today the

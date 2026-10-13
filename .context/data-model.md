@@ -1535,7 +1535,6 @@ and are registered by `crate::boot` — a test that wants them calls their
 | `config.extensions` / `config.providers` / `config.metrics` | async | `config.changed` (`extensions`; `extensionInstances`, `activeProviders`; any key) | after the in-memory swap: the extension catalog's change signal; the provider registry reconciles; the metric catalog reseeds (P7.B6) | boot.rs |
 | `extension_models.entities` | async | `collector.synced` | the extension models compile again (a new entity may let one) (P7.B6) | boot.rs |
 | `change.analyze` | async | `snapshot.taken` (that recorded files), `vcs.head.moved` | re-analyzes the stream's working change and open efforts' changes, skipping an event a newer one supersedes; dead-letters a failure naming the stream (P7.B4) | boot.rs |
-| `contribution.repair` | async | `contribution.disabled` | files the contribution's repair work item on the active provider as the system, or comments on its open one; records it in `contribution_health.repair_item` (P7.C2) | boot.rs |
 | `collector.triggers` | async | what enabled collectors' `on:` name (never `collector.synced`) | runs each matching collector for the event, once per event (`collector_run.last_event_id`): an entity collector's rows, or a fact collector through the fact engine (`snapshot.taken`: a delta collector only when the take recorded files, a whole-tree one on every take; `effort.finished` over the effort's end snapshot; anything else over the stream's latest snapshot) — plus `collector_run` and `collector.synced@1` (P7.B3; replaced `effort.gauges` and the metrics bus `SnapshotTaken` arm) | boot.rs |
 
 **Async consumers (P2.6.2, tsk454).** `trait AsyncEventConsumer { name,
@@ -2114,10 +2113,9 @@ one transaction; `oxplow.contribution.enable` clears it (`contribution.enabled@1
 `v_contribution_health` adds `dead_letters` (pending dead letters of its
 consumer `extension:<extension>/<contribution>`, or of events whose subject
 is `extension:<extension>`) and `fresh` (0 once `next_due_at` has passed).
-V136 (P7.C2) adds `repair_item` (the repair work item's ref the
-`contribution.repair` consumer filed) and `repair_seq` (the last
-`contribution.disabled` it handled, so a redelivery files nothing twice);
-`v_contribution_health` shows `repair_item` only while that item is open.
+`v_contribution_health` shows `repair_item`: the open work item whose title starts
+`Repair <extension> <contribution>:`, which the bundled repair effect files (V136
+added `repair_item`/`repair_seq` columns for the old core consumer; V58 drops them).
 
 ### `provider_collector_state` — `SqliteProviderCollectorStore` (`crates/oxplow-db/src/provider_collector_store.rs`)
 

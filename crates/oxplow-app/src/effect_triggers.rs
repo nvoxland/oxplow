@@ -1809,10 +1809,9 @@ mod tests {
     }
 
     /// P8.D11: three failed reactions in a row disable the effect — it
-    /// stops reacting — and the disable files a repair work item naming
-    /// its failures.
+    /// stops reacting — and log the disable.
     #[tokio::test(flavor = "multi_thread")]
-    async fn three_failures_disable_an_effect_and_file_a_repair_item() {
+    async fn three_failures_disable_an_effect() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         extension(
@@ -1851,16 +1850,6 @@ mod tests {
             .find(|e| e.envelope.event_type == "contribution.disabled")
             .expect("the disable is logged");
         assert_eq!(disabled.envelope.payload["kind"], json!("effect"));
-        crate::contribution_repair::ContributionRepair::new(Arc::downgrade(svc))
-            .handle(&disabled)
-            .await
-            .unwrap();
-        let repair = rows(
-            svc,
-            "SELECT repair_item FROM v_contribution_health WHERE extension = 'acme'",
-        )
-        .await;
-        assert!(repair[0][0].is_string(), "a repair item is filed: {repair}");
     }
 
     /// Skipped and proposed reactions aren't failures.
