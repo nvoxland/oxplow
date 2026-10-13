@@ -739,7 +739,22 @@ Prerequisites: Compose declared host services through the shared context.
 
 #### Prove public APIs with diverse agent-authored extension trials
 
-Status: planned.
+Status: done. Three trials, tested through public commands and the SDK
+only (`examples/extensions/README.md` lists them, the tests and the
+friction found): effort-review (a job started by an effect on
+`effort.finished`, its tool reading an effort's evidence, streamed,
+cancelled through `oxplow.job.cancel`, commented on the work item and
+exported as a model); triage's workflow state surviving restart,
+revocation and re-approval (`crates/oxplow-sdk/tests/trials.rs`, the
+browser spec); review-badges importing effort-review's model and
+degrading when it is disabled, missing or exports another version.
+Shared services added for them: a job's intent key as its subject
+(snapshot `intentKey`, `v_job.intent_key`), a command fixture's `expect:
+{ result }`, and `extension check`/`test` printing how each import
+resolved. Still open (in the README's friction list): event-started jobs,
+AI profiles, diff text, job fixtures over seeded evidence, the
+builtin-shadowing scanner, withheld-contribution diagnostics, metric
+functions in command scripts.
 
 Scope: Build three small non-bundled trials: cancellable AI review over collected evidence, a durable triage workflow with a custom UI, and a producer/consumer integration between independent extensions. Reuse the custom metrics trial as the data-first baseline. Improve shared services when a trial otherwise needs copied infrastructure.
 
