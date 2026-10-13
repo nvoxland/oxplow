@@ -325,8 +325,12 @@ impl ProviderRegistry {
             };
             // A running instance this generation doesn't change keeps its
             // process: the same program, config, approval and declarations.
+            // One whose approval no longer covers its program (an edit
+            // re-approved, a revocation) is replaced here: reusing it would
+            // fail `validate_live` and reject the whole generation.
             let unchanged = base.get(name).filter(|current| {
                 !current.is_stopped()
+                    && current.host_calls.authority_current()
                     && current.scope == instance.scope
                     && current.config == instance.config
                     && current.spec == instance.spec

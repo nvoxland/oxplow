@@ -6344,7 +6344,7 @@ commands:
             ]
         );
         let effects: Vec<&str> = b.effects.iter().map(|e| e.id.as_str()).collect();
-        assert_eq!(effects, ["verify-unchecked"]);
+        assert_eq!(effects, ["verify-unchecked", "repair-disabled"]);
         assert!(b
             .collectors
             .iter()

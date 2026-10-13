@@ -342,3 +342,73 @@ pub fn generated_section(doc: &str, name: &str, generated: &str) {
         "{doc}'s {name} table is stale; bless it with OXPLOW_BLESS=1"
     );
 }
+
+/// A person approves bundled effect `id` (`<extension>/<effect>`) as it is
+/// now: its files, and events from now on.
+pub async fn approve_effect(svc: &Arc<crate::Services>, id: &str) {
+    let (ext, decl) = crate::effect_triggers::find_effect(svc, id).expect("its effect");
+    let program = crate::effects::effect_program(&ext, &decl);
+    let root = svc.layout.project_dir.clone();
+    let config = svc.config.read().unwrap().clone();
+    crate::exec_consent::approve_program(
+        &svc.approvals,
+        &root,
+        &config,
+        std::slice::from_ref(&ext),
+        crate::exec_consent::ProgramKind::Effect,
+        &program.name,
+        &program.hash(&root).unwrap(),
+    )
+    .unwrap();
+    crate::effects::approved(&svc.db, id).await.unwrap();
+}
+
+/// A person takes their approval of effect `id` back.
+pub fn revoke_effect(svc: &Arc<crate::Services>, id: &str) {
+    let (ext, decl) = crate::effect_triggers::find_effect(svc, id).expect("its effect");
+    let program = crate::effects::effect_program(&ext, &decl);
+    let config = svc.config.read().unwrap().clone();
+    crate::exec_consent::revoke_program(
+        &svc.approvals,
+        &svc.layout.project_dir,
+        &config,
+        std::slice::from_ref(&ext),
+        crate::exec_consent::ProgramKind::Effect,
+        &program.name,
+    )
+    .unwrap();
+}
+
+/// Disable collector `extension`/`contribution` for `reason`, as three
+/// failures in a row do; the `contribution.disabled` it logged.
+pub async fn disable_collector(
+    svc: &Arc<crate::Services>,
+    extension: &str,
+    contribution: &str,
+    reason: &str,
+) -> oxplow_domain::StoredEvent {
+    let health = crate::contribution_health::ContributionHealth::new(
+        svc.db.clone(),
+        svc.event_log_store.vocabulary().clone(),
+    );
+    let key = crate::collector_runner::contribution_key(extension, contribution);
+    health.enable(&key, "human").await.unwrap();
+    health.disable(&key, reason).await.unwrap();
+    svc.event_log_store
+        .read_after(0, 10_000)
+        .await
+        .unwrap()
+        .into_iter()
+        .rev()
+        .find(|e| e.envelope.event_type == "contribution.disabled")
+        .expect("the disable is logged")
+}
+
+/// Deliver `event` to the effects, as the pump would.
+pub async fn deliver(svc: &Arc<crate::Services>, event: &oxplow_domain::StoredEvent) {
+    use crate::event_pump::AsyncEventConsumer as _;
+    crate::effect_triggers::EffectTriggers::new(Arc::downgrade(svc))
+        .handle(event)
+        .await
+        .unwrap();
+}

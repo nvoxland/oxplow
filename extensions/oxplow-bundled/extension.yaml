@@ -30,6 +30,15 @@ intent:
     - name: a metric pushed past its warn threshold during an effort
       input: { advisory: threshold-crossed, effort_id: 1 }
       expect: one "⚠ <metric> crossed its warn threshold" line, once per metric
+    - name: repair-files-an-item
+      input: { effect: repair-disabled, event: { type: contribution.disabled } }
+      expect: one repair item filed on the active work list for the disabled contribution
+    - name: repair-comments-on-the-open-item
+      input: { effect: repair-disabled, event: { type: contribution.disabled } }
+      expect: a comment on the contribution's open repair item, not a second item
+    - name: repair-skips-without-a-work-list
+      input: { effect: repair-disabled, event: { type: contribution.disabled } }
+      expect: nothing filed when no work list is running
 # oxplow's default work list and effort policy: built-ins of core's,
 # declared here so they are an extension's like any other. Disabled, both
 # fall to none. Snapshots can't be none: their default is core's own (it
@@ -275,11 +284,19 @@ event_types:
       v: 1
       schema: event_types/finished_cleared.v1.json
       summary: A person cleared a thread's Finished list in the Work panel. Subject — the thread.
+# Effects are programs: a person approves each before it reacts, bundled
+# or not. `repair-disabled` files nothing until it is approved (and stops
+# when the approval is taken back); `verify-unchecked` likewise.
 effects:
   - id: verify-unchecked
     summary: After an acceptance that left claims unverified or decisions inferred, file one item to verify them.
     on: [oxplow_bundled.accepted]
     entry: effects/verify_unchecked.star
+    needs: [sql.read]
+  - id: repair-disabled
+    summary: When an extension's contribution is disabled after repeated failures, file one repair item on the active work list (comment on it while it is open).
+    on: [contribution.disabled]
+    entry: effects/repair_disabled.star
     needs: [sql.read]
 commands:
   - name: review.accept

@@ -1265,7 +1265,7 @@ impl CommandBus {
         // oxplow's own records.
         let mut gates = Gates { may_write: None };
         if let Some(thread_id) = actor.gated_thread() {
-            if spec.access.needs_writer() && thread_id.is_none() {
+            if spec.access.needs_writer() && thread_id.is_none() && !actor.is_anchorless_effect() {
                 let err = CommandError::Denied {
                     reason: "a writer-bound command requires the actor's thread".into(),
                 };

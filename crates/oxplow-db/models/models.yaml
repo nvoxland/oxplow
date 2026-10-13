@@ -838,7 +838,7 @@
     - { name: "updated_at", type: "TEXT", doc: "When this row last changed." }
     - { name: "dead_letters", type: "", doc: "Events it couldn't handle and that wait for a person: dead letters of its consumer (`extension:<extension>/<contribution>`) or of events about its extension (subject `extension:<extension>`)." }
     - { name: "fresh", type: "", doc: "1 unless a scheduled run is overdue (`next_due_at` has passed)." }
-    - { name: "repair_item", type: "TEXT", doc: "The open repair work item filed when it was disabled; NULL once that item is done or canceled." }
+    - { name: "repair_item", type: "TEXT", doc: "The open repair work item for it — the one whose title starts `Repair <extension> <contribution>:`, filed by the bundled repair effect; NULL when none is open." }
   tests:
     - { not_null: extension }
 - name: snapshot

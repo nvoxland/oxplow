@@ -8125,7 +8125,7 @@
         {
           "name": "repair_item",
           "type": "TEXT",
-          "doc": "The open repair work item filed when it was disabled; NULL once that item is done or canceled."
+          "doc": "The open repair work item for it — the one whose title starts `Repair <extension> <contribution>:`, filed by the bundled repair effect; NULL when none is open."
         }
       ],
       "key": []

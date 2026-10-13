@@ -623,6 +623,22 @@ impl Actor {
         }
     }
 
+    /// An effect whose event carries no thread (a project-level fact: a
+    /// contribution's health, a config change). The writer gate exists to
+    /// stop a non-writer *thread* changing a stream's worktree; this one
+    /// acts for no thread and writes into no worktree, so that gate doesn't
+    /// apply to it. Its approval, each command's invokers and its
+    /// confirmation still do.
+    pub fn is_anchorless_effect(&self) -> bool {
+        matches!(
+            self,
+            Actor::Effect {
+                thread_id: None,
+                ..
+            }
+        )
+    }
+
     /// Whether this actor works only in its own stream (VCS commands): an
     /// agent (or a lens acting for one), or an effect, in its event's.
     pub fn confined_to_own_stream(&self) -> bool {
