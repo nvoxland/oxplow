@@ -16,6 +16,6 @@ def transform(input):
         c = len(ast_query(tri[1], tri[2], q))
         if c > 0:
             facts.append({"measure": "repo.ts_as_cast", "value": c,
-                          "subject": "file:" + tri[0], "path": tri[0],
+                          "subject": ref.build("file", tri[0]), "path": tri[0],
                           "dims": {"oxplow.language": "typescript"}})
     return {"facts": facts}

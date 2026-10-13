@@ -1,6 +1,8 @@
 -- The active work list's items only: the interface shows one list at a
 -- time, whichever implementation it is (none: nothing).
-SELECT w.ref, w.provider, w.title, w.body, w.state, w.native_state, w.native,
+SELECT w.ref, w.provider,
+       CAST(substr(w.ref, length('work_item:' || w.provider || ':') + 1) AS TEXT) AS native_id,
+       w.title, w.body, w.state, w.native_state, w.native,
        -- A deleted parent isn't a live work item: no parent then.
        (SELECT p.ref FROM source('work_item') p
          WHERE p.ref = w.parent_ref AND p.deleted_at IS NULL) AS parent_ref,

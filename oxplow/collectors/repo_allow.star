@@ -16,6 +16,6 @@ def transform(input):
                 c += 1
         if c > 0:
             facts.append({"measure": "repo.rust_allow", "value": c,
-                          "subject": "file:" + f["path"], "path": f["path"],
+                          "subject": ref.build("file", f["path"]), "path": f["path"],
                           "dims": {"oxplow.language": "rust"}})
     return {"facts": facts}

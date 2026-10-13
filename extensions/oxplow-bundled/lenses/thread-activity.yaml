@@ -4,7 +4,7 @@ params:
   - { name: thread_id, label: Thread }
 query: |
   WITH turns AS (
-    SELECT t.id, t.thread_id, t.agent_session_id, t.started_at, t.ended_at,
+    SELECT t.id, t.ref, t.thread_id, t.agent_session_id, t.started_at, t.ended_at,
            trim(CASE WHEN instr(t.prompt, char(10)) > 0
                      THEN substr(t.prompt, 1, instr(t.prompt, char(10)) - 1)
                      ELSE t.prompt END) AS prompt,
@@ -25,8 +25,8 @@ query: |
          (SELECT sum(k.input_tokens + k.output_tokens + k.cache_creation_input_tokens + k.cache_read_input_tokens)
             FROM v_token_usage k WHERE k.turn_id = u.id) AS tokens,
          u.started_at AS at,
-         'turn:trn' || u.id AS turn_ref,
-         CASE WHEN u.effort_id IS NOT NULL THEN 'effort:eff' || u.effort_id END AS effort_ref
+         u.ref AS turn_ref,
+         e.ref AS effort_ref
   FROM turns u
   LEFT JOIN v_effort e ON e.id = u.effort_id
   ORDER BY u.started_at DESC

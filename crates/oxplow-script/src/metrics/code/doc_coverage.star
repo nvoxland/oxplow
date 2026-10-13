@@ -24,7 +24,7 @@ def transform(input):
                 "value": documented * 100.0 / public,
                 "num": documented,
                 "den": public,
-                "subject": "file:" + f["path"],
+                "subject": ref.build("file", f["path"]),
                 "path": f["path"],
                 "dims": {"oxplow.language": lang},
             })

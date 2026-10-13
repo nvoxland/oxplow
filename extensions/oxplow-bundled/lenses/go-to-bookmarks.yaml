@@ -13,7 +13,7 @@ query: |
        OR (bk.scope = 'stream' AND bk.stream_id = (SELECT stream_id FROM v_thread WHERE id = :thread_id))
        OR bk.scope = 'project'
   ) b
-  LEFT JOIN v_wiki_page w ON b.page_kind = 'wiki' AND b.ref = 'wiki:' || w.slug
+  LEFT JOIN v_knowledge_page w ON w.ref = b.ref
   WHERE b.n = 1
   ORDER BY b.added_at DESC, b.id DESC
 viz: list

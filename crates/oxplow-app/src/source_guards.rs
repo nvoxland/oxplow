@@ -1091,3 +1091,116 @@ fn refs_are_built_and_parsed_through_the_grammar() {
         offenders.join("\n")
     );
 }
+
+/// The scripts, lens queries and model SQL the repo ships, and the Rust
+/// files that embed Starlark templates, as `(repo-relative path, text)`.
+fn script_and_sql_sources() -> Vec<(String, String)> {
+    let root = repo_root();
+    let mut out = Vec::new();
+    let mut stack: Vec<PathBuf> = [
+        "extensions",
+        "examples/extensions",
+        "oxplow/collectors",
+        "crates/oxplow-script/src/metrics",
+        "crates/oxplow-db/models",
+        "crates/oxplow-sdk/src",
+    ]
+    .iter()
+    .map(|p| root.join(p))
+    .collect();
+    stack.push(root.join("crates/oxplow-app/src/metric_scaffold.rs"));
+    while let Some(path) = stack.pop() {
+        if path.is_dir() {
+            let Ok(entries) = std::fs::read_dir(&path) else {
+                continue;
+            };
+            stack.extend(entries.flatten().map(|e| e.path()));
+            continue;
+        }
+        let rel = path
+            .strip_prefix(&root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let wanted = rel.ends_with(".star")
+            || rel.ends_with(".sql")
+            || (rel.ends_with(".yaml") && rel.contains("/lenses/"))
+            || rel.starts_with("crates/oxplow-sdk/src") && rel.ends_with(".rs")
+            || rel.ends_with("metric_scaffold.rs");
+        if wanted {
+            out.push((rel, std::fs::read_to_string(&path).unwrap_or_default()));
+        }
+    }
+    out.sort();
+    out
+}
+
+/// The built-in metrics that still spell a symbol subject: `code_metrics()`
+/// doesn't yet return the container-qualified name and overload ordinal
+/// the symbol indexer computes, so they can't build `v_symbol.ref`. A
+/// follow-up makes the host return that identity and these build it with
+/// `ref.build("symbol", …)`; then this list goes empty again.
+const KEPT_SYMBOL_SUBJECTS: &[&str] = &[
+    "crates/oxplow-script/src/metrics/code/fn_count.star",
+    "crates/oxplow-script/src/metrics/code/high_complexity_fns.star",
+    "crates/oxplow-script/src/metrics/code/long_functions.star",
+];
+
+/// Every place a script, lens query or model SQL spells or takes apart a
+/// ref of a core kind by hand, as `path:line text`. A kind's owning model
+/// (`oxplow_db::ref_models::REF_MODELS`) spells its prefix in its `ref`
+/// column and is exempt.
+fn hand_made_script_refs() -> Vec<String> {
+    use regex::Regex;
+    let kinds: Vec<String> = oxplow_domain::refs::kind::core_kinds()
+        .kinds()
+        .map(|k| k.kind.clone())
+        .collect();
+    let alt = kinds.join("|");
+    let patterns = [
+        // `"file:" + path`, `'effort:eff' || id`, `"lens:x?a=" || ref`.
+        format!(r#"["'](?:{alt}):[^"'\s]*["']\s*(?:\+|\|\|)"#),
+        // `x + "file:"`, `x || 'wiki:'`.
+        format!(r#"(?:\+|\|\|)\s*["'](?:{alt}):"#),
+        // `startswith("effort:eff")`, `len("effort:eff")`, `length('work_item:' || …)`.
+        format!(r#"(?i)(?:startswith|endswith|len|length)\(\s*["'](?:{alt}):"#),
+    ]
+    .map(|p| Regex::new(&p).expect("a fixed pattern"));
+    let owners: BTreeSet<String> = oxplow_db::ref_models::REF_MODELS
+        .iter()
+        .map(|m| {
+            format!(
+                "crates/oxplow-db/models/{}.sql",
+                m.view.trim_start_matches("v_")
+            )
+        })
+        .collect();
+    let mut out = Vec::new();
+    for (path, text) in script_and_sql_sources() {
+        if owners.contains(&path) || KEPT_SYMBOL_SUBJECTS.contains(&path.as_str()) {
+            continue;
+        }
+        for (i, line) in text.lines().enumerate() {
+            if patterns.iter().any(|p| p.is_match(line)) {
+                out.push(format!("{path}:{} {}", i + 1, line.trim()));
+            }
+        }
+    }
+    out
+}
+
+/// A ref's owner spells it and everyone else carries it: scripts build a
+/// ref with `ref.build` and read one with `ref.id` / `ref.parse`, and SQL
+/// selects or joins on the owning model's `ref` column — never
+/// `"file:" + path`, `'effort:eff' || id`, `startswith("effort:eff")`
+/// (`.context/refs.md`, "Using refs"). The kept list is the three symbol metrics.
+#[test]
+fn scripts_and_sql_carry_refs_rather_than_spelling_them() {
+    let offenders = hand_made_script_refs();
+    assert!(
+        offenders.is_empty(),
+        "{} hand-built or hand-parsed refs in scripts and SQL:\n{}",
+        offenders.len(),
+        offenders.join("\n")
+    );
+}

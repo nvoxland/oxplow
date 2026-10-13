@@ -2,7 +2,7 @@ title: Job Runs
 description: Each run of a job an extension declares — running and queued first, then the last day's — with what each attempt has used so far. A job is what an extension declares; a job run is one execution of it. Open one to follow its output; Cancel stops it.
 query: |
   SELECT ref,
-         'lens:oxplow-bundled/job-run-output?job_run=' || ref AS output_ref,
+         lens_ref('oxplow-bundled/job-run-output', 'job_run', ref) AS output_ref,
          job,
          intent_key,
          state,

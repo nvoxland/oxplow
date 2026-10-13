@@ -5,7 +5,7 @@
 SELECT CAST(w.ref AS TEXT) AS ref,
        CAST(w.title AS TEXT) AS title,
        -- Its own id first (`tsk42`, `ENG-12`), so typing it finds it.
-       CAST(substr(w.ref, length('work_item:' || w.provider || ':') + 1) || char(10) || w.body
+       CAST(w.native_id || char(10) || w.body
             AS TEXT) AS body,
        CAST(CASE WHEN th.stream_id IS NULL THEN NULL ELSE 'str' || th.stream_id END AS TEXT)
          AS stream_id

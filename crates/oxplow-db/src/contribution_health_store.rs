@@ -347,7 +347,7 @@ mod tests {
     }
 
     /// `v_contribution_health` counts the contribution's pending dead letters
-    /// (by its consumer, or events about its extension) and marks an overdue
+    /// (by its consumer, or events naming it) and marks an overdue
     /// schedule unfresh.
     #[tokio::test]
     async fn the_view_counts_dead_letters_and_marks_a_missed_schedule() {
@@ -357,7 +357,7 @@ mod tests {
             let k = k.clone();
             move |tx| {
                 set_next_due_tx(tx, &k, Some("2000-01-01T00:00:00.000000Z"), "t1")?;
-                for (seq, subject) in [(1, "[\"extension:tracker\"]"), (2, "[]"), (3, "[]")] {
+                for (seq, subject) in [(1, "[\"provider:tracker/fake\"]"), (2, "[]"), (3, "[]")] {
                     tx.execute(
                         "INSERT INTO event_log (seq, id, type, v, at, source, subject, payload)
                          VALUES (?1, 'e' || ?1, 'x.y', 1, 't', 's', ?2, '{}')",
@@ -367,8 +367,8 @@ mod tests {
                 }
                 for (consumer, seq, state) in [
                     ("some.consumer", 1, "pending"),
-                    ("extension:tracker/fake", 2, "pending"),
-                    ("extension:tracker/fake", 3, "discarded"),
+                    ("provider:tracker/fake", 2, "pending"),
+                    ("provider:tracker/fake", 3, "discarded"),
                 ] {
                     tx.execute(
                         "INSERT INTO event_dead_letter (consumer, event_seq, error, first_failed_at, last_failed_at, state)

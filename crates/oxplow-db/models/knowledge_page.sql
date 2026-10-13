@@ -14,7 +14,7 @@ SELECT CAST('wiki:' || w.slug AS TEXT) AS ref,
        CAST((SELECT json_group_array(t) FROM
            (SELECT DISTINCT r.target_kind || ':' || r.target_id AS t
               FROM refs r WHERE r.slug = w.slug ORDER BY t)) AS TEXT) AS outbound_refs,
-       CAST((SELECT count(DISTINCT k.path) FROM ref('knowledge_ref') k
-         WHERE k.page = 'wiki:' || w.slug AND k.stale = 1) AS INTEGER) AS stale_ref_count,
+       CAST((SELECT count(DISTINCT k.path) FROM ref('knowledge_pin') k
+         WHERE k.slug = w.slug AND k.stale = 1) AS INTEGER) AS stale_ref_count,
        w.updated_at
 FROM source('wiki_page') w

@@ -228,6 +228,7 @@ fn init_connection(c: &Connection) -> rusqlite::Result<()> {
     // rusqlite's default LRU is 16 statements, small enough that the
     // build/read mix would thrash it and re-parse anyway.
     c.set_prepared_statement_cache_capacity(128);
+    crate::sql_functions::register(c)?;
     Ok(())
 }
 
@@ -304,6 +305,7 @@ impl Database {
             .with_init(move |c| {
                 if read_only {
                     c.pragma_update(None, "foreign_keys", "ON")?;
+                    crate::sql_functions::register(c)?;
                 } else {
                     init_connection(c)?;
                 }
@@ -371,6 +373,7 @@ impl Database {
         let hooks = changes.clone();
         let manager = SqliteConnectionManager::memory().with_init(move |c| {
             c.pragma_update(None, "foreign_keys", "ON")?;
+            crate::sql_functions::register(c)?;
             hooks.install(c)
         });
         let pool = Pool::builder()
