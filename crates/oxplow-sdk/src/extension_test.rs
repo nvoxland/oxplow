@@ -64,6 +64,8 @@ pub struct TestReport {
     pub blessed: Vec<String>,
     /// What ran: `check`, `provider <id>`, `<capability> suite`.
     pub ran: Vec<String>,
+    /// How each of its `imports:` resolved here (`crate::import_lines`).
+    pub imports: Vec<String>,
     /// The throwaway's activation generation the examples ran against.
     pub generation: Option<String>,
     /// What the extension contributes, by public id
@@ -122,6 +124,7 @@ pub async fn test_extension_in(
             .current_pin()
             .and_then(|pin| pin.generation().map(str::to_string))
             .or_else(|| Some(host.svc.extension_catalog.generation(&host.root))),
+        imports: crate::import_lines(&checked.extension),
         contributes: Vec::new(),
         unsupported: Vec::new(),
         left: Vec::new(),
@@ -2469,6 +2472,9 @@ pub fn render(report: &TestReport, format: crate::Format) -> String {
             for l in &report.left {
                 out.push_str(&format!("left in the provider: {l}\n"));
             }
+            for i in &report.imports {
+                out.push_str(&format!("import {i}\n"));
+            }
             if !report.unsupported.is_empty() {
                 out.push_str(&format!(
                     "not run here (the app shows them): {}\n",
@@ -2686,6 +2692,82 @@ commands:
         assert!(
             errors.contains("example `happy`: composed [oxplow.work_item.comment] but `expect_commands` is [oxplow.work_item.transition]"),
             "{errors}"
+        );
+    }
+
+    /// A producer exporting `items` at `version`, and a consumer reading it
+    /// through an optional import of version 1.
+    fn producer_and_consumer(root: &Path, version: u32) {
+        write(
+            root,
+            "oxplow/extensions/maker/extension.yaml",
+            &format!(
+                "manifest: 2\nname: maker\nintent:\n  purpose: Make items.\nmodels:\n  - name: items\n    version: {version}\n    description: Items.\n    columns:\n      - {{ name: ref, type: TEXT, doc: A work item. }}\nexports:\n  - {{ contribution: maker/model/items, version: {version}, visibility: stable }}\n"
+            ),
+        );
+        write(
+            root,
+            "oxplow/extensions/maker/models/items.sql",
+            "SELECT ref FROM ref('work_item')\n",
+        );
+        write(
+            root,
+            "oxplow/extensions/reader/extension.yaml",
+            "manifest: 2\nname: reader\nintent:\n  purpose: Read the maker's items.\nimports:\n  - { id: items, contribution: maker/model/items, version: 1, optional: true }\n",
+        );
+        write(
+            root,
+            "oxplow/extensions/reader/lenses/seen.yaml",
+            "title: Seen\nquery: SELECT ref FROM import_ref('items')\n",
+        );
+    }
+
+    /// `extension test` says how each import resolved: available, or why
+    /// not (the producer disabled, or exporting another version).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn extension_test_reports_how_each_import_resolved() {
+        let dir = tempfile::tempdir().unwrap();
+        producer_and_consumer(dir.path(), 1);
+        let report = test_extension(dir.path(), "reader", false).await.unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
+        assert_eq!(
+            report.imports,
+            ["`items` → maker/model/items v1: available"]
+        );
+        assert!(render(&report, crate::Format::Text)
+            .contains("import `items` → maker/model/items v1: available\n"));
+        let checked = crate::check(
+            dir.path(),
+            "reader",
+            &oxplow_app::extension_catalog::ExtensionCatalog::new(),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(crate::render_findings(&checked, crate::Format::Text)
+            .contains("import `items` → maker/model/items v1: available\n"));
+
+        let dir = tempfile::tempdir().unwrap();
+        producer_and_consumer(dir.path(), 2);
+        let report = test_extension(dir.path(), "reader", false).await.unwrap();
+        assert_eq!(
+            report.imports,
+            ["`items` → maker/model/items v1: unavailable (maker exports v2)"]
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        producer_and_consumer(dir.path(), 1);
+        write(
+            dir.path(),
+            ".oxplow/project.yaml",
+            "extensions:\n  disabled: [maker]\n",
+        );
+        let report = test_extension(dir.path(), "reader", false).await.unwrap();
+        assert_eq!(
+            report.imports,
+            ["`items` → maker/model/items v1: unavailable (maker is disabled)"]
         );
     }
 

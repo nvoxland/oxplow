@@ -137,6 +137,10 @@ duplicate names are errors. Models and lenses can read a public model with
 comments and qualified function names are untouched. A model's binding becomes
 an ordinary `ref('<producer>/<model>')`, retaining lineage and native contract
 checks; a lens's becomes its quoted published view. SQL grants still apply.
+`extension check` and `extension test` print one line per binding from
+`public_contracts.bindings` (`oxplow_sdk::import_lines`: available, or the
+`UnavailableReason` in words), so an author sees the resolution without
+reading the withheld-contribution warnings.
 
 The loader validates declarations and optional guards before legacy global-name
 collision pruning can hide duplicate identities or let a withheld contribution

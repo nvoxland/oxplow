@@ -533,14 +533,20 @@ implementations:
 
 `oxplow extension check` loads the extension the way oxplow does and
 dry-runs its models, commands, lenses and advisories. Each finding is
-one line: `file:line: what — fix`. `--impact` adds what your working
+one line: `file:line: what — fix`. Each of its `imports:` gets a line
+saying how it resolved here: `` import `items` → maker/model/items v1:
+available ``, or `unavailable (maker exports v2)` and the like, which is
+when an optional import's guarded contributions are withheld.
+`--impact` adds what your working
 tree's version changes against git `HEAD`. `--services` lists the
 services each script uses.
 
 `oxplow extension test` runs on a throwaway oxplow: the check, then
 each intent example's fixture, then each declared provider's
 handshake, examples and conformance suite, and each policy script's
-conformance suite. `--bless` writes a
+conformance suite. Its report carries the same import lines. A
+command's fixture may check what the command answers, `expect: { result:
+{...} }`, compared on the keys you name. `--bless` writes a
 provider's golden transcript.
 
 Your coding agent has the same checks as MCP tools

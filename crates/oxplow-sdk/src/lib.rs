@@ -1135,6 +1135,39 @@ pub enum Format {
 /// Each script's services, as `check --services` prints them: the script,
 /// then a line per service — declared or implied by its kind, used or not,
 /// and whether a person approves it.
+/// How each of `ext`'s `imports:` resolved, one line apiece: `` `id` →
+/// <contribution> v<n>: available `` or `unavailable (<why>)` — what an
+/// author reads to see whether a contract it consumes is there, and what
+/// it withholds when it isn't.
+pub fn import_lines(ext: &Extension) -> Vec<String> {
+    use oxplow_app::extensions::imports::UnavailableReason as Why;
+    ext.public_contracts
+        .bindings
+        .iter()
+        .map(|b| {
+            let producer = &b.contribution.extension;
+            let state = match &b.unavailable_reason {
+                None if b.available => "available".to_string(),
+                None => "unavailable".to_string(),
+                Some(why) => format!(
+                    "unavailable ({})",
+                    match why {
+                        Why::Missing => format!("{producer} or its contribution isn't here"),
+                        Why::Disabled => format!("{producer} is disabled"),
+                        Why::Blocked => format!("{producer} is blocked by its own imports"),
+                        Why::Private => format!("{producer} doesn't export it"),
+                        Why::Experimental => format!("{producer} exports it as experimental"),
+                        Why::Incompatible { actual } => format!("{producer} exports v{actual}"),
+                        Why::Ambiguous => "more than one producer has that name".to_string(),
+                        Why::Invalid => format!("{producer}'s declaration is invalid"),
+                    }
+                ),
+            };
+            format!("`{}` → {} v{}: {state}", b.id, b.contribution, b.version)
+        })
+        .collect()
+}
+
 pub fn render_services(report: &CheckReport) -> String {
     use oxplow_app::services::Declared;
     let mut out = String::new();
@@ -1175,6 +1208,9 @@ pub fn render_findings(report: &CheckReport, format: Format) -> String {
                 out.push_str("warning: ");
                 out.push_str(w);
                 out.push('\n');
+            }
+            for i in import_lines(&report.extension) {
+                out.push_str(&format!("import {i}\n"));
             }
             let sql = match report.dry_run {
                 DryRun::Project => "its SQL dry-run against the project's database",
