@@ -14,5 +14,5 @@ def transform(input):
             if m["text"] == "unwrap" or m["text"] == "expect":
                 c += 1
         if c > 0:
-            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "unwrap_expect", "subject": "file:" + f["path"], "path": f["path"], "dims": {"oxplow.language": "rust"}})
+            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "unwrap_expect", "subject": ref.build("file", f["path"]), "path": f["path"], "dims": {"oxplow.language": "rust"}})
     return {"facts": facts}

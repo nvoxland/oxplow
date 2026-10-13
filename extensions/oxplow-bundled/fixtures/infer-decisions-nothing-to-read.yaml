@@ -4,7 +4,7 @@ input:
   input: { effort: "effort:eff7" }
   answers:
     sql.read:
-      - [{ work_item: null, title: "" }]
+      - [{ id: 7, work_item: null, title: "" }]
       - []
       - []
 expect:

@@ -13,5 +13,5 @@ def transform(input):
             if len(regex_find(r"^\{\s*\}$", b["text"])) > 0:
                 c += 1
         if c > 0:
-            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "empty_catch", "subject": "file:" + f["path"], "path": f["path"], "dims": {"oxplow.language": "csharp"}})
+            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "empty_catch", "subject": ref.build("file", f["path"]), "path": f["path"], "dims": {"oxplow.language": "csharp"}})
     return {"facts": facts}

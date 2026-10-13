@@ -24,7 +24,7 @@ epic AS (
   FROM active a JOIN item e ON e.ref = a.parent_ref AND e.is_epic
 ),
 unlinked AS (
-  SELECT e.thread_id, e.id, coalesce(e.title, 'Work in progress') AS title, e.ended_at
+  SELECT e.thread_id, e.id, e.ref, coalesce(e.title, 'Work in progress') AS title, e.ended_at
   FROM ref('effort') e
   WHERE e.work_item IS NULL
 ),
@@ -33,10 +33,10 @@ finished AS (
   FROM item i
   WHERE i.state = 'done' AND i.closed_at IS NOT NULL AND i.thread_id IS NOT NULL
   UNION ALL
-  SELECT k.thread_id, p.title, 'wiki', 'wiki:' || p.slug, k.last_seen_at
+  SELECT k.thread_id, p.title, 'wiki', p.ref, k.last_seen_at
   FROM ref('knowledge_touch') k JOIN ref('knowledge_page') p ON p.ref = k.page
   UNION ALL
-  SELECT u.thread_id, u.title, 'done', 'effort:eff' || u.id, u.ended_at
+  SELECT u.thread_id, u.title, 'done', u.ref, u.ended_at
   FROM unlinked u WHERE u.ended_at IS NOT NULL
 ),
 lines AS (
@@ -45,7 +45,7 @@ SELECT a.thread_id, 'In progress' AS grp, 0 AS g, 0 AS ord, a.title, a.state AS 
 FROM active a
 WHERE NOT EXISTS (SELECT 1 FROM epic e WHERE e.thread_id = a.thread_id)
 UNION ALL
-SELECT u.thread_id, 'In progress', 0, -2, u.title, 'in_progress', 'effort:eff' || u.id, 0, 1
+SELECT u.thread_id, 'In progress', 0, -2, u.title, 'in_progress', u.ref, 0, 1
 FROM unlinked u WHERE u.ended_at IS NULL
 UNION ALL
 SELECT e.thread_id, 'In progress', 0, -1, e.epic_title, 'epic', e.epic_ref, 0, 0

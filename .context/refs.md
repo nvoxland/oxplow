@@ -40,8 +40,7 @@ resolvers for `work_item`, `commit`, `file`, `dir`, `wiki` and
 (`REF_MODELS`); an extension's kind through the `resolve` view its
 `ref_kinds:` names. Nothing resolves it → `resolved: false`.
 
-**Guards.** `refs/refs.guard.test.ts` (TS) and the Rust and SQL/Starlark
-source guards refuse a hand-built or hand-parsed ref outside the owning
+**Guards.** `refs/refs.guard.test.ts` (TS), `source_guards::refs_are_built_and_parsed_through_the_grammar` (Rust) and `source_guards::scripts_and_sql_carry_refs_rather_than_spelling_them` (shipped `.star`, lens and model SQL, embedded Starlark templates; a kind's owning model in `REF_MODELS` is exempt) refuse a hand-built or hand-parsed ref outside the owning
 place. When one fires, the fix is the builder or reader above — or, when
 a kind has none, adding it to `refs::build` / `ref_models` — never a
 string.

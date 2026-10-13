@@ -12,7 +12,7 @@
 use std::str::FromStr;
 
 use crate::ids::{AgentSessionId, AgentTurnId, CommentId, EffortId, NoteId, StreamId, ThreadId};
-use crate::refs::grammar::CanonicalRef;
+use crate::refs::grammar::{CanonicalRef, RefParseError};
 use crate::refs::kind as k;
 
 /// `<kind>:<id>`, the id escaped as the grammar needs: what every builder
@@ -158,6 +158,44 @@ pub fn event_ref(id: &str) -> String {
 /// A lens (`<extension>/<slug>`).
 pub fn lens_ref(id: &str) -> String {
     of(k::LENS, id)
+}
+
+/// A lens ref carrying params (`lens:acme/blocked?stream_id=2`): the
+/// query follows the ref raw, each key and value escaped like a URL
+/// query (the desktop's `withParams`), so `splitParams` reads it back.
+/// A param with no value is left out.
+///
+/// # Errors
+/// On an empty id.
+pub fn lens_ref_with(id: &str, params: &[(&str, Option<&str>)]) -> Result<String, RefParseError> {
+    CanonicalRef::new(k::LENS, id, None, None)?;
+    let head = lens_ref(id);
+    let query: Vec<String> = params
+        .iter()
+        .filter_map(|(key, value)| {
+            Some(format!("{}={}", query_escape(key), query_escape((*value)?)))
+        })
+        .collect();
+    Ok(if query.is_empty() {
+        head
+    } else {
+        format!("{head}?{}", query.join("&"))
+    })
+}
+
+/// `encodeURIComponent`, keeping `/ : ? ,` and writing a space as `+`.
+fn query_escape(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' => out.push(b as char),
+            b'-' | b'_' | b'.' | b'!' | b'~' | b'*' | b'\'' | b'(' | b')' => out.push(b as char),
+            b'/' | b':' | b'?' | b',' => out.push(b as char),
+            b' ' => out.push('+'),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
 }
 
 /// An agent's answer in a thread (`thread_answer.id`).
@@ -339,6 +377,24 @@ mod tests {
         assert_eq!(effort_of_ref(&effort_ref(id)), Some(id));
         assert_eq!(effort_of_ref("eff12"), None, "a bare id isn't a ref");
         assert_eq!(effort_of_ref("turn:12"), None);
+    }
+
+    #[test]
+    fn a_lens_ref_carries_its_params_escaped_like_a_query() {
+        assert_eq!(
+            lens_ref_with("acme/blocked", &[("stream_id", Some("2"))]).unwrap(),
+            "lens:acme/blocked?stream_id=2"
+        );
+        assert_eq!(
+            lens_ref_with(
+                "acme/x",
+                &[("a", Some("b c&d=e%")), ("gone", None), ("z", Some("1"))]
+            )
+            .unwrap(),
+            "lens:acme/x?a=b+c%26d%3De%25&z=1"
+        );
+        assert_eq!(lens_ref_with("acme/x", &[]).unwrap(), "lens:acme/x");
+        assert!(lens_ref_with("", &[]).is_err());
     }
 
     #[test]

@@ -138,6 +138,15 @@ struggle signals are what a person reviewing agent work needs most —
 
 ## Models (P4.2)
 
+Every connection registers one scalar function for refs,
+`lens_ref(id, key1, value1, …)` (`oxplow-db/src/sql_functions.rs`): it builds a
+`lens:` ref through `refs::build::lens_ref_with` — the params escaped like a
+URL query, a NULL value left out, a NULL id giving NULL, an even argument
+count an error — so a model or lens links to another lens
+(`lens_ref('oxplow-bundled/job-run-output', 'job_run', ref)`) without
+concatenating a prefix. Other refs are selected from their owning model's
+`ref` column (`.context/refs.md`).
+
 Extension models and lenses may use `import_ref('binding')` for a model declared
 in the extension's explicit public `imports`. The host resolves the canonical
 target and exact native version before exposing the contribution; an unavailable
@@ -591,7 +600,7 @@ and `v_model_test` are the catalog of all of them:
 | `v_thread` | threads within a stream |
 | `v_knowledge_touch` | which threads wrote which knowledge pages, and when each last did (`page`, `thread_id`, `last_seen_at`; the rail's Finished section, P6.E1b) |
 | `v_knowledge_page` / `v_knowledge_ref` | knowledge pages with their outbound refs and `stale_ref_count`, and each page's file refs with their pin and `stale` (P5.C4; knowledge.md) |
-| `v_work_item` | the active work list's items (`ref`, `provider`, canonical `state`, `native_state`, `native` JSON, `parent_ref`), excluding deleted; everything reads it — oxplow's tasks have no model of their own (`v_task` was removed) and keep their own fields in `native_state` / `native`; oxplow's tasks are `work_item:oxplow:tsk<n>` (V115, P5.C1; data-model.md) |
+| `v_work_item` | the active work list's items (`ref`, `provider`, `native_id`, canonical `state`, `native_state`, `native` JSON, `parent_ref`), excluding deleted; everything reads it — oxplow's tasks have no model of their own (`v_task` was removed) and keep their own fields in `native_state` / `native`; oxplow's tasks are `work_item:oxplow:tsk<n>` (V115, P5.C1; data-model.md) |
 | `v_effort` | spans of a thread's work, linked to a work item or not (`work_item` ref; join `v_work_item` for the item); `title` defaults to the item's or the first prompt's, `summary` (v3) to the last turn's final message, and `closed_by` says what closed it |
 | `v_comment` | comment threads, with first-message `body` and `message_count` |
 | `v_wiki_page` | wiki pages (excerpt; full body is on disk) |
@@ -806,7 +815,7 @@ collectors:
           number: int          # text | int | real | bool | time
           title: { type: text, doc: PR title }
         relations:             # documented joins (not executed)
-          - { to: v_work_item, on: "v_github_pr.title LIKE '%' || substr(v_work_item.ref, length('work_item:' || v_work_item.provider || ':') + 1) || '%'" }
+          - { to: v_work_item, on: "v_github_pr.title LIKE '%' || v_work_item.native_id || '%'" }
 ```
 
 The entry prints `{"entities": {"<name>": [ {col: value, …}, … ]}}`,

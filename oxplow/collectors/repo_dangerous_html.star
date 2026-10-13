@@ -19,6 +19,6 @@ def transform(input):
                 c += 1
         if c > 0:
             facts.append({"measure": "repo.dangerous_html", "value": c,
-                          "subject": "file:" + tri[0], "path": tri[0],
+                          "subject": ref.build("file", tri[0]), "path": tri[0],
                           "dims": {"oxplow.language": "typescript"}})
     return {"facts": facts}

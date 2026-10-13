@@ -2398,7 +2398,7 @@ mod tests {
     #[tokio::test]
     async fn downstream_models_come_from_the_lineage() {
         let fx = crate::test_fixtures::services_with_effort().await;
-        let readers = downstream_of(&fx.svc.sql, "v_knowledge_ref").await;
+        let readers = downstream_of(&fx.svc.sql, "v_knowledge_pin").await;
         assert!(
             readers.contains(&"v_knowledge_page".to_string()),
             "{readers:?}"

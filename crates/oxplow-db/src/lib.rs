@@ -50,6 +50,7 @@ pub mod replaceable_store;
 pub mod search_store;
 pub mod semantic_layer;
 pub mod snapshot_tree;
+mod sql_functions;
 pub mod sql_tokens;
 pub mod stream_store;
 pub mod symbol_store;

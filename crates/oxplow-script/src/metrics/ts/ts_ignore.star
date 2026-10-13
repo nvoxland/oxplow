@@ -19,5 +19,5 @@ def transform(input):
         for cm in ast_query(tri[1], tri[2], "(comment) @c"):
             c += len(regex_find(r"@ts-(ignore|expect-error)", cm["text"]))
         if c > 0:
-            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "ts_ignore", "subject": "file:" + tri[0], "path": tri[0], "dims": {"oxplow.language": "typescript"}})
+            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "ts_ignore", "subject": ref.build("file", tri[0]), "path": tri[0], "dims": {"oxplow.language": "typescript"}})
     return {"facts": facts}

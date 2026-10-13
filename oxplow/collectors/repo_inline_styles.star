@@ -12,6 +12,6 @@ def transform(input):
                 c += 1
         if c > 0:
             facts.append({"measure": "repo.inline_styles", "value": c,
-                          "subject": "file:" + f["path"], "path": f["path"],
+                          "subject": ref.build("file", f["path"]), "path": f["path"],
                           "dims": {"oxplow.language": "typescript"}})
     return {"facts": facts}

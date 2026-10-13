@@ -16,7 +16,7 @@ def transform(input):
             facts.append({
                 "measure": "triage.todos",
                 "value": 1,
-                "subject": "file:" + f["path"],
+                "subject": ref.build("file", f["path"]),
                 "path": f["path"],
                 "line": m["line"],
                 "rule": kind,

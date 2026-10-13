@@ -2,22 +2,24 @@
 # one answer a model can read. Every list is capped (the job's tool answers
 # are limited to 64 KiB); `truncated` names the ones that were cut.
 
-PREFIX = "effort:eff"
 CAP = 50
 
 def read(sql, effort_id, limit):
     return scope("sql.read", {"sql": sql + " LIMIT " + str(limit + 1), "params": {"id": effort_id}})
 
 def transform(x):
-    ref = x["input"]["effort"]
-    if not ref.startswith(PREFIX) or not ref[len(PREFIX):].isdigit():
-        return {"refuse": "`effort` is an effort ref, `effort:eff<id>`"}
-    effort_id = int(ref[len(PREFIX):])
+    effort = x["input"]["effort"]
+    if not ref.is_ref(effort) or ref.kind(effort) != "effort":
+        return {"refuse": "`effort` is an effort ref, `effort:<id>`"}
+    ids = scope("sql.read", {"sql": "SELECT id FROM v_effort WHERE ref = :ref", "params": {"ref": effort}})
+    if not ids:
+        return {"refuse": "no effort " + effort}
+    effort_id = ids[0]["id"]
     efforts = read(
         "SELECT work_item, title, summary, started_at, ended_at, closed_by FROM v_effort WHERE id = :id",
         effort_id, 1)
     if not efforts:
-        return {"refuse": "no effort " + ref}
+        return {"refuse": "no effort " + effort}
     truncated = []
 
     def capped(name, rows, limit):
@@ -55,7 +57,7 @@ def transform(x):
         + "AND path IN (SELECT path FROM v_effort_file WHERE effort_id = :id) "
         + "ORDER BY path, start_line", effort_id, CAP), CAP)
     return {"commands": [], "result": {
-        "effort": ref,
+        "effort": effort,
         "workItem": efforts[0]["work_item"],
         "title": efforts[0]["title"],
         "summary": efforts[0]["summary"],

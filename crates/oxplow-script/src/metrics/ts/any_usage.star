@@ -22,5 +22,5 @@ def transform(input):
             if t["text"] == "any":
                 c += 1
         if c > 0:
-            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "any_usage", "subject": "file:" + tri[0], "path": tri[0], "dims": {"oxplow.language": "typescript"}})
+            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "any_usage", "subject": ref.build("file", tri[0]), "path": tri[0], "dims": {"oxplow.language": "typescript"}})
     return {"facts": facts}

@@ -55,7 +55,7 @@ query: |
   -- A wiki page shows its title now, not the one it had then.
   SELECT r.grp, coalesce(nullif(trim(w.title), ''), nullif(trim(r.label), ''), r.ref) AS title,
          r.page_kind, r.ref, r.visits
-  FROM row r LEFT JOIN v_wiki_page w ON r.page_kind = 'wiki' AND r.ref = 'wiki:' || w.slug
+  FROM row r LEFT JOIN v_knowledge_page w ON w.ref = r.ref
   ORDER BY r.g, r.ord
 viz: list
 group: { by: grp }

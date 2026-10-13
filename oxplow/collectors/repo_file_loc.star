@@ -13,6 +13,6 @@ def transform(input):
         for f in files(pat):
             n = len(f["text"].split("\n"))
             facts.append({"measure": "repo.file_loc", "value": n,
-                          "subject": "file:" + f["path"], "path": f["path"],
+                          "subject": ref.build("file", f["path"]), "path": f["path"],
                           "dims": {"oxplow.language": _lang(f["path"])}})
     return {"facts": facts}

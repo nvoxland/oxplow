@@ -9,7 +9,6 @@
 # binding or new activity answers afresh. The `store-decisions` effect
 # stores what comes back.
 
-PREFIX = "effort:eff"
 # Longest digest, longest kept prompt or answer, longest tool detail, and
 # the share of the digest tool calls may take — in characters.
 MAX_DIGEST = 40000
@@ -44,14 +43,16 @@ def read(sql, effort_id):
 
 def transform(x):
     effort = x["input"]["effort"]
-    if not effort.startswith(PREFIX) or not effort[len(PREFIX):].isdigit():
-        return {"refuse": "`effort` is an effort ref, `effort:eff<id>`"}
-    effort_id = int(effort[len(PREFIX):])
-    found = read(
-        "SELECT e.work_item, coalesce(w.title, '') AS title FROM v_effort e "
-        + "LEFT JOIN v_work_item w ON w.ref = e.work_item WHERE e.id = :id", effort_id)
+    if not ref.is_ref(effort) or ref.kind(effort) != "effort":
+        return {"refuse": "`effort` is an effort ref, `effort:<id>`"}
+    found = scope("sql.read", {
+        "sql": "SELECT e.id, e.work_item, coalesce(w.title, '') AS title FROM v_effort e "
+        + "LEFT JOIN v_work_item w ON w.ref = e.work_item WHERE e.ref = :ref",
+        "params": {"ref": effort},
+    })
     if not found:
         return {"refuse": "no effort " + effort}
+    effort_id = found[0]["id"]
     # Newest first under the row cap, so a long effort keeps its latest
     # activity; reversed to oldest first below. The turns are the effort's
     # thread's that overlap its window (a turn has no effort of its own).

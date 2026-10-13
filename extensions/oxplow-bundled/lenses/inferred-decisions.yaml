@@ -6,7 +6,7 @@ params:
 query: |
   SELECT question, choice,
          (SELECT group_concat(value, '; ') FROM json_each(alternatives)) AS alternatives,
-         confidence, why, 'decision:' || id AS decision
+         confidence, why, ref AS decision
   FROM v_decision
   WHERE effort_id = :effort_id AND provenance = 'inferred'
   ORDER BY id

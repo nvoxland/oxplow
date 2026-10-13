@@ -6,6 +6,7 @@ input:
   input: { effort: "effort:eff7" }
   answers:
     sql.read:
+      - [{ id: 7 }]
       - [{ work_item: "work_item:oxplow:tsk1", title: "Parse blocks", summary: null, started_at: "2026-10-12T10:00:00Z", ended_at: "2026-10-12T11:00:00Z", closed_by: commit }]
       - [{ path: src/parse.rs, change_kind: updated, source: claimed, additions: 40, deletions: 5, is_test: 0 }]
       - [{ path: src/parse.rs, container: "", name: parse_block, status: modified, signature_changed: 0, complexity: 9, complexity_delta: 3, length_delta: 20, is_test: 0 }]

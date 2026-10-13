@@ -536,6 +536,11 @@ Carry refs; never assemble or dissect them:
   `v_decision.ref`, `v_thread.ref`, `v_work_item.ref`, …) and compare
   refs to refs: `WHERE ref = :ref`. Never `'effort:eff' || id` or
   `substr(ref, …)`.
+- **To link one lens to another from SQL**, use `lens_ref(id, key1,
+  value1, …)`: `lens_ref('oxplow-bundled/thread-activity', 'thread_id',
+  thread_id)` gives `lens:oxplow-bundled/thread-activity?thread_id=7`
+  (params escaped, a NULL value left out; an odd argument count is an
+  error). Never `'lens:…?x=' || value`.
 - **In a script**, build with `ref.build("file", f["path"])` and read
   with `ref.parse(r)` / `ref.id(r, kind = "effort")` (which refuses a ref
   of another kind) / `ref.kind(r)` / `ref.is_ref(v)`. Never
