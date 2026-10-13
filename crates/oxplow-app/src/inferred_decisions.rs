@@ -217,14 +217,10 @@ pub async fn infer_for_effort(
     svc: &crate::Services,
     effort_id: i64,
 ) -> Result<InferOutcome, String> {
-    let configured = svc
-        .ai
-        .config()
-        .map_err(|e| e.to_string())?
-        .resolve(Role::Main)
-        .is_some();
-    if !configured {
-        return Ok(InferOutcome::Off);
+    match svc.ai.binding_for(&Role::MAIN) {
+        Ok(_) => {}
+        Err(AiServiceError::NotConfigured(_)) => return Ok(InferOutcome::Off),
+        Err(e) => return Err(e.to_string()),
     }
     let layer = svc.sql.clone();
     let activity = gather(&layer, effort_id).await?;
@@ -233,7 +229,7 @@ pub async fn infer_for_effort(
     };
     let reply = match svc
         .ai_compute
-        .extract(CALLER, SYSTEM_PROMPT, &prompt, &reply_schema())
+        .extract(CALLER, &Role::MAIN, SYSTEM_PROMPT, &prompt, &reply_schema())
         .await
     {
         Ok(recorded) => recorded.value,
@@ -469,7 +465,7 @@ mod tests {
         f.svc
             .ai
             .set_role(
-                Role::Main,
+                &Role::MAIN,
                 Some(RoleBinding {
                     provider: "m".into(),
                     model: "x".into(),
@@ -589,7 +585,7 @@ mod tests {
         f.svc
             .ai
             .set_role(
-                Role::Main,
+                &Role::MAIN,
                 Some(RoleBinding {
                     provider: "m".into(),
                     model: "x".into(),

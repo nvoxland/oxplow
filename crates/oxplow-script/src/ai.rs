@@ -29,13 +29,21 @@ pub trait AiOracle: Send + Sync {
     fn complete_typed(&self, _role: &str, _request: Value) -> Result<Value, String> {
         Err("this host has no typed AI completion".into())
     }
-    /// `{ label, probabilities }`: which of `labels` fits `text`.
-    fn classify(&self, text: &str, labels: &[String]) -> Result<Value, String>;
+    /// `{ label, probabilities }`: which of `labels` fits `text`. Each
+    /// call names its `role`: a built-in or one of the extension's AI
+    /// profiles, by its bare name.
+    fn classify(&self, role: &str, text: &str, labels: &[String]) -> Result<Value, String>;
     /// `{ level, score, probabilities }`: where `text` sits on `levels`.
-    fn score(&self, text: &str, levels: &[String]) -> Result<Value, String>;
-    fn summarize(&self, text: &str, focus: Option<&str>) -> Result<String, String>;
+    fn score(&self, role: &str, text: &str, levels: &[String]) -> Result<Value, String>;
+    fn summarize(&self, role: &str, text: &str, focus: Option<&str>) -> Result<String, String>;
     /// JSON matching `schema`, as `instructions` ask.
-    fn extract(&self, instructions: &str, text: &str, schema: &Value) -> Result<Value, String>;
+    fn extract(
+        &self,
+        role: &str,
+        instructions: &str,
+        text: &str,
+        schema: &Value,
+    ) -> Result<Value, String>;
 }
 
 /// The model a run asks (`ai.compute`): what the `ai_*` builtins answer
@@ -122,11 +130,12 @@ pub(crate) fn ai_builtins(builder: &mut starlark::environment::GlobalsBuilder) {
     fn ai_classify<'v>(
         text: &str,
         labels: starlark::values::Value<'v>,
+        #[starlark(require = named, default = "decide")] role: &str,
         eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<starlark::values::Value<'v>> {
         let labels = strings(labels, "labels")?;
         let out = host(eval, "ai_classify")?
-            .timed(|o| o.classify(text, &labels))
+            .timed(|o| o.classify(role, text, &labels))
             .map_err(anyhow::Error::msg)?;
         Ok(eval.heap().alloc(out))
     }
@@ -136,11 +145,12 @@ pub(crate) fn ai_builtins(builder: &mut starlark::environment::GlobalsBuilder) {
     fn ai_score<'v>(
         text: &str,
         levels: starlark::values::Value<'v>,
+        #[starlark(require = named, default = "decide")] role: &str,
         eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<starlark::values::Value<'v>> {
         let levels = strings(levels, "levels")?;
         let out = host(eval, "ai_score")?
-            .timed(|o| o.score(text, &levels))
+            .timed(|o| o.score(role, text, &levels))
             .map_err(anyhow::Error::msg)?;
         Ok(eval.heap().alloc(out))
     }
@@ -150,10 +160,11 @@ pub(crate) fn ai_builtins(builder: &mut starlark::environment::GlobalsBuilder) {
         text: &str,
         #[starlark(default = starlark::values::none::NoneOr::None)]
         focus: starlark::values::none::NoneOr<&str>,
+        #[starlark(require = named, default = "summarize")] role: &str,
         eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<starlark::values::Value<'v>> {
         let out = host(eval, "ai_summarize")?
-            .timed(|o| o.summarize(text, focus.into_option()))
+            .timed(|o| o.summarize(role, text, focus.into_option()))
             .map_err(anyhow::Error::msg)?;
         Ok(eval.heap().alloc(out))
     }
@@ -164,11 +175,12 @@ pub(crate) fn ai_builtins(builder: &mut starlark::environment::GlobalsBuilder) {
         text: &str,
         schema: starlark::values::Value<'v>,
         #[starlark(default = "")] instructions: &str,
+        #[starlark(require = named, default = "main")] role: &str,
         eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<starlark::values::Value<'v>> {
         let schema = schema.to_json_value()?;
         let out = host(eval, "ai_extract")?
-            .timed(|o| o.extract(instructions, text, &schema))
+            .timed(|o| o.extract(role, instructions, text, &schema))
             .map_err(anyhow::Error::msg)?;
         Ok(eval.heap().alloc(out))
     }
@@ -192,27 +204,39 @@ mod tests {
     }
 
     impl AiOracle for Scripted {
-        fn classify(&self, text: &str, labels: &[String]) -> Result<Value, String> {
+        fn classify(&self, role: &str, text: &str, labels: &[String]) -> Result<Value, String> {
             std::thread::sleep(self.delay);
-            self.asked.lock().unwrap().push(format!("classify {text}"));
+            self.asked
+                .lock()
+                .unwrap()
+                .push(format!("classify[{role}] {text}"));
             Ok(json!({ "label": labels[0], "probabilities": { labels[0].clone(): 1.0 } }))
         }
-        fn score(&self, text: &str, levels: &[String]) -> Result<Value, String> {
-            self.asked.lock().unwrap().push(format!("score {text}"));
+        fn score(&self, role: &str, text: &str, levels: &[String]) -> Result<Value, String> {
+            self.asked
+                .lock()
+                .unwrap()
+                .push(format!("score[{role}] {text}"));
             Ok(json!({ "level": levels[levels.len() - 1], "score": 1.0, "probabilities": {} }))
         }
-        fn summarize(&self, text: &str, focus: Option<&str>) -> Result<String, String> {
+        fn summarize(&self, role: &str, text: &str, focus: Option<&str>) -> Result<String, String> {
             self.asked
                 .lock()
                 .unwrap()
-                .push(format!("summarize {text} {focus:?}"));
+                .push(format!("summarize[{role}] {text} {focus:?}"));
             Ok("short".into())
         }
-        fn extract(&self, instructions: &str, text: &str, schema: &Value) -> Result<Value, String> {
-            self.asked
-                .lock()
-                .unwrap()
-                .push(format!("extract {instructions} {text} {}", schema["type"]));
+        fn extract(
+            &self,
+            role: &str,
+            instructions: &str,
+            text: &str,
+            schema: &Value,
+        ) -> Result<Value, String> {
+            self.asked.lock().unwrap().push(format!(
+                "extract[{role}] {instructions} {text} {}",
+                schema["type"]
+            ));
             Ok(json!({ "n": 3 }))
         }
     }
@@ -220,7 +244,7 @@ mod tests {
     const SCRIPT: &str = r#"
 def transform(input):
     c = ai_classify("fix the login bug", ["bug", "feature"])
-    s = ai_score("big change", ["small", "large"])
+    s = ai_score("big change", ["small", "large"], role = "sort")
     return {
         "label": c["label"],
         "level": s["level"],
@@ -245,11 +269,11 @@ def transform(input):
         assert_eq!(
             *oracle.asked.lock().unwrap(),
             vec![
-                "classify fix the login bug",
-                "score big change",
-                "summarize a long text Some(\"risk\")",
-                "summarize other text None",
-                "extract count one two three \"object\"",
+                "classify[decide] fix the login bug",
+                "score[sort] big change",
+                "summarize[summarize] a long text Some(\"risk\")",
+                "summarize[summarize] other text None",
+                "extract[main] count one two three \"object\"",
             ]
         );
     }

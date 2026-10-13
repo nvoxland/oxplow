@@ -16,7 +16,7 @@ use oxplow_ai::client::{
 /// Re-exported so the IPC and MCP adapters need only `oxplow-app`.
 pub use oxplow_ai::client::{Answer, Completion, Decision, Question};
 use oxplow_ai::config::AiConfig;
-pub use oxplow_ai::config::{ProviderConfig, Role, RoleBinding};
+pub use oxplow_ai::config::{AiProfile, BuiltinRole, ProviderConfig, Role, RoleBinding};
 use oxplow_ai::parts::{PartV1, UsageSourceV1};
 pub use oxplow_ai::parts::{TypedRequestV1, TypedResponseV1};
 use oxplow_ai::secrets::SecretStore;
@@ -26,6 +26,13 @@ use oxplow_db::{NewAiCall, SqliteAiCallStore};
 pub enum AiServiceError {
     #[error("no model is assigned to the `{0}` role (Settings → AI)")]
     NotConfigured(String),
+    #[error(
+        "no model is assigned to the AI profile `{profile}` or the `{fallback}` role it falls \
+         back to (Settings → AI)"
+    )]
+    ProfileNotConfigured { profile: String, fallback: String },
+    #[error("no active extension declares the AI profile `{0}`")]
+    UndeclaredProfile(String),
     #[error("AI settings: {0}")]
     Config(String),
     #[error("keychain: {0}")]
@@ -48,17 +55,30 @@ pub struct ProviderStatus {
 #[serde(rename_all = "camelCase")]
 pub struct RoleStatus {
     pub role: Role,
-    /// `None` when the role has no model.
+    /// What it's for: oxplow's text for a built-in, the declaring
+    /// extension's for a profile.
+    pub description: String,
+    /// The extension declaring a profile; `None` for a built-in.
+    pub extension: Option<String>,
+    /// The built-in role an unbound profile uses.
+    pub fallback: Option<BuiltinRole>,
+    /// Its own binding; `None` when it has none.
     pub binding: Option<RoleBinding>,
+    /// What a call would use now: its binding, else its fallback's.
+    pub effective: Option<RoleBinding>,
     /// The binding comes from the project, not the global `ai.yaml`.
     pub overridden: bool,
+    /// Why a call on it would be refused, when it would be: a profile no
+    /// active extension declares, or a model lacking a feature it needs.
+    pub problem: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiSettings {
     pub providers: Vec<ProviderStatus>,
-    /// Every role, in `Role::ALL` order.
+    /// The built-in roles in `BuiltinRole::ALL` order, then the active
+    /// extensions' AI profiles, then bindings for profiles nothing declares.
     pub roles: Vec<RoleStatus>,
     /// The kinds a provider can be: the registered model providers.
     pub kinds: Vec<ProviderKindInfo>,
@@ -139,7 +159,7 @@ impl ModelRequest<'_> {
 /// One call as it is recorded: who asked, what answered, when it started,
 /// and what it was asked.
 struct Attempt<'a> {
-    role: Role,
+    role: &'a Role,
     site: CallSite<'a>,
     provider: &'a ProviderConfig,
     binding: &'a RoleBinding,
@@ -158,6 +178,8 @@ pub struct AiService {
     /// The project's role assignments, read on every resolve so edits to
     /// `project.yaml` apply without syncing anything.
     overrides: OverridesSource,
+    /// The active extensions' AI profiles, read on every resolve.
+    profiles: std::sync::RwLock<ProfilesSource>,
     /// The project's activation boundary; a service built alone has its own,
     /// which nothing has activated.
     activation: Arc<crate::extension_activation::ExtensionActivation>,
@@ -170,6 +192,9 @@ tokio::task_local! {
 
 /// Where project role overrides come from (the live project config).
 pub type OverridesSource = Arc<dyn Fn() -> BTreeMap<Role, RoleBinding> + Send + Sync>;
+
+/// Where the active extensions' AI profiles come from (the catalog).
+pub type ProfilesSource = Arc<dyn Fn() -> Vec<AiProfile> + Send + Sync>;
 
 impl AiService {
     pub fn new(
@@ -184,6 +209,7 @@ impl AiService {
             calls,
             config_dir,
             overrides: Arc::new(BTreeMap::new),
+            profiles: std::sync::RwLock::new(Arc::new(Vec::new)),
             activation: Arc::new(crate::extension_activation::ExtensionActivation::new()),
             identity: Arc::new(()),
         }
@@ -209,6 +235,18 @@ impl AiService {
     pub fn with_project_overrides(mut self, source: OverridesSource) -> Self {
         self.overrides = source;
         self
+    }
+
+    /// Read AI profiles from `source`. Set after construction: the
+    /// extension catalog that declares them is built after the service.
+    pub fn set_profiles(&self, source: ProfilesSource) {
+        *self.profiles.write().expect("profiles lock") = source;
+    }
+
+    /// The active extensions' AI profiles now.
+    pub fn profiles(&self) -> Vec<AiProfile> {
+        let source = self.profiles.read().expect("profiles lock").clone();
+        source()
     }
 
     pub fn with_activation(
@@ -263,11 +301,6 @@ impl AiService {
             })?
     }
 
-    /// Production metadata ingress; synchronous settings remains a standalone helper.
-    pub async fn settings_pinned(&self) -> Result<AiSettings, AiServiceError> {
-        self.read_generation(async { self.settings() }).await?
-    }
-
     /// The model providers it calls through.
     pub fn providers(&self) -> &ModelProviders {
         &self.providers
@@ -298,10 +331,16 @@ impl AiService {
     }
 
     /// Providers (with whether each has a key; never the key) and every
-    /// role with its binding. What Settings → AI and `list_ai_roles` show.
-    pub fn settings(&self) -> Result<AiSettings, AiServiceError> {
+    /// role with its binding and what a call on it would use. What
+    /// Settings → AI and `list_ai_roles` show.
+    pub async fn settings(&self) -> Result<AiSettings, AiServiceError> {
+        self.read_generation(self.settings_unpinned()).await?
+    }
+
+    async fn settings_unpinned(&self) -> Result<AiSettings, AiServiceError> {
         let config = self.config()?;
         let overrides = (self.overrides)();
+        let profiles = self.profiles();
         let providers = config
             .providers
             .iter()
@@ -314,14 +353,47 @@ impl AiService {
                 })
             })
             .collect::<Result<_, AiServiceError>>()?;
-        let roles = Role::ALL
+        let status = |role: Role, description: String, profile: Option<&AiProfile>| {
+            let effective = config.resolve(&role, &profiles).map(|(_, b)| b.clone());
+            RoleStatus {
+                description,
+                extension: profile.map(|p| p.extension.clone()),
+                fallback: profile.map(|p| p.fallback),
+                binding: config.roles.get(&role).cloned(),
+                effective,
+                overridden: overrides.contains_key(&role),
+                problem: None,
+                role,
+            }
+        };
+        let mut roles: Vec<RoleStatus> = BuiltinRole::ALL
             .iter()
-            .map(|r| RoleStatus {
-                role: *r,
-                binding: config.roles.get(r).cloned(),
-                overridden: overrides.contains_key(r),
-            })
+            .map(|r| status(Role::Builtin(*r), r.description().to_string(), None))
             .collect();
+        let mut declared: Vec<&AiProfile> = profiles.iter().collect();
+        declared.sort_by_key(|p| p.role());
+        for profile in declared {
+            let mut row = status(profile.role(), profile.description.clone(), Some(profile));
+            if row.effective.is_some() && !profile.features.is_empty() {
+                row.problem = self
+                    .capabilities_unpinned(&row.role)
+                    .await
+                    .ok()
+                    .and_then(|snapshot| missing_feature(profile, &snapshot));
+            }
+            roles.push(row);
+        }
+        for role in config.roles.keys() {
+            if role.builtin().is_none() && !profiles.iter().any(|p| &p.role() == role) {
+                let mut row = status(role.clone(), String::new(), None);
+                row.extension = match role {
+                    Role::Profile { extension, .. } => Some(extension.clone()),
+                    Role::Builtin(_) => None,
+                };
+                row.problem = Some(AiServiceError::UndeclaredProfile(role.to_string()).to_string());
+                roles.push(row);
+            }
+        }
         let kinds = self
             .providers
             .kinds()
@@ -383,7 +455,7 @@ impl AiService {
             .roles
             .iter()
             .filter(|(_, b)| b.provider == id)
-            .map(|(r, _)| role_name(*r))
+            .map(|(r, _)| r.to_string())
             .collect();
         if !users.is_empty() {
             return Err(AiServiceError::Config(format!(
@@ -400,11 +472,15 @@ impl AiService {
 
     /// Assign a role to a provider + model in the global `ai.yaml`, or
     /// unassign it with `None`.
-    pub fn set_role(&self, role: Role, binding: Option<RoleBinding>) -> Result<(), AiServiceError> {
+    pub fn set_role(
+        &self,
+        role: &Role,
+        binding: Option<RoleBinding>,
+    ) -> Result<(), AiServiceError> {
         let mut global = self.global()?;
         match binding {
-            Some(b) => global.roles.insert(role, b),
-            None => global.roles.remove(&role),
+            Some(b) => global.roles.insert(role.clone(), b),
+            None => global.roles.remove(role),
         };
         self.save_global(&global)
     }
@@ -458,7 +534,7 @@ impl AiService {
     /// asked (an extension, `mcp`, core), for the usage record.
     pub async fn complete(
         &self,
-        role: Role,
+        role: &Role,
         caller: &str,
         system: Option<&str>,
         prompt: &str,
@@ -473,7 +549,7 @@ impl AiService {
     /// row id comes back with it.
     pub async fn complete_as(
         &self,
-        role: Role,
+        role: &Role,
         site: CallSite<'_>,
         system: Option<&str>,
         prompt: &str,
@@ -485,7 +561,7 @@ impl AiService {
 
     async fn complete_as_unpinned(
         &self,
-        role: Role,
+        role: &Role,
         site: CallSite<'_>,
         system: Option<&str>,
         prompt: &str,
@@ -533,7 +609,7 @@ impl AiService {
     /// this surface to select another model, endpoint or credential.
     pub async fn complete_typed_as(
         &self,
-        role: Role,
+        role: &Role,
         site: CallSite<'_>,
         request: &TypedRequestV1,
     ) -> Result<(TypedResponseV1, Option<i64>), AiServiceError> {
@@ -543,7 +619,7 @@ impl AiService {
 
     async fn complete_typed_as_unpinned(
         &self,
-        role: Role,
+        role: &Role,
         site: CallSite<'_>,
         request: &TypedRequestV1,
     ) -> Result<(TypedResponseV1, Option<i64>), AiServiceError> {
@@ -562,7 +638,7 @@ impl AiService {
     /// cancelled call's row keeps what had arrived (`error: cancelled`).
     pub async fn stream_typed_as(
         &self,
-        role: Role,
+        role: &Role,
         site: CallSite<'_>,
         request: &TypedRequestV1,
         cancel: &oxplow_ai::client::Cancel,
@@ -589,7 +665,7 @@ impl AiService {
     /// A typed call's reply checked and recorded.
     async fn finish_typed(
         &self,
-        role: Role,
+        role: &Role,
         site: CallSite<'_>,
         request: &TypedRequestV1,
         typed: &TypedCall,
@@ -644,7 +720,7 @@ impl AiService {
     /// declared features were checked.
     async fn prepare_typed(
         &self,
-        role: Role,
+        role: &Role,
         request: &TypedRequestV1,
     ) -> Result<TypedCall, AiServiceError> {
         request.validate_version().map_err(AiError::from)?;
@@ -709,6 +785,12 @@ impl AiService {
                 .into());
             }
         }
+        if let Some(problem) = self
+            .declared(role, &self.profiles())?
+            .and_then(|profile| missing_feature(profile, &metadata))
+        {
+            return Err(AiServiceError::Config(problem));
+        }
         let key = self.key(&provider)?;
         Ok(TypedCall {
             provider,
@@ -721,7 +803,7 @@ impl AiService {
     /// Answer typed questions about `state` with the model `role` is bound to.
     pub async fn decide(
         &self,
-        role: Role,
+        role: &Role,
         caller: &str,
         state: &str,
         questions: &BTreeMap<String, Question>,
@@ -735,7 +817,7 @@ impl AiService {
     /// id comes back with it.
     pub async fn decide_as(
         &self,
-        role: Role,
+        role: &Role,
         site: CallSite<'_>,
         state: &str,
         questions: &BTreeMap<String, Question>,
@@ -746,7 +828,7 @@ impl AiService {
 
     async fn decide_as_unpinned(
         &self,
-        role: Role,
+        role: &Role,
         site: CallSite<'_>,
         state: &str,
         questions: &BTreeMap<String, Question>,
@@ -786,23 +868,20 @@ impl AiService {
 
     /// The provider and model `role` is bound to now (what a recorded
     /// result is keyed by), without calling it.
-    pub fn binding_for(&self, role: Role) -> Result<RoleBinding, AiServiceError> {
-        self.config()?
-            .resolve(role)
-            .map(|(_, b)| b.clone())
-            .ok_or_else(|| AiServiceError::NotConfigured(role_name(role)))
+    pub fn binding_for(&self, role: &Role) -> Result<RoleBinding, AiServiceError> {
+        self.resolve(role).map(|(_, binding)| binding)
     }
 
     /// Metadata for the role's selected model. Never fetches a key or makes
     /// a completion, and records no paid call.
-    pub async fn capabilities(&self, role: Role) -> Result<CapabilitySnapshotV1, AiServiceError> {
+    pub async fn capabilities(&self, role: &Role) -> Result<CapabilitySnapshotV1, AiServiceError> {
         self.read_generation(self.capabilities_unpinned(role))
             .await?
     }
 
     async fn capabilities_unpinned(
         &self,
-        role: Role,
+        role: &Role,
     ) -> Result<CapabilitySnapshotV1, AiServiceError> {
         let (provider, binding) = self.resolve(role)?;
         let metadata = self
@@ -819,11 +898,11 @@ impl AiService {
     }
 
     /// Enumerated metadata from the role's provider, without keychain access.
-    pub async fn models(&self, role: Role) -> Result<ModelCatalogV1, AiServiceError> {
+    pub async fn models(&self, role: &Role) -> Result<ModelCatalogV1, AiServiceError> {
         self.read_generation(self.models_unpinned(role)).await?
     }
 
-    async fn models_unpinned(&self, role: Role) -> Result<ModelCatalogV1, AiServiceError> {
+    async fn models_unpinned(&self, role: &Role) -> Result<ModelCatalogV1, AiServiceError> {
         let (provider, _) = self.resolve(role)?;
         let metadata = self
             .provider_of(&provider)?
@@ -833,11 +912,37 @@ impl AiService {
         Ok(metadata)
     }
 
-    fn resolve(&self, role: Role) -> Result<(ProviderConfig, RoleBinding), AiServiceError> {
+    /// The provider and binding a call on `role` uses: its own binding,
+    /// else, for a profile an active extension declares, its fallback's.
+    fn resolve(&self, role: &Role) -> Result<(ProviderConfig, RoleBinding), AiServiceError> {
+        let profiles = self.profiles();
+        let profile = self.declared(role, &profiles)?;
         self.config()?
-            .resolve(role)
+            .resolve(role, &profiles)
             .map(|(provider, binding)| (provider.clone(), binding.clone()))
-            .ok_or_else(|| AiServiceError::NotConfigured(role_name(role)))
+            .ok_or_else(|| match profile {
+                Some(p) => AiServiceError::ProfileNotConfigured {
+                    profile: role.to_string(),
+                    fallback: p.fallback.name().to_string(),
+                },
+                None => AiServiceError::NotConfigured(role.to_string()),
+            })
+    }
+
+    /// The declaration of a profile `role`; `None` for a built-in.
+    fn declared<'p>(
+        &self,
+        role: &Role,
+        profiles: &'p [AiProfile],
+    ) -> Result<Option<&'p AiProfile>, AiServiceError> {
+        if role.builtin().is_some() {
+            return Ok(None);
+        }
+        profiles
+            .iter()
+            .find(|p| &p.role() == role)
+            .map(Some)
+            .ok_or_else(|| AiServiceError::UndeclaredProfile(role.to_string()))
     }
 
     /// Resolve `role` and fetch its provider's key.
@@ -845,7 +950,7 @@ impl AiService {
     /// local server) is called without auth.
     fn prepare(
         &self,
-        role: Role,
+        role: &Role,
     ) -> Result<(ProviderConfig, RoleBinding, Option<String>), AiServiceError> {
         let (provider, binding) = self.resolve(role)?;
         let key = self.key(&provider)?;
@@ -938,7 +1043,7 @@ impl AiService {
             Err(e) => (Some(e), (0, 0, None)),
         };
         let call = NewAiCall {
-            role: role_name(role),
+            role: role.to_string(),
             provider: provider.id.clone(),
             model: binding.model.clone(),
             caller: site.caller.to_string(),
@@ -960,6 +1065,39 @@ impl AiService {
             }
         }
     }
+}
+
+/// What `profile` needs that the model `snapshot` describes can't do, as
+/// a person reads it. A feature the provider doesn't know about passes.
+fn missing_feature(profile: &AiProfile, snapshot: &CapabilitySnapshotV1) -> Option<String> {
+    use oxplow_ai::capabilities::{CapabilitySupport, ModelFeature};
+    let missing: Vec<&str> = profile
+        .features
+        .iter()
+        .filter(|f| {
+            let support = match f {
+                ModelFeature::Text => snapshot.text,
+                ModelFeature::Image => snapshot.image,
+                ModelFeature::ToolCalling => snapshot.tool_calling,
+                ModelFeature::Streaming => snapshot.streaming,
+            };
+            support == CapabilitySupport::Unsupported
+        })
+        .map(|f| match f {
+            ModelFeature::Text => "text",
+            ModelFeature::Image => "images",
+            ModelFeature::ToolCalling => "tool calling",
+            ModelFeature::Streaming => "streaming",
+        })
+        .collect();
+    (!missing.is_empty()).then(|| {
+        format!(
+            "AI profile `{}` needs {}, which `{}` doesn't support",
+            profile.role(),
+            missing.join(" and "),
+            snapshot.model.as_deref().unwrap_or("its model")
+        )
+    })
 }
 
 /// A typed call ready to send: see [`AiService::prepare_typed`].
@@ -992,7 +1130,7 @@ pub fn project_overrides(
     roles
         .iter()
         .filter_map(|(name, o)| {
-            let role: Role = serde_json::from_value(serde_json::json!(name)).ok()?;
+            let role = Role::parse(name).ok()?;
             Some((
                 role,
                 RoleBinding {
@@ -1004,7 +1142,6 @@ pub fn project_overrides(
         .collect()
 }
 
-/// The role's name as `ai.yaml` and `v_ai_call` spell it.
 /// A keychain entry: the key and the endpoint it was saved for.
 struct StoredKey {
     key: String,
@@ -1145,13 +1282,6 @@ pub fn summarize_system(focus: Option<&str>) -> String {
     system
 }
 
-pub fn role_name(role: Role) -> String {
-    serde_json::to_value(role)
-        .ok()
-        .and_then(|v| v.as_str().map(str::to_string))
-        .unwrap_or_default()
-}
-
 /// The built-in model providers, under foundation's ids, for tests that
 /// build an `AiService` without booting.
 #[cfg(test)]
@@ -1200,7 +1330,7 @@ mod tests {
                 base_url: Some(base.into()),
             }],
             roles: BTreeMap::from([(
-                Role::Summarize,
+                Role::SUMMARIZE,
                 RoleBinding {
                     provider: "or".into(),
                     model: "m".into(),
@@ -1235,13 +1365,126 @@ mod tests {
         serde_json::to_value(&out.rows).unwrap()
     }
 
+    fn review(features: Vec<oxplow_ai::capabilities::ModelFeature>) -> AiProfile {
+        AiProfile {
+            extension: "acme".into(),
+            name: "review".into(),
+            description: "Reviews things.".into(),
+            fallback: BuiltinRole::Summarize,
+            features,
+        }
+    }
+
+    /// A profile no active extension declares is refused; a declared one
+    /// runs on its fallback's model until a person binds it, and a
+    /// project's binding wins over theirs. Each call records the profile.
+    #[tokio::test]
+    async fn a_profile_runs_on_its_fallback_until_bound() {
+        let (base, seen) = mock("/chat/completions", 200, chat_reply()).await;
+        let dir = tempfile::tempdir().unwrap();
+        let (svc, db) = service(&base, &dir);
+        let role = Role::parse("acme/review").unwrap();
+        let err = svc
+            .complete(&role, "t", None, "hi", false)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "no active extension declares the AI profile `acme/review`"
+        );
+        svc.set_profiles(Arc::new(|| vec![review(vec![])]));
+        svc.complete(&role, "t", None, "hi", false).await.unwrap();
+        let model = |i: usize| seen.lock().unwrap()[i].2["model"].clone();
+        assert_eq!(model(0), "m", "the summarize role's model");
+        let bind = |model: &str| RoleBinding {
+            provider: "or".into(),
+            model: model.into(),
+        };
+        svc.set_role(&role, Some(bind("big"))).unwrap();
+        svc.complete(&role, "t", None, "hi", false).await.unwrap();
+        assert_eq!(model(1), "big");
+        let project = role.clone();
+        let svc = svc.with_project_overrides(Arc::new(move || {
+            BTreeMap::from([(project.clone(), bind("project"))])
+        }));
+        svc.complete(&role, "t", None, "hi", false).await.unwrap();
+        assert_eq!(model(2), "project");
+        assert_eq!(
+            recorded(&db).await,
+            json!([
+                ["acme/review", "t", 1, 0, 10],
+                ["acme/review", "t", 1, 0, 10],
+                ["acme/review", "t", 1, 0, 10]
+            ])
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unbound_profile_whose_fallback_is_unbound_says_both() {
+        let dir = tempfile::tempdir().unwrap();
+        let (svc, _db) = service("http://unused", &dir);
+        svc.set_role(&Role::SUMMARIZE, None).unwrap();
+        svc.set_profiles(Arc::new(|| vec![review(vec![])]));
+        let err = svc
+            .complete(&Role::parse("acme/review").unwrap(), "t", None, "hi", false)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "no model is assigned to the AI profile `acme/review` or the `summarize` role it \
+             falls back to (Settings → AI)"
+        );
+    }
+
+    /// Settings → AI lists the built-ins, then each declared profile with
+    /// its extension, fallback and what a call would use, then a binding
+    /// for a profile nothing declares, as a problem.
+    #[tokio::test]
+    async fn settings_list_profiles_after_the_built_in_roles() {
+        let dir = tempfile::tempdir().unwrap();
+        let (svc, _db) = service("http://unused", &dir);
+        svc.set_profiles(Arc::new(|| vec![review(vec![])]));
+        svc.set_role(
+            &Role::parse("gone/old").unwrap(),
+            Some(RoleBinding {
+                provider: "or".into(),
+                model: "x".into(),
+            }),
+        )
+        .unwrap();
+        let st = svc.settings().await.unwrap();
+        let names: Vec<String> = st.roles.iter().map(|r| r.role.to_string()).collect();
+        assert_eq!(
+            names,
+            ["main", "summarize", "decide", "acme/review", "gone/old"]
+        );
+        let profile = &st.roles[3];
+        assert_eq!(profile.description, "Reviews things.");
+        assert_eq!(profile.extension.as_deref(), Some("acme"));
+        assert_eq!(profile.fallback, Some(BuiltinRole::Summarize));
+        assert_eq!(profile.binding, None);
+        assert_eq!(
+            profile.effective.as_ref().map(|b| b.model.as_str()),
+            Some("m")
+        );
+        assert_eq!(profile.problem, None);
+        assert_eq!(
+            st.roles[1].description,
+            BuiltinRole::Summarize.description()
+        );
+        assert_eq!(
+            st.roles[4].problem.as_deref(),
+            Some("no active extension declares the AI profile `gone/old`")
+        );
+    }
+
     #[tokio::test]
     async fn a_call_uses_the_role_binding_and_keychain_key_and_is_recorded() {
         let (base, seen) = mock("/chat/completions", 200, chat_reply()).await;
         let dir = tempfile::tempdir().unwrap();
         let (svc, db) = service(&base, &dir);
         let c = svc
-            .complete(Role::Summarize, "ext:review", None, "hi", false)
+            .complete(&Role::SUMMARIZE, "ext:review", None, "hi", false)
             .await
             .unwrap();
         assert_eq!(c.text, "hello");
@@ -1312,7 +1555,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (svc, _) = service("http://127.0.0.1:1", &dir);
         let err = svc
-            .complete(Role::Main, "core", None, "hi", false)
+            .complete(&Role::MAIN, "core", None, "hi", false)
             .await
             .unwrap_err();
         assert_eq!(err, AiServiceError::NotConfigured("main".into()));
@@ -1325,14 +1568,14 @@ mod tests {
         let (svc, _) = service(&base, &dir);
         let svc = svc.with_project_overrides(Arc::new(|| {
             BTreeMap::from([(
-                Role::Main,
+                Role::MAIN,
                 RoleBinding {
                     provider: "or".into(),
                     model: "big".into(),
                 },
             )])
         }));
-        svc.complete(Role::Main, "core", None, "hi", false)
+        svc.complete(&Role::MAIN, "core", None, "hi", false)
             .await
             .unwrap();
         assert_eq!(seen.lock().unwrap()[0].2["model"], "big");
@@ -1344,7 +1587,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (svc, db) = service(&base, &dir);
         let err = svc
-            .complete(Role::Summarize, "core", None, "a", false)
+            .complete(&Role::SUMMARIZE, "core", None, "a", false)
             .await
             .unwrap_err();
         assert!(matches!(err, AiServiceError::Call(AiError::Auth { .. })));
@@ -1369,7 +1612,7 @@ mod tests {
             },
         )]);
         let d = svc
-            .decide(Role::Summarize, "core", "state", &qs)
+            .decide(&Role::SUMMARIZE, "core", "state", &qs)
             .await
             .unwrap();
         assert_eq!(d.answers["ok"], Answer::Noul { probability: 0.9 });
@@ -1379,17 +1622,17 @@ mod tests {
     async fn settings_list_every_role_and_whether_keys_are_set_never_the_key() {
         let dir = tempfile::tempdir().unwrap();
         let (svc, _) = service("http://x", &dir);
-        let st = svc.settings().unwrap();
+        let st = svc.settings().await.unwrap();
         assert_eq!(st.providers.len(), 1);
         assert!(st.providers[0].key_set);
         assert!(!serde_json::to_string(&st).unwrap().contains("sk-1"));
-        assert_eq!(st.roles.len(), Role::ALL.len());
-        let summarize = st.roles.iter().find(|r| r.role == Role::Summarize).unwrap();
+        assert_eq!(st.roles.len(), BuiltinRole::ALL.len());
+        let summarize = st.roles.iter().find(|r| r.role == Role::SUMMARIZE).unwrap();
         assert_eq!(summarize.binding.as_ref().unwrap().model, "m");
         assert!(st
             .roles
             .iter()
-            .find(|r| r.role == Role::Main)
+            .find(|r| r.role == Role::MAIN)
             .unwrap()
             .binding
             .is_none());
@@ -1409,7 +1652,7 @@ mod tests {
         )
         .unwrap();
         svc.set_role(
-            Role::Decide,
+            &Role::DECIDE,
             Some(RoleBinding {
                 provider: "ts".into(),
                 model: "jev".into(),
@@ -1437,15 +1680,15 @@ mod tests {
             svc.raw_key("ts").unwrap().map(|k| k.key).as_deref(),
             Some("tk-9")
         );
-        assert_eq!(svc.settings().unwrap().providers.len(), 2);
+        assert_eq!(svc.settings().await.unwrap().providers.len(), 2);
 
         // A provider in use can't be removed; once unassigned, it and its key go.
         let err = svc.remove_provider("ts").unwrap_err();
         assert!(err.to_string().contains("decide"), "{err}");
-        svc.set_role(Role::Decide, None).unwrap();
+        svc.set_role(&Role::DECIDE, None).unwrap();
         svc.remove_provider("ts").unwrap();
         assert_eq!(svc.secrets.get("ts").unwrap(), None);
-        assert_eq!(svc.settings().unwrap().providers.len(), 1);
+        assert_eq!(svc.settings().await.unwrap().providers.len(), 1);
     }
 
     #[tokio::test]
@@ -1454,7 +1697,7 @@ mod tests {
         let (svc, _) = service("http://x", &dir);
         let err = svc
             .set_role(
-                Role::Main,
+                &Role::MAIN,
                 Some(RoleBinding {
                     provider: "nope".into(),
                     model: "m".into(),
@@ -1464,10 +1707,11 @@ mod tests {
         assert!(matches!(err, AiServiceError::Config(_)), "{err:?}");
         assert!(svc
             .settings()
+            .await
             .unwrap()
             .roles
             .iter()
-            .all(|r| r.role != Role::Main || r.binding.is_none()));
+            .all(|r| r.role != Role::MAIN || r.binding.is_none()));
     }
 
     #[tokio::test]
@@ -1490,15 +1734,15 @@ mod tests {
         let (svc, _) = service("http://x", &dir);
         let svc = svc.with_project_overrides(Arc::new(|| {
             BTreeMap::from([(
-                Role::Summarize,
+                Role::SUMMARIZE,
                 RoleBinding {
                     provider: "or".into(),
                     model: "small".into(),
                 },
             )])
         }));
-        let st = svc.settings().unwrap();
-        let summarize = st.roles.iter().find(|r| r.role == Role::Summarize).unwrap();
+        let st = svc.settings().await.unwrap();
+        let summarize = st.roles.iter().find(|r| r.role == Role::SUMMARIZE).unwrap();
         assert!(summarize.overridden);
         assert_eq!(summarize.binding.as_ref().unwrap().model, "small");
     }
@@ -1528,7 +1772,7 @@ mod tests {
             .unwrap();
         svc.ai
             .set_role(
-                Role::Summarize,
+                &Role::SUMMARIZE,
                 Some(RoleBinding {
                     provider: "fixture".into(),
                     model: "m".into(),
@@ -1541,7 +1785,7 @@ mod tests {
             .unwrap();
         let out = svc
             .ai
-            .complete(Role::Summarize, "t", None, "hi", false)
+            .complete(&Role::SUMMARIZE, "t", None, "hi", false)
             .await
             .unwrap();
         assert_eq!(out.text, "a fixture answer");
@@ -1610,14 +1854,14 @@ mod tests {
             .unwrap();
         svc.ai
             .set_role(
-                Role::Summarize,
+                &Role::SUMMARIZE,
                 Some(RoleBinding {
                     provider: "a".into(),
                     model: "m".into(),
                 }),
             )
             .unwrap();
-        let call = || svc.ai.complete(Role::Summarize, "t", None, "hi", false);
+        let call = || svc.ai.complete(&Role::SUMMARIZE, "t", None, "hi", false);
         let err = call().await.unwrap_err().to_string();
         assert!(err.contains("Settings → Data → Programs"), "{err}");
         assert!(seen.lock().unwrap().is_empty(), "nothing was sent");
@@ -1910,7 +2154,7 @@ mod tests {
 
     #[test]
     fn project_config_role_names_match_the_roles() {
-        let names: Vec<String> = Role::ALL.iter().map(|r| role_name(*r)).collect();
+        let names: Vec<&str> = BuiltinRole::ALL.iter().map(|r| r.name()).collect();
         assert_eq!(names, oxplow_config::AI_ROLE_NAMES.to_vec());
     }
 
@@ -1938,20 +2182,20 @@ mod tests {
                 None,
             )
             .unwrap();
-        let summarize = |svc: &crate::Services| {
-            let st = svc.ai.settings().unwrap();
+        async fn summarize(svc: &crate::Services) -> (bool, Option<String>) {
+            let st = svc.ai.settings().await.unwrap();
             let r = st
                 .roles
                 .into_iter()
-                .find(|r| r.role == Role::Summarize)
+                .find(|r| r.role == Role::SUMMARIZE)
                 .unwrap();
             (r.overridden, r.binding.map(|b| b.model))
-        };
-        assert_eq!(summarize(&svc), (true, Some("small".to_string())));
+        }
+        assert_eq!(summarize(&svc).await, (true, Some("small".to_string())));
         yaml("tiny");
         svc.reload_config_from_disk().unwrap();
         crate::test_fixtures::activate_with_problems(&svc).await;
-        assert_eq!(summarize(&svc), (true, Some("tiny".to_string())));
+        assert_eq!(summarize(&svc).await, (true, Some("tiny".to_string())));
     }
 
     /// An agent can edit `ai.yaml`. Pointing a provider at another host
@@ -1970,7 +2214,7 @@ mod tests {
         };
         svc.save_provider(provider(&base), Some("sk-2".into()))
             .unwrap();
-        svc.complete(Role::Summarize, "t", None, "hi", false)
+        svc.complete(&Role::SUMMARIZE, "t", None, "hi", false)
             .await
             .unwrap();
 
@@ -1979,7 +2223,7 @@ mod tests {
         cfg.providers[0].base_url = Some(evil.clone());
         cfg.save(dir.path()).unwrap();
         let err = svc
-            .complete(Role::Summarize, "t", None, "hi", false)
+            .complete(&Role::SUMMARIZE, "t", None, "hi", false)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("re-save the AI provider"), "{err}");
@@ -1990,7 +2234,7 @@ mod tests {
 
         // A person re-saving the provider (the UI) rebinds the kept key.
         svc.save_provider(provider(&evil), None).unwrap();
-        svc.complete(Role::Summarize, "t", None, "hi", false)
+        svc.complete(&Role::SUMMARIZE, "t", None, "hi", false)
             .await
             .unwrap();
         assert_eq!(
@@ -2088,7 +2332,7 @@ def response(x):
                 base_url: Some(base.clone()),
             }],
             roles: BTreeMap::from([(
-                Role::Summarize,
+                Role::SUMMARIZE,
                 RoleBinding {
                     provider: "p".into(),
                     model: "m".into(),
@@ -2200,7 +2444,7 @@ def response(x):
             snapshot("other", "unsupported", "supported")
         ]);
         let fx = fixture("fake", Some(models), typed_reply("observed")).await;
-        let snap = fx.svc.capabilities(Role::Summarize).await.unwrap();
+        let snap = fx.svc.capabilities(&Role::SUMMARIZE).await.unwrap();
         assert_eq!(snap.model.as_deref(), Some("m"));
         assert_eq!(snap.tool_calling, CapabilitySupport::Supported);
         assert_eq!(snap.image, CapabilitySupport::Unknown);
@@ -2209,7 +2453,7 @@ def response(x):
             snap.output_tokens, None,
             "an undeclared limit stays unknown"
         );
-        let catalog = fx.svc.models(Role::Summarize).await.unwrap();
+        let catalog = fx.svc.models(&Role::SUMMARIZE).await.unwrap();
         assert!(catalog.catalog_known);
         assert_eq!(catalog.models.len(), 2);
 
@@ -2227,16 +2471,16 @@ def response(x):
     #[tokio::test]
     async fn undeclared_metadata_stays_unknown() {
         let fx = fixture("openai_compatible", None, json!({})).await;
-        let snap = fx.svc.capabilities(Role::Summarize).await.unwrap();
+        let snap = fx.svc.capabilities(&Role::SUMMARIZE).await.unwrap();
         assert_eq!(
             snap,
             oxplow_ai::capabilities::CapabilitySnapshotV1::unknown("m")
         );
-        assert!(!fx.svc.models(Role::Summarize).await.unwrap().catalog_known);
+        assert!(!fx.svc.models(&Role::SUMMARIZE).await.unwrap().catalog_known);
 
         let listing_others = json!([snapshot("other", "supported", "supported")]);
         let fx = fixture("fake", Some(listing_others), json!({})).await;
-        let snap = fx.svc.capabilities(Role::Summarize).await.unwrap();
+        let snap = fx.svc.capabilities(&Role::SUMMARIZE).await.unwrap();
         assert!(!snap.model_known);
         assert_eq!(snap.image, CapabilitySupport::Unknown);
         assert_eq!(fx.secrets.gets.load(Ordering::SeqCst), 0);
@@ -2251,7 +2495,7 @@ def response(x):
         let request = mixed_request();
         let (response, id) = fx
             .svc
-            .complete_typed_as(Role::Summarize, CallSite::new("test"), &request)
+            .complete_typed_as(&Role::SUMMARIZE, CallSite::new("test"), &request)
             .await
             .unwrap();
         assert!(id.is_some());
@@ -2290,7 +2534,7 @@ def response(x):
         let fx = fixture("fake", None, typed_reply("estimated")).await;
         let (response, _) = fx
             .svc
-            .complete_typed_as(Role::Summarize, CallSite::new("test"), &mixed_request())
+            .complete_typed_as(&Role::SUMMARIZE, CallSite::new("test"), &mixed_request())
             .await
             .unwrap();
         assert_eq!(response.usage.source, UsageSourceV1::Estimated);
@@ -2317,7 +2561,7 @@ def response(x):
         let fx = fixture("fake", None, typed_reply("observed")).await;
         let err = fx
             .svc
-            .complete_typed_as(Role::Summarize, CallSite::new("test"), &image_request())
+            .complete_typed_as(&Role::SUMMARIZE, CallSite::new("test"), &image_request())
             .await
             .unwrap_err();
         assert!(
@@ -2338,7 +2582,7 @@ def response(x):
         let fx = fixture("fake", Some(models), typed_reply("observed")).await;
         let err = fx
             .svc
-            .complete_typed_as(Role::Summarize, CallSite::new("test"), &mixed_request())
+            .complete_typed_as(&Role::SUMMARIZE, CallSite::new("test"), &mixed_request())
             .await
             .unwrap_err();
         assert!(
@@ -2350,10 +2594,43 @@ def response(x):
         assert!(fx.seen.lock().unwrap().is_empty());
         // Plain text is still fine for that model.
         fx.svc
-            .complete_typed_as(Role::Summarize, CallSite::new("test"), &text_request("hi"))
+            .complete_typed_as(&Role::SUMMARIZE, CallSite::new("test"), &text_request("hi"))
             .await
             .unwrap();
         assert_eq!(fx.seen.lock().unwrap().len(), 1);
+    }
+
+    /// A profile needing a feature its bound model lacks is refused
+    /// before anything is sent, and Settings → AI shows why.
+    #[tokio::test]
+    async fn a_profile_needing_a_feature_its_model_lacks_is_refused() {
+        let models = json!([snapshot("m", "unsupported", "unknown")]);
+        let fx = fixture("fake", Some(models), typed_reply("observed")).await;
+        fx.svc.set_profiles(Arc::new(|| {
+            vec![AiProfile {
+                extension: "acme".into(),
+                name: "review".into(),
+                description: String::new(),
+                fallback: BuiltinRole::Summarize,
+                features: vec![oxplow_ai::capabilities::ModelFeature::ToolCalling],
+            }]
+        }));
+        let role = Role::parse("acme/review").unwrap();
+        let err = fx
+            .svc
+            .complete_typed_as(&role, CallSite::new("test"), &text_request("hi"))
+            .await
+            .unwrap_err();
+        let needs = "AI profile `acme/review` needs tool calling, which `m` doesn't support";
+        assert!(err.to_string().contains(needs), "{err}");
+        assert!(fx.seen.lock().unwrap().is_empty());
+        let st = fx.svc.settings().await.unwrap();
+        assert_eq!(st.roles[3].problem.as_deref(), Some(needs));
+        // The built-in role it falls back to has no such need.
+        fx.svc
+            .complete_typed_as(&Role::SUMMARIZE, CallSite::new("test"), &text_request("hi"))
+            .await
+            .unwrap();
     }
 
     /// A request for another model, or another schema version, is refused
@@ -2367,7 +2644,7 @@ def response(x):
         };
         let err = fx
             .svc
-            .complete_typed_as(Role::Summarize, CallSite::new("t"), &other_model)
+            .complete_typed_as(&Role::SUMMARIZE, CallSite::new("t"), &other_model)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("role's configured model"), "{err}");
@@ -2377,7 +2654,7 @@ def response(x):
         };
         let err = fx
             .svc
-            .complete_typed_as(Role::Summarize, CallSite::new("t"), &stale)
+            .complete_typed_as(&Role::SUMMARIZE, CallSite::new("t"), &stale)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("schemaVersion 2"), "{err}");
@@ -2393,7 +2670,7 @@ def response(x):
         let fx = fixture("fake", None, reply).await;
         let err = fx
             .svc
-            .complete_typed_as(Role::Summarize, CallSite::new("t"), &text_request("hi"))
+            .complete_typed_as(&Role::SUMMARIZE, CallSite::new("t"), &text_request("hi"))
             .await
             .unwrap_err();
         assert!(err.to_string().contains("imageAssetResolution"), "{err}");
@@ -2411,7 +2688,7 @@ def response(x):
         let fx = fixture("openai_compatible", None, reply).await;
         let c = fx
             .svc
-            .complete(Role::Summarize, "core", None, "hi", false)
+            .complete(&Role::SUMMARIZE, "core", None, "hi", false)
             .await
             .unwrap();
         assert_eq!(
@@ -2428,13 +2705,13 @@ def response(x):
         // went through the same provider.
         assert!(fx
             .svc
-            .decide(Role::Summarize, "core", "s", &qs)
+            .decide(&Role::SUMMARIZE, "core", "s", &qs)
             .await
             .is_err());
 
         let (typed, _) = fx
             .svc
-            .complete_typed_as(Role::Summarize, CallSite::new("core"), &text_request("hi"))
+            .complete_typed_as(&Role::SUMMARIZE, CallSite::new("core"), &text_request("hi"))
             .await
             .unwrap();
         assert_eq!(

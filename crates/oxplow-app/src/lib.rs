@@ -1213,6 +1213,13 @@ impl Services {
         let extension_catalog = Arc::new(extension_catalog::ExtensionCatalog::for_project(
             &layout.project_dir,
         ));
+        // The service is built before the catalog: its AI profiles are
+        // whatever the active extensions declare, read live.
+        ai.set_profiles({
+            let catalog = extension_catalog.clone();
+            let root = layout.project_dir.clone();
+            Arc::new(move || extensions::ai_profiles::profiles_of(&catalog.get(&root)))
+        });
         let extension_secrets = Arc::new(extension_secrets::ExtensionSecrets::new(
             extension_catalog.clone(),
             &layout.project_dir,

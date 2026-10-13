@@ -3,7 +3,7 @@
 //! else the fallback role's model is used. Declaring one binds nothing.
 
 use oxplow_ai::capabilities::ModelFeature;
-use oxplow_ai::config::Role;
+use oxplow_ai::config::BuiltinRole;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 
@@ -18,9 +18,30 @@ pub struct AiProfileDecl {
     pub id: String,
     pub description: String,
     /// The built-in role whose model serves it until the person binds one.
-    pub fallback: Role,
+    pub fallback: BuiltinRole,
     /// What the bound model must support.
     pub features: Vec<ModelFeature>,
+}
+
+impl AiProfileDecl {
+    /// The profile as the AI service resolves it, owned by `extension`.
+    pub fn profile(&self, extension: &str) -> oxplow_ai::config::AiProfile {
+        oxplow_ai::config::AiProfile {
+            extension: extension.to_string(),
+            name: self.id.clone(),
+            description: self.description.clone(),
+            fallback: self.fallback,
+            features: self.features.clone(),
+        }
+    }
+}
+
+/// Every AI profile `extensions` declare (a disabled one declares none).
+pub fn profiles_of(extensions: &[super::Extension]) -> Vec<oxplow_ai::config::AiProfile> {
+    extensions
+        .iter()
+        .flat_map(|ext| ext.ai_profiles.iter().map(|p| p.profile(&ext.name)))
+        .collect()
 }
 
 /// The built-in roles a profile may fall back to.
@@ -133,9 +154,9 @@ pub fn parse_ai_profiles(
                 id: raw.id,
                 description: raw.description,
                 fallback: match raw.fallback {
-                    FallbackFile::Main => Role::Main,
-                    FallbackFile::Summarize => Role::Summarize,
-                    FallbackFile::Decide => Role::Decide,
+                    FallbackFile::Main => BuiltinRole::Main,
+                    FallbackFile::Summarize => BuiltinRole::Summarize,
+                    FallbackFile::Decide => BuiltinRole::Decide,
                 },
                 features,
             });
@@ -177,7 +198,7 @@ mod tests {
             [AiProfileDecl {
                 id: "review".into(),
                 description: "Reviews.".into(),
-                fallback: Role::Summarize,
+                fallback: BuiltinRole::Summarize,
                 features: vec![ModelFeature::ToolCalling],
             }]
         );

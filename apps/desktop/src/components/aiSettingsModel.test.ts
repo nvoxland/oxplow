@@ -20,9 +20,37 @@ const settings: AiSettings = {
     { kind: "openai_compatible", title: "An OpenAI-compatible API", defaultBaseUrl: null },
   ],
   roles: [
-    { role: "main", binding: null, overridden: false },
-    { role: "summarize", binding: { provider: "or", model: "openai/gpt-5-mini" }, overridden: false },
-    { role: "decide", binding: { provider: "gone", model: "jev" }, overridden: true },
+    { role: "main", description: "General reasoning", extension: null, fallback: null, binding: null, effective: null, overridden: false, problem: null },
+    {
+      role: "summarize",
+      description: "Summaries of sessions",
+      extension: null,
+      fallback: null,
+      binding: { provider: "or", model: "openai/gpt-5-mini" },
+      effective: { provider: "or", model: "openai/gpt-5-mini" },
+      overridden: false,
+      problem: null,
+    },
+    {
+      role: "decide",
+      description: "Typed questions",
+      extension: null,
+      fallback: null,
+      binding: { provider: "gone", model: "jev" },
+      effective: null,
+      overridden: true,
+      problem: null,
+    },
+    {
+      role: "effort-review/review",
+      description: "Reviews an effort's evidence.",
+      extension: "effort-review",
+      fallback: "summarize",
+      binding: null,
+      effective: { provider: "or", model: "openai/gpt-5-mini" },
+      overridden: false,
+      problem: "AI profile `effort-review/review` needs tool calling, which `openai/gpt-5-mini` doesn't support",
+    },
   ],
 };
 
@@ -61,11 +89,21 @@ describe("providerFormError", () => {
 describe("roleRows", () => {
   test("every role with what it's for and its assignment", () => {
     const rows = roleRows(settings);
-    expect(rows.map((r) => r.role)).toEqual(["main", "summarize", "decide"]);
+    expect(rows.map((r) => r.role)).toEqual(["main", "summarize", "decide", "effort-review/review"]);
     const summarize = rows.find((r) => r.role === "summarize")!;
     expect(summarize.assigned).toBe("or · openai/gpt-5-mini");
-    expect(summarize.usedFor.toLowerCase()).toContain("summar");
+    expect(summarize.usedFor).toBe("Summaries of sessions");
+    expect(summarize.extension).toBeNull();
     expect(rows.find((r) => r.role === "main")!.assigned).toBeNull();
+  });
+
+  test("an extension's profile shows its extension, what it falls back to and why it can't run", () => {
+    const review = roleRows(settings).find((r) => r.role === "effort-review/review")!;
+    expect(review.extension).toBe("effort-review");
+    expect(review.assigned).toBeNull();
+    expect(review.note).toBe("Falls back to summarize (or · openai/gpt-5-mini)");
+    expect(review.problem).toContain("needs tool calling");
+    expect(review.editable).toBe(true);
   });
 
   test("a binding to a missing provider is flagged, and project overrides are noted", () => {

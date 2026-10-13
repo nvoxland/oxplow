@@ -235,16 +235,16 @@ fn scope_calls_are_answered_by_the_host_outside_the_budget() {
 struct Oracle;
 
 impl oxplow_script::AiOracle for Oracle {
-    fn classify(&self, text: &str, labels: &[String]) -> Result<Value, String> {
-        Ok(json!({ "label": labels[0], "text": text }))
+    fn classify(&self, role: &str, text: &str, labels: &[String]) -> Result<Value, String> {
+        Ok(json!({ "label": labels[0], "text": text, "role": role }))
     }
-    fn score(&self, _: &str, _: &[String]) -> Result<Value, String> {
+    fn score(&self, _: &str, _: &str, _: &[String]) -> Result<Value, String> {
         Err("no scores today".into())
     }
-    fn summarize(&self, text: &str, _: Option<&str>) -> Result<String, String> {
-        Ok(format!("short {text}"))
+    fn summarize(&self, role: &str, text: &str, _: Option<&str>) -> Result<String, String> {
+        Ok(format!("short {text} ({role})"))
     }
-    fn extract(&self, _: &str, _: &str, schema: &Value) -> Result<Value, String> {
+    fn extract(&self, _: &str, _: &str, _: &str, schema: &Value) -> Result<Value, String> {
         Ok(json!({ "schema": schema }))
     }
 }
@@ -252,7 +252,7 @@ impl oxplow_script::AiOracle for Oracle {
 #[test]
 fn model_calls_are_answered_by_the_hosts_oracle() {
     let w = workers(limits());
-    let script = "def transform(x):\n    return {'c': ai_classify('hi', ['a', 'b']), 's': ai_summarize('long')}\n";
+    let script = "def transform(x):\n    return {'c': ai_classify('hi', ['a', 'b'], role = 'sort'), 's': ai_summarize('long')}\n";
     let ran = w
         .run(
             &budget(5_000),
@@ -262,7 +262,7 @@ fn model_calls_are_answered_by_the_hosts_oracle() {
         .unwrap();
     assert_eq!(
         ran.value,
-        json!({ "c": { "label": "a", "text": "hi" }, "s": "short long" })
+        json!({ "c": { "label": "a", "text": "hi", "role": "sort" }, "s": "short long (summarize)" })
     );
     let err = w
         .run(
@@ -396,7 +396,7 @@ struct Slow {
 }
 
 impl oxplow_script::AiOracle for Slow {
-    fn classify(&self, text: &str, labels: &[String]) -> Result<Value, String> {
+    fn classify(&self, _: &str, text: &str, labels: &[String]) -> Result<Value, String> {
         self.asked
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -404,13 +404,13 @@ impl oxplow_script::AiOracle for Slow {
         std::thread::sleep(self.delay);
         Ok(json!({ "label": labels[0] }))
     }
-    fn score(&self, _: &str, _: &[String]) -> Result<Value, String> {
+    fn score(&self, _: &str, _: &str, _: &[String]) -> Result<Value, String> {
         Err("no".into())
     }
-    fn summarize(&self, _: &str, _: Option<&str>) -> Result<String, String> {
+    fn summarize(&self, _: &str, _: &str, _: Option<&str>) -> Result<String, String> {
         Err("no".into())
     }
-    fn extract(&self, _: &str, _: &str, _: &Value) -> Result<Value, String> {
+    fn extract(&self, _: &str, _: &str, _: &str, _: &Value) -> Result<Value, String> {
         Err("no".into())
     }
 }

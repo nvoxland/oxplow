@@ -405,7 +405,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	setAiRole: (role: Role, binding: {
+	setAiRole: (role: string, binding: {
 	// A provider `id`.
 	provider: string,
 	model: string,
@@ -1394,6 +1394,16 @@ export type AiCallBody =
 // What it answered: `{ text }` or `{ answers }`.
 "response";
 
+// A named model need of one extension.
+export type AiProfileDecl = {
+	id: string,
+	description: string,
+	// The built-in role whose model serves it until the person binds one.
+	fallback: BuiltinRole,
+	// What the bound model must support.
+	features: ModelFeature[],
+};
+
 // One `ai.roles` entry.
 export type AiRoleOverride = {
 	provider: string,
@@ -1402,7 +1412,10 @@ export type AiRoleOverride = {
 
 export type AiSettings = {
 	providers: ProviderStatus[],
-	// Every role, in `Role::ALL` order.
+	/**
+	 *  The built-in roles in `BuiltinRole::ALL` order, then the active
+	 *  extensions' AI profiles, then bindings for profiles nothing declares.
+	 */
 	roles: RoleStatus[],
 	// The kinds a provider can be: the registered model providers.
 	kinds: ProviderKindInfo[],
@@ -1557,6 +1570,12 @@ export type BranchChangeEntry = {
 	deletions: number,
 };
 
+/**
+ *  The jobs oxplow itself gives models. Every extension can name them,
+ *  and each extension AI profile falls back to one.
+ */
+export type BuiltinRole = "main" | "summarize" | "decide";
+
 // One question the person can ask, with where it comes from.
 export type CatalogPrompt = {
 	prompt: string,
@@ -1679,6 +1698,8 @@ export type CheckReport_Deserialize = {
 	 *  (`--services` prints them).
 	 */
 	services: ScriptServices[],
+	// What serves each of its `ai_profiles:` here ([`profile_lines`]).
+	profiles: string[],
 };
 
 // What `check` found.
@@ -1704,6 +1725,8 @@ export type CheckReport_Serialize = {
 	 *  (`--services` prints them).
 	 */
 	services: ScriptServices[],
+	// What serves each of its `ai_profiles:` here ([`profile_lines`]).
+	profiles: string[],
 };
 
 // How a client authenticates to a token endpoint.
@@ -2284,7 +2307,7 @@ export type ContributionImpact = {
 };
 
 // Every kind of contribution a manifest can declare.
-export type ContributionKind = "model" | "measure" | "metric" | "dimension" | "collector" | "event_type" | "ref_kind" | "command" | "job" | "effect" | "advisory" | "skill" | "implementation" | "provider" | "lens" | "page" | "panel" | "slot" | "decorator" | "replacement" | "custom_component";
+export type ContributionKind = "model" | "measure" | "metric" | "dimension" | "collector" | "event_type" | "ref_kind" | "command" | "job" | "ai_profile" | "effect" | "advisory" | "skill" | "implementation" | "provider" | "lens" | "page" | "panel" | "slot" | "decorator" | "replacement" | "custom_component";
 
 // One credential a provider declares.
 export type CredentialDecl = {
@@ -3135,6 +3158,8 @@ export type Extension_Deserialize = {
 	commands: ExtensionCommand[],
 	// Durable host operations declared by this extension.
 	jobs: JobDecl[],
+	// Named model needs this extension declares.
+	aiProfiles: AiProfileDecl[],
 	// Its `version:` (semver), when it declares one; required to share.
 	version: string | null,
 	/**
@@ -3263,6 +3288,8 @@ export type Extension_Serialize = {
 	commands: ExtensionCommand[],
 	// Durable host operations declared by this extension.
 	jobs: JobDecl[],
+	// Named model needs this extension declares.
+	aiProfiles: AiProfileDecl[],
 	// Its `version:` (semver), when it declares one; required to share.
 	version: string | null,
 	/**
@@ -4706,6 +4733,9 @@ export type ModelDecl = {
 	materialize?: Materialize | null,
 };
 
+// Features callers may discover before requesting a model operation.
+export type ModelFeature = "text" | "image" | "toolCalling" | "streaming";
+
 // When one model last changed.
 export type ModelFreshness = {
 	model: string,
@@ -5659,12 +5689,6 @@ export type RevisionInfo = {
 	parents: string[],
 };
 
-/**
- *  Jobs oxplow gives models. Extensions and features refer to roles,
- *  never to models.
- */
-export type Role = "main" | "summarize" | "decide";
-
 export type RoleBinding = {
 	// A provider `id`.
 	provider: string,
@@ -5672,11 +5696,27 @@ export type RoleBinding = {
 };
 
 export type RoleStatus = {
-	role: Role,
-	// `None` when the role has no model.
+	role: string,
+	/**
+	 *  What it's for: oxplow's text for a built-in, the declaring
+	 *  extension's for a profile.
+	 */
+	description: string,
+	// The extension declaring a profile; `None` for a built-in.
+	extension: string | null,
+	// The built-in role an unbound profile uses.
+	fallback: BuiltinRole | null,
+	// Its own binding; `None` when it has none.
 	binding: RoleBinding | null,
+	// What a call would use now: its binding, else its fallback's.
+	effective: RoleBinding | null,
 	// The binding comes from the project, not the global `ai.yaml`.
 	overridden: boolean,
+	/**
+	 *  Why a call on it would be refused, when it would be: a profile no
+	 *  active extension declares, or a model lacking a feature it needs.
+	 */
+	problem: string | null,
 };
 
 // A model's rows before and after.

@@ -70,7 +70,7 @@ pub async fn effective_config(
         .clone();
     let root = svc.worktrees.resolve(None).await.into_local_path();
     let extensions = svc.extension_catalog.get(&root);
-    let ai = svc.ai.settings().ok();
+    let ai = svc.ai.settings().await.ok();
     let global = oxplow_config::global_config_dir();
     Ok(oxplow_app::effective_config::effective_config(
         &config,

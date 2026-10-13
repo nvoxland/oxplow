@@ -789,8 +789,9 @@ pub fn disabled_extensions(project_dir: impl AsRef<Path>) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Role names `ai.roles` accepts. Must match `oxplow_ai::config::Role`
-/// (a test in oxplow-app checks).
+/// The built-in role names `ai.roles` accepts beside extension AI
+/// profiles (`<extension>/<profile>`). Must match
+/// `oxplow_ai::config::BuiltinRole` (a test in oxplow-app checks).
 pub const AI_ROLE_NAMES: [&str; 3] = ["main", "summarize", "decide"];
 
 /// Roles oxplow dropped because nothing asked them (`oxplow_ai`'s
@@ -2288,6 +2289,21 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
 }
 
 /// Validate `ai.roles`: known role names, non-empty provider and model.
+/// `<extension>/<profile>`: the shape only. Whether an active extension
+/// declares it is known at run time, where an unknown one goes unused.
+fn is_ai_profile_name(role: &str) -> bool {
+    role.split_once('/').is_some_and(|(extension, profile)| {
+        !extension.is_empty()
+            && extension
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+            && profile.starts_with(|c: char| c.is_ascii_lowercase())
+            && profile
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+    })
+}
+
 fn validate_ai_roles(
     raw: Option<RawAiBlock>,
 ) -> Result<std::collections::BTreeMap<String, AiRoleOverride>, ConfigError> {
@@ -2300,9 +2316,10 @@ fn validate_ai_roles(
                 AI_ROLE_NAMES.join(", ")
             )));
         }
-        if !AI_ROLE_NAMES.contains(&role.as_str()) {
+        if !AI_ROLE_NAMES.contains(&role.as_str()) && !is_ai_profile_name(role) {
             return Err(ConfigError::Invalid(format!(
-                "ai.roles.{role}: unknown role (use one of {})",
+                "ai.roles.{role}: unknown role (use one of {}, or an extension's AI profile as \
+                 `<extension>/<profile>`)",
                 AI_ROLE_NAMES.join(", ")
             )));
         }
@@ -4545,10 +4562,15 @@ lsp:
         let dir = tempdir().unwrap();
         std::fs::write(
             cfg_path(dir.path()),
-            "ai:\n  roles:\n    summarize: { provider: openrouter, model: openai/gpt-5-mini }\n",
+            "ai:\n  roles:\n    summarize: { provider: openrouter, model: openai/gpt-5-mini }\n    \
+             acme/review: { provider: openrouter, model: big }\n",
         )
         .unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
+        assert!(
+            cfg.ai_roles.contains_key("acme/review"),
+            "an extension's AI profile"
+        );
         assert_eq!(
             cfg.ai_roles.get("summarize"),
             Some(&AiRoleOverride {
@@ -4568,6 +4590,10 @@ lsp:
             (
                 "ai:\n  roles:\n    main: { provider: p, model: \"\" }\n",
                 "main",
+            ),
+            (
+                "ai:\n  roles:\n    acme/Review: { provider: p, model: m }\n",
+                "acme/Review: unknown role",
             ),
             // A role nothing asked is gone: naming one says so.
             (

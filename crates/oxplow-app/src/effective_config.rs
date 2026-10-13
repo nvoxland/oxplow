@@ -117,20 +117,26 @@ pub fn effective_config(
     }
     if let Some(ai) = ai {
         for r in &ai.roles {
-            let role = serde_json::to_value(r.role)
-                .ok()
-                .and_then(|v| v.as_str().map(str::to_string))
-                .unwrap_or_default();
+            let role = &r.role;
             out.push(EffectiveSetting {
                 key: format!("ai.roles.{role}"),
-                doc: format!("The model the `{role}` AI role uses (a provider and a model)."),
+                doc: match r.fallback {
+                    Some(fallback) => format!(
+                        "The model the `{role}` AI profile uses (a provider and a model); \
+                         unset, it uses the `{}` role's.",
+                        fallback.name()
+                    ),
+                    None => {
+                        format!("The model the `{role}` AI role uses (a provider and a model).")
+                    }
+                },
                 value: r.binding.as_ref().map(plain).unwrap_or(Value::Null),
                 origin: match (&r.binding, r.overridden) {
                     (_, true) => ConfigOrigin::Project,
                     (Some(_), false) => ConfigOrigin::Global,
                     (None, false) => ConfigOrigin::Default,
                 },
-                extension: None,
+                extension: r.extension.clone(),
                 human_only: true,
                 schema: Value::Null,
             });
@@ -271,25 +277,46 @@ mod tests {
             kinds: vec![],
             roles: vec![
                 RoleStatus {
-                    role: Role::Main,
+                    role: Role::MAIN,
+                    description: String::new(),
+                    extension: None,
+                    fallback: None,
+                    effective: Some(RoleBinding {
+                        provider: "p".into(),
+                        model: "m".into(),
+                    }),
                     binding: Some(RoleBinding {
                         provider: "p".into(),
                         model: "m".into(),
                     }),
                     overridden: false,
+                    problem: None,
                 },
                 RoleStatus {
-                    role: Role::Summarize,
+                    role: Role::SUMMARIZE,
+                    description: String::new(),
+                    extension: None,
+                    fallback: None,
+                    effective: Some(RoleBinding {
+                        provider: "p".into(),
+                        model: "f".into(),
+                    }),
                     binding: Some(RoleBinding {
                         provider: "p".into(),
                         model: "f".into(),
                     }),
                     overridden: true,
+                    problem: None,
                 },
                 RoleStatus {
-                    role: Role::Decide,
+                    role: Role::DECIDE,
+                    description: String::new(),
+                    extension: None,
+                    fallback: None,
+                    effective: None,
                     binding: None,
                     overridden: false,
+                    problem: None,
                 },
             ],
         };

@@ -114,7 +114,7 @@ mod tests {
         fx.svc
             .ai
             .set_role(
-                Role::Summarize,
+                &Role::SUMMARIZE,
                 Some(RoleBinding {
                     provider: "m".into(),
                     model: "x".into(),
@@ -125,7 +125,7 @@ mod tests {
         let id = fx
             .svc
             .ai_compute
-            .summarize(mine, "a long log", None)
+            .summarize(mine, &Role::SUMMARIZE, "a long log", None)
             .await
             .unwrap()
             .ai_call_id

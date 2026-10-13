@@ -11,6 +11,8 @@ const MANIFEST: &str = "manifest: 2
 name: triage
 intent:
   purpose: p
+ai_profiles:
+  - { id: sort, description: Sorts items., fallback: summarize }
 jobs:
   - { id: summarize, description: Summarize an item., version: 1, operation: ai.complete_typed, needs: [ai.compute] }
 commands:
@@ -81,7 +83,7 @@ fn configure(svc: &crate::Services, base: String) {
         .unwrap();
     svc.ai
         .set_role(
-            Role::Summarize,
+            &Role::SUMMARIZE,
             Some(RoleBinding {
                 provider: "a".into(),
                 model: "m".into(),
@@ -127,12 +129,16 @@ async fn run_on(svc: &crate::Services, command: &str, input: Value) -> Value {
 }
 
 fn ask(intent: &str) -> Value {
+    ask_as(intent, "summarize")
+}
+
+fn ask_as(intent: &str, role: &str) -> Value {
     json!({
         "job": "summarize",
         "intentKey": intent,
         "request": {
             "schemaVersion": 1,
-            "role": "summarize",
+            "role": role,
             "messages": [{"role": "user", "parts": [{"type": "text", "text": "Summarize: the build is red."}]}],
         },
     })
@@ -191,6 +197,45 @@ async fn an_approved_job_runs_and_its_result_is_read_back() {
         .await
         .unwrap();
     assert_eq!(completed, 1, "its completion is an event");
+}
+
+/// A job names one of its extension's AI profiles by its bare id: it runs
+/// on the profile's model (here its fallback's) and the call records the
+/// qualified profile. A name the extension doesn't declare is refused.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_job_runs_on_its_extensions_ai_profile() {
+    let fx = fixture(true).await;
+    let id = run(&fx, "triage.summary.ask", ask_as("item-p", "sort")).await["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    until(&fx, &id, |s| s["state"] == json!("succeeded")).await;
+    let roles = fx
+        .svc
+        .sql
+        .query_sql("SELECT role FROM v_ai_call", vec![], None)
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(&roles.rows).unwrap(),
+        json!([["triage/sort"]])
+    );
+    let err = fx
+        .svc
+        .commands
+        .run(
+            &Actor::Human,
+            "triage.summary.ask",
+            ask_as("item-q", "review"),
+            false,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("`role` is `main`, `summarize`, `decide` or one of this extension's `ai_profiles` (`sort`)"),
+        "{err}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

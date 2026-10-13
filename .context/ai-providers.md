@@ -89,8 +89,10 @@ ai:
 
 - Provider ids refer to each person's own `ai.yaml`; a role naming a
   provider someone hasn't set up shows "AI provider X isn't set up" for them.
-- `OxplowConfig.ai_roles` holds them (validated against
-  `oxplow_config::AI_ROLE_NAMES`, which a test keeps equal to `Role::ALL`).
+- `OxplowConfig.ai_roles` holds them (a built-in name from
+  `oxplow_config::AI_ROLE_NAMES`, which a test keeps equal to
+  `BuiltinRole::ALL`, or a profile's `<extension>/<name>`, checked for
+  shape only).
 - `AiService` gets an `OverridesSource` closure that reads the live config
   on every resolve, so edits and `reload_config_from_disk` apply with
   nothing to sync. Settings → AI shows such roles read-only
@@ -107,6 +109,46 @@ A role exists only once something asks it. A config naming a role oxplow
 dropped (`fast`, `embed`, `review`: nothing asked them) fails to load,
 saying so (`oxplow_ai::config::DROPPED_ROLES`; project.yaml's
 `DROPPED_AI_ROLES`).
+
+### Extension AI profiles
+
+An extension declares its own model needs as **AI profiles**
+(`ai_profiles:` in `extension.yaml`, [extensions.md](./extensions.md)):
+an id, a description, a required `fallback` built-in role and optional
+`features` (`text | tool_calling | streaming | image`). So
+`oxplow_ai::config::Role` is open: `Builtin(BuiltinRole)` or
+`Profile { extension, name }`, written as one string (`summarize`,
+`effort-review/review`) wherever a person sees it — `ai.yaml`,
+`project.yaml`'s `ai.roles`, Settings, `ai_call.role`, `ai_result.role`.
+
+- **Naming.** Inside its own extension an author writes the bare id (a
+  job request's `role`, a collector's `role=`); the host qualifies it
+  with `Role::parse_in(extension, name)`. A bare name is a built-in or
+  one of *this* extension's profiles: profiles aren't shared.
+- **Resolution** (`AiConfig::resolve(role, profiles)`): a profile's own
+  binding (project over global), else its fallback's. One no active
+  extension declares resolves to nothing — "no active extension declares
+  the AI profile `x/y`" — even if bound; unbound with an unbound fallback
+  is "no model is assigned to the AI profile … or the `summarize` role it
+  falls back to". `AiService` reads the active extensions' profiles
+  through a `ProfilesSource` set after the catalog exists
+  (`set_profiles`; the service is built first), live, like the overrides.
+- **Features** are checked where a model's metadata is discovered anyway:
+  a typed call (`prepare_typed`) on a profile whose bound model reports a
+  needed feature `Unsupported` is refused before its key is read —
+  "AI profile `x/y` needs tool calling, which `m` doesn't support" — and
+  Settings shows the same as the row's `problem`. Unknown support passes.
+- **Profiles are capability, tools are authority.** What a model may call
+  stays on the job (`tools:`, approved by the person, enforced per call by
+  the bus); a profile only picks the model. Rebinding one never changes
+  what a job may do or re-asks its approval. Declaring a profile
+  authorizes nothing: it's reached only through the person's own provider.
+- **The cache needs nothing new.** A recorded computation is keyed by
+  provider and model, the role is an attribute, so rebinding a profile
+  computes afresh and old rows keep their provenance.
+- `extension check` prints each profile and what serves it (bound, or the
+  fallback); `extension test` runs on the throwaway's built-ins, so
+  profiles fall back there.
 
 ## Client
 
@@ -379,13 +421,16 @@ recorded for the key): one question reads one answer; the loser's call
 stays in `v_ai_call`, paid for, with the same `input_hash`. A failed or
 unusable answer is never recorded. Tokens only; no cost.
 
-| op | role | returns |
+Every op takes the `role` it runs on (a built-in or a profile); the
+column is what core's callers and the collector builtins default to.
+
+| op | usual role | returns |
 |---|---|---|
-| `classify(caller, text, labels)` | `decide` (a `choice` question, `CLASSIFY_INSTRUCTIONS`) | `{ label, probabilities }` |
-| `score(caller, text, levels)` | `decide` (a `score` question, levels lowest first, `SCORE_INSTRUCTIONS`) | `{ level, score, probabilities }` |
-| `decide(caller, state, questions)` | `decide` (any named `noul` / `choice` / `score` questions) — MCP `ai_decide` asks it | answers by question name (a reply missing one is refused) |
-| `summarize(caller, text, focus?)` | `summarize` (`summarize_system`) — the one summarize path: MCP `ai_summarize` asks it too | the summary |
-| `extract(caller, instructions, text, schema)` | `main`, JSON mode; the schema is in the system prompt | JSON matching `schema` (checked with `InputValidator`; a mismatch is refused, naming the pointer) |
+| `classify(caller, role, text, labels)` | `decide` (a `choice` question, `CLASSIFY_INSTRUCTIONS`) | `{ label, probabilities }` |
+| `score(caller, role, text, levels)` | `decide` (a `score` question, levels lowest first, `SCORE_INSTRUCTIONS`) | `{ level, score, probabilities }` |
+| `decide(caller, role, state, questions)` | `decide` (any named `noul` / `choice` / `score` questions) — MCP `ai_decide` asks it | answers by question name (a reply missing one is refused) |
+| `summarize(caller, role, text, focus?)` | `summarize` (`summarize_system`) — the one summarize path: MCP `ai_summarize` asks it too | the summary |
+| `extract(caller, role, instructions, text, schema)` | `main`, JSON mode; the schema is in the system prompt | JSON matching `schema` (checked with `InputValidator`; a mismatch is refused, naming the pointer) |
 
 **The version follows the prompt.** There is no version constant to
 bump: an op's request carries its whole prompt — its instructions, its
@@ -406,7 +451,9 @@ record `input_hash` NULL.
 
 An **entity collector** (a starlark derived source) calls `ai_classify(text,
 labels)`, `ai_score(text, levels)`, `ai_summarize(text, focus = None)`
-and `ai_extract(text, schema, instructions = "")` — Starlark builtins
+and `ai_extract(text, schema, instructions = "")`, each with a keyword
+`role=` (defaults `decide`, `decide`, `summarize`, `main`; or one of its
+extension's AI profiles by id, qualified with the run's extension) — Starlark builtins
 (`crates/oxplow-script/src/ai.rs`) answered by the run's
 `AiHost`, one of the services the run was given (`runtime::Hosts`,
 [extensions.md](./extensions.md) "Services"). The host holds
@@ -500,7 +547,12 @@ one signal), `test_ai_provider`.
   the saved one. Remove is refused while a role uses the provider, and
   deletes its key. Test makes one small call with a model you name (a
   `decide` question for Jev); it isn't recorded in `ai_call`.
-- Roles: pick a provider and model per role; "Not assigned" clears it.
+- Roles: the built-ins (their text is `BuiltinRole::description`), then
+  each active extension's AI profiles (`RoleStatus.extension`,
+  `fallback`, `effective`, `problem`), then bindings for profiles nothing
+  declares (a problem, so they can be cleared). Pick a provider and model
+  per role; "Not assigned" clears it, and an unbound profile shows "Falls
+  back to summarize (provider · model)".
 - Recent Calls: the last 7 days of `v_ai_call` by role and caller, read
   with `query_sql`, the same path lenses use.
 

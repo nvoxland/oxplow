@@ -298,34 +298,45 @@ impl RemoteOracle {
 }
 
 impl crate::ai::AiOracle for RemoteOracle {
-    fn classify(&self, text: &str, labels: &[String]) -> Result<Value, String> {
+    fn classify(&self, role: &str, text: &str, labels: &[String]) -> Result<Value, String> {
         self.ask(
             "classify",
-            serde_json::json!({ "text": text, "labels": labels }),
+            serde_json::json!({ "role": role, "text": text, "labels": labels }),
         )
     }
 
-    fn score(&self, text: &str, levels: &[String]) -> Result<Value, String> {
+    fn score(&self, role: &str, text: &str, levels: &[String]) -> Result<Value, String> {
         self.ask(
             "score",
-            serde_json::json!({ "text": text, "levels": levels }),
+            serde_json::json!({ "role": role, "text": text, "levels": levels }),
         )
     }
 
-    fn summarize(&self, text: &str, focus: Option<&str>) -> Result<String, String> {
+    fn summarize(&self, role: &str, text: &str, focus: Option<&str>) -> Result<String, String> {
         match self.ask(
             "summarize",
-            serde_json::json!({ "text": text, "focus": focus }),
+            serde_json::json!({ "role": role, "text": text, "focus": focus }),
         )? {
             Value::String(s) => Ok(s),
             other => Err(format!("a summary should be text, not {other}")),
         }
     }
 
-    fn extract(&self, instructions: &str, text: &str, schema: &Value) -> Result<Value, String> {
+    fn extract(
+        &self,
+        role: &str,
+        instructions: &str,
+        text: &str,
+        schema: &Value,
+    ) -> Result<Value, String> {
         self.ask(
             "extract",
-            serde_json::json!({ "instructions": instructions, "text": text, "schema": schema }),
+            serde_json::json!({
+                "role": role,
+                "instructions": instructions,
+                "text": text,
+                "schema": schema,
+            }),
         )
     }
 }

@@ -101,7 +101,7 @@
     - { name: "model", type: "TEXT", doc: "The model that computed it." }
     - { name: "request_hash", type: "TEXT", doc: "Content hash of the exact request the model was sent (`v_ai_call.request_hash`); a changed prompt is a new result." }
     - { name: "op", type: "TEXT", doc: "`classify`, `score`, `decide`, `summarize` or `extract`." }
-    - { name: "role", type: "TEXT", doc: "The role it ran on (`decide`, `summarize`, `main`)." }
+    - { name: "role", type: "TEXT", doc: "The role it ran on: a built-in (`decide`, `summarize`, `main`) or an extension's AI profile (`acme/review`)." }
     - { name: "caller", type: "TEXT", doc: "What first asked, e.g. `inferred-decisions`, `collector:<owner>/<id>`." }
     - { name: "output_json", type: "TEXT", doc: "The result as JSON." }
     - { name: "input_tokens", type: "INTEGER", doc: "Input tokens of the call that computed it." }

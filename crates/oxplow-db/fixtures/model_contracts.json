@@ -596,7 +596,7 @@
         {
           "name": "role",
           "type": "TEXT",
-          "doc": "The role it ran on (`decide`, `summarize`, `main`)."
+          "doc": "The role it ran on: a built-in (`decide`, `summarize`, `main`) or an extension's AI profile (`acme/review`)."
         },
         {
           "name": "caller",

@@ -127,7 +127,8 @@ pub async fn test_extension_in(
             .and_then(|pin| pin.generation().map(str::to_string))
             .or_else(|| Some(host.svc.extension_catalog.generation(&host.root))),
         imports: crate::import_lines(&checked.extension),
-        profiles: crate::profile_lines(&checked.extension),
+        // The throwaway binds the built-in roles only: profiles fall back.
+        profiles: crate::profile_lines(&checked.extension, &Default::default()),
         contributes: Vec::new(),
         unsupported: Vec::new(),
         left: Vec::new(),

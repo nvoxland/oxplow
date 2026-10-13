@@ -415,7 +415,7 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
         .unwrap();
     svc.ai
         .set_role(
-            Role::Decide,
+            &Role::DECIDE,
             Some(RoleBinding {
                 provider: "m".into(),
                 model: "x".into(),
@@ -641,7 +641,7 @@ async fn the_effort_review_example_reviews_evidence_and_can_be_cancelled() {
         .unwrap();
     svc.ai
         .set_role(
-            Role::Summarize,
+            &Role::SUMMARIZE,
             Some(RoleBinding {
                 provider: "fixture".into(),
                 model: "fixture".into(),
@@ -1011,7 +1011,7 @@ async fn a_review_effort_review_wrote_shows_in_review_badges() {
         .unwrap();
     svc.ai
         .set_role(
-            Role::Summarize,
+            &Role::SUMMARIZE,
             Some(RoleBinding {
                 provider: "fixture".into(),
                 model: "fixture".into(),

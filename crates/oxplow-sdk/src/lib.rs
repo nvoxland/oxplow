@@ -969,6 +969,8 @@ pub struct CheckReport {
     /// The services each of its Starlark scripts uses or declares
     /// (`--services` prints them).
     pub services: Vec<oxplow_app::services::ScriptServices>,
+    /// What serves each of its `ai_profiles:` here ([`profile_lines`]).
+    pub profiles: Vec<String>,
 }
 
 /// The database a check dry-runs an extension's SQL on. It always has one
@@ -1046,6 +1048,7 @@ pub async fn check(
         services: oxplow_app::services::of_extension(&extension, &|file| {
             extensions::read_extension_file(root, name, file)
         }),
+        profiles: profile_lines(&extension, &ai_bindings(root)),
         extension,
         impact,
         against: against.map(str::to_string),
@@ -1156,7 +1159,9 @@ pub fn import_lines(ext: &Extension) -> Vec<String> {
 
 /// One line per `ai_profiles:` entry: what serves it. For now every profile
 /// falls back to its built-in role's model.
-pub fn profile_lines(ext: &Extension) -> Vec<String> {
+/// What serves each of `ext`'s `ai_profiles:` under `ai` (the bindings a
+/// call would use): its own binding, else its fallback role.
+pub fn profile_lines(ext: &Extension, ai: &oxplow_ai::config::AiConfig) -> Vec<String> {
     ext.ai_profiles
         .iter()
         .map(|p| {
@@ -1175,10 +1180,29 @@ pub fn profile_lines(ext: &Extension) -> Vec<String> {
                     .collect();
                 format!(" (needs {})", names.join(", "))
             };
-            let role = format!("{:?}", p.fallback).to_lowercase();
-            format!("ai profile `{}` → falls back to `{role}`{features}", p.id)
+            let role = oxplow_ai::config::Role::Profile {
+                extension: ext.name.clone(),
+                name: p.id.clone(),
+            };
+            let serves = match ai.roles.get(&role) {
+                Some(b) => format!("bound to `{} · {}`", b.provider, b.model),
+                None => format!("falls back to `{}`", p.fallback.name()),
+            };
+            format!("ai profile `{}` → {serves}{features}", p.id)
         })
         .collect()
+}
+
+/// The AI bindings a call from `root` would use: this machine's `ai.yaml`
+/// with the project's `ai.roles` over it. Never a key.
+fn ai_bindings(root: &Path) -> oxplow_ai::config::AiConfig {
+    let global = oxplow_config::global_config_dir()
+        .and_then(|dir| oxplow_ai::config::AiConfig::load(&dir).ok())
+        .unwrap_or_default();
+    let overrides = oxplow_config::load_project_config(root)
+        .map(|c| oxplow_app::ai_service::project_overrides(&c.ai_roles))
+        .unwrap_or_default();
+    global.with_overrides(&overrides)
 }
 
 pub fn render_services(report: &CheckReport) -> String {
@@ -1225,7 +1249,7 @@ pub fn render_findings(report: &CheckReport, format: Format) -> String {
             for i in import_lines(&report.extension) {
                 out.push_str(&format!("import {i}\n"));
             }
-            for line in profile_lines(&report.extension) {
+            for line in &report.profiles {
                 out.push_str(&format!("{line}\n"));
             }
             let sql = match report.dry_run {
@@ -1662,6 +1686,11 @@ mod tests {
             "oxplow/extensions/prof/extension.yaml",
             "manifest: 2\nname: prof\nsharing: private\nintent:\n  purpose: x\n  examples: [{ name: a }]\nai_profiles:\n  - { id: review, description: Reviews., fallback: summarize, features: [tool_calling, streaming] }\n  - { id: plain, description: Plain., fallback: main }\n",
         );
+        write(
+            dir.path(),
+            ".oxplow/project.yaml",
+            "ai:\n  roles:\n    prof/plain: { provider: p, model: big }\n",
+        );
         let report = check(
             dir.path(),
             "prof",
@@ -1680,7 +1709,7 @@ mod tests {
             "{text}"
         );
         assert!(
-            text.contains("ai profile `plain` → falls back to `main`\n"),
+            text.contains("ai profile `plain` → bound to `p · big`\n"),
             "{text}"
         );
     }

@@ -4185,8 +4185,14 @@ the built-in roles `main | summarize | decide` (required), `features` of
 (`ContributionKind::AiProfile`, `RunsOn::Declared`). It is a declaration
 only: the person binds `<extension>/<id>` to a model, else the fallback
 role's model serves it; `features` are what a bound model must support.
-`extension check` and `extension test` print a line per profile
-(`oxplow_sdk::profile_lines`).
+The extension names it by its bare id — a job request's `role`
+(`extension_jobs::enqueue` qualifies it and stores `<ext>/<id>`, refusing
+a name the extension doesn't declare), a collector's `role=` (qualified
+with the run's extension by `CollectorOracle`). `ai_profiles::profiles_of`
+feeds `AiService::set_profiles` from the catalog; resolution, features
+and Settings are [ai-providers.md](./ai-providers.md) "Extension AI
+profiles". `extension check` and `extension test` print a line per
+profile (`oxplow_sdk::profile_lines`: bound, or falling back).
 
 ## Host-owned secret references
 

@@ -707,8 +707,9 @@ to a read-only SQL query:
   schema, instructions = "")` → JSON matching `schema`. Each is recorded
   (`v_ai_result`): the same question on the same text is one model call,
   ever, so a re-sync costs nothing for rows that didn't change. They run
-  on the project's AI roles (`decide`, `summarize`, `main`); with no model
-  assigned the run fails saying which role. A fact collector calls them
+  on the project's AI roles (`decide`, `summarize`, `main`), or on one of
+  your `ai_profiles` with `role = "<id>"`; with no model assigned the run
+  fails saying which role. A fact collector calls them
   when it declares `needs: [ai.compute]`; a command's, an effect's or a
   policy's script never can ("Host services" below). For example, what
   kind of work each turn was:
@@ -819,9 +820,10 @@ effects:
 
 When a job or script needs "a model for X" that a person may want to
 choose, declare `ai_profiles: [{ id, description, fallback: main|summarize|decide,
-features? }]` rather than hard-coding a role; `oxplow extension check`
-shows what serves it. Until a person binds `<extension>/<id>` in Settings →
-AI, the fallback role's model is used.
+features? }]` rather than hard-coding a role, and name it by its id: a job
+request's `role: <id>`, a collector's `ai_classify(..., role = "<id>")`.
+`oxplow extension check` shows what serves it. Until a person binds
+`<extension>/<id>` in Settings → AI, the fallback role's model is used.
 
 ## Replacing a core view
 

@@ -60,7 +60,6 @@ import type {
   LensSpec,
   ProviderConfig,
   RecentProjectView,
-  Role,
   RoleBinding,
   CollectorListing,
   CollectorRunReport,
@@ -88,7 +87,7 @@ import type {
   SqlQueryResult,
 } from "./tauri-bridge/generated/bindings.js";
 
-export type { AiSettings, ProviderConfig, Role, RoleBinding };
+export type { AiSettings, ProviderConfig, RoleBinding };
 export type {
   AcpEvent,
   AcpSnapshot,
@@ -775,7 +774,8 @@ export async function removeAiProvider(id: string): Promise<AiSettings> {
 }
 
 /// Assign a role to a provider + model, or unassign it with null.
-export async function setAiRole(role: Role, binding: RoleBinding | null): Promise<AiSettings> {
+/// `role` is a built-in (`summarize`) or an extension's AI profile (`acme/review`).
+export async function setAiRole(role: string, binding: RoleBinding | null): Promise<AiSettings> {
   return unwrap(await commands.setAiRole(role, binding));
 }
 

@@ -420,16 +420,18 @@ impl Answering<'_> {
 
 fn ask(oracle: &dyn AiOracle, op: &str, args: &Value) -> Result<Value, String> {
     let text = args["text"].as_str().unwrap_or_default();
+    let role = args["role"].as_str().unwrap_or_default();
     let strings = |key: &str| -> Vec<String> {
         serde_json::from_value(args[key].clone()).unwrap_or_default()
     };
     match op {
-        "classify" => oracle.classify(text, &strings("labels")),
-        "score" => oracle.score(text, &strings("levels")),
+        "classify" => oracle.classify(role, text, &strings("labels")),
+        "score" => oracle.score(role, text, &strings("levels")),
         "summarize" => oracle
-            .summarize(text, args["focus"].as_str())
+            .summarize(role, text, args["focus"].as_str())
             .map(Value::String),
         "extract" => oracle.extract(
+            role,
             args["instructions"].as_str().unwrap_or_default(),
             text,
             &args["schema"],

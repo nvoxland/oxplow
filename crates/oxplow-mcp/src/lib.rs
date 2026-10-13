@@ -998,13 +998,14 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "List oxplow's AI roles (main, fast, summarize, embed, decide, review): \
-                       which provider and model each uses, or none, plus the configured \
-                       providers and whether each has a key. Keys are never shown. The person \
-                       manages these in Settings → AI."
+        description = "List oxplow's AI roles — the built-ins (main, summarize, decide), then \
+                       each active extension's AI profiles (`<extension>/<name>`, with the role \
+                       it falls back to): which provider and model each is bound to and would \
+                       use now, or none, plus the configured providers and whether each has a \
+                       key. Keys are never shown. The person manages these in Settings → AI."
     )]
     async fn list_ai_roles(&self) -> Result<CallToolResult, McpError> {
-        json_result(&self.services.ai.settings_pinned().await.map_err(ai_error)?)
+        json_result(&self.services.ai.settings().await.map_err(ai_error)?)
     }
 
     #[tool(
@@ -1052,7 +1053,12 @@ impl OxplowMcp {
         let decision = self
             .services
             .ai_compute
-            .decide(caller.as_str(), &p.state, &questions)
+            .decide(
+                caller.as_str(),
+                &oxplow_app::ai_service::Role::DECIDE,
+                &p.state,
+                &questions,
+            )
             .await
             .map_err(compute_error)?;
         json_result(&serde_json::json!({
@@ -1078,7 +1084,12 @@ impl OxplowMcp {
         let summary = self
             .services
             .ai_compute
-            .summarize(caller.as_str(), &p.text, p.focus.as_deref())
+            .summarize(
+                caller.as_str(),
+                &oxplow_app::ai_service::Role::SUMMARIZE,
+                &p.text,
+                p.focus.as_deref(),
+            )
             .await
             .map_err(compute_error)?;
         Ok(CallToolResult::success(vec![ContentBlock::text(
@@ -5052,7 +5063,7 @@ mod tests {
         services
             .ai
             .set_role(
-                role,
+                &role,
                 Some(RoleBinding {
                     provider: "mock".into(),
                     model: "m".into(),

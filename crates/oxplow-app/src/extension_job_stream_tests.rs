@@ -72,7 +72,7 @@ pub(super) async fn prepare(
         .unwrap();
     svc.ai
         .set_role(
-            Role::Summarize,
+            &Role::SUMMARIZE,
             Some(RoleBinding {
                 provider: "fixture".into(),
                 model: "fixture".into(),

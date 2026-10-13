@@ -164,11 +164,9 @@ impl ExtensionJobs {
         if input.intent_key.len() > 128 || input.job.len() > 256 {
             return Err(invalid("invalid job declaration or intent key"));
         }
-        let request = TypedAiJobRequest::from_value(&input.request)
-            .map_err(|_| invalid("invalid typed AI job input"))?;
         let intent_key = IntentKey::new(input.intent_key.clone())
             .map_err(|_| invalid("invalid job intent key"))?;
-        let (owner, operation, policy) = self
+        let (owner, operation, policy, profiles) = self
             .ownership
             .with_owner(ctx.run, "jobs.write", |extension| {
                 extension
@@ -193,11 +191,19 @@ impl ExtensionJobs {
                             },
                             job.operation.as_str().to_owned(),
                             replay(job.replay),
+                            extension
+                                .ai_profiles
+                                .iter()
+                                .map(|p| p.id.clone())
+                                .collect::<Vec<_>>(),
                         )
                     })
             })
             .map_err(|_| denied("job scheduling authority is unavailable"))?
             .ok_or_else(|| invalid("declared job is unavailable"))?;
+        let request = qualify_role(&input.request, &owner.contribution.extension, &profiles)?;
+        let request = TypedAiJobRequest::from_value(&request)
+            .map_err(|_| invalid("invalid typed AI job input"))?;
         self.operations
             .snapshot()
             .find(&owner, &operation)
@@ -524,6 +530,44 @@ fn denied(message: &str) -> CommandError {
         reason: message.into(),
     }
 }
+/// `request` with its `role` as the job's extension means it: a built-in
+/// role, or the bare id of one of its own `ai_profiles`, stored qualified
+/// (`<extension>/<id>`) so the run resolves it without the manifest.
+fn qualify_role(
+    request: &Value,
+    extension: &str,
+    profiles: &[String],
+) -> Result<Value, CommandError> {
+    let refused = || {
+        let declared = if profiles.is_empty() {
+            "it declares none".to_string()
+        } else {
+            profiles
+                .iter()
+                .map(|p| format!("`{p}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        invalid(&format!(
+            "`role` is `main`, `summarize`, `decide` or one of this extension's `ai_profiles` \
+             ({declared})"
+        ))
+    };
+    let mut request = request.clone();
+    let Some(role) = request.get_mut("role") else {
+        return Ok(request);
+    };
+    let name = role.as_str().ok_or_else(refused)?;
+    let qualified = oxplow_ai::config::Role::parse_in(extension, name).map_err(|_| refused())?;
+    if let oxplow_ai::config::Role::Profile { name, .. } = &qualified {
+        if !profiles.contains(name) {
+            return Err(refused());
+        }
+    }
+    *role = Value::String(qualified.to_string());
+    Ok(request)
+}
+
 fn invalid(message: &str) -> CommandError {
     CommandError::Invalid {
         field: None,

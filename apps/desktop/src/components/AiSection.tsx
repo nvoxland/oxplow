@@ -18,7 +18,6 @@ import {
   setAiRole,
   testAiProvider,
   type AiSettings,
-  type Role,
 } from "../api.js";
 import {
   emptyProviderForm,
@@ -75,7 +74,10 @@ export function AiSection() {
       <ProviderEditor settings={settings} onSaved={setSettings} />
 
       <h3 style={subheadStyle}>Roles</h3>
-      <div style={mutedStyle}>Oxplow and extensions ask for a role, never a model. Assign each role you want to use.</div>
+      <div style={mutedStyle}>
+        Oxplow and extensions ask for a role, never a model. An extension&apos;s own roles (its AI profiles) use the role they
+        fall back to until you assign one.
+      </div>
       <ul style={listStyle}>
         {roleRows(settings).map((row) => (
           <RoleRowEditor key={row.role} settings={settings} role={row.role} onSaved={setSettings} />
@@ -287,7 +289,7 @@ function ProviderEditor({ settings, onSaved }: { settings: AiSettings; onSaved(s
   );
 }
 
-function RoleRowEditor({ settings, role, onSaved }: { settings: AiSettings; role: Role; onSaved(s: AiSettings): void }) {
+function RoleRowEditor({ settings, role, onSaved }: { settings: AiSettings; role: string; onSaved(s: AiSettings): void }) {
   const row = roleRows(settings).find((r) => r.role === role)!;
   const binding = settings.roles.find((r) => r.role === role)?.binding ?? null;
   const [provider, setProvider] = useState(binding?.provider ?? "");
@@ -329,7 +331,9 @@ function RoleRowEditor({ settings, role, onSaved }: { settings: AiSettings; role
           }
         }}
       >
-        <strong style={{ width: 90 }}>{role}</strong>
+        <strong style={{ minWidth: 90 }} title={row.extension ? `Declared by the ${row.extension} extension` : undefined}>
+          {role}
+        </strong>
         <span style={{ ...mutedStyle, flex: 1, minWidth: 160 }}>
           {row.usedFor}
           {row.note ? ` · ${row.note}` : ""}

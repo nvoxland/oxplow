@@ -63,8 +63,8 @@ impl TypedAiJobRequest {
         })
     }
 
-    pub fn role(&self) -> Role {
-        self.role
+    pub fn role(&self) -> &Role {
+        &self.role
     }
 
     /// The tools its request declares (a job that declares its own takes

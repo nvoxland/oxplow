@@ -1,7 +1,7 @@
 /// Pure view-model for the Settings → AI section (`AiSection.tsx`).
 /// See `.context/ai-providers.md`.
 
-import type { AiSettings, ProviderKindInfo, Role, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
+import type { AiSettings, ProviderKindInfo, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 
 /// `kind` is a registered provider kind (`AiSettings.kinds`).
 export type ProviderForm = { id: string; kind: string; baseUrl: string; key: string; editing: boolean };
@@ -28,15 +28,12 @@ export function providerFormError(form: ProviderForm, settings: AiSettings): str
   return null;
 }
 
-const USED_FOR: Record<Role, string> = {
-  main: "General reasoning: extracting structured answers, such as an effort's inferred decisions",
-  summarize: "Summaries of sessions, efforts and changes",
-  decide: "Typed yes/no, choice and score questions (e.g. Jev)",
-};
-
 export type RoleRow = {
-  role: Role;
+  /// A built-in (`summarize`) or an extension's profile (`acme/review`).
+  role: string;
   usedFor: string;
+  /// The extension declaring a profile; null for a built-in role.
+  extension: string | null;
   /// `provider · model`, or null when unassigned.
   assigned: string | null;
   problem: string | null;
@@ -50,12 +47,19 @@ export type RoleRow = {
 
 export function roleRows(settings: AiSettings): RoleRow[] {
   const ids = new Set(settings.providers.map((p) => p.id));
+  const shown = (b: { provider: string; model: string }) => `${b.provider} · ${b.model}`;
   return settings.roles.map((r) => ({
     role: r.role,
-    usedFor: USED_FOR[r.role],
-    assigned: r.binding ? `${r.binding.provider} · ${r.binding.model}` : null,
-    problem: r.binding && !ids.has(r.binding.provider) ? `AI provider ${r.binding.provider} isn't set up.` : null,
-    note: r.overridden ? "Set by this project" : null,
+    usedFor: r.description,
+    extension: r.extension,
+    assigned: r.binding ? shown(r.binding) : null,
+    problem:
+      r.binding && !ids.has(r.binding.provider) ? `AI provider ${r.binding.provider} isn't set up.` : r.problem,
+    note: r.overridden
+      ? "Set by this project"
+      : !r.binding && r.fallback
+        ? `Falls back to ${r.fallback}${r.effective ? ` (${shown(r.effective)})` : ""}`
+        : null,
     editable: !r.overridden,
     lockedReason: r.overridden ? "This project sets this role in .oxplow/project.yaml (ai.roles); change it there." : null,
   }));

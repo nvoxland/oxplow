@@ -7,12 +7,15 @@
 //! no `ai_call` row — so a computation is paid for once and reads stay
 //! deterministic. Tokens only; there is no cost.
 //!
-//! - `classify(caller, text, labels)` and `score(caller, text, levels)`
-//!   ask the `decide` role a typed question, and `decide(caller, state,
-//!   questions)` asks it any set of them;
-//! - `summarize(caller, text, focus)` runs on the `summarize` role;
-//! - `extract(caller, instructions, text, schema)` asks the `main` role
-//!   for JSON matching `schema`, and refuses a reply that doesn't.
+//! Each runs on the role its caller names — a built-in or an extension's
+//! AI profile (the collector builtins default to `decide`, `summarize`
+//! and `main`):
+//! - `classify(caller, role, text, labels)` and `score(…, levels)` ask a
+//!   typed question, and `decide(caller, role, state, questions)` asks
+//!   any set of them;
+//! - `summarize(caller, role, text, focus)` summarizes;
+//! - `extract(caller, role, instructions, text, schema)` asks for JSON
+//!   matching `schema`, and refuses a reply that doesn't.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -136,7 +139,7 @@ impl<'a> From<&'a str> for Caller<'a> {
 /// request it sends, on which role, for whom.
 struct Op<'a> {
     name: &'static str,
-    role: Role,
+    role: &'a Role,
     caller: Caller<'a>,
     args: Value,
     request: ModelRequest<'a>,
@@ -148,7 +151,7 @@ impl AiCompute {
     }
 
     /// The model `role` is bound to now: what a job's request names.
-    pub(crate) fn model_for(&self, role: Role) -> Result<String, AiComputeError> {
+    pub(crate) fn model_for(&self, role: &Role) -> Result<String, AiComputeError> {
         Ok(self.ai.binding_for(role)?.model)
     }
 
@@ -158,7 +161,7 @@ impl AiCompute {
     pub(crate) async fn stream_job_round(
         &self,
         run: &oxplow_domain::run::RunContext,
-        role: Role,
+        role: &Role,
         request: &TypedRequestV1,
         on_delta: oxplow_ai::client::OnDelta<'_>,
     ) -> Result<Recorded<TypedResponseV1>, AiComputeError> {
@@ -246,7 +249,7 @@ impl AiCompute {
                 model: binding.model,
                 request_hash,
                 op: op.name.into(),
-                role: crate::ai_service::role_name(op.role),
+                role: op.role.to_string(),
                 caller: op.caller.name.into(),
                 output: serde_json::to_value(&value).expect("result serializes"),
                 input_tokens,
@@ -269,7 +272,7 @@ impl AiCompute {
     pub async fn complete_typed(
         &self,
         caller: impl Into<Caller<'_>>,
-        role: Role,
+        role: &Role,
         request: &TypedRequestV1,
     ) -> Result<Recorded<TypedResponseV1>, AiComputeError> {
         request
@@ -302,7 +305,7 @@ impl AiCompute {
     pub async fn stream_typed(
         &self,
         caller: impl Into<Caller<'_>>,
-        role: Role,
+        role: &Role,
         request: &TypedRequestV1,
         cancel: &oxplow_ai::client::Cancel,
         on_delta: oxplow_ai::client::OnDelta<'_>,
@@ -342,10 +345,12 @@ impl AiCompute {
         Ok(recorded)
     }
 
-    /// Which of `labels` fits `text` (the `decide` role).
+    /// Which of `labels` fits `text` (asked as a typed choice; the
+    /// `decide` role unless the caller names another).
     pub async fn classify(
         &self,
         caller: impl Into<Caller<'_>>,
+        role: &Role,
         text: &str,
         labels: &[String],
     ) -> Result<Recorded<Classification>, AiComputeError> {
@@ -359,7 +364,7 @@ impl AiCompute {
         )]);
         let op = Op {
             name: "classify",
-            role: Role::Decide,
+            role,
             caller,
             args: json!({ "text": text, "labels": labels }),
             request: ModelRequest::Decide {
@@ -371,7 +376,7 @@ impl AiCompute {
         self.recorded(op, |hash| async move {
             let (decision, call) = self
                 .ai
-                .decide_as(Role::Decide, site(caller, &hash), text, questions)
+                .decide_as(role, site(caller, &hash), text, questions)
                 .await?;
             match decision.answers.get("label") {
                 Some(Answer::Choice {
@@ -394,10 +399,11 @@ impl AiCompute {
         .await
     }
 
-    /// Where `text` sits on `levels`, lowest first (the `decide` role).
+    /// Where `text` sits on `levels`, lowest first (a typed score).
     pub async fn score(
         &self,
         caller: impl Into<Caller<'_>>,
+        role: &Role,
         text: &str,
         levels: &[String],
     ) -> Result<Recorded<Scored>, AiComputeError> {
@@ -411,7 +417,7 @@ impl AiCompute {
         )]);
         let op = Op {
             name: "score",
-            role: Role::Decide,
+            role,
             caller,
             args: json!({ "text": text, "levels": levels }),
             request: ModelRequest::Decide {
@@ -423,7 +429,7 @@ impl AiCompute {
         self.recorded(op, |hash| async move {
             let (decision, call) = self
                 .ai
-                .decide_as(Role::Decide, site(caller, &hash), text, questions)
+                .decide_as(role, site(caller, &hash), text, questions)
                 .await?;
             match decision.answers.get("score") {
                 Some(Answer::Score {
@@ -450,18 +456,18 @@ impl AiCompute {
         .await
     }
 
-    /// Answers to typed `questions` about `state` (the `decide` role), by
-    /// question name. A reply missing an answer is refused.
+    /// Answers to typed `questions` about `state`, by question name. A reply missing an answer is refused.
     pub async fn decide(
         &self,
         caller: impl Into<Caller<'_>>,
+        role: &Role,
         state: &str,
         questions: &BTreeMap<String, Question>,
     ) -> Result<Recorded<BTreeMap<String, Answer>>, AiComputeError> {
         let caller = caller.into();
         let op = Op {
             name: "decide",
-            role: Role::Decide,
+            role,
             caller,
             args: json!({ "state": state, "questions": questions }),
             request: ModelRequest::Decide { state, questions },
@@ -469,7 +475,7 @@ impl AiCompute {
         self.recorded(op, |hash| async move {
             let (decision, call) = self
                 .ai
-                .decide_as(Role::Decide, site(caller, &hash), state, questions)
+                .decide_as(role, site(caller, &hash), state, questions)
                 .await?;
             if let Some(missing) = questions
                 .keys()
@@ -489,10 +495,11 @@ impl AiCompute {
         .await
     }
 
-    /// A summary of `text` (the `summarize` role), focused on `focus`.
+    /// A summary of `text`, focused on `focus`.
     pub async fn summarize(
         &self,
         caller: impl Into<Caller<'_>>,
+        role: &Role,
         text: &str,
         focus: Option<&str>,
     ) -> Result<Recorded<String>, AiComputeError> {
@@ -500,7 +507,7 @@ impl AiCompute {
         let system = crate::ai_service::summarize_system(focus);
         let op = Op {
             name: "summarize",
-            role: Role::Summarize,
+            role,
             caller,
             args: json!({ "text": text, "focus": focus }),
             request: ModelRequest::Complete {
@@ -513,13 +520,7 @@ impl AiCompute {
         self.recorded(op, |hash| async move {
             let (c, call) = self
                 .ai
-                .complete_as(
-                    Role::Summarize,
-                    site(caller, &hash),
-                    Some(system),
-                    text,
-                    false,
-                )
+                .complete_as(role, site(caller, &hash), Some(system), text, false)
                 .await?;
             Ok((
                 c.text.trim().to_string(),
@@ -531,12 +532,13 @@ impl AiCompute {
         .await
     }
 
-    /// JSON matching `schema` from `text`, as `instructions` ask (the
-    /// `main` role, in JSON mode). A reply that isn't JSON, or doesn't
+    /// JSON matching `schema` from `text`, as `instructions` ask (in JSON
+    /// mode). A reply that isn't JSON, or doesn't
     /// match, is refused and not recorded.
     pub async fn extract(
         &self,
         caller: impl Into<Caller<'_>>,
+        role: &Role,
         instructions: &str,
         text: &str,
         schema: &Value,
@@ -546,7 +548,7 @@ impl AiCompute {
             format!("{instructions}\n\nReply with JSON only, matching this JSON Schema:\n{schema}");
         let op = Op {
             name: "extract",
-            role: Role::Main,
+            role,
             caller,
             args: json!({ "instructions": instructions, "text": text, "schema": schema }),
             request: ModelRequest::Complete {
@@ -562,7 +564,7 @@ impl AiCompute {
             })?;
             let (c, call) = self
                 .ai
-                .complete_as(Role::Main, site(caller, &hash), Some(system), text, true)
+                .complete_as(role, site(caller, &hash), Some(system), text, true)
                 .await?;
             let value = parse_json_reply(&c.text)?;
             if let Err(oxplow_domain::CommandError::Invalid { field, message }) =
@@ -610,6 +612,15 @@ impl CollectorOracle {
         Caller {
             name: &self.caller,
             run: Some(self.run.run().as_str()),
+        }
+    }
+
+    /// `role` as the collector's own extension means it: a built-in, or
+    /// the bare name of one of its AI profiles.
+    fn role(&self, role: &str) -> Result<Role, String> {
+        match self.run.extension() {
+            Some(extension) => Role::parse_in(extension, role),
+            None => Role::parse(role),
         }
     }
 
@@ -667,13 +678,13 @@ impl CollectorOracle {
 
 impl oxplow_script::AiOracle for CollectorOracle {
     fn capabilities(&self, role: &str) -> Result<Value, String> {
-        let role = serde_json::from_value(Value::String(role.into())).map_err(|e| e.to_string())?;
-        self.metadata(self.compute.ai.capabilities(role))
+        let role = self.role(role)?;
+        self.metadata(self.compute.ai.capabilities(&role))
     }
 
     fn models(&self, role: &str) -> Result<Value, String> {
-        let role = serde_json::from_value(Value::String(role.into())).map_err(|e| e.to_string())?;
-        self.metadata(self.compute.ai.models(role))
+        let role = self.role(role)?;
+        self.metadata(self.compute.ai.models(&role))
     }
 
     fn complete_typed(&self, role: &str, mut request: Value) -> Result<Value, String> {
@@ -682,7 +693,7 @@ impl oxplow_script::AiOracle for CollectorOracle {
         {
             return Err(reason);
         }
-        let role = serde_json::from_value(Value::String(role.into())).map_err(|e| e.to_string())?;
+        let role = self.role(role)?;
         let fields = request
             .as_object_mut()
             .ok_or("typed request must be an object")?;
@@ -690,7 +701,7 @@ impl oxplow_script::AiOracle for CollectorOracle {
             return Err("a collector selects an AI role, not a model".into());
         }
         self.run(async {
-            let binding = self.compute.ai.binding_for(role)?;
+            let binding = self.compute.ai.binding_for(&role)?;
             // Resolve the role inside the same captured AI configuration as
             // cache lookup, provider invocation and result attribution.
             request
@@ -700,28 +711,38 @@ impl oxplow_script::AiOracle for CollectorOracle {
             let request = serde_json::from_value(request)
                 .map_err(|_| AiComputeError::BadOutput("invalid typed request".into()))?;
             self.compute
-                .complete_typed(self.caller(), role, &request)
+                .complete_typed(self.caller(), &role, &request)
                 .await
         })
     }
 
-    fn classify(&self, text: &str, labels: &[String]) -> Result<Value, String> {
-        self.run(self.compute.classify(self.caller(), text, labels))
+    fn classify(&self, role: &str, text: &str, labels: &[String]) -> Result<Value, String> {
+        let role = self.role(role)?;
+        self.run(self.compute.classify(self.caller(), &role, text, labels))
     }
 
-    fn score(&self, text: &str, levels: &[String]) -> Result<Value, String> {
-        self.run(self.compute.score(self.caller(), text, levels))
+    fn score(&self, role: &str, text: &str, levels: &[String]) -> Result<Value, String> {
+        let role = self.role(role)?;
+        self.run(self.compute.score(self.caller(), &role, text, levels))
     }
 
-    fn summarize(&self, text: &str, focus: Option<&str>) -> Result<String, String> {
-        self.run(self.compute.summarize(self.caller(), text, focus))
+    fn summarize(&self, role: &str, text: &str, focus: Option<&str>) -> Result<String, String> {
+        let role = self.role(role)?;
+        self.run(self.compute.summarize(self.caller(), &role, text, focus))
             .map(|v| v.as_str().unwrap_or_default().to_string())
     }
 
-    fn extract(&self, instructions: &str, text: &str, schema: &Value) -> Result<Value, String> {
+    fn extract(
+        &self,
+        role: &str,
+        instructions: &str,
+        text: &str,
+        schema: &Value,
+    ) -> Result<Value, String> {
+        let role = self.role(role)?;
         self.run(
             self.compute
-                .extract(self.caller(), instructions, text, schema),
+                .extract(self.caller(), &role, instructions, text, schema),
         )
     }
 }
@@ -771,7 +792,7 @@ mod tests {
             .unwrap();
         svc.ai
             .set_role(
-                role,
+                &role,
                 Some(RoleBinding {
                     provider: provider.into(),
                     model: "x".into(),
@@ -805,11 +826,11 @@ mod tests {
     #[tokio::test]
     async fn the_same_computation_twice_is_one_call_and_a_cached_result() {
         let fx = crate::test_fixtures::services_with_effort().await;
-        with_model(&fx.svc, Role::Summarize, chat("  A short summary.  ")).await;
+        with_model(&fx.svc, Role::SUMMARIZE, chat("  A short summary.  ")).await;
         let first = fx
             .svc
             .ai_compute
-            .summarize("test", "a long text", None)
+            .summarize("test", &Role::SUMMARIZE, "a long text", None)
             .await
             .unwrap();
         assert_eq!(first.value, "A short summary.");
@@ -818,7 +839,7 @@ mod tests {
         let second = fx
             .svc
             .ai_compute
-            .summarize("test", "a long text", None)
+            .summarize("test", &Role::SUMMARIZE, "a long text", None)
             .await
             .unwrap();
         assert!(second.cached);
@@ -865,7 +886,7 @@ mod tests {
         let other = fx
             .svc
             .ai_compute
-            .summarize("test", "a long text", Some("risks"))
+            .summarize("test", &Role::SUMMARIZE, "a long text", Some("risks"))
             .await
             .unwrap();
         assert!(!other.cached);
@@ -879,7 +900,7 @@ mod tests {
     async fn decide_is_a_recorded_computation() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let reply = json!({ "answers": { "risky": { "type": "noul", "probability": 0.8 } } });
-        with_model(&fx.svc, Role::Decide, chat(&reply.to_string())).await;
+        with_model(&fx.svc, Role::DECIDE, chat(&reply.to_string())).await;
         let questions = BTreeMap::from([(
             "risky".to_string(),
             Question::Noul {
@@ -890,7 +911,7 @@ mod tests {
             let out = fx
                 .svc
                 .ai_compute
-                .decide("thread:thr1", "a diff", &questions)
+                .decide("thread:thr1", &Role::DECIDE, "a diff", &questions)
                 .await
                 .unwrap();
             assert_eq!(out.cached, cached);
@@ -912,7 +933,7 @@ mod tests {
         let err = fx
             .svc
             .ai_compute
-            .decide("thread:thr1", "a diff", &more)
+            .decide("thread:thr1", &Role::DECIDE, "a diff", &more)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("`big`"), "{err}");
@@ -923,19 +944,19 @@ mod tests {
     #[tokio::test]
     async fn another_provider_of_the_same_model_computes_afresh() {
         let fx = crate::test_fixtures::services_with_effort().await;
-        with_provider(&fx.svc, Role::Summarize, "local", chat("local says")).await;
+        with_provider(&fx.svc, Role::SUMMARIZE, "local", chat("local says")).await;
         let local = fx
             .svc
             .ai_compute
-            .summarize("test", "t", None)
+            .summarize("test", &Role::SUMMARIZE, "t", None)
             .await
             .unwrap();
         assert_eq!(local.value, "local says");
-        with_provider(&fx.svc, Role::Summarize, "hosted", chat("hosted says")).await;
+        with_provider(&fx.svc, Role::SUMMARIZE, "hosted", chat("hosted says")).await;
         let hosted = fx
             .svc
             .ai_compute
-            .summarize("test", "t", None)
+            .summarize("test", &Role::SUMMARIZE, "t", None)
             .await
             .unwrap();
         assert!(!hosted.cached);
@@ -943,7 +964,7 @@ mod tests {
         fx.svc
             .ai
             .set_role(
-                Role::Summarize,
+                &Role::SUMMARIZE,
                 Some(RoleBinding {
                     provider: "local".into(),
                     model: "x".into(),
@@ -953,7 +974,7 @@ mod tests {
         let again = fx
             .svc
             .ai_compute
-            .summarize("test", "t", None)
+            .summarize("test", &Role::SUMMARIZE, "t", None)
             .await
             .unwrap();
         assert!(again.cached);
@@ -966,7 +987,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_effort().await;
         with_model(
             &fx.svc,
-            Role::Main,
+            Role::MAIN,
             chat("```json\n{\"n\": \"three\"}\n```"),
         )
         .await;
@@ -974,7 +995,7 @@ mod tests {
         let refused = fx
             .svc
             .ai_compute
-            .extract("test", "Count them.", "one two three", &schema)
+            .extract("test", &Role::MAIN, "Count them.", "one two three", &schema)
             .await
             .unwrap_err();
         assert!(refused.to_string().contains("`/n`"), "{refused}");
@@ -1026,12 +1047,12 @@ mod tests {
             "tool_calls": [{ "id": "c1", "type": "function",
                              "function": { "name": "grep", "arguments": "{\"q\":\"x\"}" } }] } }],
             "usage": { "prompt_tokens": 7, "completion_tokens": 3 } });
-        with_model(&fx.svc, Role::Summarize, reply).await;
+        with_model(&fx.svc, Role::SUMMARIZE, reply).await;
         let request = typed_request("find x");
         let first = fx
             .svc
             .ai_compute
-            .complete_typed("test", Role::Summarize, &request)
+            .complete_typed("test", &Role::SUMMARIZE, &request)
             .await
             .unwrap();
         assert!(!first.cached);
@@ -1045,7 +1066,7 @@ mod tests {
         let second = fx
             .svc
             .ai_compute
-            .complete_typed("test", Role::Summarize, &request)
+            .complete_typed("test", &Role::SUMMARIZE, &request)
             .await
             .unwrap();
         assert!(second.cached);
@@ -1075,7 +1096,7 @@ mod tests {
         let other = fx
             .svc
             .ai_compute
-            .complete_typed("test", Role::Summarize, &typed_request("find y"))
+            .complete_typed("test", &Role::SUMMARIZE, &typed_request("find y"))
             .await
             .unwrap();
         assert!(!other.cached);
@@ -1087,7 +1108,7 @@ mod tests {
     async fn a_typed_completion_refuses_images_and_unknown_versions() {
         use oxplow_ai::parts::PartV1;
         let fx = crate::test_fixtures::services_with_effort().await;
-        with_model(&fx.svc, Role::Summarize, chat("never sent")).await;
+        with_model(&fx.svc, Role::SUMMARIZE, chat("never sent")).await;
         let mut with_image = typed_request("see");
         with_image.messages[0].parts.push(PartV1::Image {
             asset_ref: "asset:1".into(),
@@ -1096,7 +1117,7 @@ mod tests {
         let err = fx
             .svc
             .ai_compute
-            .complete_typed("test", Role::Summarize, &with_image)
+            .complete_typed("test", &Role::SUMMARIZE, &with_image)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("imageAssetResolution"), "{err}");
@@ -1107,7 +1128,7 @@ mod tests {
         let err = fx
             .svc
             .ai_compute
-            .complete_typed("test", Role::Summarize, &stale)
+            .complete_typed("test", &Role::SUMMARIZE, &stale)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("schemaVersion 2"), "{err}");

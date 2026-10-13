@@ -14,7 +14,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use oxplow_ai::config::{ProviderConfig, Role, RoleBinding};
+use oxplow_ai::config::{BuiltinRole, ProviderConfig, RoleBinding};
 use oxplow_app::extensions::EXTENSIONS_DIR;
 use oxplow_app::providers::host::HostEnv;
 
@@ -113,11 +113,11 @@ impl Host {
                 None,
             )
             .map_err(|e| e.to_string())?;
-        for role in Role::ALL {
+        for role in BuiltinRole::ALL {
             self.svc
                 .ai
                 .set_role(
-                    role,
+                    &role.into(),
                     Some(RoleBinding {
                         provider: FIXTURE_INSTANCE.into(),
                         model: FIXTURE_INSTANCE.into(),

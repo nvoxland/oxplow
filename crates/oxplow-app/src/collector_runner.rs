@@ -3338,7 +3338,8 @@ pub(crate) mod tests {
     }
 
     /// A derived source's `ai_classify` is a recorded computation — six
-    /// calls on one text, one model call, recorded as the source. A script
+    /// calls on one text, one model call, recorded as the source, on the
+    /// AI profile it names (bound to its own model). A script
     /// that calls a model spends the person's key each run, so it is a
     /// program they approve, like an exec one: until then it is refused,
     /// listed unapproved, and asks nothing.
@@ -3350,10 +3351,10 @@ pub(crate) mod tests {
         extension(
             root.path(),
             "work",
-            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: kind.star\n    input: \"SELECT ref, title FROM v_work_item\"\n    entities:\n      - { name: kind, key: ref, columns: { ref: text, kind: text } }\n",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\nai_profiles:\n  - { id: sort, description: Sorts., fallback: decide }\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: kind.star\n    input: \"SELECT ref, title FROM v_work_item\"\n    entities:\n      - { name: kind, key: ref, columns: { ref: text, kind: text } }\n",
             &[(
                 "kind.star",
-                "def transform(input):\n    rows = []\n    for r in input[\"rows\"]:\n        a = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"])\n        b = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"])\n        rows.append({\"ref\": r[\"ref\"], \"kind\": a[\"label\"] if a == b else \"differs\"})\n    return {\"entities\": {\"kind\": rows}}\n",
+                "def transform(input):\n    rows = []\n    for r in input[\"rows\"]:\n        a = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"], role = \"sort\")\n        b = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"], role = \"sort\")\n        rows.append({\"ref\": r[\"ref\"], \"kind\": a[\"label\"] if a == b else \"differs\"})\n    return {\"entities\": {\"kind\": rows}}\n",
             )],
         );
         let db = task_db().await;
@@ -3386,13 +3387,30 @@ pub(crate) mod tests {
         )
         .unwrap();
         ai.set_role(
-            Role::Decide,
+            &Role::DECIDE,
             Some(RoleBinding {
                 provider: "m".into(),
                 model: "x".into(),
             }),
         )
         .unwrap();
+        ai.set_role(
+            &Role::parse("work/sort").unwrap(),
+            Some(RoleBinding {
+                provider: "m".into(),
+                model: "y".into(),
+            }),
+        )
+        .unwrap();
+        ai.set_profiles(std::sync::Arc::new(|| {
+            vec![oxplow_ai::config::AiProfile {
+                extension: "work".into(),
+                name: "sort".into(),
+                description: "Sorts.".into(),
+                fallback: oxplow_ai::config::BuiltinRole::Decide,
+                features: vec![],
+            }]
+        }));
         let store = SqliteCollectorStore::new(db.clone());
         let secrets = oxplow_ai::secrets::MemorySecrets::default();
         let ctx = Collectors {
@@ -3444,7 +3462,7 @@ pub(crate) mod tests {
             .query_sql(
                 "SELECT (SELECT group_concat(DISTINCT kind) FROM v_work_kind), \
                         (SELECT count(*) FROM v_ai_call), (SELECT caller FROM v_ai_call), \
-                        (SELECT op || ' ' || role FROM v_ai_result)",
+                        (SELECT op || ' ' || role || ' ' || model FROM v_ai_result)",
                 vec![],
                 None,
             )
@@ -3452,7 +3470,7 @@ pub(crate) mod tests {
             .unwrap();
         assert_eq!(
             serde_json::to_value(&out.rows).unwrap(),
-            json!([["bug", 1, "collector:work/star", "classify decide"]])
+            json!([["bug", 1, "collector:work/star", "classify work/sort y"]])
         );
     }
 

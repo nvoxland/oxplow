@@ -340,7 +340,7 @@ pub async fn live(
             },
         )]);
         match ai
-            .decide(Role::Decide, "answerability", &state, &questions)
+            .decide(&Role::DECIDE, "answerability", &state, &questions)
             .await
         {
             Ok(d) => {

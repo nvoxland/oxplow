@@ -347,8 +347,9 @@ commands:
 ```
 
 `enqueue` takes `{job, intentKey, request}`. For this operation, `request`
-is `{schemaVersion: 1, role, messages, tools?}`; the host chooses the model
-for the role, and a job that declares `tools` takes none here. The request
+is `{schemaVersion: 1, role, messages, tools?}`: `role` is `main`,
+`summarize`, `decide` or the id of one of your `ai_profiles`; the host
+chooses the model for it, and a job that declares `tools` takes none here. The request
 is private and limited to 1 MiB and 64 nesting levels. `cancel` and
 `snapshot` take `{id}`. The `intentKey` is what the job is about, one job
 per key: asking again with it returns the same job. Put the subject in it
@@ -402,11 +403,17 @@ ai_profiles:
     features: [tool_calling]        # optional: text | tool_calling | streaming | image
 ```
 
-The person binds `<extension>/<id>` to a model in Settings → AI; until
-they do, the `fallback` role's model serves it. `features` are what the
-bound model must support. Declaring a profile changes nothing by itself;
-`oxplow extension check` prints one line per profile saying what serves
-it.
+Name it by its id where your extension picks a role: a job request's
+`role: review`, a collector's `ai_classify(text, labels, role = "review")`
+(every `ai_*` builtin takes `role=`). Another extension's profiles aren't
+yours to name. The person binds `<extension>/<id>` to a model in
+Settings → AI (or a project in `.oxplow/project.yaml`'s `ai.roles`);
+until they do, the `fallback` role's model serves it. `features` are what
+the bound model must support: a job's typed call on a model that
+reports one unsupported is refused, and Settings shows why. A profile
+picks a model, nothing more — what a job's model may call is still its
+`tools:`. `oxplow extension check` prints one line per profile saying
+what serves it.
 
 ### Replacing a core view
 
