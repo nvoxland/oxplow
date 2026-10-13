@@ -1,0 +1,29 @@
+manifest: 2
+name: review-badges
+description: The latest model review of each work item, from effort-review, as a list and on the task page.
+sharing: private
+engine: ">=0.7"
+version: 0.1.0
+intent:
+  purpose: >-
+    Show what effort-review's model said about each work item — the latest
+    review, how it ended and when — in one list and on the task's own
+    page. It reads effort-review's exported `reviews` model and writes
+    nothing; without effort-review it shows nothing and says why in
+    Settings → Extensions.
+  origin: null
+  examples:
+    - name: review-verdicts
+      input: { lens: review-verdicts }
+      expect: no rows until effort-review has reviewed an effort
+    - name: item-review
+      input: { lens: item-review, params: { ref: "work_item:oxplow:tsk1" } }
+      expect: nothing for an item that has no review yet
+# Optional: with effort-review missing, disabled or exporting another
+# version, the two lenses below are withheld (a warning in Settings →
+# Extensions) and nothing else changes.
+imports:
+  - { id: reviews, contribution: effort-review/model/reviews, version: 1, optional: true }
+ui:
+  slots:
+    - { slot: work_item.detail.body, lens: item-review }

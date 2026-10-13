@@ -798,3 +798,282 @@ async fn the_effort_review_example_reviews_evidence_and_can_be_cancelled() {
     )
     .await;
 }
+
+/// Both examples copied into one project.
+async fn review_project(with_producer: bool) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    oxplow_app::vcs::GitProvider
+        .init_repository(root)
+        .await
+        .unwrap();
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions");
+    copy_dir(
+        &examples.join("review-badges"),
+        &root.join("oxplow/extensions/review-badges"),
+    );
+    if with_producer {
+        copy_dir(
+            &examples.join("effort-review"),
+            &root.join("oxplow/extensions/effort-review"),
+        );
+    }
+    dir
+}
+
+/// The review-badges example reads effort-review's exported `reviews`
+/// model, optionally: with the producer present its lenses and slot load;
+/// with it disabled, exporting another version or missing, they are
+/// withheld, the import says why, and nothing errors.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_them() {
+    // Both present.
+    let dir = review_project(true).await;
+    let root = dir.path();
+    let report = check(
+        root,
+        "review-badges",
+        &ExtensionCatalog::new(),
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(report.ok, "{}", render_findings(&report, Format::Text));
+    let tested = test_extension(root, "review-badges", false).await.unwrap();
+    assert_eq!(tested.errors, Vec::<String>::new());
+    assert_eq!(
+        tested.imports,
+        ["`reviews` → effort-review/model/reviews v1: available"]
+    );
+    for id in [
+        "review-badges/lens/review-verdicts",
+        "review-badges/lens/item-review",
+    ] {
+        assert!(
+            tested.contributes.iter().any(|c| c == id),
+            "{id}: {:?}",
+            tested.contributes
+        );
+    }
+    for example in ["review-verdicts", "item-review"] {
+        assert!(
+            tested.ran.contains(&format!("example {example}")),
+            "{example}: {:?}",
+            tested.ran
+        );
+    }
+
+    // The producer disabled.
+    let dir = review_project(true).await;
+    let root = dir.path();
+    std::fs::create_dir_all(root.join(".oxplow")).unwrap();
+    std::fs::write(
+        root.join(".oxplow/project.yaml"),
+        "extensions:\n  disabled: [effort-review]\n",
+    )
+    .unwrap();
+    let tested = test_extension(root, "review-badges", false).await.unwrap();
+    // The lenses and the slot are withheld, with the warning; the
+    // fixtures that name them can't run, which is all that errors.
+    assert_eq!(
+        tested.imports,
+        ["`reviews` → effort-review/model/reviews v1: unavailable (effort-review is disabled)"]
+    );
+    assert!(tested.contributes.is_empty(), "{:?}", tested.contributes);
+    for lens in ["review-verdicts", "item-review"] {
+        assert!(
+            tested.warnings.iter().any(|w| w.contains(&format!(
+                "withheld `review-badges/lens/{lens}` because an import binding is unavailable"
+            ))),
+            "{lens}: {:?}",
+            tested.warnings
+        );
+    }
+    assert!(
+        tested
+            .errors
+            .iter()
+            .all(|e| e.contains("fixtures/") && e.contains("not found")),
+        "{:?}",
+        tested.errors
+    );
+    let svc = oxplow_app::Services::in_memory(root).await.unwrap();
+    let consumer = svc.extension_catalog.named(root, "review-badges").unwrap();
+    assert!(consumer.ui.slots.is_empty(), "{:?}", consumer.ui.slots);
+
+    // The producer exports another version.
+    let dir = review_project(true).await;
+    let root = dir.path();
+    let manifest = root.join("oxplow/extensions/effort-review/extension.yaml");
+    let text = std::fs::read_to_string(&manifest).unwrap();
+    let bumped = text
+        .replace(
+            "    version: 1\n    key: [job]",
+            "    version: 2\n    key: [job]",
+        )
+        .replace(
+            "contribution: effort-review/model/reviews, version: 1,",
+            "contribution: effort-review/model/reviews, version: 2,",
+        );
+    assert_ne!(bumped, text);
+    std::fs::write(&manifest, bumped).unwrap();
+    let tested = test_extension(root, "review-badges", false).await.unwrap();
+    assert_eq!(
+        tested.imports,
+        ["`reviews` → effort-review/model/reviews v1: unavailable (effort-review exports v2)"]
+    );
+    assert!(tested.contributes.is_empty(), "{:?}", tested.contributes);
+
+    // The producer missing: unavailable, and no error from loading it.
+    let dir = review_project(false).await;
+    let root = dir.path();
+    let tested = test_extension(root, "review-badges", false).await.unwrap();
+    assert_eq!(
+        tested.imports,
+        ["`reviews` → effort-review/model/reviews v1: unavailable (effort-review or its contribution isn't here)"]
+    );
+    assert!(
+        tested
+            .errors
+            .iter()
+            .all(|e| e.contains("fixtures/") && e.contains("not found")),
+        "{:?}",
+        tested.errors
+    );
+}
+
+/// With both examples running in one oxplow, a review effort-review's job
+/// wrote shows up in review-badges' lenses: the list, and the task page's
+/// slot lens for that item and none other.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_review_effort_review_wrote_shows_in_review_badges() {
+    use oxplow_app::ai_service::{ProviderConfig, Role, RoleBinding};
+    use oxplow_app::exec_consent::{approve_every, ProgramKind};
+    use serde_json::json;
+
+    let dir = review_project(true).await;
+    let root = dir.path();
+    let svc = oxplow_app::Services::in_memory(root).await.unwrap();
+    let replies: Vec<oxplow_ai::fixture::FixtureReply> = serde_json::from_value(json!([
+        "The tests pass and coverage is fine; one untested branch remains in the parser.",
+    ]))
+    .unwrap();
+    let model = std::sync::Arc::new(oxplow_ai::fixture::FixtureModel::new(replies));
+    svc.ai.providers().register_host(model);
+    svc.ai
+        .save_provider(
+            ProviderConfig {
+                id: "fixture".into(),
+                kind: oxplow_ai::fixture::KIND.into(),
+                base_url: None,
+            },
+            None,
+        )
+        .unwrap();
+    svc.ai
+        .set_role(
+            Role::Summarize,
+            Some(RoleBinding {
+                provider: "fixture".into(),
+                model: "fixture".into(),
+            }),
+        )
+        .unwrap();
+    approve_every(&svc, ProgramKind::Job).unwrap();
+    svc.extension_activation
+        .activate(svc.clone())
+        .await
+        .expect("it activates");
+    let consumer = svc.extension_catalog.named(root, "review-badges").unwrap();
+    assert_eq!(consumer.ui.slots.len(), 1, "{:?}", consumer.ui.slots);
+
+    // An effort on a work item, then the review of it asked for.
+    svc.streams.ensure_primary().await.unwrap();
+    let item = as_person(
+        &svc,
+        "oxplow.work_item.create",
+        json!({ "title": "Parse blocks" }),
+    )
+    .await["ref"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    as_person(
+        &svc,
+        "oxplow.effort.open",
+        json!({ "thread": "thread:thr1", "work_item": item }),
+    )
+    .await;
+    as_person(
+        &svc,
+        "oxplow.effort.close",
+        json!({ "effort": "effort:eff1" }),
+    )
+    .await;
+    as_person(
+        &svc,
+        "effort_review.review.ask",
+        json!({
+            "job": "review",
+            "intentKey": "review:effort:eff1",
+            "request": {
+                "schemaVersion": 1,
+                "role": "summarize",
+                "messages": [{ "role": "user", "parts": [{ "type": "text", "text": "Review effort:eff1." }] }],
+            },
+        }),
+    )
+    .await;
+    svc.jobs
+        .spawn(svc.extension_activation.clone(), svc.commands.clone());
+    until_row(
+        &svc,
+        "SELECT 1 FROM v_effort_review_reviews WHERE state = 'succeeded'",
+    )
+    .await;
+
+    let lens = |id: &'static str, params: Vec<(&'static str, oxplow_db::SqlCell)>| {
+        let svc = svc.clone();
+        async move {
+            let run = oxplow_app::extensions::run_lens(
+                &svc.sql,
+                &svc.extension_catalog,
+                root,
+                id,
+                params
+                    .into_iter()
+                    .map(|(k, v)| (k.to_string(), v))
+                    .collect(),
+                &oxplow_app::extensions::LensContext::default(),
+            )
+            .await
+            .unwrap();
+            serde_json::to_value(&run.result.rows).unwrap()
+        }
+    };
+    let list = lens("review-badges/review-verdicts", vec![]).await;
+    assert_eq!(list[0][0], json!(item), "{list}");
+    assert_eq!(list[0][1], json!("effort:eff1"));
+    assert_eq!(list[0][2], json!("succeeded"));
+    assert!(list[0][4]
+        .as_str()
+        .unwrap()
+        .starts_with("The tests pass and coverage is fine"));
+    let here = lens(
+        "review-badges/item-review",
+        vec![("ref", oxplow_db::SqlCell::Text(item.clone()))],
+    )
+    .await;
+    assert_eq!(here[0][0], json!("succeeded"), "{here}");
+    let elsewhere = lens(
+        "review-badges/item-review",
+        vec![(
+            "ref",
+            oxplow_db::SqlCell::Text("work_item:oxplow:tsk99".into()),
+        )],
+    )
+    .await;
+    assert_eq!(elsewhere, json!([]));
+}

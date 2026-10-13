@@ -1,0 +1,7 @@
+# An item with no review shows no row.
+input:
+  lens: item-review
+  params: { ref: "work_item:oxplow:tsk1" }
+expect:
+  columns: [state, reviewed_at, review]
+  rows: 0
