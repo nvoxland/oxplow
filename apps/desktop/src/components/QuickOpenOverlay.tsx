@@ -1,4 +1,5 @@
 import type { CommandEntry } from "./quickOpenResults.js";
+import { pageRef, refOf } from "../refs/ref.js";
 import { SEARCH_TRIGGER_TESTID } from "./TitleBar.js";
 import type { CSSProperties } from "react";
 import { refKindInfo, useRefKinds } from "../refKinds.js";
@@ -489,7 +490,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
                 // launcher mode so the tree structure reads clearly.
                 return (
                   <button type="button"
-                    key={`page:${result.entry.id}`}
+                    key={pageRef(result.entry.id)}
                     data-testid={`launcher-page-${result.entry.id}`}
                     data-row-index={index}
                     onClick={() => confirm(result)}
@@ -515,7 +516,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
               if (result.kind === "command") {
                 return (
                   <button type="button"
-                    key={`command:${result.entry.id}`}
+                    key={refOf("command", result.entry.id)}
                     data-testid={`launcher-command-${result.entry.id}`}
                     data-row-index={index}
                     onClick={() => confirm(result)}
@@ -589,7 +590,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
               }
               return (
                 <button type="button"
-                  key={`file:${result.file.path}`}
+                  key={refOf("file", result.file.path)}
                   data-row-index={index}
                   onClick={() => confirm(result)}
                   style={{

@@ -14,7 +14,7 @@ import { streamRowId, threadRowId } from "../modelIds.js";
 import type { Reads, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 import { refFromTabId } from "./pageRefs.js";
 import type { TabRef } from "./tabState.js";
-import { streamRef, threadRef } from "../recordRefs.js";
+import { streamRef, threadRef } from "../refs/ref.js";
 
 export type BookmarkScope = "thread" | "stream" | "project";
 

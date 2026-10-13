@@ -1,4 +1,5 @@
 import { fuzzyMatches } from "../fuzzy-match.js";
+import { pageRef, refOf } from "../refs/ref.js";
 import type { SearchHit, WorkspaceIndexedFile } from "../api.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { MenuPlace } from "../tauri-bridge/generated/bindings.js";
@@ -106,11 +107,11 @@ function isExactMatch(r: QuickOpenResult, q: string): boolean {
 function resultKey(r: QuickOpenResult): string {
   switch (r.kind) {
     case "page":
-      return `page:${r.entry.id}`;
+      return pageRef(r.entry.id);
     case "command":
-      return `command:${r.entry.id}`;
+      return refOf("command", r.entry.id);
     case "file":
-      return `file:${r.file.path}`;
+      return refOf("file", r.file.path);
     case "hit":
       return `hit:${r.hit.kind}:${r.hit.ref_id}:${r.hit.stream_id ?? ""}`;
     case "ask":

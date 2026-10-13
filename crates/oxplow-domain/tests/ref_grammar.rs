@@ -6,6 +6,7 @@ use serde::Deserialize;
 
 #[derive(Deserialize)]
 struct Fixture {
+    kinds: Vec<String>,
     valid: Vec<ValidCase>,
     invalid: Vec<InvalidCase>,
     format: Vec<FormatCase>,
@@ -79,4 +80,13 @@ fn a_bad_kind_error_names_the_kind() {
         "{err:?}"
     );
     assert!(err.to_string().contains("Git-Commit"), "{err}");
+}
+
+/// The core kinds, one list for both languages: the desktop's guard
+/// (`apps/desktop/src/refs/refs.guard.test.ts`) reads the same array.
+#[test]
+fn the_fixture_lists_exactly_the_core_kinds() {
+    let registry = oxplow_domain::refs::kind::core_kinds();
+    let core: Vec<String> = registry.kinds().map(|k| k.kind.clone()).collect();
+    assert_eq!(fixture().kinds, core);
 }

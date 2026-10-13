@@ -32,7 +32,7 @@ import { useWorkItemRef } from "../../workItemTitleCache.js";
 import { useWorkListProfile } from "../../useWorkListProfile.js";
 import { workItemRefOfMention } from "../../workItems.js";
 import { workItemId, workItemLabel } from "../../workItemRef.js";
-import { parseRef } from "../../refs/ref.js";
+import { parseRef, rawAfterKind } from "../../refs/ref.js";
 import { extensionWikilinkRef, refKindInfo, useExtensionRefTitle, useRefKinds } from "../../refKinds.js";
 import { attachPanZoom, loadMermaid } from "./mermaidRender.js";
 
@@ -120,8 +120,9 @@ export function parseMarkdownLink(rawHref: string): ParsedLink {
   if (/^https?:\/\//i.test(rawHref) || rawHref.startsWith("mailto:")) {
     return { kind: "external" };
   }
-  if (rawHref.startsWith("file:")) {
-    const raw = rawHref.slice("file:".length);
+  const fileRaw = rawAfterKind(rawHref, "file");
+  if (fileRaw !== null) {
+    const raw = fileRaw;
     if (!raw) return { kind: "empty" };
     // The preprocessed href shape is `file:<path>[@<version>][:<line>]`.
     // Pull the version off first since it can contain hex / branch
@@ -160,17 +161,19 @@ export function parseMarkdownLink(rawHref: string): ParsedLink {
     }
     return { kind: "file", path: body, version };
   }
-  if (rawHref.startsWith("dir:")) {
-    const raw = rawHref.slice("dir:".length).replace(/\/+$/, "");
+  const dirRaw = rawAfterKind(rawHref, "dir");
+  if (dirRaw !== null) {
+    const raw = dirRaw.replace(/\/+$/, "");
     if (!raw) return { kind: "empty" };
     return { kind: "directory", path: raw };
   }
-  if (rawHref.startsWith("commit:")) {
-    const sha = rawHref.slice("commit:".length);
+  const commitRaw = rawAfterKind(rawHref, "commit");
+  if (commitRaw !== null) {
+    const sha = commitRaw;
     if (!sha) return { kind: "empty" };
     return { kind: "commit", sha };
   }
-  if (rawHref.startsWith("work_item:")) {
+  if (rawAfterKind(rawHref, "work_item") !== null) {
     // Any list's item, by its ref.
     return workItemId(rawHref) === null ? { kind: "empty" } : { kind: "work_item", ref: rawHref };
   }
@@ -250,18 +253,21 @@ function collapseLinksOutsideInlineCode(text: string): string {
 }
 
 function collapseInternalLink(label: string, url: string): string | null {
-  if (url.startsWith("file:")) {
-    const path = url.slice("file:".length);
+  const filePath = rawAfterKind(url, "file");
+  if (filePath !== null) {
+    const path = filePath;
     if (!path) return null;
     return label === path ? `[[${path}]]` : `[[${path}|${label}]]`;
   }
-  if (url.startsWith("dir:")) {
-    const path = url.slice("dir:".length);
+  const dirPath = rawAfterKind(url, "dir");
+  if (dirPath !== null) {
+    const path = dirPath;
     if (!path) return null;
     return label === path ? `[[dir:${path}]]` : `[[dir:${path}|${label}]]`;
   }
-  if (url.startsWith("commit:")) {
-    const sha = url.slice("commit:".length);
+  const commitSha = rawAfterKind(url, "commit");
+  if (commitSha !== null) {
+    const sha = commitSha;
     if (!sha) return null;
     // If the label is a prefix of the SHA (the bare `[[<sha>]]` form
     // renders as the short 7-char SHA), drop the label and emit the
@@ -269,7 +275,7 @@ function collapseInternalLink(label: string, url: string): string | null {
     const labelIsHexPrefix = /^[0-9a-f]{7,40}$/i.test(label) && sha.toLowerCase().startsWith(label.toLowerCase());
     return labelIsHexPrefix ? `[[git:${sha}]]` : `[[git:${sha}|${label}]]`;
   }
-  if (url.startsWith("work_item:") && workItemId(url) !== null) {
+  if (rawAfterKind(url, "work_item") !== null && workItemId(url) !== null) {
     // A bare `[[tsk42]]` (or `[[work_item:…]]`) renders with what was
     // written as its text (the title swap is a render-time overlay, not
     // stored), so a label equal to it collapses to the bare form.
@@ -364,8 +370,9 @@ function rewriteWikilinksOutsideInlineCode(text: string, mentionRef: MentionRef)
       }
       // Directory form: explicit `dir:` prefix (mirrors `git:`).
       // Trailing slash on the path is tolerated and stripped.
-      if (target.startsWith("dir:")) {
-        const dir = target.slice(4).trim().replace(/\/+$/, "");
+      const dirTarget = rawAfterKind(target, "dir");
+      if (dirTarget !== null) {
+        const dir = dirTarget.trim().replace(/\/+$/, "");
         if (dir) {
           // When no label was supplied, default to showing the bare
           // path (without the `dir:` prefix) so the rendered link

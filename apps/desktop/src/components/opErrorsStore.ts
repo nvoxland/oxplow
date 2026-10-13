@@ -11,7 +11,7 @@
 
 import { runCommand } from "../api.js";
 import { logUi, type UiLogLevel } from "../logger.js";
-import { streamRef, threadRef } from "../recordRefs.js";
+import { streamRef, threadRef } from "../refs/ref.js";
 
 const MAX_ENTRIES = 20;
 

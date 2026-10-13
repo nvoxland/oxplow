@@ -114,3 +114,122 @@ export function fileLinesRef(path: string, start: number, end: number, rev: stri
 export function kindOf(text: string): string | null {
   return parseRef(text)?.kind ?? null;
 }
+
+// ---------------------------------------------------------------------------
+// Builders. A ref's owner spells it and everyone else carries it: this file
+// is the one place in the desktop that writes a kind prefix
+// (`refs.guard.test.ts` fails on a hand-built or hand-parsed one anywhere
+// else). A caller names the kind through a builder here, or `refOf`.
+// ---------------------------------------------------------------------------
+
+/** `<kind>:<id>` for any kind. */
+export function refOf(kind: string, id: string): string {
+  return ref(kind, id);
+}
+
+/** The id of `text` when it is a ref of `kind`, else null. */
+export function idOf(text: string, kind: string): string | null {
+  const parsed = parseRef(text);
+  return parsed !== null && parsed.kind === kind ? parsed.id : null;
+}
+
+/** Whether `text` is a ref of `kind`. */
+export function isRefOfKind(text: string, kind: string): boolean {
+  return kindOf(text) === kind;
+}
+
+/** A thread (`thr3` → `thread:thr3`). */
+export const threadRef = (id: string): string => refOf("thread", id);
+/** A stream (`str1` → `stream:str1`). */
+export const streamRef = (id: string): string => refOf("stream", id);
+/** An effort (`eff12` → `effort:eff12`). */
+export const effortRef = (id: string): string => refOf("effort", id);
+/** A wiki comment (`cmt12` → `comment:cmt12`). */
+export const commentRef = (id: string): string => refOf("comment", id);
+/** An agent session (`ses3` → `agent_session:ses3`). */
+export const agentSessionRef = (id: string): string => refOf("agent_session", id);
+/** A wiki page (`architecture` → `wiki:architecture`). */
+export const wikiRef = (slug: string): string => refOf("wiki", slug);
+/** A logged event, by its id. */
+export const eventRef = (id: string): string => refOf("event", id);
+/** A command proposal (`command_proposal.id`). */
+export const proposalRef = (id: string | number): string => refOf("proposal", String(id));
+/** A `.oxplow/project.yaml` key (`config:snapshotRetentionDays`). */
+export const configRef = (key: string): string => refOf("config", key);
+/** A work item, whichever list holds it (`work_item:<provider>:<id>`). */
+export const workItemRef = (provider: string, id: string): string => refOf("work_item", `${provider}:${id}`);
+
+// Query params after a route name or a lens id: `?k=v&k=v`. Values are
+// percent-encoded the way `URLSearchParams` reads them, but only the
+// characters that would break the id are escaped — the query syntax
+// (`&`, `=`, `+`, `%`) and the grammar's reserved `@` and `#` — so
+// `path=src/a.ts&left=ref:abc` stays readable. The encoded text is a valid
+// canonical ref of its kind (`page:` / `lens:`) as written, so it is parsed
+// from the RAW text after the kind, not from `parseRef`'s decoded id (which
+// would turn an escaped `&` back into a separator).
+
+export type ParamValue = string | number | null | undefined;
+
+function encodeParamValue(v: string): string {
+  return encodeURIComponent(v)
+    .replace(/%2F/gi, "/")
+    .replace(/%3A/gi, ":")
+    .replace(/%3F/gi, "?")
+    .replace(/%2C/gi, ",")
+    .replace(/%20/g, "+");
+}
+
+/** `k=v&k=v` in the given key order; `null`/`undefined` values are skipped. */
+export function encodeParams(params: Record<string, ParamValue>): string {
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(params)) {
+    if (v === null || v === undefined) continue;
+    parts.push(`${encodeParamValue(k)}=${encodeParamValue(String(v))}`);
+  }
+  return parts.join("&");
+}
+
+/** `head` plus `params` as a query (after any it has). */
+export function withParams(head: string, params: Record<string, ParamValue>): string {
+  const qs = encodeParams(params);
+  if (!qs) return head;
+  return `${head}${head.includes("?") ? "&" : "?"}${qs}`;
+}
+
+/** The part of a `page:` / `lens:` ref's raw text after its kind, split
+ *  into its (decoded) head and query. Null when `text` isn't of `kind`. */
+export function splitKindParams(text: string, kind: string): { head: string; params: URLSearchParams } | null {
+  const raw = rawAfterKind(text, kind);
+  return raw === null ? null : splitParams(raw);
+}
+
+/** The raw text after `<kind>:`, undecoded; null when `text` isn't of `kind`. */
+export function rawAfterKind(text: string, kind: string): string | null {
+  const colon = text.indexOf(":");
+  return colon !== -1 && text.slice(0, colon) === kind ? text.slice(colon + 1) : null;
+}
+
+/** A raw `head?k=v` tail as its decoded head and query. */
+export function splitParams(raw: string): { head: string; params: URLSearchParams } {
+  const q = raw.indexOf("?");
+  const head = q === -1 ? raw : raw.slice(0, q);
+  return { head: decodeURIComponent(head), params: new URLSearchParams(q === -1 ? "" : raw.slice(q + 1)) };
+}
+
+/** A shell route: `page:<name>[?params]`. */
+export function pageRef(name: string, params?: Record<string, ParamValue>): string {
+  const head = `page:${name}`;
+  return params ? withParams(head, params) : head;
+}
+
+/** An extension's page: `page:ext.<extension>.<page>[?params]`. */
+export function extPageRef(extension: string, page: string, params?: Record<string, ParamValue>): string {
+  return pageRef(`ext.${extension}.${page}`, params);
+}
+
+/** A lens: `lens:<extension>/<slug>[?params]`; params are the caller's,
+ *  in the order given. */
+export function lensRef(lensId: string, params?: Record<string, ParamValue>): string {
+  const head = `lens:${escapeId(lensId)}`;
+  return params ? withParams(head, params) : head;
+}

@@ -6,6 +6,7 @@
  * Writes are `knowledge.*` commands (`writeWikiPage`).
  */
 import { querySql, searchSite } from "./api.js";
+import { wikiRef } from "./refs/ref.js";
 import { unionReads } from "./lens/lensRerun.js";
 import type { CapabilityProvider } from "./workItems.js";
 import type { Reads, SearchHit, SqlCell, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
@@ -94,7 +95,7 @@ export async function readWikiPage(
       [slug],
       1,
     ),
-    querySql("SELECT body FROM v_knowledge_body WHERE ref = ?1", [`wiki:${slug}`], 1),
+    querySql("SELECT body FROM v_knowledge_body WHERE ref = ?1", [wikiRef(slug)], 1),
   ]);
   const reads = unionReads([pages.reads, body.reads]);
   const summary = pagesFromResult(pages)[0];
@@ -119,7 +120,7 @@ export async function readWikiFreshness(slug: string): Promise<{ rows: WikiRefFr
   const res = await querySql(
     `SELECT path, pinned_snapshot_id, pinned_vcs_rev, pinned_vcs_rev_exact, latest_snapshot_id, stale
        FROM v_knowledge_ref WHERE page = ?1 ORDER BY path`,
-    [`wiki:${slug}`],
+    [wikiRef(slug)],
     10_000,
   );
   return { rows: freshnessFromResult(res), reads: res.reads };

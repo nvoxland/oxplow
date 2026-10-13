@@ -2,6 +2,7 @@
 /// that it shows only the first rows, and that a collector feeding a model
 /// it read hasn't run, failed or is out of date. `.context/semantic-layer.md`.
 
+import { idOf } from "../refs/ref.js";
 import type { SourceCoverage, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 
 export interface Completeness {
@@ -24,7 +25,7 @@ function when(at: string, now: Date): { text: string; today: boolean } | null {
 }
 
 /** `collector:my-gh/gh` → `my-gh/gh`. */
-const sourceName = (source: string) => source.replace(/^collector:/, "");
+const sourceName = (source: string) => idOf(source, "collector") ?? source;
 
 /** The model as a noun: `v_my_gh_pull_request` fed by `my-gh/gh` is
  *  "Pull request" (the extension's prefix goes, underscores become spaces). */

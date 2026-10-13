@@ -246,6 +246,24 @@ matching the backend's `CommentTarget`), and lens `link.kind` targets.
 `kindForTabId` and `refFromTabId` go through `parseRef` first, so a `:`
 inside an id never splits it.
 
+**One place spells a ref; one place reads it.** A ref's owner spells it
+and everyone else carries it. In the desktop, `apps/desktop/src/refs/ref.ts`
+is the only file that writes a kind prefix (`refOf(kind, id)` and a builder
+per kind the desktop names: `threadRef`, `streamRef`, `effortRef`,
+`commentRef`, `agentSessionRef`, `wikiRef`, `workItemRef(provider, id)`,
+`eventRef`, `proposalRef`, `configRef`, `pageRef(name, params?)`,
+`extPageRef`, `lensRef`), and `parseRef` / `kindOf` / `idOf(ref, kind)` are
+how a ref is read; everything else takes a ref from a builder or from data
+and passes it on. A revision (`git:`, `snap:`) is not a ref and stays
+`revision.ts`'s. `refs/refs.guard.test.ts` fails on a hand-built or
+hand-parsed prefix of any core kind anywhere else (a template
+`` `kind:${…}` ``, `"kind:" +`, `startsWith("kind:")`,
+`slice("kind:".length)`, `replace(/^kind:/…)`, or `indexOf(":")` on a
+ref-named variable); its list of kinds is `kinds` in
+`crates/oxplow-domain/tests/fixtures/ref_grammar.json`, which
+`ref_grammar.rs` asserts equals `core_kinds()`, so both languages read one
+list. Its kept list is empty: use a builder.
+
 **A snapshot, an effort and an agent turn are entity pages** (P2.11):
 `snapshot:<N>`, `effort:<effN>`, `turn:<trnN>` (kinds `snapshot` /
 `effort` / `turn`, built by `snapshotRef` / `effortDiffRef` / `turnRef`

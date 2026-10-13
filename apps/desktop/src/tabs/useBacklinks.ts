@@ -9,6 +9,7 @@ import {
   workItemTabRef,
 } from "./pageRefs.js";
 import { workItemId } from "../workItemRef.js";
+import { refOf, wikiRef } from "../refs/ref.js";
 import type { TabRef } from "./tabState.js";
 import type { BacklinkEntry } from "./backlinkTypes.js";
 
@@ -210,11 +211,11 @@ function canonicalEntryKey(ref: TabRef): string {
     const path = (ref.payload as { path?: string } | null)?.path;
     if (path) {
       const m = /^\.oxplow\/wiki\/(.+)\.md$/.exec(path);
-      if (m) return `wiki:${m[1]}`;
+      if (m) return wikiRef(m[1]!);
     }
   }
   const id = canonicalIdForTarget(ref) ?? ref.id;
-  return `${ref.kind}:${id}`;
+  return refOf(ref.kind, id);
 }
 
 /**
@@ -228,7 +229,7 @@ function refFor(kind: string, id: string): TabRef | null {
     case "wiki":
       return wikiPageRef(id);
     case "work_item":
-      return workItemTabRef(`work_item:${id}`);
+      return workItemTabRef(refOf("work_item", id));
     case "file":
       return fileRef(id);
     case "dir":

@@ -1,3 +1,4 @@
+import { effortRef, refOf } from "../refs/ref.js";
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type { DiffEntry, EffortAtSnapshot, Snapshot, Stream } from "../api.js";
@@ -272,11 +273,11 @@ function DiffBody({
 function specKey(spec: DiffViewSpec): string {
   switch (spec.mode) {
     case "snapshot":
-      return `snapshot:${spec.snapshotId}`;
+      return refOf("snapshot", String(spec.snapshotId));
     case "effort":
-      return `effort:${spec.effortId}`;
+      return effortRef(String(spec.effortId));
     case "turn":
-      return `turn:${spec.turnId}`;
+      return refOf("turn", String(spec.turnId));
     case "endpoints":
       return `endpoints:${JSON.stringify(spec.start)}:${JSON.stringify(spec.end)}`;
   }
@@ -836,7 +837,7 @@ function endpointDisplay(
   if (ep === WORKING) return { timeText: "working tree", commitSha: null, iso: null };
   const snapshotId = snapshotIdOf(ep);
   if (snapshotId === null) {
-    return { timeText: null, commitSha: ep.slice(ep.indexOf(":") + 1), iso: null };
+    return { timeText: null, commitSha: vcsRevOf(ep) ?? ep, iso: null };
   }
   const snap = snapshotsById.get(snapshotId);
   return {

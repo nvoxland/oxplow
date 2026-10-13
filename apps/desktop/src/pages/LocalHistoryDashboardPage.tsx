@@ -21,6 +21,7 @@ import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { NavSiblingEntry, NavSiblings } from "../tabs/PageNavigationContext.js";
 import { gitCommitRef, indexRef, snapshotRef } from "../tabs/pageRefs.js";
+import { wikiRef } from "../refs/ref.js";
 import { workItemLabel } from "../workItemRef.js";
 import { vcsRevOf } from "../revision.js";
 import { EmptyState } from "../components/Prompts/EmptyState.js";
@@ -511,7 +512,7 @@ function snapshotSiblingEntries(rows: SnapshotRow[]): NavSiblingEntry[] {
     // says something meaningful.
     const fallback =
       vcsRevOf(row.snapshot.revision)?.slice(0, 7) ??
-      (row.wikiSlugs.length > 0 ? `wiki:${row.wikiSlugs[0]}` : "snapshot");
+      (row.wikiSlugs.length > 0 ? wikiRef(row.wikiSlugs[0]!) : "snapshot");
     return {
       ref: snapshotRef(row.snapshot.id),
       label: label || fallback,
