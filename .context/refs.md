@@ -357,7 +357,7 @@ list. Its kept list is empty: use a builder.
 in `tabs/pageRefs.ts`), each rendering its diff in `DiffViewPage`
 (`DiffViewPayload.mode`). Only an ad-hoc pair of endpoints stays a
 route (`page:diff-view?start=…&end=…`). A lens `effort-diff` link
-normalizes a row id (`7`) to `effort:eff7`. Tab ids are always built
+takes the effort's ref (`v_effort.ref`, `effort:eff7`). Tab ids are always built
 through the ref helpers (`fileRef(path).id`, never `` `file:${path}` ``):
 `escapeId` percent-encodes a path's `@` / `#` / `%`, which a hand-built
 id would read as a revision or fragment.

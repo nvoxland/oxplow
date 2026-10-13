@@ -9,7 +9,8 @@ import { useCallback, useEffect, useState } from "react";
 import { querySql } from "./api.js";
 import { recordOpError } from "./components/opErrorsStore.js";
 import { NO_READS, useRerunOnChange } from "./lens/lensRerun.js";
-import { threadIdOf, threadRowId } from "./modelIds.js";
+import { threadRowId } from "./modelIds.js";
+import { idOf } from "./refs/ref.js";
 import type { Reads, SqlCell, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
 
 /** One open agent session, under the UI's ids. */
@@ -32,13 +33,14 @@ export interface AgentSessionRow {
   stoppedByUser: boolean;
 }
 
-const COLUMNS = "id, thread_id, kind, harness, acp_agent, title, opened_at, stopped_by_user_at";
+const COLUMNS =
+  "s.ref, (SELECT t.ref FROM v_thread t WHERE t.id = s.thread_id) AS thread_ref, s.kind, s.harness, s.acp_agent, s.title, s.opened_at, s.stopped_by_user_at";
 
 export function agentSessionsFromResult(result: SqlQueryResult): AgentSessionRow[] {
   const at = (row: SqlCell[], name: string) => row[result.columns.indexOf(name)] ?? null;
   return result.rows.map((row) => ({
-    id: `ses${Number(at(row, "id"))}`,
-    threadId: threadIdOf(Number(at(row, "thread_id"))),
+    id: idOf(String(at(row, "ref")), "agent_session") ?? "",
+    threadId: idOf(String(at(row, "thread_ref")), "thread") ?? "",
     kind: String(at(row, "kind")),
     harness: String(at(row, "harness")),
     acpAgent: at(row, "acp_agent") == null ? null : String(at(row, "acp_agent")),
@@ -51,7 +53,7 @@ export function agentSessionsFromResult(result: SqlQueryResult): AgentSessionRow
 /** A thread's open sessions, oldest first, and what was read. */
 export async function readThreadSessions(threadId: string): Promise<{ sessions: AgentSessionRow[]; reads: Reads }> {
   const res = await querySql(
-    `SELECT ${COLUMNS} FROM v_agent_session WHERE thread_id = ?1 AND closed_at IS NULL ORDER BY opened_at, id`,
+    `SELECT ${COLUMNS} FROM v_agent_session s WHERE s.thread_id = ?1 AND s.closed_at IS NULL ORDER BY s.opened_at, s.id`,
     [threadRowId(threadId)],
     1_000,
   );

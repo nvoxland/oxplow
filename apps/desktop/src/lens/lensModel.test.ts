@@ -113,7 +113,7 @@ describe("row groups and styling", () => {
 
 describe("cellLinkRef", () => {
   const cols = ["id", "title", "path", "slug", "effort"];
-  const row = [42, "Fix it", "src/a.ts", "auth-flow", 7];
+  const row = [42, "Fix it", "src/a.ts", "auth-flow", "effort:eff7"];
 
   test("a page link reads its ref from `from`", () => {
     expect(cellLinkRef({ kind: "page", from: "ref", line: null, base: null, head: null }, "title", [...row, "work_item:issues:E-1"], [...cols, "ref"])?.id).toBe("work_item:issues:E-1");

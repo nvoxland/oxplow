@@ -5,10 +5,10 @@ import { agentSessionsFromResult } from "./agentSessions.js";
 
 test("a v_agent_session row reads as a session under the UI's ids", () => {
   const result = {
-    columns: ["id", "thread_id", "kind", "harness", "acp_agent", "title", "opened_at", "stopped_by_user_at"],
+    columns: ["ref", "thread_ref", "kind", "harness", "acp_agent", "title", "opened_at", "stopped_by_user_at"],
     rows: [
-      [3, 1, "terminal", "claude", null, "", "2026-10-08T00:00:00Z", null],
-      [4, 1, "chat", "acp", "gemini", "review", "2026-10-08T00:01:00Z", "2026-10-08T00:02:00Z"],
+      ["agent_session:ses3", "thread:thr1", "terminal", "claude", null, "", "2026-10-08T00:00:00Z", null],
+      ["agent_session:ses4", "thread:thr1", "chat", "acp", "gemini", "review", "2026-10-08T00:01:00Z", "2026-10-08T00:02:00Z"],
     ],
   } as unknown as SqlQueryResult;
   expect(agentSessionsFromResult(result)).toEqual([

@@ -3,6 +3,7 @@ description: Forks the agent seems to have resolved without recording them, prop
 hidden: true    # needs a slot param (effort_id / change_id); shown on the diff
 params:
   - { name: effort_id, label: Effort }
+  - { name: effort, label: Effort ref }    # the effort's ref, for the Infer Again action
 query: |
   SELECT question, choice,
          (SELECT group_concat(value, '; ') FROM json_each(alternatives)) AS alternatives,
@@ -20,5 +21,5 @@ columns:
 actions:
   - { id: confirm, label: Confirm, command: oxplow.effort.confirm_decision, input: { decision: "{{row.decision}}" }, row: true }
   - { id: dismiss, label: Dismiss, command: oxplow.effort.dismiss_decision, input: { decision: "{{row.decision}}" }, row: true }
-  - { id: infer, label: Infer Again, command: oxplow.effort.infer_decisions, input: { effort: "effort:eff{{param.effort_id}}", again: true } }
+  - { id: infer, label: Infer Again, command: oxplow.effort.infer_decisions, input: { effort: "{{param.effort}}", again: true } }
 empty: Nothing inferred. The agent recorded its decisions or made none worth noting; or no model serves `oxplow-bundled/decisions` (Settings → AI); or its programs aren't approved (Settings → Data → Programs).

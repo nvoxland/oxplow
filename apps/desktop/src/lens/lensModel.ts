@@ -11,7 +11,7 @@ import { computeDiffId, duplicateBlockRef, effortDiffRef, refFromTabId, fileRef,
 import { WORKING, parseRevision, shortRevisionLabel } from "../revision.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { formatContextMention, type ContextRef } from "../agent-context-ref.js";
-import { parseRef } from "../refs/ref.js";
+import { idOf, parseRef } from "../refs/ref.js";
 
 export interface DisplayColumn {
   key: string;
@@ -202,10 +202,10 @@ export function cellLinkRef(
     case "wiki":
       return wikiPageRef(s);
     case "effort-diff": {
-      // A lens row carries the effort's row id (`7`) or its id (`eff7`);
-      // the page is the canonical `effort:eff7`.
-      const n = effortRowId(s);
-      return n === null ? null : effortDiffRef(`eff${n}`);
+      // A lens row carries the effort's ref (`v_effort.ref`); a cell that
+      // isn't one links nowhere.
+      const id = idOf(s, "effort");
+      return id === null ? null : effortDiffRef(id);
     }
   }
 }
@@ -382,7 +382,7 @@ export function rowAsk(lens: Lens, columns: string[], row: SqlCell[]): string {
 }
 
 /** What a slot runs: each mounted lens with the slot params it declares
- *  (a slot offers several, e.g. `effort.review.details`'s `effort_id` and
+ *  (a slot offers several, e.g. `effort.review.details`'s `effort_id`, `effort` and
  *  `change_id`; `run_lens` rejects undeclared ones). */
 export function slotRuns(
   extensions: Extension[],

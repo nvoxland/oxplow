@@ -1823,7 +1823,7 @@ export function awaitBackgroundTask(taskId: string): Promise<BackgroundTask | nu
 export type { MetricSpec, SeriesPoint, MetricCatalogEntry } from "./metricsSql.js";
 
 import type { Dashboard, DashboardWithItems } from "./tauri-bridge/index.js";
-import { agentSessionRef, commentRef, streamRef, threadRef } from "./refs/ref.js";
+import { agentSessionRef, commentRef, effortRef, idOf, streamRef, threadRef } from "./refs/ref.js";
 export type { Dashboard, DashboardItem, DashboardWithItems } from "./tauri-bridge/index.js";
 
 // User-created dashboards (tsk138) — project-global grids of metric tiles.
@@ -2217,14 +2217,13 @@ export async function listWikiSlugsForSnapshots(
 /** Efforts' titles (`v_effort.title`: their own, else their item's, else
  *  their first prompt's first line), by effort id (`eff12`). */
 export async function effortTitles(effortIds: string[]): Promise<Map<string, string>> {
-  const ids = effortIds.map((id) => Number(id.replace(/^eff/, ""))).filter((n) => Number.isFinite(n));
-  if (ids.length === 0) return new Map();
+  if (effortIds.length === 0) return new Map();
   const res = await querySql(
-    `SELECT id, title FROM v_effort WHERE id IN (SELECT value FROM json_each(?1)) AND title IS NOT NULL`,
-    [JSON.stringify(ids)],
+    `SELECT ref, title FROM v_effort WHERE ref IN (SELECT value FROM json_each(?1)) AND title IS NOT NULL`,
+    [JSON.stringify(effortIds.map(effortRef))],
     10_000,
   );
-  return new Map(res.rows.map((r) => [`eff${String(r[0])}`, String(r[1])] as [string, string]));
+  return new Map(res.rows.map((r) => [idOf(String(r[0]), "effort") ?? "", String(r[1])] as [string, string]));
 }
 
 export async function listEffortsAtSnapshots(
