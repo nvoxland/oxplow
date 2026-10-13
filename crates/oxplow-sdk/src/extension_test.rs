@@ -10,7 +10,8 @@
 //! a fact collector (`input: { collector, files: { <path>: <text> } }`,
 //! `expect: { facts: [{ measure, value?, path?, … }] }`, tsk1047),
 //! or one of its own commands (`input: { command, input, rows? }`,
-//! `expect: { commands: [names] }` or `{ refuses }`, dry-run),
+//! `expect: { commands: [names] }` and/or `{ result }` — only the keys it
+//! names — or `{ refuses }`, dry-run),
 //! the extension's `questions.yaml`, and for each declared provider —
 //!
 //! 1. the live `initialize` equals its declarations file;
@@ -1030,7 +1031,8 @@ fn answers(
 /// Dry-run one of the extension's own `commands:` on the fixture's
 /// `input` (and `answers`, standing in for its scope calls' — per
 /// scope, in call order): what it composes, checked against the
-/// throwaway's registry, against `expect` — `{ commands: [names] }`, or
+/// throwaway's registry, and what it answers, against `expect` — `{
+/// commands: [names] }` and/or `{ result }` (only the keys it names), or
 /// `{ refuses: <part of the reason> }`. Nothing runs.
 async fn command_example(
     host: &Host,
@@ -1060,16 +1062,22 @@ async fn command_example(
             "composed [{}] but the example expects it to refuse ({want})",
             call_names(&calls).join(", ")
         )),
-        (Ok(Composed::Run { calls, .. }), None) => first_mismatch(
-            &ex.expect,
-            &json!({ "commands": call_names(&calls) }),
-        )
-        .map(|(path, want, got)| format!("composed {got} at `{path}`, the example expects {want}")),
+        (Ok(Composed::Run { calls, result, .. }), None) => {
+            let got = json!({ "commands": call_names(&calls), "result": result });
+            first_mismatch(&ex.expect, &shaped_like(&ex.expect, &got)).map(|(path, want, got)| {
+                let did = if path.starts_with("/result") {
+                    "answered"
+                } else {
+                    "composed"
+                };
+                format!("{did} {got} at `{path}`, the example expects {want}")
+            })
+        }
     };
     if let Some(p) = problem {
         report.errors.push(format!(
             "{shown}:1: command `{}` {p} — fix: its script, or the example's `expect` \
-             (`{{ commands: [names] }}` or `{{ refuses: <part of the reason> }}`)",
+             (`{{ commands: [names], result: {{ … }} }}` or `{{ refuses: <part of the reason> }}`)",
             cmd.name
         ));
     }
@@ -2679,6 +2687,54 @@ commands:
             errors.contains("example `happy`: composed [oxplow.work_item.comment] but `expect_commands` is [oxplow.work_item.transition]"),
             "{errors}"
         );
+    }
+
+    /// A read command's example checks what it answers (`expect: {
+    /// result }`), only the keys the example names, beside or instead of
+    /// what it composes; a different answer is a finding.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_read_commands_example_checks_its_result() {
+        for (want, ok) in [("{ count: 2, of: things }", true), ("{ count: 3 }", false)] {
+            let dir = tempfile::tempdir().unwrap();
+            tally(
+                dir.path(),
+                "{ entities: { thing: 2 } }",
+                "[oxplow.work_item.comment]",
+            );
+            let manifest = dir.path().join("oxplow/extensions/tally/extension.yaml");
+            let yaml = std::fs::read_to_string(&manifest).unwrap().replace(
+                "    - {{ name: shell,".replace("{{", "{").as_str(),
+                "    - { name: counted, input: { command: tally.things.count }, expect: the things counted }\n    - { name: shell,",
+            ) + "  - name: things.count\n    summary: How many things there are.\n    entry: handlers/count.star\n    needs: [sql.read]\n    access: read\n    input_schema: { type: object }\n    invokers: { human: true, agent: true, lens: true }\n";
+            std::fs::write(&manifest, yaml).unwrap();
+            write(
+                dir.path(),
+                "oxplow/extensions/tally/handlers/count.star",
+                "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT id FROM v_tally_labelled\"})\n    return {\"commands\": [], \"result\": {\"count\": len(rows), \"of\": \"things\"}}\n",
+            );
+            write(
+                dir.path(),
+                "oxplow/extensions/tally/fixtures/counted.yaml",
+                &format!(
+                    "input: {{ command: tally.things.count, input: {{}}, answers: {{ sql.read: [[{{ id: 1 }}, {{ id: 2 }}]] }} }}\nexpect: {{ result: {want} }}\n"
+                ),
+            );
+            let report = test_extension(dir.path(), "tally", false).await.unwrap();
+            let errors = report.errors.join("\n");
+            if ok {
+                assert_eq!(errors, "", "{want}");
+                assert!(
+                    report.ran.iter().any(|r| r == "example counted"),
+                    "{:?}",
+                    report.ran
+                );
+            } else {
+                assert!(
+                    errors.contains("fixtures/counted.yaml:1: command `tally.things.count` answered 2 at `/result/count`, the example expects 3"),
+                    "{errors}"
+                );
+            }
+        }
     }
 
     /// An extension with one incremental model over page visits, watermarked

@@ -472,8 +472,10 @@ names the file and line and says what to change.
      `expect: { facts: [{ measure, value, path? }] }` — each fact is
      compared on the keys you name, in order;
    - a command: `input: { command: <id>, input: {...}, answers? }`,
-     `expect: { commands: [names] }` or `{ refuses: <part of the reason>
-     }` — a dry run; nothing changes;
+     `expect: { commands: [names], result: {...} }` (either or both;
+     `result` is compared on the keys you name, so a read command's
+     example checks its answer) or `{ refuses: <part of the reason> }` —
+     a dry run; nothing changes;
    - an effort policy script (`implementations:`): `input: {
      implementation: <id>, event: { type, payload, anchors? }, answers?
      }`, `expect: { commands: [names] }` or `{ skip: <part of the

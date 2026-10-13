@@ -1357,7 +1357,9 @@ fixtures to it.
   then `effects::dry_run`: its script, its scope calls answered
   from `answers` (per scope, in call order) or for real, the
   composed calls checked against the registry; nothing runs. An
-  extension command's is `input: { command: <id>, input, answers? }`;
+  extension command's is `input: { command: <id>, input, answers? }`,
+  `expect: { commands?, result? }` (each compared on the keys it names:
+  a read command's example checks what it answers) or `{ refuses }`;
   `{ skip: $any }` matches any skip (`reaction_problem`, shared with the
   policy's);
 - `input: { implementation: <id>, event: { type, payload, subject?,
