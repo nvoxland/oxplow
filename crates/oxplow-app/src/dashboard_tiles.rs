@@ -43,15 +43,12 @@ fn chart_roles(display: &str) -> Option<(&'static [&'static str], &'static [&'st
     }
 }
 
-/// A chart tile's `chart` names its required roles, and every role it
-/// names is a column the query returns.
-async fn check_chart(
-    sql: &SqlGateway,
-    query: &str,
+/// A chart tile's `chart` names its required roles.
+fn chart_names_roles<'a>(
     display: &str,
-    (required, optional): (&[&str], &[&str]),
-    chart: Option<&Value>,
-) -> Result<(), DomainError> {
+    required: &[&str],
+    chart: Option<&'a Value>,
+) -> Result<&'a Map<String, Value>, DomainError> {
     let need = || {
         invalid(format!(
             "a `{display}` tile needs `chart: {{ {} }}` in its options",
@@ -65,9 +62,30 @@ async fn check_chart(
     {
         return Err(need());
     }
-    let columns = sql.query_sql(query, Vec::new(), Some(1)).await?.columns;
-    for key in required.iter().chain(optional) {
-        if let Some(col) = chart.get(*key).and_then(Value::as_str) {
+    Ok(chart)
+}
+
+/// What a query tile's SQL has yet to be held to: the semantic engine's
+/// read contract and, for a chart, the columns its roles name. Both run
+/// SQL, which is async.
+#[derive(Debug, Clone)]
+pub struct QueryCheck {
+    query: String,
+    /// The chart's roles with the columns they name.
+    chart_columns: Vec<(String, String)>,
+}
+
+impl QueryCheck {
+    pub async fn run(&self, sql: &SqlGateway) -> Result<(), DomainError> {
+        sql.check(&self.query).await?;
+        if self.chart_columns.is_empty() {
+            return Ok(());
+        }
+        let columns = sql
+            .query_sql(&self.query, Vec::new(), Some(1))
+            .await?
+            .columns;
+        for (key, col) in &self.chart_columns {
             if !columns.iter().any(|c| c == col) {
                 return Err(invalid(format!(
                     "chart `{key}`: `{col}` isn't a column the query returns ({})",
@@ -75,17 +93,30 @@ async fn check_chart(
                 )));
             }
         }
+        Ok(())
     }
-    Ok(())
 }
 
 fn invalid(msg: impl Into<String>) -> DomainError {
     DomainError::Invalid(msg.into())
 }
 
-/// Build the tile, checking a query tile's SQL through the gateway (the read
-/// contract a lens is held to).
+/// Build the tile and check a query tile's SQL through the gateway (the
+/// read contract a lens is held to): [`build_tile`] and then its
+/// [`QueryCheck`]. The bus runs the check as a command's precheck, before
+/// the transaction, and builds again inside it.
 pub async fn new_tile(sql: &SqlGateway, input: TileInput) -> Result<NewDashboardItem, DomainError> {
+    let (tile, check) = build_tile(input)?;
+    if let Some(check) = check {
+        check.run(sql).await?;
+    }
+    Ok(tile)
+}
+
+/// Build the tile from what the caller gave, with everything that needs no
+/// SQL checked; a query tile also returns its [`QueryCheck`].
+pub fn build_tile(input: TileInput) -> Result<(NewDashboardItem, Option<QueryCheck>), DomainError> {
+    let mut pending = None;
     let mut opts: Map<String, Value> = match input.options_json.as_deref() {
         Some(raw) if !raw.trim().is_empty() => {
             serde_json::from_str(raw).map_err(|e| invalid(format!("options_json: {e}")))?
@@ -117,10 +148,19 @@ pub async fn new_tile(sql: &SqlGateway, input: TileInput) -> Result<NewDashboard
                     "a `metric` display needs the metric key in options `metric`",
                 ));
             }
-            sql.check(&query).await?;
-            if let Some(roles) = chart_roles(&display) {
-                check_chart(sql, &query, &display, roles, opts.get("chart")).await?;
+            let mut chart_columns = Vec::new();
+            if let Some((required, optional)) = chart_roles(&display) {
+                let chart = chart_names_roles(&display, required, opts.get("chart"))?;
+                for key in required.iter().chain(optional) {
+                    if let Some(col) = chart.get(*key).and_then(Value::as_str) {
+                        chart_columns.push((key.to_string(), col.to_string()));
+                    }
+                }
             }
+            pending = Some(QueryCheck {
+                query: query.clone(),
+                chart_columns,
+            });
             opts.insert("sql".into(), Value::String(query));
             opts.insert("display".into(), Value::String(display));
         }
@@ -143,10 +183,13 @@ pub async fn new_tile(sql: &SqlGateway, input: TileInput) -> Result<NewDashboard
             )))
         }
     }
-    Ok(NewDashboardItem {
-        kind: input.kind,
-        options_json: Some(Value::Object(opts).to_string()),
-    })
+    Ok((
+        NewDashboardItem {
+            kind: input.kind,
+            options_json: Some(Value::Object(opts).to_string()),
+        },
+        pending,
+    ))
 }
 
 #[cfg(test)]

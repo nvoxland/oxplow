@@ -1,12 +1,14 @@
 //! Dashboard commands (P8.A5, `.context/dashboards.md`): a dashboard and
 //! its tiles, written through the bus by the desktop, an agent or a lens.
 //! Creating, renaming, deleting a dashboard and removing or reordering its
-//! tiles are `Tx` over the dashboard store's `_tx` cores. Adding a tile and
-//! editing one are `External`: a query tile's SQL is checked by the
-//! semantic engine first — the read contract a lens is held to, with
-//! `MEASURE()` resolved — which is async, so it can't run inside the
-//! bus's transaction; the write that follows is one statement. Dashboards
-//! and tiles are named by id (`dsh3`, `dti7`).
+//! tiles are `Tx` over the dashboard store's `_tx` cores, and so are adding
+//! a tile and editing one: a query tile's SQL is checked by the semantic
+//! engine — the read contract a lens is held to, with `MEASURE()`
+//! resolved — which is async, so it runs as the command's `Precheck`
+//! before the transaction (`new_tile`), and the handler inside builds the
+//! tile again without SQL (`build_tile`). A composite holding either stays
+//! one transaction and undoes as one. Dashboards and tiles are named by id
+//! (`dsh3`, `dti7`).
 
 use crate::commands::ops::Op;
 use std::sync::Arc;
@@ -19,11 +21,11 @@ use oxplow_db::Database;
 use oxplow_domain::{CommandCall, CommandError, Confirm, DashboardId, DashboardItemId, Invokers};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 
 use super::util::{invalid, parse, schema};
-use super::{Handler, HandlerOutput, Invocation, TxCtx};
-use crate::dashboard_tiles::{new_tile, TileInput};
+use super::{Handler, HandlerOutput, Precheck, TxCtx};
+use crate::dashboard_tiles::{build_tile, new_tile, TileInput};
 use crate::sql_gateway::SqlGateway;
 
 pub const CREATE: &str = "oxplow.dashboard.create";
@@ -203,111 +205,111 @@ pub fn delete_op() -> Op {
 
 /// `dashboard.add_item { dashboard, kind, sql?, display?, lens_id?,
 /// options_json?, position? }`: the tile checked (a query tile's SQL by the
-/// semantic engine), then written. Undone by removing it.
-pub fn add_item_op(db: Database, sql: SqlGateway) -> Op {
+/// semantic engine, before the transaction), then written. Undone by
+/// removing it.
+pub fn add_item_op(sql: SqlGateway) -> Op {
+    let precheck: Arc<Precheck> = Arc::new(move |input: Value| {
+        let sql = sql.clone();
+        Box::pin(async move {
+            let input: AddItemInput = parse(input)?;
+            new_tile(&sql, add_tile_input(input))
+                .await
+                .map(|_| ())
+                .map_err(|e| tile_error(e, ""))
+        })
+    });
     Op::new(
         "dashboards.write",
         "add_item",
         schema::<AddItemInput>(),
         true,
-        Handler::External(Arc::new(move |_: Invocation, input| {
-            let (db, sql) = (db.clone(), sql.clone());
-            Box::pin(async move {
-                let input: AddItemInput = parse(input)?;
-                let dashboard = dashboard_id(&input.dashboard, "/dashboard")?;
-                let tile = new_tile(
-                    &sql,
-                    TileInput {
-                        kind: input.kind,
-                        sql: input.sql,
-                        display: input.display,
-                        lens_id: input.lens_id,
-                        options_json: input.options_json,
-                    },
-                )
-                .await
-                .map_err(|e| tile_error(e, ""))?;
-                let position = input.position;
-                let id = db
-                    .transaction(move |tx| {
-                        if dashboard_tx(tx, dashboard)?.is_none() {
-                            return Err(oxplow_domain::DomainError::Invalid(format!(
-                                "no dashboard `{dashboard}`"
-                            )));
-                        }
-                        add_item_tx(tx, dashboard, &tile, position)
-                    })
-                    .await
-                    .map_err(|e| tile_error(e, "/dashboard"))?;
-                Ok(HandlerOutput {
-                    result: json!({ "id": id }),
-                    inverse: Some(CommandCall {
-                        name: REMOVE_ITEM.into(),
-                        input: json!({ "item": id }),
-                    }),
-                    ..HandlerOutput::default()
-                })
+        Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
+            let input: AddItemInput = parse(input)?;
+            let dashboard = dashboard_id(&input.dashboard, "/dashboard")?;
+            let position = input.position;
+            // Its query was checked before the transaction.
+            let (tile, _) = build_tile(add_tile_input(input)).map_err(|e| tile_error(e, ""))?;
+            exists(ctx.conn, dashboard, "/dashboard")?;
+            let id = add_item_tx(ctx.conn, dashboard, &tile, position)?;
+            Ok(HandlerOutput {
+                result: json!({ "id": id }),
+                inverse: Some(CommandCall {
+                    name: REMOVE_ITEM.into(),
+                    input: json!({ "item": id }),
+                }),
+                ..HandlerOutput::default()
             })
         })),
     )
+    .with_precheck(precheck)
 }
 
-/// `dashboard.update_item { item, options_json? }`: a query tile's SQL is
-/// checked again. Undone by its previous options.
+fn add_tile_input(input: AddItemInput) -> TileInput {
+    TileInput {
+        kind: input.kind,
+        sql: input.sql,
+        display: input.display,
+        lens_id: input.lens_id,
+        options_json: input.options_json,
+    }
+}
+
+/// `dashboard.update_item { item, options_json? }`: an edited tile is
+/// checked as a new one of its kind is — its options parse, a query tile
+/// keeps its SQL (held to the read contract, before the transaction) and a
+/// display it can show. Undone by its previous options.
 pub fn update_item_op(db: Database, sql: SqlGateway) -> Op {
+    let precheck: Arc<Precheck> = Arc::new(move |input: Value| {
+        let (db, sql) = (db.clone(), sql.clone());
+        Box::pin(async move {
+            let input: UpdateItemInput = parse(input)?;
+            let id = item_id(&input.item, "/item")?;
+            let kind = db
+                .read(move |tx| {
+                    item_tx(tx, id)?.map(|t| t.kind).ok_or_else(|| {
+                        oxplow_domain::DomainError::Invalid(format!("no tile `{id}`"))
+                    })
+                })
+                .await
+                .map_err(|e| tile_error(e, "/item"))?;
+            new_tile(&sql, update_tile_input(kind, input.options_json))
+                .await
+                .map(|_| ())
+                .map_err(|e| tile_error(e, "/options_json"))
+        })
+    });
     Op::new(
         "dashboards.write",
         "update_item",
         schema::<UpdateItemInput>(),
         true,
-        Handler::External(Arc::new(move |_: Invocation, input| {
-            let (db, sql) = (db.clone(), sql.clone());
-            Box::pin(async move {
-                let input: UpdateItemInput = parse(input)?;
-                let id = item_id(&input.item, "/item")?;
-                // An edited tile is checked as a new one of its kind is:
-                // its options parse, a query tile keeps its SQL (held to the
-                // read contract) and a display it can show.
-                let kind = db
-                    .read(move |tx| {
-                        item_tx(tx, id)?.map(|t| t.kind).ok_or_else(|| {
-                            oxplow_domain::DomainError::Invalid(format!("no tile `{id}`"))
-                        })
-                    })
-                    .await
-                    .map_err(|e| tile_error(e, "/item"))?;
-                let tile = new_tile(
-                    &sql,
-                    TileInput {
-                        kind,
-                        options_json: input.options_json.clone(),
-                        ..TileInput::default()
-                    },
-                )
-                .await
+        Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
+            let input: UpdateItemInput = parse(input)?;
+            let id = item_id(&input.item, "/item")?;
+            let before = item_tx(ctx.conn, id)?
+                .ok_or_else(|| invalid("/item", format!("no tile `{id}`")))?;
+            let (tile, _) = build_tile(update_tile_input(before.kind, input.options_json))
                 .map_err(|e| tile_error(e, "/options_json"))?;
-                let options = tile.options_json;
-                let before = db
-                    .transaction(move |tx| {
-                        let before = item_tx(tx, id)?.ok_or_else(|| {
-                            oxplow_domain::DomainError::Invalid(format!("no tile `{id}`"))
-                        })?;
-                        update_item_tx(tx, id, options.as_deref())?;
-                        Ok(before.options_json)
-                    })
-                    .await
-                    .map_err(|e| tile_error(e, "/item"))?;
-                Ok(HandlerOutput {
-                    result: json!({ "item": input.item }),
-                    inverse: Some(CommandCall {
-                        name: UPDATE_ITEM.into(),
-                        input: json!({ "item": input.item, "options_json": before }),
-                    }),
-                    ..HandlerOutput::default()
-                })
+            update_item_tx(ctx.conn, id, tile.options_json.as_deref())?;
+            Ok(HandlerOutput {
+                result: json!({ "item": input.item }),
+                inverse: Some(CommandCall {
+                    name: UPDATE_ITEM.into(),
+                    input: json!({ "item": input.item, "options_json": before.options_json }),
+                }),
+                ..HandlerOutput::default()
             })
         })),
     )
+    .with_precheck(precheck)
+}
+
+fn update_tile_input(kind: String, options_json: Option<String>) -> TileInput {
+    TileInput {
+        kind,
+        options_json,
+        ..TileInput::default()
+    }
 }
 
 /// `dashboard.remove_item { item }`; undone by adding it back where it was.
@@ -386,7 +388,7 @@ pub fn ops(db: Database, sql: SqlGateway) -> Vec<Op> {
         create_op(),
         rename_op(),
         delete_op(),
-        add_item_op(db.clone(), sql.clone()),
+        add_item_op(sql.clone()),
         update_item_op(db, sql),
         remove_item_op(),
         reorder_items_op(),
@@ -398,7 +400,6 @@ mod tests {
     use super::*;
     use crate::test_fixtures::{services_with_effort, EffortFixture};
     use oxplow_domain::Actor;
-    use serde_json::Value;
 
     fn agent(fx: &EffortFixture) -> Actor {
         Actor::Agent {
@@ -546,6 +547,96 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(tiles(&fx, &d).await, before);
+    }
+
+    /// A composite holding tile writes stays one transaction and undoes as
+    /// one; a refused query in it writes nothing.
+    #[tokio::test]
+    async fn tile_writes_compose_into_one_undoable_transaction() {
+        let fx = services_with_effort().await;
+        let d = dashboard(&fx).await;
+        let first = run(
+            &fx,
+            &Actor::Human,
+            ADD_ITEM,
+            json!({ "dashboard": d, "kind": "text",
+                    "options_json": json!({ "text": "a" }).to_string() }),
+        )
+        .await
+        .unwrap();
+        let item = first.result["id"].as_str().unwrap().to_string();
+        let before = tiles(&fx, &d).await;
+        let text = |t: &str| json!({ "text": t }).to_string();
+        let calls = |sql: &str| {
+            json!({ "calls": [
+                { "name": ADD_ITEM, "input": { "dashboard": d, "kind": "text", "options_json": text("b") } },
+                { "name": UPDATE_ITEM, "input": { "item": item, "options_json": text("a2") } },
+                { "name": ADD_ITEM, "input": { "dashboard": d, "kind": "query", "sql": sql, "display": "number" } },
+            ] })
+        };
+        let err = run(
+            &fx,
+            &Actor::Human,
+            "oxplow.command.sequence",
+            calls("SELECT * FROM task"),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, CommandError::Invalid { .. }), "{err:?}");
+        assert_eq!(tiles(&fx, &d).await, before);
+        let out = run(
+            &fx,
+            &Actor::Human,
+            "oxplow.command.sequence",
+            calls("SELECT count(*) AS n FROM v_work_item"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(tiles(&fx, &d).await.len(), 3);
+        fx.svc
+            .commands
+            .undo(&Actor::Human, out.audit_id.unwrap(), false)
+            .await
+            .unwrap();
+        assert_eq!(tiles(&fx, &d).await, before);
+    }
+
+    /// A refused tile is audited invalid at its field.
+    #[tokio::test]
+    async fn a_refused_tile_names_its_field() {
+        let fx = services_with_effort().await;
+        let d = dashboard(&fx).await;
+        let field = |e: CommandError| match e {
+            CommandError::Invalid { field, .. } => field,
+            other => panic!("{other:?}"),
+        };
+        let err = run(
+            &fx,
+            &Actor::Human,
+            ADD_ITEM,
+            json!({ "dashboard": d, "kind": "query", "sql": "SELECT * FROM task" }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(field(err).unwrap_or_default(), "");
+        let err = run(
+            &fx,
+            &Actor::Human,
+            ADD_ITEM,
+            json!({ "dashboard": "dsh99999", "kind": "text" }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(field(err).as_deref(), Some("/dashboard"));
+        let err = run(
+            &fx,
+            &Actor::Human,
+            UPDATE_ITEM,
+            json!({ "item": "dti99999" }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(field(err).as_deref(), Some("/item"));
     }
 
     /// Deleting a dashboard is a person's, asked first.

@@ -64,14 +64,17 @@ dashboard.rs`, P8.A5), for the desktop (`runCommand`), an agent
   `oxplow.dashboard.delete { dashboard }` (a person's or a lens's,
   `Confirm::Destructive`; the page's Delete `InlineConfirm` is the
   confirmation, so the desktop runs it confirmed; not undoable).
-- `External`: `oxplow.dashboard.add_item { dashboard, kind, sql?, display?,
-  lens_id?, options_json?, position? }` and `oxplow.dashboard.update_item { item,
-  options_json? }` — a tile is checked by `dashboard_tiles::new_tile`
-  first, an edited one as a new tile of its kind (its options parse, a
+- `Tx` with a `Precheck`: `oxplow.dashboard.add_item { dashboard, kind, sql?,
+  display?, lens_id?, options_json?, position? }` and `oxplow.dashboard.update_item
+  { item, options_json? }`. A tile is checked as `dashboard_tiles::new_tile`
+  does, an edited one as a new tile of its kind (its options parse, a
   query tile keeps its SQL — `SqlGateway::check`: the read contract,
-  `MEASURE()` resolved — and a display it can show, a lens tile its lens),
-  which is async and can't run inside the bus's transaction; the write
-  that follows is one statement. Both undo
+  `MEASURE()` resolved — and a display it can show, a lens tile its lens).
+  The SQL check is async, so it is the command's `Precheck`, run before
+  the transaction (a refusal is invalid at `""` / `/options_json`, and
+  `/item` for an unknown tile); the handler inside rebuilds the tile with
+  the sync `build_tile` and writes over the `_tx` cores. So they join a
+  composite's transaction and undo with it. Both undo
   (remove the tile; restore the old options).
 
 Dashboards and tiles are named by id (`dsh3`, `dti7`). The reads stay

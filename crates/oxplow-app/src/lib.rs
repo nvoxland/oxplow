@@ -2217,9 +2217,6 @@ mod tests {
                 "oxplow.collector.sync",
                 // A provider's process restarts (P7.C1; was provider.enable).
                 "oxplow.contribution.enable",
-                // A tile's SQL is checked by the semantic engine first (P8.A5).
-                "oxplow.dashboard.add_item",
-                "oxplow.dashboard.update_item",
                 // The worktree and the snapshot diff a report is checked
                 // against (P8.A7).
                 "oxplow.effect.backfill",
