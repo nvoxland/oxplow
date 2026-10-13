@@ -55,6 +55,10 @@ Fixed while building them:
   now check `expect: { result }`.
 - An author couldn't see how an import resolved; `extension check` and
   `extension test` now print one line per import.
+- A local variable named like a service builtin (`files = …`) counted as
+  using it, and a command script was refused for it; a name the script
+  binds itself (parameter, assignment, loop or comprehension variable,
+  def) is no longer a use.
 
 Still open:
 
@@ -76,8 +80,6 @@ Still open:
   (`effort_review.review.ask`), while its contribution ids and model
   views keep or translate the dash differently
   (`effort-review/job/review`, `v_effort_review_reviews`).
-- **A local variable named like a service builtin** (`files = …`) counts
-  as using it, and a command script is refused for it.
 - **Withheld contributions are reported unevenly.** A consumer's lens
   fixture fails with "not found" rather than "withheld: import
   unavailable"; a dropped slot gets no warning of its own; the import's
