@@ -1381,15 +1381,14 @@ mod tests {
         assert!(matches!(err, CommandError::Invalid { .. }), "{err:?}");
     }
 
-    /// A link made by a person (no thread of their own) belongs to the
-    /// linked task's thread; two backlog tasks can't be linked that way.
+    /// A link belongs to its task: a person links two backlog tasks, and an
+    /// unknown link type is refused.
     #[tokio::test]
-    async fn a_persons_link_takes_the_tasks_thread() {
+    async fn a_persons_link_belongs_to_its_task() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let from = work_item_ref(fx.task);
         let other = file_on(&fx, "other", None).await;
-        let out = fx
-            .svc
+        fx.svc
             .commands
             .run(
                 &Actor::Human,
@@ -1399,13 +1398,8 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(
-            task_row(&fx.svc, &out.result).await["thread_id"],
-            fx.thread.to_string()
-        );
         let another = file_on(&fx, "another", None).await;
-        let err = fx
-            .svc
+        fx.svc
             .commands
             .run(
                 &Actor::Human,
@@ -1414,8 +1408,7 @@ mod tests {
                 false,
             )
             .await
-            .unwrap_err();
-        assert!(err.to_string().contains("thread"), "{err}");
+            .unwrap();
         let err = fx
             .svc
             .commands
@@ -1659,11 +1652,11 @@ mod tests {
         assert_eq!(
             column(
                 &fx.svc,
-                "SELECT link_type || ' ' || thread_id FROM task_link WHERE from_item_id = ?1",
+                "SELECT link_type FROM task_link WHERE from_item_id = ?1",
                 from_id
             )
             .await,
-            format!("blocks {}", fx.thread.value())
+            "blocks"
         );
         let commented = fx
             .svc

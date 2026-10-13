@@ -159,7 +159,7 @@ pub fn create_tx(
         author: task_author(actor),
     };
     let id = store::insert_tx(conn, &item).map_err(CommandError::from)?;
-    // Its links, made with it. A backlog task's need the caller's thread.
+    // Its links, made with it.
     for (n, link) in input.links.iter().enumerate() {
         let at = |e: CommandError| match e {
             CommandError::Invalid { field, message } => CommandError::Invalid {
@@ -170,13 +170,7 @@ pub fn create_tx(
         };
         link_target_tx(conn, &link.target).map_err(at)?;
         let link_type = link_type_of(&link.link_type).map_err(at)?;
-        let link_thread = actor.thread_id().or(thread).ok_or_else(|| {
-            invalid_at(
-                &format!("/links/{n}"),
-                "a backlog task's links need a thread: file it from one".into(),
-            )
-        })?;
-        crate::satellite::create_link_tx(conn, link_thread, id, &link.target, link_type)
+        crate::satellite::create_link_tx(conn, id, &link.target, link_type)
             .map_err(CommandError::from)?;
     }
     Ok(Answer {
@@ -353,39 +347,17 @@ fn link_type_of(raw: &str) -> Result<TaskLinkType, CommandError> {
 }
 
 /// `link`: a typed link from a live task to another live task, or to any
-/// ref it is `about`. It belongs to a thread: the caller's, else the
-/// task's, else the linked task's. Linking twice is one link. Undone by
-/// `unlink`.
+/// ref it is `about`. A link belongs to its task. Linking twice is one
+/// link. Undone by `unlink`.
 pub fn link_tx(
     conn: &rusqlite::Connection,
-    actor: &Actor,
     input: WorkItemLinkInput,
 ) -> Result<Answer, CommandError> {
     let from = task_ref(&input.item_ref, "/ref")?;
     live_task_tx(conn, from, &input.item_ref, "/ref")?;
-    let to = link_target_tx(conn, &input.target)?;
+    link_target_tx(conn, &input.target)?;
     let link_type = link_type_of(&input.link_type)?;
-    let thread = match actor.thread_id() {
-        Some(t) => t,
-        None => {
-            let on = |id: TaskId| -> Result<Option<ThreadId>, CommandError> {
-                Ok(store::get_task_tx(conn, id)
-                    .map_err(CommandError::from)?
-                    .and_then(|t| t.thread_id))
-            };
-            let target_thread = match to {
-                Some(to) => on(to)?,
-                None => None,
-            };
-            on(from)?.or(target_thread).ok_or_else(|| {
-                invalid_at(
-                    "/ref",
-                    "a link from a backlog task needs a thread: run it from one".into(),
-                )
-            })?
-        }
-    };
-    let added = crate::satellite::create_link_tx(conn, thread, from, &input.target, link_type)
+    let added = crate::satellite::create_link_tx(conn, from, &input.target, link_type)
         .map_err(CommandError::from)?;
     Ok(Answer {
         result: json!({ "ref": input.item_ref, "linked": added }),

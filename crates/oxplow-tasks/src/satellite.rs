@@ -9,7 +9,7 @@ use rusqlite::params;
 
 use crate::ids::TaskId;
 use oxplow_db::{map_sql_err, string_to_ts, ts_to_string, Database};
-use oxplow_domain::{DomainError, NoteId, ThreadId, Timestamp};
+use oxplow_domain::{DomainError, NoteId, Timestamp};
 
 use crate::model::{TaskLinkType, TaskNote};
 
@@ -50,22 +50,20 @@ pub fn add_task_note_tx(
 }
 
 /// A typed link from task `from` to any ref `to` (another item, or what
-/// the item is `about`), made in `thread` — the core of
+/// the item is `about`) — the core of
 /// `oxplow.work_item.link`. Linking twice is one link: whether this one
 /// is new.
 pub fn create_link_tx(
     conn: &rusqlite::Connection,
-    thread: ThreadId,
     from: TaskId,
     to: &str,
     link_type: TaskLinkType,
 ) -> Result<bool, DomainError> {
     let added = conn
         .execute(
-            "INSERT OR IGNORE INTO task_link (thread_id, from_item_id, to_ref, link_type, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT OR IGNORE INTO task_link (from_item_id, to_ref, link_type, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
             params![
-                thread.value(),
                 from.value(),
                 to,
                 link_type_to_str(link_type),
@@ -147,6 +145,8 @@ impl TaskNoteStore for SqliteTaskNoteStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use oxplow_domain::ThreadId;
 
     use crate::model::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
     use crate::store::{SqliteTaskStore, TaskStore};
@@ -269,7 +269,6 @@ mod tests {
         db.transaction(move |tx| {
             create_link_tx(
                 tx,
-                tid,
                 from_id,
                 &crate::refs::work_item_ref(to_id),
                 TaskLinkType::Blocks,

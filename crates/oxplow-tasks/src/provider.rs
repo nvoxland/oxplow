@@ -55,7 +55,7 @@ fn run_tx(
         "create" => verbs::create_tx(conn, actor, parse(input)?),
         "update" => verbs::update_tx(conn, parse(input)?),
         "transition" => verbs::transition_tx(conn, parse(input)?),
-        "link" => verbs::link_tx(conn, actor, parse(input)?),
+        "link" => verbs::link_tx(conn, parse(input)?),
         "unlink" => verbs::unlink_tx(conn, parse(input)?),
         "comment" => verbs::comment_tx(conn, actor, parse(input)?),
         "delete" => verbs::delete_tx(conn, parse(input)?),
