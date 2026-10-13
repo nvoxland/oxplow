@@ -133,7 +133,7 @@ fn status_of(
     };
     Ok(SourceCoverage {
         model,
-        source: format!("collector:{}/{}", f.owner, f.id),
+        source: oxplow_domain::refs::build::collector_ref(&f.owner, &f.id),
         status: status.into(),
         at,
         error,

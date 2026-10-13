@@ -77,7 +77,7 @@ pub fn save_op(files: Arc<WorkspaceFiles>) -> Op {
                         bytes,
                     },
                 )
-                .with_subject([format!("file:{}", saved.path)]);
+                .with_subject([oxplow_domain::refs::build::file_ref(&saved.path)]);
                 saved_event.anchors.stream_id = Some(stream);
                 Ok(HandlerOutput {
                     result: json!({ "path": saved.path, "bytes": bytes }),

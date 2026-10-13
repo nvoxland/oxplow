@@ -493,12 +493,10 @@ pub fn retry_op(services: ServicesSlot) -> Op {
                     message: "oxplow is shutting down".into(),
                 })?;
                 let (ext, decl, health) = ready(&svc, &effect).await?;
-                let id = event.strip_prefix("event:").ok_or_else(|| {
-                    invalid(
-                        "/event",
-                        format!("`{event}` isn't an event ref (`event:<id>`)"),
-                    )
-                })?;
+                let id =
+                    oxplow_domain::refs::build::id_of(&event, oxplow_domain::refs::kind::EVENT)
+                        .map_err(|e| invalid("/event", e.to_string()))?;
+                let id = id.as_str();
                 let stored = svc
                     .event_log_store
                     .get(oxplow_domain::EventId(id.to_string()))

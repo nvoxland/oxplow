@@ -409,14 +409,15 @@ pub(crate) fn dim_value_cached(
         }
         // Pseudo-dimensions off the capture/fact spine (not `dims_json`), so
         // `group_by` is uniform server-side (tsk26): branch, the raw subject, and
-        // the model (a `model:<id>` subject → the bare id, else the dims_json
+        // the model (an `ai_model:<name>` subject → the bare id, else the dims_json
         // `oxplow.model`).
         "oxplow.branch" => f.branch.clone(),
         "subject" => f.subject_ref.clone(),
         "oxplow.model" => match &f.subject_ref {
-            Some(s) if f.subject_kind.as_deref() == Some("model") => {
-                Some(s.strip_prefix("model:").unwrap_or(s).to_string())
-            }
+            Some(s) if f.subject_kind.as_deref() == Some("model") => Some(
+                oxplow_domain::refs::build::id_of(s, oxplow_domain::refs::kind::AI_MODEL)
+                    .unwrap_or_else(|_| s.clone()),
+            ),
             _ => dims.get(f).and_then(|d| dim_from_map(d, "oxplow.model")),
         },
         // The capture spine: who/where a fact was measured (tsk321).
@@ -2538,7 +2539,7 @@ mod tests {
         let f = FactRow {
             path: Some("src/deep/mod.rs".into()),
             subject_kind: Some("model".into()),
-            subject_ref: Some("model:opus".into()),
+            subject_ref: Some("ai_model:opus".into()),
             branch: Some("feature/x".into()),
             thread_id: Some(4),
             effort_id: Some(9),
@@ -3328,7 +3329,7 @@ mod tests {
             path: Some("crates/a/src/lib.rs".into()),
             branch: Some("main".into()),
             subject_kind: Some("model".into()),
-            subject_ref: Some("model:opus".into()),
+            subject_ref: Some("ai_model:opus".into()),
             ..fact(1, "2026-06-30T10:00:00Z", 1.0)
         };
         assert_eq!(dim_value(&f, "oxplow.language").as_deref(), Some("rust"));

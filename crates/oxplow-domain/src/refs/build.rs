@@ -195,6 +195,12 @@ pub fn job_run_ref(id: &str) -> String {
     of(k::JOB_RUN, id)
 }
 
+/// A language model by the name its harness or provider reports
+/// (`ai_model:claude-opus-4-8`); not the `model` kind, a published view.
+pub fn ai_model_ref(name: &str) -> String {
+    of(k::AI_MODEL, name)
+}
+
 /// An extension, by its name.
 pub fn extension_ref(name: &str) -> String {
     of(k::EXTENSION, name)
@@ -389,6 +395,7 @@ mod tests {
             metric_ref("m"),
             model_ref("v_a"),
             job_run_ref("01a1369e-b063-76f8-968f-902d392f882d"),
+            ai_model_ref("claude-opus-4-8"),
             extension_ref("e"),
             command_ref("a.b"),
             config_ref("c"),

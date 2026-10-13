@@ -9,7 +9,7 @@
 //!
 //! Every stored `(kind, id)` is a canonical ref's `(kind, id)`
 //! (`.context/refs.md`), so a row can be turned back into a ref by
-//! `format!("{kind}:{id}")` and nothing downstream needs a per-kind id
+//! `refs::build::of(kind, id)` and nothing downstream needs a per-kind id
 //! scheme:
 //! - wiki:      `"<slug>"`
 //! - work_item: `"oxplow:tsk<n>"` — a task, provider-scoped ([`work_item_id`])
@@ -26,13 +26,10 @@ use oxplow_domain::EffortImpact;
 use crate::effort_store::FileRefVersion;
 use crate::page_ref_store::PageRefEdge;
 
-pub const KIND_WIKI: &str = "wiki";
-pub const KIND_WORK_ITEM: &str = "work_item";
-pub const KIND_THREAD_NOTE: &str = "thread_note";
-pub const KIND_FILE: &str = "file";
-pub const KIND_DIR: &str = "dir";
-pub const KIND_FINDING: &str = "finding";
-pub const KIND_COMMIT: &str = "commit";
+pub use oxplow_domain::refs::kind::{
+    COMMIT as KIND_COMMIT, DIR as KIND_DIR, FILE as KIND_FILE, FINDING as KIND_FINDING,
+    THREAD_NOTE as KIND_THREAD_NOTE, WIKI as KIND_WIKI, WORK_ITEM as KIND_WORK_ITEM,
+};
 
 // The work-item helpers live with the other ref builders (tsk450).
 
@@ -213,8 +210,7 @@ pub fn effort_impact_edges(
         // ref, or one of the active list's own ids.
         let target_id = if target_kind == KIND_WORK_ITEM {
             let id = imp.id.trim();
-            let Some(target) = id
-                .strip_prefix("work_item:")
+            let Some(target) = oxplow_domain::refs::build::work_item_id_of_ref(id)
                 .map(str::to_string)
                 .or_else(|| kinds.work_item_id(id))
             else {
@@ -424,7 +420,7 @@ pub fn work_item_link_edges(id: &str, links: &[(String, String)]) -> Vec<PageRef
     links
         .iter()
         .filter_map(|(target, link_type)| {
-            let target = target.strip_prefix("work_item:")?;
+            let target = oxplow_domain::refs::build::work_item_id_of_ref(target)?;
             Some(PageRefEdge::new(
                 KIND_WORK_ITEM,
                 id,

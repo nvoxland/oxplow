@@ -123,9 +123,12 @@ impl AsyncEventConsumer for EffortLandingConsumer {
         let Some(stream) = event.envelope.anchors.stream_id else {
             return Ok(());
         };
-        let Some(sha) = indexed.commit.strip_prefix("commit:") else {
+        let Ok(sha) =
+            oxplow_domain::refs::build::id_of(&indexed.commit, oxplow_domain::refs::kind::COMMIT)
+        else {
             return Ok(());
         };
+        let sha = sha.as_str();
         let ws = svc
             .worktrees
             .resolve(Some(&stream.to_string()))

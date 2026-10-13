@@ -41,16 +41,19 @@ impl EventConsumer for UiPush {
             return Ok(());
         }
         let stream = env.anchors.stream_id.or_else(|| {
-            payload["stream"]
-                .as_str()
-                .and_then(|r| r.strip_prefix("stream:"))
-                .and_then(StreamId::try_from_str)
+            payload["stream"].as_str().and_then(|r| {
+                oxplow_domain::refs::build::parse_as::<StreamId>(
+                    r,
+                    oxplow_domain::refs::kind::STREAM,
+                )
+                .ok()
+            })
         });
         let snapshot = env.anchors.snapshot_id.or_else(|| {
-            payload["snapshot"]
-                .as_str()
-                .and_then(|r| r.strip_prefix("snapshot:"))
-                .and_then(|n| n.parse().ok())
+            payload["snapshot"].as_str().and_then(|r| {
+                oxplow_domain::refs::build::parse_as::<i64>(r, oxplow_domain::refs::kind::SNAPSHOT)
+                    .ok()
+            })
         });
         let trigger = if head_moved {
             oxplow_domain::snapshot::SnapshotTrigger::HeadMoved

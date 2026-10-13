@@ -96,7 +96,11 @@ impl SqliteSymbolStore {
                                end_line, end_col)
                              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
                             rusqlite::params![
-                                format!("symbol:{}/{id}@snap:{snapshot_id}", file.path),
+                                oxplow_domain::refs::build::symbol_ref(
+                                    &file.path,
+                                    &id,
+                                    snapshot_id
+                                ),
                                 snapshot_id,
                                 stream_id,
                                 file.path,

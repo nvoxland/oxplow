@@ -797,7 +797,9 @@ impl OxplowMcp {
             .unwrap_or(serde_json::Value::Null);
         let mut lens_text = serde_json::Value::Null;
         if page.kind == "lens" {
-            if let Some(lens_id) = page.page_id.strip_prefix("lens:") {
+            if let Ok(lens_id) =
+                oxplow_domain::refs::build::id_of(&page.page_id, oxplow_domain::refs::kind::LENS)
+            {
                 // The app shows the main worktree's lenses, whatever the
                 // thread's stream.
                 let root = self.services.worktrees.project_dir();
@@ -817,7 +819,7 @@ impl OxplowMcp {
                         &self.services.sql,
                         &self.services.extension_catalog,
                         root,
-                        lens_id,
+                        &lens_id,
                         lens_params,
                         &ctx,
                     )
@@ -1289,10 +1291,10 @@ impl OxplowMcp {
             .as_str()
             .unwrap_or_default()
             .to_string();
-        let id: i64 = answer
-            .strip_prefix("answer:")
-            .and_then(|n| n.parse().ok())
-            .ok_or_else(|| internal("oxplow.lens.show returned no answer"))?;
+        let id: i64 =
+            oxplow_domain::refs::build::parse_as(&answer, oxplow_domain::refs::kind::ANSWER)
+                .ok()
+                .ok_or_else(|| internal("oxplow.lens.show returned no answer"))?;
         let (run, text) = oxplow_app::commands::lens::text_answer(&self.services, id)
             .await
             .map_err(domain_err)?;

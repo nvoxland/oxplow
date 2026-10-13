@@ -359,7 +359,7 @@ pub struct ProjectProgram {
 impl ProjectProgram {
     pub fn key(&self) -> String {
         match self.kind {
-            ProgramKind::Collector => format!("collector:{}", self.name),
+            ProgramKind::Collector => oxplow_domain::refs::build::of("collector", &self.name),
             ProgramKind::AcpAgent => format!("acp:{}", self.name),
             ProgramKind::Advisories => format!("advisories:{}", self.name),
             ProgramKind::Provider => format!("provider:{}", self.name),
@@ -891,7 +891,7 @@ pub fn component_program(
         scopes: component
             .assets
             .iter()
-            .map(|asset| format!("lens:{asset}"))
+            .map(|asset| oxplow_domain::refs::build::lens_ref(asset))
             .collect(),
         tree: Some(dir.to_string()),
         remote: false,

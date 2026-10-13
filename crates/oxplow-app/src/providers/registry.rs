@@ -1344,7 +1344,7 @@ pub fn check_subject(
 ) -> Result<(), String> {
     let own =
         oxplow_domain::capability::contract(capability).is_some_and(|c| owns(c, provider, subject));
-    if own || subject == format!("extension:{extension}") {
+    if own || subject == oxplow_domain::refs::build::extension_ref(extension) {
         Ok(())
     } else {
         Err(format!(

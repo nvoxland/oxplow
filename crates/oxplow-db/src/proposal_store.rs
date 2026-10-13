@@ -93,7 +93,9 @@ pub struct NewProposal {
 /// its input with keys sorted.
 pub fn proposal_key(command: &str, input: &Value) -> String {
     match (command, input.get("key").and_then(Value::as_str)) {
-        ("oxplow.config.set" | "oxplow.config.unset", Some(key)) => format!("config:{key}"),
+        ("oxplow.config.set" | "oxplow.config.unset", Some(key)) => {
+            oxplow_domain::refs::build::config_ref(key)
+        }
         _ => format!("{command} {}", canonical(input)),
     }
 }
@@ -159,7 +161,8 @@ fn decide_tx(
     let current = get_tx(conn, id)?.ok_or(DomainError::NotFound)?;
     if current.decision != ProposalDecision::Pending {
         return Err(DomainError::Invalid(format!(
-            "proposal:{id} is already {}",
+            "{} is already {}",
+            oxplow_domain::refs::build::proposal_ref(id),
             current.decision.as_str()
         )));
     }
@@ -199,7 +202,8 @@ pub fn finish_claim_tx(conn: &Connection, id: i64, audit_id: i64) -> Result<(), 
         .map_err(map_sql_err)?;
     if n == 0 {
         return Err(DomainError::Invariant(format!(
-            "proposal:{id} is not claimed for approval"
+            "{} is not claimed for approval",
+            oxplow_domain::refs::build::proposal_ref(id)
         )));
     }
     Ok(())

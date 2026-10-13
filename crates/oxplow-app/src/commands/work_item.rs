@@ -88,7 +88,10 @@ pub(crate) fn with_loose_refs(
             continue;
         };
         // A ref stays as it is; `parent_ref: ""` means no parent.
-        if raw.is_empty() || raw.starts_with("work_item:") {
+        if raw.is_empty()
+            || oxplow_domain::refs::build::kind_of(raw).as_deref()
+                == Some(oxplow_domain::refs::kind::WORK_ITEM)
+        {
             continue;
         }
         let canonical = registry

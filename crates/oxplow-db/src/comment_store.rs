@@ -218,7 +218,7 @@ fn comment_event(id: i64, target_kind: &str, target_id: &str, deleted: bool) -> 
         KnowledgeCommentDeleted, KnowledgeCommentDeletedV1, KnowledgeCommentWritten,
         KnowledgeCommentWrittenV1,
     };
-    let comment = format!("comment:{}", CommentId::new(id));
+    let comment = oxplow_domain::refs::build::comment_ref(CommentId::new(id));
     let env = if deleted {
         Envelope::typed::<KnowledgeCommentDeleted>(
             SOURCE,

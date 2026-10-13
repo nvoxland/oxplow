@@ -680,7 +680,7 @@ impl Actor {
             Actor::Agent {
                 thread_id: None, ..
             } => "agent".into(),
-            Actor::Lens { lens_id, .. } => format!("lens:{lens_id}"),
+            Actor::Lens { lens_id, .. } => crate::refs::build::lens_ref(lens_id),
             Actor::System => "system".into(),
             Actor::Effect { effect, .. } => format!("effect:{effect}"),
             Actor::Job {

@@ -283,8 +283,8 @@ fn missing_reason(world: &LinkWorld<'_>, reference: &Reference) -> Option<String
         // Through the interface: the active list's items.
         Reference::WorkItem(id) => (!exists(
             world.conn,
-            "SELECT 1 FROM v_work_item WHERE ref = 'work_item:' || ?1",
-            id,
+            "SELECT 1 FROM v_work_item WHERE ref = ?1",
+            &oxplow_domain::refs::build::of("work_item", id),
         ))
         .then(|| format!("work item `{id}` does not exist")),
         Reference::Wiki(slug) => (world.this_page != Some(slug.as_str())

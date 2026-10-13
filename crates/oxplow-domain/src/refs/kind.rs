@@ -211,6 +211,8 @@ pub const ANSWER: &str = "answer";
 pub const PAGE: &str = "page";
 pub const METRIC: &str = "metric";
 pub const MODEL: &str = "model";
+/// A language model by the name its harness or provider reports.
+pub const AI_MODEL: &str = "ai_model";
 pub const EXTENSION: &str = "extension";
 pub const COMMAND: &str = "command";
 pub const CONFIG: &str = "config";
@@ -255,6 +257,9 @@ pub fn core_kinds() -> KindRegistry {
         KindSpec::new(EVENT, r"^[0-9a-f-]{36}$"),
         // An agent's answer in a thread (`thread_answer.id`, P6.C1).
         KindSpec::new(ANSWER, r"^[0-9]+$"),
+        // A language model by the name its harness or provider reports
+        // (`claude-opus-4-8`, `gpt-5.5`): a token-usage fact's subject.
+        KindSpec::new(AI_MODEL, r"^\S+$"),
         KindSpec::new(EXTENSION, r"^[a-z0-9-]+$"),
         // A `.oxplow/project.yaml` key (`config.changed`'s subject).
         KindSpec::new(CONFIG, r"^[A-Za-z][A-Za-z0-9]*$"),

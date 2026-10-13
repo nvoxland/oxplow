@@ -51,17 +51,15 @@ impl crate::event_pump::AsyncEventConsumer for SearchIndexConsumer {
             ));
         };
         let payload = &event.envelope.payload;
-        let stream = payload["stream"]
-            .as_str()
-            .and_then(|r| r.strip_prefix("stream:"));
-        let snapshot = payload["snapshot"]
-            .as_str()
-            .and_then(|r| r.strip_prefix("snapshot:"))
-            .and_then(|n| n.parse::<i64>().ok());
+        let stream = payload["stream"].as_str().and_then(|r| {
+            oxplow_domain::refs::build::parse_as::<StreamId>(r, oxplow_domain::refs::kind::STREAM)
+                .ok()
+        });
+        let snapshot = payload["snapshot"].as_str().and_then(|r| {
+            oxplow_domain::refs::build::parse_as::<i64>(r, oxplow_domain::refs::kind::SNAPSHOT).ok()
+        });
         let files = payload["file_count"].as_u64().unwrap_or(0);
-        if let (Some(stream), Some(snapshot), true) =
-            (stream.and_then(StreamId::try_from_str), snapshot, files > 0)
-        {
+        if let (Some(stream), Some(snapshot), true) = (stream, snapshot, files > 0) {
             Indexer::new(svc)
                 .index_snapshot_files(&stream, snapshot)
                 .await;

@@ -25,7 +25,7 @@ fn note_event(id: i64, thread: i64, deleted: bool) -> oxplow_domain::Envelope {
     use oxplow_domain::events::schema::{
         KnowledgeNoteDeleted, KnowledgeNoteDeletedV2, KnowledgeNoteWritten, KnowledgeNoteWrittenV2,
     };
-    let note = format!("{KIND_THREAD_NOTE}:{}", NoteId::new(id));
+    let note = oxplow_domain::refs::build::thread_note_ref(NoteId::new(id));
     let thread = oxplow_domain::refs::build::thread_ref(ThreadId::new(thread));
     const SOURCE: &str = "system:notes";
     let env = if deleted {

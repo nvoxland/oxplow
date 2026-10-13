@@ -978,7 +978,10 @@ async fn handle(
                 let mut foreign = rows.first().map(|(_, r)| r.clone()).unwrap_or_else(
                     || json!({ "title": "x", "state": "todo", "native_state": "Backlog" }),
                 );
-                foreign["ref"] = json!("work_item:other:X-1");
+                foreign["ref"] = json!(oxplow_domain::refs::build::of(
+                    oxplow_domain::refs::kind::WORK_ITEM,
+                    "other:X-1"
+                ));
                 rows.insert(0, (after + 1, foreign));
             }
             if hooks.stale_read {
@@ -1026,8 +1029,8 @@ async fn handle(
 
 /// The number of instance `id`'s item `item_ref`.
 fn number_of(id: &str, item_ref: &str) -> Result<u64, ProtocolError> {
-    item_ref
-        .strip_prefix(&format!("work_item:{id}:W-"))
+    oxplow_domain::refs::build::work_item_id_of_ref(item_ref)
+        .and_then(|rest| rest.strip_prefix(&format!("{id}:W-")))
         .and_then(|n| n.parse().ok())
         .ok_or_else(|| ProtocolError::InvalidInput {
             field: "/ref".into(),
@@ -1124,7 +1127,10 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
                 native["points"] = points.into();
             }
             let record = WorkItemRecord {
-                item_ref: format!("work_item:{}:W-{n}", w.id),
+                item_ref: oxplow_domain::refs::build::of(
+                    oxplow_domain::refs::kind::WORK_ITEM,
+                    &format!("{}:W-{n}", w.id),
+                ),
                 title,
                 body: input
                     .get("body")
