@@ -345,7 +345,10 @@ commands:
 is `{schemaVersion: 1, role, messages, tools?}`; the host chooses the model
 for the role, and a job that declares `tools` takes none here. The request
 is private and limited to 1 MiB and 64 nesting levels. `cancel` and
-`snapshot` take `{id}`. The host records intent before a worker starts, and
+`snapshot` take `{id}`. The `intentKey` is what the job is about, one job
+per key: asking again with it returns the same job. Put the subject in it
+(`review:effort:eff12`), and read it back as the snapshot's `intentKey` or
+`v_job.intent_key`. The host records intent before a worker starts, and
 a person approves each job declaration in Settings -> Data -> Programs
 before it can spend an AI provider key; changing the declaration asks
 again.

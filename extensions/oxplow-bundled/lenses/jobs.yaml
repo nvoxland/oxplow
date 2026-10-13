@@ -4,6 +4,7 @@ query: |
   SELECT id,
          'lens:oxplow-bundled/job-output?job_id=' || id AS output_ref,
          job,
+         intent_key,
          state,
          attempt,
          ai_calls,
@@ -18,6 +19,7 @@ query: |
 viz: table
 columns:
   - { key: job, label: Job, link: { kind: page, from: output_ref } }
+  - { key: intent_key, label: About }
   - { key: state, label: State }
   - { key: attempt, label: Attempt }
   - { key: ai_calls, label: Model rounds }

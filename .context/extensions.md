@@ -4081,8 +4081,11 @@ commands:
   outputTokens }, aiCalls }` — `parts` is the last round's reply; a
   failure adds `error`; a cancelled job keeps the parts it had, with
   `stopped: cancelled`. `jobs.read/snapshot` returns `{ id, job,
-  version, state, attempt, cancellationRequested, text, toolCalls,
-  result }`, `text` being what the current attempt has streamed so far.
+  intentKey, version, state, attempt, cancellationRequested, text,
+  toolCalls, result }`, `text` being what the current attempt has
+  streamed so far. The intent key is the job's subject (one job per key
+  and declaration), so an effect on `contribution.job.completed` knows
+  what the answer is about; `v_job.intent_key` (v2) publishes it.
 - **Cancel.** `jobs.write/cancel` (the extension's own jobs) or
   `oxplow.job.cancel` (a person's, any job: `invokers` human and lens).
   A queued job ends at once. A running one has its run cancelled: the

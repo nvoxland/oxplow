@@ -1,5 +1,6 @@
 SELECT j.id,
        j.contribution_id AS job,
+       j.intent_key,
        CAST(substr(j.contribution_id, 1, instr(j.contribution_id, '/') - 1) AS TEXT) AS extension,
        j.package_version AS version,
        j.contract_version,

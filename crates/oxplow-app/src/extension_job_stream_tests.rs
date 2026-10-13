@@ -225,7 +225,7 @@ pub(super) async fn completions(fx: &Fixture, id: &str) -> Vec<String> {
 
 /// A streamed reply is the attempt's output while it comes: text rows
 /// appear before the job ends, `v_job` counts its round, and the result
-/// is the whole answer.
+/// is the whole answer. The job keeps what it was about, its intent key.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_job_streams_its_reply_as_output_rows() {
     let fx = fixture(MANIFEST, vec![slow("one two three four five six", 60)]).await;
@@ -243,6 +243,7 @@ async fn a_job_streams_its_reply_as_output_rows() {
 
     let done = until(&fx, &id, |s| s["state"] == json!("succeeded")).await;
     assert_eq!(done["text"], json!("one two three four five six"), "{done}");
+    assert_eq!(done["intentKey"], json!("stream"), "{done}");
     assert_eq!(
         done["result"]["parts"],
         json!([{ "type": "text", "text": "one two three four five six" }])
@@ -256,7 +257,7 @@ async fn a_job_streams_its_reply_as_output_rows() {
     assert!(text_rows[0][0].as_i64().unwrap() > 1, "streamed in pieces");
     let job = rows(
         &fx,
-        "SELECT state, ai_calls, extension, job FROM v_job WHERE id = ?1",
+        "SELECT state, ai_calls, extension, job, intent_key FROM v_job WHERE id = ?1",
         vec![json!(id)],
     )
     .await;
@@ -266,7 +267,8 @@ async fn a_job_streams_its_reply_as_output_rows() {
             json!("succeeded"),
             json!(1),
             json!("triage"),
-            json!("triage/job/review")
+            json!("triage/job/review"),
+            json!("stream")
         ]
     );
     assert_eq!(completions(&fx, &id).await, ["succeeded"]);
@@ -383,7 +385,8 @@ async fn a_tool_call_runs_the_extensions_command_and_answers_the_model() {
     let jobs = lens(&fx, "oxplow-bundled/jobs", vec![]).await;
     assert_eq!(jobs[0][0], json!(id), "{jobs}");
     assert_eq!(jobs[0][2], json!("triage/job/review"));
-    assert_eq!(jobs[0][3], json!("succeeded"));
+    assert_eq!(jobs[0][3], json!("tools"), "what it was about");
+    assert_eq!(jobs[0][4], json!("succeeded"));
     let output = lens(
         &fx,
         "oxplow-bundled/job-output",

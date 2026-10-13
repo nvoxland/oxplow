@@ -296,6 +296,7 @@ impl ExtensionJobs {
         Ok(json!({
             "id": id.as_str(),
             "job": metadata.job.owner.contribution.to_string(),
+            "intentKey": metadata.job.intent_key.as_str(),
             "version": metadata.job.owner.contract_version,
             "state": metadata.job.state,
             "attempt": metadata.job.attempt,
