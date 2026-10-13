@@ -672,7 +672,18 @@ Prerequisites: Stage and activate one coherent extension generation; Enforce sco
 
 #### Provide provider-independent custom views, forms and workflow UI
 
-Status: planned.
+Status: in progress. The Board, the Tasks list and a work item's editor
+are unbound replacement targets any extension may replace with no
+provider (`work_item.board`, `work_item.list`, `work_item.detail`); only
+the state control stays bound to its item's provider. Contracts are
+versioned, published as `v_replaceable` and generated into the
+reference. The person picks whose view shows (`replacements`, Settings →
+Integrations). Lens actions open their command's form (`form: true`,
+`fixed`), form lenses take `fixed` and `fields`, a refused field shows
+under it in every form, and component bundles may hold forms (bridge
+protocol 4). The triage example keeps workflow decisions in private
+state through its own commands. Still to do: the task-views example and
+its browser spec. See [extensions.md](./extensions.md) "Replacements".
 
 Scope: Expand the existing task-screen follow-up into general presentation primitives: detail/list/board mounting, forms, editing, reorder and navigation over references and host actions. Decouple choosing a presentation from installing a work-list provider. Integrate durable state/config instead of making authors impersonate a provider.
 

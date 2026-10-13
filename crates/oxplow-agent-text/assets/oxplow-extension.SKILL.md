@@ -761,6 +761,56 @@ effects:
 - `examples/extensions/triage/` in the oxplow repo has one, with its
   fixtures (a tool round, a cancel).
 
+## Replacing a core view
+
+When a person wants their own Board, Tasks list or work item editor, an
+extension replaces that core view with a lens or component — no work list
+provider needed. The views and their props are `v_replaceable` (query
+it); the lens declares each prop as a `param`:
+
+```yaml
+ui:
+  replacements:
+    - { target: work_item.board, lens: swimlanes, version: 1 }   # props: scope, thread_id
+    - { target: work_item.detail, lens: edit-item, version: 1 }  # props: ref
+```
+
+- Read items from `v_work_item`; change them only through the interface
+  commands (`oxplow.work_item.update`, `transition`, `reorder` — when
+  the active list's `features` in `v_capability_provider` include
+  `ordering` — and `move`), so the view works with whichever list is
+  active. A component declares the commands it runs (`commands:`), and a
+  person approves it before it can run them.
+- The person picks whose view shows: Settings → Integrations, or
+  `replacements: { <target>: <extension> | oxplow }` in the project
+  config (a person-only key: tell them, don't set it). One extension
+  replacing a view shows by itself.
+- The page around the view stays oxplow's (the Board's scope picker, a
+  work item's state pill and Move To), so an item can always move.
+
+## Forms
+
+- **A form lens** (`viz: form`) is one command's input:
+  `form: { command, defaults?, fixed?, fields? }`. `defaults` takes
+  `{{param.x}}`; a `query` prefills from its first row; `fixed` fields
+  show their default and can't be changed (an item's `ref`); `fields`
+  says which to show.
+- **A form action** on any lens: `form: true` on an action opens the
+  command's form (a side panel) starting from its `input`, instead of
+  running at once; `fixed` keeps fields to the bound values:
+  `{ id: edit, label: Edit…, command: oxplow.work_item.update, row: true,
+  form: true, fixed: [ref], input: { ref: "{{row.ref}}", title: "{{row.title}}" } }`.
+- **In a component**, a `<form>` is fine: handle `submit` in your script
+  (`preventDefault`) and run the command with `invoke`. A refusal rejects
+  with `{ code, message, field? }`; show `message` under the field it
+  names. The kit has `ox-form`, `ox-field`, `ox-label`, `ox-input`,
+  `ox-select`, `ox-textarea`, `ox-error`.
+- **Workflow state** no provider owns (a triage decision) lives in the
+  extension's private state: a script command reads the stamp with
+  `scope("state.read", …)` and composes your `state.write/compare_exchange`
+  command with it; a read command returns it for a view to show. The
+  triage example's TODO board does both.
+
 ## Health and repair
 
 oxplow keeps each provider's, collector's and effect's health on this machine
