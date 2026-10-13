@@ -35,6 +35,7 @@ pub mod ai;
 pub mod builtin_metrics;
 pub mod exec_io;
 pub mod helpers;
+pub mod refs;
 pub mod runtime;
 pub mod scope;
 pub mod uses;

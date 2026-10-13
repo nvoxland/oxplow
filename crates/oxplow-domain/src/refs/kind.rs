@@ -189,6 +189,40 @@ impl KindRegistry {
     }
 }
 
+/// The core kinds' names: the one place in Rust each is spelled. Build a
+/// ref with `refs::build`, read one with `refs::build::{parse_as, id_of}`.
+pub const PROJECT: &str = "project";
+pub const STREAM: &str = "stream";
+pub const THREAD: &str = "thread";
+pub const EFFORT: &str = "effort";
+pub const TURN: &str = "turn";
+pub const SNAPSHOT: &str = "snapshot";
+pub const COMMIT: &str = "commit";
+pub const BRANCH: &str = "branch";
+pub const FILE: &str = "file";
+pub const DIR: &str = "dir";
+pub const SYMBOL: &str = "symbol";
+pub const WORK_ITEM: &str = "work_item";
+pub const WIKI: &str = "wiki";
+pub const COMMENT: &str = "comment";
+pub const EVENT: &str = "event";
+pub const LENS: &str = "lens";
+pub const ANSWER: &str = "answer";
+pub const PAGE: &str = "page";
+pub const METRIC: &str = "metric";
+pub const MODEL: &str = "model";
+pub const EXTENSION: &str = "extension";
+pub const COMMAND: &str = "command";
+pub const CONFIG: &str = "config";
+pub const FINDING: &str = "finding";
+pub const THREAD_NOTE: &str = "thread_note";
+pub const AGENT_SESSION: &str = "agent_session";
+pub const RUN: &str = "run";
+pub const PROPOSAL: &str = "proposal";
+pub const CLAIM: &str = "claim";
+pub const DECISION: &str = "decision";
+pub const COLLECTOR: &str = "collector";
+
 /// A repo-relative path: no leading `/`, no `//`, no newline.
 const PATH_ID: &str = r"^[^/\n][^\n]*$";
 /// A prefixed entity id from `oxplow-domain::ids` (`thr1`, `eff362`).
@@ -202,49 +236,49 @@ fn prefixed(prefix: &str) -> String {
 pub fn core_kinds() -> KindRegistry {
     let mut reg = KindRegistry::default();
     let specs = [
-        KindSpec::new("project", r"^[A-Za-z0-9._-]+$"),
-        KindSpec::new("stream", &prefixed("str")),
-        KindSpec::new("thread", &prefixed("thr")),
-        KindSpec::new("effort", &prefixed("eff")),
-        KindSpec::new("turn", &prefixed("trn")),
-        KindSpec::new("snapshot", r"^[A-Za-z0-9]+$"),
+        KindSpec::new(PROJECT, r"^[A-Za-z0-9._-]+$"),
+        KindSpec::new(STREAM, &prefixed("str")),
+        KindSpec::new(THREAD, &prefixed("thr")),
+        KindSpec::new(EFFORT, &prefixed("eff")),
+        KindSpec::new(TURN, &prefixed("trn")),
+        KindSpec::new(SNAPSHOT, r"^[A-Za-z0-9]+$"),
         // 7..=40 hex for SHA-1 abbreviations and ids, up to 64 for SHA-256.
-        KindSpec::new("commit", r"^[0-9a-f]{7,64}$").map(|k| k.wikilink_prefix("git")),
-        KindSpec::new("branch", r"^[^\s]+$"),
-        KindSpec::new("file", PATH_ID).map(KindSpec::revisioned),
-        KindSpec::new("dir", PATH_ID).map(KindSpec::revisioned),
-        KindSpec::new("symbol", r"^[a-z0-9_-]+/.+$").map(KindSpec::revisioned),
-        KindSpec::new("work_item", r"^[a-z][a-z0-9_-]*:.+$").map(KindSpec::provider_scoped),
-        KindSpec::new("wiki", r"^[A-Za-z0-9][A-Za-z0-9_-]*$"),
-        KindSpec::new("comment", &prefixed("cmt")),
-        KindSpec::new("event", r"^[0-9a-f-]{36}$"),
-        KindSpec::new("lens", r"^[a-z0-9-]+/[a-z0-9-]+(\?.*)?$"),
+        KindSpec::new(COMMIT, r"^[0-9a-f]{7,64}$").map(|k| k.wikilink_prefix("git")),
+        KindSpec::new(BRANCH, r"^[^\s]+$"),
+        KindSpec::new(FILE, PATH_ID).map(KindSpec::revisioned),
+        KindSpec::new(DIR, PATH_ID).map(KindSpec::revisioned),
+        KindSpec::new(SYMBOL, r"^[a-z0-9_-]+/.+$").map(KindSpec::revisioned),
+        KindSpec::new(WORK_ITEM, r"^[a-z][a-z0-9_-]*:.+$").map(KindSpec::provider_scoped),
+        KindSpec::new(WIKI, r"^[A-Za-z0-9][A-Za-z0-9_-]*$"),
+        KindSpec::new(COMMENT, &prefixed("cmt")),
+        KindSpec::new(EVENT, r"^[0-9a-f-]{36}$"),
+        KindSpec::new(LENS, r"^[a-z0-9-]+/[a-z0-9-]+(\?.*)?$"),
         // An agent's answer in a thread (`thread_answer.id`, P6.C1).
-        KindSpec::new("answer", r"^[0-9]+$"),
+        KindSpec::new(ANSWER, r"^[0-9]+$"),
         // A shell route (`page:settings`) or an extension's page
         // (`page:ext.<extension>.<page>`, P6.G2).
         KindSpec::new(
             "page",
             r"^(?:[a-z0-9-]+|ext\.[a-z0-9-]+\.[a-z0-9-]+)(\?.*)?$",
         ),
-        KindSpec::new("metric", r"^[a-z0-9_.-]+$"),
-        KindSpec::new("model", r"^v_[a-z0-9_]+$"),
-        KindSpec::new("extension", r"^[a-z0-9-]+$"),
+        KindSpec::new(METRIC, r"^[a-z0-9_.-]+$"),
+        KindSpec::new(MODEL, r"^v_[a-z0-9_]+$"),
+        KindSpec::new(EXTENSION, r"^[a-z0-9-]+$"),
         // Two or more dot segments, as `CommandSpec::validate_id` allows.
-        KindSpec::new("command", r"^[a-z0-9_]+(\.[a-z0-9_]+)+$"),
+        KindSpec::new(COMMAND, r"^[a-z0-9_]+(\.[a-z0-9_]+)+$"),
         // A `.oxplow/project.yaml` key (`config.changed`'s subject).
-        KindSpec::new("config", r"^[A-Za-z][A-Za-z0-9]*$"),
-        KindSpec::new("finding", r"^\S+$"),
-        KindSpec::new("thread_note", &prefixed("not")),
+        KindSpec::new(CONFIG, r"^[A-Za-z][A-Za-z0-9]*$"),
+        KindSpec::new(FINDING, r"^\S+$"),
+        KindSpec::new(THREAD_NOTE, &prefixed("not")),
         // An agent slot opened on a thread (`agent_session.id`).
-        KindSpec::new("agent_session", &prefixed("ses")),
-        KindSpec::new("run", r"^\d+$"),
+        KindSpec::new(AGENT_SESSION, &prefixed("ses")),
+        KindSpec::new(RUN, r"^\d+$"),
         // A command waiting for a person's decision (`command_proposal.id`, P6b).
-        KindSpec::new("proposal", r"^[0-9]+$"),
+        KindSpec::new(PROPOSAL, r"^[0-9]+$"),
         // An agent's claim about its work and a decision it made or oxplow
         // inferred (`claim.id`, `decision.id`; P7.C4 reviews them).
-        KindSpec::new("claim", r"^[0-9]+$"),
-        KindSpec::new("decision", r"^[0-9]+$"),
+        KindSpec::new(CLAIM, r"^[0-9]+$"),
+        KindSpec::new(DECISION, r"^[0-9]+$"),
         // A collector: `<owner>/<id>`, the owner an extension, `project`
         // or `built-in`, the id dotted identifiers (P7.B3).
         KindSpec::new(
