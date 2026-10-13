@@ -6,10 +6,9 @@ SELECT CAST(h.ref AS TEXT) AS ref, h.extension, h.contribution, h.kind, h.state,
            AND (d.consumer = h.ref
                 OR EXISTS (SELECT 1 FROM json_each(e.subject) s WHERE s.value = h.ref))) AS dead_letters,
        (h.next_due_at IS NULL OR h.next_due_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) AS fresh,
-       (SELECT w.ref FROM ref('work_item') w
-         WHERE w.state NOT IN ('done', 'canceled')
-           AND substr(w.title, 1, length('Repair ' || h.extension || ' ' || h.contribution || ':'))
-               = 'Repair ' || h.extension || ' ' || h.contribution || ':'
+       (SELECT w.ref FROM ref('work_item_link') l JOIN ref('work_item') w ON w.ref = l.from_ref
+         WHERE l.to_ref = h.ref AND l.link_type = 'about'
+           AND w.state NOT IN ('done', 'canceled')
          ORDER BY w.ref DESC LIMIT 1) AS repair_item
 FROM (SELECT *, CAST(kind || ':' || extension || '/' || contribution AS TEXT) AS ref
         FROM source('contribution_health')) h

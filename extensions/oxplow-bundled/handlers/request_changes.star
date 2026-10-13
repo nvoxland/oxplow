@@ -50,6 +50,8 @@ def transform(x):
         lines.extend(checklist)
     item = row["work_item"]
     payload = {
+        "effort": ref,
+        "work_item": item,
         "unverified": len(_list(row["unverified"])),
         "inferred": len(_list(row["inferred"])),
         "deviated": len(_list(row["deviated"])),

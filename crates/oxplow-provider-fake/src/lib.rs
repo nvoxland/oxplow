@@ -390,7 +390,13 @@ fn declared(idempotent_writes: bool) -> InitializeResult {
                 json!({ "type": "object", "required": ["title"], "additionalProperties": false,
                         "properties": { "title": string, "body": string, "parent_ref": string,
                                         "state": state, "native_state": string,
-                                        "native": native } }),
+                                        "native": native,
+                                        "links": { "type": "array", "items": {
+                                            "type": "object",
+                                            "required": ["target", "link_type"],
+                                            "additionalProperties": false,
+                                            "properties": { "target": string,
+                                                            "link_type": string } } } } }),
             ),
             command(
                 "update",
@@ -1151,8 +1157,14 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
                 deleted: false,
                 rank: None,
                 // It keeps its links and comments, so every record states
-                // them.
-                links: Some(Vec::new()),
+                // them; the links asked for on create come with the item.
+                links: Some(
+                    serde_json::from_value(input.get("links").cloned().unwrap_or(json!([])))
+                        .map_err(|e| ProtocolError::InvalidInput {
+                            field: "/links".into(),
+                            message: e.to_string(),
+                        })?,
+                ),
                 comments: Some(Vec::new()),
                 // It keeps no lists: the item stays where it was filed.
                 list: None,

@@ -810,7 +810,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     `data-slot="<slot>"`, which the "every enhancement off" smoke test
     looks for): every mounted lens, run with
     the slot params it declares (`slotRuns`), re-run on data events.
-    DiffViewPage offers `effort_id` and `change_id`; WorkItemPage `ref`
+    DiffViewPage offers `effort_id`, `effort` (the effort's ref) and `change_id`; WorkItemPage `ref`
     (body and sidebar; the item's ref, whichever list); PlanPane
     `thread_id` (the compact `strip` variant, which hides lenses with no
     rows); GitCommitPage and UncommittedChangesPage `change_id`, plus
@@ -1587,7 +1587,7 @@ they live under `ui:`.
 
 | Slot | Core page | Params |
 |---|---|---|
-| `effort.review.details` | diff-view for an effort | `effort_id`, `change_id` |
+| `effort.review.details` | diff-view for an effort | `effort_id`, `effort`, `change_id` |
 | `work_item.detail.body` | WorkItemPage, below the body | `ref` |
 | `work_item.detail.sidebar` | WorkItemPage, in the side rail | `ref` |
 | `thread.plan.header` | PlanPane (compact strip) | `thread_id` |
@@ -2602,9 +2602,9 @@ event_types:
 
 **Promoted to stable (P9.D6)** on the evidence rule every kind is held to
 — a first-party, shared extension depending on it: oxplow-bundled's
-`oxplow_bundled.accepted@1 { unverified, inferred, deviated }` and
-`oxplow_bundled.changes_requested@1 { unverified, inferred, deviated,
-note? }`, which `accept.star` and `request_changes.star` return in
+`oxplow_bundled.accepted@1 { effort, work_item, unverified, inferred,
+deviated }` and `oxplow_bundled.changes_requested@1 { effort, work_item,
+unverified, inferred, deviated, note? }`, which `accept.star` and `request_changes.star` return in
 `events:` (subjects: the effort, its work item and, for an acceptance, the
 claims and decisions it took unchecked; caused by the run's
 `command.executed`). They replaced a single `verdict@1` type, whose
@@ -2624,9 +2624,10 @@ the provider host was), so a kind carries no stability.
 
 **`effects` is stable** (P11, tsk956), on the evidence rule: a bundled
 extension acts with one. oxplow-bundled's **`verify-unchecked`** reacts to
-`oxplow_bundled.accepted`: its script takes the acceptance's subject from its envelope
-(`event["subject"]`) — the effort, its item, and each claim and decision
-accepted unchecked — and reads (`scope("sql.read")`) only what the event
+`oxplow_bundled.accepted`: its script takes the effort and its item from the event's payload
+(`effort`, `work_item`) and the claims and decisions accepted unchecked from
+its envelope (`event["subject"]`), links the item it files `about` the
+effort, and reads (`scope("sql.read")`) only what the event
 can't say: which of those are still unverified or inferred now, and its
 own earlier reactions. It is empty when
 the effect already filed (or proposed) a follow-up for an earlier
@@ -3390,11 +3391,12 @@ Every contribution that runs — an external provider instance, a collector, an 
   `sql.read`; the item says to run `oxplow extension check`/`test`. A later
   disable while the item is open comments on it (`oxplow.work_item.comment`);
   once it is done or canceled the next disable files a new one. **The
-  open item is found by its title prefix** (`Repair <extension>
-  <contribution>:`) — a work item has no stable key an effect can set and a
-  view can match (no label, origin key or ref link) — and
-  `v_contribution_health.repair_item` is that open item, derived by the
-  same prefix (the table keeps no `repair_item`). With no running work list
+  open item is found by its link**: it is created with `links: [{ target:
+  <contribution ref>, link_type: about }]`, and the open one is the not-done
+  `v_work_item` with a `v_work_item_link` `about` the contribution's ref.
+  The title is for people and never matched.
+  `v_contribution_health.repair_item` is that same open item (the table
+  keeps no `repair_item`). With no running work list
   (`none`, or the chosen tracker down) the effect skips; it is a bundled
   effect like `verify-unchecked`, so **repair items appear once a person
   approves it**, and revoking the approval or disabling the effect stops new

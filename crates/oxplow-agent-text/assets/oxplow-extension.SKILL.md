@@ -202,7 +202,7 @@ empty: Nothing is waiting on you.
   - `file` takes a repo-relative path; add `line: <column>` to open at a
     line.
   - `wiki` takes a slug.
-  - `effort-diff` takes an effort id.
+  - `effort-diff` takes an effort ref (`v_effort.ref`).
   - `commit` takes a sha.
   - `metric` takes a metric key.
   
@@ -221,7 +221,7 @@ empty: Nothing is waiting on you.
 - **Slots** mount a lens into a core page (`ui: { slots: [{ slot, lens }] }`
   in `extension.yaml`). The lens must declare at least one param the slot
   binds, and gets only the ones it declares:
-  - `effort.review.details` (an effort's diff) → `effort_id`, `change_id`;
+  - `effort.review.details` (an effort's diff) → `effort_id`, `effort` (the effort's ref, for an action's `input`), `change_id`;
   - `vcs.commit.details` (a commit page) and `vcs.status.details` (the
     working tree) → `change_id` (the `v_change*` analysis);
   - `vcs.status.header` (a strip above the uncommitted changes) and
@@ -918,7 +918,9 @@ in `v_contribution_health` (`extension`, `contribution`, `kind`, `state` = `ok` 
 - **A disable files a repair work item** (`repair_item`). Its body is the
   whole repair brief: what the extension is for, the declaration, the
   last errors, the failing fixture and the `check` report. A repeat
-  failure comments on the open item. When the user asks you to repair an
+  failure comments on the open item. The item is linked `about` the
+  contribution's ref (`v_work_item_link`), which is how the open one is
+  found; its title is only for people. When the user asks you to repair an
   extension, read that item first.
 - **Fix it, then prove it.** Change the script or declaration, run
   `oxplow extension check` and `oxplow extension test`, then `oxplow.collector.sync`

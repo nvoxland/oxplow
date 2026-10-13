@@ -3,9 +3,9 @@
 # them — a checklist naming each, on the active tracker like every new
 # item.
 
-# What is still unchecked among the acceptance's subject — the effort, its
-# item, and each claim and decision accepted unchecked, which the event
-# carries (`event["subject"]`) — read as it stands now (a claim verified
+# What is still unchecked among the acceptance's subject — each claim and
+# decision accepted unchecked, which the event carries
+# (`event["subject"]`; the effort and item are in its payload) — read as it stands now (a claim verified
 # since, or a decision no longer inferred, drops off). Empty when this
 # effect already filed (or proposed) a follow-up for an earlier acceptance
 # of the effort; an earlier one it never reacted to (before its approval)
@@ -22,7 +22,7 @@ WHERE NOT EXISTS (
     SELECT 1 FROM v_event p
       JOIN v_effect_run r ON r.event_id = p.id
      WHERE p.type = 'oxplow_bundled.accepted' AND p.seq < :event_seq
-       AND json_extract(p.subject, '$[0]') = :effort
+       AND :effort IN (SELECT value FROM json_each(p.subject))
        AND r.effect = 'oxplow-bundled/verify-unchecked' AND r.latest = 1
        AND r.state IN ('ok', 'proposed'))
 """
@@ -37,14 +37,16 @@ _ITEMS = 50
 def transform(x):
     event = x["event"]
     subject = event["subject"]
-    if len(subject) < 2:
+    effort = event["payload"].get("effort")
+    item = event["payload"].get("work_item")
+    if not effort or not item:
         return {"skip": "an acceptance names an effort and its item"}
     rows = scope("sql.read", {
         "sql": _ACCEPTED,
         "params": {
             "subject": json.encode(subject),
             "event_seq": event["seq"],
-            "effort": subject[0],
+            "effort": effort,
         },
     })
     if not rows:
@@ -54,8 +56,6 @@ def transform(x):
     decisions = _list(row["decisions"])
     if not claims and not decisions:
         return {"skip": "nothing was accepted unchecked"}
-    effort = subject[0]
-    item = subject[1]
     items = ["- [ ] %s: %s" % (c["claim"], md_text(c["statement"])) for c in claims]
     items.extend(["- [ ] %s: %s → %s" % (d["decision"], md_text(d["question"]), md_text(d["choice"])) for d in decisions])
     lines = ["The review of %s (%s) accepted these unchecked:" % (effort, item), ""]
@@ -68,6 +68,7 @@ def transform(x):
             "input": {
                 "title": "Verify what the review of %s accepted unchecked" % effort,
                 "body": "\n".join(lines),
+                "links": [{"target": effort, "link_type": "about"}],
             },
         }],
     }

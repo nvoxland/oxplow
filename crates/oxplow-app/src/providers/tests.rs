@@ -562,7 +562,7 @@ async fn a_repair_item_is_filed_on_the_active_alternate_provider() {
         .svc
         .sql
         .query_sql(
-            "SELECT ref FROM v_work_item WHERE title LIKE 'Repair work hot:%'",
+            "SELECT w.ref FROM v_work_item w JOIN v_work_item_link l ON l.from_ref = w.ref WHERE l.to_ref = 'collector:work/hot' AND l.link_type = 'about'",
             vec![],
             None,
         )

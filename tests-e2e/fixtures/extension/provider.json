@@ -57,6 +57,25 @@
                 "type": "integer"
               }
             }
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "target",
+                "link_type"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "target": {
+                  "type": "string"
+                },
+                "link_type": {
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       },

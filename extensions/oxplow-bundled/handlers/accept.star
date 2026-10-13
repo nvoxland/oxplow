@@ -63,6 +63,8 @@ def transform(x):
             "type": "oxplow_bundled.accepted",
             "subject": [ref, item] + [c["claim"] for c in claims] + [d["decision"] for d in decisions],
             "payload": {
+                "effort": ref,
+                "work_item": item,
                 "unverified": len(claims),
                 "inferred": len(decisions),
                 "deviated": len(_list(row["deviated"])),

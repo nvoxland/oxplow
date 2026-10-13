@@ -4,9 +4,9 @@
 # comment on that item when the contribution is disabled again while it is
 # still open. oxplow never sends the item to an agent; a person does.
 #
-# The item is the contribution's: its title starts `Repair <extension>
-# <contribution>:`, which is what the open one is found by (and what
-# `v_contribution_health.repair_item` shows).
+# The item is the contribution's: it is `about` the contribution's ref,
+# which is what the open one is found by (and what
+# `v_contribution_health.repair_item` shows). Its title is for people.
 
 _REASON_MAX = 80
 _ERRORS_SHOWN = 5
@@ -17,10 +17,10 @@ _STATE = """
 SELECT (SELECT provider FROM v_capability_provider
          WHERE capability = 'work_items' AND active = 1 AND available = 1
            AND provider <> 'none') AS provider,
-       (SELECT ref FROM v_work_item
-         WHERE state NOT IN ('done', 'canceled')
-           AND substr(title, 1, length(:prefix)) = :prefix
-         ORDER BY ref DESC LIMIT 1) AS open_item
+       (SELECT w.ref FROM v_work_item_link l JOIN v_work_item w ON w.ref = l.from_ref
+         WHERE l.to_ref = :contribution AND l.link_type = 'about'
+           AND w.state NOT IN ('done', 'canceled')
+         ORDER BY w.ref DESC LIMIT 1) AS open_item
 """
 
 # Where it is declared, and its recent failures, newest first: a
@@ -66,7 +66,7 @@ def transform(x):
     reason = p["reason"]
     prefix = "Repair %s %s:" % (extension, contribution)
 
-    state = scope("sql.read", {"sql": _STATE, "params": {"prefix": prefix}})[0]
+    state = scope("sql.read", {"sql": _STATE, "params": {"contribution": p["contribution"]}})[0]
     if not state["provider"]:
         return {"skip": "no work list is running to file a repair item on"}
 
@@ -109,5 +109,9 @@ def transform(x):
     ])
     return {"commands": [{
         "name": "oxplow.work_item.create",
-        "input": {"title": _title(prefix, reason), "body": "\n".join(body)},
+        "input": {
+            "title": _title(prefix, reason),
+            "body": "\n".join(body),
+            "links": [{"target": p["contribution"], "link_type": "about"}],
+        },
     }]}

@@ -2082,7 +2082,7 @@ mod tests {
         let out = svc
             .sql
             .query_sql(
-                "SELECT ref, title, body FROM v_work_item WHERE title LIKE 'Repair work hot:%' ORDER BY ref",
+                "SELECT w.ref, w.title, w.body FROM v_work_item w JOIN v_work_item_link l ON l.from_ref = w.ref WHERE l.to_ref = 'collector:work/hot' AND l.link_type = 'about' ORDER BY w.ref",
                 vec![],
                 None,
             )
@@ -2828,6 +2828,7 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(logged[0][0].as_str().unwrap()).unwrap(),
             serde_json::json!({
+                "effort": effort_ref(&f), "work_item": item,
                 "unverified": 1, "inferred": 1, "deviated": 1,
                 "note": "Keep it to the UI."
             })
@@ -2852,7 +2853,7 @@ mod tests {
         assert_eq!(logged.as_array().unwrap().len(), 2, "{logged}");
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(logged[1][0].as_str().unwrap()).unwrap(),
-            serde_json::json!({ "unverified": 1, "inferred": 1, "deviated": 1 })
+            serde_json::json!({ "effort": effort_ref(&f), "work_item": item, "unverified": 1, "inferred": 1, "deviated": 1 })
         );
         assert_eq!(logged[1][1], "command:oxplow.review.accept");
         assert_eq!(logged[1][4], "oxplow_bundled.accepted");
