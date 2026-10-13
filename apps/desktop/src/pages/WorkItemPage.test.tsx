@@ -8,6 +8,7 @@ const realQuerySql = realApi.querySql;
 const realRunCommand = realApi.runCommand;
 let features: Record<string, boolean> = {};
 let parent: string | null = "work_item:fake:W-0";
+let outbound: unknown[] = [];
 const ran: Array<[string, unknown]> = [];
 const lensRuns: Array<[string, unknown]> = [];
 mock.module("../api.js", () => ({
@@ -41,6 +42,8 @@ mock.module("../api.js", () => ({
     ran.push([name, rest[0] === true ? { ...(input as object), confirmed: true } : input]);
     return { result: null, audit_id: 1, event_id: null, inverse: null };
   },
+  listPageOutbound: async () => outbound,
+  listBacklinks: async () => [],
   listExtensions: async () => [
     {
       name: "x",
@@ -68,6 +71,7 @@ const { PageNavigationContext } = await import("../tabs/PageNavigationContext.js
 afterEach(() => {
   parent = "work_item:fake:W-0";
   ran.length = 0;
+  outbound = [];
   lensRuns.length = 0;
   cleanup();
 });
@@ -158,4 +162,67 @@ test("a provider with hierarchy shows no Parent for an item without one", async 
   const view = page();
   await waitFor(() => expect(view.getByTestId("work-item-page").textContent).toContain("Their bug"));
   expect(view.queryByTestId("work-item-parent")).toBeNull();
+});
+
+/** The page inside navigation, whose bar carries the Outbound list. */
+const pageWithNav = () => {
+  const nav = { goBack() {}, goForward() {}, navigate() {}, canGoBack: false, canGoForward: false, setTitle() {} };
+  return render(
+    <PageNavigationContext.Provider value={nav as never}>
+      <WorkItemPage workItemRef="work_item:fake:W-1" stream={null} thread={null} onOpenPage={() => {}} />
+    </PageNavigationContext.Provider>,
+  );
+};
+
+const aboutEdge = (kind: string, id: string, resolved: boolean, label: string | null) => ({
+  source_kind: "work_item",
+  source_id: "fake:W-1",
+  target_kind: kind,
+  target_id: id,
+  ref_type: "work_item_link:about",
+  source_extra: null,
+  source_label: label,
+  resolved,
+});
+
+test("Link… takes any ref: its placeholder says so, and an `about` link to an effort runs the link verb", async () => {
+  features = { links: true };
+  const view = page();
+  fireEvent.click(await waitFor(() => view.getByTestId("work-item-link-open")));
+  expect((view.getByTestId("work-item-link-target") as HTMLInputElement).placeholder).toBe(
+    "a ref: work_item:…, effort:eff12, collector:x/y",
+  );
+  fireEvent.change(view.getByTestId("work-item-link-link_type"), { target: { value: "about" } });
+  fireEvent.change(view.getByTestId("work-item-link-target"), { target: { value: "effort:eff12" } });
+  fireEvent.click(view.getByTestId("work-item-link-submit"));
+  await waitFor(() =>
+    expect(ran).toEqual([["oxplow.work_item.link", { ref: "work_item:fake:W-1", target: "effort:eff12", link_type: "about" }]]),
+  );
+});
+
+test("a link row's right-click menu has Unlink, which runs work_item.unlink with the link's input", async () => {
+  features = { links: true };
+  outbound = [aboutEdge("collector", "triage/todos", true, "Triage todos")];
+  const view = pageWithNav();
+  fireEvent.click(await waitFor(() => view.getByTestId("page-nav-outbound-toggle")));
+  const row = await waitFor(() => view.getByTestId("backlinks-entry-page:settings"));
+  expect(row.textContent).toContain("Triage todos");
+  fireEvent.contextMenu(row, { clientX: 3, clientY: 3 });
+  fireEvent.click(view.getByTestId("menu-item-unlink"));
+  await waitFor(() =>
+    expect(ran).toEqual([
+      ["oxplow.work_item.unlink", { ref: "work_item:fake:W-1", target: "collector:triage/todos", link_type: "about" }],
+    ]),
+  );
+});
+
+test("a link to a ref nothing resolves is a dead link: raw text, and it still unlinks", async () => {
+  features = { links: true };
+  outbound = [aboutEdge("acme_pr", "12", false, null)];
+  const view = pageWithNav();
+  fireEvent.click(await waitFor(() => view.getByTestId("page-nav-outbound-toggle")));
+  const row = await waitFor(() => view.getByTestId("backlinks-dead-acme_pr:12"));
+  expect(row.textContent).toContain("acme_pr:12");
+  fireEvent.contextMenu(row, { clientX: 3, clientY: 3 });
+  expect(view.getByTestId("menu-item-unlink")).toBeTruthy();
 });

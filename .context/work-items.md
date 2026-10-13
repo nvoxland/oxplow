@@ -171,7 +171,16 @@ interface commands, so it works with whichever list is active; the person
 picks whose shows (`replacements`, Settings → Integrations).
 [extensions.md](./extensions.md) "Replacements" has the contracts. The `work_item.detail.body` / `.sidebar` slots get
 `{ ref }`. Link…'s link type is free text (default `relates_to`): the
-provider names its own types.
+provider names its own types, and `about` fits any ref. Its target is
+**any ref** (`work_item:…`, `effort:eff12`, `collector:x/y`); a link row
+in Outbound has **Unlink** on its right-click menu (`oxplow.work_item.unlink`,
+the link's input, undoable like Link). Link rows render through the
+generic ref → page mapping (`useBacklinks.ts` `refFor` → `refFromTabId`): a
+kind with a page opens it, a contribution (`collector:…`, `job:…`)
+something resolves opens Settings, and a ref nothing resolves is a **dead
+link** — its raw text, muted, tooltip "nothing resolves this ref; its
+extension may be gone" — that still unlinks. `BacklinkEdge.resolved` (the
+IPC's `ref_resolver::resolve_ref`) says which.
 
 The **Board** (`page:board`, `components/Board/WorkBoard.tsx`) shows
 items as cards in one column per canonical state. Drag a card to a

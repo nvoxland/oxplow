@@ -19,6 +19,8 @@ import { RouteLink } from "../tabs/RouteLink.js";
 import { gitCommitRef, snapshotRef, workItemTabRef } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
+import type { BacklinkEntry } from "../tabs/backlinkTypes.js";
+import type { MenuItem } from "../menu.js";
 import type { Reads } from "../tauri-bridge/generated/bindings.js";
 import { workItemId, workItemLabel } from "../workItemRef.js";
 import {
@@ -110,7 +112,8 @@ export function WorkItemPage({
   usePageTitle(item?.title ?? null);
   const graphRef = useMemo(() => workItemTabRef(workItemRef), [workItemRef]);
   const backlinkEntries = useBacklinks(graphRef);
-  const outboundEntries = usePageOutbound(graphRef);
+  const [linkVersion, setLinkVersion] = useState(0);
+  const outboundEntries = usePageOutbound(graphRef, linkVersion);
   const [prompt, setPrompt] = useState<"comment" | "link" | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -131,13 +134,30 @@ export function WorkItemPage({
       recordOpError({ label: "Delete", message: e instanceof Error ? e.message : String(e) });
     }
   };
-  const run = async (label: string, verb: "comment" | "link", input: Record<string, unknown>) => {
+  const run = async (label: string, verb: "comment" | "link" | "unlink", input: Record<string, unknown>) => {
     if (!item) return;
     setBusy(true);
     const ran = await personCommands.run(label, `oxplow.work_item.${verb}`, { ref: item.ref, ...input });
     setBusy(false);
-    if (ran) setPrompt(null);
+    if (ran) {
+      setPrompt(null);
+      if (verb !== "comment") setLinkVersion((v) => v + 1);
+    }
   };
+  // A link row's right-click menu: Unlink runs the bus's unlink (undoable
+  // like Link, with the same input). Only the item's own links have one —
+  // a mention or a touched file is not a link.
+  const linkMenu = (entry: BacklinkEntry): MenuItem[] =>
+    entry.linkType && features.links
+      ? [
+          {
+            id: "unlink",
+            label: "Unlink",
+            enabled: !busy,
+            run: () => run("Unlink", "unlink", { target: entry.target, link_type: entry.linkType }),
+          },
+        ]
+      : [];
 
   const snapshotBacklinks = useMemo<SnapshotBacklinkEntry[]>(
     () =>
@@ -170,7 +190,7 @@ export function WorkItemPage({
   };
   const outbound =
     outboundEntries.length > 0
-      ? { count: outboundEntries.length, body: <BacklinksList entries={outboundEntries} onOpenPage={onOpenPage} /> }
+      ? { count: outboundEntries.length, body: <BacklinksList entries={outboundEntries} onOpenPage={onOpenPage} entryMenu={linkMenu} /> }
       : undefined;
 
   if (!item) {
@@ -282,10 +302,10 @@ export function WorkItemPage({
         ) : prompt === "link" ? (
           <InlinePromptStrip
             testId="work-item-link"
-            message={`Link this item to another, as ${item.provider} names the link.`}
+            message={`Link this item to another item or to any ref (an effort, a collector, a file…), as ${item.provider} names the link. \`about\` fits any ref.`}
             fields={[
               { key: "link_type", initialValue: DEFAULT_LINK_TYPE, placeholder: "link type" },
-              { key: "target", placeholder: "work_item:<provider>:<id>" },
+              { key: "target", placeholder: "a ref: work_item:…, effort:eff12, collector:x/y" },
             ]}
             confirmLabel="Link"
             busy={busy}

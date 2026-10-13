@@ -34,6 +34,11 @@ pub struct BacklinkEdge {
     /// commit subject, …). Falls back to `source_id` in the
     /// renderer when None.
     pub source_label: Option<String>,
+    /// Whether anything resolves the row the label belongs to (the
+    /// source for a backlink, the target for an outbound edge). A link
+    /// to a ref nothing resolves — an extension gone, a record deleted —
+    /// is a dead link the renderer shows as its raw text.
+    pub resolved: bool,
 }
 
 pub async fn list_backlinks(
@@ -73,7 +78,7 @@ pub async fn list_outbound(
 async fn decorate_with_labels(svc: &Services, edges: Vec<PageRefEdge>) -> Vec<BacklinkEdge> {
     let mut out = Vec::with_capacity(edges.len());
     for e in edges {
-        let label = source_label(svc, &e.source_kind, &e.source_id).await;
+        let (label, resolved) = resolve(svc, &e.source_kind, &e.source_id).await;
         out.push(BacklinkEdge {
             source_kind: e.source_kind,
             source_id: e.source_id,
@@ -82,6 +87,7 @@ async fn decorate_with_labels(svc: &Services, edges: Vec<PageRefEdge>) -> Vec<Ba
             ref_type: e.ref_type,
             source_extra: e.source_extra,
             source_label: label,
+            resolved,
         });
     }
     out
@@ -90,7 +96,7 @@ async fn decorate_with_labels(svc: &Services, edges: Vec<PageRefEdge>) -> Vec<Ba
 async fn decorate_outbound_targets(svc: &Services, edges: Vec<PageRefEdge>) -> Vec<BacklinkEdge> {
     let mut out = Vec::with_capacity(edges.len());
     for e in edges {
-        let label = source_label(svc, &e.target_kind, &e.target_id).await;
+        let (label, resolved) = resolve(svc, &e.target_kind, &e.target_id).await;
         out.push(BacklinkEdge {
             source_kind: e.source_kind,
             source_id: e.source_id,
@@ -99,20 +105,20 @@ async fn decorate_outbound_targets(svc: &Services, edges: Vec<PageRefEdge>) -> V
             ref_type: e.ref_type,
             source_extra: e.source_extra,
             source_label: label,
+            resolved,
         });
     }
     out
 }
 
-/// Best-effort label lookup by kind. Delegates to the shared typed
-/// [`ref_resolver`] (the single source of truth for hydrating a
-/// `(kind,id)` ref) and keeps only its `title`. Returns `None` when the
-/// row doesn't exist (deleted) or the kind carries no first-class label
-/// (files/directories use the path itself).
-async fn source_label(svc: &Services, kind: &str, id: &str) -> Option<String> {
-    oxplow_app::ref_resolver::resolve_ref(svc, kind, id)
-        .await
-        .title
+/// The label and whether anything resolves a `(kind, id)` ref, through
+/// the shared [`ref_resolver`] (the single source of truth for hydrating
+/// a ref). The label is `None` when the row doesn't exist (deleted) or
+/// the kind carries no first-class label (files and directories use the
+/// path itself).
+async fn resolve(svc: &Services, kind: &str, id: &str) -> (Option<String>, bool) {
+    let summary = oxplow_app::ref_resolver::resolve_ref(svc, kind, id).await;
+    (summary.title, summary.resolved)
 }
 
 #[cfg(test)]
@@ -141,5 +147,52 @@ mod tests {
         .await
         .unwrap();
         assert!(out.is_array());
+    }
+
+    /// An edge's `resolved` says whether its far end is a ref anything
+    /// names: a link to a collector nothing installed defines comes back
+    /// unresolved with no label, never an error.
+    #[tokio::test]
+    async fn an_outbound_edge_says_whether_its_target_resolves() {
+        let (svc, _dir) = crate::test_support::services().await;
+        let stream = svc.streams.ensure_primary().await.unwrap();
+        let thread = svc
+            .threads
+            .selected_or_active(&stream.id)
+            .await
+            .unwrap()
+            .expect("the primary stream has a writer thread");
+        let made = svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "oxplow.work_item.create",
+                serde_json::json!({
+                    "title": "Fix it",
+                    "thread": thread.to_string(),
+                    "links": [{ "target": "collector:ghost/none", "link_type": "about" }],
+                }),
+                false,
+            )
+            .await
+            .unwrap();
+        let item =
+            oxplow_domain::refs::build::work_item_id_of_ref(made.result["ref"].as_str().unwrap())
+                .unwrap();
+        let out = crate::dispatch(
+            "list_outbound",
+            serde_json::json!({ "sourceKind": "work_item", "sourceId": item }),
+            &svc,
+        )
+        .await
+        .unwrap();
+        let edge = out
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["target_kind"] == "collector")
+            .unwrap_or_else(|| panic!("no collector edge in {out}"));
+        assert_eq!(edge["resolved"], false);
+        assert!(edge["source_label"].is_null());
     }
 }

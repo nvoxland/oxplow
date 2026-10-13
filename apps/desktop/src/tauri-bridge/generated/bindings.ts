@@ -1528,6 +1528,13 @@ export type BacklinkEdge = {
 	 *  renderer when None.
 	 */
 	source_label: string | null,
+	/**
+	 *  Whether anything resolves the row the label belongs to (the
+	 *  source for a backlink, the target for an outbound edge). A link
+	 *  to a ref nothing resolves — an extension gone, a record deleted —
+	 *  is a dead link the renderer shows as its raw text.
+	 */
+	resolved: boolean,
 };
 
 // A sign-in begun: the page the person signs in on, and its number.

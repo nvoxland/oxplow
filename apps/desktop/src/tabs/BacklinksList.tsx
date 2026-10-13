@@ -2,6 +2,8 @@ import { EmptyState } from "../components/Prompts/EmptyState.js";
 import { workItemLabel } from "../workItemRef.js";
 import type { MouseEvent } from "react";
 import { useMemo } from "react";
+import type { MenuItem } from "../menu.js";
+import { useContextMenu } from "../components/useRowContextMenu.js";
 import type { BacklinkEntry } from "./backlinkTypes.js";
 import { PageKindIcon } from "../pageKinds.js";
 import { refOf } from "../refs/ref.js";
@@ -55,6 +57,10 @@ export interface BacklinksListProps {
    *  CommitDetailSlideover. */
   commitEntries?: CommitBacklinkEntry[];
   onOpenPage(ref: TabRef): void;
+  /** Right-click actions for an entry (Unlink on a work item's link row).
+   *  Without them — or with none for a row — right-click opens the page in
+   *  a new tab. */
+  entryMenu?(entry: BacklinkEntry): MenuItem[];
   /** Required when `snapshotEntries` is provided. Receives the snapshot
    *  id + a small descriptor so the host can route into a slideover. */
   onOpenSnapshot?(payload: { snapshotId: string; label?: string | null; source?: string; tasksId?: number | null }): void;
@@ -107,17 +113,19 @@ export function BacklinksList({
   snapshotEntries = [],
   commitEntries = [],
   onOpenPage,
+  entryMenu,
   onOpenSnapshot,
   onOpenCommit,
 }: BacklinksListProps) {
   const ctxNav = useOptionalPageNavigation();
+  const { open: openMenu, menu } = useContextMenu();
   // Pre-compute the sibling list (the regular `entries` only — snapshot
   // and commit entries open slideovers and don't participate in tab-
   // level navigation). The destination page receives this as
   // `siblings`, picks up prev/next buttons keyed by the row's index.
   const siblingsList = useMemo<NavSiblings>(
     () => ({
-      entries: entries.map((e) => ({ ref: e.ref, label: e.label })),
+      entries: entries.flatMap((e) => (e.ref ? [{ ref: e.ref, label: e.label }] : [])),
       // index is resolved at the destination via ref.id matching.
       index: 0,
     }),
@@ -182,43 +190,58 @@ export function BacklinksList({
         </button>
       ))}
       {entries.map((entry, idx) => {
-        const ctxRef = tabRefToContextRef(entry.ref);
+        const page = entry.ref;
+        const items = entryMenu?.(entry) ?? [];
+        const onContextMenu = (e: MouseEvent) => {
+          if (items.length > 0) openMenu(e, items, entry.label);
+          else if (page) { e.preventDefault(); onOpenPage(page); }
+          else e.preventDefault();
+        };
+        if (!page) {
+          // Nothing opens: a dead link shows its raw ref, muted; a ref that
+          // resolves but has no page shows its label.
+          return (
+            <div
+              key={`${entry.target}|${entry.subtitle ?? ""}`}
+              data-testid={entry.dead ? `backlinks-dead-${entry.target}` : `backlinks-entry-${entry.target}`}
+              title={entry.dead ? DEAD_LINK_TIP : entry.target}
+              onContextMenu={onContextMenu}
+              style={{ ...rowStyle, cursor: "default", color: entry.dead ? "var(--text-secondary)" : "var(--text-primary)" }}
+            >
+              <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {entry.label}
+              </span>
+              {entry.subtitle ? (
+                <span style={{ color: "var(--text-secondary)", fontSize: 11 }}>{entry.subtitle}</span>
+              ) : null}
+            </div>
+          );
+        }
+        const ctxRef = tabRefToContextRef(page);
         return (
         <button
-          key={entry.ref.id}
+          key={page.id}
           type="button"
-          data-testid={`backlinks-entry-${entry.ref.id}`}
+          data-testid={`backlinks-entry-${page.id}`}
           onClick={(e: MouseEvent) => {
             // Cmd/Ctrl-click opens in a new tab; default is in-tab
             // navigation when a PageNavigation context is available,
             // falling back to the host's onOpenPage (new tab) otherwise.
             if ((e.metaKey || e.ctrlKey) || !ctxNav) {
-              onOpenPage(entry.ref);
+              onOpenPage(page);
             } else {
-              ctxNav.navigate(entry.ref, { siblings: { entries: siblingsList.entries, index: idx, title: "Backlinks" } });
+              ctxNav.navigate(page, { siblings: { entries: siblingsList.entries, index: idx, title: "Backlinks" } });
             }
           }}
           onAuxClick={(e: MouseEvent) => {
-            if (e.button === 1) { e.preventDefault(); onOpenPage(entry.ref); }
+            if (e.button === 1) { e.preventDefault(); onOpenPage(page); }
           }}
-          onContextMenu={(e: MouseEvent) => { e.preventDefault(); onOpenPage(entry.ref); }}
+          onContextMenu={onContextMenu}
           draggable={ctxRef !== null}
           onDragStart={ctxRef !== null ? (e) => setContextRefDrag(e, ctxRef) : undefined}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            padding: "4px 8px",
-            background: "transparent",
-            color: "var(--text-primary)",
-            border: "1px solid transparent",
-            borderRadius: 4,
-            cursor: "pointer",
-            textAlign: "left",
-            fontSize: "var(--text-xs)",
-          }}
+          style={rowStyle}
         >
-          <PageKindIcon kind={entry.ref.kind} size={14} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
+          <PageKindIcon kind={page.kind} size={14} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
           <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {entry.label}
           </span>
@@ -228,9 +251,27 @@ export function BacklinksList({
         </button>
         );
       })}
+      {menu}
     </div>
   );
 }
+
+/** Shown on a dead link: its ref names something nothing resolves. */
+const DEAD_LINK_TIP = "nothing resolves this ref; its extension may be gone";
+
+const rowStyle = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  padding: "4px 8px",
+  background: "transparent",
+  color: "var(--text-primary)",
+  border: "1px solid transparent",
+  borderRadius: 4,
+  cursor: "pointer",
+  textAlign: "left" as const,
+  fontSize: "var(--text-xs)",
+};
 
 const listButtonStyle = {
   display: "flex",

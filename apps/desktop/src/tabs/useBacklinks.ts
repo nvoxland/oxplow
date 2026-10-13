@@ -1,15 +1,8 @@
 import { useEffect, useState } from "react";
 import { listBacklinks, listPageOutbound, type BacklinkEdge } from "../api.js";
-import {
-  directoryRef,
-  fileRef,
-  gitCommitRef,
-  lensRef,
-  wikiPageRef,
-  workItemTabRef,
-} from "./pageRefs.js";
+import { indexRef, lensRef, refFromTabId } from "./pageRefs.js";
 import { workItemId } from "../workItemRef.js";
-import { refOf, wikiRef } from "../refs/ref.js";
+import { contributionOf, idOf, refOf, wikiRef } from "../refs/ref.js";
 import type { TabRef } from "./tabState.js";
 import type { BacklinkEntry } from "./backlinkTypes.js";
 
@@ -37,10 +30,7 @@ export function useBacklinks(target: TabRef): BacklinkEntry[] {
     void listBacklinks(target.kind, targetId, null)
       .then((edges) => {
         if (cancelled) return;
-        const mapped = edges
-          .map(edgeToInboundEntry)
-          .filter((e): e is BacklinkEntry => e !== null);
-        setEntries(dedupeEntriesByTarget(mapped));
+        setEntries(dedupeEntriesByTarget(edges.map(edgeToInboundEntry)));
       })
       .catch(() => {
         if (!cancelled) setEntries([]);
@@ -55,9 +45,10 @@ export function useBacklinks(target: TabRef): BacklinkEntry[] {
 
 /**
  * Outbound: what this page points AT. Sibling to `useBacklinks` and
- * drives the new Outbound dropdown / panel in the Page chrome.
+ * drives the new Outbound dropdown / panel in the Page chrome. A page
+ * that changes its own edges (Link…, Unlink) bumps `version` to re-read.
  */
-export function usePageOutbound(source: TabRef): BacklinkEntry[] {
+export function usePageOutbound(source: TabRef, version = 0): BacklinkEntry[] {
   const [entries, setEntries] = useState<BacklinkEntry[]>([]);
 
   useEffect(() => {
@@ -70,10 +61,7 @@ export function usePageOutbound(source: TabRef): BacklinkEntry[] {
     void listPageOutbound(source.kind, sourceId, null)
       .then((edges) => {
         if (cancelled) return;
-        const mapped = edges
-          .map(edgeToOutboundEntry)
-          .filter((e): e is BacklinkEntry => e !== null);
-        setEntries(dedupeEntriesByTarget(mapped));
+        setEntries(dedupeEntriesByTarget(edges.map(edgeToOutboundEntry)));
       })
       .catch(() => {
         if (!cancelled) setEntries([]);
@@ -81,7 +69,7 @@ export function usePageOutbound(source: TabRef): BacklinkEntry[] {
     return () => {
       cancelled = true;
     };
-  }, [source.kind, source.id]);
+  }, [source.kind, source.id, version]);
 
   return entries;
 }
@@ -89,9 +77,8 @@ export function usePageOutbound(source: TabRef): BacklinkEntry[] {
 /**
  * The `page_ref` id for a TabRef: exactly the canonical ref's id
  * (`.context/refs.md`), which is what the graph stores. A task is
- * `oxplow:tsk42` under kind `work_item`. Returns null for kinds the
- * page-ref graph doesn't track (settings, dialogs, …) so the hook
- * short-circuits.
+ * `oxplow:tsk42` under kind `work_item`. Returns null for pages that are
+ * not a ref's (settings, dialogs, …) so the hook short-circuits.
  */
 export function canonicalIdForTarget(ref: TabRef): string | null {
   switch (ref.kind) {
@@ -116,7 +103,10 @@ export function canonicalIdForTarget(ref: TabRef): string | null {
       return p?.sha ?? null;
     }
     default:
-      return null;
+      // Any other kind with a page is its canonical ref's id (a lens, an
+      // effort, a collector's page); a shell route (`settings`) is not a
+      // ref of its kind and has none.
+      return idOf(ref.id, ref.kind);
   }
 }
 
@@ -129,22 +119,40 @@ export function humanRefTypeForTest(refType: string, sourceExtra: string | null)
   return humanRefType(refType, sourceExtra);
 }
 
+/** The work-item link type an edge's `ref_type` names (`work_item_link:about`). */
+const LINK_TYPE_PREFIX = "work_item_link:";
+
+function linkTypeOf(refType: string): string | undefined {
+  return refType.startsWith(LINK_TYPE_PREFIX) ? refType.slice(LINK_TYPE_PREFIX.length) : undefined;
+}
+
 /** Convert one inbound edge (source -> me) into a renderer entry. */
-function edgeToInboundEntry(edge: BacklinkEdge): BacklinkEntry | null {
-  const ref = refFor(edge.source_kind, edge.source_id);
-  if (!ref) return null;
-  const label = edge.source_label ?? edge.source_id;
-  const subtitle = humanRefType(edge.ref_type, edge.source_extra);
-  return { ref, label, subtitle };
+export function edgeToInboundEntry(edge: BacklinkEdge): BacklinkEntry {
+  return entryFor(edge, edge.source_kind, edge.source_id);
 }
 
 /** Convert one outbound edge (me -> target) into a renderer entry. */
-function edgeToOutboundEntry(edge: BacklinkEdge): BacklinkEntry | null {
-  const ref = refFor(edge.target_kind, edge.target_id);
-  if (!ref) return null;
-  const label = edge.source_label ?? edge.target_id;
-  const subtitle = humanRefType(edge.ref_type, edge.source_extra);
-  return { ref, label, subtitle };
+export function edgeToOutboundEntry(edge: BacklinkEdge): BacklinkEntry {
+  return entryFor(edge, edge.target_kind, edge.target_id);
+}
+
+/**
+ * One row for the far end `(kind, id)` of an edge. A ref no page shows
+ * and nothing resolves is a dead link — it keeps its raw text and never
+ * throws; an extension may come back, or the record.
+ */
+function entryFor(edge: BacklinkEdge, kind: string, id: string): BacklinkEntry {
+  const target = refOf(kind, id);
+  const ref = refFor(kind, id, edge.resolved);
+  const dead = ref === null && !edge.resolved;
+  return {
+    ref,
+    target,
+    label: dead ? target : (edge.source_label ?? id),
+    subtitle: humanRefType(edge.ref_type, edge.source_extra),
+    dead,
+    linkType: linkTypeOf(edge.ref_type),
+  };
 }
 
 /**
@@ -167,7 +175,7 @@ export function dedupeEntriesByTarget(entries: BacklinkEntry[]): BacklinkEntry[]
   const buckets = new Map<string, BacklinkEntry[]>();
   const order: string[] = [];
   for (const e of entries) {
-    const key = canonicalEntryKey(e.ref);
+    const key = canonicalEntryKey(e);
     if (!buckets.has(key)) {
       buckets.set(key, []);
       order.push(key);
@@ -179,7 +187,7 @@ export function dedupeEntriesByTarget(entries: BacklinkEntry[]): BacklinkEntry[]
     if (group.length === 1) return group[0];
     // Pick the "best" base entry: wiki kind wins over file when the
     // file is the on-disk shadow of the same wiki page.
-    const wikiMember = group.find((g) => g.ref.kind === "wiki");
+    const wikiMember = group.find((g) => g.ref?.kind === "wiki");
     const base = wikiMember ?? group[0];
     // Combine subtitles, dropping empties and duplicates while
     // preserving first-seen order.
@@ -192,8 +200,7 @@ export function dedupeEntriesByTarget(entries: BacklinkEntry[]): BacklinkEntry[]
       subs.push(s);
     }
     return {
-      ref: base.ref,
-      label: base.label,
+      ...base,
       subtitle: subs.length > 0 ? subs.join(" · ") : undefined,
     };
   });
@@ -206,7 +213,9 @@ export function dedupeEntriesByTarget(entries: BacklinkEntry[]): BacklinkEntry[]
  * on-disk shadow of a wiki page doesn't render as a sibling row to
  * the wiki tab itself.
  */
-function canonicalEntryKey(ref: TabRef): string {
+function canonicalEntryKey(entry: BacklinkEntry): string {
+  const ref = entry.ref;
+  if (!ref) return entry.target;
   if (ref.kind === "file") {
     const path = (ref.payload as { path?: string } | null)?.path;
     if (path) {
@@ -219,29 +228,20 @@ function canonicalEntryKey(ref: TabRef): string {
 }
 
 /**
- * Build a navigable `TabRef` from a (kind, id) pair. Kinds the
- * frontend doesn't render directly (rare today but possible for
- * future page kinds) yield null so the row is dropped rather than
- * rendering as a dead button.
+ * The page a `(kind, id)` ref opens, through the one ref → page mapping
+ * (`refFromTabId`: the core kinds with a page, a lens, an extension's
+ * page and the pages of an extension's own kinds). A contribution
+ * (`collector:<ext>/<id>`, `job:…`) something resolves, with no page of
+ * its own, opens Settings, where extensions are managed. Anything else
+ * yields null: a dead link when nothing resolves it.
  */
-function refFor(kind: string, id: string): TabRef | null {
-  switch (kind) {
-    case "wiki":
-      return wikiPageRef(id);
-    case "work_item":
-      return workItemTabRef(refOf("work_item", id));
-    case "file":
-      return fileRef(id);
-    case "dir":
-      return directoryRef(id);
-    case "commit":
-      return gitCommitRef(id);
-    case "finding":
-      // Findings are listed by the oxplow-bundled Findings lens.
-      return lensRef("oxplow-bundled/findings");
-    default:
-      return null;
-  }
+function refFor(kind: string, id: string, resolved: boolean): TabRef | null {
+  // Findings are listed by the oxplow-bundled Findings lens.
+  if (kind === "finding") return lensRef("oxplow-bundled/findings");
+  const canonical = refOf(kind, id);
+  const page = refFromTabId(canonical);
+  if (page) return page;
+  return resolved && contributionOf(canonical) !== null ? indexRef("settings") : null;
 }
 
 /**
