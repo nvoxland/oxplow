@@ -342,10 +342,11 @@ impl ExtensionActivation {
                     let mut commands = svc.extension_commands.reserve(&commands).map_err(|_| {
                         rejected("command registry changed while activation was staged")
                     })?;
-                    let config = svc
-                        .config
-                        .read()
-                        .map_err(|_| rejected("host configuration is unavailable"))?;
+                    // A snapshot, not a held read guard: a provider's live check
+                    // below reads the configuration again, and a second read
+                    // behind a waiting writer (`reload_config_from_disk`) never
+                    // returns. A change after this is a new activation's.
+                    let config = crate::config_service::read_config(&svc.config);
                     let mut running = running.lock().unwrap_or_else(|error| error.into_inner());
                     let mut providers = providers.lock().unwrap_or_else(|error| error.into_inner());
                     let mut providers = svc

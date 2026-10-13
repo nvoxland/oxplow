@@ -186,11 +186,21 @@ fn supports(
 /// asks of it.
 type Target = fn(&WorkItemsRegistry, &Value) -> Result<WorkItemsProvider, CommandError>;
 
+/// An item always has a title: a blank one is refused at `/title`, whichever
+/// list it is for.
+fn not_blank(title: &str) -> Result<(), CommandError> {
+    if title.trim().is_empty() {
+        return Err(invalid_at("/title", "a title can't be empty".into()));
+    }
+    Ok(())
+}
+
 fn create_target(
     registry: &WorkItemsRegistry,
     input: &Value,
 ) -> Result<WorkItemsProvider, CommandError> {
     let input: WorkItemCreateInput = parse(input.clone())?;
+    not_blank(&input.title)?;
     // Always the work list the person and project chose — never another.
     // One that isn't available resolved to none, which files nowhere.
     let provider = active_provider(registry)?;
@@ -211,6 +221,9 @@ fn update_target(
     input: &Value,
 ) -> Result<WorkItemsProvider, CommandError> {
     let input: WorkItemUpdateInput = parse(input.clone())?;
+    if let Some(title) = &input.title {
+        not_blank(title)?;
+    }
     let provider = provider_of_ref(registry, &input.item_ref, "/ref")?;
     if let Some(parent) = &input.parent_ref {
         supports(
@@ -810,6 +823,33 @@ mod tests {
         assert_eq!(targets(&edited.result), vec!["tsk99998"]);
         let fixed = run(UPDATE, json!({ "ref": item, "body": "no links" })).await;
         assert_eq!(targets(&fixed.result), Vec::<String>::new());
+    }
+
+    /// A blank title is refused at `/title` on create and update, before any
+    /// list sees it; a title is kept when it isn't touched.
+    #[tokio::test]
+    async fn a_blank_title_is_refused_at_the_title() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let run = |name: &'static str, input: Value| {
+            let commands = fx.svc.commands.clone();
+            async move { commands.run(&Actor::Human, name, input, false).await }
+        };
+        let made = run(CREATE, json!({ "title": "Real" })).await.unwrap();
+        let item = made.result["ref"].as_str().unwrap().to_string();
+        for (name, input) in [
+            (CREATE, json!({ "title": "  " })),
+            (UPDATE, json!({ "ref": item, "title": "" })),
+        ] {
+            match run(name, input).await.unwrap_err() {
+                CommandError::Invalid { field, .. } => {
+                    assert_eq!(field.as_deref(), Some("/title"), "{name}");
+                }
+                other => panic!("{name}: expected Invalid, got {other:?}"),
+            }
+        }
+        run(UPDATE, json!({ "ref": item, "body": "title untouched" }))
+            .await
+            .unwrap();
     }
 
     /// P5.C2: the commands take canonical refs and refuse another

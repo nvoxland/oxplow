@@ -547,7 +547,8 @@ function FormViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
   const form = useFormSubmit(
     run.lens.title,
     (input, confirmed) => submitLensForm(run.lens.id, input, run.params, streamId, confirmed),
-    // A fresh form for the next entry.
+    // A fresh form for the next entry, started again from the current
+    // values: an edit form shows what it saved.
     () => setRound((r) => r + 1),
   );
   useEffect(() => {
@@ -564,7 +565,7 @@ function FormViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
     };
     // paramsKey stands in for `run.params` (a fresh object each render).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [run.lens.id, paramsKey, streamId]);
+  }, [run.lens.id, paramsKey, streamId, round]);
   if (error) return <div style={{ color: "var(--severity-critical)", fontSize: "var(--text-sm)" }}>{error}</div>;
   if (!start) return null;
   return (

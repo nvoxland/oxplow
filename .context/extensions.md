@@ -1704,6 +1704,14 @@ list. `lens/swimlanes.test.ts` runs the bundle's script against its page;
 `oxplow-sdk/tests/examples.rs` checks it clean and runs its fixtures,
 including a `form:` one.
 
+A form lens (`FormViz`) re-reads its start values when it resets, so after
+a successful Save it shows what was saved, not the title it first opened
+with. Activation takes a cloned snapshot of the config (`read_config`)
+rather than holding its read guard across the transaction: a nested
+read behind a waiting config reload would otherwise deadlock the daemon
+when the active work list switched (`tests-e2e/specs/components/task-views.spec.ts`
+is its regression test).
+
 ## Reviewing by impact
 
 An extension is reviewed by its **impact** — what installing or updating

@@ -13,6 +13,9 @@ const realApi = await import("../api.js");
 const runs: Array<{ action: string; row: unknown; input: unknown; confirmed: boolean }> = [];
 let invalidField: string | null = null;
 const submits: unknown[] = [];
+// What the item's title is in the models: a form lens starts from it.
+let storedTitle = "Old";
+let formStarts = 0;
 
 const UPDATE: CommandSpec = {
   id: "oxplow.work_item.update",
@@ -44,14 +47,18 @@ mock.module("../api.js", () => ({
     if (invalidField) throw new IpcCallError("a title can't be empty", "INVALID", invalidField);
     return { result: null, auditId: 1, eventId: null, inverse: null };
   },
-  lensForm: async () => ({
+  lensForm: async () => {
+    formStarts += 1;
+    return {
     command: UPDATE,
-    values: { ref: "work_item:oxplow:tsk1", title: "Old" },
+    values: { ref: "work_item:oxplow:tsk1", title: storedTitle },
     fixed: ["ref"],
     fields: ["title"],
-  }),
+    };
+  },
   submitLensForm: async (_id: string, input: unknown) => {
     submits.push(input);
+    if (!invalidField) storedTitle = (input as { title?: string }).title ?? storedTitle;
     if (invalidField) throw new IpcCallError("a title can't be empty", "INVALID", invalidField);
     return { result: null, auditId: 1, eventId: null, inverse: null };
   },
@@ -63,6 +70,8 @@ beforeEach(() => {
   runs.length = 0;
   submits.length = 0;
   invalidField = null;
+  storedTitle = "Old";
+  formStarts = 0;
 });
 afterEach(cleanup);
 
@@ -156,4 +165,21 @@ test("a form lens shows only its fields, keeps its fixed ones, and puts errors u
   await waitFor(() => expect(submits).toEqual([{ ref: "work_item:oxplow:tsk1" }]));
   const error = await waitFor(() => view.getByTestId("lens-form-fields-title-error"));
   expect(error.textContent).toContain("can't be empty");
+});
+
+// An edit form shows what it saved: after a successful submit it starts
+// again from the models, not from the values it first opened with.
+test("a form lens starts again from the current values after it saves", async () => {
+  const form: LensRun = {
+    lens: { ...lens, viz: "form", form: { command: "oxplow.work_item.update", defaults: null, fixed: ["ref"], fields: ["title"] }, actions: [] },
+    params: {},
+    result: { columns: [], rows: [], truncated: false },
+  } as unknown as LensRun;
+  const view = render(<LensResultView run={form} onOpenPage={() => {}} />);
+  const title = await waitFor(() => view.getByTestId("lens-form-fields-title") as HTMLInputElement);
+  fireEvent.change(title, { target: { value: "New" } });
+  fireEvent.submit(view.getByTestId("lens-form-fields"));
+  await waitFor(() => expect(submits).toEqual([{ ref: "work_item:oxplow:tsk1", title: "New" }]));
+  await waitFor(() => expect(formStarts).toBe(2));
+  await waitFor(() => expect((view.getByTestId("lens-form-fields-title") as HTMLInputElement).value).toBe("New"));
 });

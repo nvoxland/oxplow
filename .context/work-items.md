@@ -206,6 +206,7 @@ service or models.
   transaction; its inverse is named by its **verb**. The key is
   the caller's when it has one (an effect's step), else the host mints
   one ([providers.md](./providers.md) "Idempotency").
+- **A blank title is refused** by `oxplow.work_item.create` and `update` (`INVALID` at `/title`), so a view's form shows the message under the field; the check is the command's, not any list's.
 - **`WorkItemsFeatures`**: `hierarchy`, `comments`, `links`, `delete`,
   `idempotent_writes` (a write sent twice with one
   idempotency key is done once — [providers.md](./providers.md)

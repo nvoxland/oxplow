@@ -1,0 +1,189 @@
+import { cpSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import type { Page } from "@playwright/test";
+
+import { approveProgram, ipc, run, searchable, until, type Daemon } from "../../support/daemon.js";
+import { expect, test, type Workspace } from "../../support/fixtures.js";
+import { openFromLauncher } from "../../support/ui.js";
+
+// The task-views example (`examples/extensions/task-views`): swimlanes for
+// the Board, a compact list for the Tasks page and a plain editor form for
+// a work item, each replacing oxplow's own view with no provider of its
+// own — in Chromium and WebKit.
+
+/** Put the example into `daemon`'s project and wait until it's loaded. It
+ *  isn't in every suite daemon: replacing the Board would change every
+ *  other spec's. */
+async function install(daemon: Daemon) {
+  const here = dirname(fileURLToPath(import.meta.url));
+  cpSync(
+    join(here, "..", "..", "..", "examples", "extensions", "task-views"),
+    join(daemon.project, "oxplow", "extensions", "task-views"),
+    { recursive: true },
+  );
+  await until("task-views to load", 60_000, async () => {
+    const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
+      sql: "SELECT 1 FROM v_replaceable WHERE target = 'work_item.board'",
+    });
+    const ext = await ipc<Array<{ name: string }>>(daemon, "list_extensions");
+    return out.rows.length > 0 && ext.some((e) => e.name === "task-views");
+  });
+}
+
+/** Choose whose view shows for `target` on Settings → Integrations. */
+async function choose(page: Page, target: string, who: string) {
+  await openFromLauncher(page, "Settings");
+  const choice = page.getByTestId(`integrations-replacement-choice-${target}`);
+  await choice.selectOption(who);
+  // The select shows what is saved: it holds the choice once it is stored.
+  await expect(choice).toHaveValue(who);
+}
+
+const TARGETS = ["work_item.board", "work_item.list", "work_item.detail"] as const;
+
+/** The state of the item titled `title`, from the models. */
+async function stateOf(daemon: Daemon, title: string): Promise<string | undefined> {
+  const out = await ipc<{ rows: string[][] }>(daemon, "query_sql", {
+    sql: "SELECT state FROM v_work_item WHERE title = ?1",
+    params: [title],
+  });
+  return out.rows[0]?.[0];
+}
+
+async function titled(daemon: Daemon, title: string): Promise<boolean> {
+  const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
+    sql: "SELECT 1 FROM v_work_item WHERE title = ?1",
+    params: [title],
+  });
+  return out.rows.length > 0;
+}
+
+/** The Board, replaced: drag a card (refused until the board is approved),
+ *  rename it, and the empty title's refusal under its input. `scope` is
+ *  the Board's scope that shows the items. */
+async function swimlanes(page: Page, daemon: Workspace, scope: string) {
+  await run(daemon, "oxplow.work_item.create", { title: "Card one", thread: daemon.thread });
+  // A tracker's items reach oxplow's models through its collector's read.
+  if (scope === "all") await run(daemon, "oxplow.provider.sync", { instance: "e2e/fake", collector: "work_items" });
+  await until("the item to be in the models", 30_000, () => titled(daemon, "Card one"));
+  await page.goto("/");
+  await choose(page, "work_item.board", "task-views");
+  await openFromLauncher(page, "Board");
+  await expect(page.getByTestId("replacement-work_item.board")).toContainText("replaced by task-views");
+  await page.getByTestId("board-scope").selectOption(scope);
+  await expect(page.getByTestId("replacement-work_item.board")).toContainText("replaced by task-views");
+  const frame = page.frameLocator('[data-testid="custom-component-frame"]');
+  const card = frame.locator(".card", { hasText: "Card one" });
+  await expect(card).toBeVisible();
+  await expect(frame.locator(".lane")).toHaveCount(5);
+
+  // Refused until a person approves the board, said in one line above it.
+  await card.dragTo(frame.locator('.lane[data-state="done"]'));
+  await expect(frame.locator("#note")).toContainText("Approve");
+  expect(await stateOf(daemon, "Card one")).not.toBe("done");
+
+  await approveProgram(daemon, "component", "task-views/swimlanes");
+  await card.dragTo(frame.locator('.lane[data-state="done"]'));
+  await expect(frame.locator('.lane[data-state="done"] .card', { hasText: "Card one" })).toBeVisible();
+  expect(await stateOf(daemon, "Card one")).toBe("done");
+
+  // The title is its own form: Enter saves, an empty one is refused under
+  // the input, Escape puts it back.
+  const done = frame.locator('.lane[data-state="done"] .card');
+  await done.locator(".title").click();
+  const input = done.locator("input.ox-input");
+  await input.fill("");
+  await input.press("Enter");
+  await expect(done.locator(".ox-error")).toBeVisible();
+  await input.press("Escape");
+  await expect(done.locator(".title")).toHaveText("Card one");
+  await done.locator(".title").click();
+  await done.locator("input.ox-input").fill("Card renamed");
+  await done.locator("input.ox-input").press("Enter");
+  await expect(frame.locator(".card", { hasText: "Card renamed" })).toBeVisible();
+  await until("the rename to be stored", 15_000, () => titled(daemon, "Card renamed"));
+}
+
+test("the swimlanes replace the Board: drag, rename, and the refusal until approved", async ({ fresh }) => {
+  const { page, daemon } = fresh;
+  await install(daemon);
+  await swimlanes(page, daemon, "thread");
+});
+
+test("the swimlanes work over another work list too (e2e/fake active)", async ({ fresh }) => {
+  const { page, daemon } = fresh;
+  await install(daemon);
+  // The fake tracker as the active work list, set up before any page is
+  // open: Settings → Integrations does the same (see fake-provider.spec).
+  await approveProgram(daemon, "provider", "e2e/fake");
+  await ipc(daemon, "set_provider_instance", { instance: "e2e/fake", enabled: true, config: { team: "core" } });
+  await until("the fake to be ready", 30_000, async () => {
+    const all = await ipc<Array<{ instance: string; enabled: boolean; health: { state: { state: string } } }>>(
+      daemon,
+      "list_provider_instances",
+    );
+    const fake = all.find((i) => i.instance === "e2e/fake");
+    return !!fake && fake.enabled && fake.health.state.state === "ready";
+  });
+  await run(daemon, "oxplow.config.set", { key: "activeProviders", value: { work_items: "fake" } });
+  await until("the fake to be the active work list", 30_000, async () => {
+    const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
+      sql: "SELECT 1 FROM v_capability_provider WHERE capability = 'work_items' AND active = 1 AND provider = 'fake'",
+    });
+    return out.rows.length > 0;
+  });
+  // A tracker's items are on no thread.
+  await swimlanes(page, daemon, "all");
+});
+
+test("the editor, the list and oxplow's own, each chosen from Settings", async ({ fresh }) => {
+  const { page, daemon } = fresh;
+  await install(daemon);
+  await run(daemon, "oxplow.work_item.create", { title: "Item to edit", thread: daemon.thread });
+  await searchable(daemon, "Item to edit", "work_item");
+  await page.goto("/");
+  for (const target of TARGETS) await choose(page, target, "task-views");
+
+  // The item's page: the form in place of the editor, the rail still oxplow's.
+  await openFromLauncher(page, "Item to edit");
+  const detail = page.getByTestId("replacement-work_item.detail");
+  await expect(detail).toContainText("replaced by task-views");
+  // Only the title and body are shown; the item's ref is fixed, not editable.
+  await expect(detail.getByTestId("lens-form-fields-ref")).toHaveCount(0);
+  await expect(detail.getByTestId("lens-form-fields-title")).toHaveValue("Item to edit");
+  await expect(page.getByLabel("State")).toBeVisible();
+  await expect(detail.getByLabel("State")).toHaveCount(0);
+  await detail.getByTestId("lens-form-fields-title").fill("Item edited");
+  await detail.getByTestId("lens-form-fields-submit").click();
+  await until("the edit to be stored", 15_000, () => titled(daemon, "Item edited"));
+  await expect(detail.getByTestId("lens-form-fields-title")).toHaveValue("Item edited");
+
+  // The Tasks page: the compact list, its Edit… row action in a slideover.
+  await openFromLauncher(page, "Tasks");
+  const list = page.getByTestId("replacement-work_item.list");
+  await expect(list).toContainText("replaced by task-views");
+  await expect(list).toContainText("Item edited");
+  // The title is a link; the row's menu is on its other cells.
+  await list.getByRole("row").filter({ hasText: "Item edited" }).locator("td").nth(1).click({ button: "right" });
+  await page.getByTestId("menu-item-lens-action-edit").click();
+  const form = page.getByTestId("lens-action-form");
+  await form.getByTestId("lens-action-form-fields-title").fill("Item edited again");
+  await form.getByTestId("lens-action-form-fields-submit").click();
+  await expect(form).toHaveCount(0);
+  await until("the second edit to be stored", 15_000, () => titled(daemon, "Item edited again"));
+  await expect(list).toContainText("Item edited again");
+
+  // oxplow's own, for each: the replacement is gone.
+  for (const target of TARGETS) await choose(page, target, "oxplow");
+  await openFromLauncher(page, "Tasks");
+  await expect(page.locator('[data-testid^="replacement-"]:visible')).toHaveCount(0);
+  await expect(page.getByTestId(/^tasks-row-/).first()).toBeVisible();
+  await openFromLauncher(page, "Board");
+  await expect(page.getByTestId("work-board")).toBeVisible();
+  await expect(page.locator('[data-testid^="replacement-"]:visible')).toHaveCount(0);
+  await searchable(daemon, "Item edited again", "work_item");
+  await openFromLauncher(page, "Item edited again");
+  await expect(page.locator('[data-testid^="replacement-"]:visible')).toHaveCount(0);
+});
