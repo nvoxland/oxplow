@@ -199,8 +199,12 @@ async fn the_documented_examples_activate() {
     let dir = tempfile::tempdir().unwrap();
     crate::test_fixtures::init_git_repo(dir.path());
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions");
+    // Each example is a folder; the folder's README isn't one.
     for entry in std::fs::read_dir(&examples).unwrap() {
         let from = entry.unwrap().path();
+        if !from.is_dir() {
+            continue;
+        }
         let to = dir
             .path()
             .join("oxplow/extensions")

@@ -129,6 +129,9 @@ mod tests {
         let examples = repo_root().join("examples/extensions");
         for dir in std::fs::read_dir(&examples).expect("examples/extensions") {
             let dir = dir.unwrap().path();
+            if !dir.is_dir() {
+                continue; // the examples' README
+            }
             let text = std::fs::read_to_string(dir.join("extension.yaml")).unwrap();
             let p = problems(&manifest, &text);
             assert!(p.is_empty(), "{}: {p:#?}", dir.display());
