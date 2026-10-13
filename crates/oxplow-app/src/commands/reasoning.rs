@@ -11,8 +11,11 @@ use crate::commands::ops::Op;
 use std::sync::Arc;
 
 use oxplow_db::effort_store::find_open_for_work_item_tx;
-use oxplow_db::reasoning_store::{record_claim_tx, record_decision_tx, NewClaim, NewDecision};
+use oxplow_db::reasoning_store::{
+    record_claim_tx, record_decision_tx, replace_inferred_tx, NewClaim, NewDecision,
+};
 use oxplow_db::thread_store::get_tx as thread_tx;
+use oxplow_domain::events::schema::{EffortDecisionsInferred, EffortDecisionsInferredV1};
 use oxplow_domain::refs::build::validate_work_item_ref;
 use oxplow_domain::{CommandError, ThreadId};
 use rusqlite::OptionalExtension;
@@ -21,11 +24,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::thread::acting_thread;
-use super::util::{invalid, parse, schema, sql};
+use super::util::{invalid, parse, ref_id, schema, sql};
 use super::{Handler, HandlerOutput, TxCtx};
 
 pub const RECORD_DECISION: &str = "oxplow.effort.record_decision";
 pub const RECORD_CLAIM: &str = "oxplow.effort.record_claim";
+pub const REPLACE_INFERRED_DECISIONS: &str = "oxplow.effort.replace_inferred_decisions";
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -67,6 +71,58 @@ pub struct ClaimInput {
     /// What backs it (`run:<id>`, a test name, a file); absent, unbacked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evidence_ref: Option<String>,
+}
+
+/// `effort.replace_inferred_decisions`'s input: a model's proposals for one
+/// effort.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InferredDecisionsInput {
+    /// The effort (`effort:eff12`).
+    pub effort: String,
+    /// What it holds after: every inferred decision it had is replaced.
+    #[schemars(length(max = 8))]
+    pub decisions: Vec<InferredDecision>,
+}
+
+/// One proposed decision.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InferredDecision {
+    /// The fork: what had to be decided.
+    #[schemars(length(min = 1, max = 1000))]
+    pub question: String,
+    /// What was chosen.
+    #[schemars(length(min = 1, max = 1000))]
+    pub choice: String,
+    /// The options not taken.
+    #[serde(default)]
+    #[schemars(length(max = 16))]
+    pub alternatives: Vec<String>,
+    #[serde(default)]
+    #[schemars(length(max = 4000))]
+    pub why: String,
+    /// How sure the model is that it was a real decision; absent, `low`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<Confidence>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum Confidence {
+    Low,
+    Medium,
+    High,
+}
+
+impl Confidence {
+    fn as_str(self) -> &'static str {
+        match self {
+            Confidence::Low => "low",
+            Confidence::Medium => "medium",
+            Confidence::High => "high",
+        }
+    }
 }
 
 /// Where a record lands: its thread, work item and effort.
@@ -201,9 +257,72 @@ pub fn record_claim_op() -> Op {
     )
 }
 
+/// `effort.replace_inferred_decisions { effort, decisions }`: the only
+/// writer of provenance `inferred` — what a model proposed the agent
+/// decided without recording it. Replaces the effort's inferred
+/// decisions; its recorded, confirmed and dismissed ones stay. The thread
+/// and work item are the effort's. Inferred decisions are a person's to
+/// review and never reach the agent, so any invoker may propose them.
+pub fn replace_inferred_decisions_op() -> Op {
+    Op::new(
+        "efforts.write",
+        "replace_inferred_decisions",
+        schema::<InferredDecisionsInput>(),
+        false,
+        Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
+            let input: InferredDecisionsInput = parse(input)?;
+            let effort: oxplow_domain::EffortId = ref_id(&input.effort, "effort", "/effort")?;
+            let (thread_id, work_item): (i64, Option<String>) = ctx
+                .conn
+                .query_row(
+                    "SELECT thread_id, work_item FROM effort WHERE id = ?1",
+                    [effort.value()],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()
+                .map_err(sql)?
+                .ok_or_else(|| invalid("/effort", format!("no effort `{}`", input.effort)))?;
+            let decisions: Vec<NewDecision> = input
+                .decisions
+                .into_iter()
+                .map(|d| NewDecision {
+                    thread_id,
+                    work_item: work_item.clone(),
+                    effort_id: Some(effort.value()),
+                    question: d.question,
+                    choice: d.choice,
+                    alternatives: d.alternatives,
+                    confidence: d.confidence.unwrap_or(Confidence::Low).as_str().into(),
+                    why: d.why,
+                })
+                .collect();
+            let count = replace_inferred_tx(ctx.conn, effort.value(), &decisions)
+                .map_err(CommandError::from)?;
+            let effort_ref = oxplow_domain::refs::build::effort_ref(effort);
+            let event = ctx
+                .events
+                .typed::<EffortDecisionsInferred>(&EffortDecisionsInferredV1 {
+                    effort: effort_ref.clone(),
+                    work_item: work_item.clone(),
+                    count: count as u32,
+                })
+                .with_subject(vec![effort_ref.clone()]);
+            Ok(HandlerOutput {
+                result: json!({ "effort": effort_ref, "count": count }),
+                events: vec![event],
+                ..HandlerOutput::default()
+            })
+        })),
+    )
+}
+
 /// The reasoning commands, for the bus.
 pub fn ops() -> Vec<Op> {
-    vec![record_decision_op(), record_claim_op()]
+    vec![
+        record_decision_op(),
+        record_claim_op(),
+        replace_inferred_decisions_op(),
+    ]
 }
 
 #[cfg(test)]
@@ -317,6 +436,175 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, CommandError::Invalid { .. }), "{err:?}");
+    }
+
+    /// A model's proposals replace the effort's inferred decisions and
+    /// nothing else: the agent's recorded one and a reviewed one stay.
+    /// The thread and work item come from the effort; an effect may call
+    /// it; the replacement is logged with its count.
+    #[tokio::test]
+    async fn inferred_decisions_replace_only_the_efforts_inferred_ones() {
+        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let effort = fx.effort.value();
+        let d = |q: &str| NewDecision {
+            thread_id: fx.thread.value(),
+            work_item: Some(work_item_ref(fx.task)),
+            effort_id: Some(effort),
+            question: q.into(),
+            choice: "c".into(),
+            alternatives: vec![],
+            confidence: "medium".into(),
+            why: String::new(),
+        };
+        fx.svc
+            .db
+            .transaction({
+                let recorded = d("recorded");
+                move |tx| record_decision_tx(tx, &recorded)
+            })
+            .await
+            .unwrap();
+        fx.svc
+            .reasoning_store
+            .replace_inferred(effort, vec![d("reviewed"), d("stale")])
+            .await
+            .unwrap();
+        fx.svc
+            .db
+            .transaction(|tx| {
+                tx.execute(
+                    "UPDATE decision SET provenance = 'confirmed' WHERE question = 'reviewed'",
+                    [],
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+
+        let effect = Actor::Effect {
+            effect: "oxplow-bundled/store-decisions".into(),
+            thread_id: Some(fx.thread),
+            stream_id: None,
+        };
+        let out = fx
+            .svc
+            .commands
+            .run(
+                &effect,
+                REPLACE_INFERRED_DECISIONS,
+                json!({
+                    "effort": oxplow_domain::refs::build::effort_ref(fx.effort),
+                    "decisions": [
+                        { "question": "Which CSV library?", "choice": "csv crate",
+                          "alternatives": ["hand-rolled"], "why": "quoting" },
+                    ],
+                }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(out.result["count"], json!(1));
+
+        let rows = fx
+            .svc
+            .db
+            .read(move |c| {
+                let mut s = c
+                    .prepare(
+                        "SELECT question, provenance, thread_id, work_item, confidence
+                         FROM decision WHERE effort_id = ?1 ORDER BY id",
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = s
+                    .query_map([effort], |r| {
+                        Ok((
+                            r.get::<_, String>(0)?,
+                            r.get::<_, String>(1)?,
+                            r.get::<_, i64>(2)?,
+                            r.get::<_, Option<String>>(3)?,
+                            r.get::<_, String>(4)?,
+                        ))
+                    })
+                    .map_err(oxplow_db::map_sql_err)?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(oxplow_db::map_sql_err)?;
+                Ok(rows)
+            })
+            .await
+            .unwrap();
+        let item = Some(work_item_ref(fx.task));
+        let t = fx.thread.value();
+        assert_eq!(
+            rows,
+            vec![
+                (
+                    "recorded".into(),
+                    "recorded".into(),
+                    t,
+                    item.clone(),
+                    "medium".into()
+                ),
+                (
+                    "reviewed".into(),
+                    "confirmed".into(),
+                    t,
+                    item.clone(),
+                    "medium".into()
+                ),
+                (
+                    "Which CSV library?".into(),
+                    "inferred".into(),
+                    t,
+                    item.clone(),
+                    "low".into()
+                ),
+            ]
+        );
+
+        let logged = fx
+            .svc
+            .db
+            .read(|c| {
+                c.query_row(
+                    "SELECT json_extract(payload, '$.count'), json_extract(payload, '$.work_item')
+                     FROM v_event WHERE type = 'effort.decisions_inferred'",
+                    [],
+                    |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(logged, (1, work_item_ref(fx.task)));
+    }
+
+    /// An unknown effort, a ninth proposal and an unknown confidence are
+    /// the caller's errors, and nothing changes.
+    #[tokio::test]
+    async fn inferred_decisions_are_checked() {
+        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let run = |input: serde_json::Value| {
+            let svc = fx.svc.clone();
+            async move {
+                svc.commands
+                    .run(&Actor::Human, REPLACE_INFERRED_DECISIONS, input, false)
+                    .await
+                    .unwrap_err()
+            }
+        };
+        let one = json!({ "question": "q", "choice": "c" });
+        let effort = oxplow_domain::refs::build::effort_ref(fx.effort);
+        for input in [
+            json!({ "effort": "effort:eff999", "decisions": [one] }),
+            json!({ "effort": effort, "decisions": vec![one.clone(); 9] }),
+            json!({ "effort": effort, "decisions": [{ "question": "q", "choice": "c", "confidence": "sure" }] }),
+        ] {
+            let err = run(input.clone()).await;
+            assert!(
+                matches!(err, CommandError::Invalid { .. }),
+                "{input}: {err:?}"
+            );
+        }
     }
 
     /// A claim about another stream's work item is refused.

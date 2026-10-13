@@ -51,57 +51,57 @@ impl SqliteReasoningStore {
         Self { db }
     }
 
-    /// Replace `effort_id`'s inferred decisions (provenance `inferred`:
-    /// proposed by a model from the effort's activity, not recorded by the
-    /// agent) with `decisions`. Recorded decisions are untouched. Their
-    /// `effort_id` is overwritten with `effort_id`.
+    /// Replace `effort_id`'s inferred decisions (`replace_inferred_tx`) in
+    /// a transaction of its own.
     pub async fn replace_inferred(
         &self,
         effort_id: i64,
         decisions: Vec<NewDecision>,
     ) -> Result<usize, DomainError> {
-        let now = now_string();
-        let mut rows = Vec::new();
-        for d in decisions {
-            if d.question.trim().is_empty() || d.choice.trim().is_empty() {
-                continue;
-            }
-            let confidence = if ["low", "medium", "high"].contains(&d.confidence.as_str()) {
-                d.confidence
-            } else {
-                "low".to_string()
-            };
-            let alternatives = serde_json::to_string(&d.alternatives)
-                .map_err(|e| DomainError::Storage(format!("alternatives: {e}")))?;
-            rows.push((
-                d.thread_id,
-                d.work_item,
-                d.question,
-                d.choice,
-                alternatives,
-                confidence,
-                d.why,
-            ));
-        }
         self.db
-            .transaction(move |tx| {
-                tx.execute(
-                    "DELETE FROM decision WHERE effort_id = ?1 AND provenance = 'inferred'",
-                    [effort_id],
-                )
-                .map_err(map_sql_err)?;
-                for (thread_id, work_item, question, choice, alternatives, confidence, why) in &rows {
-                    tx.execute(
-                        "INSERT INTO decision (thread_id, work_item, effort_id, question, choice, alternatives_json, confidence, why, provenance, created_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'inferred', ?9)",
-                        rusqlite::params![thread_id, work_item, effort_id, question, choice, alternatives, confidence, why, now],
-                    )
-                    .map_err(map_sql_err)?;
-                }
-                Ok(rows.len())
-            })
+            .transaction(move |tx| replace_inferred_tx(tx, effort_id, &decisions))
             .await
     }
+}
+
+/// Replace `effort_id`'s inferred decisions (provenance `inferred`:
+/// proposed by a model from the effort's activity, not recorded by the
+/// agent) with `decisions`, in the caller's transaction. Recorded,
+/// confirmed and dismissed decisions are untouched. Entries without a
+/// question or choice are skipped, an unknown confidence is `low`, and
+/// each row's `effort_id` is `effort_id`. Returns how many were stored.
+pub fn replace_inferred_tx(
+    conn: &rusqlite::Connection,
+    effort_id: i64,
+    decisions: &[NewDecision],
+) -> Result<usize, DomainError> {
+    conn.execute(
+        "DELETE FROM decision WHERE effort_id = ?1 AND provenance = 'inferred'",
+        [effort_id],
+    )
+    .map_err(map_sql_err)?;
+    let now = now_string();
+    let mut stored = 0;
+    for d in decisions {
+        if d.question.trim().is_empty() || d.choice.trim().is_empty() {
+            continue;
+        }
+        let confidence = if ["low", "medium", "high"].contains(&d.confidence.as_str()) {
+            d.confidence.as_str()
+        } else {
+            "low"
+        };
+        let alternatives = serde_json::to_string(&d.alternatives)
+            .map_err(|e| DomainError::Storage(format!("alternatives: {e}")))?;
+        conn.execute(
+            "INSERT INTO decision (thread_id, work_item, effort_id, question, choice, alternatives_json, confidence, why, provenance, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'inferred', ?9)",
+            rusqlite::params![d.thread_id, d.work_item, effort_id, d.question, d.choice, alternatives, confidence, d.why, now],
+        )
+        .map_err(map_sql_err)?;
+        stored += 1;
+    }
+    Ok(stored)
 }
 
 /// Record a decision the agent made, in the caller's transaction (the

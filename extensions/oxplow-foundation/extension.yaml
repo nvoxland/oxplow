@@ -245,6 +245,11 @@ commands:
     scope: efforts.write
     op: reopen_decision
     invokers: { human: true, agent: false, lens: true }
+  - name: effort.replace_inferred_decisions
+    summary: "Replace an effort's inferred decisions (`effort:eff<id>`) with a model's proposals — at most 8 forks the agent seems to have resolved without recording them. Its recorded and reviewed decisions stay. They wait for a person's review and are never shown to the agent. Returns `{ effort, count }`."
+    scope: efforts.write
+    op: replace_inferred_decisions
+    invokers: { human: true, agent: true, lens: true }
   - name: effort.report
     summary: "Optional: describe the thread's current (else latest) effort — a `summary` of what shipped, and any `impacts` beyond the edits (a wiki page, a work item, a commit, a finding). Without one, the summary is your last turn's final message; files and test runs are observed. Returns `{ effort, link_warnings }`."
     scope: efforts.write

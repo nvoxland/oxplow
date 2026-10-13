@@ -2312,6 +2312,7 @@ mod tests {
                 "efforts.write/open",
                 "efforts.write/record_claim",
                 "efforts.write/record_decision",
+                "efforts.write/replace_inferred_decisions",
                 "efforts.write/report",
                 "efforts.write/update",
                 // Anyone else than a person only in its own stream, and as

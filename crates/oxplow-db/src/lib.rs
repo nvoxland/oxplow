@@ -116,7 +116,8 @@ pub use panel_layout_store::{PanelPlacement, SqlitePanelLayoutStore};
 pub use proposal_store::{NewProposal, Proposal, ProposalDecision, SqliteProposalStore};
 pub use provider_collector_store::{CollectorState, SqliteProviderCollectorStore};
 pub use reasoning_store::{
-    record_claim_tx, record_decision_tx, NewClaim, NewDecision, SqliteReasoningStore,
+    record_claim_tx, record_decision_tx, replace_inferred_tx, NewClaim, NewDecision,
+    SqliteReasoningStore,
 };
 pub use search_store::{sanitize_query, SearchHit, SqliteSearchStore};
 pub use semantic_layer::{

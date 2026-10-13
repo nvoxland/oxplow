@@ -198,6 +198,8 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<EffortDecisionReviewed>()
             .expect("core type registers");
+        r.register::<EffortDecisionsInferred>()
+            .expect("core type registers");
         r.register::<EffortFinished>().expect("core type registers");
         r.register::<CollectorSynced>()
             .expect("core type registers");
@@ -1971,6 +1973,27 @@ impl EventType for EffortDecisionReviewed {
     type Payload = EffortDecisionReviewedV1;
 }
 
+/// `effort.decisions_inferred@1`: a model's proposals replaced an
+/// effort's inferred decisions (`oxplow.effort.replace_inferred_decisions`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EffortDecisionsInferredV1 {
+    /// `effort:eff<id>`.
+    pub effort: String,
+    /// The effort's work item, when it has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_item: Option<String>,
+    /// How many inferred decisions it holds now.
+    pub count: u32,
+}
+
+pub struct EffortDecisionsInferred;
+impl EventType for EffortDecisionsInferred {
+    const TYPE: &'static str = "effort.decisions_inferred";
+    const V: u32 = 1;
+    type Payload = EffortDecisionsInferredV1;
+}
+
 /// `collector.synced@1` (P7.B3): a collector ran — by hand
 /// (`oxplow.collector.sync`), on its schedule, or for an event its `on:` trigger
 /// names (then the envelope's `cause` is that event). Logged in the
@@ -2680,6 +2703,7 @@ mod tests {
                 ("effort.claim_verified", 1),
                 ("effort.closed", 2),
                 ("effort.decision_reviewed", 1),
+                ("effort.decisions_inferred", 1),
                 ("effort.finished", 2),
                 ("effort.landed", 1),
                 ("effort.linked", 1),
