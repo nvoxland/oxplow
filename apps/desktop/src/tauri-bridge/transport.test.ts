@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   invokeRoute,
+  ipcRequest,
   listenRoute,
   onRemoteReconnect,
   resolveBase,
@@ -158,5 +159,13 @@ describe("parseRemoteInput", () => {
       token: "abc",
     });
     expect(parseRemoteInput("http://127.0.0.1:7420")).toEqual({ base: "http://127.0.0.1:7420", token: null });
+  });
+});
+
+describe("a window closing", () => {
+  test("hands its client host back with a request that outlives the page", () => {
+    expect(ipcRequest("unregister_client_host", { client: "c" }, null).keepalive).toBe(true);
+    expect(ipcRequest(PROJECT_COMMAND, undefined, "t").keepalive).toBe(false);
+    expect(ipcRequest(PROJECT_COMMAND, undefined, "t").headers).toMatchObject({ Authorization: "Bearer t" });
   });
 });

@@ -24,8 +24,12 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   lens with its page, and a ref kind. Private, since `providers` is still
   experimental. The effect comments on each created task; a title with
   `[fail]` makes it fail (Delivery, Retry) and one with `[delete]` makes it
-  delete the task (a proposal). Nothing in it is approved until a spec
-  approves it.
+  delete the task (a proposal). It also declares a scripted model provider,
+  `sorter` (`providers/sorter.star`): it answers a choice question with
+  `bug` when the text mentions a bug, else `cleanup`; the host's one HTTP
+  call goes to the base URL a spec gives the provider (an echo server of its
+  own), so the script decides and nothing leaves the machine. Nothing in it
+  is approved until a spec approves it.
 - **The github example** (`examples/extensions/github`) is copied in too,
   its `sync.sh` swapped for one that prints `fixtures/github-prs.json`
   (two pull requests) — the documented example, no GitHub.
@@ -96,7 +100,10 @@ a person's Retry, Backfill) and Approvals (an effect's destructive step);
 `review/` the verdict chip; `agent/` the fake ACP agent's reply and a
 Terminal shell; `components/` the github example's PR Lifetimes (frame,
 filters, navigation, approval-gated `invoke`, and a self-navigation off
-this machine sending no request).
+this machine sending no request), the task-views example (replacing the
+Board, list and editor) and the triage example (its real `todos` collector
+over the `sorter` provider, decisions from the board and the `todos` lens,
+surviving a reload).
 
 What stays a hand walk: the WKWebView window itself, shell-only surfaces
 (project setup, the native menu, the clipboard, external URLs), OAuth

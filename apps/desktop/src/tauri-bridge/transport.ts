@@ -255,17 +255,28 @@ export function invokeRoute(
 /// REJECTS with the IpcError object on failure — the same semantics
 /// as `@tauri-apps/api/core`'s invoke, which the bindings' typedError
 /// wrapper converts into the `{status, data|error}` envelope.
+/// Calls a closing page makes: sent `keepalive`, so the browser finishes
+/// them after the page is gone instead of cancelling them (WebKit reports
+/// a cancelled fetch as an error the page threw).
+const UNLOAD_CALLS = new Set(["unregister_client_host"]);
+
+/// The POST that carries `name(args)` to the daemon. Pure; exported for tests.
+export function ipcRequest(name: string, args: Record<string, unknown> | undefined, token: string | null): RequestInit {
+  return {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders(token) },
+    body: JSON.stringify(args ?? null),
+    keepalive: UNLOAD_CALLS.has(name),
+  };
+}
+
 export async function invoke<T>(name: string, args?: Record<string, unknown>): Promise<T> {
   const route = invokeRoute(name, remoteBase, shellAvailable());
   if (route === "tauri") return tauriInvoke<T>(name, args);
   if (route === "none") {
     throw { code: "NOT_FOUND", message: `${name} is the desktop shell's, and this window has none`, cause: null };
   }
-  const resp = await fetch(`${remoteBase}/ipc/${name}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders(remoteToken) },
-    body: JSON.stringify(args ?? null),
-  });
+  const resp = await fetch(`${remoteBase}/ipc/${name}`, ipcRequest(name, args, remoteToken));
   if (resp.status === 401) {
     // The daemon refused this window's token: no retry fixes that.
     markTokenRefused();

@@ -4,7 +4,8 @@ sharing: private
 intent:
   purpose: >-
     The browser suite's extension: a fake work-item tracker, an effect, a
-    lens with its page, and a ref kind, so specs drive each through the UI.
+    lens with its page, and a ref kind, so specs drive each through the UI, and a scripted model
+    provider that sorts text by its words.
   origin: null
   examples: []
 # `bin/provider` is written when a suite daemon starts: it runs the
@@ -14,6 +15,15 @@ providers:
     capability: work_items
     entry: bin/provider
     declarations: provider.json
+# A model provider for specs that need an answer from a model, offline: its
+# script sorts each TODO by its words (providers/sorter.star); the host's one
+# HTTP call goes to the spec's own echo server (its instance's baseUrl).
+implementations:
+  - capability: ai_provider
+    id: sorter
+    title: E2E sorter
+    entry: providers/sorter.star
+    config: { ops: [decide] }
 effects:
   - id: note-created
     summary: >-
