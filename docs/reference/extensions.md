@@ -331,7 +331,7 @@ jobs:
     tools: [todos.in_file]          # your commands its model may call
     max_tool_rounds: 4              # 1–16, default 4
     timeout: 120                    # seconds, 1–600, default 120
-    replay: never
+    replay: never                   # or idempotent: run again after a restart, up to 3 attempts
 commands:
   - { name: summary.start, summary: Start a summary, scope: jobs.write, op: enqueue, invokers: { human: true, agent: true, lens: true } }
   - { name: summary.cancel, summary: Cancel a summary, scope: jobs.write, op: cancel, invokers: { human: true, agent: true, lens: true } }
@@ -376,7 +376,10 @@ again.
 - **Cancel** stops a running job at once — its model call is dropped —
   and it ends `cancelled`. A person can stop any job from the Jobs lens.
   Past its `timeout` a job fails. An attempt cut off by a restart is
-  `interrupted`; nothing retries it.
+  `interrupted`, unless the job says `replay: idempotent`: then it runs
+  again, up to three attempts in all, and only its final end is
+  announced. A round it had finished costs nothing the second time; its
+  tools run again, so they must only read (as every tool does).
 
 A script declaring `needs: [jobs.read]` can call
 `scope("jobs.read", {"id": job_id})` for its extension's result. The

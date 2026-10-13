@@ -9,8 +9,8 @@ use oxplow_domain::Actor;
 use serde_json::{json, Value};
 
 use crate::extension_job_stream_tests::{
-    ask, completions, fixture, fixture_idle, prepare, reply, rows, run, slow, until, Fixture,
-    LOOKUP, MANIFEST,
+    ask, calls, completions, fixture, fixture_idle, manifest_idempotent, prepare, reply, rows, run,
+    slow, until, Fixture, LOOKUP, MANIFEST,
 };
 
 fn words(count: usize) -> String {
@@ -102,8 +102,8 @@ fn job_key(fx: &Fixture) -> String {
         .key()
 }
 
-/// An attempt whose lease ran out ends `interrupted` — nothing is replayed
-/// and nothing the stopped worker says later changes that.
+/// A `never` job whose lease ran out ends `interrupted` — it isn't
+/// replayed, and nothing the stopped worker says later changes that.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_job_whose_lease_ran_out_is_interrupted() {
     let fx = fixture(MANIFEST, vec![slow(&words(100), 50)]).await;
@@ -178,7 +178,8 @@ async fn a_job_does_not_succeed_across_a_generation_change() {
 }
 
 /// A restart finds a queued job and runs it, and a running one with no
-/// worker left and interrupts it once its lease is out; nothing replays.
+/// worker left and interrupts it once its lease is out; a `never` job
+/// isn't replayed.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_restart_runs_what_was_queued_and_interrupts_what_was_running() {
     let dir = tempfile::tempdir().unwrap();
@@ -314,4 +315,124 @@ async fn cancelling_a_queued_job_ends_it_at_once() {
     assert_eq!(after["state"], json!("cancelled"), "{after}");
     assert_eq!(completions(&fx, &id).await, ["cancelled"]);
     assert!(fx.model.asked_typed().is_empty());
+}
+
+/// An `idempotent` job whose lease ran out runs again, as its next
+/// attempt: the round it had finished is read back from its record, the
+/// cut-off one is asked again, and its end is announced once, when it
+/// really ends.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_idempotent_job_whose_lease_ran_out_runs_again() {
+    let fx = fixture(
+        &manifest_idempotent(),
+        vec![
+            calls(&[("todos_lookup", json!({ "path": "src/a.rs" }))]),
+            slow(&words(100), 50),
+            reply("done after the retry"),
+        ],
+    )
+    .await;
+    let id = ask(&fx, "replayed").await;
+    // Its first round is done (the tool ran) and its second streams.
+    streaming(&fx, &id).await;
+    assert_eq!(fx.model.asked_typed().len(), 2);
+
+    expire_lease(&fx.svc, &id).await;
+    let done = until(&fx, &id, |s| s["state"] == json!("succeeded")).await;
+    assert_eq!(done["attempt"], json!(2), "{done}");
+    assert_eq!(done["text"], json!("done after the retry"), "{done}");
+    assert_eq!(completions(&fx, &id).await, ["succeeded"]);
+    // Round one came from its record; only the cut-off round was asked
+    // again.
+    assert_eq!(fx.model.asked_typed().len(), 3);
+    let second = rows(
+        &fx,
+        "SELECT count(*) FROM v_job_output WHERE job_id = ?1 AND attempt = 2 AND kind = 'tool_result'",
+        vec![json!(id)],
+    )
+    .await;
+    assert_eq!(second, [[json!(1)]], "the tool ran again on attempt 2");
+}
+
+/// An `idempotent` job cut off on each of its three attempts ends
+/// `interrupted` after the third, announced then and only then.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_idempotent_job_interrupted_three_times_ends_interrupted() {
+    let fx = fixture(&manifest_idempotent(), vec![slow(&words(400), 50)]).await;
+    let id = ask(&fx, "thrice").await;
+    for attempt in 1..=3 {
+        until(&fx, &id, |s| {
+            s["state"] == json!("running")
+                && s["attempt"] == json!(attempt)
+                && !s["text"].as_str().unwrap_or_default().is_empty()
+        })
+        .await;
+        expire_lease(&fx.svc, &id).await;
+        if attempt < 3 {
+            until(&fx, &id, |s| s["attempt"] == json!(attempt + 1)).await;
+            assert_eq!(completions(&fx, &id).await, Vec::<String>::new());
+        }
+    }
+    let ended = until(&fx, &id, |s| s["state"] == json!("interrupted")).await;
+    assert_eq!(ended["attempt"], json!(3), "{ended}");
+    assert_eq!(completions(&fx, &id).await, ["interrupted"]);
+}
+
+/// A restart replays an `idempotent` job that was running: once its lease
+/// is out it runs again and succeeds, its end announced once.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_restart_replays_an_idempotent_job_that_was_running() {
+    let dir = tempfile::tempdir().unwrap();
+    crate::test_fixtures::init_git_repo(dir.path());
+    let ext = dir.path().join("oxplow/extensions/triage");
+    std::fs::create_dir_all(ext.join("commands")).unwrap();
+    std::fs::write(ext.join("extension.yaml"), manifest_idempotent()).unwrap();
+    std::fs::write(ext.join("commands/lookup.star"), LOOKUP).unwrap();
+    let global = dir.path().join(".oxplow/global-config");
+    let secrets: Arc<dyn oxplow_ai::secrets::SecretStore> =
+        Arc::new(oxplow_ai::secrets::MemorySecrets::default());
+    let open = || async {
+        crate::Services::on_machine_with_database(
+            dir.path(),
+            global.clone(),
+            secrets.clone(),
+            crate::providers::host::process_env(),
+            oxplow_db::Database::open(dir.path().join("restart.sqlite")).unwrap(),
+        )
+        .await
+        .unwrap()
+    };
+
+    let before = open().await;
+    let model = prepare(&before, vec![slow(&words(400), 50)]).await;
+    before
+        .jobs
+        .spawn(before.extension_activation.clone(), before.commands.clone());
+    let fx = Fixture {
+        _dir: tempfile::tempdir().unwrap(),
+        svc: before,
+        model,
+    };
+    let running = ask(&fx, "running").await;
+    streaming(&fx, &running).await;
+    fx.svc.jobs.shutdown();
+    drop(fx);
+
+    let svc = open().await;
+    let model = prepare(&svc, vec![reply("ran again after the restart")]).await;
+    let fx = Fixture {
+        _dir: tempfile::tempdir().unwrap(),
+        svc,
+        model,
+    };
+    expire_lease(&fx.svc, &running).await;
+    fx.svc
+        .jobs
+        .spawn(fx.svc.extension_activation.clone(), fx.svc.commands.clone());
+    let done = until(&fx, &running, |s| s["state"] == json!("succeeded")).await;
+    assert_eq!(done["attempt"], json!(2), "{done}");
+    assert_eq!(done["text"], json!("ran again after the restart"), "{done}");
+    assert_eq!(completions(&fx, &running).await, ["succeeded"]);
+    // The cut-off round was never recorded, so it was asked again.
+    assert_eq!(fx.model.asked_typed().len(), 1);
 }

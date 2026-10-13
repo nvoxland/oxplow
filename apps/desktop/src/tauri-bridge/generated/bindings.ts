@@ -3806,7 +3806,18 @@ export type JobDecl = {
 
 export type JobOperationKind = "ai.complete_typed";
 
-export type JobReplay = "never" | "idempotent";
+export type JobReplay = 
+/**
+ *  An attempt cut off (a restart, a lost lease) ends the job
+ *  `interrupted`.
+ */
+"never" | 
+/**
+ *  The job can run again from its first request: an attempt cut off
+ *  is queued again, up to `MAX_ATTEMPTS` in all, and its
+ *  `contribution.job.completed` is logged once, at its final end.
+ */
+"idempotent";
 
 /**
  *  One of a job's tools: the command it runs and the name the model calls

@@ -34,8 +34,13 @@ pub const QUERY_SQL_TOOL: &str = "query_sql";
 )]
 #[serde(rename_all = "snake_case")]
 pub enum JobReplay {
+    /// An attempt cut off (a restart, a lost lease) ends the job
+    /// `interrupted`.
     #[default]
     Never,
+    /// The job can run again from its first request: an attempt cut off
+    /// is queued again, up to `MAX_ATTEMPTS` in all, and its
+    /// `contribution.job.completed` is logged once, at its final end.
     Idempotent,
 }
 

@@ -33,6 +33,14 @@ commands:
     invokers: { human: false, agent: false, lens: false, job: true }
 "#;
 
+/// [`MANIFEST`] with its job declared `replay: idempotent`.
+pub(super) fn manifest_idempotent() -> String {
+    MANIFEST.replace(
+        "    timeout: 5\n",
+        "    timeout: 5\n    replay: idempotent\n",
+    )
+}
+
 pub(super) const LOOKUP: &str = r#"
 def transform(x):
     return {"commands": [], "result": {"todos": ["fix the parser in " + x["input"]["path"]]}}

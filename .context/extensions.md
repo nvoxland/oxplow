@@ -4046,7 +4046,7 @@ jobs:
     tools: [evidence.lookup]          # this extension's commands the model may call
     max_tool_rounds: 4                # model rounds at most, 1–16 (default 4)
     timeout: 300                      # seconds, 1–600 (default 120)
-    replay: never                     # or idempotent
+    replay: never                     # or idempotent: run again when cut off
 commands:
   - { name: review.ask, summary: …, scope: jobs.write, op: enqueue, invokers: { human: true, agent: true, lens: true } }
   - { name: review.cancel, summary: …, scope: jobs.write, op: cancel, invokers: { human: true, agent: true, lens: true } }
@@ -4126,10 +4126,19 @@ commands:
 - **Limits.** Past its `timeout` a job fails (`timed out after Ns`),
   keeping its output; the dispatcher stops a worker still running 15 s
   later. The lease is 30 s, renewed every 10 s: an attempt whose lease
-  ran out (oxplow stopped) is `interrupted` when recovery finds it.
-  Nothing replays an interrupted job yet, `idempotent` or not.
-  A queued job survives a restart and runs after it; one that was
-  running is `interrupted` once its lease is out. A running job whose
+  ran out (oxplow stopped) is fenced when recovery finds it. A `never`
+  job then ends `interrupted`. An `idempotent` one is queued again in
+  the same transaction (`extension_job_dispatch::requeue_tx`,
+  `JobEvent::RetryInterrupted`), so it is never seen `interrupted`, and
+  runs as its next attempt, up to `MAX_ATTEMPTS` (3) in all; the third
+  cut-off is final. On the new attempt a round that had finished reads
+  its recorded answer (a recorded computation is keyed by its request,
+  not its attempt); the cut-off round is asked again, and its tools run
+  again (they only read). Cancelling a job queued for its retry ends it
+  `interrupted`, not `cancelled`: the attempt before may still have an
+  effect in flight. A queued job survives a restart and runs after it;
+  one that was running is fenced once its lease is out, then replayed or
+  ended as above. A running job whose
   declaration changes (a new generation) or whose approval is revoked
   is cancelled with what it had, never completed under the new
   generation. An extension has at most 256 queued or running jobs (a
@@ -4138,8 +4147,9 @@ commands:
   `extension_job_hardening_tests.rs`.
 - **Its end** is the event `contribution.job.completed@1 { job_id,
   contribution, version, attempt, fence, outcome: succeeded | failed |
-  cancelled | interrupted }`, logged in the transaction that ended it
-  (however it ended: completion, cancel, recovery) with the anchors and
+  cancelled | interrupted }`, logged once, at the real end, in the
+  transaction that ended it (however it ended: completion, cancel,
+  recovery; an attempt queued again logs nothing) with the anchors and
   cause the job was asked with. It carries no request or result: an
   effect reads the result with `scope("jobs.read", { id })` and writes
   what it says (the triage example's `publish-summary`).

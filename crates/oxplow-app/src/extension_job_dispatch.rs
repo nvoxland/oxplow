@@ -50,13 +50,19 @@ pub enum DispatchOutcome {
     Completed,
     Cancelled,
     Interrupted,
+    /// Its attempt was cut off and, being `idempotent`, it was queued to
+    /// run again.
+    Requeued,
     Skipped,
 }
 
 /// Bounded restart progress; no request or result payload is exposed.
 pub struct JobRecoveryPage {
     pub examined: usize,
+    /// Expired attempts that ended their job `interrupted`.
     pub interrupted: usize,
+    /// Expired attempts whose `idempotent` job was queued again.
+    pub requeued: usize,
     pub next: Option<RecoveryCursor>,
 }
 
@@ -86,9 +92,9 @@ impl ExtensionJobDispatcher {
     }
 
     /// Fence expired attempts after restart without asserting their workers
-    /// stopped or replaying external effects. Already-interrupted rows advance
-    /// the cursor so they cannot starve later expired work. A caller decides
-    /// explicitly whether an idempotent operation may be retried.
+    /// stopped. An `idempotent` job is queued again (until `MAX_ATTEMPTS`);
+    /// any other ends `interrupted`. Already-interrupted rows advance the
+    /// cursor so they cannot starve later expired work.
     pub async fn recover_page(
         &self,
         after: Option<RecoveryCursor>,
@@ -108,7 +114,7 @@ impl ExtensionJobDispatcher {
             .store
             .recovery_candidates(now_ms(), after, limit)
             .await?;
-        let mut interrupted = 0;
+        let (mut interrupted, mut requeued) = (0, 0);
         for candidate in &page.items {
             if candidate.job.state != JobState::Running {
                 continue;
@@ -122,6 +128,7 @@ impl ExtensionJobDispatcher {
                 )
                 .await
             {
+                Ok(recovered) if recovered.job.state == JobState::Queued => requeued += 1,
                 Ok(_) => interrupted += 1,
                 Err(
                     ExtensionJobStoreError::Conflict
@@ -133,6 +140,7 @@ impl ExtensionJobDispatcher {
         Ok(JobRecoveryPage {
             examined: page.items.len(),
             interrupted,
+            requeued,
             next: page.next,
         })
     }
@@ -540,6 +548,9 @@ impl ExtensionJobDispatcher {
                     .transition_retry(id, JobEvent::RecoverExpired { now_ms: now })
                     .await
                 {
+                    Ok(recovered) if recovered.job.state == JobState::Queued => {
+                        return Ok(DispatchOutcome::Requeued)
+                    }
                     Ok(_) => return Ok(DispatchOutcome::Interrupted),
                     Err(ExtensionJobStoreError::Conflict)
                     | Err(ExtensionJobStoreError::TransitionRejected(_)) => continue,
@@ -557,7 +568,10 @@ impl ExtensionJobDispatcher {
     }
 
     /// A transition, and when it ends the job, its
-    /// `contribution.job.completed` — in one transaction.
+    /// `contribution.job.completed` — in one transaction. An expired
+    /// attempt's `idempotent` job is queued again in the same transaction
+    /// (`requeue_tx`), so it is never seen `interrupted` and nothing is
+    /// announced until its real end.
     async fn transition_announced(
         &self,
         id: JobId,
@@ -568,11 +582,16 @@ impl ExtensionJobDispatcher {
         let vocabulary = self.vocabulary.clone();
         self.db
             .transaction_or(move |tx| {
-                let changed = transition_tx(tx, &id, expected_revision, &event, result.as_ref())
-                    .map_err(|e| match e {
-                        ExtensionJobStoreError::Storage(storage) => TxError::Storage(storage),
-                        other => TxError::Aborted(other),
-                    })?;
+                let aborted = |e| match e {
+                    ExtensionJobStoreError::Storage(storage) => TxError::Storage(storage),
+                    other => TxError::Aborted(other),
+                };
+                let mut changed =
+                    transition_tx(tx, &id, expected_revision, &event, result.as_ref())
+                        .map_err(aborted)?;
+                if matches!(event, JobEvent::RecoverExpired { .. }) {
+                    changed = requeue_tx(tx, changed).map_err(aborted)?;
+                }
                 if let Some(vocabulary) = &vocabulary {
                     crate::extension_jobs::announce_tx(tx, &vocabulary.current(), &changed.job)
                         .map_err(TxError::Storage)?;
@@ -681,6 +700,25 @@ enum PublishFailure {
 enum PublishAbort {
     Revoked,
     Store(ExtensionJobStoreError),
+}
+
+/// `job`, just interrupted, queued again when its replay policy allows
+/// another attempt (`JobEvent::RetryInterrupted`); as it was otherwise.
+fn requeue_tx(
+    tx: &rusqlite::Connection,
+    job: StoredExtensionJob,
+) -> Result<StoredExtensionJob, ExtensionJobStoreError> {
+    let retry = JobEvent::RetryInterrupted {
+        now_ms: job.job.updated_at_ms,
+        intent_key: job.job.intent_key.clone(),
+    };
+    match transition_tx(tx, &job.job.id, job.revision, &retry, None) {
+        Ok(requeued) => Ok(requeued),
+        Err(ExtensionJobStoreError::TransitionRejected(
+            oxplow_domain::extension_job::TransitionError::ReplayNotAllowed,
+        )) => Ok(job),
+        Err(error) => Err(error),
+    }
 }
 
 fn now_ms() -> i64 {

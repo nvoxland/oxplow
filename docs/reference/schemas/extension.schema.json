@@ -1972,10 +1972,17 @@
       ]
     },
     "JobReplay": {
-      "type": "string",
-      "enum": [
-        "never",
-        "idempotent"
+      "oneOf": [
+        {
+          "description": "An attempt cut off (a restart, a lost lease) ends the job\n`interrupted`.",
+          "type": "string",
+          "const": "never"
+        },
+        {
+          "description": "The job can run again from its first request: an attempt cut off\nis queued again, up to `MAX_ATTEMPTS` in all, and its\n`contribution.job.completed` is logged once, at its final end.",
+          "type": "string",
+          "const": "idempotent"
+        }
       ]
     },
     "PageFile": {

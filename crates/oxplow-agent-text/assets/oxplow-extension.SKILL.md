@@ -800,7 +800,10 @@ effects:
   `sql.read` it also has `query_sql` over the `v_*` models. A job never
   writes: the effect on its end does (`scope("jobs.read", { id })` gives
   it the result, `{ parts, … }`; its event's `outcome` is `succeeded`,
-  `failed`, `cancelled` or `interrupted`).
+  `failed`, `cancelled` or `interrupted`). Declare `replay: idempotent`
+  when running it again is harmless: an attempt a restart cuts off is
+  then retried, up to three attempts, and the effect hears only the
+  final end.
 - Show it running with a lens over `v_job_output` (`WHERE job_id = :id`):
   it updates as the model writes. oxplow's own Jobs lens lists every job
   with Cancel.

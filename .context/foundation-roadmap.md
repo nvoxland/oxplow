@@ -580,7 +580,8 @@ for at most `max_tool_rounds`; `timeout` fails it; its end is
 (`oxplow.job.cancel`, the bundled Jobs lens). Still to do: the vendor
 streaming mappings (Anthropic, OpenAI) and the hardening tests (lease
 expiry, revocation and generation change mid-run, restart, capacity).
-Nothing replays an interrupted job. See [extensions.md](./extensions.md)
+An `idempotent` job cut off by a restart or a lost lease runs again, up
+to three attempts, its end announced once. See [extensions.md](./extensions.md)
 "Jobs" and [ai-providers.md](./ai-providers.md) "Streaming and cancelling".
 
 Scope: Build AI streaming on durable job identity with cancellation, incremental output and completion/error events. Route model-requested tool operations through explicitly granted host commands/services with bounded recursion and usage. Keep interactive sessions and their input authority separate from model inference.

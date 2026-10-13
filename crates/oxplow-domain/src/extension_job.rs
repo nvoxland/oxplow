@@ -9,6 +9,10 @@ use uuid::Uuid;
 use crate::{contribution::ContributionId, run::RunId};
 
 const MAX_PERSISTED_COUNTER: u64 = i64::MAX as u64;
+
+/// How many attempts an `Idempotent` job gets in all: one cut off is run
+/// again until this many have started, and the last one's end is final.
+pub const MAX_ATTEMPTS: u32 = 3;
 const MAX_INTENT_KEY_BYTES: usize = 128;
 const MAX_OWNER_IDENTITY_BYTES: usize = 256;
 
@@ -326,6 +330,7 @@ impl ExtensionJob {
             || self.fence > MAX_PERSISTED_COUNTER
             || self.attempt as u64 > self.fence
             || (self.replay_policy == ReplayPolicy::Never && self.attempt > 1)
+            || self.attempt > MAX_ATTEMPTS
         {
             return Err(TransitionError::InvalidState);
         }
@@ -509,6 +514,7 @@ impl ExtensionJob {
                 if next.state != JobState::Interrupted
                     || next.replay_policy != ReplayPolicy::Idempotent
                     || next.cancellation_requested_at_ms.is_some()
+                    || next.attempt >= MAX_ATTEMPTS
                 {
                     return Err(TransitionError::ReplayNotAllowed);
                 }
@@ -580,4 +586,136 @@ fn valid_owner_identity(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= MAX_OWNER_IDENTITY_BYTES
         && value.bytes().all(|byte| byte.is_ascii_graphic())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::contribution::ContributionKind;
+
+    const LEASE: i64 = 1_000;
+
+    fn key() -> IntentKey {
+        IntentKey::new("review:1".into()).unwrap()
+    }
+
+    fn queued(replay: ReplayPolicy) -> ExtensionJob {
+        ExtensionJob::queued(
+            JobId::generate(),
+            JobOwner {
+                contribution: ContributionId::new("acme", ContributionKind::Job, "review"),
+                package_version: None,
+                generation: "g1".into(),
+                contract_version: Some(1),
+            },
+            RunId::generate(),
+            key(),
+            replay,
+            0,
+        )
+        .unwrap()
+    }
+
+    /// Claim `job` at `now`, then let its lease run out: the job recovery
+    /// finds, `Interrupted`.
+    fn claimed_then_expired(job: ExtensionJob, now: i64) -> ExtensionJob {
+        let running = job
+            .transition(JobEvent::Claim {
+                now_ms: now,
+                lease_ms: LEASE,
+                intent_key: key(),
+            })
+            .unwrap()
+            .job;
+        running
+            .transition(JobEvent::RecoverExpired {
+                now_ms: now + LEASE,
+            })
+            .unwrap()
+            .job
+    }
+
+    fn retry(job: &ExtensionJob, now: i64) -> Result<JobTransition, TransitionError> {
+        job.transition(JobEvent::RetryInterrupted {
+            now_ms: now,
+            intent_key: key(),
+        })
+    }
+
+    /// An idempotent job cut off is queued again, keeping its attempt; its
+    /// next claim is the next attempt, under a new fence.
+    #[test]
+    fn an_interrupted_idempotent_job_is_queued_again_for_its_next_attempt() {
+        let interrupted = claimed_then_expired(queued(ReplayPolicy::Idempotent), 10);
+        assert_eq!(interrupted.state, JobState::Interrupted);
+        let requeued = retry(&interrupted, 2_000).unwrap().job;
+        assert_eq!(requeued.state, JobState::Queued);
+        assert_eq!(requeued.attempt, 1);
+        assert_eq!(requeued.fence, interrupted.fence);
+        assert_eq!(requeued.lease_until_ms, None);
+        let next = requeued
+            .transition(JobEvent::Claim {
+                now_ms: 2_001,
+                lease_ms: LEASE,
+                intent_key: key(),
+            })
+            .unwrap();
+        assert_eq!(next.job.attempt, 2);
+        assert_eq!(next.job.fence, interrupted.fence + 1);
+        assert_eq!(
+            next.token,
+            Some(AttemptFence {
+                attempt: 2,
+                fence: interrupted.fence + 1
+            })
+        );
+    }
+
+    /// A `never` job, one someone asked to stop, and one that has had its
+    /// `MAX_ATTEMPTS` aren't replayed.
+    #[test]
+    fn replay_is_refused_for_never_for_a_cancel_and_past_the_last_attempt() {
+        let never = claimed_then_expired(queued(ReplayPolicy::Never), 10);
+        assert_eq!(
+            retry(&never, 2_000).unwrap_err(),
+            TransitionError::ReplayNotAllowed
+        );
+
+        let asked = claimed_then_expired(queued(ReplayPolicy::Idempotent), 10)
+            .transition(JobEvent::RequestCancellation { now_ms: 2_000 })
+            .unwrap()
+            .job;
+        assert_eq!(
+            retry(&asked, 2_001).unwrap_err(),
+            TransitionError::ReplayNotAllowed
+        );
+
+        let mut job = queued(ReplayPolicy::Idempotent);
+        let mut now = 10;
+        for attempt in 1..=MAX_ATTEMPTS {
+            job = claimed_then_expired(job, now);
+            assert_eq!(job.attempt, attempt);
+            now += 2 * LEASE;
+            if attempt < MAX_ATTEMPTS {
+                job = retry(&job, now).unwrap().job;
+            }
+        }
+        assert_eq!(
+            retry(&job, now).unwrap_err(),
+            TransitionError::ReplayNotAllowed
+        );
+    }
+
+    /// Cancelling a job queued for its retry ends it `Interrupted`, not
+    /// `Cancelled`: the attempt before may still have an effect in flight.
+    #[test]
+    fn cancelling_a_queued_retry_ends_it_interrupted() {
+        let interrupted = claimed_then_expired(queued(ReplayPolicy::Idempotent), 10);
+        let requeued = retry(&interrupted, 2_000).unwrap().job;
+        let ended = requeued
+            .transition(JobEvent::RequestCancellation { now_ms: 2_001 })
+            .unwrap()
+            .job;
+        assert_eq!(ended.state, JobState::Interrupted);
+    }
 }
