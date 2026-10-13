@@ -12,9 +12,10 @@
 //!   provider's item): its **steps** run in order (`steps.rs`), each
 //!   landing as it runs, with no undo (P7 review, tsk713).
 //!
-//! Either way it is composed once, on the snapshot the bus routes it on,
-//! and each child's own needs, invokers, policy and confirmation — a
-//! composite child's children's too — are checked before anything runs.
+//! Either way it is composed once, before any transaction, its reads
+//! through the SQL gateway (as an effect's are), and each child's own
+//! needs, invokers, policy and confirmation — a composite child's
+//! children's too — are checked before anything runs.
 
 use std::sync::Arc;
 
@@ -38,16 +39,21 @@ pub struct Composition {
     pub events: Vec<oxplow_domain::Envelope>,
 }
 
-/// Say what a composite runs for `input`, reading on `conn` (a read
-/// snapshot when the bus routes a run, the run's transaction for a call a
-/// handler composes by hand), as part of `run` (a pure child of the run:
-/// the scopes it calls are counted on its trace). The bus composes once
-/// per run: what it routed and checked is what runs.
-pub type Composer = dyn Fn(
-        &rusqlite::Connection,
-        &oxplow_domain::run::RunContext,
-        &Value,
-    ) -> Result<Composition, CommandError>
+/// What a composer reads through: the SQL gateway (the published models,
+/// the metric functions, extension state, configuration and jobs) and the
+/// database, from the blocking thread the bus routes on — so a read may
+/// block on `runtime`, and no connection is held while it does.
+pub struct Composing<'a> {
+    pub sql: &'a crate::sql_gateway::SqlGateway,
+    pub db: &'a oxplow_db::Database,
+    pub runtime: &'a tokio::runtime::Handle,
+}
+
+/// Say what a composite runs for `input`, reading through `composing`, as
+/// part of `run` (a pure child of the run: the scopes it calls are counted
+/// on its trace). The bus composes once per run, before the transaction:
+/// what it routed and checked is what runs.
+pub type Composer = dyn Fn(&Composing<'_>, &oxplow_domain::run::RunContext, &Value) -> Result<Composition, CommandError>
     + Send
     + Sync;
 

@@ -2314,9 +2314,9 @@ uses):
   command's `entry:`, an effect, an effort policy script — reads only
   (`scope_calls::check_script_need`: it runs pure, so `ai.compute` is
   refused, naming why). A **command's** script reads the semantic layer
-  and not the tree: the bus composes it inside its transaction, and
-  reading a whole tree there would hold the database while it reads
-  (refused at load, naming an effect or a collector). A provider's
+  (metric functions included) and not the tree: it decides what runs,
+  and reading a whole tree belongs to an effect or a collector (refused
+  at load, naming them). A provider's
   `needs` stay `scope()` calls (`check_callable`: `host/call` answers
   `sql.read`).
 - **What a kind implies:** a Starlark fact collector reads its tree
@@ -3187,8 +3187,7 @@ A shared extension's commands are `Stable`, a private one's
 and writes nothing (`composed` → `Composed::{Run, Refused}`). An `access:
 read` command composes nothing and logs no events (refused at run time
 otherwise): it reads and returns a `result`, is never confirmed and needs
-no scope that changes things; the bus runs it on a read snapshot,
-unrecorded. An example may give `answers:` — per scope, its calls'
+no scope that changes things; the bus runs it unrecorded. An example may give `answers:` — per scope, its calls'
 answers in order, standing in so it doesn't depend on the project's data
 (a scope without any is served for real; one that runs out is an
 error) — and may expect a refusal with `refuses: <part of the reason>` instead of
@@ -3239,12 +3238,13 @@ retries the run), then the
 **Running** (`extension_command`): each is a composite
 (`Handler::Compose`, atomicity `Dispatch`) `<namespace>.<name>`
 (summary "… (extension `x`)", the declared invokers / confirm / access,
-`Lifecycle::Experimental`). Its composer runs `compose_calls`, answering
-`sql.read` on the connection it's given (`semantic_layer::read_on`: the
-`query_sql` authorizer, row cap and timeout, the read session restored —
-`query_only` off — before any writes) and counting each call in the run's
-`ScopeTrace` (pure, so the bus may compose more than once: once to
-route, again in the run's transaction, whose calls are the ones recorded).
+`Lifecycle::Experimental`). Its composer runs `compose_calls` on the bus's routing thread,
+answering `sql.read` through the SQL gateway as an effect's script is
+answered (`SqlGateway::run_in`: the `query_sql` authorizer, row cap and
+timeout, the metric functions computed first), `state.read`,
+`configuration.read` and `jobs.read` through the gateway's sources, and
+counting each call in the run's `ScopeTrace`. It runs once per run, when
+the bus routes it.
 The bus runs what it composes ([commands.md](./commands.md) →
 "Composition"): when every call stays in oxplow's records, as children
 in one transaction (`steps::run_composed`; the script runs once, when the bus routes the run) — each child's invokers, policy and

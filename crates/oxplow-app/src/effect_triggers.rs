@@ -985,7 +985,7 @@ fn effect_command(
     let sequence = bus.command(SEQUENCE).ok_or_else(|| CommandError::Failed {
         message: format!("`{SEQUENCE}` isn't registered"),
     })?;
-    let composer: Arc<Composer> = Arc::new(move |_conn, run, _input| {
+    let composer: Arc<Composer> = Arc::new(move |_composing, run, _input| {
         run.trace().add(&scopes);
         Ok(Composition {
             calls: calls.clone(),

@@ -1358,15 +1358,7 @@ impl Services {
                 event_pump.clone(),
             )
             .with_activation(extension_activation.clone())
-            .with_state_host(extension_state::StateHost::new(
-                extension_catalog.clone(),
-                layout.project_dir.clone(),
-            ))
-            .with_jobs_host(jobs.clone())
-            .with_configuration_host(extension_configuration::ConfigurationHost::new(
-                extension_catalog.clone(),
-                layout.project_dir.clone(),
-            ))
+            .with_sql_gateway(sql.clone())
             // Only a stream's writer thread may change state; an unknown
             // thread may not.
             .with_write_gate({
@@ -1544,6 +1536,7 @@ impl Services {
                 catalog: extension_catalog.clone(),
                 activation: extension_activation.clone(),
                 db: db.clone(),
+                sql: sql.clone(),
                 log: (*event_log_store).clone(),
                 host_env: machine.host_env.clone(),
                 backoff: machine.provider_backoff,

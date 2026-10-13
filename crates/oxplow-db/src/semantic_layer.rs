@@ -1030,19 +1030,6 @@ fn run_read_only(
     })
 }
 
-/// [`SemanticLayer::run`] on `conn` — for a command's handler that reads
-/// inside its own transaction (a command's `sql.read`): one
-/// read-only `SELECT`/`WITH` over the published models, under the same
-/// authorizer, row cap and timeout. The read session is restored before
-/// it returns, so the handler's writes that follow are unaffected.
-pub fn read_on(
-    conn: &rusqlite::Connection,
-    query: &SqlQuery,
-) -> Result<SqlQueryResult, DomainError> {
-    crate::sql_tokens::check_single_read(&query.sql)?;
-    run_read_only(conn, query)
-}
-
 /// [`SemanticLayer::check_with`] on `conn` — for a command's handler,
 /// which checks an agent's SQL inside its own transaction: a single
 /// read-only `SELECT`/`WITH` over the published models (the `query_sql`
@@ -1154,33 +1141,6 @@ mod tests {
         .unwrap();
         let sl = SemanticLayer::new(db.clone());
         (db, sl)
-    }
-
-    /// A command's handler reads its `input` with `read_on` inside its
-    /// write transaction, then its children write: the read must leave
-    /// the connection writable (`query_only` off, no authorizer left).
-    #[tokio::test]
-    async fn read_on_leaves_the_connection_writable() {
-        let (db, _sl) = seeded().await;
-        db.transaction(|tx| {
-            let read = read_on(
-                tx,
-                &SqlQuery::new("SELECT title FROM v_work_item WHERE ref = 'work_item:oxplow:a'"),
-            )?;
-            assert_eq!(read.rows.len(), 1);
-            let query_only: i64 = tx
-                .query_row("PRAGMA query_only", [], |r| r.get(0))
-                .map_err(crate::database::map_sql_err)?;
-            assert_eq!(query_only, 0);
-            tx.execute(
-                "UPDATE work_item SET title = 'Written after' WHERE ref = 'work_item:oxplow:a'",
-                [],
-            )
-            .map_err(crate::database::map_sql_err)?;
-            Ok(())
-        })
-        .await
-        .unwrap();
     }
 
     #[tokio::test]

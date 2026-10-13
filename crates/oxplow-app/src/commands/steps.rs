@@ -69,17 +69,6 @@ impl Composed {
         self.calls.iter().any(ComposedCall::has_private_input)
     }
 
-    /// Calls routed by hand (`CommandBus::run_nested`): no result or events
-    /// of their own, nothing composing them called.
-    pub(super) fn of(calls: Vec<ComposedCall>) -> Self {
-        Self {
-            calls,
-            result: None,
-            events: Vec::new(),
-            scopes: BTreeMap::new(),
-        }
-    }
-
     /// Its calls as a confirmation shows them.
     fn preview_input(&self) -> Value {
         json!({ "calls": self.calls.iter().map(|c| &c.call).collect::<Vec<_>>() })
@@ -170,12 +159,12 @@ struct Routed {
     outside: Option<usize>,
 }
 
-/// Routes a composite's calls — composing it once, on `conn` — checking
+/// Routes a composite's calls — composing it once, through `composing` — checking
 /// each call (step 0, its input, that it writes) and collecting its check
 /// before the transaction (tsk1010).
 pub(super) struct Router<'a> {
     pub registry: &'a BTreeMap<String, Arc<Command>>,
-    pub conn: &'a rusqlite::Connection,
+    pub composing: &'a super::compose::Composing<'a>,
     /// What's active: each call needs what a direct one would (step 0).
     pub active: Option<&'a crate::capabilities::Active>,
     pub prechecks: Vec<Pending>,
@@ -220,7 +209,7 @@ impl Router<'_> {
         run.check_authority()
             .map_err(|reason| CommandError::Denied { reason })?;
         let composing = run.child(None, oxplow_domain::run::Mode::Pure);
-        let composition = (compose.compose)(self.conn, &composing, input)?;
+        let composition = (compose.compose)(self.composing, &composing, input)?;
         let (calls, outside) = self.route_calls_for(run, composition.calls, depth, at)?;
         Ok(Routed {
             composed: Composed {
@@ -235,15 +224,6 @@ impl Router<'_> {
 
     /// Route `calls`, made at nesting `depth`: each checked, a composite
     /// one composed in turn. With the first that leaves the transaction.
-    pub(super) fn route_calls(
-        &mut self,
-        calls: Vec<CommandCall>,
-        depth: usize,
-        at: &str,
-    ) -> Result<(Vec<ComposedCall>, Option<usize>), CommandError> {
-        self.route_calls_for(self.run, calls, depth, at)
-    }
-
     fn route_calls_for(
         &mut self,
         parent: &RunContext,
@@ -530,7 +510,8 @@ fn stopped(failed: &str, landed: &[NestedChild], err: &CommandError) -> CommandE
 
 impl CommandBus {
     /// Route composite `spec` (`compose`) for `input`: composed once, on a
-    /// read snapshot, each call checked and routed. Every call inside the
+    /// blocking thread reading through the SQL gateway, each call checked
+    /// and routed. Every call inside the
     /// transaction → a `Tx` handler running exactly those calls; any
     /// outside → its steps. With it, every composed call's check before
     /// the transaction (tsk1010).
@@ -544,23 +525,29 @@ impl CommandBus {
         let registry = self.commands.read().commands.clone();
         let active = self.active();
         let (c, input, run) = (compose.clone(), input.clone(), run.clone());
-        let routed = self
-            .db
-            .read_or(move |conn| {
-                let mut router = Router {
-                    registry: &registry,
-                    conn,
-                    active: active.as_ref(),
-                    prechecks: Vec::new(),
-                    run: &run,
-                };
-                router
-                    .route(&c, &input, "", 0, "")
-                    .map(|routed| (routed, router.prechecks))
-                    .map_err(TxError::Aborted)
-            })
-            .await
-            .map_err(super::command_error)?;
+        let (sql, db) = (self.sql.clone(), self.db.clone());
+        let runtime = tokio::runtime::Handle::current();
+        let routed = tokio::task::spawn_blocking(move || {
+            let composing = super::compose::Composing {
+                sql: &sql,
+                db: &db,
+                runtime: &runtime,
+            };
+            let mut router = Router {
+                registry: &registry,
+                composing: &composing,
+                active: active.as_ref(),
+                prechecks: Vec::new(),
+                run: &run,
+            };
+            router
+                .route(&c, &input, "", 0, "")
+                .map(|routed| (routed, router.prechecks))
+        })
+        .await
+        .map_err(|e| CommandError::Failed {
+            message: format!("composing failed: {e}"),
+        })??;
         let (Routed { composed, outside }, prechecks) = routed;
         let composed = Arc::new(composed);
         let private_input = composed.has_private_input();

@@ -500,6 +500,23 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
         assert!(decided.contains(scope), "{scope}: {decided}");
     }
     assert!(!decided.contains("denied"), "{decided}");
+
+    // Its decisions command reads the TODOs through the metric
+    // (`metric_findings('triage.todos')`), as its board's lens does.
+    let listed = svc
+        .commands
+        .run(
+            &oxplow_domain::Actor::Human,
+            "triage.todos.decisions",
+            serde_json::json!({}),
+            false,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        listed.result["result"]["todos"],
+        serde_json::json!([{ "path": "src/lib.rs", "line": 1, "kind": "bug", "decision": null }])
+    );
 }
 
 /// The task-views example replaces the Board, the Tasks list and the editor

@@ -71,6 +71,10 @@ Fixed while building them:
   unlisted one failed with a bare "not found"; `extension check` now
   warns for an unlisted fixture, and `extension test` for an example with
   no fixture, each naming the file and the fix.
+- A command script couldn't read `metric_grid()` / `metric_findings()`,
+  so triage rebuilt the latest TODOs from `v_fact`; a command's script
+  now reads through the SQL gateway, as an effect's does, and triage
+  reads `metric_findings('triage.todos')`.
 - A shared extension could carry a token in its files unnoticed;
   `extension check` now warns about known token prefixes, private-key
   headers and long high-entropy literals, showing the file and line but
@@ -96,8 +100,6 @@ Still open:
   (`effort_review.review.ask`), while its contribution ids and model
   views keep or translate the dash differently
   (`effort-review/job/review`, `v_effort_review_reviews`).
-- **A command script can't read `metric_grid()` / `metric_findings()`**:
-  it runs inside the bus transaction, so triage reads `v_fact` instead.
 - **The compare-exchange stamp isn't readable** through a public read, so
   a stale write can only be tested as `expected: null` against existing
   state.

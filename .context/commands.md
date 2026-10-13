@@ -240,17 +240,19 @@ commits with the run; the file is written after it commits), while
 Two more scopes are services a script uses through builtins rather than
 `scope(…)` — `tree.read` and `ai.compute` ([extensions.md](./extensions.md)
 "Services"). A command's script may read SQL or its owning extension's private state: it
-composes, so no model calls, and it composes inside the bus's transaction, so
-no tree (`scope_calls::check_command_need`, at load). The callable services are
+composes, so no model calls, and it decides what runs rather than doing it, so no
+tree (`scope_calls::check_command_need`, at load; an effect or a collector reads it). The callable services are
 **`sql.read`** and **`state.read`**; state takes `{scope, area}` and returns
 null or `{stamp, values}` on the routing connection, with identity and live
 authority checked by StateHost. It never enters the semantic layer. SQL takes `{ sql, params? }`, one read-only
 statement over the published models (`v_*`), its `:name`s bound from
 `params`, at most `SQL_READ_ROW_CAP` (1000) rows, answered as a list of
-row objects (`semantic_layer::read_on` under the `query_sql`
-authorizer: a command's composer reads on the routing pass's read
-snapshot; an effect's or policy's script, and a provider's `host/call`,
-through the SQL gateway or a read of their own). More than 1000 result
+row objects, read through the SQL gateway (`SqlGateway::run_in`, on
+the run's activation pin) by every script host alike — a command's
+composer, an effect's or policy's script, a dry run and a provider's
+`host/call` — so `metric_grid()` and `metric_findings()` answer there as
+in a lens. Each read is its own snapshot; a script's reads don't share
+one. More than 1000 result
 rows fails with an error; it never hands a script a silently truncated
 list. Exactly 1000 rows is allowed. Aggregate in SQL to calculate across
 all matching source rows, or explicitly narrow the query with a filter
@@ -368,7 +370,7 @@ once meant everyone, agents included).
 ([extensions.md](./extensions.md) "The run context") whose trace counts
 its scope calls. A `Tx` run's attempt keeps its own (`TxCtx::trace`,
 fresh per attempt, shared by the runs nested in it). The routing pass
-composes a composite once on a read snapshot as a pure child of the run,
+composes a composite once, through the gateway, as a pure child of the run,
 and what that child called becomes the plan's scopes, which the run
 records; steps add each step's. An `External` call's is its
 `Invocation::run`, a child of the command's run: a provider's
@@ -383,7 +385,7 @@ sampled or on by setting, and approvals by scope.
 ## The pipeline (`crates/oxplow-app/src/commands/mod.rs`)
 
 The bus is split by concern: `mod.rs` the types, the registry and the
-pipeline (`run_prepared`, `run_nested`, the read path); `record.rs` a
+pipeline (`run_prepared`, the read path); `record.rs` a
 run's audit row and events (`record_tx`, `audit_only`,
 `record_external`, the transaction's `Abort`); `undo.rs` undo and the
 claims that keep two undos or approvals from both applying;
@@ -566,7 +568,10 @@ calls decide where it runs, so composites are pinned
 (`CommandBus::composite_commands`, `the_composite_commands_are_the_reviewed_ones`).
 Once the actor is admitted (steps 2–3), the bus **routes** it
 (`CommandBus::route_composite`, `commands/steps.rs` `Router`): it
-**composes once**, on a read snapshot, and routes each call — a `Tx`
+**composes once** — on a blocking thread, before any transaction, its
+reads through the SQL gateway (`compose::Composing`: the gateway, the
+database and the runtime to block on; no connection is held while it
+reads, so the metric engine's own reads can run) — and routes each call — a `Tx`
 command stays in the transaction; an `External` one (every work list's
 `work_item.*` verbs, oxplow's own tasks' included) leaves it; a nested
 composite is composed in turn and must route inside (its steps would
@@ -611,10 +616,8 @@ doesn't veto the rest; one that says so but returns events or an inverse
 is refused; a composite whose every child changed nothing, with no events
 of its own, is `unchanged` itself and leaves no record. A child's `Busy`
 propagates and the bus retries the whole parent (handlers are pure).
-`CommandBus::run_nested(ctx, parent, calls)` is the same for a `Tx`
-handler that composes by hand: its calls routed on the run's own
-connection (one that leaves the transaction refused, naming the system
-and the composite) and run as above.
+A `Tx` handler doesn't compose by hand: composing is a composite's, so
+it reads through the gateway outside the transaction.
 
 **As steps** (P7 review, tsk713; `CommandBus::run_steps`): a composite
 with a call outside the transaction can't be all-or-nothing, so its

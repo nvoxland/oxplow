@@ -370,8 +370,9 @@ declare is a load error. Discovery is `list_services` (MCP), `oxplow
 extension check --services` and the generated reference table.
 `examples/extensions/triage` combines all three and runs end to end
 (`crates/oxplow-sdk/tests/examples.rs`). Not here:
-- A command's script reads the semantic layer but not the tree, because
-  the bus composes it inside its transaction.
+- A command's script reads the semantic layer, metric functions
+  included, but not the tree: it decides what runs, and an effect or a
+  collector reads the tree.
 - The tree is shipped whole; a lazily read tree is a follow-up.
 - References and audited commands stay where they were: commands compose
   through the bus.

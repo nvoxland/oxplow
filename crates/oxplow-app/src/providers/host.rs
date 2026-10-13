@@ -411,7 +411,8 @@ pub fn serve_incoming(
 pub struct HostCalls {
     gate: parking_lot::Mutex<Option<crate::exec_consent::Gate>>,
     needs: Vec<String>,
-    db: oxplow_db::Database,
+    /// What its `sql.read` reads through, the metric functions included.
+    sql: crate::sql_gateway::SqlGateway,
     state: Option<(
         crate::extension_state::StateSource,
         crate::extension_configuration::ConfigurationSource,
@@ -436,7 +437,7 @@ impl Drop for Registration<'_> {
 impl HostCalls {
     pub fn new(
         needs: Vec<String>,
-        db: oxplow_db::Database,
+        sql: crate::sql_gateway::SqlGateway,
         state: Option<(
             crate::extension_state::StateSource,
             crate::extension_configuration::ConfigurationSource,
@@ -446,7 +447,7 @@ impl HostCalls {
         Arc::new(Self {
             gate: parking_lot::Mutex::new(None),
             needs,
-            db,
+            sql,
             state,
             runs: parking_lot::Mutex::default(),
         })
@@ -523,17 +524,14 @@ impl HostCalls {
                 None => "a `host/call` names the invoke it serves (`key`)".to_string(),
             }));
         };
-        let (needs, db, gate, state) = (
+        let (needs, sql, gate, state) = (
             self.needs.clone(),
-            self.db.clone(),
+            self.sql.clone(),
             self.gate.lock().clone(),
             self.state.clone(),
         );
         let runtime = tokio::runtime::Handle::current();
         tokio::task::spawn_blocking(move || {
-            let read = Box::new(|q: oxplow_db::SqlQuery| {
-                runtime.block_on(db.read(move |tx| oxplow_db::semantic_layer::read_on(tx, &q)))
-            });
             // Decided against the provider's own declaration, on the run
             // it serves.
             let mut run = run.clone().authorized(oxplow_domain::run::Authority {
@@ -544,6 +542,9 @@ impl HostCalls {
             if let Some(gate) = gate {
                 run = run.guarded(gate);
             }
+            // Read as a command's or an effect's script does: through the
+            // SQL gateway, on the run's activation pin.
+            let read = Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(sql.run_in(&run, q)));
             let mut calls = crate::scope_calls::Calls::new(&run, &needs, read);
             if let Some((source, configuration, owner)) = state {
                 // A provider reads its own namespace, even when another

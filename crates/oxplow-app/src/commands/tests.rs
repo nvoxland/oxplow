@@ -402,20 +402,16 @@ async fn a_thread_that_may_not_write_cant_write_through_a_composite() {
     let mut spec = kv_spec("oxplow.kv.compose", Invokers::ALL, Confirm::Never);
     spec.access = Access::Record;
     spec.input_schema = json!({ "type": "object" });
-    let parent = spec.clone();
-    let weak = Arc::downgrade(&bus);
-    bus.register(
-        Command::new(
-            spec,
-            Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
-                let calls: Vec<CommandCall> =
-                    serde_json::from_value(input["calls"].clone()).unwrap();
-                weak.upgrade().unwrap().run_nested(ctx, &parent, &calls)
-            })),
-        )
-        .unwrap(),
-    )
-    .unwrap();
+    use super::compose::{Compose, Composer, Composition};
+    spec.atomicity = Atomicity::Dispatch;
+    let compose: Arc<Composer> = Arc::new(|_composing, _run, input: &Value| {
+        Ok(Composition {
+            calls: serde_json::from_value(input["calls"].clone()).unwrap(),
+            ..Composition::default()
+        })
+    });
+    bus.register(Command::new(spec, Compose::handler(compose)).unwrap())
+        .unwrap();
     let calls = json!({ "calls": [{ "name": "oxplow.kv.set", "input": { "k": "a", "v": "1" } }] });
     let err = bus
         .run(&agent(), "oxplow.kv.compose", calls.clone(), false)
@@ -1475,7 +1471,7 @@ async fn a_composite_runs_the_calls_it_was_routed_with() {
     let (db, bus) = composing_bus();
     let composed = Arc::new(AtomicUsize::new(0));
     let count = composed.clone();
-    let compose: Arc<Composer> = Arc::new(move |_conn, _trace, _input: &Value| {
+    let compose: Arc<Composer> = Arc::new(move |_composing, _trace, _input: &Value| {
         // The first composition sets `a`; any later one would set `b`.
         let k = if count.fetch_add(1, Ordering::SeqCst) == 0 {
             "a"
@@ -1742,7 +1738,7 @@ async fn a_composites_own_events_land_with_its_steps_only_when_all_landed() {
         op: None,
         unrecorded: Vec::new(),
     };
-    let compose: Arc<Composer> = Arc::new(|_conn, _trace, input: &Value| {
+    let compose: Arc<Composer> = Arc::new(|_composing, _trace, input: &Value| {
         Ok(Composition {
             calls: vec![CommandCall {
                 name: "oxplow.kv.external".into(),

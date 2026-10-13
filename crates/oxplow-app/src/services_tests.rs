@@ -164,7 +164,7 @@ async fn a_commands_script_cant_ask_a_model_or_read_the_tree() {
     );
     let errors = errors_with("tree.read", "len(files(\"**\"))");
     assert!(
-        errors.contains("a command's script composes inside its transaction"),
+        errors.contains("a command's script decides what runs"),
         "{errors}"
     );
     let held = crate::test_fixtures::activate_with_problems(svc).await;

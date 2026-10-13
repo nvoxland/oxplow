@@ -64,9 +64,8 @@ pub fn check_command_need(id: &str) -> Result<(), String> {
     check_script_need(id)?;
     if oxplow_domain::service::need_scope(id) == "tree.read" {
         return Err(
-            "`needs`: `tree.read` can't be used here: a command's script composes inside its \
-             transaction, so it reads the semantic layer (`sql.read`) — an effect or a \
-             collector can read the tree"
+            "`needs`: `tree.read` can't be used here: a command's script decides what runs, \
+             reading oxplow's models (`sql.read`) — an effect or a collector can read the tree"
                 .into(),
         );
     }
@@ -125,7 +124,8 @@ impl<'a> Calls<'a> {
         }
     }
 
-    /// A composer reads on its existing connection, without nested DB dispatch.
+    /// Answer `state.read` with `state` (`with_state_source` builds one
+    /// over the gateway's source).
     pub fn with_state_reader(mut self, state: Box<StateReader<'a>>) -> Self {
         self.state = Some(state);
         self
@@ -666,16 +666,13 @@ mod tests {
 
     /// Aggregate in SQL to keep all source rows in the calculation while
     /// returning a complete result that fits the scope's cap.
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn sql_read_aggregates_all_rows_before_applying_the_cap() {
-        let db = oxplow_db::Database::in_memory();
-        db.read(|conn| {
+        let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
+        let runtime = tokio::runtime::Handle::current();
+        tokio::task::spawn_blocking(move || {
             let (needs, run) = (needs(&["sql.read"]), crate::run_context::for_dry_run());
-            let mut calls = Calls::new(
-                &run,
-                &needs,
-                Box::new(|q| oxplow_db::semantic_layer::read_on(conn, &q)),
-            );
+            let mut calls = Calls::new(&run, &needs, Box::new(|q| runtime.block_on(layer.run(q))));
             let sql = format!("SELECT count(*) AS n, sum(n) AS total FROM ({NUMBER_ROWS})");
             assert_eq!(
                 calls
@@ -686,7 +683,6 @@ mod tests {
                     .unwrap(),
                 json!([{ "n": 1001, "total": 501501 }]),
             );
-            Ok(())
         })
         .await
         .unwrap();

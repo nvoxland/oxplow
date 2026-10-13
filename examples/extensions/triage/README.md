@@ -64,9 +64,8 @@ the last left; a write holding an old stamp is refused rather than
 overwriting. `oxplow-sdk/tests/trials.rs` runs each of these over an
 on-disk database.
 
-A command composes inside oxplow's transaction, where `metric_findings()`
-can't be computed, so the commands read the TODO facts themselves
-(`v_fact`, the latest capture).
+The commands read the TODOs as the board's lens does, through the
+metric (`metric_findings('triage.todos')`).
 
 ## Use it
 

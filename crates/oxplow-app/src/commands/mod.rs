@@ -113,7 +113,7 @@ pub struct HandlerOutput {
     pub unchanged: bool,
 }
 
-/// One child of a composite run (`CommandBus::run_nested`): what ran,
+/// One child of a composite run (`steps::run_composed`): what ran,
 /// with what, what it returned and how it undoes.
 #[derive(Debug, Clone, Serialize)]
 pub struct NestedChild {
@@ -135,7 +135,7 @@ pub struct TxCtx<'a> {
     pub events: oxplow_db::EventCtx<'a>,
     /// Step 4's answer: a person confirmed this call. A handler that
     /// learns only while running that a confirmation is needed — a
-    /// composite whose child asks (`CommandBus::run_nested`) — checks it
+    /// composite whose child asks (`steps::run_composed`) — checks it
     /// and raises `NeedsConfirmation`, which the bus treats as step 4
     /// would: rolled back, nothing audited.
     pub confirmed: bool,
@@ -144,7 +144,7 @@ pub struct TxCtx<'a> {
     /// composite applies it to each child it runs.
     pub may_write: Option<bool>,
     /// How many composites this run is inside: 0 for the bus's own call,
-    /// one more for each `run_nested` level. Past [`MAX_NESTING`] a
+    /// one more for each nested composite. Past [`MAX_NESTING`] a
     /// composition is refused rather than recursing until the stack
     /// overflows (a command that composes itself).
     pub depth: usize,
@@ -733,9 +733,10 @@ pub struct CommandBus {
     /// the provider registry, set once it exists.
     providers: std::sync::OnceLock<std::sync::Weak<dyn ProviderRouter>>,
     write_gate: Option<WriteGate>,
-    state_host: Option<crate::extension_state::StateHost>,
-    configuration_host: Option<crate::extension_configuration::ConfigurationHost>,
-    jobs_host: Option<Arc<crate::extension_jobs::ExtensionJobs>>,
+    /// What a composer reads through (`compose::Composing`): the
+    /// project's gateway once `with_sql_gateway` gives it; a bare one over
+    /// `db` until then.
+    sql: crate::sql_gateway::SqlGateway,
     /// What's active, for what a command needs or which implementation
     /// owns it (`capabilities::Active::refusal`); `None` offers everything.
     capabilities: Option<(
@@ -754,6 +755,7 @@ impl CommandBus {
         policy: Arc<AgentPolicy>,
         pump: Arc<EventPump>,
     ) -> Self {
+        let sql_db = db.clone();
         Self {
             audit: SqliteCommandAuditStore::new(db.clone()),
             proposals: SqliteProposalStore::new(db.clone()),
@@ -765,9 +767,7 @@ impl CommandBus {
             ops: RwLock::new(ops::Ops::default()),
             providers: std::sync::OnceLock::new(),
             write_gate: None,
-            state_host: None,
-            configuration_host: None,
-            jobs_host: None,
+            sql: crate::sql_gateway::SqlGateway::new(sql_db),
             capabilities: None,
             activation: Arc::new(crate::extension_activation::ExtensionActivation::new()),
         }
@@ -806,37 +806,12 @@ impl CommandBus {
         self
     }
 
-    /// Give composers the private state service on their existing connection.
-    pub fn with_state_host(mut self, host: crate::extension_state::StateHost) -> Self {
-        self.state_host = Some(host);
+    /// Compose through `sql`: the project's gateway, whose metric
+    /// functions, extension state, configuration and jobs a composer's
+    /// script reads.
+    pub fn with_sql_gateway(mut self, sql: crate::sql_gateway::SqlGateway) -> Self {
+        self.sql = sql;
         self
-    }
-
-    pub(crate) fn state_host(&self) -> Option<&crate::extension_state::StateHost> {
-        self.state_host.as_ref()
-    }
-
-    pub fn with_configuration_host(
-        mut self,
-        host: crate::extension_configuration::ConfigurationHost,
-    ) -> Self {
-        self.configuration_host = Some(host);
-        self
-    }
-
-    pub(crate) fn configuration_host(
-        &self,
-    ) -> Option<&crate::extension_configuration::ConfigurationHost> {
-        self.configuration_host.as_ref()
-    }
-
-    pub fn with_jobs_host(mut self, host: Arc<crate::extension_jobs::ExtensionJobs>) -> Self {
-        self.jobs_host = Some(host);
-        self
-    }
-
-    pub(crate) fn jobs_host(&self) -> Option<&Arc<crate::extension_jobs::ExtensionJobs>> {
-        self.jobs_host.as_ref()
     }
 
     /// Register one of core's commands (under `oxplow`). A second command
@@ -1314,8 +1289,8 @@ impl CommandBus {
                 return Err(err);
             }
         }
-        // A composite is routed now that the actor is admitted: composed on
-        // a read snapshot, each call checked and routed (`steps.rs`).
+        // A composite is routed now that the actor is admitted: composed
+        // through the SQL gateway, each call checked and routed (`steps.rs`).
         let (resolved, prechecks, private_children) = match routing {
             Routing::Ready(resolved) => {
                 let own = command
@@ -1646,52 +1621,6 @@ impl CommandBus {
                 reason: format!("the agent's thread `{thread}` doesn't exist"),
             }),
         }
-    }
-
-    /// Run `calls` as one, inside `ctx`'s transaction: a `Tx` handler
-    /// composing other commands by hand (a composite command is routed by
-    /// the bus instead, `steps.rs`). Each call is routed as a composite's
-    /// are — what it needs active, its input, that it writes and stays in
-    /// the transaction (one that leaves it is refused, naming the system
-    /// and `parent`), a composite call composed — then checked and run
-    /// like a routed composite's (`steps::run_composed`): one audit row,
-    /// the children's inverses reversed as the undo.
-    pub fn run_nested(
-        &self,
-        ctx: &TxCtx<'_>,
-        parent: &CommandSpec,
-        calls: &[CommandCall],
-    ) -> Result<HandlerOutput, CommandError> {
-        if ctx.depth >= MAX_NESTING {
-            return Err(CommandError::Invalid {
-                field: None,
-                message: format!(
-                    "`{}` is nested more than {MAX_NESTING} composites deep — does a command \
-                     compose itself?",
-                    parent.id
-                ),
-            });
-        }
-        let registry = self.commands.read().commands.clone();
-        let active = self.active();
-        let mut router = steps::Router {
-            registry: &registry,
-            conn: ctx.conn,
-            active: active.as_ref(),
-            prechecks: Vec::new(),
-            run: ctx.run,
-        };
-        let (routed, outside) = router.route_calls(calls.to_vec(), ctx.depth, "")?;
-        if let Some(i) = outside {
-            return Err(CommandError::Invalid {
-                field: Some(format!("/calls/{i}/name")),
-                message: format!(
-                    "`{}` runs against a system, outside the transaction `{}` runs in",
-                    calls[i].name, parent.id
-                ),
-            });
-        }
-        steps::run_composed(&self.policy, ctx, parent, &steps::Composed::of(routed))
     }
 
     /// Step 5 for a command that only reads (`View` / `Read`): the handler

@@ -82,6 +82,8 @@ pub struct HostDeps {
     /// generation, provider maps are published through it.
     pub activation: Arc<crate::extension_activation::ExtensionActivation>,
     pub db: Database,
+    /// What a provider's `host/call` `sql.read` reads through.
+    pub sql: crate::sql_gateway::SqlGateway,
     pub log: SqliteEventLogStore,
     pub host_env: host::HostEnv,
     /// The first restart's wait; each failure doubles it, up to
@@ -2140,7 +2142,7 @@ impl ProviderRegistry {
             reading: parking_lot::Mutex::new(std::collections::HashMap::new()),
             host_calls: host::HostCalls::new(
                 spec.needs.clone(),
-                self.deps.db.clone(),
+                self.deps.sql.clone(),
                 state.clone(),
             ),
             this: this.clone(),

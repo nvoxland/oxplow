@@ -653,8 +653,9 @@ first difference), and `check` of the instance's config must return a
 handle (`HostError::Unconfigured { problems }` otherwise). A request
 from the provider is answered `MethodNotFound` but `host/call`, served by
 the instance's `host::HostCalls` through the gate a command's handler
-meets (`scope_calls::Calls`: its `needs`; `sql.read` on a read of
-the database, or `state.read` over its own private namespace), each call counted
+meets (`scope_calls::Calls`: its `needs`; `sql.read` through the SQL
+gateway — `HostDeps::sql`, metric functions included — or `state.read`
+over its own private namespace), each call counted
 into the trace of the run whose key it
 names (`ProviderRegistry::run_op` registers the run's
 `Invocation::trace` under its key, and `ExternalWorkItems` the

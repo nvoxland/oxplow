@@ -7028,3 +7028,23 @@ async fn a_knowledge_provider_keeps_pages_and_core_records_them() {
         .unwrap()
         .is_none());
 }
+
+/// A provider's `host/call` `sql.read` reads through the SQL gateway, as a
+/// command's or an effect's script does: the metric functions answer.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_providers_host_read_reaches_the_metric_functions() {
+    let fx = services_with_effort().await;
+    let calls = host::HostCalls::new(vec!["sql.read".into()], fx.svc.sql.clone(), None);
+    let run =
+        oxplow_domain::run::RunContext::core(Actor::Human, oxplow_domain::run::Mode::External);
+    let _serving = calls.register("k", run).unwrap();
+    let read = calls
+        .call(json!({
+            "key": "k",
+            "scope": "sql.read",
+            "args": { "sql": "SELECT count(*) AS n FROM (SELECT capture_id, MEASURE('oxplow.coverage.abs_pct') AS c FROM metric_grid('capture'))" },
+        }))
+        .await
+        .unwrap();
+    assert_eq!(read, json!([{ "n": 0 }]));
+}

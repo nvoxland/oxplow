@@ -684,7 +684,7 @@ pub fn own_events(
 fn anchor_to_efforts(
     conn: &rusqlite::Connection,
     mut events: Vec<oxplow_domain::Envelope>,
-) -> Result<Vec<oxplow_domain::Envelope>, oxplow_domain::CommandError> {
+) -> Result<Vec<oxplow_domain::Envelope>, oxplow_domain::DomainError> {
     use rusqlite::OptionalExtension as _;
     for event in &mut events {
         if event.anchors.thread_id.is_some() {
@@ -730,10 +730,10 @@ pub enum Composed {
     Refused(String),
 }
 
-/// How long a command's script may run. The bus holds a read snapshot
-/// while it composes, so this is far tighter than a collector's runaway
-/// catch: composing a few commands is milliseconds. A script past it has
-/// its worker stopped and the snapshot released.
+/// How long a command's script may run. The bus routes the run while it
+/// composes, so this is far tighter than a collector's runaway catch:
+/// composing a few commands is milliseconds. A script past it has its
+/// worker stopped and the run refused.
 pub const COMMAND_SCRIPT_BUDGET: oxplow_domain::run::Budget =
     oxplow_domain::run::Budget::with_timeout(std::time::Duration::from_secs(5));
 
@@ -856,24 +856,19 @@ pub fn extension_command(
     };
     let (needs, reads) = (decl.needs.clone(), decl.access.reads_only());
     let (vocabulary, extension) = (bus.vocabulary().clone(), extension.to_string());
-    let state_host = bus.state_host().cloned();
-    let configuration_host = bus.configuration_host().cloned();
-    let jobs_host = bus.jobs_host().cloned();
     let source = format!("extension:{extension}/{}", decl.name);
     let compose: std::sync::Arc<Composer> = std::sync::Arc::new(
-        move |conn: &rusqlite::Connection, run: &oxplow_domain::run::RunContext, input: &Value| {
-            let read =
-                Box::new(|q: oxplow_db::SqlQuery| oxplow_db::semantic_layer::read_on(conn, &q));
-            let mut calls = crate::scope_calls::Calls::new(run, &needs, read);
-            if let Some(host) = &state_host {
-                calls = calls.with_state_reader(Box::new(|input| host.snapshot(conn, run, input)));
-            }
-            if let Some(host) = &configuration_host {
-                calls = calls.with_configuration_reader(Box::new(|| host.snapshot(conn, run)));
-            }
-            if let Some(host) = &jobs_host {
-                calls = calls.with_jobs_reader(Box::new(|input| host.snapshot(conn, run, &input)));
-            }
+        move |composing: &crate::commands::compose::Composing<'_>,
+              run: &oxplow_domain::run::RunContext,
+              input: &Value| {
+            // Read as an effect's script does: through the SQL gateway (its
+            // metric functions included), on the run's activation pin.
+            let (sql, runtime) = (composing.sql, composing.runtime);
+            let read = Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(sql.run_in(run, q)));
+            let mut calls = crate::scope_calls::Calls::new(run, &needs, read)
+                .with_state_source(sql.state_source(), runtime)
+                .with_configuration_source(sql.configuration_source(), runtime)
+                .with_jobs_source(sql.jobs_source(), runtime);
             match compose_calls(&script, input.clone(), &mut calls)? {
                 Composed::Run { calls, events, .. }
                     if reads && !(calls.is_empty() && events.is_empty()) =>
@@ -889,14 +884,17 @@ pub fn extension_command(
                     calls,
                     result,
                     events,
-                } => Ok(Composition {
-                    calls,
-                    result,
-                    events: anchor_to_efforts(
-                        conn,
-                        own_events(&vocabulary.current(), &extension, &source, events)?,
-                    )?,
-                }),
+                } => {
+                    let events = own_events(&vocabulary.current(), &extension, &source, events)?;
+                    let events = runtime
+                        .block_on(composing.db.read(move |tx| anchor_to_efforts(tx, events)))
+                        .map_err(oxplow_domain::CommandError::from)?;
+                    Ok(Composition {
+                        calls,
+                        result,
+                        events,
+                    })
+                }
                 Composed::Refused(message) => Err(CommandError::Invalid {
                     field: None,
                     message,
@@ -2517,9 +2515,9 @@ mod tests {
         assert_eq!(task(&fx).await.title, before, "nothing kept");
     }
 
-    /// The script runs while the bus holds a read snapshot for it, so a
-    /// runaway one is given up on after `COMMAND_SCRIPT_BUDGET`, not the
-    /// collectors' two minutes.
+    /// The script runs while the bus routes its run, so a runaway one is
+    /// given up on after `COMMAND_SCRIPT_BUDGET`, not the collectors' two
+    /// minutes.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_runaway_script_is_given_up_on_within_the_budget() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
