@@ -1006,7 +1006,9 @@ extension catalog's change signal and on an `extensionInstances` /
 generation starts every enabled instance that isn't already running unchanged
 and stops the rest. A running instance whose identity is the same in the new
 generation — its program (the extension's files, so its approval hash), its
-config, scope, declarations and spec, and a live connection — is carried over
+config, scope, declarations and spec, a live connection, and an approval that still
+covers its program (`authority_current`; a re-approved edit replaces it in the same
+activation rather than rejecting the generation at `validate_live`) — is carried over
 with its process; only a changed instance is replaced, and a removed or turned-off
 one stopped (the extension's place among the others doesn't count). An instance that can't run never rejects the
 generation: one that is unapproved, unconfigured, refused (its id is another
