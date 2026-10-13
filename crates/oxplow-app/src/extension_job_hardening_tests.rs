@@ -33,7 +33,7 @@ async fn state(fx: &Fixture, id: &str) -> Value {
         fx,
         &Actor::Human,
         "triage.review.result",
-        json!({ "id": id }),
+        json!({ "job_run": oxplow_domain::refs::build::job_run_ref(id) }),
     )
     .await
 }
@@ -276,7 +276,7 @@ async fn the_queue_is_bounded_per_extension_and_a_duplicate_is_not_new() {
         first,
         "the same intent is the same job"
     );
-    let count = rows(&fx, "SELECT count(*) FROM v_job", vec![]).await;
+    let count = rows(&fx, "SELECT count(*) FROM v_job_run", vec![]).await;
     assert_eq!(count[0][0], json!(256));
 }
 
@@ -311,7 +311,13 @@ async fn cancelling_a_queued_job_ends_it_at_once() {
     let fx = fixture_idle(MANIFEST, vec![reply("unused")]).await;
     let id = ask(&fx, "queued").await;
     assert_eq!(state(&fx, &id).await["state"], json!("queued"));
-    run(&fx, &Actor::Human, "oxplow.job.cancel", json!({ "id": id })).await;
+    run(
+        &fx,
+        &Actor::Human,
+        "oxplow.job_run.cancel",
+        json!({ "job_run": oxplow_domain::refs::build::job_run_ref(&id) }),
+    )
+    .await;
     let after = state(&fx, &id).await;
     assert_eq!(after["state"], json!("cancelled"), "{after}");
     assert_eq!(completions(&fx, &id).await, ["cancelled"]);
@@ -348,7 +354,7 @@ async fn an_idempotent_job_whose_lease_ran_out_runs_again() {
     assert_eq!(fx.model.asked_typed().len(), 3);
     let second = rows(
         &fx,
-        "SELECT count(*) FROM v_job_output WHERE job_id = ?1 AND attempt = 2 AND kind = 'tool_result'",
+        "SELECT count(*) FROM v_job_run_output WHERE job_id = ?1 AND attempt = 2 AND kind = 'tool_result'",
         vec![json!(id)],
     )
     .await;

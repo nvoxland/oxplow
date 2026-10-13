@@ -35,8 +35,8 @@ The lifecycle is pure in `oxplow-domain/src/extension_job.rs`; the store is
   finished after its attempt was fenced off records what it had here, never
   on the job.
 
-Published as **`v_job`** (no request, no result: state, attempt, the current
-attempt's model rounds, tool calls and tokens) and **`v_job_output`**. A
+Published as **`v_job_run`** (no request, no result: state, attempt, the current
+attempt's model rounds, tool calls and tokens) and **`v_job_run_output`**. A
 job's request and result are read only through its extension's
 `jobs.read/snapshot`. The writers are on the thin-caller clippy deny lists:
 jobs change through their commands and the dispatcher.
@@ -2065,7 +2065,7 @@ See [extensions.md](./extensions.md) "Effects".
 V48. One row per finished run of extension code (`oxplow_domain::run`,
 [extensions.md](./extensions.md) "The run context"): `run_id` (a
 UUIDv7), `parent_run_id`, `extension`, `contribution`
-(`<ext>/<kind>/<local>`), `kind`, `version`, `generation`, `actor_kind` /
+(its ref, `command:oxplow.review.accept`, `job:effort-review/review`), `kind`, `version`, `generation`, `actor_kind` /
 `actor`, the anchors (`stream_id`, `thread_id`, `effort_id`, `turn_id`,
 `agent_session_id`, `snapshot_id`, as integers), `cause_event_id`,
 `mode`, `started_at` / `finished_at`, `outcome` (`ok` / `skipped` /

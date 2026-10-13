@@ -13,7 +13,7 @@ const ACME_PR: RefKind = {
   idPattern: "^\\d+$",
   wikilinks: ["pr"],
   resolve: "v_acme_prs",
-  page: "page:ext.acme.pr",
+  page: "page:acme/pr",
   icon: "git-pull-request",
 };
 
@@ -32,7 +32,7 @@ describe("an extension's ref kind (P8.D7)", () => {
     setRefKinds([ACME_PR]);
     const tab = refFromTabId("acme_pr:12");
     expect(tab).toEqual({
-      id: "page:ext.acme.pr?ref=acme_pr:12",
+      id: "page:acme/pr?ref=acme_pr:12",
       kind: "ext-page",
       payload: { extension: "acme", page: "pr", params: { ref: "acme_pr:12" } },
     });
@@ -49,7 +49,7 @@ describe("an extension's ref kind (P8.D7)", () => {
     expect(body).toBe("see [pr:12](acme_pr:12)");
     const parsed = parseMarkdownLink("acme_pr:12");
     expect(parsed).toEqual({ kind: "ref", ref: "acme_pr:12" });
-    expect(linkTarget(parsed)?.id).toBe("page:ext.acme.pr?ref=acme_pr:12");
+    expect(linkTarget(parsed)?.id).toBe("page:acme/pr?ref=acme_pr:12");
     setRefKinds([]);
     expect(extensionWikilinkRef("pr:12")).toBeNull();
     expect(preprocessWikilinks("see [[pr:12]]")).toContain("oxplow-invalid:");
@@ -83,7 +83,7 @@ describe("an extension's ref kind (P8.D7)", () => {
   test("reads v_ref_kind rows", () => {
     const kinds = refKindsFromResult({
       columns: ["kind", "extension", "label", "id_pattern", "wikilinks", "resolve", "page", "icon"],
-      rows: [["acme_pr", "acme", "Pull request", "^\\d+$", '["pr"]', "v_acme_prs", "page:ext.acme.pr", "git-pull-request"]],
+      rows: [["acme_pr", "acme", "Pull request", "^\\d+$", '["pr"]', "v_acme_prs", "page:acme/pr", "git-pull-request"]],
       truncated: false,
       reads: { models: [], tables: [] },
     } as never);

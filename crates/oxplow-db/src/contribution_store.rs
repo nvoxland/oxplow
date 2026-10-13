@@ -24,8 +24,8 @@ pub fn reset_tx(
         .prepare(
             "INSERT OR REPLACE INTO contribution
                (id, extension, kind, local, origin, version, contract_version,
-                runs_on_json, needs_json, after_json, global_name, aliases_json, file, line)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                runs_on_json, needs_json, after_json, global_name, file, line)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         )
         .map_err(map_sql_err)?;
     for d in descriptors {
@@ -41,7 +41,6 @@ pub fn reset_tx(
             json(&d.needs),
             json(&d.after),
             d.global,
-            json(&d.aliases),
             d.source.file,
             d.source.line,
         ])
@@ -89,7 +88,7 @@ mod tests {
         let rows: Vec<(String, String, Option<String>)> = db
             .call(|c| {
                 let mut s =
-                    c.prepare("SELECT id, kind, version FROM v_contribution ORDER BY id")?;
+                    c.prepare("SELECT ref, kind, version FROM v_contribution ORDER BY ref")?;
                 let rows = s
                     .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -100,7 +99,7 @@ mod tests {
         assert_eq!(
             rows,
             [(
-                "beta/metric/acme.todos".to_string(),
+                "metric:acme.todos".to_string(),
                 "metric".to_string(),
                 Some("1.0.0".to_string())
             )]

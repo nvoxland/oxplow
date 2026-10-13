@@ -153,7 +153,7 @@ async fn a_qualified_read_reaches_only_its_model_and_what_derives_from_it() {
         .svc
         .sql
         .query_sql(
-            "SELECT decisions FROM v_extension_run WHERE contribution = 'acme/command/read.efforts'",
+            "SELECT decisions FROM v_extension_run WHERE contribution = 'command:acme.read.efforts'",
             vec![],
             None,
         )

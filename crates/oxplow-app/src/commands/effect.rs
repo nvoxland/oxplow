@@ -222,7 +222,7 @@ pub(crate) fn unreacted_tx(
     // (tsk847). Never approved, it has nothing to backfill.
     let live_from = oxplow_db::effect_state_store::start_after_tx(tx, &decl.name())?.unwrap_or(-1);
     let to = range.to_seq.unwrap_or(i64::MAX).min(live_from);
-    let own = format!("effect:{}", decl.name());
+    let own = oxplow_domain::refs::build::effect_source(&decl.name());
     let mut st = tx.prepare(&sql).map_err(oxplow_db::map_sql_err)?;
     let mut out = Unreacted::default();
     let mut from = range.from_seq.unwrap_or(0);

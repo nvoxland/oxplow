@@ -1,6 +1,6 @@
 //! What a declared job runs (`operation: ai.complete_typed`): model rounds
 //! streamed on the request's role, written as the attempt's output while
-//! they come (`v_job_output`), and — for a job that declares `tools` or
+//! they come (`v_job_run_output`), and — for a job that declares `tools` or
 //! reads SQL — each tool the model calls run and answered, then another
 //! round, up to its `max_tool_rounds`. All of it outside any transaction;
 //! cancelling the job drops the model's connection and the attempt closes

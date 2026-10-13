@@ -60,7 +60,10 @@ async fn run(
         thread_id: Some(thread),
         stream_id: Some(stream),
     };
-    let actor = format!("effect:{}:{policy}", crate::effort_policy::CAPABILITY);
+    let actor = oxplow_domain::refs::build::effect_source(&format!(
+        "{}:{policy}",
+        crate::effort_policy::CAPABILITY
+    ));
     // A clean thread: what the policy opens is all that's open.
     for effort in open_efforts(svc, thread, None).await? {
         svc.commands

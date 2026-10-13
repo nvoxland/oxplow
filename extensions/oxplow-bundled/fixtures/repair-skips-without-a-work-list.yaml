@@ -3,7 +3,7 @@ input:
   effect: repair-disabled
   event:
     type: contribution.disabled
-    payload: { extension: "extension:work", contribution: hot, kind: collector, reason: boom }
+    payload: { contribution: "collector:work/hot", reason: boom }
   answers:
     sql.read:
       - [{ provider: null, open_item: null }]

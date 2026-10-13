@@ -46,7 +46,7 @@ failure after your edit is yours:
 - `effect` — a script reacting to a logged event by composing commands
   (private; runs only once a person approves it);
 - `job` — model work that runs on its own, outside any transaction: its
-  reply streams into `v_job_output`, its model may call tools you
+  reply streams into `v_job_run_output`, its model may call tools you
   declare, a person can cancel it, and an effect on its
   `contribution.job.completed` writes what it found (runs once a person
   approves it; "Jobs" below);
@@ -291,7 +291,7 @@ empty: Nothing is waiting on you.
   component <name>` scaffolds a working one; `docs/guide/lenses.md` has
   the reference.
 - **Pages** give a lens a place of its own: `pages: [{ id, title, icon?,
-  category, lens }]` opens it full-page at `page:ext.<extension>.<id>` and
+  category, lens }]` opens it full-page at `page:<extension>/<id>` and
   lists it in the launcher under `category` (Work, Code, Git, Activity,
   Knowledge, Data, Lenses, System).
 - **Panels** put a lens in the left nav (`panels: [{ id, title, icon?,
@@ -597,7 +597,7 @@ the binding:
 
 ```yaml
 imports:
-  - { id: reviews, contribution: effort-review/model/reviews, version: 1, optional: true }
+  - { id: reviews, contribution: model:effort-review/reviews, version: 1, optional: true }
 ```
 
 ```sql
@@ -609,7 +609,7 @@ SELECT work_item, review FROM import_ref('reviews')
   mounts the lens) is withheld with a warning, and the rest of your
   extension still loads. Without it, your whole extension is blocked.
 - `oxplow extension check` prints how each import resolved
-  (``import `reviews` → effort-review/model/reviews v1: available``, or
+  (``import `reviews` → model:effort-review/reviews v2: available``, or
   why not).
 - The producer bumping its model's version is a break: your import of
   the old version goes unavailable until you change it.
@@ -816,21 +816,21 @@ effects:
   role, messages } }` — no model: the role's is used. The `intentKey` is
   the job's **subject**, one job per key: put what it's about in it
   (`review:effort:eff12`), and read it back as the snapshot's `intentKey`
-  (or `v_job.intent_key`) in the effect that publishes the answer.
+  (or `v_job_run.intent_key`) in the effect that publishes the answer.
 - To start one on an event, an effect composes your own `ask` command
   (give it `invokers.agent: true`: an effect acts as an agent). Keep the
   prompt in one script command that composes `ask`, so the effect and a
   lens button share it.
 - A tool only reads; the model calls it as `todos_in_file`, and with
   `sql.read` it also has `query_sql` over the `v_*` models. A job never
-  writes: the effect on its end does (`scope("jobs.read", { id })` gives
+  writes: the effect on its end does (`scope("jobs.read", { job_run })` gives
   it the result, `{ parts, … }`; its event's `outcome` is `succeeded`,
   `failed`, `cancelled` or `interrupted`). Declare `replay: idempotent`
   when running it again is harmless: an attempt a restart cuts off is
   then retried, up to three attempts, and the effect hears only the
   final end.
-- Show it running with a lens over `v_job_output` (`WHERE job_id = :id`):
-  it updates as the model writes. oxplow's own Jobs lens lists every job
+- Show it running with a lens over `v_job_run_output` (`WHERE job_id = (SELECT id FROM v_job_run WHERE ref = :job_run)`):
+  it updates as the model writes. oxplow's own Job Runs lens lists every run
   with Cancel.
 - `examples/extensions/triage/` in the oxplow repo has one, with its
   fixtures (a tool round, a cancel); `examples/extensions/effort-review/`
@@ -838,7 +838,7 @@ effects:
   and comments the answer on the work item.
 - Your command namespace is your name with `-` as `_`: extension
   `effort-review` has commands `effort_review.review.ask`, while its
-  contribution ids keep the dash (`effort-review/job/review`).
+  its contributions' refs keep the dash (`job:effort-review/review`).
 
 ## AI profiles
 

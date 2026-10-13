@@ -1009,7 +1009,12 @@ fn provider_command(
     spec.atomicity = oxplow_domain::Atomicity::External;
     spec.undoable = undoable;
     spec.op = Some(oxplow_domain::OpRef {
-        scope: format!("provider:{extension}/{provider}"),
+        scope: oxplow_domain::contribution::ContributionId::new(
+            extension,
+            oxplow_domain::contribution::ContributionKind::Provider,
+            provider,
+        )
+        .to_string(),
         op: op.into(),
     });
     let bus_weak = std::sync::Arc::downgrade(bus);
@@ -1255,18 +1260,14 @@ impl ExtensionCommands {
         extension: &str,
         registration: &RegisteredCommands,
     ) -> Result<Vec<crate::commands::Command>, String> {
-        let ns = &registration.namespace;
         registration
             .commands
             .iter()
             .map(|decl| {
                 // Its local id, as its descriptor has it: the bus id
                 // without the namespace (`<area>.<verb>`).
-                let name = decl
-                    .name
-                    .strip_prefix(&format!("{ns}."))
-                    .unwrap_or(&decl.name)
-                    .to_string();
+                // A command contribution is named by its bus id.
+                let name = decl.name.clone();
                 // Keep provenance with the handler, including when the
                 // catalog reloads before this command is replaced.
                 let contribution = oxplow_domain::run::ContributionRef {

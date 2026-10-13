@@ -62,11 +62,11 @@ afterEach(() => {
 
 test("each extension's row shows its last run, and a denied one says why", async () => {
   runs = [
-    ["acme", "acme/collector/pull", "failed", "rate limited", "2026-10-10T09:00:00Z", null],
-    ["acme", "acme/effect/note", "ok", null, "2026-10-10T08:00:00Z", null],
+    ["acme", "collector:acme/pull", "failed", "rate limited", "2026-10-10T09:00:00Z", null],
+    ["acme", "effect:acme/note", "ok", null, "2026-10-10T08:00:00Z", null],
     [
       "beta",
-      "beta/collector/sync",
+      "collector:beta/sync",
       "denied",
       "denied",
       "2026-10-10T07:00:00Z",
@@ -86,7 +86,7 @@ test("each extension's row shows its last run, and a denied one says why", async
 });
 
 test("a healthy last run is quiet, not a warning", async () => {
-  runs = [["acme", "acme/effect/note", "ok", null, "2026-10-10T08:00:00Z", null]];
+  runs = [["acme", "effect:acme/note", "ok", null, "2026-10-10T08:00:00Z", null]];
   const view = render(<ExtensionsSection />);
   const acme = await waitFor(() => view.getByTestId("extension-last-run-acme"));
   expect(acme.getAttribute("data-warn")).toBe("false");

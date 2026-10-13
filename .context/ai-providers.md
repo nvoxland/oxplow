@@ -538,7 +538,7 @@ any extension has; core keeps the storage and the review.
   so asking again about unchanged activity on the same binding reads the
   recorded answer; rebinding the profile asks the new model.
 - **`store-decisions`** (on `contribution.job.completed`, `where: {
-  contribution: oxplow-bundled/job/decisions }`) reads the job, drops a
+  contribution: job:oxplow-bundled/decisions }`) reads the job, drops a
   code fence, and skips — saying so — a reply that isn't a JSON object
   with a `decisions` list (Starlark's `json.decode` has no fallback, so
   the check is the object's braces; malformed JSON inside them fails the

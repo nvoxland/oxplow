@@ -79,7 +79,7 @@ async fn the_github_example_checks_tests_and_its_pr_opens() {
     };
     assert_eq!(
         row("SELECT page, resolve FROM v_ref_kind WHERE kind = 'github_pr'").await,
-        serde_json::json!([["page:ext.github.pr", "v_github_pull_request"]])
+        serde_json::json!([["page:github/pr", "v_github_pull_request"]])
     );
     assert_eq!(
         row("SELECT title FROM v_github_pull_request WHERE ref = 'github_pr:12'").await,
@@ -348,10 +348,10 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
     }
     assert!(tested.generation.is_some());
     for id in [
-        "triage/job/summarize",
-        "triage/effect/publish-summary",
-        "triage/custom_component/todo-board",
-        "triage/command/summary.ask",
+        "job:triage/summarize",
+        "effect:triage/publish-summary",
+        "custom_component:triage/todo-board",
+        "command:triage.summary.ask",
     ] {
         assert!(
             tested.contributes.iter().any(|c| c == id),
@@ -489,7 +489,7 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
     let decided = svc
         .sql
         .query_sql(
-            "SELECT decisions FROM v_extension_run WHERE contribution = 'triage/collector/todos'",
+            "SELECT decisions FROM v_extension_run WHERE contribution = 'collector:triage/todos'",
             vec![],
             None,
         )
@@ -716,7 +716,7 @@ async fn the_effort_review_example_reviews_evidence_and_can_be_cancelled() {
     // it waits while the coverage report arrives.
     let job = until_row(
         &svc,
-        "SELECT id FROM v_job WHERE intent_key = 'review:effort:eff1'",
+        "SELECT id FROM v_job_run WHERE intent_key = 'review:effort:eff1'",
     )
     .await[0]
         .as_str()
@@ -744,7 +744,9 @@ async fn the_effort_review_example_reviews_evidence_and_can_be_cancelled() {
     // The model read the evidence: the test run and the coverage.
     let evidence = until_row(
         &svc,
-        &format!("SELECT data FROM v_job_output WHERE job_id = '{job}' AND kind = 'tool_result'"),
+        &format!(
+            "SELECT data FROM v_job_run_output WHERE job_id = '{job}' AND kind = 'tool_result'"
+        ),
     )
     .await[0]
         .as_str()
@@ -811,17 +813,22 @@ async fn the_effort_review_example_reviews_evidence_and_can_be_cancelled() {
     .await;
     let second = until_row(
         &svc,
-        "SELECT job_id FROM v_job_output o JOIN v_job j ON j.id = o.job_id \
+        "SELECT job_id FROM v_job_run_output o JOIN v_job_run j ON j.id = o.job_id \
           WHERE j.intent_key = 'review:effort:eff2' AND o.kind = 'text'",
     )
     .await[0]
         .as_str()
         .unwrap()
         .to_string();
-    as_person(&svc, "oxplow.job.cancel", json!({ "id": second })).await;
+    as_person(
+        &svc,
+        "oxplow.job_run.cancel",
+        json!({ "job_run": oxplow_domain::refs::build::job_run_ref(&second) }),
+    )
+    .await;
     until_row(
         &svc,
-        &format!("SELECT 1 FROM v_job WHERE id = '{second}' AND state = 'cancelled'"),
+        &format!("SELECT 1 FROM v_job_run WHERE id = '{second}' AND state = 'cancelled'"),
     )
     .await;
     until_row(
@@ -958,7 +965,7 @@ async fn the_bundled_extension_infers_an_efforts_decisions_on_its_profile() {
     assert_eq!(calls, [json!("oxplow-bundled/decisions"), json!(1)]);
     let jobs = until_row(
         &svc,
-        "SELECT count(*) FROM v_job WHERE intent_key = 'decisions:effort:eff1'",
+        "SELECT count(*) FROM v_job_run WHERE intent_key = 'decisions:effort:eff1'",
     )
     .await;
     assert_eq!(jobs, [json!(1)]);
@@ -972,7 +979,7 @@ async fn the_bundled_extension_infers_an_efforts_decisions_on_its_profile() {
     .await;
     until_row(
         &svc,
-        "SELECT 1 FROM v_job WHERE intent_key = 'decisions:effort:eff1@2' AND state = 'succeeded'",
+        "SELECT 1 FROM v_job_run WHERE intent_key = 'decisions:effort:eff1@2' AND state = 'succeeded'",
     )
     .await;
     let calls = until_row(&svc, "SELECT count(*) FROM v_ai_call").await;
@@ -995,7 +1002,7 @@ async fn without_a_model_inferring_decisions_skips_and_says_where_to_bind_one() 
     );
     let jobs = svc
         .sql
-        .query_sql("SELECT count(*) FROM v_job", vec![], None)
+        .query_sql("SELECT count(*) FROM v_job_run", vec![], None)
         .await
         .unwrap();
     assert_eq!(
@@ -1050,11 +1057,11 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
     assert_eq!(tested.errors, Vec::<String>::new());
     assert_eq!(
         tested.imports,
-        ["`reviews` → effort-review/model/reviews v1: available"]
+        ["`reviews` → model:effort-review/reviews v2: available"]
     );
     for id in [
-        "review-badges/lens/review-verdicts",
-        "review-badges/lens/item-review",
+        "lens:review-badges/review-verdicts",
+        "lens:review-badges/item-review",
     ] {
         assert!(
             tested.contributes.iter().any(|c| c == id),
@@ -1084,7 +1091,7 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
     // the import; the fixtures that test them are skipped, saying why.
     assert_eq!(
         tested.imports,
-        ["`reviews` → effort-review/model/reviews v1: unavailable (effort-review is disabled)"]
+        ["`reviews` → model:effort-review/reviews v2: unavailable (effort-review is disabled)"]
     );
     assert!(tested.contributes.is_empty(), "{:?}", tested.contributes);
     let import_warnings: Vec<_> = tested
@@ -1096,15 +1103,15 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
     let warning = import_warnings[0];
     assert!(
         warning.contains(
-            "optional import `reviews` for `effort-review/model/reviews` v1 is unavailable: \
+            "optional import `reviews` for `model:effort-review/reviews` v2 is unavailable: \
              effort-review is disabled; withheld: "
         ),
         "{warning}"
     );
     for id in [
-        "`review-badges/lens/item-review`",
-        "`review-badges/lens/review-verdicts`",
-        "`review-badges/slot/work_item.detail.body-0`",
+        "`lens:review-badges/item-review`",
+        "`lens:review-badges/review-verdicts`",
+        "`slot:review-badges/work_item.detail.body-0`",
     ] {
         assert!(warning.contains(id), "{id}: {warning}");
     }
@@ -1124,7 +1131,7 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
         assert!(
             tested.warnings.iter().any(|w| w.contains(&format!(
                 "fixtures/{example}.yaml:1: example `{example}` isn't run: \
-                 `review-badges/lens/{lens}` is withheld because import `reviews` is \
+                 `lens:review-badges/{lens}` is withheld because import `reviews` is \
                  unavailable (effort-review is disabled)"
             ))),
             "{example}: {:?}",
@@ -1142,19 +1149,19 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
     let text = std::fs::read_to_string(&manifest).unwrap();
     let bumped = text
         .replace(
-            "    version: 1\n    key: [job]",
-            "    version: 2\n    key: [job]",
+            "    version: 2\n    key: [job_run]",
+            "    version: 3\n    key: [job_run]",
         )
         .replace(
-            "contribution: effort-review/model/reviews, version: 1,",
-            "contribution: effort-review/model/reviews, version: 2,",
+            "contribution: model:effort-review/reviews, version: 2,",
+            "contribution: model:effort-review/reviews, version: 3,",
         );
     assert_ne!(bumped, text);
     std::fs::write(&manifest, bumped).unwrap();
     let tested = test_extension(root, "review-badges", false).await.unwrap();
     assert_eq!(
         tested.imports,
-        ["`reviews` → effort-review/model/reviews v1: unavailable (effort-review exports v2)"]
+        ["`reviews` → model:effort-review/reviews v2: unavailable (effort-review exports v3)"]
     );
     assert!(tested.contributes.is_empty(), "{:?}", tested.contributes);
 
@@ -1164,7 +1171,7 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
     let tested = test_extension(root, "review-badges", false).await.unwrap();
     assert_eq!(
         tested.imports,
-        ["`reviews` → effort-review/model/reviews v1: unavailable (effort-review or its contribution isn't here)"]
+        ["`reviews` → model:effort-review/reviews v2: unavailable (effort-review or its contribution isn't here)"]
     );
     assert_eq!(tested.errors, Vec::<String>::new());
 }

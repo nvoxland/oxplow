@@ -133,7 +133,10 @@ pub struct Materialized {
 impl GridPlan {
     /// The grid's column for a metric key.
     pub fn column(key: &str) -> String {
-        format!("measure:{key}")
+        oxplow_domain::refs::build::of(
+            oxplow_domain::contribution::ContributionKind::Measure.segment(),
+            key,
+        )
     }
 
     /// Read every metric's series and build the grid. With `with_rows`

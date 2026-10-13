@@ -301,7 +301,7 @@ impl<'a> Calls<'a> {
         let job_input = if id == "jobs.read" {
             Some(
                 serde_json::from_value::<crate::extension_jobs::JobInput>(args.clone())
-                    .map_err(|_| "jobs.read takes {id}".to_string())?,
+                    .map_err(|_| "jobs.read takes { job_run }".to_string())?,
             )
         } else {
             None

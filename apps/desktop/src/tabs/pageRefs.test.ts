@@ -327,7 +327,7 @@ test("searchHitTarget routes core kinds and an extension's kind", async () => {
   const { searchHitTarget, workItemTabRef, wikiPageRef, commentsRef, extPageRef } = await import("./pageRefs.js");
   const { setRefKinds } = await import("../refKinds.js");
   setRefKinds([
-    { kind: "acme_pr", extension: "acme", label: "Pull request", idPattern: "^\\d+$", wikilinks: ["pr"], resolve: "v_acme_prs", page: "page:ext.acme.pr", icon: "git-pull-request" },
+    { kind: "acme_pr", extension: "acme", label: "Pull request", idPattern: "^\\d+$", wikilinks: ["pr"], resolve: "v_acme_prs", page: "page:acme/pr", icon: "git-pull-request" },
   ]);
   try {
     // A work item's hit carries its ref after `work_item:`.

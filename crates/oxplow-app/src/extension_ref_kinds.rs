@@ -65,7 +65,7 @@ pub struct RefKindDecl {
     pub id_pattern: String,
     /// The view whose `title` names one (`v_<extension>_<model>`, by `ref`).
     pub resolve: String,
-    /// The page that opens one: `page:ext.<extension>.<page>`, given
+    /// The page that opens one: `page:<extension>/<page>`, given
     /// `?ref=<ref>`.
     pub page: String,
     pub wikilink: Option<String>,
@@ -634,7 +634,7 @@ ref_kinds:
         let k = &ext.ref_kinds[0];
         assert_eq!(
             (k.kind.as_str(), k.resolve.as_str(), k.page.as_str()),
-            ("acme_pr", "v_acme_prs", "page:ext.acme.pr")
+            ("acme_pr", "v_acme_prs", "page:acme/pr")
         );
         assert_eq!(k.declared_at, "oxplow/extensions/acme/extension.yaml:15");
     }

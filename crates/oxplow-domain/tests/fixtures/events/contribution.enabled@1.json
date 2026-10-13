@@ -1,5 +1,3 @@
 {
-  "extension": "extension:tracker",
-  "contribution": "fake",
-  "kind": "provider"
+  "contribution": "provider:tracker/fake"
 }

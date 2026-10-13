@@ -11,7 +11,7 @@ It reads effort-review's exported `reviews` model and writes nothing.
 
 ```yaml
 imports:
-  - { id: reviews, contribution: effort-review/model/reviews, version: 1, optional: true }
+  - { id: reviews, contribution: model:effort-review/reviews, version: 2, optional: true }
 ui:
   slots:
     - { slot: work_item.detail.body, lens: item-review }
@@ -41,7 +41,7 @@ When effort-review is missing, disabled, or exports another version:
 - everything else, including review-badges itself, loads as usual.
 
 `oxplow extension check review-badges` prints how the import resolved:
-``import `reviews` → effort-review/model/reviews v1: available`` or
+``import `reviews` → model:effort-review/reviews v2: available`` or
 `unavailable (effort-review is disabled)`, `(effort-review exports v2)`,
 `(effort-review or its contribution isn't here)`. `oxplow extension test`
 prints the same, and skips the fixtures for the two lenses with a warning

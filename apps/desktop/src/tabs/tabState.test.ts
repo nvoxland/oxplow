@@ -227,11 +227,11 @@ describe("PageSlot navigation", () => {
   });
 
   test("slotId is preserved across navigations", () => {
-    let slot = createSlot(FILE_A, "slot:fixed");
+    let slot = createSlot(FILE_A, "tab-slot-fixed");
     slot = navigateInSlot(slot, FILE_B);
     slot = slotGoBack(slot)!;
     slot = slotGoForward(slot)!;
-    expect(slot.slotId).toBe("slot:fixed");
+    expect(slot.slotId).toBe("tab-slot-fixed");
   });
 });
 

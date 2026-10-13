@@ -172,7 +172,7 @@ impl AiCompute {
         ) {
             return Err(refused());
         }
-        let name = format!("job:{}", run.actor().source());
+        let name = run.actor().source();
         self.ai
             .read_run(run, async {
                 run.check_authority().map_err(|_| refused())?;

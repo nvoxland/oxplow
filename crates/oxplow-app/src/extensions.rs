@@ -937,14 +937,14 @@ pub struct ExtensionPanel {
 }
 
 /// A page an extension contributes (P6.G2, target §11.3): a lens shown
-/// full-page at `page:ext.<extension>.<id>`, listed in the launcher under
+/// full-page at `page:<extension>/<id>`, listed in the launcher under
 /// its category.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtensionPage {
     pub id: String,
     pub extension: String,
-    /// Its tab id: `page:ext.<extension>.<id>`.
+    /// Its tab id: `page:<extension>/<id>`.
     pub page_ref: String,
     pub title: String,
     pub icon: Option<String>,
@@ -6304,7 +6304,7 @@ commands:
             .map(|c| c.id.to_string())
             .filter(|id| id.contains("ai_profile"))
             .collect();
-        assert_eq!(described, ["x/ai_profile/review"]);
+        assert_eq!(described, ["ai_profile:x/review"]);
     }
 
     /// Oxplow ships two extensions: `oxplow-foundation`, its own commands
@@ -7611,7 +7611,7 @@ commands:
     }
 
     /// P6.G2: an extension's page is a lens under a launcher category, at
-    /// `page:ext.<extension>.<page>`.
+    /// `page:<extension>/<page>`.
     #[test]
     fn pages_are_lenses_with_a_route() {
         let lenses = [("open", "title: Open\nquery: SELECT 1\n")];
@@ -7625,7 +7625,7 @@ commands:
             vec![ExtensionPage {
                 id: "open-prs".into(),
                 extension: "x".into(),
-                page_ref: "page:ext.x.open-prs".into(),
+                page_ref: "page:x/open-prs".into(),
                 title: "Open PRs".into(),
                 icon: Some("git-pull-request".into()),
                 category: LauncherCategory::Work,

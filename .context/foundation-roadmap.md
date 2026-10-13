@@ -570,7 +570,7 @@ Prerequisites: Compose declared host services through the shared context.
 
 Status: working end to end. A job's model rounds stream (`stream_typed`,
 SSE through a script's `delta`, the whole reply at once from a provider
-that doesn't stream) into its attempt's output (`v_job_output`, `v_job`);
+that doesn't stream) into its attempt's output (`v_job_run_output`, `v_job_run`);
 cancelling drops the model's connection and the job ends `cancelled`
 with what it had, its call recorded as cancelled; a job's declared
 `tools` (its extension's read-only commands admitting `invokers.job`, and
@@ -758,7 +758,7 @@ revocation and re-approval (`crates/oxplow-sdk/tests/trials.rs`, the
 browser spec); review-badges importing effort-review's model and
 degrading when it is disabled, missing or exports another version.
 Shared services added for them: a job's intent key as its subject
-(snapshot `intentKey`, `v_job.intent_key`), a command fixture's `expect:
+(snapshot `intentKey`, `v_job_run.intent_key`), a command fixture's `expect:
 { result }`, and `extension check`/`test` printing how each import
 resolved. Still open (in the README's friction list): event-started jobs,
 AI profiles, diff text, job fixtures over seeded evidence, the

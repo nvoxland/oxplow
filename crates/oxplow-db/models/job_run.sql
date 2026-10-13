@@ -1,7 +1,7 @@
 SELECT j.id,
        j.contribution_id AS job,
        j.intent_key,
-       CAST(substr(j.contribution_id, 1, instr(j.contribution_id, '/') - 1) AS TEXT) AS extension,
+       CAST((SELECT r.extension FROM source('extension_run') r WHERE r.run_id = j.run_id) AS TEXT) AS extension,
        j.package_version AS version,
        j.contract_version,
        j.operation,
@@ -21,5 +21,6 @@ SELECT j.id,
               WHERE o.job_id = j.id AND o.attempt = j.attempt AND o.kind = 'usage') AS INTEGER) AS input_tokens,
        CAST((SELECT COALESCE(sum(json_extract(o.content_json, '$.outputTokens')), 0)
                FROM source('extension_job_output') o
-              WHERE o.job_id = j.id AND o.attempt = j.attempt AND o.kind = 'usage') AS INTEGER) AS output_tokens
+              WHERE o.job_id = j.id AND o.attempt = j.attempt AND o.kind = 'usage') AS INTEGER) AS output_tokens,
+       CAST('job_run:' || j.id AS TEXT) AS ref
 FROM source('extension_job') j

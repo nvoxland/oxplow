@@ -4,7 +4,7 @@ input:
   effect: repair-disabled
   event:
     type: contribution.disabled
-    payload: { extension: "extension:work", contribution: hot, kind: collector, reason: "3 failures in a row; the last: boom again" }
+    payload: { contribution: "collector:work/hot", reason: "3 failures in a row; the last: boom again" }
   answers:
     sql.read:
       - [{ provider: oxplow, open_item: "work_item:oxplow:tsk9" }]

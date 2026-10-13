@@ -109,7 +109,7 @@ fn note_author(actor: &Actor) -> String {
         Actor::Human => "user".into(),
         Actor::Agent { .. } => "agent".into(),
         Actor::Lens { on_behalf_of, .. } => note_author(on_behalf_of),
-        Actor::Effect { effect, .. } => format!("effect:{effect}"),
+        Actor::Effect { effect, .. } => oxplow_domain::refs::build::effect_source(effect),
         Actor::System => "oxplow".into(),
         Actor::Job { .. } => actor.source(),
     }

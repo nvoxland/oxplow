@@ -47,7 +47,6 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
         let mut d = new(ContributionKind::Model, &m.decl.name, RunsOn::Query);
         d.contract_version = Some(m.decl.version);
         d.global = Some(view.clone());
-        d.aliases = vec![view];
         d.source.file = format!("{}/{}", ext.path.trim_end_matches('/'), m.file);
         out.push(d);
     }
@@ -67,21 +66,18 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
             .map(|o| o.v)
             .max();
         d.global = Some(t.event_type.clone());
-        d.aliases = vec![t.event_type.clone()];
         d.source = declared_at(&t.declared_at);
         out.push(d);
     }
     for k in &ext.ref_kinds {
         let mut d = new(ContributionKind::RefKind, &k.kind, RunsOn::Declared);
         d.global = Some(k.kind.clone());
-        d.aliases = vec![k.kind.clone()];
         d.source = declared_at(&k.declared_at);
         out.push(d);
     }
     for l in &ext.lenses {
         let mut d = new(ContributionKind::Lens, &l.slug, RunsOn::Mount);
         d.needs = l.needs.clone();
-        d.aliases = vec![oxplow_domain::refs::build::lens_ref(&l.id)];
         d.source = DeclaredAt {
             file: l.path.clone(),
             line: None,
@@ -89,45 +85,39 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
         out.push(d);
     }
     for p in &ext.pages {
-        let mut d = new(ContributionKind::Page, &p.id, RunsOn::Mount);
-        d.aliases = vec![p.page_ref.clone()];
+        let d = new(ContributionKind::Page, &p.id, RunsOn::Mount);
         out.push(d);
     }
     for p in &ext.panels {
         let local =
             p.id.strip_prefix(&format!("{}/", ext.name))
                 .unwrap_or(&p.id);
-        let mut d = new(ContributionKind::Panel, local, RunsOn::Mount);
-        d.aliases = vec![p.id.clone()];
+        let d = new(ContributionKind::Panel, local, RunsOn::Mount);
         out.push(d);
     }
     for (n, slot) in ext.ui.slots.iter().enumerate() {
-        let mut d = new(
+        let d = new(
             ContributionKind::Slot,
             &format!("{}-{n}", slot.slot),
             RunsOn::Mount,
         );
-        d.aliases = vec![slot.slot.clone()];
         out.push(d);
     }
     for dec in &ext.ui.decorators {
         let n = dec.id.rsplit('/').next().unwrap_or_default();
-        let mut d = new(
+        let d = new(
             ContributionKind::Decorator,
             &format!("decorator-{n}"),
             RunsOn::Mount,
         );
-        d.aliases = vec![dec.id.clone()];
         out.push(d);
     }
     for r in &ext.ui.replacements {
-        let mut d = new(ContributionKind::Replacement, &r.target, RunsOn::Mount);
-        d.aliases = vec![r.id.clone()];
+        let d = new(ContributionKind::Replacement, &r.target, RunsOn::Mount);
         out.push(d);
     }
     for c in &ext.custom_components {
-        let mut d = new(ContributionKind::CustomComponent, &c.id, RunsOn::Mount);
-        d.aliases = vec![format!("{}/{}", ext.name, c.id)];
+        let d = new(ContributionKind::CustomComponent, &c.id, RunsOn::Mount);
         out.push(d);
     }
     for c in &ext.collectors {
@@ -149,7 +139,6 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
         if !c.facts.is_empty() {
             d.global = Some(c.id.clone());
         }
-        d.aliases = vec![format!("{}/{}", ext.name, c.id)];
         out.push(d);
     }
     for e in &ext.effects {
@@ -162,20 +151,14 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
         );
         d.needs = e.needs.clone();
         d.after = e.after.clone();
-        d.aliases = vec![e.name()];
         out.push(d);
     }
-    // A command's bus id is `<namespace>.<name>`: its local id is the
-    // manifest's `<area>.<verb>`, its global the bus id.
+    // A command is named by its bus id (`<namespace>.<area>.<verb>`), its
+    // ref `command:<bus id>`.
     for c in &ext.commands {
-        let local = c
-            .name
-            .strip_prefix(&format!("{}.", ext.namespace))
-            .unwrap_or(&c.name);
-        let mut d = new(ContributionKind::Command, local, RunsOn::Call);
+        let mut d = new(ContributionKind::Command, &c.name, RunsOn::Call);
         d.needs = c.needs.clone();
         d.global = Some(c.name.clone());
-        d.aliases = vec![c.name.clone()];
         out.push(d);
     }
     for job in &ext.jobs {
@@ -194,7 +177,6 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
     for a in &ext.advisories {
         let mut d = new(ContributionKind::Advisory, &a.id, RunsOn::Agent);
         d.needs = a.needs.clone();
-        d.aliases = vec![format!("{}/{}", ext.name, a.id)];
         out.push(d);
     }
     // A skill's name is what an agent's runtime files it under: one per
@@ -214,7 +196,6 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
         );
         d.needs = i.needs.clone();
         d.global = Some(format!("{}/{}", i.capability, i.id));
-        d.aliases = vec![format!("{}/{}", i.capability, i.id)];
         out.push(d);
     }
     // A provider's id is its default instance's id, its refs' segment and
@@ -222,7 +203,6 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
     for p in &ext.providers {
         let mut d = new(ContributionKind::Provider, &p.id, RunsOn::Call);
         d.global = Some(p.id.clone());
-        d.aliases = vec![format!("{}/{}", ext.name, p.id)];
         out.push(d);
     }
     for m in &ext.measures {
@@ -462,8 +442,8 @@ mod tests {
         assert_eq!(
             ids,
             [
-                "acme/implementation/effort_policy.tidy",
-                "acme/implementation/ai_provider.tidy"
+                "implementation:acme/effort_policy.tidy",
+                "implementation:acme/ai_provider.tidy"
             ]
         );
     }
@@ -472,22 +452,20 @@ mod tests {
     fn a_model_is_a_query_named_by_its_view() {
         let ext = acme();
         let d = one(&ext, K::Model);
-        assert_eq!(d.id.to_string(), "acme-pr/model/prs");
+        assert_eq!(d.id.to_string(), "model:acme-pr/prs");
         assert_eq!(d.trigger, RunsOn::Query);
         assert_eq!(d.contract_version, Some(3));
         assert_eq!(d.global.as_deref(), Some("v_acme_pr_prs"));
-        assert_eq!(d.aliases, vec!["v_acme_pr_prs"]);
     }
 
     #[test]
     fn an_event_type_is_declared_and_named_by_its_type() {
         let ext = acme();
         let d = one(&ext, K::EventType);
-        assert_eq!(d.id.to_string(), "acme-pr/event_type/acme_pr.merged");
+        assert_eq!(d.id.to_string(), "event_type:acme_pr.merged");
         assert_eq!(d.trigger, RunsOn::Declared);
         assert_eq!(d.contract_version, Some(1));
         assert_eq!(d.global.as_deref(), Some("acme_pr.merged"));
-        assert_eq!(d.aliases, vec!["acme_pr.merged"]);
         assert!(d.source.line.is_some(), "{:?}", d.source);
     }
 
@@ -495,27 +473,22 @@ mod tests {
     fn a_ref_kind_is_declared_and_named_by_its_kind() {
         let ext = acme();
         let d = one(&ext, K::RefKind);
-        assert_eq!(d.id.to_string(), "acme-pr/ref_kind/acme_pr_pr");
+        assert_eq!(d.id.to_string(), "ref_kind:acme_pr_pr");
         assert_eq!(d.trigger, RunsOn::Declared);
         assert_eq!(d.global.as_deref(), Some("acme_pr_pr"));
-        assert_eq!(d.aliases, vec!["acme_pr_pr"]);
     }
 
     #[test]
     fn the_ui_kinds_are_mounted_and_claim_no_global_name() {
         let ext = acme();
         let lens = one(&ext, K::Lens);
-        assert_eq!(lens.id.to_string(), "acme-pr/lens/open");
-        assert_eq!(lens.aliases, vec!["lens:acme-pr/open"]);
+        assert_eq!(lens.id.to_string(), "lens:acme-pr/open");
         let page = one(&ext, K::Page);
-        assert_eq!(page.id.to_string(), "acme-pr/page/pr");
-        assert_eq!(page.aliases, vec!["page:ext.acme-pr.pr"]);
+        assert_eq!(page.id.to_string(), "page:acme-pr/pr");
         let panel = one(&ext, K::Panel);
-        assert_eq!(panel.id.to_string(), "acme-pr/panel/inbox");
-        assert_eq!(panel.aliases, vec!["acme-pr/inbox"]);
+        assert_eq!(panel.id.to_string(), "panel:acme-pr/inbox");
         let component = one(&ext, K::CustomComponent);
-        assert_eq!(component.id.to_string(), "acme-pr/custom_component/chart");
-        assert_eq!(component.aliases, vec!["acme-pr/chart"]);
+        assert_eq!(component.id.to_string(), "custom_component:acme-pr/chart");
         for d in [lens, page, panel, component] {
             assert_eq!(d.trigger, RunsOn::Mount, "{}", d.id);
             assert_eq!(d.global, None, "{}", d.id);
@@ -530,11 +503,10 @@ mod tests {
         assert_eq!(
             ids,
             vec![
-                "acme-pr/slot/effort.review.details-0",
-                "acme-pr/slot/vcs.commit.details-1"
+                "slot:acme-pr/effort.review.details-0",
+                "slot:acme-pr/vcs.commit.details-1"
             ]
         );
-        assert_eq!(slots[0].aliases, vec!["effort.review.details"]);
         for d in slots {
             assert_eq!((d.trigger.clone(), d.global.clone()), (RunsOn::Mount, None));
         }
@@ -544,8 +516,7 @@ mod tests {
     fn a_decorator_is_named_by_its_position() {
         let ext = acme();
         let d = one(&ext, K::Decorator);
-        assert_eq!(d.id.to_string(), "acme-pr/decorator/decorator-0");
-        assert_eq!(d.aliases, vec!["acme-pr/0"]);
+        assert_eq!(d.id.to_string(), "decorator:acme-pr/decorator-0");
         assert_eq!((d.trigger.clone(), d.global.clone()), (RunsOn::Mount, None));
     }
 
@@ -577,9 +548,8 @@ mod tests {
             .into_iter()
             .find(|d| d.id.kind == K::Replacement)
             .expect("described");
-        assert_eq!(d.id.to_string(), "tracker/replacement/work_item.board");
+        assert_eq!(d.id.to_string(), "replacement:tracker/work_item.board");
         assert_eq!(d.id.problem(), None);
-        assert_eq!(d.aliases, vec!["tracker/work_item.board"]);
         assert_eq!((d.trigger.clone(), d.global.clone()), (RunsOn::Mount, None));
     }
 
@@ -766,7 +736,7 @@ mod catalog_tests {
             .iter()
             .map(|d| d.id.to_string())
             .collect();
-        assert_eq!(ids, ["acme/skill/deploy", "acme/measure/acme.loc"]);
+        assert_eq!(ids, ["skill:acme/deploy", "measure:acme.loc"]);
         assert!(acme
             .contributions
             .iter()

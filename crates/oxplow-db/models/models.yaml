@@ -713,7 +713,7 @@
     - { name: "run_id", type: "TEXT", doc: "The run (a UUIDv7). `v_command_audit`-style records name it in their `run_id`." }
     - { name: "parent_run_id", type: "TEXT", doc: "The run it was nested in (a person's `oxplow.collector.sync`, an effect's composing script); NULL for a top-level run." }
     - { name: "extension", type: "TEXT", doc: "The extension it belongs to." }
-    - { name: "contribution", type: "TEXT", doc: "`<extension>/<kind>/<local>` (`v_contribution.id`)." }
+    - { name: "contribution", type: "TEXT", doc: "The contribution's ref (`v_contribution.ref`): `command:oxplow.review.accept`, `job:effort-review/review`." }
     - { name: "kind", type: "TEXT", doc: "`collector`, `effect`, `command`, `implementation`, …" }
     - { name: "version", type: "TEXT", doc: "The extension's declared `version:` when it ran; NULL when it declares none." }
     - { name: "generation", type: "TEXT", doc: "The extension catalog's generation it ran against (`v_*` query results name theirs the same way)." }
@@ -741,14 +741,14 @@
   tests:
     - { not_null: run_id }
     - { unique: run_id }
-- name: job
-  version: 2
+- name: job_run
+  version: 3
   key: [id]
-  description: "Each durable job an extension started (a `jobs:` declaration run through its `jobs.write/enqueue` command): which job, its state and its current attempt, and what that attempt has used so far. What it was asked and what it answered stay private to the extension (`jobs.read/snapshot`); what it streams is in `v_job_output`."
+  description: "Each job run: one execution of a job an extension declares (a `jobs:` declaration, run through its `jobs.write/enqueue` command) — which job, its state and its current attempt, and what that attempt has used so far. A job is the declaration (`job:<extension>/<id>`); a job run is one execution of it (`job_run:<id>`). What it was asked and what it answered stay private to the extension (`jobs.read/snapshot`); what it streams is in `v_job_run_output`."
   columns:
-    - { name: "id", type: "TEXT", doc: "The job (a UUIDv7): what `jobs.read/snapshot`, `jobs.write/cancel` and `oxplow.job.cancel` take." }
-    - { name: "job", type: "TEXT", doc: "Its declaration: `<extension>/job/<id>` (`v_contribution.id`)." }
-    - { name: "intent_key", type: "TEXT", doc: "What it is about: the `intentKey` it was started with, one job per key and declaration (`review:effort:eff12`). (v2)" }
+    - { name: "id", type: "TEXT", doc: "The run's id (a UUIDv7)." }
+    - { name: "job", type: "TEXT", doc: "The job it runs: `job:<extension>/<id>` (`v_contribution.ref`)." }
+    - { name: "intent_key", type: "TEXT", doc: "What it is about: the `intentKey` it was started with, one run per key and job (`review:effort:eff12`). (v2)" }
     - { name: "extension", type: "TEXT", doc: "The extension it belongs to." }
     - { name: "version", type: "TEXT", doc: "The extension's declared `version:` when it was started; NULL when it declares none." }
     - { name: "contract_version", type: "INTEGER", doc: "The job declaration's own `version:`." }
@@ -764,15 +764,16 @@
     - { name: "tool_calls", type: "INT", doc: "Tools the model called in its current attempt." }
     - { name: "input_tokens", type: "INT", doc: "Input tokens its current attempt's rounds reported (observed usage only)." }
     - { name: "output_tokens", type: "INT", doc: "Output tokens likewise." }
+    - { name: "ref", type: "TEXT", doc: "`job_run:<id>`: its ref — what `jobs.read/snapshot`, `jobs.write/cancel` and `oxplow.job_run.cancel` take. (v3)" }
   tests:
     - { not_null: id }
     - { unique: id }
-- name: job_output
+- name: job_run_output
   version: 1
   key: [job_id, attempt, seq]
   description: "What a job produced as it ran, in order: the model's reply text as it streamed (one row per short run of it), each tool the model called and what the tool answered, each model round's usage. Written while the attempt runs, so a lens over it follows a job live."
   columns:
-    - { name: "job_id", type: "TEXT", doc: "The job (`v_job.id`)." }
+    - { name: "job_id", type: "TEXT", doc: "The job (`v_job_run.id`)." }
     - { name: "attempt", type: "INTEGER", doc: "Its attempt." }
     - { name: "seq", type: "INTEGER", doc: "Order within the attempt, from 1." }
     - { name: "kind", type: "TEXT", doc: "`text`, `tool_call`, `tool_result` or `usage`." }
@@ -781,7 +782,7 @@
     - { name: "data", type: "TEXT", doc: "The row as JSON: `{ text }`, a tool call `{ id, name, arguments }`, a tool result `{ callId, result }` or `{ callId, error }`, usage `{ inputTokens, outputTokens, source, aiCallId }`." }
   tests:
     - { not_null: job_id }
-    - { relationships: { column: job_id, to: job, field: id } }
+    - { relationships: { column: job_id, to: job_run, field: id } }
 - name: event_type
   version: 1
   key: [event_type, v]
@@ -823,7 +824,7 @@
     - { name: "revisioned", type: "INTEGER", doc: "1 when a ref to one may carry `@rev`." }
     - { name: "wikilinks", type: "TEXT", doc: "JSON array of its `[[prefix:…]]` sugar (`git` for `commit`)." }
     - { name: "resolve", type: "TEXT", doc: "The view whose `title` names one, by its `ref` column; NULL for a core kind." }
-    - { name: "page", type: "TEXT", doc: "The page that opens one (`page:ext.<extension>.<page>`, given `?ref=`); NULL for a core kind." }
+    - { name: "page", type: "TEXT", doc: "The page that opens one (`page:<extension>/<page>`, given `?ref=`); NULL for a core kind." }
     - { name: "icon", type: "TEXT", doc: "Its icon's name (one of `REF_KIND_ICONS`); NULL for a core kind." }
     - { name: "searchable", type: "TEXT", doc: "The view whose rows (`ref`, `title`, `body`) the site-wide search indexes under the kind; NULL for a core kind (core indexes its own) and for an extension's kind that isn't searchable." }
   tests:
@@ -1108,14 +1109,14 @@
     - { name: "since", type: "TEXT", doc: "When its run was first deferred (RFC 3339)." }
     - { name: "touched", type: "TEXT", doc: "When a triggering event last arrived for it (RFC 3339): what `settle` counts from." }
 - name: contribution
-  version: 2
-  key: [id]
-  description: "Every enabled extension's contributions, one row each, as their descriptors say: a stable id (`<extension>/<kind>/<local>`), who contributed it and at what version, how it runs, what it needs, and the shared name it holds. What `list_extensions` counts and the reference documents. Kinds move onto descriptors one by one; a kind not yet listed here keeps its own listing."
+  version: 3
+  key: [ref]
+  description: "Every enabled extension's contributions, one row each, as their descriptors say: its ref (`<kind>:<extension>/<id>`, or `<kind>:<name>` for a command, metric, measure, dimension, event type or ref kind — the model that owns every contribution kind's ref), who contributed it and at what version, how it runs, what it needs, and the shared name it holds. What `list_extensions` counts and the reference documents. Kinds move onto descriptors one by one; a kind not yet listed here keeps its own listing."
   columns:
-    - { name: "id", type: "TEXT", doc: "`<extension>/<kind>/<local>`." }
+    - { name: "ref", type: "TEXT", doc: "Its ref: `job:effort-review/review`, `collector:triage/todos`, `command:oxplow.review.accept`. (v3, was `id`)" }
     - { name: "extension", type: "TEXT", doc: "The extension that declares it." }
     - { name: "kind", type: "TEXT", doc: "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `lens`, …" }
-    - { name: "local", type: "TEXT", doc: "Its id within the extension (a command's `<area>.<verb>`, a metric's key)." }
+    - { name: "local", type: "TEXT", doc: "Its id within the extension, or its global name (a command's bus id, a metric's key)." }
     - { name: "origin", type: "TEXT", doc: "`project` or `bundled`." }
     - { name: "version", type: "TEXT", doc: "The extension's `version:` (a bundled one's is oxplow's); NULL when it declares none." }
     - { name: "contract_version", type: "INTEGER", doc: "The contract's own version (a model's, an event type's), when it has one." }
@@ -1123,11 +1124,10 @@
     - { name: "needs", type: "TEXT", doc: "What it requires (capabilities, features, scopes), as a JSON array. Never what a person granted." }
     - { name: "after", type: "TEXT", doc: "What it runs after, as the manifest names them (JSON array)." }
     - { name: "global_name", type: "TEXT", doc: "The name it holds in a space every extension shares (a metric key, a skill name, `<capability>/<id>`); NULL when none." }
-    - { name: "aliases", type: "TEXT", doc: "Its other public forms (a command id, `lens:<ext>/<slug>`), as a JSON array." }
     - { name: "file", type: "TEXT", doc: "The manifest it's declared in." }
     - { name: "line", type: "INTEGER", doc: "Its line there, when the kind tracks lines." }
   tests:
-    - { not_null: id }
+    - { not_null: ref }
 - name: capability_provider
   version: 7
   description: "Each capability's implementations — core's, the built-ins extensions declare (`oxplow-bundled`'s defaults, `oxplow-foundation`'s agent harnesses, ACP agents and AI providers), running provider instances', and `none` for an optional capability — with the features each declares, which is active and why. A capability many implementations serve at once (`agent_harness`, `acp_adapter`, `ai_provider`) has every declared row active. A choice that isn't available (its extension disabled, its instance stopped) is listed with `available = 0`; the active row is then the fallback. Settings lists the choices from here, and the UI shows an implementation's enhancements only when its features allow them."

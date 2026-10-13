@@ -571,7 +571,7 @@ pub(crate) async fn run_reaction(
     let run = run
         .authorized(crate::grants::authority(
             &svc.approvals,
-            &format!("effect:{}", decl.name()),
+            &oxplow_domain::refs::build::effect_source(&decl.name()),
             approved,
             crate::grants::script_request(&decl.needs),
         ))
@@ -600,8 +600,12 @@ pub(crate) async fn run_reaction(
     if !runs {
         return Ok(Reacted::Nothing);
     }
-    let lineage =
-        crate::event_lineage::lineage(&svc.db, event, &format!("effect:{}", key.effect)).await?;
+    let lineage = crate::event_lineage::lineage(
+        &svc.db,
+        event,
+        &oxplow_domain::refs::build::effect_source(&key.effect),
+    )
+    .await?;
     // Its own run's events never trigger it, and aren't worth a record.
     if lineage.own {
         return Ok(Reacted::Nothing);
@@ -671,7 +675,7 @@ pub(crate) async fn run_reaction(
     let events = match own_events(
         &svc.vocabulary.current(),
         &ext.name,
-        &format!("effect:{}", key.effect),
+        &oxplow_domain::refs::build::effect_source(&key.effect),
         events,
     ) {
         Ok(events) => events,
@@ -1850,7 +1854,13 @@ mod tests {
             .into_iter()
             .find(|e| e.envelope.event_type == "contribution.disabled")
             .expect("the disable is logged");
-        assert_eq!(disabled.envelope.payload["kind"], json!("effect"));
+        assert!(
+            disabled.envelope.payload["contribution"]
+                .as_str()
+                .is_some_and(|c| c.starts_with("effect:")),
+            "{}",
+            disabled.envelope.payload
+        );
     }
 
     /// Skipped and proposed reactions aren't failures.

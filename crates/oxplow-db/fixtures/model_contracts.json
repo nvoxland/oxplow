@@ -4545,7 +4545,7 @@
         {
           "name": "page",
           "type": "TEXT",
-          "doc": "The page that opens one (`page:ext.<extension>.<page>`, given `?ref=`); NULL for a core kind."
+          "doc": "The page that opens one (`page:<extension>/<page>`, given `?ref=`); NULL for a core kind."
         },
         {
           "name": "icon",
@@ -9115,6 +9115,78 @@
       "key": [
         "id"
       ]
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "Its ref: `job:effort-review/review`, `collector:triage/todos`, `command:oxplow.review.accept`. (v3, was `id`)"
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that declares it."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `lens`, …"
+        },
+        {
+          "name": "local",
+          "type": "TEXT",
+          "doc": "Its id within the extension, or its global name (a command's bus id, a metric's key)."
+        },
+        {
+          "name": "origin",
+          "type": "TEXT",
+          "doc": "`project` or `bundled`."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "The extension's `version:` (a bundled one's is oxplow's); NULL when it declares none."
+        },
+        {
+          "name": "contract_version",
+          "type": "INTEGER",
+          "doc": "The contract's own version (a model's, an event type's), when it has one."
+        },
+        {
+          "name": "runs_on",
+          "type": "TEXT",
+          "doc": "How it comes to run, as JSON: `{on: events, types}`, `{on: schedule, every}`, `{on: run}`, `{on: call}`, `{on: query}`, `{on: mount}`, `{on: agent}`, `{on: declared}`."
+        },
+        {
+          "name": "needs",
+          "type": "TEXT",
+          "doc": "What it requires (capabilities, features, scopes), as a JSON array. Never what a person granted."
+        },
+        {
+          "name": "after",
+          "type": "TEXT",
+          "doc": "What it runs after, as the manifest names them (JSON array)."
+        },
+        {
+          "name": "global_name",
+          "type": "TEXT",
+          "doc": "The name it holds in a space every extension shares (a metric key, a skill name, `<capability>/<id>`); NULL when none."
+        },
+        {
+          "name": "file",
+          "type": "TEXT",
+          "doc": "The manifest it's declared in."
+        },
+        {
+          "name": "line",
+          "type": "INTEGER",
+          "doc": "Its line there, when the kind tracks lines."
+        }
+      ],
+      "key": [
+        "ref"
+      ]
     }
   },
   "extension_run": {
@@ -9138,7 +9210,7 @@
         {
           "name": "contribution",
           "type": "TEXT",
-          "doc": "`<extension>/<kind>/<local>` (`v_contribution.id`)."
+          "doc": "The contribution's ref (`v_contribution.ref`): `command:oxplow.review.accept`, `job:effort-review/review`."
         },
         {
           "name": "kind",
@@ -9463,7 +9535,7 @@
         {
           "name": "job_id",
           "type": "TEXT",
-          "doc": "The job (`v_job.id`)."
+          "doc": "The job (`v_job_run.id`)."
         },
         {
           "name": "attempt",
@@ -9539,6 +9611,156 @@
       ],
       "key": [
         "target"
+      ]
+    }
+  },
+  "job_run": {
+    "3": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "The run's id (a UUIDv7)."
+        },
+        {
+          "name": "job",
+          "type": "TEXT",
+          "doc": "The job it runs: `job:<extension>/<id>` (`v_contribution.ref`)."
+        },
+        {
+          "name": "intent_key",
+          "type": "TEXT",
+          "doc": "What it is about: the `intentKey` it was started with, one run per key and job (`review:effort:eff12`). (v2)"
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension it belongs to."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "The extension's declared `version:` when it was started; NULL when it declares none."
+        },
+        {
+          "name": "contract_version",
+          "type": "INTEGER",
+          "doc": "The job declaration's own `version:`."
+        },
+        {
+          "name": "operation",
+          "type": "TEXT",
+          "doc": "What it runs: `ai.complete_typed`."
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "doc": "`queued`, `running`, `succeeded`, `failed`, `cancelled` or `interrupted` (it stopped without a known end: oxplow restarted, or it lost its lease)."
+        },
+        {
+          "name": "attempt",
+          "type": "INTEGER",
+          "doc": "Its current attempt, 0 before the first starts."
+        },
+        {
+          "name": "cancellation_requested",
+          "type": "INT",
+          "doc": "1 once someone asked it to stop."
+        },
+        {
+          "name": "invoker",
+          "type": "TEXT",
+          "doc": "Who started it, as an event source: `human`, `agent:thr3`, `effect:<ext>/<id>`, …"
+        },
+        {
+          "name": "run_id",
+          "type": "TEXT",
+          "doc": "The run that started it (`v_extension_run.run_id`)."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "When it was started (RFC 3339)."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "When its state last changed (RFC 3339)."
+        },
+        {
+          "name": "ai_calls",
+          "type": "INT",
+          "doc": "Model rounds its current attempt has finished."
+        },
+        {
+          "name": "tool_calls",
+          "type": "INT",
+          "doc": "Tools the model called in its current attempt."
+        },
+        {
+          "name": "input_tokens",
+          "type": "INT",
+          "doc": "Input tokens its current attempt's rounds reported (observed usage only)."
+        },
+        {
+          "name": "output_tokens",
+          "type": "INT",
+          "doc": "Output tokens likewise."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`job_run:<id>`: its ref — what `jobs.read/snapshot`, `jobs.write/cancel` and `oxplow.job_run.cancel` take. (v3)"
+        }
+      ],
+      "key": [
+        "id"
+      ]
+    }
+  },
+  "job_run_output": {
+    "1": {
+      "columns": [
+        {
+          "name": "job_id",
+          "type": "TEXT",
+          "doc": "The job (`v_job_run.id`)."
+        },
+        {
+          "name": "attempt",
+          "type": "INTEGER",
+          "doc": "Its attempt."
+        },
+        {
+          "name": "seq",
+          "type": "INTEGER",
+          "doc": "Order within the attempt, from 1."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`text`, `tool_call`, `tool_result` or `usage`."
+        },
+        {
+          "name": "at",
+          "type": "TEXT",
+          "doc": "When it was written (RFC 3339)."
+        },
+        {
+          "name": "text",
+          "type": "TEXT",
+          "doc": "A `text` row's text; NULL for the rest."
+        },
+        {
+          "name": "data",
+          "type": "TEXT",
+          "doc": "The row as JSON: `{ text }`, a tool call `{ id, name, arguments }`, a tool result `{ callId, result }` or `{ callId, error }`, usage `{ inputTokens, outputTokens, source, aiCallId }`."
+        }
+      ],
+      "key": [
+        "job_id",
+        "attempt",
+        "seq"
       ]
     }
   }

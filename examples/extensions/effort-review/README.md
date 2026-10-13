@@ -26,7 +26,7 @@ cancelled review is still commented, marked as cancelled.
 | `review.ask` / `review.status` / `review.cancel` | The job's lifecycle, through oxplow's jobs service. |
 | `review-on-finish` | On `effort.finished` (not `effort.closed`: the evidence is refreshed between the two), asks for the review of an effort with a work item. |
 | `publish-review` | On `contribution.job.completed`, reads the review back and comments it on the effort's work item. |
-| `reviews` model | `v_effort_review_reviews`: each review, its effort and work item, its state and what the model wrote. **Exported** as `effort-review/model/reviews` v1, so another extension can build on it. |
+| `reviews` model | `v_effort_review_reviews`: each review, its effort and work item, its state and what the model wrote. **Exported** as `model:effort-review/reviews` v2, so another extension can build on it. |
 | Lenses | **Effort Reviews** and **Finished Efforts** (with **Review**), both under Work. |
 
 ## What it needs
@@ -62,7 +62,7 @@ Another extension reads the reviews through the exported model:
 
 ```yaml
 imports:
-  - { id: reviews, contribution: effort-review/model/reviews, version: 1, optional: true }
+  - { id: reviews, contribution: model:effort-review/reviews, version: 2, optional: true }
 ```
 
 and `SELECT … FROM import_ref('reviews')` in its lenses or models. With

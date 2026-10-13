@@ -1,6 +1,7 @@
 /// Pure view model for Settings → Data (DataSection.tsx): what data the
 /// semantic layer holds, who provides it, and how much. See
 /// `.context/semantic-layer.md`.
+import { refOf } from "../refs/ref.js";
 import type { CollectorListing } from "../api.js";
 import type { DataEntity, ProjectProgram, ProviderImpact } from "../tauri-bridge/generated/bindings.js";
 
@@ -178,7 +179,7 @@ function baseRow(p: ProjectProgram): BaseRow {
     // when it reads SQL.
     const tools = [...p.commands, ...(p.scopes.includes("sql.read") ? ["query_sql"] : [])];
     return {
-      key: `job:${p.name}`,
+      key: refOf("job", p.name),
       label: `Job ${p.name}`,
       command: [p.program, tools.length > 0 ? `its model may call: ${tools.join(", ")}` : null]
         .filter((line): line is string => line !== null)

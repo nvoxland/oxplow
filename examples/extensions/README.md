@@ -22,7 +22,7 @@ that run through public commands and the SDK only:
 
 - **AI review over evidence** (effort-review). An effect starts a job on
   `effort.finished`; the job's tool reads the effort's evidence; the
-  answer streams into `v_job_output`; oxplow's Jobs command cancels it and
+  answer streams into `v_job_run_output`; oxplow's Jobs command cancels it and
   the partial review is kept; an effect comments it on the work item.
   Test: `the_effort_review_example_reviews_evidence_and_can_be_cancelled`.
 - **A durable workflow with its own UI** (triage). A decision survives a
@@ -50,7 +50,7 @@ Fixed while building them:
 
 - Nothing linked a job to what it was about: a job's intent key is now
   its subject, read back as the snapshot's `intentKey` and
-  `v_job.intent_key`.
+  `v_job_run.intent_key`.
 - A read command's fixture could only check what it composed; it can
   now check `expect: { result }`.
 - An author couldn't see how an import resolved; `extension check` and
@@ -101,7 +101,7 @@ Still open:
 - **Names:** an extension's command namespace is its name with `-` as `_`
   (`effort_review.review.ask`), while its contribution ids and model
   views keep or translate the dash differently
-  (`effort-review/job/review`, `v_effort_review_reviews`).
+  (`job:effort-review/review`, `v_effort_review_reviews`).
 - **The compare-exchange stamp isn't readable** through a public read, so
   a stale write can only be tested as `expected: null` against existing
   state.

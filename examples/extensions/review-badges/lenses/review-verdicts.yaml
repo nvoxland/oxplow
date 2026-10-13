@@ -3,7 +3,7 @@ description: The latest model review of each work item — the effort reviewed, 
 query: |
   WITH latest AS (
     SELECT r.work_item, r.effort, r.state, r.reviewed_at, r.review,
-           row_number() OVER (PARTITION BY r.work_item ORDER BY r.reviewed_at DESC, r.job DESC) AS n
+           row_number() OVER (PARTITION BY r.work_item ORDER BY r.reviewed_at DESC, r.job_run DESC) AS n
     FROM import_ref('reviews') r
     WHERE r.work_item IS NOT NULL
   )

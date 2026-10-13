@@ -28,15 +28,30 @@ capability, a feature, a scope); a **grant** is what a person approved
 
 Every contribution has one `oxplow_domain::contribution::Descriptor`,
 built at load from the kind's typed declaration
-(`extensions::descriptors::describe`, `Extension.contributions`): a
-stable id `<extension>/<kind>/<local>` (`ContributionId`; one grammar for
+(`extensions::descriptors::describe`, `Extension.contributions`): its
+identity (`ContributionId { extension, kind, local }`; one grammar for
 `local`, dots only for the kinds whose ids are dotted), its owner
 (extension, origin and the extension's `version:`),
-how it runs (`RunsOn`), its needs and `after`, the **global name** it
-takes in a space extensions share (a metric key, a fact collector's id)
-and the public forms it already had (`aliases`). The kinds' table
-(`contribution::KINDS`: manifest key, title, whether two
+how it runs (`RunsOn`), its needs and `after`, and the **global name** it
+takes in a space extensions share (a metric key, a fact collector's id).
+The kinds' table (`contribution::KINDS`: manifest key, title, whether two
 extensions may share a name) is the one place those facts live.
+
+**A contribution's only public name is its ref** (`ContributionId::reference`,
+its `Display`; [refs.md](./refs.md) "Using refs"): `<kind>:<extension>/<id>`
+— `job:effort-review/review`, `collector:triage/todos`,
+`lens:acme/blocked`, `page:github/pr`, `model:effort-review/reviews` — or,
+for a kind whose names are already global (`ContributionKind::global_name`:
+command, measure, metric, dimension, event type, ref kind),
+`<kind>:<name>` — `command:oxplow.review.accept`, `metric:acme.todos`.
+Storage (`v_contribution.ref`, `v_extension_run.contribution`,
+`v_job_run.job`), events, manifests (imports, exports, `where:`), approval
+keys and the desktop carry that string; every contribution kind registers
+its ref kind from `KINDS` (`refs::kind::core_kinds`), so a new kind is
+linkable with no other change. Text names a contribution as a
+`ContributionRef` (`FromStr`); a local ref says its owner, a global one is
+resolved by the catalog (who declares that name). Starlark reads one with
+`ref.contribution(r)` → `{ kind, extension, id }`.
 
 At load, `check_ids` turns an id that breaks the grammar into a load
 error, and the folder name must be a valid extension name
@@ -91,7 +106,9 @@ model references and withholds contributions before catalog publication.
 Exports are explicit opt-in. A stable contribution kind or a legacy alias
 does not make a contribution public.
 
-- Targets use canonical `ContributionId` (`<extension>/<kind>/<local>`).
+- Targets are contribution refs (`model:effort-review/reviews`). An
+  import of a globally named kind (`command:acme.pr.merge`) is of
+  whichever extension declares that name.
   An import has a consumer-local binding name, a positive integer contract
   version and required/optional status. Binding names are lowercase letters,
   digits, dashes and underscores, starting with a letter and ending with a
@@ -497,7 +514,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     message}`; the message is `label: count`, `N rows`, or `label: value`.
   - **Pages** (P6.G2, target §11.3): `pages: [{ id, title, icon?,
     category, lens }]` — a lens shown full-page at
-    `page:ext.<extension>.<id>` (`Extension.pages`, `ExtensionPage`;
+    `page:<extension>/<id>` (`Extension.pages`, `ExtensionPage`;
     checked at load in `parse_pages`: a kebab-case, unique id, a launcher
     category, a lens that exists), listed in the launcher under its
     category (`components/extensionLauncher.ts`).
@@ -2233,7 +2250,7 @@ payload. It shows; it never acts.
 Every run of extension code — and every bus run — carries one
 `RunContext` (`oxplow_domain::run`; the app's constructors are
 `run_context.rs`): its run id (a UUIDv7), its parent run, the
-contribution it belongs to (`<ext>/<kind>/<local>`, the extension's
+contribution it belongs to (its ref, the extension's
 `version`, the catalog generation it was built against), its actor,
 anchors, subject and cause, its mode, its budget, its cancel flag and
 its scope trace.
@@ -2824,7 +2841,7 @@ helpers consult and `useRefKinds` subscribes to:
 - `pageKindIconComponent` / `pageKindLabel` fall back to a kind's icon
   (`REF_KIND_ICONS`, a lucide component per allowed name — a Rust test
   keeps the two lists equal) and label;
-- `refFromTabId("acme_pr:12")` opens `page:ext.acme.pr?ref=acme_pr:12`
+- `refFromTabId("acme_pr:12")` opens `page:acme/pr?ref=acme_pr:12`
   (`extPageRef` carries params; `ExtensionPageView` hands them to the
   lens as `initialParams`);
 - `preprocessWikilinks` turns `[[acme_pr:12]]` / `[[pr:12]]` into a link
@@ -2872,7 +2889,7 @@ design, so building it is filling in, not deciding:
   ref keeps resolving as now: `WHERE ref = :ref AND rev IS NULL`).
   `KindSpec::revisioned` follows from it.
 - **The page:** its lens declares a `rev` param, and the page opens as
-  `page:ext.<ext>.<page>?ref=<ref>&rev=<rev>` (`rev` omitted: current).
+  `page:<ext>/<page>?ref=<ref>&rev=<rev>` (`rev` omitted: current).
 - **Refs:** `[[pr:12@git:abc1234]]` and `github_pr:12@git:abc1234` parse
   through the one ref grammar (refs.md); the registry's `validate`
   accepts `@rev` only for a revisioned kind, as for core ones. A rev is
@@ -3383,6 +3400,9 @@ Every contribution that runs — an external provider instance, a collector, an 
   approves it**, and revoking the approval or disabling the effect stops new
   ones. It runs as an anchorless effect (the event has no thread), so the
   writer gate doesn't apply. oxplow never sends the item to an agent.
+- **The events** are `contribution.disabled@1 { contribution, reason }` and
+  `contribution.enabled@1 { contribution }`, `contribution` the ref
+  (`collector:triage/todos`, `effect:…`, `provider:…`).
 - **Enabling.** Only a person: `oxplow.contribution.enable { extension, kind,
   contribution }` (human-only). It names the kind — a provider and a
   collector may share an id; there must be a failed one of that kind (or
@@ -4052,7 +4072,9 @@ collector-run completion events.
 
 ## Jobs
 
-A **job** is model work an extension asks for that runs outside any
+A **job** is what an extension declares (`job:<extension>/<id>`); a **job
+run** is one execution of it (`job_run:<id>`, a row of `v_job_run`). A job
+is model work an extension asks for that runs outside any
 transaction and outlives a restart (`operation: ai.complete_typed`). It
 streams its reply as it comes, may call tools the extension declares,
 can be cancelled mid-reply, and says how it ended with an event. The
@@ -4114,7 +4136,7 @@ commands:
   linked to the run that asked. Each model round streams on the role
   (`AiCompute::stream_typed`, a recorded computation: the same request
   reads its recorded answer, replayed at once). What comes is the
-  attempt's **output** (`extension_job_output`, `v_job_output`): text
+  attempt's **output** (`extension_job_output`, `v_job_run_output`): text
   coalesced into a row every 100 ms (or 4 KiB), each tool call and what
   it answered, each round's usage. Each write is its own short
   transaction — none is held while the model writes — and the table
@@ -4134,14 +4156,15 @@ commands:
 - **Its result**: `{ parts, finishReason, rounds, usage: { inputTokens,
   outputTokens }, aiCalls }` — `parts` is the last round's reply; a
   failure adds `error`; a cancelled job keeps the parts it had, with
-  `stopped: cancelled`. `jobs.read/snapshot` returns `{ id, job,
-  intentKey, version, state, attempt, cancellationRequested, text,
-  toolCalls, result }`, `text` being what the current attempt has
-  streamed so far. The intent key is the job's subject (one job per key
-  and declaration), so an effect on `contribution.job.completed` knows
-  what the answer is about; `v_job.intent_key` (v2) publishes it.
+  `stopped: cancelled`. Enqueue returns `{ jobRun, state, created }`;
+  `jobs.read/snapshot { job_run }` returns `{ jobRun, job, intentKey,
+  version, state, attempt, cancellationRequested, text, toolCalls, result
+  }`, `text` being what the current attempt has streamed so far (`jobRun`
+  the run's ref, `job` the job's). The intent key is the run's subject (one
+  run per key and job), so an effect on `contribution.job.completed` knows
+  what the answer is about; `v_job_run.intent_key` publishes it.
 - **Cancel.** `jobs.write/cancel` (the extension's own jobs) or
-  `oxplow.job.cancel` (a person's, any job: `invokers` human and lens).
+  `oxplow.job_run.cancel { job_run }` (a person's, any run: `invokers` human and lens).
   A queued job ends at once. A running one has its run cancelled: the
   model's connection is dropped within 100 ms
   (`oxplow_ai::client::unless_cancelled`), the attempt closes
@@ -4170,19 +4193,21 @@ commands:
   repeat of an intent it already has is not a new one). No database
   transaction is held while a model streams. These are pinned in
   `extension_job_hardening_tests.rs`.
-- **Its end** is the event `contribution.job.completed@1 { job_id,
-  contribution, version, attempt, fence, outcome: succeeded | failed |
-  cancelled | interrupted }`, logged once, at the real end, in the
+- **Its end** is the event `contribution.job.completed@1 { job_run, job,
+  version, attempt, fence, outcome: succeeded | failed | cancelled |
+  interrupted }` (`job_run` and `job` refs; an effect keeps to one job with
+  `where: { job: "job:<extension>/<id>" }`), logged once, at the real end, in the
   transaction that ended it (however it ended: completion, cancel,
   recovery; an attempt queued again logs nothing) with the anchors and
   cause the job was asked with. It carries no request or result: an
-  effect reads the result with `scope("jobs.read", { id })` and writes
+  effect reads the result with `scope("jobs.read", { job_run })` and writes
   what it says (the triage example's `publish-summary`).
-- **Seeing jobs.** `v_job` (state, attempt, rounds, tool calls, tokens
-  so far) and `v_job_output` are published models, so a lens or
-  component over them follows a job live. oxplow-bundled's **Jobs** lens
-  (Activity) lists the running and the last day's, with Cancel; a row
-  opens its **Job Output**.
+- **Seeing job runs.** `v_job_run` (state, attempt, rounds, tool calls,
+  tokens so far, its `ref`) and `v_job_run_output` are published models, so
+  a lens or component over them follows a run live. oxplow-bundled's **Job
+  Runs** lens (Activity) lists the running and the last day's, with Cancel;
+  a row opens its **Job Run Output**. A job run acts as `Actor::Job`, its
+  source the run's ref (`job_run:<id>`); attempt and fence are on the row.
 - **What a job can't do**: drive an agent session, ask a person (a
   command that needs confirmation is refused, never proposed), write
   (its tools read), run core's commands, or call a model its approval

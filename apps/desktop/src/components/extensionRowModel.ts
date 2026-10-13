@@ -1,4 +1,5 @@
 /** Pure row presentation for the Settings → Extensions list. */
+import { contributionOf } from "../refs/ref.js";
 import type { CollectorListing, Extension, ExtensionReview, ScriptServices, ServiceListing, Trigger } from "../tauri-bridge/generated/bindings.js";
 import { readsChanged } from "../lens/lensRerun.js";
 
@@ -258,7 +259,7 @@ export const LATEST_RUNS_SQL =
 
 export interface RunRow {
   extension: string;
-  /** `<extension>/<kind>/<local>`. */
+  /** its ref (`<kind>:<extension>/<id>`, `command:<bus id>`). */
   contribution: string;
   outcome: string;
   error: string | null;
@@ -313,12 +314,13 @@ export function lastRuns(rows: readonly RunRow[], when: (iso: string) => string 
   }
   return Object.fromEntries(
     [...shown].map(([extension, r]) => {
-      const [, kind = "", ...local] = r.contribution.split("/");
+      const named = contributionOf(r.contribution);
+      const [kind, local] = named ? [named.kind, named.id] : ["", r.contribution];
       const warn = (SEVERITY[r.outcome] ?? 0) > 0;
       const reason = !warn ? null : r.outcome === "denied" ? (deniedReason(r.decisions) ?? r.error) : r.error;
       return [
         extension,
-        { text: `Last run: ${r.outcome} · ${kind} ${local.join("/")} · ${when(r.finished_at)}`, reason, warn },
+        { text: `Last run: ${r.outcome} · ${kind} ${local} · ${when(r.finished_at)}`, reason, warn },
       ];
     }),
   );

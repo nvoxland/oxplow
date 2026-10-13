@@ -36,7 +36,7 @@ test("pages and lenses carry their params as a query", () => {
   expect(pageRef("tasks")).toBe("page:tasks");
   expect(pageRef("diff-view", { effort: "eff9" })).toBe("page:diff-view?effort=eff9");
   expect(extPageRef("acme", "board", { ref: "work_item:oxplow:tsk1" })).toBe(
-    "page:ext.acme.board?ref=work_item:oxplow:tsk1",
+    "page:acme/board?ref=work_item:oxplow:tsk1",
   );
   expect(lensRef("acme/blocked", { stream_id: 2 })).toBe("lens:acme/blocked?stream_id=2");
 });

@@ -100,7 +100,7 @@ def transform(x):
     key = "decisions:" + effort
     if x["input"].get("again"):
         asked = scope("sql.read", {
-                "sql": "SELECT count(*) AS n FROM v_job WHERE intent_key = :key OR intent_key LIKE :key || '@%'",
+                "sql": "SELECT count(*) AS n FROM v_job_run WHERE intent_key = :key OR intent_key LIKE :key || '@%'",
                 "params": {"key": key},
             })
         key += "@" + str(asked[0]["n"] + 1)

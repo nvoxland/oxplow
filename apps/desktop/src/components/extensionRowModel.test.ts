@@ -323,7 +323,7 @@ describe("lastRuns", () => {
   const when = (iso: string) => `<${iso}>`;
   const run = (over: Partial<RunRow> = {}): RunRow => ({
     extension: "acme",
-    contribution: "acme/collector/pull",
+    contribution: "collector:acme/pull",
     outcome: "ok",
     error: null,
     finished_at: "2026-10-10T09:00:00Z",
@@ -334,8 +334,8 @@ describe("lastRuns", () => {
   test("a failing contribution isn't hidden behind another's later ok run", () => {
     const got = lastRuns(
       [
-        run({ contribution: "acme/collector/pull", outcome: "failed", error: "rate limited", finished_at: "2026-10-10T07:00:00Z" }),
-        run({ contribution: "acme/effect/note", outcome: "ok", finished_at: "2026-10-10T09:00:00Z" }),
+        run({ contribution: "collector:acme/pull", outcome: "failed", error: "rate limited", finished_at: "2026-10-10T07:00:00Z" }),
+        run({ contribution: "effect:acme/note", outcome: "ok", finished_at: "2026-10-10T09:00:00Z" }),
       ],
       when,
     );
@@ -347,20 +347,20 @@ describe("lastRuns", () => {
   });
 
   test("of several warnings, denied beats stale beats failed, then the newest", () => {
-    const at = (c: string, outcome: string, h: number) =>
-      run({ contribution: `acme/${c}`, outcome, error: outcome, finished_at: `2026-10-10T0${h}:00:00Z` });
+    const at = (contribution: string, outcome: string, h: number) =>
+      run({ contribution, outcome, error: outcome, finished_at: `2026-10-10T0${h}:00:00Z` });
     const worst = (rows: RunRow[]) => lastRuns(rows, when).acme!.text;
-    expect(worst([at("collector/a", "failed", 9), at("effect/b", "stale", 5), at("command/c", "denied", 1)])).toContain("denied · command c");
-    expect(worst([at("collector/a", "failed", 9), at("effect/b", "stale", 5)])).toContain("stale · effect b");
-    expect(worst([at("collector/a", "failed", 3), at("effect/b", "failed", 8)])).toContain("failed · effect b");
+    expect(worst([at("collector:acme/a", "failed", 9), at("effect:acme/b", "stale", 5), at("command:acme.c", "denied", 1)])).toContain("denied · command acme.c");
+    expect(worst([at("collector:acme/a", "failed", 9), at("effect:acme/b", "stale", 5)])).toContain("stale · effect b");
+    expect(worst([at("collector:acme/a", "failed", 3), at("effect:acme/b", "failed", 8)])).toContain("failed · effect b");
   });
 
   test("an extension's most recent run, named by its contribution", () => {
     const got = lastRuns(
       [
-        run({ contribution: "acme/effect/note", finished_at: "2026-10-10T08:00:00Z" }),
-        run({ contribution: "acme/collector/pull", finished_at: "2026-10-10T09:00:00Z" }),
-        run({ extension: "beta", contribution: "beta/command/ship.it", finished_at: "2026-10-09T09:00:00Z" }),
+        run({ contribution: "effect:acme/note", finished_at: "2026-10-10T08:00:00Z" }),
+        run({ contribution: "collector:acme/pull", finished_at: "2026-10-10T09:00:00Z" }),
+        run({ extension: "beta", contribution: "command:beta.ship.it", finished_at: "2026-10-09T09:00:00Z" }),
       ],
       when,
     );
@@ -369,7 +369,7 @@ describe("lastRuns", () => {
       reason: null,
       warn: false,
     });
-    expect(got.beta!.text).toBe("Last run: ok · command ship.it · <2026-10-09T09:00:00Z>");
+    expect(got.beta!.text).toBe("Last run: ok · command beta.ship.it · <2026-10-09T09:00:00Z>");
   });
 
   test("failed, denied and stale are warnings, and say why", () => {

@@ -471,14 +471,16 @@ impl Envelope {
 // Core types, v1
 // ---------------------------------------------------------------------------
 
-/// A job ended, however it ended. What it was asked and answered stay
+/// A job run ended, however it ended. What it was asked and answered stay
 /// private job data: a consumer reads them through its extension's
-/// `jobs.read` (`scope("jobs.read", { id })`).
+/// `jobs.read` (`scope("jobs.read", { job_run })`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ContributionJobCompletedV1 {
-    pub job_id: String,
-    pub contribution: String,
+    /// The run (`job_run:<id>`).
+    pub job_run: String,
+    /// The job it ran (`job:<extension>/<id>`).
+    pub job: String,
     pub version: Option<u32>,
     /// Its last attempt (0 when it was cancelled before one started).
     pub attempt: u32,
@@ -876,7 +878,7 @@ pub enum EffectOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EffectResultV2 {
-    /// The effect: `<extension>/<id>`.
+    /// The effect (`effect:<extension>/<id>`).
     pub effect: String,
     /// The event it reacted to (`event:<id>`); absent on a v1 result.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -937,7 +939,7 @@ pub enum EffectOrigin {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EffectResultV3 {
-    /// The effect: `<extension>/<id>`.
+    /// The effect (`effect:<extension>/<id>`).
     pub effect: String,
     /// The event it reacted to (`event:<id>`); absent on a v1 result.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -970,7 +972,7 @@ impl EventType for EffectResultAtV3 {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EffectResultV4 {
-    /// The effect: `<extension>/<id>`.
+    /// The effect (`effect:<extension>/<id>`).
     pub effect: String,
     /// The event it reacted to (`event:<id>`); absent on a v1 result.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2322,12 +2324,9 @@ impl EventType for CodeDiagnosticsChanged {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ContributionDisabledV1 {
-    /// `extension:<extension>`.
-    pub extension: String,
-    /// The contribution within it: a provider's, collector's or effect's id.
+    /// The contribution (`collector:<extension>/<id>`, `effect:…`,
+    /// `provider:…`).
     pub contribution: String,
-    /// `provider`, `collector` or `effect`.
-    pub kind: String,
     /// What stopped it.
     pub reason: String,
 }
@@ -2344,11 +2343,9 @@ impl EventType for ContributionDisabled {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ContributionEnabledV1 {
-    /// `extension:<extension>`.
-    pub extension: String,
+    /// The contribution (`collector:<extension>/<id>`, `effect:…`,
+    /// `provider:…`).
     pub contribution: String,
-    /// `provider`, `collector` or `effect`.
-    pub kind: String,
 }
 
 pub struct ContributionEnabled;

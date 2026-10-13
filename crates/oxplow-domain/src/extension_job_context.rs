@@ -205,13 +205,10 @@ impl JobExecutionIdentity {
         self.token
     }
 
+    /// The run's ref (`job_run:<id>`): what its actor's events and audit
+    /// rows name as their source.
     pub fn source(&self) -> String {
-        format!(
-            "job:{}:{}:{}",
-            self.job_id.as_str(),
-            self.token.attempt,
-            self.token.fence
-        )
+        crate::refs::build::job_run_ref(self.job_id.as_str())
     }
 
     pub const fn may_confirm(&self) -> bool {

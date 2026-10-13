@@ -61,7 +61,7 @@
       "description": "Effect-specific detail, opaque to the log."
     },
     "effect": {
-      "description": "The effect: `<extension>/<id>`.",
+      "description": "The effect (`effect:<extension>/<id>`).",
       "type": "string"
     },
     "event": {

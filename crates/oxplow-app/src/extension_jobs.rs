@@ -35,10 +35,11 @@ pub struct EnqueueInput {
     pub request: Value,
 }
 
+/// A job run, by its ref (`job_run:<id>`).
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct JobInput {
-    pub id: String,
+    pub job_run: String,
 }
 
 /// How long past its declared `timeout` a job's worker may still be
@@ -234,9 +235,11 @@ impl ExtensionJobs {
             let (project, package): (i64, i64) = ctx
                 .conn
                 .query_row(
-                    "SELECT count(*), COALESCE(sum(contribution_id LIKE ?1), 0)
-                FROM extension_job WHERE state IN ('queued', 'running')",
-                    [format!("{}/job/%", new.job.owner.contribution.extension)],
+                    // A job's extension is its run's.
+                    "SELECT count(*), COALESCE(sum(r.extension = ?1), 0)
+                FROM extension_job j LEFT JOIN extension_run r ON r.run_id = j.run_id
+                WHERE j.state IN ('queued', 'running')",
+                    [&new.job.owner.contribution.extension],
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .map_err(oxplow_db::map_sql_err)?;
@@ -250,7 +253,9 @@ impl ExtensionJobs {
             EnqueueResult::Created(job) => (true, job),
             EnqueueResult::Existing(job) => (false, job),
         };
-        Ok(json!({"id": stored.job.id.as_str(), "state": stored.job.state, "created": created}))
+        Ok(
+            json!({"jobRun": job_run_ref(&stored.job.id), "state": stored.job.state, "created": created}),
+        )
     }
 
     pub fn snapshot(
@@ -259,7 +264,7 @@ impl ExtensionJobs {
         run: &RunContext,
         input: &JobInput,
     ) -> Result<Value, CommandError> {
-        let id = job_id(&input.id)?;
+        let id = job_id(&input.job_run)?;
         let extension = self
             .ownership
             .with_owner(run, "jobs.read", |extension| extension.name.clone())
@@ -283,7 +288,7 @@ impl ExtensionJobs {
             None
         };
         // What the current attempt has streamed so far: its text, and how
-        // many tools it called (`v_job_output` has every row).
+        // many tools it called (`v_job_run_output` has every row).
         let output = if metadata.job.attempt > 0 {
             extension_job_store::output_tx(conn, &id, metadata.job.attempt, 0, usize::MAX)
                 .map_err(store_error)?
@@ -300,7 +305,7 @@ impl ExtensionJobs {
             .filter(|row| row.kind == oxplow_domain::extension_job::JobOutputKind::ToolCall)
             .count();
         Ok(json!({
-            "id": id.as_str(),
+            "jobRun": job_run_ref(&id),
             "job": metadata.job.owner.contribution.to_string(),
             "intentKey": metadata.job.intent_key.as_str(),
             "version": metadata.job.owner.contract_version,
@@ -348,7 +353,7 @@ impl ExtensionJobs {
         if ctx.conn.is_autocommit() {
             return Err(denied("job cancellation requires an audited transaction"));
         }
-        let id = job_id(&input.id)?;
+        let id = job_id(&input.job_run)?;
         let extension = self
             .ownership
             .with_owner(ctx.run, "jobs.write", |extension| extension.name.clone())
@@ -374,7 +379,7 @@ impl ExtensionJobs {
         if ctx.conn.is_autocommit() {
             return Err(denied("job cancellation requires an audited transaction"));
         }
-        let id = job_id(&input.id)?;
+        let id = job_id(&input.job_run)?;
         let metadata = extension_job_store::metadata_tx(ctx.conn, &id)
             .map_err(store_error)?
             .ok_or_else(|| invalid("job was not found"))?;
@@ -406,7 +411,7 @@ impl ExtensionJobs {
             .map_err(store_error)?;
             announce_tx(conn, &self.vocabulary.current(), &changed.job)?;
         }
-        Ok(json!({ "id": job.job.id.as_str(), "cancellationRequested": !ended }))
+        Ok(json!({ "jobRun": job_run_ref(&job.job.id), "cancellationRequested": !ended }))
     }
 
     /// Start the scheduler (once), as boot does after activation; tool
@@ -480,8 +485,8 @@ pub(crate) fn announce_tx(
     let context = extension_job_store::get_context_tx(conn, &job.id)
         .map_err(|e| oxplow_domain::DomainError::Invalid(e.to_string()))?;
     let payload = ContributionJobCompletedV1 {
-        job_id: job.id.as_str().into(),
-        contribution: job.owner.contribution.to_string(),
+        job_run: oxplow_domain::refs::build::job_run_ref(job.id.as_str()),
+        job: job.owner.contribution.to_string(),
         version: job.owner.contract_version,
         attempt: job.attempt,
         fence: job.fence,
@@ -511,11 +516,18 @@ fn job_problem() -> crate::vocabulary_reactor::VocabularyErrors {
         vec!["job operation registry candidate is invalid".into()],
     )])
 }
-fn job_id(id: &str) -> Result<JobId, CommandError> {
+/// The run a `job_run:<id>` ref names.
+fn job_id(job_run: &str) -> Result<JobId, CommandError> {
+    let id = oxplow_domain::refs::build::id_of(job_run, oxplow_domain::refs::kind::JOB_RUN)
+        .map_err(|e| invalid(&e.to_string()))?;
     if id.len() > 64 {
-        return Err(invalid("invalid job identity"));
+        return Err(invalid("invalid job run identity"));
     }
-    serde_json::from_value(Value::String(id.into())).map_err(|_| invalid("invalid job identity"))
+    serde_json::from_value(Value::String(id)).map_err(|_| invalid("invalid job run identity"))
+}
+
+fn job_run_ref(id: &JobId) -> String {
+    oxplow_domain::refs::build::job_run_ref(id.as_str())
 }
 fn check_stream(run: &RunContext, context: &JobInvocationContext) -> Result<(), CommandError> {
     if run.actor().confined_to_own_stream()

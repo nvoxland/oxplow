@@ -152,7 +152,12 @@ async fn until(fx: &Fixture, id: &str, done: impl Fn(&Value) -> bool) -> Value {
 async fn until_on(svc: &crate::Services, id: &str, done: impl Fn(&Value) -> bool) -> Value {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
-        let snapshot = run_on(svc, "triage.summary.result", json!({ "id": id })).await;
+        let snapshot = run_on(
+            svc,
+            "triage.summary.result",
+            json!({ "job_run": oxplow_domain::refs::build::job_run_ref(id) }),
+        )
+        .await;
         if done(&snapshot) {
             return snapshot;
         }
@@ -169,14 +174,16 @@ async fn an_approved_job_runs_and_its_result_is_read_back() {
     let fx = fixture(true).await;
     let queued = run(&fx, "triage.summary.ask", ask("item-1")).await;
     assert_eq!(queued["created"], json!(true), "{queued}");
-    let id = queued["id"].as_str().unwrap().to_owned();
+    let id = oxplow_domain::refs::build::id_of(queued["jobRun"].as_str().unwrap(), "job_run")
+        .unwrap()
+        .to_owned();
 
     let again = run(&fx, "triage.summary.ask", ask("item-1")).await;
-    assert_eq!(again["id"], queued["id"], "one intent is one job");
+    assert_eq!(again["jobRun"], queued["jobRun"], "one intent is one job");
     assert_eq!(again["created"], json!(false));
 
     let done = until(&fx, &id, |s| s["state"] == json!("succeeded")).await;
-    assert_eq!(done["job"], json!("triage/job/summarize"), "{done}");
+    assert_eq!(done["job"], json!("job:triage/summarize"), "{done}");
     assert!(
         done["result"].to_string().contains("hello"),
         "the model's answer is the result: {done}"
@@ -205,10 +212,14 @@ async fn an_approved_job_runs_and_its_result_is_read_back() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_job_runs_on_its_extensions_ai_profile() {
     let fx = fixture(true).await;
-    let id = run(&fx, "triage.summary.ask", ask_as("item-p", "sort")).await["id"]
-        .as_str()
-        .unwrap()
-        .to_owned();
+    let id = oxplow_domain::refs::build::id_of(
+        run(&fx, "triage.summary.ask", ask_as("item-p", "sort")).await["jobRun"]
+            .as_str()
+            .unwrap(),
+        "job_run",
+    )
+    .unwrap()
+    .to_owned();
     until(&fx, &id, |s| s["state"] == json!("succeeded")).await;
     let roles = fx
         .svc
@@ -241,16 +252,30 @@ async fn a_job_runs_on_its_extensions_ai_profile() {
 #[tokio::test(flavor = "multi_thread")]
 async fn an_unapproved_job_waits_and_cancelling_it_stops_it() {
     let fx = fixture(false).await;
-    let id = run(&fx, "triage.summary.ask", ask("item-2")).await["id"]
-        .as_str()
-        .unwrap()
-        .to_owned();
+    let id = oxplow_domain::refs::build::id_of(
+        run(&fx, "triage.summary.ask", ask("item-2")).await["jobRun"]
+            .as_str()
+            .unwrap(),
+        "job_run",
+    )
+    .unwrap()
+    .to_owned();
     tokio::time::sleep(Duration::from_millis(1500)).await;
-    let waiting = run(&fx, "triage.summary.result", json!({ "id": id })).await;
+    let waiting = run(
+        &fx,
+        "triage.summary.result",
+        json!({ "job_run": oxplow_domain::refs::build::job_run_ref(&id) }),
+    )
+    .await;
     assert_eq!(waiting["state"], json!("queued"), "{waiting}");
     assert!(fx.seen.lock().unwrap().is_empty(), "nothing was sent");
 
-    let cancelled = run(&fx, "triage.summary.cancel", json!({ "id": id })).await;
+    let cancelled = run(
+        &fx,
+        "triage.summary.cancel",
+        json!({ "job_run": oxplow_domain::refs::build::job_run_ref(&id) }),
+    )
+    .await;
     assert_eq!(cancelled["cancellationRequested"], json!(true));
     let done = until(&fx, &id, |s| s["state"] == json!("cancelled")).await;
     assert_eq!(done["cancellationRequested"], json!(true), "{done}");
@@ -283,10 +308,14 @@ async fn a_recorded_job_runs_after_a_restart() {
     let before = open().await;
     configure(&before, base);
     start(&before, false).await;
-    let id = run_on(&before, "triage.summary.ask", ask("item-3")).await["id"]
-        .as_str()
-        .unwrap()
-        .to_owned();
+    let id = oxplow_domain::refs::build::id_of(
+        run_on(&before, "triage.summary.ask", ask("item-3")).await["jobRun"]
+            .as_str()
+            .unwrap(),
+        "job_run",
+    )
+    .unwrap()
+    .to_owned();
     before.jobs.shutdown();
     drop(before);
 

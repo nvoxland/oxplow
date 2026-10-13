@@ -207,7 +207,11 @@ pub fn effect_step_key(
     hash.update(input.to_string().as_bytes());
     let digest = hash.finalize();
     let short: String = digest.iter().take(8).map(|b| format!("{b:02x}")).collect();
-    format!("effect:{}:{}:{index}:{short}", run.effect, run.event_id)
+    format!(
+        "{}:{}:{index}:{short}",
+        oxplow_domain::refs::build::effect_source(&run.effect),
+        run.event_id
+    )
 }
 
 #[derive(Clone)]

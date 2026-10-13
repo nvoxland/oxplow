@@ -1,6 +1,6 @@
-title: Job Output
-description: What a job produced as it ran, in order — its model's text as it streamed, each tool it called and what the tool answered, and each round's tokens.
-params: [{ name: job_id }]
+title: Job Run Output
+description: What a job run produced as it ran, in order — its model's text as it streamed, each tool it called and what the tool answered, and each round's tokens.
+params: [{ name: job_run }]
 query: |
   SELECT o.attempt,
          o.seq,
@@ -14,8 +14,8 @@ query: |
            WHEN 'usage' THEN printf('%d in, %d out', json_extract(o.data, '$.inputTokens'),
                                     json_extract(o.data, '$.outputTokens'))
          END AS content
-  FROM v_job_output o
-  WHERE o.job_id = :job_id
+  FROM v_job_run_output o
+  WHERE o.job_id = (SELECT id FROM v_job_run WHERE ref = :job_run)
   ORDER BY o.attempt, o.seq
 viz: table
 columns:

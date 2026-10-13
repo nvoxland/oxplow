@@ -1,8 +1,8 @@
 title: Effort Reviews
-description: Each finished effort a model reviewed — its work item, the review job's state and what it wrote. Open the output to follow a running one; Cancel stops it.
+description: Each finished effort a model reviewed — its work item, its review's state and what it wrote. Open the output to follow a running one; Cancel stops it.
 query: |
-  SELECT job,
-         'lens:oxplow-bundled/job-output?job_id=' || job AS output_ref,
+  SELECT job_run,
+         'lens:oxplow-bundled/job-run-output?job_run=' || job_run AS output_ref,
          effort,
          work_item,
          state,
@@ -18,6 +18,6 @@ columns:
   - { key: opening, label: Review }
   - { key: reviewed_at, label: Changed }
 actions:
-  - { id: cancel, label: Cancel, command: effort_review.review.cancel, input: { id: "{{row.job}}" }, row: true }
+  - { id: cancel, label: Cancel, command: effort_review.review.cancel, input: { job_run: "{{row.job_run}}" }, row: true }
 empty: No effort has been reviewed yet. A review starts when an effort with a work item finishes, or from Review on the Finished Efforts lens.
 launcher: { category: Work }

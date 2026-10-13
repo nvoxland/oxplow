@@ -290,8 +290,8 @@ commands:
     invokers: { human: true, agent: false, lens: false }
     confirm: always
   # jobs.manage
-  - name: job.cancel
-    summary: "Stop a running or queued job, whichever extension started it (`v_job`). A queued one ends at once; a running one drops its model call and ends `cancelled` with what it had written."
+  - name: job_run.cancel
+    summary: "Stop a running or queued job run (`job_run:<id>`), whichever extension started it (`v_job_run`). A queued one ends at once; a running one drops its model call and ends `cancelled` with what it had written."
     scope: jobs.manage
     op: cancel
     invokers: { human: true, agent: false, lens: true }

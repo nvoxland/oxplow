@@ -157,7 +157,7 @@ mod tests {
         assert_eq!(
             rows(&db).await,
             vec![(
-                "acme/effect/note".into(),
+                "effect:acme/note".into(),
                 "ok".into(),
                 Some(3),
                 "e1".into(),

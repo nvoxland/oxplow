@@ -84,7 +84,7 @@ export interface RefKind {
   wikilinks: string[];
   /** The view whose `title` names one, by `ref`. */
   resolve: string;
-  /** The page that opens one: `page:ext.<extension>.<page>`. */
+  /** The page that opens one: `page:<extension>/<page>`. */
   page: string;
   icon: string;
 }

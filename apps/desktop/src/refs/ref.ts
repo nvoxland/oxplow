@@ -222,9 +222,26 @@ export function pageRef(name: string, params?: Record<string, ParamValue>): stri
   return params ? withParams(head, params) : head;
 }
 
-/** An extension's page: `page:ext.<extension>.<page>[?params]`. */
+/** An extension's page: the contribution `page:<extension>/<page>[?params]`
+ *  (a shell route has no slash). */
 export function extPageRef(extension: string, page: string, params?: Record<string, ParamValue>): string {
-  return pageRef(`ext.${extension}.${page}`, params);
+  return pageRef(`${extension}/${page}`, params);
+}
+
+/** The kinds of contribution named globally (a command's bus id, a metric
+ *  key): their refs carry no extension. Every other contribution's ref is
+ *  `<kind>:<extension>/<id>` (`contribution::ContributionKind::global_name`). */
+const GLOBAL_CONTRIBUTION_KINDS = new Set(["command", "measure", "metric", "dimension", "event_type", "ref_kind"]);
+
+/** A contribution's ref as its kind, its extension (null for a globally
+ *  named kind) and its id; null for a string that isn't one. */
+export function contributionOf(text: string): { kind: string; extension: string | null; id: string } | null {
+  const r = parseRef(text);
+  if (!r) return null;
+  if (GLOBAL_CONTRIBUTION_KINDS.has(r.kind)) return { kind: r.kind, extension: null, id: r.id };
+  const slash = r.id.indexOf("/");
+  if (slash <= 0 || slash === r.id.length - 1) return null;
+  return { kind: r.kind, extension: r.id.slice(0, slash), id: r.id.slice(slash + 1) };
 }
 
 /** A lens: `lens:<extension>/<slug>[?params]`; params are the caller's,

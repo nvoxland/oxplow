@@ -710,7 +710,7 @@ pub struct ContributionImpact {
     pub kind: oxplow_domain::contribution::ContributionKind,
     /// The kind as a person names it (`Event type`).
     pub title: String,
-    /// `<extension>/<kind>/<local>`.
+    /// its ref (`<kind>:<extension>/<id>`, `command:<bus id>`).
     pub id: String,
     /// The part of the id after the kind: what a row is called.
     pub local: String,
@@ -3346,7 +3346,7 @@ mod tests {
             contributions: vec![ContributionImpact {
                 kind: oxplow_domain::contribution::ContributionKind::Metric,
                 title: "Metric".into(),
-                id: "shared/metric/acme.todos".into(),
+                id: "metric:acme.todos".into(),
                 local: "acme.todos".into(),
                 change: Change::Changed,
                 differs: vec!["global".into(), "needs".into()],
@@ -3490,7 +3490,7 @@ mod tests {
             seen,
             vec![
                 (
-                    "shared/event_type/acme.opened".to_string(),
+                    "event_type:acme.opened".to_string(),
                     Change::Changed,
                     vec![
                         "version".to_string(),
@@ -3499,8 +3499,8 @@ mod tests {
                         "global".into()
                     ]
                 ),
-                ("shared/page/gone".into(), Change::Removed, vec![]),
-                ("shared/panel/new".into(), Change::Added, vec![]),
+                ("page:shared/gone".into(), Change::Removed, vec![]),
+                ("panel:shared/new".into(), Change::Added, vec![]),
             ]
         );
         assert_eq!(rows[1].title, "Page");

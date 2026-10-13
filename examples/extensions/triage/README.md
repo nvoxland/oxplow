@@ -34,7 +34,7 @@ collector `todos` (collectors/todos.star):
 ## A summary job, and a board you decide on
 
 - **A job** (`jobs: summarize`): `triage.summary.ask` has a model summarize
-  the TODOs outside any transaction. Its reply streams into `v_job_output`
+  the TODOs outside any transaction. Its reply streams into `v_job_run_output`
   as it comes; its model may call `triage.todos.in_file` (a read-only
   command that admits a job) or `query_sql` before answering; when it
   ends, the `publish-summary` effect writes the answer to the wiki.

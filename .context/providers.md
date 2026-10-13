@@ -1138,7 +1138,7 @@ instance** — a write counts once however often it is sent again under
 its idempotency key (an effect's automatic retries, a person's retry of
 the same composition: `Instance::failed_keys`, tsk913), so one outage
 that a reaction retries through doesn't halt it: it stops, and the row (`disabled`, its reason) and
-`contribution.disabled@1 { extension, contribution, kind, reason }` commit
+`contribution.disabled@1 { contribution, reason }` (`contribution` the provider's ref) commit
 together (source `system:extensions`, subject `extension:<extension>`). So is
 a handshake that doesn't match the approved declarations. The row is
 what keeps it off, across generations and restarts, and one whose row

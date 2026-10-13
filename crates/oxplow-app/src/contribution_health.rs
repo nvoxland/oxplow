@@ -72,13 +72,11 @@ fn disabled_event(key: &ContributionKey, reason: &str) -> Envelope {
     Envelope::typed::<ContributionDisabled>(
         SOURCE,
         &ContributionDisabledV1 {
-            extension: extension_ref(&key.extension),
-            contribution: key.contribution.clone(),
-            kind: key.kind.to_string(),
+            contribution: key.id().to_string(),
             reason: reason.to_string(),
         },
     )
-    .with_subject([extension_ref(&key.extension)])
+    .with_subject([key.id().to_string(), extension_ref(&key.extension)])
 }
 
 impl ContributionHealth {
@@ -170,12 +168,10 @@ impl ContributionHealth {
                 let event = Envelope::typed::<ContributionEnabled>(
                     source.clone(),
                     &ContributionEnabledV1 {
-                        extension: extension_ref(&key.extension),
-                        contribution: key.contribution.clone(),
-                        kind: key.kind.to_string(),
+                        contribution: key.id().to_string(),
                     },
                 )
-                .with_subject([extension_ref(&key.extension)]);
+                .with_subject([key.id().to_string(), extension_ref(&key.extension)]);
                 oxplow_db::event_log_store::append_tx(tx, &vocabulary.current(), &event).map(|_| ())
             })
             .await
@@ -385,8 +381,7 @@ mod tests {
         ));
         let disabled = events(&db, "contribution.disabled").await;
         assert_eq!(disabled.len(), 1);
-        assert_eq!(disabled[0]["extension"], "extension:tracker");
-        assert_eq!(disabled[0]["contribution"], "fake");
+        assert_eq!(disabled[0]["contribution"], "provider:tracker/fake");
         assert_eq!(h.disabled_reason(&k).await.unwrap(), Some(reason));
 
         h.enable(&k, "human").await.unwrap();

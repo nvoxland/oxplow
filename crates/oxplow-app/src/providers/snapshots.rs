@@ -445,7 +445,7 @@ impl SnapshotProvider for ExternalSnapshots {
                 revision,
                 elapsed_ms: started.elapsed().as_millis() as u64,
                 budget_ms: request.budget.map(|b| b.as_millis() as u64),
-                source: format!("provider:{}", self.instance.name),
+                source: oxplow_domain::refs::build::provider_source(&self.instance.name),
                 provider: Some(self.instance.id.clone()),
                 contents: self.contents,
                 handle: Some(marked.handle),

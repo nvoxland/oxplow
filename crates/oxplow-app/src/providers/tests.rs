@@ -394,8 +394,7 @@ async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it()
     assert!(!running(&fx.svc, "fake"));
     let disabled = logged(&fx, "contribution.disabled").await;
     assert_eq!(disabled.len(), 1);
-    assert_eq!(disabled[0]["extension"], "extension:tracker");
-    assert_eq!(disabled[0]["contribution"], "fake");
+    assert_eq!(disabled[0]["contribution"], "provider:tracker/fake");
     assert_eq!(disabled[0]["reason"], reason.as_str());
 
     // The log keeps it off.

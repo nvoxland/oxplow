@@ -74,7 +74,8 @@ pub const BUILT_IN: &str = "oxplow:commit-or-switch";
 
 /// Whether `source` is a policy's own run: reacting to it would loop.
 fn is_a_policys(source: &str) -> bool {
-    source.starts_with(&format!("effect:{CAPABILITY}:"))
+    oxplow_domain::refs::build::effect_of_source(source)
+        .is_some_and(|e| e.starts_with(&format!("{CAPABILITY}:")))
 }
 
 fn storage(e: impl std::fmt::Display) -> DomainError {
@@ -541,9 +542,12 @@ impl AsyncEventConsumer for EffortPolicyConsumer {
                     grant: None,
                     enforcement: crate::grants::enforcement(),
                 });
-        let lineage =
-            crate::event_lineage::lineage(&self.db, event, &format!("effect:{CAPABILITY}:{id}"))
-                .await?;
+        let lineage = crate::event_lineage::lineage(
+            &self.db,
+            event,
+            &oxplow_domain::refs::build::effect_source(&format!("{CAPABILITY}:{id}")),
+        )
+        .await?;
         if lineage.refusal().is_some() {
             return Ok(());
         }

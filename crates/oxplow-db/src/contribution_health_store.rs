@@ -21,6 +21,18 @@ pub struct ContributionKey {
     pub kind: &'static str,
 }
 
+impl ContributionKey {
+    /// The contribution it keys: its ref is how events and readers name it.
+    pub fn id(&self) -> oxplow_domain::contribution::ContributionId {
+        let kind = oxplow_domain::contribution::KINDS
+            .iter()
+            .map(|k| k.kind)
+            .find(|k| k.segment() == self.kind)
+            .expect("a health row's kind is a kind of contribution");
+        oxplow_domain::contribution::ContributionId::new(&self.extension, kind, &self.contribution)
+    }
+}
+
 /// One `contribution_health` row.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]

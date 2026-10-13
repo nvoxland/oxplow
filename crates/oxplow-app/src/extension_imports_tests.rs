@@ -73,13 +73,13 @@ fn put_in(dir: &Path, e: &Ext) {
     );
     if let Some((visibility, version)) = e.export {
         manifest += &format!(
-            "exports:\n  - {{ contribution: {name}/model/items, version: {version}, visibility: {visibility} }}\n"
+            "exports:\n  - {{ contribution: model:{name}/items, version: {version}, visibility: {visibility} }}\n"
         );
     }
     let mut sql = "SELECT ref FROM ref('work_item')";
     if let Some((target, version, optional)) = e.import {
         manifest += &format!(
-            "imports:\n  - {{ id: dep, contribution: {target}/model/items, version: {version}, optional: {optional} }}\n"
+            "imports:\n  - {{ id: dep, contribution: model:{target}/items, version: {version}, optional: {optional} }}\n"
         );
         sql = "SELECT ref FROM import_ref('dep')";
         write(
@@ -177,7 +177,7 @@ async fn a_breaking_version_mismatch_blocks_only_the_consumer() {
     activate(&svc).await;
     let why = problem(&svc, "cons");
     assert!(
-        why.contains("`dep`") && why.contains("prod/model/items"),
+        why.contains("`dep`") && why.contains("model:prod/items"),
         "{why}"
     );
     assert!(!readable(&svc, "v_cons_items").await);
@@ -197,7 +197,7 @@ async fn a_missing_required_producer_blocks_only_the_consumer() {
     activate(&svc).await;
     let why = problem(&svc, "cons");
     assert!(
-        why.contains("`dep`") && why.contains("gone/model/items") && why.contains("isn't here"),
+        why.contains("`dep`") && why.contains("model:gone/items") && why.contains("isn't here"),
         "{why}"
     );
     assert!(!readable(&svc, "v_cons_plain").await);

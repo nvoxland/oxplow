@@ -25,11 +25,11 @@ def transform(x):
     payload = x["event"]["payload"]
     if payload["outcome"] != "succeeded":
         return {"skip": "the job didn't succeed (" + payload["outcome"] + ")"}
-    job = scope("jobs.read", {"id": payload["job_id"]})
-    key = job.get("intentKey") or ""
+    run = scope("jobs.read", {"job_run": payload["job_run"]})
+    key = run.get("intentKey") or ""
     if not key.startswith(PREFIX):
         return {"skip": "not an effort's decisions: " + key}
-    answer = job.get("result") or {}
+    answer = run.get("result") or {}
     reply = "".join([p.get("text", "") for p in answer.get("parts", []) if p.get("type") == "text"])
     found = proposals(reply)
     if found == None or type(found.get("decisions")) != "list":

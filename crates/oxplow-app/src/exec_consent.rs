@@ -362,12 +362,21 @@ impl ProjectProgram {
             ProgramKind::Collector => oxplow_domain::refs::build::of("collector", &self.name),
             ProgramKind::AcpAgent => format!("acp:{}", self.name),
             ProgramKind::Advisories => format!("advisories:{}", self.name),
-            ProgramKind::Provider => format!("provider:{}", self.name),
-            ProgramKind::Effect => format!("effect:{}", self.name),
+            ProgramKind::Provider => oxplow_domain::refs::build::of(
+                oxplow_domain::contribution::ContributionKind::Provider.segment(),
+                &self.name,
+            ),
+            ProgramKind::Effect => oxplow_domain::refs::build::of(
+                oxplow_domain::contribution::ContributionKind::Effect.segment(),
+                &self.name,
+            ),
             ProgramKind::Component => format!("component:{}", self.name),
             ProgramKind::AiProvider => format!("ai_provider:{}", self.name),
             ProgramKind::EffortPolicy => format!("effort_policy:{}", self.name),
-            ProgramKind::Job => format!("job:{}", self.name),
+            ProgramKind::Job => oxplow_domain::refs::build::of(
+                oxplow_domain::contribution::ContributionKind::Job.segment(),
+                &self.name,
+            ),
         }
     }
 

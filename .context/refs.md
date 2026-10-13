@@ -92,6 +92,26 @@ never change an existing case's expectation without changing both parsers.
 
 ## The kind registry (built)
 
+**Contribution kinds are ref kinds.** `core_kinds()` registers one ref
+kind per kind of contribution, from `contribution::KINDS`
+(`refs::kind::contribution_kind`): `<kind>:<extension>/<id>` (`job`,
+`effect`, `collector`, `ai_profile`, `lens`, `page`, `model`, `panel`, …)
+or `<kind>:<name>` for the globally named ones (`command`, `measure`,
+`metric`, `dimension`, `event_type`, `ref_kind`). A page is also a shell
+route (`page:settings`), a model also one of core's (`model:effort`), and
+a collector also a project's or the built-in catalog's
+(`collector:project/repo.scan_clone`, `collector:built-in/…`) until those
+become extensions. `job_run` names one run of a job (`job_run:<uuid>`);
+`ai_model` a language model by the name its harness reports.
+
+**Event sources aren't refs.** An event's `source` says who emitted it —
+`human`, `system:<component>`, `agent:thr3`, `provider:<instance>`,
+`effect:<extension>/<id>`, `effect:effort_policy:<id>`, `job_run:<id>` —
+and some coincide with refs, but a provider instance or an effort policy
+isn't one. They are built beside the refs (`refs::build::{system_source,
+effect_source, provider_source}`, `Actor::source()`) and read with
+`effect_of_source`, never spelled elsewhere.
+
 `crates/oxplow-domain/src/refs/kind.rs`: `KindSpec { kind, id_regex,
 revisioned, provider_scoped, wikilink_prefixes }` and
 `KindRegistry` (`register` refuses a collision; `validate` checks a ref's
@@ -111,9 +131,8 @@ capability's active provider.
 `extension` (`extension:<name>`, an extension by its name) is the subject
 of a contribution's `contribution.disabled@1` / `contribution.enabled@1`
 and of an effect's `effect.result`; `build::extension_ref`.
-A `page` id is a shell route (`page:settings`) or an extension's page
-(`page:ext.<extension>.<page>`, P6.G2): its id pattern is exactly those
-two shapes, so a `.` appears only in `ext.<extension>.<page>`.
+A `page` id is a shell route (`page:settings`) or an extension's page,
+the contribution `page:<extension>/<id>`; a slash tells them apart.
 `answer` (a lens an agent showed on a thread, `answer:12`, P6.C1) is
 registered with a numeric id; `build::answer_ref` and `build::lens_ref`
 (`lens:<extension>/<slug>`) build them. `proposal` (a command waiting for

@@ -23,7 +23,7 @@ intent:
 # version, the two lenses below are withheld (a warning in Settings →
 # Extensions) and nothing else changes.
 imports:
-  - { id: reviews, contribution: effort-review/model/reviews, version: 1, optional: true }
+  - { id: reviews, contribution: model:effort-review/reviews, version: 2, optional: true }
 ui:
   slots:
     - { slot: work_item.detail.body, lens: item-review }

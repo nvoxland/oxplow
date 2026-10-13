@@ -373,9 +373,14 @@ impl Instance {
         // Read from the instance: it is the record's source, so a
         // consumer can tell whose records it is (a knowledge store's
         // projection follows only the active one's).
-        Envelope::new(event_type, v, format!("provider:{}", self.id), payload)
-            .map(|e| e.with_subject([own]))
-            .map_err(|e| e.to_string())
+        Envelope::new(
+            event_type,
+            v,
+            oxplow_domain::refs::build::provider_source(&self.id),
+            payload,
+        )
+        .map(|e| e.with_subject([own]))
+        .map_err(|e| e.to_string())
     }
 
     /// Append `batch` and the checkpoint covering it, in one transaction —

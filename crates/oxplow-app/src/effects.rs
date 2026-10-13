@@ -481,7 +481,7 @@ pub fn finished_tx(
     let extension = key.effect.split('/').next().unwrap_or_default();
     let event_ref = oxplow_domain::refs::build::event_ref(&key.event_id.to_string());
     let mut result = oxplow_domain::Envelope::typed::<EffectResult>(
-        format!("effect:{}", key.effect),
+        oxplow_domain::refs::build::effect_source(&key.effect),
         &EffectResultV4 {
             effect: key.effect.clone(),
             event: Some(event_ref.clone()),

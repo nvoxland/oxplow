@@ -18,8 +18,11 @@ use crate::verbs::{self, Answer};
 /// `item`'s `work_item.recorded`, as oxplow's tasks answer with it.
 pub fn recorded(item: WorkItemRecord) -> Envelope {
     let subject = item.item_ref.clone();
-    Envelope::typed::<WorkItemRecorded>("provider:oxplow", &WorkItemRecordedV2 { item })
-        .with_subject([subject])
+    Envelope::typed::<WorkItemRecorded>(
+        oxplow_domain::refs::build::provider_source(crate::refs::PROVIDER),
+        &WorkItemRecordedV2 { item },
+    )
+    .with_subject([subject])
 }
 
 /// oxplow's task list's verbs over `db`.

@@ -70,7 +70,8 @@ pub fn lineage_tx(
             own = true;
             break;
         }
-        let effect_run = env.event_type == "command.executed" && env.source.starts_with("effect:");
+        let effect_run = env.event_type == "command.executed"
+            && oxplow_domain::refs::build::effect_of_source(&env.source).is_some();
         let collector_run = env.event_type == "collector.synced" && env.payload["trigger"] == "on";
         if effect_run || collector_run {
             depth += 1;

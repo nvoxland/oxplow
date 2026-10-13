@@ -90,8 +90,6 @@ pub struct PublicBinding {
     pub version: u32,
     pub available: bool,
     pub unavailable_reason: Option<imports::UnavailableReason>,
-    /// Published references of the resolved contribution; never lookup keys.
-    pub references: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
@@ -595,15 +593,6 @@ fn resolve(extensions: &mut [Extension], publish: bool) {
             }
         }
     }
-    let descriptors: BTreeMap<_, _> = extensions
-        .iter()
-        .filter(|ext| ext.enabled && !blocked.contains(&ext.name))
-        .flat_map(|ext| {
-            ext.contributions
-                .iter()
-                .map(|descriptor| (descriptor.id.clone(), descriptor.aliases.clone()))
-        })
-        .collect();
     for ext in extensions {
         ext.public_contracts.blocked = ext.enabled && blocked.contains(&ext.name);
         ext.public_contracts.activation_index = resolution
@@ -630,14 +619,6 @@ fn resolve(extensions: &mut [Extension], publish: bool) {
                             imports::ImportStatus::Available => imports::UnavailableReason::Blocked,
                             imports::ImportStatus::Unavailable { reason } => reason.clone(),
                         })
-                    },
-                    references: if available {
-                        descriptors
-                            .get(&binding.target)
-                            .cloned()
-                            .unwrap_or_default()
-                    } else {
-                        Vec::new()
                     },
                 }
             })
@@ -669,10 +650,7 @@ fn remove_guarded(ext: &mut Extension, id: &ContributionId) {
         }),
         ContributionKind::Lens => ext.lenses.retain(|lens| lens.slug != local),
         ContributionKind::Collector => ext.collectors.retain(|collector| collector.id != local),
-        ContributionKind::Command => {
-            let name = format!("{}.{local}", ext.namespace);
-            ext.commands.retain(|command| command.name != name);
-        }
+        ContributionKind::Command => ext.commands.retain(|command| command.name != local),
         ContributionKind::Job => ext.jobs.retain(|job| job.id != local),
         ContributionKind::Effect => ext.effects.retain(|effect| effect.id != local),
         ContributionKind::Advisory => ext.advisories.retain(|advisory| advisory.id != local),
@@ -731,10 +709,7 @@ fn prune_mounts(
                         removed.insert(ContributionId::new(
                             &ext.name,
                             ContributionKind::Command,
-                            command
-                                .name
-                                .strip_prefix(&format!("{}.", ext.namespace))
-                                .unwrap_or(&command.name),
+                            &command.name,
                         ));
                         return false;
                     }

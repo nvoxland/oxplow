@@ -570,7 +570,7 @@ mod tests {
             listed.rows,
             vec![vec![
                 SqlCell::Text("acme".into()),
-                SqlCell::Text("page:ext.acme.pr".into()),
+                SqlCell::Text("page:acme/pr".into()),
                 SqlCell::Text("git-pull-request".into())
             ]]
         );

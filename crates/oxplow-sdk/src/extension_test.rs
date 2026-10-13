@@ -71,7 +71,7 @@ pub struct TestReport {
     /// The throwaway's activation generation the examples ran against.
     pub generation: Option<String>,
     /// What the extension contributes, by public id
-    /// (`<extension>/<kind>/<local>`).
+    /// (its ref (`<kind>:<extension>/<id>`, `command:<bus id>`)).
     pub contributes: Vec<String>,
     /// What it contributes that this host can't run — a person sees it in
     /// the app (pages, panels, slots, decorators, replacements, skills).
@@ -538,7 +538,7 @@ async fn approve_effects(host: &Host, ext: &Extension) -> Result<(), String> {
 /// `jobs.read/snapshot` command once it ends: against `expect` — `{ state,
 /// result?, text?, toolCalls?, output?, effects?, commands?, pages? }`
 /// (`$any` matches): its streamed `text`, how many tools its model called
-/// and its output rows (`[{ kind, … }]`, `v_job_output`). Its model calls
+/// and its output rows (`[{ kind, … }]`, `v_job_run_output`). Its model calls
 /// answer with the fixture model's replies; with `cancel: true` in its
 /// input, the job is cancelled through the extension's `jobs.write/cancel`
 /// command once its first output is written. An expectation of `effects`,
@@ -631,7 +631,9 @@ async fn job_example(
             return;
         }
     };
-    let Some(job) = queued.get("id").and_then(Value::as_str).map(str::to_string) else {
+    let Some(job) = queued.get("jobRun").and_then(Value::as_str).and_then(|r| {
+        oxplow_domain::refs::build::id_of(r, oxplow_domain::refs::kind::JOB_RUN).ok()
+    }) else {
         report
             .errors
             .push(format!("{shown}:1: job `{id}`: {queued} names no job"));
@@ -650,7 +652,12 @@ async fn job_example(
             let snap = host
                 .svc
                 .commands
-                .run(&Actor::Human, &snapshot, json!({ "id": job }), false)
+                .run(
+                    &Actor::Human,
+                    &snapshot,
+                    json!({ "job_run": oxplow_domain::refs::build::job_run_ref(&job) }),
+                    false,
+                )
                 .await
                 .map(|out| out.result)
                 .unwrap_or(Value::Null);
@@ -668,7 +675,12 @@ async fn job_example(
         if let Err(e) = host
             .svc
             .commands
-            .run(&asker, &cancel, json!({ "id": job }), false)
+            .run(
+                &asker,
+                &cancel,
+                json!({ "job_run": oxplow_domain::refs::build::job_run_ref(&job) }),
+                false,
+            )
             .await
         {
             report
@@ -682,7 +694,12 @@ async fn job_example(
         let state = host
             .svc
             .commands
-            .run(&Actor::Human, &snapshot, json!({ "id": job }), false)
+            .run(
+                &Actor::Human,
+                &snapshot,
+                json!({ "job_run": oxplow_domain::refs::build::job_run_ref(&job) }),
+                false,
+            )
             .await
             .map(|out| out.result);
         match state {
@@ -706,7 +723,7 @@ async fn job_example(
         .svc
         .sql
         .query_sql(
-            "SELECT kind, data FROM v_job_output WHERE job_id = ?1 ORDER BY attempt, seq",
+            "SELECT kind, data FROM v_job_run_output WHERE job_id = ?1 ORDER BY attempt, seq",
             vec![oxplow_db::SqlCell::Text(job.clone())],
             None,
         )
@@ -2840,7 +2857,7 @@ commands:
             root,
             "oxplow/extensions/maker/extension.yaml",
             &format!(
-                "manifest: 2\nname: maker\nintent:\n  purpose: Make items.\nmodels:\n  - name: items\n    version: {version}\n    description: Items.\n    columns:\n      - {{ name: ref, type: TEXT, doc: A work item. }}\nexports:\n  - {{ contribution: maker/model/items, version: {version}, visibility: stable }}\n"
+                "manifest: 2\nname: maker\nintent:\n  purpose: Make items.\nmodels:\n  - name: items\n    version: {version}\n    description: Items.\n    columns:\n      - {{ name: ref, type: TEXT, doc: A work item. }}\nexports:\n  - {{ contribution: model:maker/items, version: {version}, visibility: stable }}\n"
             ),
         );
         write(
@@ -2851,7 +2868,7 @@ commands:
         write(
             root,
             "oxplow/extensions/reader/extension.yaml",
-            "manifest: 2\nname: reader\nintent:\n  purpose: Read the maker's items.\nimports:\n  - { id: items, contribution: maker/model/items, version: 1, optional: true }\n",
+            "manifest: 2\nname: reader\nintent:\n  purpose: Read the maker's items.\nimports:\n  - { id: items, contribution: model:maker/items, version: 1, optional: true }\n",
         );
         write(
             root,
@@ -2870,10 +2887,10 @@ commands:
         assert_eq!(report.errors, Vec::<String>::new());
         assert_eq!(
             report.imports,
-            ["`items` → maker/model/items v1: available"]
+            ["`items` → model:maker/items v1: available"]
         );
         assert!(render(&report, crate::Format::Text)
-            .contains("import `items` → maker/model/items v1: available\n"));
+            .contains("import `items` → model:maker/items v1: available\n"));
         let checked = crate::check(
             dir.path(),
             "reader",
@@ -2885,14 +2902,14 @@ commands:
         .await
         .unwrap();
         assert!(crate::render_findings(&checked, crate::Format::Text)
-            .contains("import `items` → maker/model/items v1: available\n"));
+            .contains("import `items` → model:maker/items v1: available\n"));
 
         let dir = tempfile::tempdir().unwrap();
         producer_and_consumer(dir.path(), 2);
         let report = test_extension(dir.path(), "reader", false).await.unwrap();
         assert_eq!(
             report.imports,
-            ["`items` → maker/model/items v1: unavailable (maker exports v2)"]
+            ["`items` → model:maker/items v1: unavailable (maker exports v2)"]
         );
 
         let dir = tempfile::tempdir().unwrap();
@@ -2905,7 +2922,7 @@ commands:
         let report = test_extension(dir.path(), "reader", false).await.unwrap();
         assert_eq!(
             report.imports,
-            ["`items` → maker/model/items v1: unavailable (maker is disabled)"]
+            ["`items` → model:maker/items v1: unavailable (maker is disabled)"]
         );
     }
 

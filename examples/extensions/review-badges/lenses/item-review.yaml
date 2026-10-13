@@ -6,7 +6,7 @@ query: |
   SELECT r.state, r.reviewed_at, r.review
   FROM import_ref('reviews') r
   WHERE r.work_item = :ref
-  ORDER BY r.reviewed_at DESC, r.job DESC
+  ORDER BY r.reviewed_at DESC, r.job_run DESC
   LIMIT 1
 viz: table
 columns:

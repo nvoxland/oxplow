@@ -344,7 +344,7 @@ effects:
   - id: store-decisions
     summary: When a decisions job ends, its proposals replace the effort's inferred decisions.
     on: [contribution.job.completed]
-    where: { contribution: oxplow-bundled/job/decisions }
+    where: { job: "job:oxplow-bundled/decisions" }
     entry: effects/store_decisions.star
     needs: [jobs.read]
 commands:

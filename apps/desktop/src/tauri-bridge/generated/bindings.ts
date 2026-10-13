@@ -2275,10 +2275,13 @@ export type ContextUsage = {
 };
 
 /**
- *  A contribution's identity: `<extension>/<kind>/<local>`. Stable across
- *  loads; what ordering, imports and the views key on. The public forms a
- *  kind already had (`lens:<ext>/<slug>`, a command id, a metric key) are
- *  its [`Descriptor::aliases`].
+ *  A contribution's identity within the catalog: who declared it, what
+ *  kind it is, and its id there (for a [`ContributionKind::global_name`]
+ *  kind, its global name). Its only public name is its ref
+ *  ([`ContributionId::reference`], also its `Display`):
+ *  `job:effort-review/review`, `command:oxplow.review.accept`. Storage,
+ *  events, manifests and the desktop all carry that ref
+ *  (`.context/refs.md` "Using refs").
  */
 export type ContributionId = {
 	extension: string,
@@ -2294,7 +2297,7 @@ export type ContributionImpact = {
 	kind: ContributionKind,
 	// The kind as a person names it (`Event type`).
 	title: string,
-	// `<extension>/<kind>/<local>`.
+	// its ref (`<kind>:<extension>/<id>`, `command:<bus id>`).
 	id: string,
 	// The part of the id after the kind: what a row is called.
 	local: string,
@@ -2467,8 +2470,6 @@ export type Descriptor = {
 	 *  of a kind that doesn't share names can't hold the same one.
 	 */
 	global: string | null,
-	// Its other public forms (`lens:<ext>/<slug>`, a command id).
-	aliases: string[],
 	source: DeclaredAt,
 };
 
@@ -2898,13 +2899,13 @@ export type ExtensionInstanceConfig = {
 
 /**
  *  A page an extension contributes (P6.G2, target §11.3): a lens shown
- *  full-page at `page:ext.<extension>.<id>`, listed in the launcher under
+ *  full-page at `page:<extension>/<id>`, listed in the launcher under
  *  its category.
  */
 export type ExtensionPage = {
 	id: string,
 	extension: string,
-	// Its tab id: `page:ext.<extension>.<id>`.
+	// Its tab id: `page:<extension>/<id>`.
 	pageRef: string,
 	title: string,
 	icon: string | null,
@@ -5519,8 +5520,6 @@ export type PublicBinding = {
 	version: number,
 	available: boolean,
 	unavailableReason: UnavailableReason | null,
-	// Published references of the resolved contribution; never lookup keys.
-	references: string[],
 };
 
 export type PublicContracts = {
@@ -5611,7 +5610,7 @@ export type RefKindDecl = {
 	// The view whose `title` names one (`v_<extension>_<model>`, by `ref`).
 	resolve: string,
 	/**
-	 *  The page that opens one: `page:ext.<extension>.<page>`, given
+	 *  The page that opens one: `page:<extension>/<page>`, given
 	 *  `?ref=<ref>`.
 	 */
 	page: string,

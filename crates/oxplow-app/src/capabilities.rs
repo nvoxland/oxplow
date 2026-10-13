@@ -1976,7 +1976,7 @@ mod contribution_tests {
             .svc
             .sql
             .query_sql(
-                "SELECT id, kind, version, global_name FROM v_contribution WHERE extension = 'acme'",
+                "SELECT ref, kind, version, global_name FROM v_contribution WHERE extension = 'acme'",
                 Vec::new(),
                 None,
             )
@@ -1987,7 +1987,7 @@ mod contribution_tests {
         assert_eq!(
             rows,
             vec![vec![
-                Text("acme/skill/deploy".into()),
+                Text("skill:acme/deploy".into()),
                 Text("skill".into()),
                 Text("1.2.0".into()),
                 Text("deploy".into()),

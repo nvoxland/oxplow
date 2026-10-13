@@ -248,7 +248,7 @@ export function duplicateBlockRef(payload: DuplicateBlockPayload): TabRef {
   });
 }
 
-/** An extension's page: `page:ext.<extension>.<page>` (P6.G2), with the
+/** An extension's page: `page:<extension>/<page>`, with the
  *  params its lens starts with — `ref`, when it opens one of the
  *  extension's refs (P8.D7). */
 export function extPageRef(extension: string, page: string, params?: Record<string, string>): TabRef {
@@ -289,14 +289,12 @@ export function searchHitTarget(hit: { kind: string; ref_id: string }): { page: 
   }
 }
 
-/** The extension and page of a `page:ext.<extension>.<page>` id (the page
- *  id has no `.`, so it's what follows the last one), or null. */
+/** The extension and page of an extension's page, `page:<extension>/<page>`
+ *  (a shell route has no slash), or null. */
 function extPageOf(head: string): { extension: string; page: string } | null {
-  if (!head.startsWith("ext.")) return null;
-  const rest = head.slice("ext.".length);
-  const dot = rest.lastIndexOf(".");
-  if (dot <= 0 || dot === rest.length - 1) return null;
-  return { extension: rest.slice(0, dot), page: rest.slice(dot + 1) };
+  const slash = head.indexOf("/");
+  if (slash <= 0 || slash === head.length - 1 || head.indexOf("/", slash + 1) !== -1) return null;
+  return { extension: head.slice(0, slash), page: head.slice(slash + 1) };
 }
 
 /** A symbol (`symbol:<path>/<name>@snap:<id>`, `v_symbol.ref`): opening

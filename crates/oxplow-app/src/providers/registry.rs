@@ -2237,7 +2237,12 @@ impl ProviderRegistry {
                     message: "the command bus is gone".into(),
                 })?;
                 let op = oxplow_domain::OpRef {
-                    scope: format!("provider:{extension}/{provider}"),
+                    scope: oxplow_domain::contribution::ContributionId::new(
+                        &extension,
+                        oxplow_domain::contribution::ContributionKind::Provider,
+                        &provider,
+                    )
+                    .to_string(),
                     op: c.command.clone(),
                 };
                 let name = bus.command_for_op(&op).ok_or_else(|| CommandError::Failed {

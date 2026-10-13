@@ -84,7 +84,7 @@ integer contract version:
 
 ```yaml
 exports:
-  - contribution: review-data/model/items
+  - contribution: model:review-data/items
     version: 1
     visibility: stable
 ```
@@ -94,11 +94,11 @@ The consumer chooses a local binding:
 ```yaml
 imports:
   - id: review_items
-    contribution: review-data/model/items
+    contribution: model:review-data/items
     version: 1
     optional: true
 import_guards:
-  - contribution: review-ui/collector/summarize
+  - contribution: collector:review-ui/summarize
     imports: [review_items]
 ```
 
@@ -109,8 +109,8 @@ independent contributions remain usable. Explicit guards can name models,
 lenses, collectors, commands, effects, advisories, skills or providers. Their
 exports and dependent mounts are withheld too. Each unavailable optional
 import is one warning naming why and everything it withheld:
-`` optional import `items` for `maker/model/items` v1 is unavailable: maker
-is disabled; withheld: `review-ui/lens/items`, `review-ui/slot/work_item.detail.body-0` ``.
+`` optional import `items` for `model:maker/items` v1 is unavailable: maker
+is disabled; withheld: `lens:review-ui/items`, `slot:review-ui/work_item.detail.body-0` ``.
 Missing required imports and
 dependency cycles block the extension with source-located errors.
 
@@ -368,7 +368,7 @@ is private and limited to 1 MiB and 64 nesting levels. `cancel` and
 `snapshot` take `{id}`. The `intentKey` is what the job is about, one job
 per key: asking again with it returns the same job. Put the subject in it
 (`review:effort:eff12`), and read it back as the snapshot's `intentKey` or
-`v_job.intent_key`. The host records intent before a worker starts, and
+`v_job_run.intent_key`. The host records intent before a worker starts, and
 a person approves each job declaration in Settings -> Data -> Programs
 before it can spend an AI provider key; changing the declaration asks
 again.
@@ -384,13 +384,13 @@ again.
   writes: write from an effect on its end.
 - **Output.** What the model writes, each tool call and its answer, and
   each round's tokens are the job's output as they happen: the
-  `v_job_output` model (a lens over it updates live), and `text` in the
-  `snapshot`. `v_job` lists every job and its state.
+  `v_job_run_output` model (a lens over it updates live), and `text` in the
+  `snapshot`. `v_job_run` lists every job and its state.
 - **Its result** (`snapshot`'s `result`, once it ends): `{parts,
   finishReason, rounds, usage, aiCalls}`; a failure adds `error`; a
   cancelled job keeps what it had, with `stopped: cancelled`.
 - **Cancel** stops a running job at once — its model call is dropped —
-  and it ends `cancelled`. A person can stop any job from the Jobs lens.
+  and it ends `cancelled`. A person can stop any job run from the Job Runs lens.
   Past its `timeout` a job fails. An attempt cut off by a restart is
   `interrupted`, unless the job says `replay: idempotent`: then it runs
   again, up to three attempts in all, and only its final end is
@@ -398,10 +398,11 @@ again.
   tools run again, so they must only read (as every tool does).
 
 A script declaring `needs: [jobs.read]` can call
-`scope("jobs.read", {"id": job_id})` for its extension's result. The
-`contribution.job.completed` event carries the job ID and `outcome`
-(`succeeded`, `failed`, `cancelled` or `interrupted`), with no request or
-result body; read the result through `jobs.read`. An agent or effect that
+`scope("jobs.read", {"job_run": payload["job_run"]})` for its extension's result. The
+`contribution.job.completed` event carries the run (`job_run`), the job
+(`job`, which `where: { job: "job:<extension>/<id>" }` matches) and
+`outcome` (`succeeded`, `failed`, `cancelled` or `interrupted`), with no
+request or result body; read the result through `jobs.read`. An agent or effect that
 composes `enqueue` does not acquire the job's AI permission.
 
 ### AI profiles
@@ -582,7 +583,7 @@ implementations:
 `oxplow extension check` loads the extension the way oxplow does and
 dry-runs its models, commands, lenses and advisories. Each finding is
 one line: `file:line: what — fix`. Each of its `imports:` gets a line
-saying how it resolved here: `` import `items` → maker/model/items v1:
+saying how it resolved here: `` import `items` → model:maker/items v1:
 available ``, or `unavailable (maker exports v2)` and the like, which is
 when an optional import's guarded contributions are withheld. `extension
 test` skips an example whose lens, job, command or other target was

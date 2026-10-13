@@ -301,8 +301,29 @@ pub fn validate_work_item_ref(r: &str) -> Result<(), crate::DomainError> {
 
 /// The `source` of an event a system component emits on its own behalf
 /// (`system:snapshot_capture`); an actor's runs use `Actor::source()`.
+///
+/// A source says who emitted an event. It looks like a ref but is its own
+/// vocabulary — `system:…`, a provider instance, an effort policy are no
+/// refs — so the sources are built here, beside the refs, and nowhere
+/// else.
 pub fn system_source(component: &str) -> String {
     format!("system:{component}")
+}
+
+/// An effect's runs (`effect:<extension>/<id>`, which is also its ref) or
+/// an effort policy's (`effect:effort_policy:<id>`).
+pub fn effect_source(effect: &str) -> String {
+    format!("effect:{effect}")
+}
+
+/// The effect a source names, when an effect emitted it.
+pub fn effect_of_source(source: &str) -> Option<&str> {
+    source.strip_prefix("effect:")
+}
+
+/// A provider instance's events (`provider:oxplow`, `provider:github/acme`).
+pub fn provider_source(instance: &str) -> String {
+    format!("provider:{instance}")
 }
 
 #[cfg(test)]

@@ -167,7 +167,9 @@ pub(super) async fn ask(fx: &Fixture, intent: &str) -> String {
         }),
     )
     .await;
-    queued["id"].as_str().unwrap().to_owned()
+    oxplow_domain::refs::build::id_of(queued["jobRun"].as_str().unwrap(), "job_run")
+        .unwrap()
+        .to_owned()
 }
 
 pub(super) async fn until(fx: &Fixture, id: &str, done: impl Fn(&Value) -> bool) -> Value {
@@ -177,7 +179,7 @@ pub(super) async fn until(fx: &Fixture, id: &str, done: impl Fn(&Value) -> bool)
             fx,
             &Actor::Human,
             "triage.review.result",
-            json!({ "id": id }),
+            json!({ "job_run": oxplow_domain::refs::build::job_run_ref(id) }),
         )
         .await;
         if done(&snapshot) {
@@ -222,8 +224,8 @@ pub(super) async fn completions(fx: &Fixture, id: &str) -> Vec<String> {
     rows(
         fx,
         "SELECT json_extract(payload, '$.outcome') FROM v_event
-          WHERE type = 'contribution.job.completed' AND json_extract(payload, '$.job_id') = ?1",
-        vec![json!(id)],
+          WHERE type = 'contribution.job.completed' AND json_extract(payload, '$.job_run') = ?1",
+        vec![json!(oxplow_domain::refs::build::job_run_ref(id))],
     )
     .await
     .into_iter()
@@ -232,7 +234,7 @@ pub(super) async fn completions(fx: &Fixture, id: &str) -> Vec<String> {
 }
 
 /// A streamed reply is the attempt's output while it comes: text rows
-/// appear before the job ends, `v_job` counts its round, and the result
+/// appear before the job ends, `v_job_run` counts its round, and the result
 /// is the whole answer. The job keeps what it was about, its intent key.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_job_streams_its_reply_as_output_rows() {
@@ -258,14 +260,14 @@ async fn a_job_streams_its_reply_as_output_rows() {
     );
     let text_rows = rows(
         &fx,
-        "SELECT count(*) FROM v_job_output WHERE job_id = ?1 AND kind = 'text'",
+        "SELECT count(*) FROM v_job_run_output WHERE job_id = ?1 AND kind = 'text'",
         vec![json!(id)],
     )
     .await;
     assert!(text_rows[0][0].as_i64().unwrap() > 1, "streamed in pieces");
     let job = rows(
         &fx,
-        "SELECT state, ai_calls, extension, job, intent_key FROM v_job WHERE id = ?1",
+        "SELECT state, ai_calls, extension, job, intent_key FROM v_job_run WHERE id = ?1",
         vec![json!(id)],
     )
     .await;
@@ -275,7 +277,7 @@ async fn a_job_streams_its_reply_as_output_rows() {
             json!("succeeded"),
             json!(1),
             json!("triage"),
-            json!("triage/job/review"),
+            json!("job:triage/review"),
             json!("stream")
         ]
     );
@@ -302,7 +304,7 @@ async fn cancelling_a_running_job_stops_its_stream() {
         &fx,
         &Actor::Human,
         "triage.review.cancel",
-        json!({ "id": id }),
+        json!({ "job_run": oxplow_domain::refs::build::job_run_ref(&id) }),
     )
     .await;
     let done = until(&fx, &id, |s| s["state"] == json!("cancelled")).await;
@@ -315,7 +317,7 @@ async fn cancelling_a_running_job_stops_its_stream() {
 
     let call = rows(
         &fx,
-        "SELECT ok, error FROM v_ai_call WHERE caller LIKE 'job:%' ORDER BY id DESC LIMIT 1",
+        "SELECT ok, error FROM v_ai_call WHERE caller LIKE 'job_run:%' ORDER BY id DESC LIMIT 1",
         vec![],
     )
     .await;
@@ -358,7 +360,7 @@ async fn a_tool_call_runs_the_extensions_command_and_answers_the_model() {
 
     let kinds: Vec<String> = rows(
         &fx,
-        "SELECT kind FROM v_job_output WHERE job_id = ?1 ORDER BY seq",
+        "SELECT kind FROM v_job_run_output WHERE job_id = ?1 ORDER BY seq",
         vec![json!(id)],
     )
     .await
@@ -375,30 +377,29 @@ async fn a_tool_call_runs_the_extensions_command_and_answers_the_model() {
     let ran = rows(
         &fx,
         "SELECT actor_kind, actor, parent_run_id IS NOT NULL FROM v_extension_run
-          WHERE contribution = 'triage/command/todos.lookup'",
+          WHERE contribution = 'command:triage.todos.lookup'",
         vec![],
     )
     .await;
     assert_eq!(ran.len(), 1, "{ran:?}");
     assert_eq!(ran[0][0], json!("job"));
-    assert!(
-        ran[0][1]
-            .as_str()
-            .unwrap()
-            .starts_with(&format!("job:{id}:")),
-        "{ran:?}"
+    assert_eq!(
+        ran[0][1],
+        json!(oxplow_domain::refs::build::job_run_ref(&id)),
+        "the job run is the actor"
     );
 
-    // oxplow's own Jobs lens lists it, and its output lens follows it.
-    let jobs = lens(&fx, "oxplow-bundled/jobs", vec![]).await;
-    assert_eq!(jobs[0][0], json!(id), "{jobs}");
-    assert_eq!(jobs[0][2], json!("triage/job/review"));
+    // oxplow's own Job Runs lens lists it, and its output lens follows it.
+    let run_ref = oxplow_domain::refs::build::job_run_ref(&id);
+    let jobs = lens(&fx, "oxplow-bundled/job-runs", vec![]).await;
+    assert_eq!(jobs[0][0], json!(run_ref), "{jobs}");
+    assert_eq!(jobs[0][2], json!("job:triage/review"));
     assert_eq!(jobs[0][3], json!("tools"), "what it was about");
     assert_eq!(jobs[0][4], json!("succeeded"));
     let output = lens(
         &fx,
-        "oxplow-bundled/job-output",
-        vec![("job_id", oxplow_db::SqlCell::Text(id.clone()))],
+        "oxplow-bundled/job-run-output",
+        vec![("job_run", oxplow_db::SqlCell::Text(run_ref.clone()))],
     )
     .await;
     let content: Vec<_> = output
@@ -437,7 +438,7 @@ async fn bad_tool_calls_are_answered_and_rounds_run_out() {
     assert_eq!(done["result"]["rounds"], json!(3));
     let errors = rows(
         &fx,
-        "SELECT json_extract(data, '$.error') FROM v_job_output
+        "SELECT json_extract(data, '$.error') FROM v_job_run_output
           WHERE job_id = ?1 AND kind = 'tool_result' ORDER BY seq LIMIT 2",
         vec![json!(id)],
     )
@@ -457,7 +458,7 @@ async fn a_job_that_reads_sql_answers_query_sql() {
         vec![
             calls(&[(
                 "query_sql",
-                json!({ "sql": "SELECT job FROM v_job WHERE state = ?1", "params": ["running"] }),
+                json!({ "sql": "SELECT job FROM v_job_run WHERE state = ?1", "params": ["running"] }),
             )]),
             reply("done"),
         ],
@@ -469,7 +470,7 @@ async fn a_job_that_reads_sql_answers_query_sql() {
     let answer = serde_json::to_value(&asked[1].messages.last().unwrap().parts).unwrap();
     assert_eq!(
         answer[0]["result"]["rows"],
-        json!([["triage/job/review"]]),
+        json!([["job:triage/review"]]),
         "{answer}"
     );
 }
@@ -505,7 +506,13 @@ async fn a_person_cancels_any_job() {
     let fx = fixture(MANIFEST, vec![slow(&words, 20)]).await;
     let id = ask(&fx, "person").await;
     until(&fx, &id, |s| s["state"] == json!("running")).await;
-    run(&fx, &Actor::Human, "oxplow.job.cancel", json!({ "id": id })).await;
+    run(
+        &fx,
+        &Actor::Human,
+        "oxplow.job_run.cancel",
+        json!({ "job_run": oxplow_domain::refs::build::job_run_ref(&id) }),
+    )
+    .await;
     until(&fx, &id, |s| s["state"] == json!("cancelled")).await;
     let refused = fx
         .svc
@@ -516,8 +523,8 @@ async fn a_person_cancels_any_job() {
                 thread_id: None,
                 stream_id: None,
             },
-            "oxplow.job.cancel",
-            json!({ "id": id }),
+            "oxplow.job_run.cancel",
+            json!({ "job_run": oxplow_domain::refs::build::job_run_ref(&id) }),
             false,
         )
         .await;

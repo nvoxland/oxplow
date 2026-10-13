@@ -70,7 +70,7 @@ export type RoutePageKind =
   | "problems"
   | "symbols";
 
-/** An extension's page (`page:ext.<extension>.<page>`, P6.G2): a lens
+/** An extension's page (`page:<extension>/<page>`, P6.G2): a lens
  *  shown full-page. Not a named route — its name is the extension's. */
 export type ExtensionPageKind = "ext-page";
 
@@ -109,10 +109,10 @@ export function resetSlotCounter(): void {
   slotCounter = 0;
 }
 
-/** Generate a stable, unique slot id. */
+/** Generate a stable, unique slot id (a tab slot's, never a ref). */
 export function nextSlotId(): string {
   slotCounter += 1;
-  return `slot:${slotCounter}`;
+  return `tab-slot-${slotCounter}`;
 }
 
 /** Build a fresh slot anchored at `ref`. */

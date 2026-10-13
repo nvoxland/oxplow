@@ -73,6 +73,19 @@ fn ref_members(builder: &mut GlobalsBuilder) {
         }
     }
 
+    /// A contribution's ref as `{ kind, extension, id }`: `extension` is
+    /// `None` for a kind named globally (a command's bus id, a metric key).
+    fn contribution<'v>(
+        #[starlark(require = pos)] text: &str,
+        heap: Heap<'v>,
+    ) -> anyhow::Result<Value<'v>> {
+        let r: oxplow_domain::contribution::ContributionRef =
+            text.parse().map_err(|e: String| anyhow::anyhow!(e))?;
+        Ok(heap.alloc(serde_json::json!({
+            "kind": r.kind().segment(), "extension": r.extension(), "id": r.name(),
+        })))
+    }
+
     /// Whether `value` is a string that parses as a ref (never fails).
     fn is_ref(#[starlark(require = pos)] value: Value) -> anyhow::Result<bool> {
         Ok(value
@@ -126,6 +139,15 @@ mod tests {
         assert!(e.contains("isn't a decision ref"), "{e}");
         let e = run(r#"ref.parse("nope")"#).unwrap_err();
         assert!(e.contains("has no `:`"), "{e}");
+        assert_eq!(
+            run(r#"ref.contribution("collector:work/hot")"#).unwrap(),
+            json!({ "kind": "collector", "extension": "work", "id": "hot" })
+        );
+        assert_eq!(
+            run(r#"ref.contribution("command:oxplow.review.accept")"#).unwrap(),
+            json!({ "kind": "command", "extension": null, "id": "oxplow.review.accept" })
+        );
+        assert!(run(r#"ref.contribution("effort:eff1")"#).is_err());
         // A guard for an optional value: `ref.is_ref` never fails.
         assert_eq!(
             run(r#"[ref.is_ref("wiki:x"), ref.is_ref("nope"), ref.is_ref(None)]"#).unwrap(),

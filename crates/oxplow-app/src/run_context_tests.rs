@@ -130,7 +130,7 @@ async fn every_run_is_recorded_once_as_itself() {
         svc,
         "SELECT r.version, r.generation, r.actor, r.cause_event_id, r.thread_id, r.outcome,
                 r.kind, (SELECT run_id FROM collector_run WHERE owner = 'acme' AND id = 'star') = r.run_id
-           FROM extension_run r WHERE r.contribution = 'acme/collector/star'",
+           FROM extension_run r WHERE r.contribution = 'collector:acme/star'",
     )
     .await;
     assert_eq!(
@@ -194,7 +194,7 @@ async fn every_run_is_recorded_once_as_itself() {
         "SELECT r.actor, r.cause_event_id, r.outcome,
                 (SELECT count(*) FROM effect_run e WHERE e.run_id = r.run_id),
                 (SELECT count(*) FROM command_audit a WHERE a.run_id = r.run_id)
-           FROM extension_run r WHERE r.contribution = 'acme/effect/note'",
+           FROM extension_run r WHERE r.contribution = 'effect:acme/note'",
     )
     .await;
     assert_eq!(
@@ -222,7 +222,7 @@ async fn every_run_is_recorded_once_as_itself() {
         svc,
         "SELECT r.actor, a.command FROM extension_run r
            JOIN command_audit a ON a.run_id = r.parent_run_id
-          WHERE r.contribution = 'acme/collector/star' AND r.parent_run_id IS NOT NULL",
+          WHERE r.contribution = 'collector:acme/star' AND r.parent_run_id IS NOT NULL",
     )
     .await;
     assert_eq!(
@@ -240,7 +240,7 @@ async fn every_run_is_recorded_once_as_itself() {
         svc,
         "SELECT r.actor, r.kind, r.outcome, a.command FROM extension_run r
            JOIN command_audit a ON a.run_id = r.run_id
-          WHERE r.contribution = 'acme/command/note.write'",
+          WHERE r.contribution = 'command:acme.note.write'",
     )
     .await;
     assert_eq!(
@@ -309,7 +309,7 @@ async fn a_run_records_what_its_grant_decided() {
     .unwrap();
     let decided = rows(
         svc,
-        "SELECT decisions_json FROM extension_run WHERE contribution = 'acme/collector/gh'",
+        "SELECT decisions_json FROM extension_run WHERE contribution = 'collector:acme/gh'",
     )
     .await;
     let decided: Value = serde_json::from_str(decided[0][0].as_str().unwrap()).unwrap();
@@ -339,7 +339,7 @@ async fn a_run_records_what_its_grant_decided() {
         .unwrap();
     let decided = rows(
         svc,
-        "SELECT decisions_json FROM extension_run WHERE contribution = 'acme/command/note.count'",
+        "SELECT decisions_json FROM extension_run WHERE contribution = 'command:acme.note.count'",
     )
     .await;
     let decided: Value = serde_json::from_str(decided[0][0].as_str().unwrap()).unwrap();

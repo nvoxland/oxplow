@@ -1,6 +1,4 @@
 {
-  "extension": "extension:tracker",
-  "contribution": "fake",
-  "kind": "provider",
+  "contribution": "provider:tracker/fake",
   "reason": "3 failures in a row; the last: timed out"
 }

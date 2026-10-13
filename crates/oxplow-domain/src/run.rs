@@ -717,7 +717,7 @@ impl RunContext {
 pub struct RunDescription {
     pub run: RunId,
     pub parent: Option<RunId>,
-    /// `<extension>/<kind>/<local>`.
+    /// its ref (`<kind>:<extension>/<id>`, `command:<bus id>`).
     pub contribution: Option<String>,
     pub version: Option<String>,
     pub generation: Option<String>,

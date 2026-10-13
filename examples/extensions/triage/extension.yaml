@@ -72,7 +72,7 @@ collectors:
     facts: [triage.todos, triage.open_items]
 # A person asks for a summary of the TODOs (`triage.summary.ask`); a model
 # answers it as a durable job, outside any transaction, once a person has
-# approved the job. Its answer streams into `v_job_output` as it comes; it
+# approved the job. Its answer streams into `v_job_run_output` as it comes; it
 # may look closer at a file (`todos.in_file`) or query oxplow's models
 # (`query_sql`, from `sql.read`) before it answers. When it finishes,
 # `publish-summary` writes the answer to the wiki.
@@ -152,6 +152,7 @@ effects:
   - id: publish-summary
     summary: When a summary job succeeds, write its answer to the wiki page `triage-summary`.
     on: [contribution.job.completed]
+    where: { job: "job:triage/summarize" }
     entry: effects/publish_summary.star
     needs: [jobs.read]
 # The TODOs as a board, grouped by what the model said they ask for, each

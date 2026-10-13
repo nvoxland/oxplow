@@ -682,15 +682,9 @@ impl Actor {
             } => "agent".into(),
             Actor::Lens { lens_id, .. } => crate::refs::build::lens_ref(lens_id),
             Actor::System => "system".into(),
-            Actor::Effect { effect, .. } => format!("effect:{effect}"),
-            Actor::Job {
-                job_id,
-                attempt,
-                fence,
-                ..
-            } => {
-                format!("job:{job_id}:{attempt}:{fence}")
-            }
+            Actor::Effect { effect, .. } => crate::refs::build::effect_source(effect),
+            // The run, by its ref; its attempt and fence are on the run's row.
+            Actor::Job { job_id, .. } => crate::refs::build::job_run_ref(job_id),
         }
     }
 
