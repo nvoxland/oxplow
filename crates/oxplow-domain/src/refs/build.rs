@@ -173,9 +173,9 @@ pub fn page_ref(name: &str, query: Option<&str>) -> String {
     }
 }
 
-/// An extension's page.
+/// An extension's page (the contribution `page:<extension>/<id>`).
 pub fn extension_page_ref(extension: &str, page: &str) -> String {
-    of(k::PAGE, &format!("ext.{extension}.{page}"))
+    of(k::PAGE, &format!("{extension}/{page}"))
 }
 
 /// A metric by its key.
@@ -183,9 +183,16 @@ pub fn metric_ref(key: &str) -> String {
     of(k::METRIC, key)
 }
 
-/// A published model by its view (`v_effort`).
-pub fn model_ref(view: &str) -> String {
-    of(k::MODEL, view)
+/// One of core's published models by its name (`effort`, published as
+/// `v_effort`); an extension's is the contribution
+/// `model:<extension>/<name>`.
+pub fn model_ref(name: &str) -> String {
+    of(k::MODEL, name)
+}
+
+/// One run of a declared job (`v_job_run.id`).
+pub fn job_run_ref(id: &str) -> String {
+    of(k::JOB_RUN, id)
 }
 
 /// An extension, by its name.
@@ -326,7 +333,8 @@ mod tests {
             page_ref("dashboard", Some("variant=visits")),
             extension_page_ref("github", "pr"),
             metric_ref("oxplow.rust.unsafe_blocks"),
-            model_ref("v_effort"),
+            model_ref("effort"),
+            job_run_ref("01a1369e-b063-76f8-968f-902d392f882d"),
             extension_ref("effort-review"),
             finding_ref("clippy:1"),
             thread_note_ref(NoteId::new(5)),
@@ -380,6 +388,7 @@ mod tests {
             page_ref("p", None),
             metric_ref("m"),
             model_ref("v_a"),
+            job_run_ref("01a1369e-b063-76f8-968f-902d392f882d"),
             extension_ref("e"),
             command_ref("a.b"),
             config_ref("c"),
@@ -395,9 +404,18 @@ mod tests {
         .iter()
         .map(|r| kind_of(r).unwrap())
         .collect();
+        // A contribution's ref is its id's (`ContributionId::reference`).
+        let contributions: std::collections::BTreeSet<String> = crate::contribution::KINDS
+            .iter()
+            .map(|k| k.kind.segment().to_string())
+            .collect();
         let registered: std::collections::BTreeSet<String> =
             core_kinds().kinds().map(|k| k.kind.clone()).collect();
-        assert_eq!(built, registered);
+        let core: std::collections::BTreeSet<String> =
+            registered.difference(&contributions).cloned().collect();
+        let built_core: std::collections::BTreeSet<String> =
+            built.difference(&contributions).cloned().collect();
+        assert_eq!(built_core, core);
     }
 
     /// A reader gets the decoded id, typed, or says which kind it wanted.

@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use oxplow_domain::contribution::{ContributionId, ContributionKind, DeclaredAt};
+use oxplow_domain::contribution::{ContributionId, ContributionKind, ContributionRef, DeclaredAt};
 use serde::{Deserialize, Serialize};
 
 use super::{imports, manifest_v2, Extension, Sharing};
@@ -141,7 +141,7 @@ pub(super) fn load(
     };
     for (index, raw) in manifest.exports.iter().enumerate() {
         let at = source("exports", index);
-        if let Some(contribution) = parse_id(ext, &raw.contribution, &at) {
+        if let Some(contribution) = parse_id(ext, &raw.contribution, &at, true) {
             ext.public_contracts.exports.push(ExportDeclaration {
                 contribution,
                 version: raw.version,
@@ -152,7 +152,7 @@ pub(super) fn load(
     }
     for (index, raw) in manifest.imports.iter().enumerate() {
         let at = source("imports", index);
-        if let Some(contribution) = parse_id(ext, &raw.contribution, &at) {
+        if let Some(contribution) = parse_id(ext, &raw.contribution, &at, false) {
             ext.public_contracts.imports.push(ImportDeclaration {
                 id: raw.id.clone(),
                 contribution,
@@ -164,7 +164,7 @@ pub(super) fn load(
     }
     for (index, raw) in manifest.import_guards.iter().enumerate() {
         let at = source("import_guards", index);
-        if let Some(contribution) = parse_id(ext, &raw.contribution, &at) {
+        if let Some(contribution) = parse_id(ext, &raw.contribution, &at, true) {
             ext.public_contracts.guards.push(ImportGuard {
                 contribution,
                 imports: raw.imports.clone(),
@@ -174,9 +174,22 @@ pub(super) fn load(
     }
 }
 
-fn parse_id(ext: &mut Extension, text: &str, source: &DeclaredAt) -> Option<ContributionId> {
-    match text.parse() {
-        Ok(id) => Some(id),
+/// A manifest's contribution ref (`model:effort-review/reviews`,
+/// `command:acme.pr.merge`). A global name says no owner: in an export or
+/// guard it is the extension's own; in an import the owner is found when
+/// imports resolve ([`resolve_global_imports`]), until then its extension
+/// is empty.
+fn parse_id(
+    ext: &mut Extension,
+    text: &str,
+    source: &DeclaredAt,
+    own: bool,
+) -> Option<ContributionId> {
+    match text.parse::<oxplow_domain::contribution::ContributionRef>() {
+        Ok(r) => Some(r.id().unwrap_or_else(|| {
+            let owner = if own { ext.name.as_str() } else { "" };
+            ContributionId::new(owner, r.kind(), r.name())
+        })),
         Err(error) => {
             ext.public_contracts.invalid = true;
             ext.errors.push(manifest_v2::at(
@@ -185,6 +198,27 @@ fn parse_id(ext: &mut Extension, text: &str, source: &DeclaredAt) -> Option<Cont
                 format!("invalid public contribution `{text}`: {error}"),
             ));
             None
+        }
+    }
+}
+
+/// An import of a global name (`command:acme.pr.merge`) is of whichever
+/// extension declares that name; one nothing declares stays ownerless
+/// and resolves as missing.
+fn resolve_global_imports(extensions: &mut [Extension]) {
+    let owners: BTreeMap<ContributionRef, ContributionId> = extensions
+        .iter()
+        .flat_map(|ext| ext.contributions.iter())
+        .filter(|d| d.id.kind.global_name())
+        .map(|d| (d.id.reference(), d.id.clone()))
+        .collect();
+    for ext in extensions.iter_mut() {
+        for import in &mut ext.public_contracts.imports {
+            if import.contribution.extension.is_empty() {
+                if let Some(owner) = owners.get(&import.contribution.reference()) {
+                    import.contribution = owner.clone();
+                }
+            }
         }
     }
 }
@@ -442,6 +476,7 @@ fn record_diagnostics(
 }
 
 fn resolve(extensions: &mut [Extension], publish: bool) {
+    resolve_global_imports(extensions);
     let mut blocked: BTreeSet<_> = extensions
         .iter()
         .filter(|ext| ext.public_contracts.invalid || ext.public_contracts.blocked)

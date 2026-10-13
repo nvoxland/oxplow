@@ -77,17 +77,37 @@ fn the_core_kinds_are_registered_and_validate_ids() {
     assert!(reg.validate(&canon("command:config.set")).is_ok());
     assert!(reg.validate(&canon("command:dashboard.item.add")).is_ok());
     assert!(reg.validate(&canon("command:nodots")).is_err());
-    // An extension's page (P6.G2): `page:ext.<extension>.<page>`.
-    assert!(reg.validate(&canon("page:ext.acme.open-prs")).is_ok());
-    assert!(reg.validate(&canon("page:ext.acme.Open PRs")).is_err());
-    // A dot only in that shape: not a stray one, not a half-named page.
+    // An extension's page is its contribution, `page:<extension>/<id>`;
+    // a shell route has no slash.
+    assert!(reg.validate(&canon("page:acme/open-prs")).is_ok());
+    assert!(reg.validate(&canon("page:acme/Open PRs")).is_err());
     for bad in [
-        "page:ext.acme",
+        "page:ext.acme.open-prs",
         "page:settings.",
-        "page:..",
-        "page:ext.a.b.c",
-        "page:a.b",
+        "page:a/b/c",
+        "page:/b",
     ] {
+        assert!(reg.validate(&canon(bad)).is_err(), "{bad}");
+    }
+    // Every contribution is named `<kind>:<extension>/<id>`, or by its
+    // global name for a command, metric, measure, dimension, event type
+    // or ref kind.
+    for ok in [
+        "job:effort-review/review",
+        "effect:oxplow-bundled/store-decisions",
+        "ai_profile:oxplow-bundled/decisions",
+        "collector:triage/todos",
+        "collector:project/repo.scan_clone",
+        "lens:acme/blocked?stream_id=2",
+        "model:effort-review/reviews",
+        "model:effort",
+        "event_type:oxplow_bundled.accepted",
+        "metric:oxplow.rust.unsafe_blocks",
+        "job_run:01a1369e-b063-76f8-968f-902d392f882d",
+    ] {
+        assert!(reg.validate(&canon(ok)).is_ok(), "{ok}");
+    }
+    for bad in ["job:review", "model:v_effort/x/y", "effect:acme/a.b"] {
         assert!(reg.validate(&canon(bad)).is_err(), "{bad}");
     }
     assert!(reg.validate(&canon("page:settings?tab=ai")).is_ok());

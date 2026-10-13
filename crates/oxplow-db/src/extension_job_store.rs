@@ -6,7 +6,7 @@
 use std::{io, io::Write};
 
 use oxplow_domain::{
-    contribution::ContributionId,
+    contribution::ContributionRef,
     extension_job::{
         AttemptFence, Completion, ExtensionJob, IntentKey, JobEvent, JobId, JobOutput,
         JobOutputKind, JobOwner, JobState, JobTransition, NewJobOutput, ReplayPolicy,
@@ -1103,8 +1103,10 @@ fn decode_job(columns: JobColumns) -> StoreResult<ExtensionJob> {
     } = columns;
     let id = parse_job_id(&id)?;
     let contribution = contribution_id
-        .parse::<ContributionId>()
-        .map_err(|_| ExtensionJobStoreError::InvalidData)?;
+        .parse::<ContributionRef>()
+        .ok()
+        .and_then(|r| r.id())
+        .ok_or(ExtensionJobStoreError::InvalidData)?;
     let owner = JobOwner {
         contribution,
         package_version,

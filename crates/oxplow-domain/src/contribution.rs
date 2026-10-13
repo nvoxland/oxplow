@@ -328,6 +328,24 @@ impl ContributionKind {
     }
 
     /// Its id segment (`metric`, `custom_component`).
+    /// Whether its contributions are named globally — by a name unique
+    /// across extensions that callers already use (a command's bus id, a
+    /// metric or measure or dimension key, an event type, a ref kind) —
+    /// rather than within their extension. Its ref is then
+    /// `<kind>:<name>`; every other kind's is `<kind>:<extension>/<id>`.
+    pub fn global_name(self) -> bool {
+        matches!(
+            self,
+            ContributionKind::Command
+                | ContributionKind::Measure
+                | ContributionKind::Metric
+                | ContributionKind::Dimension
+                | ContributionKind::EventType
+                | ContributionKind::RefKind
+        )
+    }
+
+    /// Its ref kind: the segment (`job`, `ai_profile`, `command`).
     pub fn segment(self) -> &'static str {
         match self {
             ContributionKind::Model => "model",
@@ -356,10 +374,13 @@ impl ContributionKind {
     }
 }
 
-/// A contribution's identity: `<extension>/<kind>/<local>`. Stable across
-/// loads; what ordering, imports and the views key on. The public forms a
-/// kind already had (`lens:<ext>/<slug>`, a command id, a metric key) are
-/// its [`Descriptor::aliases`].
+/// A contribution's identity within the catalog: who declared it, what
+/// kind it is, and its id there (for a [`ContributionKind::global_name`]
+/// kind, its global name). Its only public name is its ref
+/// ([`ContributionId::reference`], also its `Display`):
+/// `job:effort-review/review`, `command:oxplow.review.accept`. Storage,
+/// events, manifests and the desktop all carry that ref
+/// (`.context/refs.md` "Using refs").
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, specta::Type,
 )]
@@ -371,40 +392,132 @@ pub struct ContributionId {
 
 impl std::fmt::Display for ContributionId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}/{}/{}",
-            self.extension,
-            self.kind.segment(),
-            self.local
-        )
+        self.reference().fmt(f)
     }
 }
 
-impl std::str::FromStr for ContributionId {
+/// A contribution named by its ref, as text carries it: `job:acme/review`
+/// or `command:acme.pr.merge`. A local ref names its owner
+/// ([`ContributionRef::id`]); a global one is resolved by the catalog,
+/// which knows who declares each global name.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, specta::Type)]
+#[specta(transparent)]
+pub struct ContributionRef(#[specta(type = String)] RefParts);
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct RefParts {
+    kind: ContributionKind,
+    /// `None` for a global name.
+    extension: Option<String>,
+    name: String,
+}
+
+impl ContributionRef {
+    pub fn kind(&self) -> ContributionKind {
+        self.0.kind
+    }
+
+    /// The owning extension, when the ref says it (a local kind's).
+    pub fn extension(&self) -> Option<&str> {
+        self.0.extension.as_deref()
+    }
+
+    /// The id within its extension, or the global name.
+    pub fn name(&self) -> &str {
+        &self.0.name
+    }
+
+    /// The contribution it names, when the ref says its owner.
+    pub fn id(&self) -> Option<ContributionId> {
+        self.0
+            .extension
+            .as_ref()
+            .map(|ext| ContributionId::new(ext, self.0.kind, &self.0.name))
+    }
+}
+
+impl std::fmt::Display for ContributionRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let id = match &self.0.extension {
+            Some(ext) => format!("{ext}/{}", self.0.name),
+            None => self.0.name.clone(),
+        };
+        f.write_str(&crate::refs::build::of(self.0.kind.segment(), &id))
+    }
+}
+
+impl std::str::FromStr for ContributionRef {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, String> {
-        let mut parts = s.splitn(3, '/');
-        let (Some(extension), Some(kind), Some(local)) = (parts.next(), parts.next(), parts.next())
-        else {
-            return Err(format!("`{s}` isn't `<extension>/<kind>/<id>`"));
-        };
+        let parsed = crate::refs::grammar::CanonicalRef::parse(s)
+            .map_err(|e| format!("`{s}` isn't a ref: {e}"))?;
+        if parsed.rev.is_some() || parsed.frag.is_some() {
+            return Err(format!(
+                "`{s}` names a contribution with a revision or fragment"
+            ));
+        }
         let kind = KINDS
             .iter()
             .map(|k| k.kind)
-            .find(|k| k.segment() == kind)
-            .ok_or_else(|| format!("`{kind}` isn't a kind of contribution"))?;
-        let id = ContributionId {
-            extension: extension.into(),
-            kind,
-            local: local.into(),
+            .find(|k| k.segment() == parsed.kind)
+            .ok_or_else(|| format!("`{}` isn't a kind of contribution", parsed.kind))?;
+        let parts = if kind.global_name() {
+            RefParts {
+                kind,
+                extension: None,
+                name: parsed.id,
+            }
+        } else {
+            let (ext, name) = parsed
+                .id
+                .split_once('/')
+                .ok_or_else(|| format!("`{s}` isn't `{}:<extension>/<id>`", kind.segment()))?;
+            let id = ContributionId::new(ext, kind, name);
+            if let Some(problem) = id.problem() {
+                return Err(problem);
+            }
+            RefParts {
+                kind,
+                extension: Some(ext.to_string()),
+                name: name.to_string(),
+            }
         };
-        id.problem().map_or(Ok(id), Err)
+        if parts.extension.is_none() && !valid_local(kind, &parts.name) {
+            return Err(format!(
+                "`{}` isn't a {} name",
+                parts.name,
+                kind.spec().title
+            ));
+        }
+        Ok(ContributionRef(parts))
+    }
+}
+
+impl Serialize for ContributionRef {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for ContributionRef {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        text.parse().map_err(serde::de::Error::custom)
     }
 }
 
 impl ContributionId {
+    /// Its ref: `<kind>:<extension>/<id>`, or `<kind>:<name>` for a kind
+    /// whose names are global.
+    pub fn reference(&self) -> ContributionRef {
+        ContributionRef(RefParts {
+            kind: self.kind,
+            extension: (!self.kind.global_name()).then(|| self.extension.clone()),
+            name: self.local.clone(),
+        })
+    }
+
     pub fn new(extension: &str, kind: ContributionKind, local: &str) -> Self {
         ContributionId {
             extension: extension.into(),
@@ -610,17 +723,51 @@ mod tests {
         d
     }
 
+    /// A contribution's only name is its ref: `<kind>:<extension>/<id>`,
+    /// or `<kind>:<global name>` for a kind whose names are global (a
+    /// command's bus id, a metric key, an event type). Parsing one from
+    /// text gives a `ContributionRef`; only a local ref says its owner.
     #[test]
-    fn an_id_prints_parses_and_checks_its_grammar() {
-        let id = ContributionId::new("acme-tools", ContributionKind::Command, "pr.merge");
-        assert_eq!(id.to_string(), "acme-tools/command/pr.merge");
-        assert_eq!(
-            "acme-tools/command/pr.merge".parse::<ContributionId>(),
-            Ok(id)
+    fn a_contribution_is_named_by_its_ref() {
+        let job = ContributionId::new("effort-review", ContributionKind::Job, "review");
+        assert_eq!(job.to_string(), "job:effort-review/review");
+        let command = ContributionId::new(
+            "acme-tools",
+            ContributionKind::Command,
+            "acme_tools.pr.merge",
         );
-        assert!("acme-tools/effect/a.b".parse::<ContributionId>().is_err());
-        assert!("acme-tools/nope/x".parse::<ContributionId>().is_err());
-        assert!("Acme/effect/x".parse::<ContributionId>().is_err());
+        assert_eq!(command.to_string(), "command:acme_tools.pr.merge");
+
+        let parsed: ContributionRef = "job:effort-review/review".parse().unwrap();
+        assert_eq!(parsed, job.reference());
+        assert_eq!(parsed.to_string(), "job:effort-review/review");
+        assert_eq!(parsed.id(), Some(job.clone()));
+        let global: ContributionRef = "command:acme_tools.pr.merge".parse().unwrap();
+        assert_eq!(global, command.reference());
+        assert_eq!(global.id(), None, "a global name doesn't say its owner");
+        for bad in [
+            "effort-review/job/review",
+            "nope:acme/x",
+            "job:review",
+            "job:Acme/x",
+            "effect:acme/a.b",
+            "extension:acme",
+        ] {
+            assert!(bad.parse::<ContributionRef>().is_err(), "{bad}");
+        }
+
+        // Every kind's refs are registered kinds whose ids fit.
+        let kinds = crate::refs::kind::core_kinds();
+        for spec in KINDS {
+            let local = match (spec.kind.global_name(), spec.dotted) {
+                (true, true) => "acme.x",
+                (true, false) => "acme_x",
+                (false, _) => "x",
+            };
+            let r = ContributionId::new("acme", spec.kind, local).to_string();
+            let c = crate::refs::grammar::CanonicalRef::parse(&r).unwrap();
+            kinds.validate(&c).unwrap_or_else(|e| panic!("{r}: {e}"));
+        }
         assert!(
             ContributionId::new("acme", ContributionKind::Effect, "9lives")
                 .problem()
@@ -628,11 +775,6 @@ mod tests {
         );
         assert!(
             ContributionId::new("acme", ContributionKind::Provider, "fake_tracker")
-                .problem()
-                .is_none()
-        );
-        assert!(
-            ContributionId::new("acme", ContributionKind::Skill, "work-next")
                 .problem()
                 .is_none()
         );

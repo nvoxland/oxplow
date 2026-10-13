@@ -222,6 +222,7 @@ pub const PROPOSAL: &str = "proposal";
 pub const CLAIM: &str = "claim";
 pub const DECISION: &str = "decision";
 pub const COLLECTOR: &str = "collector";
+pub const JOB_RUN: &str = "job_run";
 
 /// A repo-relative path: no leading `/`, no `//`, no newline.
 const PATH_ID: &str = r"^[^/\n][^\n]*$";
@@ -252,20 +253,9 @@ pub fn core_kinds() -> KindRegistry {
         KindSpec::new(WIKI, r"^[A-Za-z0-9][A-Za-z0-9_-]*$"),
         KindSpec::new(COMMENT, &prefixed("cmt")),
         KindSpec::new(EVENT, r"^[0-9a-f-]{36}$"),
-        KindSpec::new(LENS, r"^[a-z0-9-]+/[a-z0-9-]+(\?.*)?$"),
         // An agent's answer in a thread (`thread_answer.id`, P6.C1).
         KindSpec::new(ANSWER, r"^[0-9]+$"),
-        // A shell route (`page:settings`) or an extension's page
-        // (`page:ext.<extension>.<page>`, P6.G2).
-        KindSpec::new(
-            "page",
-            r"^(?:[a-z0-9-]+|ext\.[a-z0-9-]+\.[a-z0-9-]+)(\?.*)?$",
-        ),
-        KindSpec::new(METRIC, r"^[a-z0-9_.-]+$"),
-        KindSpec::new(MODEL, r"^v_[a-z0-9_]+$"),
         KindSpec::new(EXTENSION, r"^[a-z0-9-]+$"),
-        // Two or more dot segments, as `CommandSpec::validate_id` allows.
-        KindSpec::new(COMMAND, r"^[a-z0-9_]+(\.[a-z0-9_]+)+$"),
         // A `.oxplow/project.yaml` key (`config.changed`'s subject).
         KindSpec::new(CONFIG, r"^[A-Za-z][A-Za-z0-9]*$"),
         KindSpec::new(FINDING, r"^\S+$"),
@@ -279,16 +269,45 @@ pub fn core_kinds() -> KindRegistry {
         // inferred (`claim.id`, `decision.id`; P7.C4 reviews them).
         KindSpec::new(CLAIM, r"^[0-9]+$"),
         KindSpec::new(DECISION, r"^[0-9]+$"),
-        // A collector: `<owner>/<id>`, the owner an extension, `project`
-        // or `built-in`, the id dotted identifiers (P7.B3).
-        KindSpec::new(
-            "collector",
-            r"^[a-z0-9-]+/[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$",
-        ),
+        // One run of a declared job (`v_job_run.id`); the job itself is
+        // the contribution `job:<extension>/<id>`.
+        KindSpec::new(JOB_RUN, r"^[0-9a-f-]{36}$"),
     ];
     for spec in specs {
         reg.register(spec.expect("core kind spec is valid"))
             .expect("core kinds don't collide");
     }
+    for kind in crate::contribution::KINDS.iter().map(|k| k.kind) {
+        reg.register(contribution_kind(kind).expect("contribution kind spec is valid"))
+            .expect("contribution kinds don't collide with core's");
+    }
     reg
+}
+
+/// The ref kind of a kind of contribution: `<kind>:<extension>/<id>`
+/// (the id as `contribution::valid_local` allows), or `<kind>:<name>` for
+/// a kind whose names are global. A few also name things that aren't
+/// contributions: a page is also a shell route (`page:settings`), a model
+/// also one of core's (`model:effort`), a collector also a project's or
+/// the built-in catalog's (`collector:project/repo.scan`), and a lens or
+/// page ref may carry its params (`lens:acme/blocked?stream_id=2`).
+fn contribution_kind(kind: crate::contribution::ContributionKind) -> Result<KindSpec, KindError> {
+    use crate::contribution::ContributionKind as C;
+    let local = if kind.spec().dotted {
+        r"[a-z][a-z0-9_.-]*"
+    } else {
+        r"[a-z][a-z0-9_-]*"
+    };
+    let owned = format!(r"[a-z][a-z0-9-]*/{local}");
+    let pattern = match kind {
+        C::Command => r"^[a-z0-9_]+(\.[a-z0-9_]+)+$".to_string(),
+        C::EventType => r"^[a-z][a-z0-9_]*(\.[a-z0-9_]+)+$".to_string(),
+        C::RefKind => r"^[a-z][a-z0-9_]*$".to_string(),
+        C::Measure | C::Metric | C::Dimension => r"^[a-z0-9_.-]+$".to_string(),
+        C::Lens => format!(r"^{owned}(\?.*)?$"),
+        C::Page => format!(r"^(?:[a-z0-9-]+|{owned})(\?.*)?$"),
+        C::Model => format!(r"^(?:[a-z][a-z0-9_]*|{owned})$"),
+        _ => format!("^{owned}$"),
+    };
+    KindSpec::new(kind.segment(), &pattern)
 }
