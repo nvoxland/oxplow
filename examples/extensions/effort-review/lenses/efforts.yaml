@@ -1,0 +1,20 @@
+title: Finished Efforts
+description: The efforts that finished in the last week, with their work items — Review asks a model to review one from its evidence.
+query: |
+  SELECT 'effort:eff' || id AS effort,
+         work_item,
+         title,
+         ended_at
+  FROM v_effort
+  WHERE ended_at IS NOT NULL
+    AND ended_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-7 days')
+  ORDER BY ended_at DESC
+viz: table
+columns:
+  - { key: title, label: Effort, link: { kind: page, from: effort } }
+  - { key: work_item, label: Work item, link: { kind: page, from: work_item } }
+  - { key: ended_at, label: Finished }
+actions:
+  - { id: review, label: Review, command: effort_review.effort.review, input: { effort: "{{row.effort}}" }, row: true }
+empty: No effort finished in the last week.
+launcher: { category: Work }

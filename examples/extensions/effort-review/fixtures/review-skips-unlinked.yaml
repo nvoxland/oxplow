@@ -1,0 +1,8 @@
+# An effort without a work item has nowhere to put a review.
+input:
+  effect: review-on-finish
+  event:
+    type: effort.finished
+    payload: { effort: "effort:eff8" }
+expect:
+  skip: $any

@@ -1,0 +1,131 @@
+manifest: 2
+name: effort-review
+description: A model reviews each finished effort from its evidence — tests, coverage, what changed, findings — and comments the review on its work item.
+sharing: shared
+engine: ">=0.7"
+version: 0.1.0
+intent:
+  purpose: >-
+    When an effort finishes, a model reads what oxplow collected about it —
+    the tests the agent ran, diff coverage, the files and functions it
+    changed, metric movement and code-quality findings on those files — and
+    writes a short review. The review streams into the Jobs page, can be
+    cancelled there, and lands as a comment on the effort's work item.
+    Other extensions read the reviews through the exported `reviews` model.
+  origin: null
+  examples:
+    - name: review-asked
+      input: { job: review }
+      expect: the model reads the effort's evidence, then answers; the call, the evidence and the answer are the job's output
+    - name: review-cancelled
+      input: { job: review }
+      expect: cancelled while it writes, the job stops and keeps what it had
+    - name: review-delivered
+      input: { job: review }
+      expect: the finished review reaches publish-review, which skips an effort it can't find
+    - name: review-on-finish
+      input: { event: effort.finished }
+      expect: a finished effort with a work item asks for its review
+    - name: review-skips-unlinked
+      input: { event: effort.finished }
+      expect: an effort without a work item isn't reviewed
+    - name: review-requested
+      input: { command: effort_review.effort.review }
+      expect: asking for an effort's review enqueues one job keyed by the effort
+    - name: evidence
+      input: { command: effort_review.effort.evidence }
+      expect: the effort's evidence in one bounded bundle
+    - name: reviews
+      input: { lens: reviews }
+      expect: one row per review the job examples started
+
+# The review: one model conversation per effort. The model must call the
+# `effort.evidence` tool first (the prompt says so); it may also query
+# oxplow's models itself (`query_sql`, from `sql.read`).
+jobs:
+  - id: review
+    description: Review one finished effort from the evidence oxplow collected about it.
+    version: 1
+    operation: ai.complete_typed
+    needs: [ai.compute, sql.read]
+    tools: [effort.evidence]
+    max_tool_rounds: 3
+    timeout: 180
+
+commands:
+  # The job's lifecycle, through the host's jobs scope. `agent: true` is
+  # what lets the `review-on-finish` effect ask (an effect acts as an
+  # agent); `lens: true` lets the Reviews and Efforts lenses' buttons.
+  - name: review.ask
+    summary: Ask a model to review one effort; returns the job. The intent key `review:<effort ref>` makes it one job per effort.
+    scope: jobs.write
+    op: enqueue
+    invokers: { human: true, agent: true, lens: true }
+  - name: review.status
+    summary: A review job's state, what it has written so far and, once it ends, its answer.
+    scope: jobs.read
+    op: snapshot
+    invokers: { human: true, agent: true, lens: true }
+  - name: review.cancel
+    summary: Stop a review job; it keeps what it had written.
+    scope: jobs.write
+    op: cancel
+    invokers: { human: true, agent: true, lens: true }
+  # Ask for one effort's review: builds the job's request (the prompt) and
+  # composes `review.ask`. The effect and the Efforts lens both use it.
+  - name: effort.review
+    summary: Ask a model to review one effort from its evidence; the review streams into the Jobs page and is commented on the effort's work item.
+    entry: commands/review_effort.star
+    access: record
+    input_schema:
+      type: object
+      required: [effort]
+      additionalProperties: false
+      properties:
+        effort: { type: string, description: "The effort (`effort:eff<id>`)." }
+    invokers: { human: true, agent: true, lens: true }
+  # The model's tool. Also a person's or an agent's read: it only reads.
+  - name: effort.evidence
+    summary: What oxplow collected about one effort — its work item, test runs, latest observations (tests, diff coverage, static analysis), changed files and functions, metric movement and findings on its files — capped so it fits one answer.
+    entry: commands/evidence.star
+    needs: [sql.read]
+    access: read
+    input_schema:
+      type: object
+      required: [effort]
+      additionalProperties: false
+      properties:
+        effort: { type: string, description: "The effort (`effort:eff<id>`)." }
+    invokers: { human: true, agent: true, lens: true, job: true }
+
+effects:
+  # `effort.finished`, not `effort.closed`: the evidence (observations,
+  # metric deltas) is refreshed between the two.
+  - id: review-on-finish
+    summary: When an effort with a work item finishes, ask for its review.
+    on: [effort.finished]
+    entry: effects/review_on_finish.star
+  - id: publish-review
+    summary: When a review job ends, comment its review on the effort's work item.
+    on: [contribution.job.completed]
+    entry: effects/publish_review.star
+    needs: [jobs.read, sql.read]
+
+models:
+  - name: reviews
+    version: 1
+    key: [job]
+    description: "Each effort review: the effort, its work item, the review job's state and what the model wrote (as far as it got, for one still running or cancelled)."
+    columns:
+      - { name: job, type: TEXT, doc: "The review job (`v_job.id`)." }
+      - { name: effort, type: TEXT, doc: "The effort reviewed (`effort:eff<id>`)." }
+      - { name: work_item, type: TEXT, doc: "Its work item's ref; NULL when it had none." }
+      - { name: state, type: TEXT, doc: "The job's state: `queued`, `running`, `succeeded`, `failed`, `cancelled` or `interrupted`." }
+      - { name: reviewed_at, type: TEXT, doc: "When the job last changed (RFC 3339)." }
+      - { name: review, type: TEXT, doc: "What the model wrote in the job's current attempt ('' before it starts)." }
+
+# Another extension may read the reviews: `imports: [{ id: reviews,
+# contribution: effort-review/model/reviews, version: 1 }]` and
+# `import_ref('reviews')` in its SQL.
+exports:
+  - { contribution: effort-review/model/reviews, version: 1, visibility: stable }

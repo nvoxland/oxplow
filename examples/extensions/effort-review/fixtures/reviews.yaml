@@ -1,0 +1,4 @@
+# The reviews the job examples before it started in the same throwaway:
+# asked, cancelled and delivered — one row each.
+input: { lens: reviews }
+expect: { columns: [job, output_ref, effort, work_item, state, opening, reviewed_at], rows: 3 }

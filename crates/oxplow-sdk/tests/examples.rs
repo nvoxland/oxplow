@@ -545,3 +545,256 @@ async fn the_task_views_example_checks_and_its_fixtures_pass() {
         );
     }
 }
+
+/// Run `name` as a person on `svc`'s bus.
+async fn as_person(
+    svc: &oxplow_app::Services,
+    name: &str,
+    input: serde_json::Value,
+) -> serde_json::Value {
+    svc.commands
+        .run(&oxplow_domain::Actor::Human, name, input, false)
+        .await
+        .unwrap_or_else(|e| panic!("{name}: {e}"))
+        .result
+}
+
+/// Poll `sql` until it returns a row, up to ten seconds.
+async fn until_row(svc: &oxplow_app::Services, sql: &str) -> Vec<serde_json::Value> {
+    for _ in 0..200 {
+        let rows = svc.sql.query_sql(sql, vec![], None).await.unwrap();
+        if let Some(row) = rows.rows.first() {
+            return serde_json::to_value(row)
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .clone();
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("no row for: {sql}");
+}
+
+/// The effort-review example over a real oxplow: an effort with a work
+/// item finishes, its review is asked for by the extension's effect, the
+/// model reads the effort's evidence (the test run the agent reported and
+/// the diff coverage) through the extension's tool, and the review is
+/// commented on the work item and published in the exported model. A
+/// second review, cancelled through oxplow's own Jobs command while the
+/// model writes, keeps what it had and says it was cancelled.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_effort_review_example_reviews_evidence_and_can_be_cancelled() {
+    use oxplow_app::ai_service::{ProviderConfig, Role, RoleBinding};
+    use oxplow_app::exec_consent::{approve_every, ProgramKind};
+    use serde_json::json;
+
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    oxplow_app::vcs::GitProvider
+        .init_repository(root)
+        .await
+        .unwrap();
+    let example =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/effort-review");
+    copy_dir(&example, &root.join("oxplow/extensions/effort-review"));
+
+    let tested = test_extension(root, "effort-review", false).await.unwrap();
+    assert_eq!(tested.errors, Vec::<String>::new());
+
+    let svc = oxplow_app::Services::in_memory(root).await.unwrap();
+    // The model: a call to the evidence tool, the review, then a slow one
+    // to cancel.
+    let replies: Vec<oxplow_ai::fixture::FixtureReply> = serde_json::from_value(json!([
+        { "toolCalls": [{ "name": "effort_evidence", "arguments": { "effort": "effort:eff1" } }] },
+        "The agent's 12 tests pass; diff coverage is 80%, leaving src/a.rs:3 untested.",
+        { "text": "A long review that is still being written when it is cancelled, word by word.", "chunkDelayMs": 100 },
+    ]))
+    .unwrap();
+    let model = std::sync::Arc::new(oxplow_ai::fixture::FixtureModel::new(replies));
+    svc.ai.providers().register_host(model.clone());
+    svc.ai
+        .save_provider(
+            ProviderConfig {
+                id: "fixture".into(),
+                kind: oxplow_ai::fixture::KIND.into(),
+                base_url: None,
+            },
+            None,
+        )
+        .unwrap();
+    svc.ai
+        .set_role(
+            Role::Summarize,
+            Some(RoleBinding {
+                provider: "fixture".into(),
+                model: "fixture".into(),
+            }),
+        )
+        .unwrap();
+    // A person approves the job and the two effects.
+    approve_every(&svc, ProgramKind::Job).unwrap();
+    approve_every(&svc, ProgramKind::Effect).unwrap();
+    let ext = svc.extension_catalog.named(root, "effort-review").unwrap();
+    for decl in &ext.effects {
+        oxplow_app::effects::approved(&svc.db, &decl.name())
+            .await
+            .unwrap();
+    }
+    svc.extension_activation
+        .activate(svc.clone())
+        .await
+        .expect("it activates");
+    oxplow_app::effect_triggers::register(&svc);
+    // The pump delivers events to the effort lifecycle and the effects, as
+    // in the app.
+    svc.event_pump.clone().spawn();
+
+    // An effort on a work item: the agent ran the tests, then it finished.
+    svc.streams.ensure_primary().await.unwrap();
+    let item = as_person(
+        &svc,
+        "oxplow.work_item.create",
+        json!({ "title": "Parse blocks" }),
+    )
+    .await;
+    let item = item["ref"].as_str().unwrap().to_string();
+    as_person(
+        &svc,
+        "oxplow.effort.open",
+        json!({ "thread": "thread:thr1", "work_item": item }),
+    )
+    .await;
+    svc.commands
+        .run(
+            &oxplow_domain::Actor::Agent {
+                session_id: None,
+                thread_id: Some(oxplow_domain::ThreadId::new(1)),
+                stream_id: None,
+            },
+            "oxplow.test.record_run",
+            json!({ "command": "cargo test", "passed": 12, "failed": 0, "total": 12 }),
+            false,
+        )
+        .await
+        .unwrap();
+    as_person(
+        &svc,
+        "oxplow.effort.close",
+        json!({ "effort": "effort:eff1" }),
+    )
+    .await;
+
+    // Its effect asked for the review; the scheduler isn't running yet, so
+    // it waits while the coverage report arrives.
+    let job = until_row(
+        &svc,
+        "SELECT id FROM v_job WHERE intent_key = 'review:effort:eff1'",
+    )
+    .await[0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let store = &svc.effort_evidence_store;
+    let mut observations = store.list_observations(1, None).await.unwrap();
+    observations.push(oxplow_db::EffortObservation {
+        kind: "diff-coverage".into(),
+        provenance: "observed".into(),
+        source: "lcov".into(),
+        metric_value: Some(80.0),
+        payload_json: Some(r#"{"uncovered":[{"path":"src/a.rs","lines":[3]}]}"#.into()),
+        local_snapshot_id: None,
+        created_at: oxplow_domain::Timestamp::now(),
+    });
+    let sig = store.attribution_sig(1).await.unwrap();
+    store
+        .replace(1, Vec::new(), observations, sig)
+        .await
+        .unwrap();
+    svc.jobs
+        .spawn(svc.extension_activation.clone(), svc.commands.clone());
+
+    // The model read the evidence: the test run and the coverage.
+    let evidence = until_row(
+        &svc,
+        &format!("SELECT data FROM v_job_output WHERE job_id = '{job}' AND kind = 'tool_result'"),
+    )
+    .await[0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let evidence: serde_json::Value = serde_json::from_str(&evidence).unwrap();
+    let bundle = &evidence["result"];
+    assert_eq!(bundle["workItem"], json!(item), "{evidence}");
+    assert_eq!(bundle["testRuns"][0]["passed"], json!(12), "{evidence}");
+    assert!(
+        bundle["observations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|o| o["kind"] == json!("diff-coverage") && o["metric_value"] == json!(80.0)),
+        "{evidence}"
+    );
+
+    // The review is commented on the work item, and published.
+    let comment = until_row(
+        &svc,
+        "SELECT body FROM v_work_item_comment WHERE body LIKE '**Review of effort:eff1**%'",
+    )
+    .await;
+    assert!(
+        comment[0]
+            .as_str()
+            .unwrap()
+            .contains("diff coverage is 80%"),
+        "{comment:?}"
+    );
+    let published = until_row(
+        &svc,
+        "SELECT effort, work_item, state, review FROM v_effort_review_reviews",
+    )
+    .await;
+    assert_eq!(
+        published,
+        [
+            json!("effort:eff1"),
+            json!(item),
+            json!("succeeded"),
+            json!("The agent's 12 tests pass; diff coverage is 80%, leaving src/a.rs:3 untested.")
+        ]
+    );
+
+    // A second effort's review, cancelled from oxplow's Jobs command while
+    // the model writes: it ends cancelled, and the comment keeps what it had.
+    as_person(
+        &svc,
+        "oxplow.effort.open",
+        json!({ "thread": "thread:thr1", "work_item": item }),
+    )
+    .await;
+    as_person(
+        &svc,
+        "oxplow.effort.close",
+        json!({ "effort": "effort:eff2" }),
+    )
+    .await;
+    let second = until_row(
+        &svc,
+        "SELECT job_id FROM v_job_output o JOIN v_job j ON j.id = o.job_id \
+          WHERE j.intent_key = 'review:effort:eff2' AND o.kind = 'text'",
+    )
+    .await[0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    as_person(&svc, "oxplow.job.cancel", json!({ "id": second })).await;
+    until_row(
+        &svc,
+        &format!("SELECT 1 FROM v_job WHERE id = '{second}' AND state = 'cancelled'"),
+    )
+    .await;
+    until_row(
+        &svc,
+        "SELECT body FROM v_work_item_comment WHERE body LIKE '**Review of effort:eff2**%The review was cancelled after%'",
+    )
+    .await;
+}

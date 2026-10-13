@@ -1,0 +1,6 @@
+# Asking for an effort's review enqueues the review job, keyed by the effort.
+input:
+  command: effort_review.effort.review
+  input: { effort: "effort:eff7" }
+expect:
+  commands: [effort_review.review.ask]

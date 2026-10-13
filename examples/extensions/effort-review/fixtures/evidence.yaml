@@ -1,0 +1,27 @@
+# The evidence for one effort, from the models' answers (in the order the
+# script reads them): the effort, its files, its functions, test runs,
+# observations, metrics and findings.
+input:
+  command: effort_review.effort.evidence
+  input: { effort: "effort:eff7" }
+  answers:
+    sql.read:
+      - [{ work_item: "work_item:oxplow:tsk1", title: "Parse blocks", summary: null, started_at: "2026-10-12T10:00:00Z", ended_at: "2026-10-12T11:00:00Z", closed_by: commit }]
+      - [{ path: src/parse.rs, change_kind: updated, source: claimed, additions: 40, deletions: 5, is_test: 0 }]
+      - [{ path: src/parse.rs, container: "", name: parse_block, status: modified, signature_changed: 0, complexity: 9, complexity_delta: 3, length_delta: 20, is_test: 0 }]
+      - [{ command: cargo test, exit_code: 0, passed: 41, failed: 0, skipped: 0, total: 41, provenance: observed, captured_at: "2026-10-12T10:50:00Z" }]
+      - [{ kind: diff-coverage, provenance: observed, metric_value: 72.5, detail: '{"uncovered":[{"path":"src/parse.rs","lines":[88,89]}]}', created_at: "2026-10-12T10:51:00Z" }]
+      - []
+      - []
+expect:
+  commands: []
+  result:
+    effort: "effort:eff7"
+    workItem: "work_item:oxplow:tsk1"
+    files: [{ path: src/parse.rs, additions: 40 }]
+    functions: [{ name: parse_block, complexity_delta: 3 }]
+    testRuns: [{ passed: 41, failed: 0 }]
+    observations: [{ kind: diff-coverage, metric_value: 72.5 }]
+    metrics: []
+    findings: []
+    truncated: []

@@ -1,0 +1,26 @@
+# The model reads the effort's evidence through its tool before it
+# answers; the call, the tool's answer (the throwaway has no such effort,
+# so the tool refuses — the model is told why) and the reply are the
+# job's output, in order.
+input:
+  job: review
+  intentKey: "review:effort:eff1"
+  request:
+    schemaVersion: 1
+    role: summarize
+    messages:
+      - { role: user, parts: [{ type: text, text: "Review effort:eff1." }] }
+  model:
+    replies:
+      - { toolCalls: [{ name: effort_evidence, arguments: { effort: "effort:eff1" } }] }
+      - "No tests ran for effort:eff1."
+expect:
+  state: succeeded
+  toolCalls: 1
+  text: "No tests ran for effort:eff1."
+  output:
+    - { kind: tool_call }
+    - { kind: usage }
+    - { kind: tool_result }
+    - { kind: text }
+    - { kind: usage }

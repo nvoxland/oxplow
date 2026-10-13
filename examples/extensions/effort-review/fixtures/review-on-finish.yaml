@@ -1,0 +1,8 @@
+# A finished effort with a work item asks for its review.
+input:
+  effect: review-on-finish
+  event:
+    type: effort.finished
+    payload: { effort: "effort:eff7", work_item: "work_item:oxplow:tsk1", end_snapshot: "snapshot:3" }
+expect:
+  commands: [effort_review.effort.review]
