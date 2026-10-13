@@ -81,7 +81,7 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
     for l in &ext.lenses {
         let mut d = new(ContributionKind::Lens, &l.slug, RunsOn::Mount);
         d.needs = l.needs.clone();
-        d.aliases = vec![format!("lens:{}", l.id)];
+        d.aliases = vec![oxplow_domain::refs::build::lens_ref(&l.id)];
         d.source = DeclaredAt {
             file: l.path.clone(),
             line: None,

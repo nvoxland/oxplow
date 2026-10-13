@@ -247,7 +247,7 @@ fn push_comment_item(items: &mut Vec<Item>, src: &str, start: usize, end: usize)
 /// Key prefix marking a standalone comment block (tsk159). `reconstruct` reads
 /// it to restore the blank line that made the block detached in the first
 /// place.
-const COMMENT_KEY_PREFIX: &str = "comment::";
+const COMMENT_KEY_PREFIX: &str = "#comment::";
 
 /// Compute an item's identity key per the spec's rules.
 fn item_key(node: Node, src: &str, spec: &MergeSpec) -> String {

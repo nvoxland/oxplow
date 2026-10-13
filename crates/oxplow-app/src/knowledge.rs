@@ -51,7 +51,7 @@ pub const RESYNC: &str = "oxplow.knowledge.resync";
 
 /// A page's ref: `wiki:<slug>`.
 pub fn page_ref(slug: &str) -> String {
-    format!("{KIND_WIKI}:{slug}")
+    oxplow_domain::refs::build::wiki_ref(slug)
 }
 
 /// Where a page's body lives.
@@ -649,7 +649,7 @@ pub async fn freshness(
             .query_map(params![page], |r| {
                 let target: String = r.get(0)?;
                 Ok(RefFreshness {
-                    target: format!("{KIND_FILE}:{target}"),
+                    target: oxplow_domain::refs::build::file_ref(&target),
                     pinned_snapshot: r.get(1)?,
                     pinned_revision: r.get(4)?,
                     pinned_revision_exact: r.get::<_, i64>(5)? != 0,
@@ -694,9 +694,12 @@ impl crate::event_pump::EventConsumer for WikiAttribution {
             serde_json::from_value(event.envelope.payload.clone()).map_err(|e| {
                 DomainError::Invalid(format!("knowledge.page.written payload: {e}"))
             })?;
-        let Some(slug) = written.page.strip_prefix("wiki:") else {
+        let Ok(slug) =
+            oxplow_domain::refs::build::id_of(&written.page, oxplow_domain::refs::kind::WIKI)
+        else {
             return Ok(());
         };
+        let slug = slug.as_str();
         // A page deleted since is no longer there to mark.
         if oxplow_db::wiki_page_store::get_tx(conn, slug)?.is_none() {
             return Ok(());

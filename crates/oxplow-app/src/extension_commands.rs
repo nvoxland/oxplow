@@ -856,7 +856,7 @@ pub fn extension_command(
     };
     let (needs, reads) = (decl.needs.clone(), decl.access.reads_only());
     let (vocabulary, extension) = (bus.vocabulary().clone(), extension.to_string());
-    let source = format!("extension:{extension}/{}", decl.name);
+    let source = oxplow_domain::refs::build::command_ref(&decl.name);
     let compose: std::sync::Arc<Composer> = std::sync::Arc::new(
         move |composing: &crate::commands::compose::Composing<'_>,
               run: &oxplow_domain::run::RunContext,
@@ -945,8 +945,12 @@ pub fn register_required(bus: &std::sync::Arc<crate::commands::CommandBus>) -> R
                 extension_command(bus, b.name, decl).map_err(|e| format!("`{}`: {e}", decl.name))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        bus.register_namespace(&namespace, &format!("extension:{}", b.name), built)
-            .map_err(|e| format!("{file}: {e}"))?;
+        bus.register_namespace(
+            &namespace,
+            &oxplow_domain::refs::build::extension_ref(b.name),
+            built,
+        )
+        .map_err(|e| format!("{file}: {e}"))?;
     }
     Ok(())
 }
@@ -981,7 +985,7 @@ pub fn register_declared(bus: &std::sync::Arc<crate::commands::CommandBus>) {
             .collect();
         bus.register_namespace(
             oxplow_domain::OXPLOW_NAMESPACE,
-            &format!("extension:{}", b.name),
+            &oxplow_domain::refs::build::extension_ref(b.name),
             built,
         )
         .expect("they register");
@@ -1159,7 +1163,7 @@ impl ExtensionCommands {
             match self.build(extension, registration) {
                 Ok(commands) => replacements.push(crate::commands::NamespaceCommands {
                     namespace: registration.namespace.clone(),
-                    source: format!("extension:{extension}"),
+                    source: oxplow_domain::refs::build::extension_ref(extension),
                     commands,
                 }),
                 Err(problem) => {
@@ -1174,7 +1178,7 @@ impl ExtensionCommands {
             if !wanted.contains_key(extension) {
                 replacements.push(crate::commands::NamespaceCommands {
                     namespace: previous.namespace.clone(),
-                    source: format!("extension:{extension}"),
+                    source: oxplow_domain::refs::build::extension_ref(extension),
                     commands: Vec::new(),
                 });
             }
@@ -1348,7 +1352,7 @@ pub async fn check_extension_commands(
 ) {
     if let (Some(registry), false) = (commands, ext.commands.is_empty()) {
         let ns = ext.namespace.clone();
-        let mine = format!("extension:{}", ext.name);
+        let mine = oxplow_domain::refs::build::extension_ref(&ext.name);
         // `oxplow` is shared by oxplow's own extensions (its namespace check
         // already refused it to anyone else); any other is one owner's.
         if let Some(owner) = registry

@@ -128,7 +128,7 @@ impl LspProvider {
 fn uri_of(ws: &Path, path: &str) -> String {
     url::Url::from_file_path(ws.join(path))
         .map(|u| u.to_string())
-        .unwrap_or_else(|()| format!("file://{}", ws.join(path).display()))
+        .unwrap_or_else(|()| ws.join(path).display().to_string())
 }
 
 /// `uri` as a workspace-relative path, or absolute when outside `ws`.

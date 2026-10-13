@@ -208,8 +208,7 @@ pub enum WorkItemsError {
 
 /// The provider segment of `work_item:<provider>:<id>`.
 pub fn provider_of(item_ref: &str) -> Result<&str, WorkItemsError> {
-    item_ref
-        .strip_prefix("work_item:")
+    crate::refs::build::work_item_id_of_ref(item_ref)
         .and_then(|rest| rest.split_once(':'))
         .filter(|(p, id)| !p.is_empty() && !id.is_empty())
         .map(|(p, _)| p)
@@ -414,7 +413,10 @@ impl WorkItemsRegistry {
             }
         };
         if matched {
-            Ok(format!("work_item:{active}:{raw}"))
+            Ok(crate::refs::build::of(
+                crate::refs::kind::WORK_ITEM,
+                &format!("{active}:{raw}"),
+            ))
         } else {
             Err(format!(
                 "`{raw}` isn't a work item ref (work_item:<provider>:<id>) or an id of the active \

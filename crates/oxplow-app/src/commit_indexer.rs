@@ -286,7 +286,7 @@ async fn log_indexed(
     let env = oxplow_domain::Envelope::typed::<VcsCommitIndexed>(
         oxplow_domain::refs::build::system_source("commit_indexer"),
         &VcsCommitIndexedV1 {
-            commit: format!("commit:{sha}"),
+            commit: oxplow_domain::refs::build::commit_ref(sha),
             stream: oxplow_domain::refs::build::stream_ref(stream),
             committed_at: committed.to_text(),
         },
@@ -295,7 +295,7 @@ async fn log_indexed(
         stream_id: Some(stream),
         ..Default::default()
     })
-    .with_subject([format!("commit:{sha}")])
+    .with_subject([oxplow_domain::refs::build::commit_ref(sha)])
     .with_dedupe_key(format!("vcs.commit.indexed:{sha}"));
     match svc.event_log_store.append(env).await {
         Ok(_) | Err(oxplow_domain::DomainError::Constraint(_)) => {}

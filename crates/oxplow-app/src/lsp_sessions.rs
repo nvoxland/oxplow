@@ -359,10 +359,10 @@ impl LspSessionManager {
                 "initialize",
                 json!({
                     "processId": std::process::id(),
-                    "rootUri": format!("file://{}", cwd.display()),
+                    "rootUri": file_uri(&cwd),
                     "capabilities": client_capabilities(),
                     "workspaceFolders": [{
-                        "uri": format!("file://{}", cwd.display()),
+                        "uri": file_uri(&cwd),
                         "name": "oxplow",
                     }],
                 }),
@@ -865,6 +865,13 @@ fn binary_exists(command: &str) -> bool {
         return false;
     };
     std::env::split_paths(&paths).any(|dir| dir.join(command).is_file())
+}
+
+/// The `file://` URI of `path`.
+fn file_uri(path: &Path) -> String {
+    url::Url::from_file_path(path)
+        .map(String::from)
+        .unwrap_or_else(|()| path.display().to_string())
 }
 
 #[cfg(test)]

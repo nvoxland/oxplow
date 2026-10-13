@@ -122,7 +122,10 @@ pub(super) fn lost_race(
     }
     let message = match origin {
         RunOrigin::Undo(audit_id) => format!("audit row {audit_id} was already undone"),
-        RunOrigin::Approval(id) => format!("proposal:{id} was already decided"),
+        RunOrigin::Approval(id) => format!(
+            "{} was already decided",
+            oxplow_domain::refs::build::proposal_ref(*id)
+        ),
         RunOrigin::Effect(key, _) => format!(
             "effect `{}` {} {}",
             key.effect,

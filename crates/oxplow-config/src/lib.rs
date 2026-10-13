@@ -2857,12 +2857,12 @@ pub type ExtensionLayer<T> = (String, Vec<T>);
 
 /// The scope string for an extension's entries.
 pub fn extension_scope(name: &str) -> String {
-    format!("extension:{name}")
+    oxplow_domain::refs::build::extension_ref(name)
 }
 
 /// The extension name in an `extension:<name>` scope.
-pub fn scope_extension(scope: &str) -> Option<&str> {
-    scope.strip_prefix("extension:")
+pub fn scope_extension(scope: &str) -> Option<String> {
+    oxplow_domain::refs::build::id_of(scope, oxplow_domain::refs::kind::EXTENSION).ok()
 }
 
 /// Scopes in precedence order (later wins): built-in, global, each

@@ -108,7 +108,7 @@ pub async fn suite(
 ) -> SuiteRun {
     let mut findings = Vec::new();
     let mut fail = |check: &'static str, message: String| findings.push(Finding { check, message });
-    let prefix = format!("work_item:{provider}:");
+    let prefix = oxplow_domain::refs::build::of("work_item", &format!("{provider}:"));
     // Every create files on the active tracker (tsk1058): the host runs the
     // suite with `provider` active.
     let active = probe.active().await;
@@ -699,7 +699,13 @@ impl WorkItemsProbe for ServicesProbe<'_> {
     }
 
     async fn titled(&self, provider: &str, title: &str) -> Vec<String> {
-        let (prefix, title) = (format!("work_item:{provider}:%"), title.to_string());
+        let (prefix, title) = (
+            format!(
+                "{}%",
+                oxplow_domain::refs::build::of("work_item", &format!("{provider}:"))
+            ),
+            title.to_string(),
+        );
         self.0
             .db
             .read(move |c| {

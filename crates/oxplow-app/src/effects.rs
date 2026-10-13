@@ -479,7 +479,7 @@ pub fn finished_tx(
         RunState::Started | RunState::Failed => EffectOutcome::Failed,
     };
     let extension = key.effect.split('/').next().unwrap_or_default();
-    let event_ref = format!("event:{}", key.event_id);
+    let event_ref = oxplow_domain::refs::build::event_ref(&key.event_id.to_string());
     let mut result = oxplow_domain::Envelope::typed::<EffectResult>(
         format!("effect:{}", key.effect),
         &EffectResultV4 {
@@ -487,7 +487,9 @@ pub fn finished_tx(
             event: Some(event_ref.clone()),
             outcome,
             reason: done.reason.clone(),
-            proposal: done.proposal_id.map(|id| format!("proposal:{id}")),
+            proposal: done
+                .proposal_id
+                .map(oxplow_domain::refs::build::proposal_ref),
             detail: serde_json::Value::Null,
             attempt: key.attempt,
             origin: match key.origin {

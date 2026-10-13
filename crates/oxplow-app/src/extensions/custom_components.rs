@@ -496,8 +496,10 @@ pub fn parse_custom_components(
             // A lens id alone: params, a revision or a fragment would make
             // it a different ref than the one `query(asset)` names.
             a.contains(['?', '@', '#'])
-                || oxplow_domain::refs::grammar::CanonicalRef::parse(&format!("lens:{a}"))
-                    .map_or(true, |r| kinds.validate(&r).is_err())
+                || oxplow_domain::refs::grammar::CanonicalRef::parse(
+                    &oxplow_domain::refs::build::of("lens", a),
+                )
+                .map_or(true, |r| kinds.validate(&r).is_err())
         }) {
             Some(format!(
                 "custom component `{}`: asset `{bad}` isn't a lens id (`<slug>` or `<extension>/<slug>`)",

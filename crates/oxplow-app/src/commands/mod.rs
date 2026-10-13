@@ -490,9 +490,8 @@ pub const CORE_SOURCE: &str = "core";
 /// the extensions that ship with oxplow — nothing else.
 fn ships_with_oxplow(source: &str) -> bool {
     source == CORE_SOURCE
-        || source
-            .strip_prefix("extension:")
-            .is_some_and(|name| crate::bundled_extensions::find(name).is_some())
+        || oxplow_domain::refs::build::id_of(source, oxplow_domain::refs::kind::EXTENSION)
+            .is_ok_and(|name| crate::bundled_extensions::find(&name).is_some())
 }
 
 /// The registered commands by id, who registered each (its source:

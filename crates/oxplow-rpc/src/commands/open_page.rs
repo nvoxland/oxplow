@@ -22,7 +22,8 @@ pub async fn report_open_page(
         oxplow_domain::DomainError::Invalid(format!("{thread_id:?} is not a thread id"))
     })?;
     let page = page_id.map(|page_id| OpenPage {
-        kind: kind.unwrap_or_else(|| page_id.split(':').next().unwrap_or_default().to_string()),
+        kind: kind
+            .unwrap_or_else(|| oxplow_domain::refs::build::kind_of(&page_id).unwrap_or_default()),
         page_id,
         detail_json,
         reported_at: Timestamp::now(),

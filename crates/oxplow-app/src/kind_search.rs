@@ -43,19 +43,34 @@ pub const MAX_ROWS: usize = 20_000;
 pub const MAX_BODY: usize = 16 * 1024;
 
 /// Core's kinds indexed from a model: the search kind, its view, the
-/// canonical ref its rows carry up to the id (tsk922: a published model's
+/// kind of the canonical ref its rows carry (up to the id) (tsk922: a published model's
 /// `ref` is a canonical ref, the one a hit opens), and the id. The view's
 /// rows carry a `stream_id`.
 pub const CORE_KINDS: &[(&str, &str, &str, &str)] = &[
     (
         "work_item",
         "v_search_work_item",
-        "work_item:",
+        oxplow_domain::refs::kind::WORK_ITEM,
         r"^[a-z][a-z0-9_]*:.+$",
     ),
-    ("comment", "v_search_comment", "comment:", r"^cmt\d+$"),
-    ("note", "v_search_note", "thread_note:", r"^not\d+$"),
-    ("wiki", "v_search_wiki", "wiki:", r"^.+$"),
+    (
+        "comment",
+        "v_search_comment",
+        oxplow_domain::refs::kind::COMMENT,
+        r"^cmt\d+$",
+    ),
+    (
+        "note",
+        "v_search_note",
+        oxplow_domain::refs::kind::THREAD_NOTE,
+        r"^not\d+$",
+    ),
+    (
+        "wiki",
+        "v_search_wiki",
+        oxplow_domain::refs::kind::WIKI,
+        r"^.+$",
+    ),
 ];
 
 /// The asset of a kind's index: `search:<kind>`.
@@ -218,7 +233,7 @@ async fn searchable_kinds(db: &Database) -> Result<Searchable, DomainError> {
         .read(|tx| {
             CORE_KINDS
                 .iter()
-                .map(|(kind, view, prefix, id)| {
+                .map(|(kind, view, ref_kind, id)| {
                     let sql: Option<String> = tx
                         .query_row(
                             "SELECT sql FROM sqlite_master WHERE type = 'view' AND name = ?1",
@@ -230,7 +245,7 @@ async fn searchable_kinds(db: &Database) -> Result<Searchable, DomainError> {
                     Ok((
                         kind.to_string(),
                         view.to_string(),
-                        prefix.to_string(),
+                        format!("{ref_kind}:"),
                         id.to_string(),
                         sql,
                     ))

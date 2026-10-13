@@ -1028,3 +1028,67 @@ fn only_oxplows_implementation_names_its_task_list() {
         "who names oxplow's task list changed.\nunlisted (read the work-item interface instead): {unlisted:#?}\nno longer there (drop from TASK_IMPLEMENTATION): {gone:#?}"
     );
 }
+
+/// Code without its comments (a doc comment may name an example ref).
+fn without_comments(text: &str) -> String {
+    text.lines()
+        .map(|line| match line.find("//") {
+            // A `//` inside a string literal (`"file://"`) is code.
+            Some(i) if line[..i].matches('"').count() % 2 == 0 => &line[..i],
+            _ => line,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Every place production code spells or splits a ref of a core kind by
+/// hand, as `path:line text`.
+fn hand_made_refs() -> Vec<String> {
+    use regex::Regex;
+    let kinds: Vec<String> = oxplow_domain::refs::kind::core_kinds()
+        .kinds()
+        .map(|k| k.kind.clone())
+        .collect();
+    let alternation = kinds.join("|");
+    // A string literal that begins with `<kind>:` and goes on (`"file:{p}"`,
+    // `"effort:"`, `strip_prefix("wiki:")`) — a prefix being written or
+    // matched; `"file: {}"` (a message) has a space after the colon.
+    let literal = Regex::new(&format!(r#"["'](?:{alternation}):[^\s]"#)).expect("a fixed pattern");
+    // A ref-named value split at its colon.
+    let split = Regex::new(
+        r"(?i)ref\w*(?:\(\))?\s*\.\s*(?:split_once|splitn|rsplit_once)\(\s*(?:2\s*,\s*)?':'",
+    )
+    .expect("a fixed pattern");
+    let mut out = Vec::new();
+    for (path, text) in production_sources() {
+        // A work list builds its own items' refs; the grammar module is the
+        // one place a prefix is written.
+        if path.starts_with("crates/oxplow-domain/src/refs/")
+            || path == "crates/oxplow-tasks/src/refs.rs"
+        {
+            continue;
+        }
+        for (i, line) in without_comments(&text).lines().enumerate() {
+            if literal.is_match(line) || split.is_match(line) {
+                out.push(format!("{path}:{} {}", i + 1, line.trim()));
+            }
+        }
+    }
+    out
+}
+
+/// A ref's owner spells it and everyone else carries it: production code
+/// builds a ref with `oxplow_domain::refs::build` and reads one with
+/// `parse_as` / `id_of` / `parse_kind` / `CanonicalRef::parse`, never with
+/// `format!("effort:…")`, `strip_prefix("wiki:")` or a split at the colon
+/// (`.context/refs.md`, "Using refs"). The kept list is empty.
+#[test]
+fn refs_are_built_and_parsed_through_the_grammar() {
+    let offenders = hand_made_refs();
+    assert!(
+        offenders.is_empty(),
+        "{} hand-built or hand-parsed refs:\n{}",
+        offenders.len(),
+        offenders.join("\n")
+    );
+}

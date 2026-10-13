@@ -2364,7 +2364,7 @@ impl MetricsService {
         if let Some(ai) = &self.ai {
             sources = sources.with_ai(
                 ai.clone(),
-                format!("collector:{}/{}", collector.owner, collector.key),
+                oxplow_domain::refs::build::collector_ref(&collector.owner, &collector.key),
             );
         }
         crate::services::prepare(run, script, &collector.needs, &sources)
@@ -3288,7 +3288,7 @@ fn collector_source(collector: &FactCollector) -> String {
     if collector.runtime == CollectorRuntime::Exec {
         format!("exec:{}", collector.key)
     } else {
-        format!("metric:{}", collector.key)
+        oxplow_domain::refs::build::metric_ref(&collector.key)
     }
 }
 

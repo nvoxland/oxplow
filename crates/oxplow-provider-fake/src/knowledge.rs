@@ -127,9 +127,9 @@ pub(crate) fn refs_of(body: &str) -> Vec<String> {
         let inner = after[..close].trim();
         if !inner.is_empty() {
             let r = if inner.contains('/') || inner.contains('.') {
-                format!("file:{inner}")
+                oxplow_domain::refs::build::file_ref(inner)
             } else {
-                format!("wiki:{inner}")
+                oxplow_domain::refs::build::wiki_ref(inner)
             };
             if !refs.contains(&r) {
                 refs.push(r);
@@ -170,7 +170,7 @@ fn keep(pages: &mut Pages, rev: &mut u64, slug: &str, mut record: Value) -> Valu
 }
 
 fn record_of(slug: &str, title: &str, body: &str, deleted: bool) -> Value {
-    let mut record = json!({ "ref": format!("wiki:{slug}"), "title": title, "body": body,
+    let mut record = json!({ "ref": oxplow_domain::refs::build::wiki_ref(slug), "title": title, "body": body,
                              "refs": refs_of(body), "updated_at": "" });
     if deleted {
         record["deleted"] = json!(true);
@@ -196,7 +196,10 @@ pub(crate) fn answer(
                 .unwrap_or(&slug)
                 .to_string();
             let recorded = keep(pages, rev, &slug, record_of(&slug, &title, &body, false));
-            Ok((json!({ "page": format!("wiki:{slug}") }), vec![recorded]))
+            Ok((
+                json!({ "page": oxplow_domain::refs::build::wiki_ref(&slug) }),
+                vec![recorded],
+            ))
         }
         "delete_page" => {
             let slug = str_field(input, "slug")?;
@@ -215,13 +218,16 @@ pub(crate) fn answer(
         }
         "link" => {
             let page = str_field(input, "page")?;
-            let slug = page.strip_prefix("wiki:").unwrap_or(&page).to_string();
+            let slug = oxplow_domain::refs::build::id_of(&page, oxplow_domain::refs::kind::WIKI)
+                .unwrap_or_else(|_| page.clone());
             let target = str_field(input, "target")?;
-            let target = target
-                .strip_prefix("wiki:")
-                .or_else(|| target.strip_prefix("file:"))
-                .unwrap_or(&target)
-                .to_string();
+            let target = [
+                oxplow_domain::refs::kind::WIKI,
+                oxplow_domain::refs::kind::FILE,
+            ]
+            .iter()
+            .find_map(|kind| oxplow_domain::refs::build::id_of(&target, kind).ok())
+            .unwrap_or(target);
             let existing = pages
                 .get(&slug)
                 .filter(|p| p.record["deleted"] != json!(true))

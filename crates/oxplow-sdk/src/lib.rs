@@ -216,6 +216,9 @@ pub fn scaffold_with(
     // An identifier from the name: a provider's or a policy's id.
     let provider_id = oxplow_domain::contribution::extension_namespace(name);
     // The intent example, and its fixture (what `extension test` runs).
+    // The refs the examples name, spelled by the grammar like every other.
+    let rb = |kind: &str, id: &str| oxplow_domain::refs::build::of(kind, id);
+    let work_item = rb("work_item", "oxplow:tsk1");
     let (example_input, example_expect, fixture_expect) = match kind {
         Kind::Lens | Kind::Component | Kind::Page | Kind::Panel => (
             format!("{{ lens: {name}, params: {{ stream_id: 1 }} }}"),
@@ -227,7 +230,10 @@ pub fn scaffold_with(
         }
         Kind::Policy => (
             format!(
-                "{{ implementation: {provider_id}, event: {{ type: thread.checkpoint, payload: {{ thread: \"thread:thr1\", turn: \"turn:trn1\", reason: turn_end, snapshot: \"snapshot:1\", changed: false, writing_tools: 0 }}, anchors: {{ thread_id: thr1, turn_id: 1 }} }} }}"
+                "{{ implementation: {provider_id}, event: {{ type: thread.checkpoint, payload: {{ thread: \"{thread}\", turn: \"{turn}\", reason: turn_end, snapshot: \"{snapshot}\", changed: false, writing_tools: 0 }}, anchors: {{ thread_id: thr1, turn_id: 1 }} }} }}",
+                thread = rb("thread", "thr1"),
+                turn = rb("turn", "trn1"),
+                snapshot = rb("snapshot", "1"),
             ),
             "nothing to do: a checkpoint opens or closes no effort",
             Some("{ skip: $any }".to_string()),
@@ -237,20 +243,24 @@ pub fn scaffold_with(
             (starter.input, starter.expect, Some(starter.fixture))
         }
         Kind::Collector => (
-            "{ collector: items, rows: [{ ref: \"work_item:demo:1\", title: First, state: todo }, { ref: \"work_item:demo:2\", title: Second, state: done }] }"
-                .to_string(),
+            format!(
+                "{{ collector: items, rows: [{{ ref: \"{}\", title: First, state: todo }}, {{ ref: \"{}\", title: Second, state: done }}] }}",
+                rb("work_item", "demo:1"),
+                rb("work_item", "demo:2"),
+            ),
             "one item per work item that isn't done",
             Some("{ entities: { item: 1 } }".to_string()),
         ),
         Kind::Metric => unreachable!("a metric is written from its template above"),
         Kind::Command => (
-            format!("{{ command: {ns}.notes.add, input: {{ ref: \"work_item:oxplow:tsk1\" }} }}"),
+            format!("{{ command: {ns}.notes.add, input: {{ ref: \"{work_item}\" }} }}"),
             "a comment on the work item",
             Some("{ commands: [oxplow.work_item.comment] }".to_string()),
         ),
         Kind::Effect => (
-            "{ effect: on-done, event: { type: work_item.state_changed, payload: { work_item: \"work_item:oxplow:tsk1\", to: done } } }"
-                .to_string(),
+            format!(
+                "{{ effect: on-done, event: {{ type: work_item.state_changed, payload: {{ work_item: \"{work_item}\", to: done }} }} }}"
+            ),
             "a comment on the finished work item",
             Some("{ commands: [oxplow.work_item.comment] }".to_string()),
         ),
@@ -331,7 +341,7 @@ pub fn scaffold_with(
              \x20   # On a work item's page (Commands) and a row's right-click.\n\
              \x20   ui: {{ label: Add Note, about: work_item, input: {{ ref: \"{{{{ref}}}}\" }} }}\n\
              \x20   examples:\n\
-             \x20     - {{ name: happy, input: {{ ref: \"work_item:oxplow:tsk1\" }}, expect_commands: [oxplow.work_item.comment] }}\n"
+             \x20     - {{ name: happy, input: {{ ref: \"{work_item}\" }}, expect_commands: [oxplow.work_item.comment] }}\n"
         )),
         Kind::Effect => manifest.push_str(
             "effects:\n\
@@ -639,12 +649,12 @@ def transform(x):
     thread = e["anchors"].get("thread_id")
     if to == "in_progress" and thread != None:
         return {"commands": [{"name": "oxplow.effort.open",
-                              "input": {"thread": "thread:" + thread, "work_item": item}}]}
+                              "input": {"thread": ref.build("thread", thread), "work_item": item}}]}
     if to == "done" or to == "canceled":
         rows = scope("sql.read", {"sql": "SELECT id FROM v_effort WHERE work_item = :w AND ended_at IS NULL",
                                   "params": {"w": item}})
         return {"commands": [{"name": "oxplow.effort.close",
-                              "input": {"effort": "effort:eff" + str(r["id"]), "reason": "switch"}}
+                              "input": {"effort": ref.build("effort", "eff" + str(r["id"])), "reason": "switch"}}
                              for r in rows]}
     return {"skip": "a move that changes no effort"}
 "#
@@ -708,8 +718,10 @@ fn provider_starter(capability: &str) -> ProviderStarter {
         },
         "snapshots" => ProviderStarter {
             // A small tree beside the fixtures (`fixtures/tree`) stands in for a worktree.
-            input: "{ command: mark, input: { stream: 'stream:str1', worktree: fixtures/tree, trigger: manual, parent: null } }"
-                .to_string(),
+            input: format!(
+                "{{ command: mark, input: {{ stream: '{}', worktree: fixtures/tree, trigger: manual, parent: null }} }}",
+                oxplow_domain::refs::build::of("stream", "str1")
+            ),
             expect: "a handle for the marked state",
             fixture: "{ handle: $any, unchanged: false, file_count: 1 }".to_string(),
             needs: None,
@@ -719,7 +731,7 @@ fn provider_starter(capability: &str) -> ProviderStarter {
             input: "{ command: write_page, input: { slug: example, body: '# Example', verified_refs: [], removed_refs: [] } }"
                 .to_string(),
             expect: "the page's ref",
-            fixture: "{ page: 'wiki:example' }".to_string(),
+            fixture: format!("{{ page: '{}' }}", oxplow_domain::refs::build::wiki_ref("example")),
             needs: None,
             data: serde_json::Value::Null,
         },

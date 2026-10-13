@@ -258,8 +258,8 @@ impl Tasks {
     }
 
     async fn show(&self, id: &str) -> Result<String, String> {
-        let id = id
-            .strip_prefix("work_item:oxplow:")
+        let id = oxplow_domain::refs::build::work_item_id_of_ref(id)
+            .and_then(|rest| rest.strip_prefix("oxplow:"))
             .unwrap_or(id)
             .trim_start_matches("tsk")
             .to_string();

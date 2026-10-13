@@ -90,15 +90,42 @@ its `collector.synced@1` (P7.B3); `build::collector_ref`.
 
 ## Building refs in Rust (built, P2.4b)
 
-Producers never hand-format a ref. `oxplow_domain::refs::build` has one
-builder per kind oxplow emits: `stream_ref`, `thread_ref`, `effort_ref`,
-`turn_ref`, `snapshot_ref`, `commit_ref`, `command_ref`, `config_ref`
-and `proposal_ref`; `work_item_id_of_ref` reads a work item's
-provider-scoped id. A work list builds its own items' refs (oxplow's
-tasks: `oxplow_tasks::{work_item_ref, work_item_id,
-task_of_work_item_ref}`). `system_source(component)` gives
-the `system:<component>` event source a system producer uses; an
-actor's runs use `Actor::source()`.
+Producers never hand-format a ref, and readers never split one by hand.
+`oxplow_domain::refs::build` has one builder per core kind, each taking
+the id as the grammar escapes it, and the kind names are constants
+(`oxplow_domain::refs::kind::{EFFORT, FILE, WIKI, …}`):
+
+- generic: `of(kind, id)` and `at(kind, id, rev, frag)` — for a kind only
+  known at run time (an extension's);
+- records: `project_ref`, `stream_ref`, `thread_ref`, `effort_ref`,
+  `turn_ref`, `snapshot_ref`, `commit_ref`, `branch_ref`;
+- files and code: `file_ref`, `file_ref_at(path, rev, lines)`, `dir_ref`,
+  `symbol_ref(path, name, snapshot)`, `wiki_ref`;
+- activity: `comment_ref`, `event_ref`, `lens_ref`, `answer_ref`,
+  `page_ref(name, query)`, `extension_page_ref`;
+- catalog: `metric_ref`, `model_ref`, `extension_ref`, `command_ref`,
+  `config_ref`, `finding_ref`, `collector_ref`;
+- review and runs: `thread_note_ref`, `agent_session_ref`, `run_ref`,
+  `proposal_ref`, `claim_ref`, `decision_ref`.
+
+Readers: `parse_as::<T>(r, kind)` (the id parsed as `T`), `id_of(r, kind)`
+(the decoded id; refuses a revision or fragment), `parse_kind(r, kind)`
+(keeps them) and `kind_of(r)`; a string that isn't a ref of the kind is
+`NotA` (“`x` isn't a <kind> ref (<kind>:<id>)”). `work_item_id_of_ref`
+reads a work item's provider-scoped id. A work list builds its own items'
+refs (oxplow's tasks: `oxplow_tasks::{work_item_ref, work_item_id,
+task_of_work_item_ref}`). `system_source(component)` gives the
+`system:<component>` event source a system producer uses; an actor's runs
+use `Actor::source()`.
+
+**The guard.** `source_guards::refs_are_built_and_parsed_through_the_grammar`
+scans production Rust in every crate (outside `oxplow-domain/src/refs/`
+and `oxplow-tasks/src/refs.rs`) and fails on a string literal that begins
+with a core kind's prefix (`format!("effort:…")`, `"wiki:"`,
+`strip_prefix("file:")`, a SQL `'work_item:' ||`) and on a ref-named value
+split at its colon. Its kept list is empty. What only looks like a ref (an
+actor source, an approval key, a revision, a URL) is not one: spell it so
+the pattern doesn't match, don't add an exception.
 
 `refs::build::validate_work_item_ref` is stricter: efforts key on the
 ref string (one open effort per work item is a unique index), so it

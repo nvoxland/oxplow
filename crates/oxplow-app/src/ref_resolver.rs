@@ -92,7 +92,10 @@ async fn resolve_work_item(services: &Services, id: &str) -> RefSummary {
         .sql
         .query_sql(
             "SELECT title, state, body FROM v_work_item WHERE ref = ?1",
-            vec![oxplow_db::SqlCell::Text(format!("work_item:{id}"))],
+            vec![oxplow_db::SqlCell::Text(oxplow_domain::refs::build::of(
+                "work_item",
+                id,
+            ))],
             None,
         )
         .await

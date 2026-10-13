@@ -1899,7 +1899,7 @@ async fn produce(
         }
         let mut sources = crate::services::Sources::default().with_ai(
             ctx.ai.clone(),
-            format!("collector:{}/{}", ext.name, spec.id),
+            oxplow_domain::refs::build::collector_ref(&ext.name, &spec.id),
         );
         if let Some(trees) = &ctx.trees {
             sources = sources.with_tree(crate::services::Trees::From(trees.clone()));

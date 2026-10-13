@@ -321,12 +321,12 @@ pub fn strip_body_version_literals(body: &str) -> String {
         }
         // (file:...) or (dir:...) markdown URL: handle as a unit
         if let Some(after_paren) = rest.strip_prefix('(') {
-            let scheme_len = if after_paren.starts_with("file:") {
-                Some(5usize)
-            } else if after_paren.starts_with("dir:") {
-                Some(4usize)
-            } else {
-                None
+            // The link's scheme is a ref kind: `file` or `dir`, then `:`.
+            let scheme_len = match after_paren.split_once(':').map(|(scheme, _)| scheme) {
+                Some(
+                    scheme @ (oxplow_domain::refs::kind::FILE | oxplow_domain::refs::kind::DIR),
+                ) => Some(scheme.len() + 1),
+                _ => None,
             };
             if let Some(scheme_len) = scheme_len {
                 if let Some(close_rel) = after_paren.find(')') {
@@ -483,7 +483,11 @@ fn find_wikilinks(body: &str) -> Vec<&str> {
 /// explicit directory marker — mirrors `git:` for commit refs.
 fn looks_like_dir(s: &str) -> Option<String> {
     let trimmed = s.trim();
-    let raw = trimmed.strip_prefix("dir:")?.trim_start();
+    let (kind, rest) = trimmed.split_once(':')?;
+    if kind != oxplow_domain::refs::kind::DIR {
+        return None;
+    }
+    let raw = rest.trim_start();
     let bare = raw.trim_end_matches('/');
     if bare.is_empty() || bare.contains('\n') || bare.contains('|') {
         return None;

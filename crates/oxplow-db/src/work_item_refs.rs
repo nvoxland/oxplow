@@ -25,8 +25,7 @@ pub fn restate_tx(
     kinds: &KindRegistry,
     item_ref: &str,
 ) -> Result<(), DomainError> {
-    let id = item_ref
-        .strip_prefix("work_item:")
+    let id = oxplow_domain::refs::build::work_item_id_of_ref(item_ref)
         .ok_or_else(|| DomainError::Invalid(format!("`{item_ref}` is not a work item")))?;
     let live: Option<(String, String)> = conn
         .query_row(

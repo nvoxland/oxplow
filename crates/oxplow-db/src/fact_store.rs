@@ -102,17 +102,17 @@ const MEASURE_COLS: &str = "id, key, title, unit, subject_kind, temporal_semanti
 /// `scope = 'global'` plus the `extension` column (V84), because the scope
 /// CHECK can't be widened without rebuilding tables whose rows facts
 /// cascade from.
-fn stored_scope(scope: &str) -> (&str, Option<&str>) {
-    match scope.strip_prefix("extension:") {
-        Some(name) => ("global", Some(name)),
-        None => (scope, None),
+fn stored_scope(scope: &str) -> (String, Option<String>) {
+    match oxplow_domain::refs::build::id_of(scope, oxplow_domain::refs::kind::EXTENSION) {
+        Ok(name) => ("global".to_string(), Some(name)),
+        Err(_) => (scope.to_string(), None),
     }
 }
 
 /// The inverse of [`stored_scope`].
 fn read_scope(scope: String, extension: Option<String>) -> String {
     match extension {
-        Some(name) => format!("extension:{name}"),
+        Some(name) => oxplow_domain::refs::build::extension_ref(&name),
         None => scope,
     }
 }

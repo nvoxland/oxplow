@@ -201,15 +201,11 @@ fn cells(params: &BTreeMap<String, Value>) -> BTreeMap<String, SqlCell> {
 }
 
 fn answer_id(raw: &str) -> Result<i64, CommandError> {
-    raw.strip_prefix("answer:")
-        .unwrap_or(raw)
-        .parse()
-        .map_err(|_| {
-            invalid(
-                "/answer",
-                format!("`{raw}` isn't an answer (`answer:<id>`)"),
-            )
-        })
+    // A bare number is the answer too.
+    raw.parse().or_else(|_| {
+        oxplow_domain::refs::build::parse_as(raw, oxplow_domain::refs::kind::ANSWER)
+            .map_err(|e: oxplow_domain::refs::build::NotA| invalid("/answer", e.to_string()))
+    })
 }
 
 fn show(target: LensTarget) -> Op {

@@ -333,7 +333,7 @@ fn problem(owner: &str, message: &str) -> VocabularyErrors {
 
 fn rejected(scope: &str, message: &str) -> TxError<VocabularyErrors> {
     TxError::Aborted(problem(
-        oxplow_config::scope_extension(scope).unwrap_or("<host>"),
+        &oxplow_config::scope_extension(scope).unwrap_or_else(|| "<host>".into()),
         message,
     ))
 }

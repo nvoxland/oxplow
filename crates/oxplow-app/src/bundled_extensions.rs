@@ -2833,10 +2833,7 @@ mod tests {
             })
         );
         assert_eq!(logged[0][4], "oxplow_bundled.changes_requested");
-        assert_eq!(
-            logged[0][1],
-            "extension:oxplow-bundled/oxplow.review.request_changes"
-        );
+        assert_eq!(logged[0][1], "command:oxplow.review.request_changes");
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(logged[0][2].as_str().unwrap()).unwrap(),
             serde_json::json!([effort_ref(&f), item])
@@ -2857,10 +2854,7 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(logged[1][0].as_str().unwrap()).unwrap(),
             serde_json::json!({ "unverified": 1, "inferred": 1, "deviated": 1 })
         );
-        assert_eq!(
-            logged[1][1],
-            "extension:oxplow-bundled/oxplow.review.accept"
-        );
+        assert_eq!(logged[1][1], "command:oxplow.review.accept");
         assert_eq!(logged[1][4], "oxplow_bundled.accepted");
         let subject: Vec<String> = serde_json::from_str(logged[1][2].as_str().unwrap()).unwrap();
         assert_eq!(subject[..2], [effort_ref(&f), item.clone()]);

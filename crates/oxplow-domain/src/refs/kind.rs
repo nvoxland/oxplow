@@ -211,6 +211,8 @@ pub const ANSWER: &str = "answer";
 pub const PAGE: &str = "page";
 pub const METRIC: &str = "metric";
 pub const MODEL: &str = "model";
+/// A language model by the name its harness or provider reports.
+pub const AI_MODEL: &str = "ai_model";
 pub const EXTENSION: &str = "extension";
 pub const COMMAND: &str = "command";
 pub const CONFIG: &str = "config";
@@ -263,6 +265,9 @@ pub fn core_kinds() -> KindRegistry {
         ),
         KindSpec::new(METRIC, r"^[a-z0-9_.-]+$"),
         KindSpec::new(MODEL, r"^v_[a-z0-9_]+$"),
+        // A language model by the name its harness or provider reports
+        // (`claude-opus-4-8`, `gpt-5.5`): a token-usage fact's subject.
+        KindSpec::new(AI_MODEL, r"^\S+$"),
         KindSpec::new(EXTENSION, r"^[a-z0-9-]+$"),
         // Two or more dot segments, as `CommandSpec::validate_id` allows.
         KindSpec::new(COMMAND, r"^[a-z0-9_]+(\.[a-z0-9_]+)+$"),

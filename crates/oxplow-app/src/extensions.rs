@@ -2611,7 +2611,7 @@ fn parse_pages(
             errors.push(err(format!("its lens `{}` isn't in lenses/", p.lens)));
         } else {
             pages.push(ExtensionPage {
-                page_ref: format!("page:ext.{extension}.{}", p.id),
+                page_ref: oxplow_domain::refs::build::extension_page_ref(extension, &p.id),
                 id: p.id,
                 extension: extension.to_string(),
                 title: p.title,

@@ -358,7 +358,7 @@ impl ReportSync {
     pub fn to_json(&self) -> serde_json::Value {
         match self {
             ReportSync::Tests { run: Some(run) } => {
-                json!({ "status": "stored", "records": "tests", "run": format!("run:{run}") })
+                json!({ "status": "stored", "records": "tests", "run": oxplow_domain::refs::build::run_ref(*run) })
             }
             ReportSync::Tests { run: None } => {
                 json!({ "status": "no_cases", "records": "tests" })
@@ -381,7 +381,7 @@ impl ReportSync {
             }) => json!({
                 "status": "stored",
                 "records": "coverage",
-                "run": format!("run:{run}"),
+                "run": oxplow_domain::refs::build::run_ref(*run),
                 "summaryPct": summary_pct,
                 "instrumentedLines": changed_lines,
                 "coveredLines": covered_lines,
@@ -396,7 +396,7 @@ impl ReportSync {
             }) => json!({
                 "status": "stored",
                 "records": "analysis",
-                "run": format!("run:{run}"),
+                "run": oxplow_domain::refs::build::run_ref(*run),
                 "errorCount": error_count,
                 "warningCount": warning_count,
                 "infoCount": info_count,
@@ -1406,7 +1406,7 @@ impl CollectionService {
         oxplow_db::fact_store::CaptureEvent {
             vocabulary: self.vocabulary.clone(),
             build: Box::new(move |capture_id| {
-                let run = format!("run:{capture_id}");
+                let run = oxplow_domain::refs::build::run_ref(capture_id);
                 let env = oxplow_domain::Envelope::typed::<TestRunRecorded>(
                     oxplow_domain::refs::build::system_source("collection"),
                     &oxplow_domain::events::schema::TestRunRecordedV2 {
@@ -1695,7 +1695,7 @@ impl CollectionService {
                 };
                 facts.push(NewFact {
                     subject_kind: Some("file".into()),
-                    subject_ref: Some(format!("file:{}", f.path)),
+                    subject_ref: Some(oxplow_domain::refs::build::file_ref(&f.path)),
                     path: Some(f.path.clone()),
                     line: f.line.map(|l| l as i64),
                     severity: Some(severity.into()),
@@ -1845,7 +1845,7 @@ impl CollectionService {
                         numerator: Some(hit as f64),
                         denominator: Some(found as f64),
                         subject_kind: Some("file".into()),
-                        subject_ref: Some(format!("file:{path}")),
+                        subject_ref: Some(oxplow_domain::refs::build::file_ref(path)),
                         path: Some(path.clone()),
                         ..NewFact::new(measure_id, hit as f64 / found as f64 * 100.0)
                     };
@@ -1869,7 +1869,7 @@ impl CollectionService {
                         numerator: Some(covered as f64),
                         denominator: Some(instr as f64),
                         subject_kind: Some("file".into()),
-                        subject_ref: Some(format!("file:{path}")),
+                        subject_ref: Some(oxplow_domain::refs::build::file_ref(path)),
                         path: Some(path.clone()),
                         ..NewFact::new(measure.id, pct)
                     });
