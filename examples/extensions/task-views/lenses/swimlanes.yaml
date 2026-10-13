@@ -1,0 +1,16 @@
+title: Swimlanes
+description: The work items as a column per state; drag a card to move it, click its title to rename it. It stands in for oxplow's Board.
+hidden: true
+params:
+  - { name: scope, label: "Scope (thread / backlog / all)", default: all }
+  - { name: thread_id, label: Thread }
+query: |
+  SELECT w.ref, w.title, w.state, w.rank
+  FROM v_work_item w
+  WHERE :scope = 'all'
+     OR (:scope = 'thread' AND w.thread_id = :thread_id)
+     OR (:scope = 'backlog' AND w.thread_id IS NULL)
+  ORDER BY w.state, w.rank
+viz: custom
+custom: { component: swimlanes }
+empty: No work items.

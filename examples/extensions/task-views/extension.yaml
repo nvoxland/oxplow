@@ -1,0 +1,35 @@
+manifest: 2
+name: task-views
+description: Another way to see the work list — swimlanes for the Board, a compact list and a plain editor — over whichever work-items provider is active.
+sharing: private
+engine: ">=0.7"
+version: 0.1.0
+intent:
+  purpose: >-
+    Replace oxplow's Board, Tasks list and task editor with views of my own.
+    They read v_work_item and change items only through the work-item
+    interface commands, so they work with any work list.
+  origin: null
+  examples:
+    - name: compact-list
+      input: { lens: compact-list, params: { scope: all } }
+      expect: the work items as a table with title, state and updated
+    - name: swimlanes-reads
+      input: { component: swimlanes }
+      expect: the board reads its cards and the active provider's features
+    - name: swimlanes-needs-approval
+      input: { component: swimlanes }
+      expect: changing an item is refused until the person approves the board
+    - name: edit-item
+      input: { form: edit-item, params: { ref: "work_item:oxplow:1" } }
+      expect: a form for the item's title and body, its ref fixed
+custom_components:
+  - id: swimlanes
+    title: Swimlanes
+    assets: [swimlanes, features]
+    commands: [oxplow.work_item.transition, oxplow.work_item.reorder, oxplow.work_item.update]
+ui:
+  replacements:
+    - { target: work_item.board, lens: swimlanes, version: 1 }
+    - { target: work_item.list, lens: compact-list, version: 1 }
+    - { target: work_item.detail, lens: edit-item, version: 1 }

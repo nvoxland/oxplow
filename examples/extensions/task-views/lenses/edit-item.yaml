@@ -1,0 +1,13 @@
+title: Edit item
+description: A work item's title and body in a plain form. It stands in for oxplow's editor; the rail beside it stays oxplow's.
+hidden: true
+params:
+  - { name: ref, label: Work item }
+query: |
+  SELECT title, body FROM v_work_item WHERE ref = :ref
+viz: form
+form:
+  command: oxplow.work_item.update
+  defaults: { ref: "{{param.ref}}" }
+  fixed: [ref]
+  fields: [title, body]

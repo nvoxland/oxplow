@@ -335,25 +335,35 @@ with no `commands` needs no approval.
 A command that needs confirmation is confirmed by you in oxplow, not
 inside the frame.
 
-## Replacing the Board
+## Replacing a view
 
-An extension that brings an external work-items provider can put its own
-lens where the Board's cards are:
+An extension can put its own lens where one of oxplow's views is: the
+Board's cards (`work_item.board`), the Tasks list (`work_item.list`) or a
+task's editor (`work_item.detail`). It needs no work-items provider of its
+own: a view reads `v_work_item` and changes items through the work-item
+commands (`oxplow.work_item.update`, `transition`, `reorder`, `move`), so it
+works with whichever list is active.
 
 ```yaml
 # extension.yaml
 ui:
   replacements:
-    - { target: work_item.board, lens: board }
+    - { target: work_item.board, lens: swimlanes, version: 1 }
 ```
 
-The lens gets the Board's `scope` (`thread`, `backlog` or `all`) and
-`thread_id` as params and must declare both. It shows only while that
-extension's provider is the work list chosen in Settings → Capabilities;
-with any other provider active you see oxplow's Board. A small "replaced by"
-badge says whose it is, and if it can't load, oxplow's Board shows with a
-line saying why. To keep oxplow's Board regardless, tick "Always use
-oxplow's own board" on Settings → Integrations.
+The lens gets the view's props as params and must declare all of them: the
+Board gets `scope` (`thread`, `backlog` or `all`) and `thread_id`; the list
+gets `scope` (`thread`, `stream` or `all`) and `thread_id`, and its lens may
+declare `stream_id`; the editor gets `ref`. Settings → Integrations lists
+each replaced view with a choice of whose to show (Default, oxplow's own, or
+an extension); a small "replaced by" badge says whose it is, and if it can't
+load, oxplow's own shows with a line saying why. A `viz: custom` view that
+changes items needs its commands declared and approved like any component;
+until then it shows a one-line note instead.
+
+[`examples/extensions/task-views`](../../examples/extensions/task-views) is a
+working set of all three: swimlanes you drag cards between, a compact list
+with row actions, and a plain editor form. Copy it and change it.
 
 ## Sharing
 

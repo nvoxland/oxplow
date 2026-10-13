@@ -197,7 +197,7 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
                 "{rel}/fixtures/{}.yaml:1: example `{}` has no fixture, so it isn't run — fix: \
                  write its `input` (`{{ lens, params?, rows? }}`, `{{ collector, rows? }}`, a fact \
                  collector's `{{ collector, files }}`, `{{ event }}`, `{{ job, intentKey, request }}`, \
-                 `{{ component }}`, or a provider's `{{ command, input }}`) and `expect`",
+                 `{{ component }}`, `{{ form }}`, or a provider's `{{ command, input }}`) and `expect`",
                 example.name, example.name
             ));
             continue;
@@ -228,6 +228,9 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
         if let Some(slug) = ex.input.get("lens").and_then(Value::as_str) {
             report.ran.push(format!("example {}", ex.name));
             lens_example(host, ext, &ex, slug, report).await;
+        } else if let Some(slug) = ex.input.get("form").and_then(Value::as_str) {
+            report.ran.push(format!("example {}", ex.name));
+            form_example(host, ext, &ex, slug, report).await;
         } else if let Some(id) = ex.input.get("job").and_then(Value::as_str) {
             report.ran.push(format!("example {}", ex.name));
             job_example(host, ext, &ex, id, report).await;
@@ -263,11 +266,11 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
         } else if ex.input.get("command").is_none() || ext.providers.is_empty() {
             report.errors.push(format!(
                 "{shown}:1: example `{}`'s `input` names no lens, collector, command, effect, \
-                 event, job, component, effort policy, event type, wikilink or provider command — \
+                 event, job, component, form, effort policy, event type, wikilink or provider command — \
                  fix: `{{ lens: <slug>, params?, rows? }}`, `{{ collector: <id>, rows?, event? }}`, \
                  `{{ command: <name>, input }}`, `{{ effect: <id>, event: {{ type, payload }} }}` \
                  (a dry run), `{{ event: {{ type, payload }} }}` (logged, and what reacts runs), \
-                 `{{ job: <id>, intentKey, request }}`, `{{ component: <id>, queries?, invokes? }}`, \
+                 `{{ job: <id>, intentKey, request }}`, `{{ component: <id>, queries?, invokes? }}`, `{{ form: <lens>, params? }}`, \
                  `{{ implementation: <id>, event: {{ type, payload, anchors? }} }}`, \
                  `{{ event_type, v?, payload }}`, `{{ wikilink }}`, or (with a provider) \
                  `{{ command, input }}`",
@@ -839,6 +842,59 @@ async fn component_example(
             "{shown}:1: component `{id}` answered {got} at `{path}`, the example expects {want} \
              — fix: the component's declarations, or the example's `expect` (`{{ queries: [{{ \
              rows }}], invokes: [{{ ok, refused? }}] }}`)"
+        ));
+    }
+}
+
+/// Open form lens `slug` as a person would (`input: { form, params? }`):
+/// `expect: { values?, fixed?, fields? }` against the values the fields
+/// start from (the lens's `defaults`, its first row laid over them), the
+/// fields shown read-only, and the fields shown (`null`: all).
+async fn form_example(
+    host: &Host,
+    ext: &Extension,
+    ex: &Example<'_>,
+    slug: &str,
+    report: &mut TestReport,
+) {
+    let shown = ex.shown;
+    let params = ex
+        .input
+        .get("params")
+        .and_then(Value::as_object)
+        .map(|o| {
+            o.iter()
+                .map(|(k, v)| (k.clone(), oxplow_db::SqlCell::from(v.clone())))
+                .collect()
+        })
+        .unwrap_or_default();
+    let start = oxplow_app::lens_actions::form_start(
+        &host.svc,
+        &host.root,
+        &format!("{}/{slug}", ext.name),
+        params,
+        &oxplow_app::extensions::LensContext::default(),
+    )
+    .await;
+    let start = match start {
+        Ok(start) => start,
+        Err(e) => {
+            report.errors.push(format!(
+                "{shown}:1: form `{slug}` didn't open: {e} — fix: the form lens (`viz: form` with \
+                 a `form:` naming a command), or the example's params"
+            ));
+            return;
+        }
+    };
+    let got = shaped_like(
+        &ex.expect,
+        &json!({ "values": start.values, "fixed": start.fixed, "fields": start.fields }),
+    );
+    if let Some((path, want, got)) = first_mismatch(&ex.expect, &got) {
+        report.errors.push(format!(
+            "{shown}:1: form `{slug}` opened with {got} at `{path}`, the example expects {want} \
+             — fix: the form's `defaults`, `fixed` or `fields`, or the example's `expect` (`{{ \
+             values?, fixed?, fields? }}`)"
         ));
     }
 }
@@ -3065,6 +3121,61 @@ ref_kinds:
         );
         assert!(
             errors.contains("oxplow/extensions/acme/fixtures/link.yaml:1: `[[pr:12]]` names"),
+            "{errors}"
+        );
+    }
+
+    /// A `viz: form` lens is opened as a person would: its defaults bound
+    /// from the params, its fixed and shown fields; a wrong expectation is
+    /// a finding at its fixture.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn extension_test_opens_a_form_lens_and_compares_what_it_starts_with() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write(
+            root,
+            "oxplow/extensions/editor/extension.yaml",
+            "manifest: 2
+name: editor
+sharing: private
+intent:
+  purpose: Edit work items.
+  examples:
+    - { name: edit, input: { form: edit-item, params: { ref: 'work_item:oxplow:tsk1' } }, expect: the ref is fixed }
+",
+        );
+        write(
+            root,
+            "oxplow/extensions/editor/lenses/edit-item.yaml",
+            "title: Edit\nviz: form\nparams: [{ name: ref }]\nquery: SELECT title, body FROM v_work_item WHERE ref = :ref\nform: { command: oxplow.work_item.update, defaults: { ref: '{{param.ref}}' }, fixed: [ref], fields: [title, body] }\n",
+        );
+        write(
+            root,
+            "oxplow/extensions/editor/fixtures/edit.yaml",
+            "input: { form: edit-item, params: { ref: 'work_item:oxplow:tsk1' } }\nexpect: { values: { ref: 'work_item:oxplow:tsk1' }, fixed: [ref], fields: [title, body] }\n",
+        );
+        let report = test_extension(root, "editor", false).await.unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
+        assert!(
+            report.ran.contains(&"example edit".to_string()),
+            "{:?}",
+            report.ran
+        );
+
+        write(
+            root,
+            "oxplow/extensions/editor/fixtures/edit.yaml",
+            "input: { form: edit-item, params: { ref: 'work_item:oxplow:tsk1' } }\nexpect: { fixed: [ref, title] }\n",
+        );
+        let errors = test_extension(root, "editor", false)
+            .await
+            .unwrap()
+            .errors
+            .join("\n");
+        assert!(
+            errors.contains(
+                "oxplow/extensions/editor/fixtures/edit.yaml:1: form `edit-item` opened with"
+            ),
             "{errors}"
         );
     }
