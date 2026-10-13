@@ -1,3 +1,4 @@
+import { idOf } from "../../refs/ref.js";
 import { LensSlots } from "../../lens/LensSlots.js";
 import { numericRowId } from "../../lens/lensModel.js";
 import type { CSSProperties } from "react";
@@ -805,7 +806,7 @@ const kbPickerStyle: CSSProperties = {
 /// app-level layer via the compose bus.
 function openCommentForTask(item: WorkItem): void {
   const el = document.querySelector(
-    `[data-ref-kind="work_item"][data-ref-id="${CSS.escape(item.ref.replace(/^work_item:/, ""))}"]`,
+    `[data-ref-kind="work_item"][data-ref-id="${CSS.escape(idOf(item.ref, "work_item") ?? item.ref)}"]`,
   );
   if (!el) return;
   const req = composeForElement(el, item.title, el.getBoundingClientRect());

@@ -4,6 +4,7 @@ import type { MouseEvent } from "react";
 import { useMemo } from "react";
 import type { BacklinkEntry } from "./backlinkTypes.js";
 import { PageKindIcon } from "../pageKinds.js";
+import { refOf } from "../refs/ref.js";
 import type { TabRef } from "./tabState.js";
 import { setContextRefDrag } from "../agent-context-dnd.js";
 import type { ContextRef } from "../agent-context-ref.js";
@@ -137,7 +138,7 @@ export function BacklinksList({
     <div data-testid="backlinks-list" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       {snapshotEntries.map((entry) => (
         <button
-          key={`snapshot:${entry.snapshotId}`}
+          key={refOf("snapshot", String(entry.snapshotId))}
           type="button"
           data-testid={`backlinks-snapshot-${entry.snapshotId}`}
           onClick={() => onOpenSnapshot?.({
@@ -162,7 +163,7 @@ export function BacklinksList({
       ))}
       {commitEntries.map((entry) => (
         <button
-          key={`commit:${entry.sha}`}
+          key={refOf("commit", entry.sha)}
           type="button"
           data-testid={`backlinks-commit-${entry.sha}`}
           onClick={() => onOpenCommit?.({ sha: entry.sha, subject: entry.subject })}

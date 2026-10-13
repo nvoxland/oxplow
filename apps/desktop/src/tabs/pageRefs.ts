@@ -27,63 +27,36 @@ import {
 } from "../revision.js";
 import type { SqlCell } from "../tauri-bridge/generated/bindings.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
-import { escapeId, formatRef, parseRef } from "../refs/ref.js";
+import {
+  agentSessionRef as agentSessionRefString,
+  extPageRef as extPageRefString,
+  formatRef,
+  lensRef as lensRefString,
+  pageRef as pageRefString,
+  parseRef,
+  rawAfterKind,
+  refOf,
+  splitKindParams,
+  splitParams,
+  withParams,
+  type ParamValue,
+} from "../refs/ref.js";
 
 function canonicalId(kind: string, id: string, rev: string | null = null): string {
   return formatRef({ kind, id, rev, frag: null });
 }
 
-// ---------------------------------------------------------------------------
-// Query params: `?k=v&k=v` after a route name or a lens id.
-//
-// Values are percent-encoded the way `URLSearchParams` reads them, but only
-// the characters that would break the id are escaped — the query syntax
-// (`&`, `=`, `+`, `%`) and the ref grammar's reserved `@` and `#` — so
-// `path=src/a.ts&left=ref:abc` stays readable. The encoded text is a
-// valid canonical ref of its kind (`page:` / `lens:`) as written, so it
-// is parsed from the RAW text after the kind, not from `parseRef`'s
-// decoded id (which would turn an escaped `&` back into a separator).
-// ---------------------------------------------------------------------------
-
-type ParamValue = string | number | null | undefined;
-
-function encodeParamValue(v: string): string {
-  return encodeURIComponent(v)
-    .replace(/%2F/gi, "/")
-    .replace(/%3A/gi, ":")
-    .replace(/%3F/gi, "?")
-    .replace(/%2C/gi, ",")
-    .replace(/%20/g, "+");
-}
-
-/** `k=v&k=v` in the given key order; `null`/`undefined` values are skipped. */
-function encodeParams(params: Record<string, ParamValue>): string {
-  const parts: string[] = [];
-  for (const [k, v] of Object.entries(params)) {
-    if (v === null || v === undefined) continue;
-    parts.push(`${encodeParamValue(k)}=${encodeParamValue(String(v))}`);
-  }
-  return parts.join("&");
-}
+// Query params (`?k=v&k=v` after a route name or a lens id) are encoded and
+// split by refs/ref.ts, the one place that spells a ref.
 
 /** `tabId` with `params` added to its query (after any it has). */
 export function withPageParams(tabId: string, params: Record<string, ParamValue>): string {
-  const qs = encodeParams(params);
-  if (!qs) return tabId;
-  return `${tabId}${tabId.includes("?") ? "&" : "?"}${qs}`;
-}
-
-/** Split `<head>?<qs>` at the first `?`; `head` is percent-decoded. */
-function splitParams(raw: string): { head: string; params: URLSearchParams } {
-  const q = raw.indexOf("?");
-  const head = q === -1 ? raw : raw.slice(0, q);
-  return { head: decodeURIComponent(head), params: new URLSearchParams(q === -1 ? "" : raw.slice(q + 1)) };
+  return withParams(tabId, params);
 }
 
 /** The id of a shell route: `page:<name>[?params]`. */
 function pageId(name: RoutePageKind, params?: Record<string, ParamValue>): string {
-  const qs = params ? encodeParams(params) : "";
-  return qs ? `page:${name}?${qs}` : `page:${name}`;
+  return pageRefString(name, params);
 }
 
 function route(name: RoutePageKind, payload: unknown = null, params?: Record<string, ParamValue>): TabRef {
@@ -137,7 +110,7 @@ export function workItemTabRef(ref: string): TabRef {
  *  chat. Pinned — it leads the strip and is never evicted; its tab follows
  *  the session's row (`reconcileSessionTabs`). */
 export function agentSessionRef(sessionId: string): TabRef {
-  return { id: `agent_session:${sessionId}`, kind: "agent_session", payload: { sessionId }, pinned: true };
+  return { id: agentSessionRefString(sessionId), kind: "agent_session", payload: { sessionId }, pinned: true };
 }
 
 /** Single git commit page. */
@@ -160,10 +133,9 @@ export function metricRef(metricKey: string): TabRef {
  *  values. */
 export function lensRef(lensId: string, params?: Record<string, SqlCell>): TabRef {
   const keys = Object.keys(params ?? {}).sort();
-  const head = `lens:${escapeId(lensId)}`;
-  if (!params || keys.length === 0) return { id: head, kind: "lens", payload: { lensId } };
-  const qs = encodeParams(Object.fromEntries(keys.map((k) => [k, params[k] === null ? "" : String(params[k])])));
-  return { id: `${head}?${qs}`, kind: "lens", payload: { lensId, params } };
+  if (!params || keys.length === 0) return { id: lensRefString(lensId), kind: "lens", payload: { lensId } };
+  const id = lensRefString(lensId, Object.fromEntries(keys.map((k) => [k, params[k] === null ? "" : String(params[k])])));
+  return { id, kind: "lens", payload: { lensId, params } };
 }
 
 /** Parse a lens id's raw `<lensId>?k=v` tail back into a ref. Numeric
@@ -280,8 +252,7 @@ export function duplicateBlockRef(payload: DuplicateBlockPayload): TabRef {
  *  params its lens starts with — `ref`, when it opens one of the
  *  extension's refs (P8.D7). */
 export function extPageRef(extension: string, page: string, params?: Record<string, string>): TabRef {
-  const qs = params ? encodeParams(params) : "";
-  const id = `page:ext.${extension}.${page}${qs ? `?${qs}` : ""}`;
+  const id = extPageRefString(extension, page, params);
   return { id, kind: "ext-page", payload: params ? { extension, page, params } : { extension, page } };
 }
 
@@ -290,7 +261,7 @@ export function extPageRef(extension: string, page: string, params?: Record<stri
 function extensionRefPage(ref: string, kind: string): TabRef | null {
   const info = refKindInfo(kind);
   if (!info) return null;
-  const ext = extPageOf(splitParams(info.page.slice("page:".length)).head);
+  const ext = extPageOf(splitKindParams(info.page, "page")?.head ?? "");
   return ext ? extPageRef(ext.extension, ext.page, { ref }) : null;
 }
 
@@ -302,7 +273,7 @@ function extensionRefPage(ref: string, kind: string): TabRef | null {
 export function searchHitTarget(hit: { kind: string; ref_id: string }): { page: TabRef } | { file: string } | null {
   switch (hit.kind) {
     case "work_item":
-      return { page: workItemTabRef(`work_item:${hit.ref_id}`) };
+      return { page: workItemTabRef(refOf("work_item", hit.ref_id)) };
     case "wiki":
       return { page: wikiPageRef(hit.ref_id) };
     case "comment":
@@ -598,8 +569,9 @@ function isRoute(name: string): name is RoutePageKind {
 /** The route name of a `page:` id (`page:diff-view?effort=e` → `diff-view`),
  *  or `null` when the id is not a page route. */
 export function routeNameOf(tabId: string): RoutePageKind | null {
-  if (!tabId.startsWith("page:")) return null;
-  const { head } = splitParams(tabId.slice("page:".length));
+  const split = splitKindParams(tabId, "page");
+  if (!split) return null;
+  const { head } = split;
   return isRoute(head) ? head : null;
 }
 
@@ -629,7 +601,7 @@ export function refFromTabId(id: string): TabRef | null {
     case "wiki":
       return wikiPageRef(canonical.id);
     case "work_item":
-      return workItemTabRef(`work_item:${canonical.id}`);
+      return workItemTabRef(refOf("work_item", canonical.id));
     case "commit":
       return gitCommitRef(canonical.id);
     case "metric":
@@ -647,9 +619,9 @@ export function refFromTabId(id: string): TabRef | null {
     case "agent_session":
       return agentSessionRef(canonical.id);
     case "lens":
-      return lensRefFromTail(id.slice("lens:".length));
+      return lensRefFromTail(rawAfterKind(id, "lens") ?? "");
     case "page": {
-      const { head, params } = splitParams(id.slice("page:".length));
+      const { head, params } = splitParams(rawAfterKind(id, "page") ?? "");
       if (isRoute(head)) return ROUTES[head](params);
       const ext = extPageOf(head);
       if (!ext) return null;
@@ -667,7 +639,7 @@ export function pageKindOf(tabId: string): PageKind | null {
   const canonical = parseRef(tabId);
   if (!canonical) return null;
   if (canonical.kind === "page") {
-    return routeNameOf(tabId) ?? (extPageOf(splitParams(tabId.slice("page:".length)).head) ? "ext-page" : null);
+    return routeNameOf(tabId) ?? (extPageOf(splitKindParams(tabId, "page")?.head ?? "") ? "ext-page" : null);
   }
   // The entity kinds that open as a page.
   const entity: readonly string[] = [

@@ -5,7 +5,7 @@
 /// or run it and open what it made. Pure, given its deps.
 import type { CommandEntry } from "./components/quickOpenResults.js";
 import type { CommandOutcome, CommandSpec } from "./tauri-bridge/generated/bindings.js";
-import { streamRef, threadRef } from "./recordRefs.js";
+import { kindOf, parseRef, streamRef, threadRef } from "./refs/ref.js";
 import { withPageParams } from "./tabs/pageRefs.js";
 import { offeredWhen, type WhenContext } from "./when.js";
 
@@ -41,7 +41,7 @@ const BINDINGS: Record<string, (ctx: OfferContext) => string | null | undefined>
   "{{stream}}": (c) => (c.streamId ? streamRef(c.streamId) : null),
   "{{thread}}": (c) => (c.threadId ? threadRef(c.threadId) : null),
   "{{ref}}": (c) => c.ref,
-  "{{ref.id}}": (c) => (c.ref ? c.ref.slice(c.ref.indexOf(":") + 1) : null),
+  "{{ref.id}}": (c) => (c.ref ? (parseRef(c.ref)?.id ?? null) : null),
 };
 
 /** `template` with each string that is exactly a binding replaced from
@@ -115,7 +115,7 @@ export function commandOffers(specs: CommandSpec[], ctx: OfferContext, deps: Off
  *  ref's page menu and its rows' right-click menus offer — with `ref`
  *  bound into their input (`{ ref: "{{ref}}" }` when they say none). */
 export function refOffers(specs: CommandSpec[], ref: string, ctx: OfferContext, deps: OfferDeps): CommandEntry[] {
-  const kind = ref.slice(0, ref.indexOf(":"));
+  const kind = kindOf(ref);
   if (!kind) return [];
   const out: CommandEntry[] = [];
   for (const spec of specs) {

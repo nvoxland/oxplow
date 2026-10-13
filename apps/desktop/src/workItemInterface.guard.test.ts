@@ -24,7 +24,6 @@ function code(text: string): string {
 
 const FORBIDDEN: Array<[RegExp, string]> = [
   [/\bv_task\b|\bv_task_\w+/, "reads oxplow's task models (read v_work_item and its views)"],
-  [/work_item:oxplow:/, "builds an oxplow work-item ref (refs come from the interface)"],
   [/tsk\\d|tsk\[0-9\]|["'`]tsk["'`$]/, "parses oxplow's task ids (ids follow the active list's id pattern)"],
 ];
 

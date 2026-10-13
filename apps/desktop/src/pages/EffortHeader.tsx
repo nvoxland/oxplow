@@ -13,7 +13,7 @@ import { workItemTabRef } from "../tabs/pageRefs.js";
 import { workItemLabel } from "../workItemRef.js";
 import { useWorkListProfile } from "../useWorkListProfile.js";
 import { workItemRefOfMention } from "../workItems.js";
-import { effortRef } from "../recordRefs.js";
+import { effortRef, parseRef } from "../refs/ref.js";
 
 /** An effort as its page shows it (`v_effort`). */
 export interface EffortRecord {
@@ -49,7 +49,8 @@ export const realEffortHeaderDeps: EffortHeaderDeps = {
  *  anything else. */
 export function normalizeWorkItemInput(raw: string, mentionRef: (id: string) => string | null): string | null {
   const v = raw.trim();
-  if (/^work_item:[a-z0-9_-]+:\S+$/.test(v)) return v;
+  const parsed = parseRef(v);
+  if (parsed?.kind === "work_item" && /^[a-z0-9_-]+:\S+$/.test(parsed.id)) return v;
   return mentionRef(v);
 }
 

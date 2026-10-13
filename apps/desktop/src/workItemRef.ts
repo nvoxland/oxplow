@@ -6,13 +6,13 @@
  * reads meaning into the id.
  */
 
-const PREFIX = "work_item:";
+import { idOf } from "./refs/ref.js";
 
 /** The `<provider>:<id>` part of a work-item ref (its `page_ref` id);
  *  `null` for anything that isn't one. */
 export function workItemId(ref: string): string | null {
-  if (!ref.startsWith(PREFIX)) return null;
-  const rest = ref.slice(PREFIX.length);
+  const rest = idOf(ref, "work_item");
+  if (rest === null) return null;
   return rest.includes(":") && !rest.startsWith(":") && !rest.endsWith(":") ? rest : null;
 }
 

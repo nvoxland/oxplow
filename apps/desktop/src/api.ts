@@ -840,7 +840,7 @@ export async function installExtension(
       git_url: gitUrl,
       ...(gitRef ? { git_ref: gitRef } : {}),
       reviewed_sha: reviewedSha,
-      ...(streamId ? { stream: `stream:${streamId}` } : {}),
+      ...(streamId ? { stream: streamRef(streamId) } : {}),
     },
     true,
   );
@@ -856,7 +856,7 @@ export async function updateExtension(
 ): Promise<Extension> {
   const outcome = await runCommand(
     "oxplow.extension.update",
-    { name, reviewed_sha: reviewedSha, ...(streamId ? { stream: `stream:${streamId}` } : {}) },
+    { name, reviewed_sha: reviewedSha, ...(streamId ? { stream: streamRef(streamId) } : {}) },
     true,
   );
   return outcome.result as Extension;
@@ -1071,13 +1071,13 @@ export async function switchStream(id: string): Promise<Stream> {
 }
 
 export async function renameStream(streamId: string, title: string): Promise<Stream> {
-  return (await runCommand("oxplow.stream.rename", { stream: `stream:${streamId}`, title })).result as Stream;
+  return (await runCommand("oxplow.stream.rename", { stream: streamRef(streamId), title })).result as Stream;
 }
 
 /** Archive a stream. The Remove dialog is the person's confirmation
  *  (`oxplow.stream.archive` is destructive), so this runs it confirmed. */
 export async function archiveStream(streamId: string, deleteWorktree: boolean): Promise<void> {
-  await runCommand("oxplow.stream.archive", { stream: `stream:${streamId}`, delete_worktree: deleteWorktree }, true);
+  await runCommand("oxplow.stream.archive", { stream: streamRef(streamId), delete_worktree: deleteWorktree }, true);
 }
 
 export async function renameCurrentStream(title: string): Promise<Stream> {
@@ -1377,9 +1377,6 @@ export interface AgentSessionRecord {
   title: string;
 }
 
-/** An agent session's ref (`agent_session:ses3`). */
-const sessionRef = (id: string) => `agent_session:${id}`;
-
 /** Open an agent session on a thread: it only adds the slot (the tab
  *  starts its process when it mounts). No harness: the project's default. */
 export async function openAgentSession(
@@ -1401,28 +1398,28 @@ export async function openAgentSession(
 /** Close an agent session: its process stops. Destructive — the caller
  *  has the person confirm first (`confirmed`). */
 export async function closeAgentSession(sessionId: string, confirmed: boolean): Promise<void> {
-  await runCommand("oxplow.agent_session.close", { session: sessionRef(sessionId) }, confirmed);
+  await runCommand("oxplow.agent_session.close", { session: agentSessionRef(sessionId) }, confirmed);
 }
 
 /** The person stops an agent: its process ends, the slot and saved
  *  conversation stay, and nothing spawns it again until `startAgentSession`. */
 export async function stopAgentSession(sessionId: string): Promise<void> {
-  await runCommand("oxplow.agent_session.stop", { session: sessionRef(sessionId) });
+  await runCommand("oxplow.agent_session.stop", { session: agentSessionRef(sessionId) });
 }
 
 /** The person starts a stopped agent again (its tab then spawns it). */
 export async function startAgentSession(sessionId: string): Promise<void> {
-  await runCommand("oxplow.agent_session.start", { session: sessionRef(sessionId) });
+  await runCommand("oxplow.agent_session.start", { session: agentSessionRef(sessionId) });
 }
 
 /** The person gives an agent a new conversation, dropping the saved one.
  *  Destructive: the caller confirms first. */
 export async function startAgentSessionFresh(sessionId: string, confirmed: boolean): Promise<void> {
-  await runCommand("oxplow.agent_session.start_fresh", { session: sessionRef(sessionId) }, confirmed);
+  await runCommand("oxplow.agent_session.start_fresh", { session: agentSessionRef(sessionId) }, confirmed);
 }
 
 export async function renameAgentSession(sessionId: string, title: string): Promise<void> {
-  await runCommand("oxplow.agent_session.rename", { session: sessionRef(sessionId), title });
+  await runCommand("oxplow.agent_session.rename", { session: agentSessionRef(sessionId), title });
 }
 
 export async function selectThread(streamId: string, threadId: string): Promise<ThreadState> {
@@ -1454,7 +1451,7 @@ export async function renameThread(_streamId: string, threadId: string, title: s
 }
 
 export async function setStreamPrompt(streamId: string, prompt: string | null): Promise<Stream[]> {
-  await runCommand("oxplow.stream.set_prompt", { stream: `stream:${streamId}`, ...(prompt ? { prompt } : {}) });
+  await runCommand("oxplow.stream.set_prompt", { stream: streamRef(streamId), ...(prompt ? { prompt } : {}) });
   return listStreams();
 }
 
@@ -1592,8 +1589,8 @@ export async function createComment(input: {
   body: string;
 }): Promise<CommentThread> {
   const outcome = await runCommand("oxplow.knowledge.add_comment", {
-    stream: `stream:${input.streamId}`,
-    ...(input.threadId ? { thread: `thread:${input.threadId}` } : {}),
+    stream: streamRef(input.streamId),
+    ...(input.threadId ? { thread: threadRef(input.threadId) } : {}),
     target: { kind: input.targetKind, id: input.targetId },
     quote: input.quote,
     selectors_json: input.selectorsJson,
@@ -1826,7 +1823,7 @@ export function awaitBackgroundTask(taskId: string): Promise<BackgroundTask | nu
 export type { MetricSpec, SeriesPoint, MetricCatalogEntry } from "./metricsSql.js";
 
 import type { Dashboard, DashboardWithItems } from "./tauri-bridge/index.js";
-import { commentRef, streamRef, threadRef } from "./recordRefs.js";
+import { agentSessionRef, commentRef, streamRef, threadRef } from "./refs/ref.js";
 export type { Dashboard, DashboardItem, DashboardWithItems } from "./tauri-bridge/index.js";
 
 // User-created dashboards (tsk138) — project-global grids of metric tiles.

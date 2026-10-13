@@ -3,6 +3,7 @@
 /// inline). Shown in Settings → Data → Delivery and on the Alerts page
 ///. Failures land in opErrorsStore.
 
+import { eventRef } from "../refs/ref.js";
 import type { CSSProperties } from "react";
 import { useState } from "react";
 
@@ -44,7 +45,7 @@ export function DeliveryList({ emptyLabel }: { emptyLabel?: string }) {
   async function retryReaction(r: FailedReaction) {
     setBusy(`reaction-${r.effect}-${r.eventId}`);
     try {
-      const out = await runCommand("oxplow.effect.retry", { effect: r.effect, event: `event:${r.eventId}` }, true);
+      const out = await runCommand("oxplow.effect.retry", { effect: r.effect, event: eventRef(r.eventId) }, true);
       const result = out.result as { outcome?: string; reason?: string } | null;
       showToast({
         message:
