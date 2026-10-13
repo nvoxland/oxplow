@@ -270,7 +270,7 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
                  fix: `{{ lens: <slug>, params?, rows? }}`, `{{ collector: <id>, rows?, event? }}`, \
                  `{{ command: <name>, input }}`, `{{ effect: <id>, event: {{ type, payload }} }}` \
                  (a dry run), `{{ event: {{ type, payload }} }}` (logged, and what reacts runs), \
-                 `{{ job: <id>, intentKey, request }}`, `{{ component: <id>, queries?, invokes? }}`, `{{ form: <lens>, params? }}`, \
+                 `{{ job: <id>, intentKey, request }}`, `{{ component: <id>, items?, queries?, invokes? }}`, `{{ form: <lens>, params? }}`, \
                  `{{ implementation: <id>, event: {{ type, payload, anchors? }} }}`, \
                  `{{ event_type, v?, payload }}`, `{{ wikilink }}`, or (with a provider) \
                  `{{ command, input }}`",
@@ -713,8 +713,9 @@ async fn job_example(
 }
 
 /// Load component `id` as its frame would, then ask what the fixture asks
-/// (`input: { component, lens?, queries?: [{ asset, params? }], invokes?:
-/// [{ command, input?, approved? }] }`): each query's rows and each
+/// (`input: { component, lens?, items?: [title], queries?: [{ asset,
+/// params? }], invokes?: [{ command, input?, approved? }] }`): `items` are
+/// work items filed first (`work_item:oxplow:tsk1`, …); each query's rows and each
 /// invoke's outcome — refused until the component is approved, as for a
 /// person — against `expect: { queries?: [{ rows }], invokes?: [{ ok?,
 /// refused? }] }`. The frame itself isn't drawn here.
@@ -757,6 +758,31 @@ async fn component_example(
             return;
         }
     };
+    for title in ex
+        .input
+        .get("items")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+    {
+        let made = host
+            .svc
+            .work_items_client()
+            .create(
+                &Actor::Human,
+                oxplow_app::work_items::NewItem {
+                    title: title.as_str().unwrap_or_default().into(),
+                    ..Default::default()
+                },
+            )
+            .await;
+        if let Err(e) = made {
+            report
+                .errors
+                .push(format!("{shown}:1: filing its item `{title}`: {e}"));
+            return;
+        }
+    }
     let ctx = oxplow_app::extensions::LensContext::default();
     let mut queries = Vec::new();
     for q in ex

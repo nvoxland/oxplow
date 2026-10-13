@@ -1,0 +1,10 @@
+# Once a person approves the board, renaming an item through it goes
+# through: the update answers with the item.
+input:
+  component: swimlanes
+  items: [Fix the parser]
+  invokes:
+    - { command: oxplow.work_item.update, input: { ref: "work_item:oxplow:tsk1", title: Fix the lexer }, approved: true }
+expect:
+  invokes:
+    - { ok: true, result: $any }

@@ -535,6 +535,7 @@ async fn the_task_views_example_checks_and_its_fixtures_pass() {
         "compact-list",
         "swimlanes-reads",
         "swimlanes-needs-approval",
+        "swimlanes-renames",
         "edit-item",
     ] {
         assert!(

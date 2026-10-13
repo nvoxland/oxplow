@@ -453,10 +453,11 @@ names the file and line and says what to change.
      the job run them and ask again); `cancel: true` cancels it through
      your `jobs.write/cancel` command once it has written. `expect: {
      state, result?, text?, toolCalls?, output?: [{ kind }] }`;
-   - a component: `input: { component: <id>, lens?, queries?: [{ asset,
-     params? }], invokes?: [{ command, input?, approved? }] }` — what its
+   - a component: `input: { component: <id>, lens?, items?: [title],
+     queries?: [{ asset, params? }], invokes?: [{ command, input?, approved? }] }` — what its
      frame would ask; `expect: { queries: [{ rows }], invokes: [{ ok,
-     refused? }] }` (an invoke is refused until `approved: true`);
+     refused? }] }` (an invoke is refused until `approved: true`; `items` are work
+     items filed first, `work_item:oxplow:tsk1`, …);
    - a form lens (`viz: form`): `input: { form: <lens>, params? }` — opens
      it as a person would; `expect: { values?, fixed?, fields? }` (the
      values its fields start from, the read-only fields, the shown ones,
