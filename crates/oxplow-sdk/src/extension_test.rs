@@ -528,7 +528,8 @@ async fn approve_effects(host: &Host, ext: &Extension) -> Result<(), String> {
 }
 
 /// Record intent for job `id` through the extension's own command over
-/// `jobs.write/enqueue` (`input: { job, intentKey, request, model? }`), the
+/// `jobs.write/enqueue` (`input: { job, intentKey, request, model?,
+/// setup?, rows? }`: `setup` and `rows` first make what its tools read), the
 /// job approved here as a person would, and read its outcome through its
 /// `jobs.read/snapshot` command once it ends: against `expect` — `{ state,
 /// result?, text?, toolCalls?, output?, effects?, commands?, pages? }`
@@ -586,6 +587,9 @@ async fn job_example(
                 .push(format!("{shown}:1: approving its effects: {e}"));
             return;
         }
+    }
+    if !seed_rows(host, ext, ex, report).await || !run_setup(host, ex, report).await {
+        return;
     }
     let logged = host
         .svc
@@ -771,6 +775,94 @@ async fn job_example(
              output?, effects?, commands?, pages? }}`)"
         ));
     }
+}
+
+/// The example's `rows: { <entity>: [ … ] }`, published for the
+/// extension's own entities in place of what a collector would have
+/// brought. `false`, with the error reported, when they couldn't be.
+async fn seed_rows(
+    host: &Host,
+    ext: &Extension,
+    ex: &Example<'_>,
+    report: &mut TestReport,
+) -> bool {
+    let shown = ex.shown;
+    let Some(rows) = ex.input.get("rows") else {
+        return true;
+    };
+    let rows = match serde_json::from_value::<std::collections::BTreeMap<String, Vec<Value>>>(
+        rows.clone(),
+    ) {
+        Ok(rows) => rows,
+        Err(e) => {
+            report.errors.push(format!(
+                "{shown}:1: `rows` must map each entity to its rows: {e}"
+            ));
+            return false;
+        }
+    };
+    if let Err(e) =
+        oxplow_app::collector_runner::publish_declared_rows(&host.svc.db, ext, &rows).await
+    {
+        report.errors.push(format!("{shown}:1: `rows`: {e}"));
+        return false;
+    }
+    true
+}
+
+/// The example's `setup: [{ command, input?, as? }]`: oxplow's own
+/// commands, run in order before the example, to make the data its
+/// contribution reads (a work item, an effort, a test run). Each runs as a
+/// person, or with `as: agent` as the agent of `thread:thr1`. `false`,
+/// with the error reported, when one fails.
+async fn run_setup(host: &Host, ex: &Example<'_>, report: &mut TestReport) -> bool {
+    let shown = ex.shown;
+    let Some(steps) = ex.input.get("setup") else {
+        return true;
+    };
+    let Some(steps) = steps.as_array() else {
+        report.errors.push(format!(
+            "{shown}:1: `setup` isn't a list — fix: `setup: [{{ command, input?, as? }}]`"
+        ));
+        return false;
+    };
+    if let Err(e) = host.svc.streams.ensure_primary().await {
+        report
+            .errors
+            .push(format!("{shown}:1: `setup`: its thread: {e}"));
+        return false;
+    }
+    for (index, step) in steps.iter().enumerate() {
+        let Some(command) = step.get("command").and_then(Value::as_str) else {
+            report.errors.push(format!(
+                "{shown}:1: `setup[{index}]` names no command — fix: `{{ command, input?, as? }}`"
+            ));
+            return false;
+        };
+        let actor = match step.get("as").and_then(Value::as_str) {
+            None | Some("person") => Actor::Human,
+            Some("agent") => Actor::Agent {
+                session_id: None,
+                thread_id: Some(oxplow_domain::ThreadId::new(1)),
+                stream_id: None,
+            },
+            Some(other) => {
+                report.errors.push(format!(
+                    "{shown}:1: `setup[{index}]`: `as: {other}` — fix: `person` or `agent`"
+                ));
+                return false;
+            }
+        };
+        let input = step.get("input").cloned().unwrap_or_else(|| json!({}));
+        if let Err(e) = host.svc.commands.run(&actor, command, input, false).await {
+            report.errors.push(format!(
+                "{shown}:1: `setup[{index}]` `{command}` failed: {e} — fix: its input, or the steps \
+                 before it"
+            ));
+            return false;
+        }
+    }
+    true
 }
 
 /// Load component `id` as its frame would, then ask what the fixture asks
@@ -1005,26 +1097,8 @@ async fn lens_example(
     report: &mut TestReport,
 ) {
     let (shown, expect) = (ex.shown, &ex.expect);
-    // Rows for the entities it reads, in place of what a collector would
-    // have brought (`rows: { <entity>: [ … ] }`).
-    if let Some(rows) = ex.input.get("rows") {
-        let rows = match serde_json::from_value::<std::collections::BTreeMap<String, Vec<Value>>>(
-            rows.clone(),
-        ) {
-            Ok(rows) => rows,
-            Err(e) => {
-                report.errors.push(format!(
-                    "{shown}:1: `rows` must map each entity to its rows: {e}"
-                ));
-                return;
-            }
-        };
-        if let Err(e) =
-            oxplow_app::collector_runner::publish_declared_rows(&host.svc.db, ext, &rows).await
-        {
-            report.errors.push(format!("{shown}:1: `rows`: {e}"));
-            return;
-        }
+    if !seed_rows(host, ext, ex, report).await {
+        return;
     }
     let params = ex
         .input

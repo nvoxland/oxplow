@@ -552,8 +552,14 @@ each intent example's fixture, then each declared provider's
 handshake, examples and conformance suite, and each policy script's
 conformance suite. Its report carries the same import lines. A
 command's fixture may check what the command answers, `expect: { result:
-{...} }`, compared on the keys you name. `--bless` writes a
-provider's golden transcript.
+{...} }`, compared on the keys you name. A job's fixture can make the
+data its tools read first: `setup: [{ command, input?, as? }]` runs
+oxplow's own commands in order (as a person, or `as: agent` for the agent
+of `thread:thr1`), and `rows` seeds your own entities as a lens fixture
+does. A fixture model's reply may say `when: "<text>"` to answer only the
+request whose last message carries that text, such as a tool's result;
+other replies answer in turn. `--bless` writes a provider's golden
+transcript.
 
 Your coding agent has the same checks as MCP tools
 (`validate_extension`, `run_collector`, `preview_collector`), and the

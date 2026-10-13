@@ -548,8 +548,10 @@ See [Anthropic token accounting](https://platform.claude.com/docs/en/build-with-
 `oxplow_ai::fixture::FixtureModel` (kind `fixture`, registered with
 `ModelProviders::register_host`, never declared) answers in-process from a
 list of replies, each a string or `FixtureReply { text, tool_calls,
-chunk_delay }` (in a fixture: `{ text?, toolCalls?: [{ name, arguments }],
-chunkDelayMs? }`); the last repeats. A typed call takes any conversation,
+chunk_delay, when }` (in a fixture: `{ text?, toolCalls?: [{ name, arguments }],
+chunkDelayMs?, when? }`). A reply with `when` answers the first request
+whose last message (its parts as JSON, a tool round's results included)
+contains that text; the others answer in turn; the last repeats. A typed call takes any conversation,
 tools included: the reply's text, then its tool calls (ids `call-<n>`,
 finish `toolCalls`). Streamed, the text comes a word at a time, each after
 `chunk_delay`, honouring cancel. `asked()` / `asked_typed()` are what it

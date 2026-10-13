@@ -55,6 +55,9 @@ Fixed while building them:
   now check `expect: { result }`.
 - An author couldn't see how an import resolved; `extension check` and
   `extension test` now print one line per import.
+- Job fixtures ran on an empty throwaway, so a job's tool found no
+  evidence; a job fixture's `setup` now runs oxplow's own commands first,
+  and a fixture model's reply can be matched to the request (`when`).
 - Withheld contributions were reported unevenly: a lens fixture failed
   with "not found", a dropped slot got no warning, and one cause got two
   differently worded warnings. Now each unavailable import is one warning
@@ -73,9 +76,9 @@ Still open:
   `decide`; an extension can't declare its own profile yet.
 - **No diff text** in any `v_*` model: a review sees per-file and
   per-function statistics, not the hunks.
-- **Job fixtures run on an empty throwaway**: a job's tool finds no
-  evidence there, so a real-data run needs a Rust test. A fixture
-  model's replies are a queue, not matched to the round.
+- **Not all evidence can be made in a fixture**: `setup` reaches what
+  oxplow's commands make (work items, efforts, test runs), not collected
+  reports like diff coverage, so that still needs a Rust test.
 - **`extension test` needs the folder under `oxplow/extensions/`.**
 - **Names:** an extension's command namespace is its name with `-` as `_`
   (`effort_review.review.ask`), while its contribution ids and model

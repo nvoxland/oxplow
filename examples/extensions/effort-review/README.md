@@ -72,6 +72,7 @@ another version; `oxplow extension check` prints how the import resolved.
 
 `oxplow extension test oxplow/extensions/effort-review` runs its eight
 examples on a throwaway oxplow with a fixture model: the job with a tool
-call, cancelled mid-reply, its end reaching `publish-review`, the effect
+call over an effort its `setup` makes (a work item, the agent's test run),
+answered once the evidence carries the test run, cancelled mid-reply, its end reaching `publish-review`, the effect
 on a finished effort (with and without a work item), the evidence bundle
 from given rows, and the Reviews lens.

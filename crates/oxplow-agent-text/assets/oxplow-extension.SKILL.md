@@ -445,12 +445,17 @@ names the file and line and says what to change.
      throwaway and delivered: your effects (approved there) react for
      real and their commands run. `expect: { effects: [{ id, state }],
      commands: [names] }` (only the keys you name are compared);
-   - a job: `input: { job: <id>, intentKey, request, cancel? }` — run
+   - a job: `input: { job: <id>, intentKey, request, cancel?, setup?,
+     rows? }` — `setup: [{ command, input?, as? }]` first runs oxplow's
+     own commands (`as: agent` for the agent of `thread:thr1`) to make
+     what its tools read: a work item, an effort, a test run — run
      through your commands over `jobs.write/enqueue` and
      `jobs.read/snapshot` (declare both), approved there, its model rounds
      answered by `model.replies` (a string, or `{ text?, toolCalls?: [{
-     name, arguments }], chunkDelayMs? }` — a reply with tool calls makes
-     the job run them and ask again); `cancel: true` cancels it through
+     name, arguments }], chunkDelayMs?, when? }` — a reply with tool calls
+     makes the job run them and ask again; one with `when: "<text>"`
+     answers only the round whose last message carries that text, such as
+     the tool's result); `cancel: true` cancels it through
      your `jobs.write/cancel` command once it has written. `expect: {
      state, result?, text?, toolCalls?, output?: [{ kind }] }`;
    - a component: `input: { component: <id>, lens?, items?: [title],

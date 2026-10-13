@@ -23,15 +23,18 @@ use crate::parts::{
 /// Its kind, as `ai.yaml`'s `kind:` names it.
 pub const KIND: &str = "fixture";
 
-/// One answer: its text, the tools it calls (after the text), and how long
-/// it waits before each word when it streams (so a test can cancel it
-/// mid-way). A plain string is a text answer.
+/// One answer: its text, the tools it calls (after the text), how long it
+/// waits before each word when it streams (so a test can cancel it
+/// mid-way), and, with `when`, the request it answers: the first whose
+/// last message (a tool round's results included) carries that text. A
+/// plain string is a text answer, in turn.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(from = "ReplyRepr")]
 pub struct FixtureReply {
     pub text: String,
     pub tool_calls: Vec<FixtureToolCall>,
     pub chunk_delay: Duration,
+    pub when: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -58,6 +61,8 @@ struct FullReply {
     tool_calls: Vec<FixtureToolCall>,
     #[serde(default)]
     chunk_delay_ms: u64,
+    #[serde(default)]
+    when: Option<String>,
 }
 
 impl From<ReplyRepr> for FixtureReply {
@@ -68,6 +73,7 @@ impl From<ReplyRepr> for FixtureReply {
                 text: full.text,
                 tool_calls: full.tool_calls,
                 chunk_delay: Duration::from_millis(full.chunk_delay_ms),
+                when: full.when,
             },
         }
     }
@@ -88,7 +94,8 @@ impl From<&str> for FixtureReply {
     }
 }
 
-/// Answers with each reply in turn; the last repeats. Usage is unknown.
+/// Answers with the reply whose `when` the request matches, else each
+/// other reply in turn; the last repeats. Usage is unknown.
 pub struct FixtureModel {
     replies: Mutex<VecDeque<FixtureReply>>,
     last: Mutex<FixtureReply>,
@@ -121,12 +128,15 @@ impl FixtureModel {
             .clone()
     }
 
-    fn next(&self) -> FixtureReply {
-        let next = self
-            .replies
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .pop_front();
+    /// The reply for a request whose last message reads `last`.
+    fn next(&self, last: &str) -> FixtureReply {
+        let mut replies = self.replies.lock().unwrap_or_else(|e| e.into_inner());
+        let at = replies
+            .iter()
+            .position(|r| r.when.as_deref().is_some_and(|w| last.contains(w)))
+            .or_else(|| replies.iter().position(|r| r.when.is_none()));
+        let next = at.and_then(|at| replies.remove(at));
+        drop(replies);
         let mut last = self.last.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(next) = next {
             *last = next;
@@ -157,7 +167,18 @@ impl FixtureModel {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .push(req.clone());
-        let reply = self.next();
+        let last = req
+            .messages
+            .last()
+            .map(|m| {
+                m.parts
+                    .iter()
+                    .map(|p| serde_json::to_string(p).unwrap_or_default())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .unwrap_or_default();
+        let reply = self.next(&last);
         let mut parts = Vec::new();
         if !reply.text.is_empty() {
             parts.push(PartV1::Text {
@@ -205,7 +226,7 @@ impl ModelProvider for FixtureModel {
             .unwrap_or_else(|e| e.into_inner())
             .push(req.prompt.to_string());
         Ok(Completion {
-            text: self.next().text,
+            text: self.next(req.prompt).text,
             input_tokens: 0,
             output_tokens: 0,
         })
@@ -332,6 +353,29 @@ mod tests {
         assert_eq!(replies[1].tool_calls[0].name, "look");
         assert_eq!(replies[1].chunk_delay, Duration::from_millis(5));
         assert!(serde_json::from_value::<FixtureReply>(json!({ "txt": "x" })).is_err());
+    }
+
+    /// A reply with `when` answers the first request whose last message
+    /// carries that text, wherever it is in the list; the others answer in
+    /// turn.
+    #[tokio::test]
+    async fn a_reply_with_when_answers_the_request_it_matches() {
+        let replies: Vec<FixtureReply> = serde_json::from_value(json!([
+            { "when": "testRuns", "text": "reviewed" },
+            "first",
+        ]))
+        .unwrap();
+        let model = FixtureModel::new(replies);
+        let text = |r: TypedResponseV1| match &r.parts[..] {
+            [PartV1::Text { text }] => text.clone(),
+            other => panic!("{other:?}"),
+        };
+        let first = model.complete_typed(&instance(), &ask("review it")).await;
+        assert_eq!(text(first.unwrap()), "first");
+        let after_tool = model
+            .complete_typed(&instance(), &ask(r#"{"testRuns": []}"#))
+            .await;
+        assert_eq!(text(after_tool.unwrap()), "reviewed");
     }
 
     /// A typed answer is its text, then its tool calls, each with its own

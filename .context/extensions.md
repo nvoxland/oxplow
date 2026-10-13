@@ -1244,12 +1244,16 @@ and one calling MCP read identical `file:line: what — fix` lines.
   }`: appended to the throwaway's log and delivered; the extension's
   effects, approved there, react for real — `expect: { effects: [{ id,
   state }], commands }`, read from `v_effect_run` and `command.executed`),
-  a job (`{ job, intentKey, request, cancel? }`: through the extension's
+  a job (`{ job, intentKey, request, cancel?, setup?, rows? }`: `setup`
+  runs oxplow's own commands first, in order, each as a person or `as:
+  agent` (thread 1, after `ensure_primary`), so its tools read real data;
+  `rows` as a lens's; then through the extension's
   commands over `jobs.write/enqueue` and `jobs.read/snapshot`, approved
   there; `cancel: true` cancels it through `jobs.write/cancel` once it
   has written — `expect: { state, result?, text?, toolCalls?, output? }`,
   `output` its rows `[{ kind, … }]` ("Jobs"); a model reply is a string
-  or `{ text?, toolCalls?: [{ name, arguments }], chunkDelayMs? }`;
+  or `{ text?, toolCalls?: [{ name, arguments }], chunkDelayMs?, when? }`
+  (`when`: answers the request whose last message carries that text);
   naming `effects`, `commands` or `pages`
   also approves its effects and delivers the `contribution.job.completed`
   the job logs, asked in a thread: the effects that reacted, the commands
