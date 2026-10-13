@@ -63,7 +63,7 @@ test("init carries the run, props and tokens, at protocol 3", () => {
   const r = { lens: { id: "x/b", custom: { component: "b", props: { a: 1 } } }, params: {}, result: { columns: [], rows: [], truncated: false } } as unknown as LensRun;
   expect(initMessage(r, { "--accent": "#08f" })).toEqual({
     type: "init",
-    protocol: 3,
+    protocol: 4,
     run: r,
     props: { a: 1 },
     tokens: { "--accent": "#08f" },

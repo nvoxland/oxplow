@@ -274,34 +274,61 @@ pub async fn invoke_component_command(
     .await?)
 }
 
+/// One press of a lens's action: the lens, the action, the lens's params,
+/// the row it was pressed on (a row action), and what the person filled in
+/// (a form action, `form: true`).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LensPress {
+    pub id: String,
+    pub action: String,
+    #[serde(default)]
+    pub params: Option<BTreeMap<String, SqlCell>>,
+    #[serde(default)]
+    pub row: Option<BTreeMap<String, SqlCell>>,
+    #[serde(default)]
+    pub input: Option<oxplow_domain::Json>,
+}
+
+impl LensPress {
+    fn call(self, confirmed: bool) -> oxplow_app::lens_actions::LensActionCall {
+        oxplow_app::lens_actions::LensActionCall {
+            lens_id: self.id,
+            action_id: self.action,
+            params: self.params.unwrap_or_default(),
+            row: self.row,
+            input: self.input.map(|i| i.0),
+            on_behalf_of: oxplow_domain::Actor::Human,
+            confirmed,
+        }
+    }
+}
+
+/// The form a lens's form action (`form: true`) opens: its command, the
+/// values it starts from (the action's bound `input`) and its fixed fields.
+pub async fn lens_action_form(
+    svc: &Services,
+    press: LensPress,
+    stream_id: Option<String>,
+) -> Result<oxplow_app::lens_actions::FormStart, IpcError> {
+    let root = root(svc);
+    let ctx = context(svc, stream_id.as_deref()).await;
+    Ok(oxplow_app::lens_actions::action_form(svc, root, press.call(false), &ctx).await?)
+}
+
 /// A person presses one of a lens's actions: its command runs as the
 /// lens, acting for them (`NEEDS_CONFIRMATION` asks them first). A row
-/// action takes the row it was pressed on.
+/// action takes the row it was pressed on; a form action, what they
+/// filled in.
 pub async fn run_lens_action(
     svc: &Services,
-    id: String,
-    action: String,
-    params: Option<BTreeMap<String, SqlCell>>,
-    row: Option<BTreeMap<String, SqlCell>>,
+    press: LensPress,
     stream_id: Option<String>,
     confirmed: bool,
 ) -> Result<oxplow_domain::CommandOutcome, IpcError> {
     let root = root(svc);
     let ctx = context(svc, stream_id.as_deref()).await;
-    Ok(oxplow_app::lens_actions::run_lens_action(
-        svc,
-        root,
-        oxplow_app::lens_actions::LensActionCall {
-            lens_id: id,
-            action_id: action,
-            params: params.unwrap_or_default(),
-            row,
-            on_behalf_of: oxplow_domain::Actor::Human,
-            confirmed,
-        },
-        &ctx,
-    )
-    .await?)
+    Ok(oxplow_app::lens_actions::run_lens_action(svc, root, press.call(confirmed), &ctx).await?)
 }
 
 /// Load one extension and dry-run each lens, returning every problem —

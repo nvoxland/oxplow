@@ -1,7 +1,9 @@
 // oxplow's client library for custom components (`viz: custom` lenses).
 //
-// A component runs in a sandboxed frame: scripts only, no network, no
-// storage. oxplow hands it one end of a MessageChannel in an `init`
+// A component runs in a sandboxed frame: scripts and forms, no network,
+// no storage. A form submits nowhere (the frame's CSP): handle `submit` in
+// your script and run a command with `invoke`; a refused one rejects with
+// `{ code, message, field? }`, `field` the input it names (`/title`). oxplow hands it one end of a MessageChannel in an `init`
 // message; this wraps that protocol. Load it before your own script:
 //
 //   <script src="/component-lib/oxplow-component.js"></script>
@@ -25,7 +27,7 @@
   "use strict";
 
   // The protocol this library speaks; `init` says which one the host does.
-  const PROTOCOL = 3;
+  const PROTOCOL = 4;
 
   function component(port, init) {
     let next = 0;
@@ -95,7 +97,7 @@
 
   // Wait for oxplow's `init` and answer `ready`. Rejects when none comes
   // within `timeoutMs` (10 s), or when the host speaks another protocol.
-  // A failed request rejects with the host's `{ code, message }`.
+  // A failed request rejects with the host's `{ code, message, field? }`.
   function connect(options) {
     const target = (options && options.target) || global;
     const timeoutMs = (options && options.timeoutMs) || 10000;

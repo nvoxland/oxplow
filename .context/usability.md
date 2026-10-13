@@ -169,6 +169,12 @@ Things I keep forgetting. Read this before adding any UI.
   once above the submit button as `<prefix>-form-error`). Server errors
   never disable submit; client errors still do. All three are keyed on
   their content, so a re-read keeps what was typed.
+  A command's refusal that names a field (`INVALID` with `field`, on
+  `IpcCallError.field`; `fieldErrors`) is shown that way by every form
+  that runs a command — a form lens, a lens's form action (`form: true`,
+  in a `Slideover`, never a modal; success closes it) and, through the
+  bridge's `field`, a custom component's own form — never only in the
+  error rail.
 - **Autofocus the first input** in any inline edit / prompt strip
   when it mounts (and select existing text so the user can replace
   it with a single keystroke). A *page* that opens on its own (not from

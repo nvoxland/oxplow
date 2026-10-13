@@ -36,7 +36,7 @@ import {
   type SeriesPoint,
 } from "./metricsSql.js";
 import { normalizeSnapshotId } from "./effort-snapshot.js";
-import { IpcCallError, ipcErrorCode, ipcErrorMessage } from "./ipc-error.js";
+import { IpcCallError, ipcErrorCode, ipcErrorField, ipcErrorMessage } from "./ipc-error.js";
 import type {
   AiSettings,
   HarnessListing,
@@ -112,7 +112,7 @@ export type { ProviderInstanceView };
 /// instead of collapsing to a generic "ipc error" (see ipc-error.ts).
 function unwrap<T>(result: { status: "ok"; data: T } | { status: "error"; error: unknown }): T {
   if (result.status === "ok") return result.data;
-  throw new IpcCallError(ipcErrorMessage(result.error), ipcErrorCode(result.error));
+  throw new IpcCallError(ipcErrorMessage(result.error), ipcErrorCode(result.error), ipcErrorField(result.error));
 }
 
 /// Pure slug derivation: lowercase ASCII alphanumerics, runs of any
@@ -592,8 +592,21 @@ export async function runLensAction(
   row: Record<string, SqlCell> | null,
   streamId: string | null,
   confirmed: boolean,
+  input: Record<string, unknown> | null = null,
 ): Promise<CommandOutcome> {
-  return unwrap(await commands.runLensAction(id, action, params, row, streamId, confirmed));
+  return unwrap(await commands.runLensAction({ id, action, params, row, input }, streamId, confirmed));
+}
+
+/** The form a lens's form action (`form: true`) opens: its command, the
+ *  values it starts from and its fixed fields. */
+export async function lensActionForm(
+  id: string,
+  action: string,
+  params: Record<string, SqlCell>,
+  row: Record<string, SqlCell> | null,
+  streamId: string | null,
+): Promise<FormStart> {
+  return unwrap(await commands.lensActionForm({ id, action, params, row, input: null }, streamId));
 }
 
 /** A command's spec: what a form renders from its `input_schema`, and

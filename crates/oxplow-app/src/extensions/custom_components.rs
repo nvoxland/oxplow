@@ -188,8 +188,11 @@ pub fn bundle_problems(
 /// silently or that ends the component: an inline `<script>` or event
 /// handler, a `type="module"` script, a load from outside the bundle
 /// (`src`, `srcset`, a stylesheet), a `<base>`, a nested frame, an `<object>` or `<embed>`,
-/// a form, a refresh; and, for its `index.html`, never loading the client
+/// a refresh; and, for its `index.html`, never loading the client
 /// library. A link (`<a href>`) is a navigation, not a load, and isn't one.
+/// A `<form>` is fine: the frame allows forms (`allow-forms`) and its CSP
+/// never lets one submit anywhere (`form-action 'none'`), so a component
+/// handles `submit` in its script and runs a command with `invoke`.
 pub fn page_problems(html: &str, index: bool) -> Vec<String> {
     let mut out = Vec::new();
     let mut loads_lib = false;
@@ -226,9 +229,6 @@ pub fn page_problems(html: &str, index: bool) -> Vec<String> {
             "iframe" | "frame" => Some("a <iframe> — the frame's CSP refuses a nested frame"),
             "object" => Some("an <object> — the frame's CSP refuses embedded objects"),
             "embed" => Some("an <embed> — the frame's CSP refuses embedded objects"),
-            "form" => {
-                Some("a <form> — the frame's CSP refuses submitting one (`form-action 'none'`)")
-            }
             "meta"
                 if attr("http-equiv").is_some_and(|v| v.trim().eq_ignore_ascii_case("refresh")) =>
             {
@@ -743,7 +743,6 @@ mod tests {
             ("<iframe src=\"other.html\"></iframe>", "a <iframe>"),
             ("<object data=\"x.swf\"></object>", "an <object>"),
             ("<embed src=\"x.swf\">", "an <embed>"),
-            ("<form><input></form>", "a <form>"),
             (
                 "<meta http-equiv=\"refresh\" content=\"0;url=x\">",
                 "a refresh",
@@ -752,6 +751,16 @@ mod tests {
             let problems = page_problems(&format!("{LIB_TAG}{html}"), true).join("\n");
             assert!(problems.contains(says), "{html}: {problems}");
         }
+        assert_eq!(
+            page_problems(
+                &format!(
+                    "{LIB_TAG}<form><input name=title><button type=submit>Save</button></form>"
+                ),
+                true
+            ),
+            Vec::<String>::new(),
+            "a form is a component's own, handled in its script"
+        );
         assert!(page_problems("<script src=app.js></script>", true)
             .join("\n")
             .contains("doesn't load the client library"));

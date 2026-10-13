@@ -37,9 +37,11 @@ pub const LIB_PATH: &str = "/component-lib/";
 
 /// The CSP on every bundle file. `lib` is the client library's folder
 /// ([`LIB_PATH`]): a script source (the library) and a style source (the
-/// kit's sheet, tsk961), nothing else. `sandbox allow-scripts` makes the
-/// document's origin opaque however it is loaded — the host's iframe
-/// attribute is not the only fence. `source` is the loaded snapshot's own
+/// kit's sheet, tsk961), nothing else. `sandbox allow-scripts allow-forms`
+/// makes the document's origin opaque however it is loaded — the host's
+/// iframe attribute is not the only fence — and lets it hold a form, whose
+/// submission goes nowhere (`form-action 'none'`): a component handles
+/// `submit` in its script. `source` is the loaded snapshot's own
 /// folder (`http://<host>/components/v/<version>/`), named: there is no
 /// `'self'` anywhere (tsk983), since in a sandboxed frame it still matches
 /// the daemon's whole origin — the response URL's — and would let a frame
@@ -51,7 +53,7 @@ pub const LIB_PATH: &str = "/component-lib/";
 /// check, since the frame won't.
 pub fn bundle_csp(source: &str, lib: &str) -> String {
     format!(
-        "sandbox allow-scripts; default-src 'none'; script-src {source} {lib}; style-src 'unsafe-inline' {source} {lib}; \
+        "sandbox allow-scripts allow-forms; default-src 'none'; script-src {source} {lib}; style-src 'unsafe-inline' {source} {lib}; \
          img-src data: blob: {source}; font-src data: {source}; connect-src 'none'; \
          form-action 'none'; base-uri 'none'"
     )
@@ -220,8 +222,13 @@ mod tests {
             "http://127.0.0.1:1/component-lib/",
         );
         let directives: Vec<&str> = csp.split(';').map(str::trim).collect();
-        assert!(directives.contains(&"sandbox allow-scripts"), "{csp}");
+        assert!(
+            directives.contains(&"sandbox allow-scripts allow-forms"),
+            "{csp}"
+        );
         assert!(directives.contains(&"connect-src 'none'"), "{csp}");
+        // A form may be there, but never submit anywhere.
+        assert!(directives.contains(&"form-action 'none'"), "{csp}");
     }
 
     /// P9.A4, tsk983: a bundle may load its own files and the client

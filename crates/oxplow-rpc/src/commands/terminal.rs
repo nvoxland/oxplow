@@ -63,6 +63,7 @@ fn not_stopped(session: &AgentSession) -> Result<(), IpcError> {
             code: STOPPED.into(),
             message: format!("agent session {} was stopped", session.id),
             cause: None,
+            field: None,
         });
     }
     Ok(())

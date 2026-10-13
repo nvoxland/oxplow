@@ -247,7 +247,7 @@ function ComponentFrame({
         ref={frameRef}
         data-testid="custom-component-frame"
         title={run.lens.title}
-        sandbox="allow-scripts"
+        sandbox="allow-scripts allow-forms"
         referrerPolicy="no-referrer"
         src={src}
         onLoad={onLoad}

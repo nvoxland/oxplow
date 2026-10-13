@@ -20,6 +20,10 @@ pub struct IpcError {
     pub code: String,
     pub message: String,
     pub cause: Option<String>,
+    /// For `INVALID` input, the field it names (a JSON pointer, `/title`),
+    /// so a form shows the message under that field.
+    #[serde(default)]
+    pub field: Option<String>,
 }
 
 impl IpcError {
@@ -28,6 +32,7 @@ impl IpcError {
             code: "INTERNAL".into(),
             message: msg.into(),
             cause: None,
+            field: None,
         }
     }
 
@@ -36,6 +41,7 @@ impl IpcError {
             code: "INVALID".into(),
             message: msg.into(),
             cause: None,
+            field: None,
         }
     }
 
@@ -44,6 +50,7 @@ impl IpcError {
             code: "NOT_FOUND".into(),
             message: "not found".into(),
             cause: None,
+            field: None,
         }
     }
 
@@ -63,6 +70,10 @@ impl From<oxplow_domain::CommandError> for IpcError {
     fn from(value: oxplow_domain::CommandError) -> Self {
         use oxplow_domain::CommandError as E;
         let message = value.to_string();
+        let field = match &value {
+            E::Invalid { field, .. } => field.clone(),
+            _ => None,
+        };
         let code = match &value {
             E::Unknown { .. } => "NOT_FOUND",
             E::Invalid { .. } => "INVALID",
@@ -77,6 +88,7 @@ impl From<oxplow_domain::CommandError> for IpcError {
             code: code.into(),
             message,
             cause: None,
+            field,
         }
     }
 }
@@ -88,27 +100,32 @@ impl From<DomainError> for IpcError {
                 code: "INVALID".into(),
                 message: msg.clone(),
                 cause: None,
+                field: None,
             },
             DomainError::NotFound => Self::not_found(),
             DomainError::Invariant(msg) => Self {
                 code: "INVARIANT".into(),
                 message: msg.clone(),
                 cause: None,
+                field: None,
             },
             DomainError::Constraint(msg) => Self {
                 code: "CONSTRAINT".into(),
                 message: msg.clone(),
                 cause: None,
+                field: None,
             },
             DomainError::Busy(msg) => Self {
                 code: "BUSY".into(),
                 message: msg.clone(),
                 cause: None,
+                field: None,
             },
             DomainError::Storage(msg) => Self {
                 code: "STORAGE".into(),
                 message: msg.clone(),
                 cause: None,
+                field: None,
             },
         }
     }
@@ -121,26 +138,31 @@ impl From<SessionError> for IpcError {
                 code: "NOT_A_REPO".into(),
                 message: format!("not a git repo: {}", p.display()),
                 cause: None,
+                field: None,
             },
             SessionError::InWorktree(p) => Self {
                 code: "IN_WORKTREE".into(),
                 message: format!("workspace is a secondary git worktree: {}", p.display()),
                 cause: None,
+                field: None,
             },
             SessionError::PrimaryExists => Self {
                 code: "PRIMARY_EXISTS".into(),
                 message: "primary stream already exists".into(),
                 cause: None,
+                field: None,
             },
             SessionError::PrimaryMissing => Self {
                 code: "PRIMARY_MISSING".into(),
                 message: "primary stream missing".into(),
                 cause: None,
+                field: None,
             },
             SessionError::DuplicateWorktreeSlug(slug) => Self {
                 code: "DUPLICATE_WORKTREE_SLUG".into(),
                 message: format!("worktree slug \"{slug}\" already exists"),
                 cause: None,
+                field: None,
             },
             SessionError::Vcs(e) => IpcError::from(DomainError::from(e.clone())),
             SessionError::Storage(e) => IpcError::from(e.clone()),
@@ -156,6 +178,7 @@ impl From<ThreadError> for IpcError {
                 code: "THREAD_CLOSED".into(),
                 message: format!("thread is closed: {id}"),
                 cause: None,
+                field: None,
             },
             ThreadError::Storage(e) => IpcError::from(e),
         }

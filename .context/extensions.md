@@ -1424,8 +1424,12 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   binding.
 - `viz`: `table`, `list`, `number`, `markdown`, `bar`, `line`, `treemap`,
   `grid` (child lenses, `children`), `tree`, `timeline`, `detail`,
-  `steps`, `hunks`, `form` (`form: { command, defaults? }`; no `query`
-  needed) or `custom` (`custom: {
+  `steps`, `hunks`, `form` (`form: { command, defaults?, fixed?,
+  fields? }`; no `query` needed: one, if given, prefills from its first
+  row; `fixed` fields show their `defaults` value and can't be changed —
+  it's imposed again on submit, so an item's `ref` stays its own;
+  `fields` lists which to show, the rest keep their starting values) or
+  `custom` (`custom: {
   component, props? }`, one of the extension's `custom_components`; see
   "Custom components"). Each component names the columns it draws from in
   its own block: `chart` (`x`, `y`, `series`, `label`, `size`, `group`),
@@ -1484,8 +1488,15 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   (`columns` entry for `tree.label`), so its `link`, `icon` and `tone`
   apply.
 - `actions`: commands the lens offers, `{ id, label, command, input?,
-  row?, group? }`, with `{{param.x}}` / `{{row.x}}` placeholders; run as the lens
-  for whoever pressed, so they grant no power. `group: <value>` puts the
+  row?, group?, form?, fixed? }`, with `{{param.x}}` / `{{row.x}}` placeholders; run as the lens
+  for whoever pressed, so they grant no power. `form: true` opens the
+  command's form instead of running (a slideover: `lens_action_form`
+  gives the command and the bound `input` as starting values); what the
+  person fills in runs (`run_lens_action`'s `input`, taken only by a form
+  action), its `fixed` fields put back to the bound values (an `Edit…`
+  row action keeps the row's `ref`). A refusal naming a field (`INVALID`
+  with `field`, carried over IPC on `IpcError.field`) shows under that
+  field, in a form lens too. `group: <value>` puts the
   action in that group's heading (matched against the group's value as
   text) instead of the toolbar — also in a compact panel, where the
   toolbar is hidden. It needs the lens to have `group`, isn't a row
@@ -1862,10 +1873,12 @@ reloads after its own installs and updates.
 `custom_components:` (P6b.D1; **stable since P11**;
 `extensions/custom_components.rs`) are web bundles a `viz: custom` lens
 renders in a sandboxed frame. **The sandbox bounds what it reaches**:
-the frame has an opaque origin (the iframe's `sandbox="allow-scripts"`
-*and* the daemon's `sandbox allow-scripts` CSP directive), no daemon
-token and no way to send data — no fetch/XHR/WebSocket (`connect-src
-'none'`), no forms, no storage. The one way out is navigating itself:
+the frame has an opaque origin (the iframe's `sandbox="allow-scripts
+allow-forms"` *and* the daemon's `sandbox allow-scripts allow-forms` CSP
+directive), no daemon token and no way to send data — no
+fetch/XHR/WebSocket (`connect-src 'none'`), no form submission
+(`form-action 'none'`: a component's `<form>` is its own, its script
+handles `submit` and runs a command with `invoke`), no storage. The one way out is navigating itself:
 the page's `frame-src` (`http://127.0.0.1:*`, `http://localhost:*` —
 each loopback name the daemon serves a bundle to, tsk1003; not `[::1]`,
 which no CSP host source can name, tsk1048) bounds that to this machine —
@@ -1996,7 +2009,8 @@ input }`, `{ id, method: navigate, ref }` (an oxplow page only:
 `componentNavigationTarget` refuses an external-url ref with `INVALID`,
 since an outside tab would carry whatever the frame put in its URL out);
 replies `{ id, ok, result |
-error: { code, message } }`; a re-run sends `update { run }` — only
+error: { code, message, field? } }` (`field`: the input an `INVALID`
+refusal names, so a component's form marks it; protocol 4); a re-run sends `update { run }` — only
 when its params or result differ from what the frame last got
 (`createBridgeHost` takes the run `init` carried); a second `ready` is
 ignored. The frame is keyed by its bundle URL (`ComponentFrame`): a
@@ -2090,7 +2104,7 @@ file (`bundle_problems` / `page_problems`, from `check_components`):
   path other than `/component-lib/` (matched before `?`/`#`), or `..`
   past the folder;
 - a `<base>`, an `<iframe>`/`<frame>`, an `<object>`/`<embed>`, a
-  `<form>`, a refresh `<meta>`;
+  refresh `<meta>` (a `<form>` is allowed: it submits nowhere);
 - an `index.html` that never loads the client library.
 
 Only each bundle's **`index.html`** is linted — the one page a frame

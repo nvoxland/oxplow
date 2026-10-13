@@ -135,6 +135,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::lens_text,
             commands::generated::run_answer,
             commands::generated::lens_form,
+            commands::generated::lens_action_form,
             commands::generated::submit_lens_form,
             commands::generated::run_component_query,
             commands::generated::load_component,

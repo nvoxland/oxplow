@@ -283,6 +283,14 @@ pub struct LensForm {
     #[serde(default, serialize_with = "plain_json")]
     #[specta(type = Option<oxplow_domain::Json>)]
     pub defaults: Option<serde_json::Value>,
+    /// Fields shown but not editable: their values are `defaults`', imposed
+    /// again on submit (an item's `ref`).
+    #[serde(default)]
+    pub fixed: Vec<String>,
+    /// The fields to show, in order; the rest keep their starting values
+    /// and are submitted with them. None: every field.
+    #[serde(default)]
+    pub fields: Option<Vec<String>>,
 }
 
 /// Serialize a JSON value with its numbers as plain numbers, so a YAML
@@ -611,6 +619,13 @@ pub struct LensAction {
     /// A group action: a button in the heading of the group whose `by`
     /// value (as text) this is, instead of above the result.
     pub group: Option<String>,
+    /// Opens the command's form, its fields starting from `input`, for the
+    /// person to fill in before it runs (`lens_action_form`), instead of
+    /// running at once.
+    pub form: bool,
+    /// Fields of a form action the person sees but can't change: their
+    /// values are `input`'s, imposed again when it runs (an item's `ref`).
+    pub fixed: Vec<String>,
 }
 
 /// The `{{param.x}}` / `{{row.x}}` placeholders in `input`, as
@@ -642,6 +657,13 @@ struct ActionFile {
     /// The `group` heading (its `by` value) it's a button in.
     #[serde(default)]
     group: Option<String>,
+    /// Open the command's form, starting from `input`, instead of running.
+    #[serde(default)]
+    form: bool,
+    /// A form action's fields that keep `input`'s values (shown, not
+    /// editable).
+    #[serde(default)]
+    fixed: Vec<String>,
 }
 
 /// Parse a lens's `actions:`: each `{ id, label, command, input?, row? }`.
@@ -685,6 +707,18 @@ fn parse_actions(
                 f.id
             ));
         }
+        if !f.fixed.is_empty() && !f.form {
+            return Err(format!(
+                "actions: `{}`: `fixed` is for a form action (`form: true`)",
+                f.id
+            ));
+        }
+        if let Some(missing) = f.fixed.iter().find(|k| input.get(k.as_str()).is_none()) {
+            return Err(format!(
+                "actions: `{}`: fixed field `{missing}` needs a value in `input`",
+                f.id
+            ));
+        }
         for (scope, name) in action_templates(&input) {
             match scope.as_str() {
                 "param" if params.iter().any(|p| p.name == name) => {}
@@ -717,6 +751,8 @@ fn parse_actions(
             input,
             row: f.row,
             group: f.group,
+            form: f.form,
+            fixed: f.fixed,
         });
     }
     Ok(out)
@@ -2753,12 +2789,24 @@ fn shape_problem(
         }
         LensViz::Form => {
             let f = lens.form.clone().unwrap_or_default();
-            need("form", &[("command", &f.command)]).or_else(|| {
-                let command = f.command.as_deref().unwrap_or_default();
-                oxplow_domain::CommandSpec::validate_id(command)
-                    .err()
-                    .map(|e| format!("form: {e}"))
-            })
+            need("form", &[("command", &f.command)])
+                .or_else(|| {
+                    let command = f.command.as_deref().unwrap_or_default();
+                    oxplow_domain::CommandSpec::validate_id(command)
+                        .err()
+                        .map(|e| format!("form: {e}"))
+                })
+                .or_else(|| {
+                    f.fixed
+                        .iter()
+                        .find(|k| {
+                            f.defaults
+                                .as_ref()
+                                .and_then(|d| d.get(k.as_str()))
+                                .is_none()
+                        })
+                        .map(|k| format!("form: fixed field `{k}` needs a value in `defaults`"))
+                })
         }
         // A grid composes its children; it renders no rows of its own.
         LensViz::Grid => grid_problem(lens, ids_in_extension),
@@ -5595,6 +5643,7 @@ empty: No items.
             form: Some(LensForm {
                 command: Some("oxplow.work_item.create".into()),
                 defaults: Some(serde_json::json!({ "title": "x" })),
+                ..LensForm::default()
             }),
             ..spec_base()
         };

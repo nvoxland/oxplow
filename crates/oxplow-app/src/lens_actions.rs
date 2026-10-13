@@ -23,6 +23,10 @@ pub struct LensActionCall {
     pub params: BTreeMap<String, SqlCell>,
     /// For a row action, the row it was invoked on (column → value).
     pub row: Option<BTreeMap<String, SqlCell>>,
+    /// For a form action (`form: true`), what the person filled in: laid
+    /// over the action's bound `input`, its `fixed` fields imposed again.
+    /// Any other action runs as declared and takes none.
+    pub input: Option<Value>,
     /// Who pressed it: a person from the UI, the calling agent from MCP.
     pub on_behalf_of: Actor,
     /// The person confirmed a command that asks (an agent never can).
@@ -54,6 +58,7 @@ async fn run_lens_action_unpinned(
         action_id,
         params,
         row,
+        input: given,
         on_behalf_of,
         confirmed,
     } = call;
@@ -94,7 +99,19 @@ async fn run_lens_action_unpinned(
         _ => {}
     }
     let params = extensions::resolve_params(&lens, &params, ctx).map_err(CommandError::from)?;
-    let input = bind_input(&action.input, &params, row)?;
+    let bound = bind_input(&action.input, &params, row)?;
+    let input = match given {
+        None => bound,
+        Some(_) if !action.form => {
+            return Err(invalid(
+                "/input",
+                format!(
+                    "`{action_id}` runs as declared; only a form action (`form: true`) takes input"
+                ),
+            ))
+        }
+        Some(given) => filled(bound, given, &action.fixed)?,
+    };
     svc.commands
         .run(
             &Actor::Lens {
@@ -108,14 +125,84 @@ async fn run_lens_action_unpinned(
         .await
 }
 
-/// What a form lens shows: its command (the fields come from its input
-/// schema) and the values the fields start from — the form's `defaults`
-/// (placeholders bound) under the query's first row, if it has a query.
+/// What a form shows: its command (the fields come from its input
+/// schema), the values the fields start from, the fields shown but not
+/// editable, and which fields to show (none: all).
 #[derive(Debug, Clone, serde::Serialize, specta::Type)]
 pub struct FormStart {
     pub command: oxplow_domain::CommandSpec,
     #[specta(type = oxplow_domain::Json)]
     pub values: Value,
+    pub fixed: Vec<String>,
+    pub fields: Option<Vec<String>>,
+}
+
+/// `given` (what a person filled in, a map) laid over `start`, with the
+/// `fixed` fields put back to `start`'s values: what a form runs with.
+fn filled(start: Value, given: Value, fixed: &[String]) -> Result<Value, CommandError> {
+    let Value::Object(given) = given else {
+        return Err(CommandError::Invalid {
+            field: Some("/input".into()),
+            message: "a form's input is its fields, a map".into(),
+        });
+    };
+    let mut out = match start {
+        Value::Object(m) => m,
+        _ => serde_json::Map::new(),
+    };
+    let kept: Vec<(String, Value)> = fixed
+        .iter()
+        .filter_map(|k| out.get(k).map(|v| (k.clone(), v.clone())))
+        .collect();
+    out.extend(given);
+    out.extend(kept);
+    Ok(Value::Object(out))
+}
+
+/// The form a form action (`form: true`) opens: its command, its bound
+/// `input` as the starting values, and its `fixed` fields.
+pub async fn action_form(
+    svc: &crate::Services,
+    lens_root: &Path,
+    call: LensActionCall,
+    ctx: &extensions::LensContext,
+) -> Result<FormStart, CommandError> {
+    svc.sql
+        .read_generation(async {
+            let lens = svc
+                .extension_catalog
+                .find_lens(lens_root, &call.lens_id)
+                .map_err(CommandError::from)?;
+            let action = lens
+                .actions
+                .iter()
+                .find(|a| a.id == call.action_id && a.form)
+                .cloned()
+                .ok_or_else(|| CommandError::Invalid {
+                    field: Some("/action".into()),
+                    message: format!(
+                        "lens `{}` has no form action `{}`",
+                        call.lens_id, call.action_id
+                    ),
+                })?;
+            let params =
+                extensions::resolve_params(&lens, &call.params, ctx).map_err(CommandError::from)?;
+            let values = bind_input(&action.input, &params, call.row.as_ref())?;
+            let command =
+                svc.commands
+                    .spec(&action.command)
+                    .ok_or_else(|| CommandError::Unknown {
+                        name: action.command.clone(),
+                    })?;
+            Ok(FormStart {
+                command,
+                values,
+                fixed: action.fixed,
+                fields: None,
+            })
+        })
+        .await
+        .map_err(CommandError::from)?
 }
 
 pub async fn form_start(
@@ -182,6 +269,8 @@ async fn form_start_unpinned(
     Ok(FormStart {
         command,
         values: Value::Object(values),
+        fixed: form.fixed,
+        fields: form.fields,
     })
 }
 
@@ -238,21 +327,12 @@ async fn submit_form_unpinned(
             })
         }
     };
-    let Value::Object(given) = input else {
-        return Err(CommandError::Invalid {
-            field: Some("/input".into()),
-            message: "a form's input is its fields, a map".into(),
-        });
-    };
     let params = extensions::resolve_params(&lens, &params, ctx).map_err(CommandError::from)?;
-    let mut merged = match form.defaults.as_ref() {
-        Some(d) => match bind_input(d, &params, None)? {
-            Value::Object(m) => m,
-            _ => serde_json::Map::new(),
-        },
-        None => serde_json::Map::new(),
+    let defaults = match form.defaults.as_ref() {
+        Some(d) => bind_input(d, &params, None)?,
+        None => Value::Object(serde_json::Map::new()),
     };
-    merged.extend(given);
+    let merged = filled(defaults, input, &form.fixed)?;
     svc.commands
         .run(
             &Actor::Lens {
@@ -260,7 +340,7 @@ async fn submit_form_unpinned(
                 on_behalf_of: Box::new(on_behalf_of),
             },
             form.command.as_deref().unwrap_or_default(),
-            Value::Object(merged),
+            merged,
             confirmed,
         )
         .await
@@ -569,6 +649,7 @@ actions:
   - { id: finish-row, label: Finish, command: oxplow.work_item.transition, row: true, input: { ref: "{{row.ref}}", to: done } }
   - { id: commit, label: Commit, command: oxplow.vcs.commit, input: { stream: str1, message: "x" } }
   - { id: prompt, label: Prompt, command: oxplow.config.set, input: { key: agentPromptAppend, value: be brief } }
+  - { id: retitle, label: Retitle…, command: oxplow.work_item.update, row: true, form: true, fixed: [ref], input: { ref: "{{row.ref}}", title: "{{row.title}}" } }
 "#,
         )
         .unwrap();
@@ -588,6 +669,7 @@ actions:
             action_id: action.into(),
             params,
             row,
+            input: None,
             on_behalf_of,
             confirmed,
         }
@@ -700,6 +782,140 @@ actions:
             matches!(err, CommandError::Proposed { .. }),
             "an agent's lens can't set a human-only key, only propose it: {err:?}"
         );
+    }
+
+    /// A form action opens the command's form starting from its bound
+    /// input, with its fixed fields; what the person fills in runs, the
+    /// fixed fields put back whatever was sent. A plain action takes no
+    /// input.
+    #[tokio::test]
+    async fn a_form_action_runs_what_the_person_filled_in_keeping_its_fixed_fields() {
+        let (fx, root) = fixture().await;
+        let item = work_item_ref(fx.task);
+        let row = BTreeMap::from([
+            ("ref".to_string(), SqlCell::Text(item.clone())),
+            ("title".to_string(), SqlCell::Text("Old title".into())),
+        ]);
+        let start = action_form(
+            &fx.svc,
+            &root,
+            call(
+                "retitle",
+                BTreeMap::new(),
+                Some(row.clone()),
+                Actor::Human,
+                false,
+            ),
+            &extensions::LensContext::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(start.command.id, "oxplow.work_item.update");
+        assert_eq!(start.values, json!({ "ref": item, "title": "Old title" }));
+        assert_eq!(start.fixed, vec!["ref".to_string()]);
+
+        let mut press = call("retitle", BTreeMap::new(), Some(row), Actor::Human, false);
+        press.input = Some(json!({ "ref": "work_item:oxplow:tsk999999", "title": "New title" }));
+        run_lens_action(&fx.svc, &root, press, &extensions::LensContext::default())
+            .await
+            .unwrap();
+        let title: String = fx
+            .svc
+            .db
+            .read({
+                let item = item.clone();
+                move |c| {
+                    c.query_row(
+                        "SELECT title FROM v_work_item WHERE ref = ?1",
+                        [item],
+                        |r| r.get(0),
+                    )
+                    .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
+                }
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            title, "New title",
+            "the fixed ref was kept, so this item changed"
+        );
+
+        let mut plain = call(
+            "finish",
+            BTreeMap::from([("item".to_string(), SqlCell::Text(item))]),
+            None,
+            Actor::Human,
+            false,
+        );
+        plain.input = Some(json!({ "to": "canceled" }));
+        let err = run_lens_action(&fx.svc, &root, plain, &extensions::LensContext::default())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("only a form action"), "{err}");
+        let err = action_form(
+            &fx.svc,
+            &root,
+            call("finish", BTreeMap::new(), None, Actor::Human, false),
+            &extensions::LensContext::default(),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("no form action"), "{err}");
+    }
+
+    /// A form lens's fixed fields keep their `defaults` on submit, and its
+    /// `fields` say which to show.
+    #[tokio::test]
+    async fn a_form_lens_keeps_its_fixed_fields() {
+        let (fx, root) = fixture().await;
+        let item = work_item_ref(fx.task);
+        std::fs::write(
+            root.join("oxplow/extensions/acme/lenses/edit.yaml"),
+            "title: Edit\nviz: form\nparams: [{ name: ref }]\nquery: SELECT title FROM v_work_item WHERE ref = :ref\nform: { command: oxplow.work_item.update, defaults: { ref: '{{param.ref}}' }, fixed: [ref], fields: [title] }\n",
+        )
+        .unwrap();
+        crate::test_fixtures::activate(&fx.svc).await;
+        let params = BTreeMap::from([("ref".to_string(), SqlCell::Text(item.clone()))]);
+        let start = form_start(
+            &fx.svc,
+            &root,
+            "acme/edit",
+            params.clone(),
+            &extensions::LensContext::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(start.fixed, vec!["ref".to_string()]);
+        assert_eq!(start.fields, Some(vec!["title".to_string()]));
+        assert_eq!(start.values["ref"], json!(item));
+        submit_form(
+            &fx.svc,
+            &root,
+            FormSubmission {
+                lens_id: "acme/edit".into(),
+                input: json!({ "ref": "work_item:oxplow:tsk999999", "title": "Edited" }),
+                params,
+                on_behalf_of: Actor::Human,
+                confirmed: false,
+            },
+            &extensions::LensContext::default(),
+        )
+        .await
+        .unwrap();
+        let title: String = fx
+            .svc
+            .db
+            .read(move |c| {
+                c.query_row(
+                    "SELECT title FROM v_work_item WHERE ref = ?1",
+                    [item],
+                    |r| r.get(0),
+                )
+                .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
+            })
+            .await
+            .unwrap();
+        assert_eq!(title, "Edited");
     }
 
     #[test]

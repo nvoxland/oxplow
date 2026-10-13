@@ -235,6 +235,10 @@ pub const MANIFEST: &[Capability] = &[
         "a form lens is the person's form; an agent runs the command itself",
     ),
     ui(
+        "lens_action_form",
+        "a form action's form is the person's; an agent runs the command itself",
+    ),
+    ui(
         "run_component_query",
         "a custom component's bridged read, from its sandboxed frame through the host (P6b.D2)",
     ),

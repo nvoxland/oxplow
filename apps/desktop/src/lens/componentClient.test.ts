@@ -130,6 +130,25 @@ test("a refused request rejects with the host's code and message", async () => {
   h.close();
 });
 
+// Protocol 4: a command refusing invalid input names the field, so a
+// component's form marks it.
+test("an invalid input's refusal names its field", async () => {
+  const h = harness({
+    invoke: async () => {
+      throw Object.assign(new Error("a title can't be empty"), { code: "INVALID", field: "/title" });
+    },
+  });
+  const connecting = connect({ target: h.frame });
+  h.init();
+  const c = await connecting;
+  await expect(c.invoke("oxplow.work_item.update", { ref: "work_item:oxplow:tsk1", title: "" })).rejects.toEqual({
+    code: "INVALID",
+    message: "a title can't be empty",
+    field: "/title",
+  });
+  h.close();
+});
+
 test("onUpdate hears a re-run until it unsubscribes", async () => {
   const h = harness();
   const connecting = connect({ target: h.frame });

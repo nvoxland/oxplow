@@ -16,6 +16,8 @@ export interface OxplowRun {
 export interface OxplowError {
   code: string;
   message: string;
+  /** For `INVALID` input, the field it names (a JSON pointer, `/title`). */
+  field?: string;
 }
 
 export interface OxplowComponent {

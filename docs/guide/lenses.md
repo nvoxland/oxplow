@@ -107,6 +107,27 @@ actions:
 
 `{{param.x}}` and `{{row.col}}` fill the input from the lens's params or
 the row. A command that asks for confirmation asks you before it runs.
+
+With `form: true` an action opens the command's form in a side panel
+instead of running at once, its fields starting from `input`; you edit
+them and submit (Enter). `fixed` lists the fields you see but can't
+change — they keep `input`'s values, so an `Edit…` on a row always edits
+that row's item:
+
+```yaml
+actions:
+  - id: edit
+    label: Edit…
+    command: oxplow.work_item.update
+    input: { ref: "{{row.ref}}", title: "{{row.title}}" }
+    row: true
+    form: true
+    fixed: [ref]
+```
+
+A `viz: form` lens takes the same `fixed`, and `fields` to show only some
+of the command's fields. When the command refuses a field (an empty
+title), the message shows under that field.
 An action runs as the lens acting for you, so it can't do anything you
 couldn't. Copy and Add to Agent Context are on every lens; you don't
 declare them.
@@ -223,8 +244,10 @@ Problems show under Settings → Extensions. Agents check their work with
 
 When none of the built-in views fit, an extension can ship its own web
 component and a `viz: custom` lens that renders it. It runs in a
-sandboxed frame: scripts only, no storage, no access to the app, and no
-way to send data out — it can't fetch, open a socket or submit a form.
+sandboxed frame: scripts and forms, no storage, no access to the app,
+and no way to send data out — it can't fetch or open a socket, and a
+form submits nowhere: handle `submit` in your script and run a command
+with `invoke`.
 If it navigates itself away, the frame can only go to this machine, and
 the app ends the component and shows its table instead. It can only ask
 for the lenses and commands it declares.
@@ -286,7 +309,9 @@ can be picked up, plus `ox-dragging` while it is; `ox-drop-target` for
 where it may land), the states `ox-ok`, `ox-waiting`, `ox-running` and
 `ox-bad`, and chart series `ox-series-1` to `ox-series-8` (a `fill` for
 SVG, a `background` otherwise). They only work after `applyTheme()`. A
-request that fails rejects with `{ code, message }`. Types for the
+request that fails rejects with `{ code, message, field? }` — `field` is
+the input a refused command names (`/title`), so your form can show the
+message under it. Types for the
 library are served beside it (`/component-lib/oxplow-component.d.ts`).
 
 The frame refuses some things silently, so `oxplow extension check` reports

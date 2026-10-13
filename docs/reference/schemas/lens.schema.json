@@ -666,6 +666,25 @@
         "defaults": {
           "description": "Input values the form starts with (`{{param.x}}` placeholders bound).",
           "default": null
+        },
+        "fixed": {
+          "description": "Fields shown but not editable: their values are `defaults`', imposed\nagain on submit (an item's `ref`).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "fields": {
+          "description": "The fields to show, in order; the rest keep their starting values\nand are submitted with them. None: every field.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "default": null
         }
       },
       "additionalProperties": false
@@ -771,6 +790,19 @@
             "null"
           ],
           "default": null
+        },
+        "form": {
+          "description": "Open the command's form, starting from `input`, instead of running.",
+          "type": "boolean",
+          "default": false
+        },
+        "fixed": {
+          "description": "A form action's fields that keep `input`'s values (shown, not\neditable).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
         }
       },
       "additionalProperties": false,

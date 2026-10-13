@@ -65,15 +65,24 @@ mod tests {
     #[test]
     fn error_branch_serializes_ipc_error_camelcase() {
         // typedError returns { status: "error", error: <IpcError> }.
-        // IpcError serializes camelCase with code/message/cause.
+        // IpcError serializes camelCase with code/message/cause/field.
         let env = ipc_envelope(Err(IpcError::not_found()));
         assert_eq!(
             env,
             json!({
                 "status": "error",
-                "error": { "code": "NOT_FOUND", "message": "not found", "cause": null }
+                "error": { "code": "NOT_FOUND", "message": "not found", "cause": null, "field": null }
             })
         );
+        // A command's invalid input keeps the field it names, for a form.
+        let invalid: IpcError = oxplow_domain::CommandError::Invalid {
+            field: Some("/title".into()),
+            message: "a title can't be empty".into(),
+        }
+        .into();
+        let env = ipc_envelope(Err(invalid));
+        assert_eq!(env["error"]["code"], "INVALID");
+        assert_eq!(env["error"]["field"], "/title");
     }
 
     #[test]

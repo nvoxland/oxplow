@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useState, type CSSProperties, type ReactNode } from "react";
-import { getLens, lensForm, lensText, runLens, runLensAction, submitLensForm, type LensRun, type SqlCell } from "../api.js";
+import { getLens, lensActionForm, lensForm, lensText, runLens, runLensAction, submitLensForm, type LensRun, type SqlCell } from "../api.js";
+import { Slideover } from "../components/Slideover.js";
 import type { FormStart } from "../tauri-bridge/generated/bindings.js";
 import type { LensAction } from "../tauri-bridge/generated/bindings.js";
 import { DailyBarChart } from "../components/Analytics/DailyBarChart.js";
@@ -11,7 +12,7 @@ import { DiffPane } from "../components/Diff/DiffPane.js";
 import { CommandConfirm } from "../components/CommandConfirm.js";
 import { ResultCompleteness } from "./ResultCompleteness.js";
 import { SchemaForm } from "../components/SchemaForm/SchemaForm.js";
-import { needsConfirmation } from "../ipc-error.js";
+import { fieldErrors, needsConfirmation } from "../ipc-error.js";
 import { RouteLink } from "../tabs/RouteLink.js";
 import { refFromTabId } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -78,11 +79,16 @@ export function LensResultView(props: LensResultViewProps) {
       testIdPrefix="lens-action-confirm"
     />
   ) : null;
+  // A form action's form, in a slideover beside whatever pressed it.
+  const form = actions.form ? (
+    <ActionForm run={run} streamId={streamId} pressed={actions.form} onClose={actions.closeForm} />
+  ) : null;
   // Compact strips (a number inline) have no room for buttons.
   if (compact || !toolbar) {
     return (
       <>
         {confirm}
+        {form}
         <LensBody {...props} actions={actions} />
       </>
     );
@@ -90,6 +96,7 @@ export function LensResultView(props: LensResultViewProps) {
   return (
     <div>
       {confirm}
+      {form}
       <LensToolbar run={run} streamId={streamId} actions={actions} />
       <LensBody {...props} actions={actions} />
     </div>
@@ -120,6 +127,8 @@ interface LensResultViewProps {
 function useLensActions(run: LensRun, streamId: string | null) {
   const [busy, setBusy] = useState<string | null>(null);
   const [pending, setPending] = useState<{ action: LensAction; row: Record<string, SqlCell> | null } | null>(null);
+  // A form action pressed: its form is open until it runs or is closed.
+  const [form, setForm] = useState<{ action: LensAction; row: Record<string, SqlCell> | null } | null>(null);
   const deps = {
     runLensAction,
     toast: (message: string) => showToast({ message }),
@@ -137,7 +146,12 @@ function useLensActions(run: LensRun, streamId: string | null) {
   return {
     busy,
     pending,
-    run: (action: LensAction, row: Record<string, SqlCell> | null) => void press(action, row, false),
+    form,
+    closeForm: () => setForm(null),
+    run: (action: LensAction, row: Record<string, SqlCell> | null) => {
+      if (action.form) setForm({ action, row });
+      else void press(action, row, false);
+    },
     confirm: () => {
       if (pending) void press(pending.action, pending.row, true);
     },
@@ -495,15 +509,47 @@ function LensViz({
   }
 }
 
+/** A form submitted, as `FormViz` and `ActionForm` both submit one: the
+ *  person's input runs; a command that asks is held for them to confirm;
+ *  an invalid field's message goes under that field; anything else is a
+ *  recorded failure. */
+function useFormSubmit(label: string, run: (input: Record<string, unknown>, confirmed: boolean) => Promise<unknown>, onDone: () => void) {
+  const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState<Record<string, unknown> | null>(null);
+  const [serverErrors, setServerErrors] = useState<Record<string, string> | undefined>(undefined);
+  const submit = async (input: Record<string, unknown>, confirmed: boolean) => {
+    setBusy(true);
+    try {
+      await run(input, confirmed);
+      setPending(null);
+      setServerErrors(undefined);
+      showToast({ message: `${label}: done.` });
+      onDone();
+    } catch (e) {
+      const fields = fieldErrors(e);
+      if (!confirmed && needsConfirmation(e)) setPending(input);
+      else if (fields) setServerErrors(fields);
+      else recordOpError({ label, message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return { busy, pending, serverErrors, submit, cancel: () => setPending(null) };
+}
+
 /** `form`: the fields of its command's input, starting from the form's
  *  values; submitting runs the command as the lens, for the person. */
 function FormViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
   const [start, setStart] = useState<FormStart | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [pending, setPending] = useState<Record<string, unknown> | null>(null);
   const [round, setRound] = useState(0);
   const paramsKey = JSON.stringify(run.params);
+  const form = useFormSubmit(
+    run.lens.title,
+    (input, confirmed) => submitLensForm(run.lens.id, input, run.params, streamId, confirmed),
+    // A fresh form for the next entry.
+    () => setRound((r) => r + 1),
+  );
   useEffect(() => {
     let live = true;
     lensForm(run.lens.id, run.params, streamId)
@@ -521,29 +567,14 @@ function FormViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
   }, [run.lens.id, paramsKey, streamId]);
   if (error) return <div style={{ color: "var(--severity-critical)", fontSize: "var(--text-sm)" }}>{error}</div>;
   if (!start) return null;
-  const submit = async (input: Record<string, unknown>, confirmed: boolean) => {
-    setBusy(true);
-    try {
-      await submitLensForm(run.lens.id, input, run.params, streamId, confirmed);
-      setPending(null);
-      showToast({ message: `${run.lens.title}: done.` });
-      // A fresh form for the next entry.
-      setRound((r) => r + 1);
-    } catch (e) {
-      if (!confirmed && needsConfirmation(e)) setPending(input);
-      else recordOpError({ label: run.lens.title, message: e instanceof Error ? e.message : String(e) });
-    } finally {
-      setBusy(false);
-    }
-  };
   return (
     <div data-testid="lens-form">
-      {pending ? (
+      {form.pending ? (
         <CommandConfirm
           label={run.lens.title}
           command={start.command.id}
-          onConfirm={() => void submit(pending, true)}
-          onCancel={() => setPending(null)}
+          onConfirm={() => void form.submit(form.pending!, true)}
+          onCancel={form.cancel}
           testIdPrefix="lens-form-confirm"
         />
       ) : null}
@@ -551,12 +582,81 @@ function FormViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
         key={round}
         schema={start.command.input_schema as Record<string, unknown>}
         initial={start.values}
+        fields={start.fields ?? undefined}
+        fixed={start.fixed}
+        serverErrors={form.serverErrors}
         submitLabel={run.lens.title}
-        busy={busy}
-        onSubmit={(input) => void submit(input, false)}
+        busy={form.busy}
+        onSubmit={(input) => void form.submit(input, false)}
         testIdPrefix="lens-form-fields"
       />
     </div>
+  );
+}
+
+/** A form action's form (`form: true`), in a slideover: its command's
+ *  fields starting from the action's bound input, its fixed fields shown
+ *  but not editable; submitting runs it as the lens, for the person, and
+ *  closes it. */
+function ActionForm({
+  run,
+  streamId,
+  pressed,
+  onClose,
+}: {
+  run: LensRun;
+  streamId: string | null;
+  pressed: { action: LensAction; row: Record<string, SqlCell> | null };
+  onClose(): void;
+}) {
+  const { action, row } = pressed;
+  const [start, setStart] = useState<FormStart | null>(null);
+  const form = useFormSubmit(
+    action.label,
+    (input, confirmed) => runLensAction(run.lens.id, action.id, run.params, row, streamId, confirmed, input),
+    onClose,
+  );
+  const rowKey = JSON.stringify(row);
+  useEffect(() => {
+    let live = true;
+    lensActionForm(run.lens.id, action.id, run.params, row, streamId)
+      .then((s) => {
+        if (live) setStart(s);
+      })
+      .catch((e) => {
+        recordOpError({ label: action.label, message: e instanceof Error ? e.message : String(e) });
+        onClose();
+      });
+    return () => {
+      live = false;
+    };
+    // rowKey stands in for `row`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run.lens.id, action.id, rowKey, streamId]);
+  return (
+    <Slideover open onClose={onClose} title={action.label} testId="lens-action-form">
+      {form.pending && start ? (
+        <CommandConfirm
+          label={action.label}
+          command={start.command.id}
+          onConfirm={() => void form.submit(form.pending!, true)}
+          onCancel={form.cancel}
+          testIdPrefix="lens-action-form-confirm"
+        />
+      ) : null}
+      {start ? (
+        <SchemaForm
+          schema={start.command.input_schema as Record<string, unknown>}
+          initial={start.values}
+          fixed={start.fixed}
+          serverErrors={form.serverErrors}
+          submitLabel={action.label.replace(/…$/, "")}
+          busy={form.busy}
+          onSubmit={(input) => void form.submit(input, false)}
+          testIdPrefix="lens-action-form-fields"
+        />
+      ) : null}
+    </Slideover>
   );
 }
 

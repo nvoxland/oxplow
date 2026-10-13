@@ -194,7 +194,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	runLensAction: (id: string, action: string, params: { [key in string]: SqlCell } | null, row: { [key in string]: SqlCell } | null, streamId: string | null, confirmed: boolean) => typedError<CommandOutcome, IpcError>(__TAURI_INVOKE("run_lens_action", { id, action, params, row, streamId, confirmed })),
+	runLensAction: (press: LensPress, streamId: string | null, confirmed: boolean) => typedError<CommandOutcome, IpcError>(__TAURI_INVOKE("run_lens_action", { press, streamId, confirmed })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -210,6 +210,11 @@ export const commands = {
 	 *  implementation and its docs live on the core.
 	 */
 	lensForm: (id: string, params: { [key in string]: SqlCell } | null, streamId: string | null) => typedError<FormStart, IpcError>(__TAURI_INVOKE("lens_form", { id, params, streamId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	lensActionForm: (press: LensPress, streamId: string | null) => typedError<FormStart, IpcError>(__TAURI_INVOKE("lens_action_form", { press, streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -3391,13 +3396,15 @@ export type ForeignSubscription = {
 };
 
 /**
- *  What a form lens shows: its command (the fields come from its input
- *  schema) and the values the fields start from — the form's `defaults`
- *  (placeholders bound) under the query's first row, if it has a query.
+ *  What a form shows: its command (the fields come from its input
+ *  schema), the values the fields start from, the fields shown but not
+ *  editable, and which fields to show (none: all).
  */
 export type FormStart = {
 	command: CommandSpec,
 	values: unknown,
+	fixed: string[],
+	fields: string[] | null,
 };
 
 /**
@@ -3760,6 +3767,11 @@ export type IpcError = {
 	code: string,
 	message: string,
 	cause: string | null,
+	/**
+	 *  For `INVALID` input, the field it names (a JSON pointer, `/title`),
+	 *  so a form shows the message under that field.
+	 */
+	field?: string | null,
 };
 
 export type ItemBody = 
@@ -3867,6 +3879,17 @@ export type LensAction = {
 	 *  value (as text) this is, instead of above the result.
 	 */
 	group: string | null,
+	/**
+	 *  Opens the command's form, its fields starting from `input`, for the
+	 *  person to fill in before it runs (`lens_action_form`), instead of
+	 *  running at once.
+	 */
+	form: boolean,
+	/**
+	 *  Fields of a form action the person sees but can't change: their
+	 *  values are `input`'s, imposed again when it runs (an item's `ref`).
+	 */
+	fixed: string[],
 };
 
 /**
@@ -3945,6 +3968,16 @@ export type LensForm_Deserialize = {
 	command: string | null,
 	// Input values the form starts with (`{{param.x}}` placeholders bound).
 	defaults?: unknown | null,
+	/**
+	 *  Fields shown but not editable: their values are `defaults`', imposed
+	 *  again on submit (an item's `ref`).
+	 */
+	fixed?: string[],
+	/**
+	 *  The fields to show, in order; the rest keep their starting values
+	 *  and are submitted with them. None: every field.
+	 */
+	fields?: string[] | null,
 };
 
 // `form` viz: the command it submits and the values it starts from.
@@ -3952,6 +3985,16 @@ export type LensForm_Serialize = {
 	command: string | null,
 	// Input values the form starts with (`{{param.x}}` placeholders bound).
 	defaults: unknown | null,
+	/**
+	 *  Fields shown but not editable: their values are `defaults`', imposed
+	 *  again on submit (an item's `ref`).
+	 */
+	fixed: string[],
+	/**
+	 *  The fields to show, in order; the rest keep their starting values
+	 *  and are submitted with them. None: every field.
+	 */
+	fields: string[] | null,
 };
 
 /**
@@ -4057,6 +4100,19 @@ export type LensParam = {
 export type LensParamOption = {
 	value: string,
 	label: string,
+};
+
+/**
+ *  One press of a lens's action: the lens, the action, the lens's params,
+ *  the row it was pressed on (a row action), and what the person filled in
+ *  (a form action, `form: true`).
+ */
+export type LensPress = {
+	id: string,
+	action: string,
+	params?: { [key in string]: SqlCell } | null,
+	row?: { [key in string]: SqlCell } | null,
+	input?: unknown | null,
 };
 
 // The result of running a lens.

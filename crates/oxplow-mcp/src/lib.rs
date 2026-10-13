@@ -1431,6 +1431,7 @@ impl OxplowMcp {
                 action_id: p.action,
                 params: overrides,
                 row,
+                input: None,
                 on_behalf_of,
                 // An agent never confirms.
                 confirmed: false,

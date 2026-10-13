@@ -1,7 +1,7 @@
 /// The host side of a custom component's bridge (P6b.D4,
 /// `.context/extensions.md` → "Custom components"). The frame is
-/// sandboxed (`allow-scripts` only: an opaque origin, no network, no
-/// token); after it loads, the host hands it one end of a MessageChannel
+/// sandboxed (`allow-scripts allow-forms`: an opaque origin, no network,
+/// no token; a form submits nowhere, its script handles it); after it loads, the host hands it one end of a MessageChannel
 /// with `init`, and every request comes back over that port — never over
 /// `window` messages anyone could send:
 ///
@@ -25,8 +25,10 @@ import type { CommandOutcome, LensRun, SqlCell } from "../tauri-bridge/generated
 /// The protocol above, by number: bumped when a message's shape changes,
 /// with the served library (`crates/oxplow-daemon/assets/`). 2: `init`
 /// lost `kitCss` — the kit is a stylesheet the bundle links (tsk961).
-/// 3: `navigate` carries `newTab` (a Cmd-click in a component).
-export const BRIDGE_PROTOCOL = 3;
+/// 3: `navigate` carries `newTab` (a Cmd-click in a component). 4: a
+/// refused request's error carries the input `field` it names, when it
+/// names one (`INVALID`), so a component's form marks that field.
+export const BRIDGE_PROTOCOL = 4;
 
 export type BridgeRequest =
   | { id: string; method: "query"; asset: string; params: Record<string, SqlCell> }
@@ -140,10 +142,17 @@ export function createBridgeHost(
   let last = shown(sent);
   let ready = false;
   const reply = (id: string, result: unknown) => port.postMessage({ id, ok: true, result });
-  const fail = (id: string, code: string, message: string) => port.postMessage({ id, ok: false, error: { code, message } });
+  const fail = (id: string, code: string, message: string, field: string | null = null) =>
+    port.postMessage({ id, ok: false, error: field === null ? { code, message } : { code, message, field } });
   const failWith = (id: string, e: unknown) => {
     const code = (e as { code?: unknown })?.code;
-    fail(id, typeof code === "string" ? code : "FAILED", e instanceof Error ? e.message : String(e));
+    const field = (e as { field?: unknown })?.field;
+    fail(
+      id,
+      typeof code === "string" ? code : "FAILED",
+      e instanceof Error ? e.message : String(e),
+      typeof field === "string" && field ? field : null,
+    );
   };
   const handle = async (r: BridgeRequest) => {
     switch (r.method) {

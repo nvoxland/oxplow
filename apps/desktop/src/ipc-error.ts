@@ -38,17 +38,37 @@ export function ipcErrorCode(err: unknown): string | null {
   return null;
 }
 
-/** A failed IPC call: its message, and its code when it has one, so a
- *  caller can tell "ask the person first" (`NEEDS_CONFIRMATION`) from a
- *  failure. */
+/** The field an `INVALID` error names (a JSON pointer, `/title`), or
+ *  null. */
+export function ipcErrorField(err: unknown): string | null {
+  if (err && typeof err === "object") {
+    const field = (err as { field?: unknown }).field;
+    if (typeof field === "string" && field.trim()) return field;
+  }
+  return null;
+}
+
+/** A failed IPC call: its message, its code when it has one, so a caller
+ *  can tell "ask the person first" (`NEEDS_CONFIRMATION`) from a failure,
+ *  and for invalid input the field it names. */
 export class IpcCallError extends Error {
   constructor(
     message: string,
     readonly code: string | null,
+    readonly field: string | null = null,
   ) {
     super(message);
     this.name = "IpcCallError";
   }
+}
+
+/** A form's per-field errors from a failed submit: an `INVALID` that names
+ *  a field becomes that top-level field's message (`/title` → `title`);
+ *  anything else is null (the caller records it as a failure). */
+export function fieldErrors(e: unknown): Record<string, string> | null {
+  if (!(e instanceof IpcCallError) || e.code !== "INVALID" || e.field === null) return null;
+  const name = e.field.replace(/^\//, "").split("/")[0];
+  return name ? { [name]: e.message } : null;
 }
 
 /** The command needs the person to confirm it; call again confirmed. */
