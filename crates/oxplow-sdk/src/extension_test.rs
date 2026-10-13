@@ -198,8 +198,8 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
     for example in examples {
         let Some((shown, doc)) = example_fixture(&read, &rel, &example.name) else {
             report.warnings.push(format!(
-                "{rel}/fixtures/{}.yaml:1: example `{}` has no fixture, so it isn't run — fix: \
-                 write its `input` (`{{ lens, params?, rows? }}`, `{{ collector, rows? }}`, a fact \
+                "{rel}/extension.yaml:1: intent example `{}` has no fixture, so it isn't run — fix: \
+                 add fixtures/{}.yaml with its `input` (`{{ lens, params?, rows? }}`, `{{ collector, rows? }}`, a fact \
                  collector's `{{ collector, files }}`, `{{ event }}`, `{{ job, intentKey, request }}`, \
                  `{{ component }}`, `{{ form }}`, or a provider's `{{ command, input }}`) and `expect`",
                 example.name, example.name

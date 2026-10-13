@@ -63,6 +63,18 @@ Fixed while building them:
   differently worded warnings. Now each unavailable import is one warning
   naming everything it withheld, and `extension test` skips a withheld
   target's fixture, saying why.
+- A local variable named like a service builtin (`files = …`) counted as
+  using it, and a command script was refused for it; a name the script
+  binds itself (parameter, assignment, loop or comprehension variable,
+  def) is no longer a use.
+- A fixture runs only when its name is in `intent.examples`, and an
+  unlisted one failed with a bare "not found"; `extension check` now
+  warns for an unlisted fixture, and `extension test` for an example with
+  no fixture, each naming the file and the fix.
+- A shared extension could carry a token in its files unnoticed;
+  `extension check` now warns about known token prefixes, private-key
+  headers and long high-entropy literals, showing the file and line but
+  never the value.
 
 Still open:
 
@@ -84,15 +96,10 @@ Still open:
   (`effort_review.review.ask`), while its contribution ids and model
   views keep or translate the dash differently
   (`effort-review/job/review`, `v_effort_review_reviews`).
-- **A local variable named like a service builtin** (`files = …`) counts
-  as using it, and a command script is refused for it.
-- **A fixture runs only when its name is in `intent.examples`**, and an
-  unlisted one fails with a bare "not found".
 - **A command script can't read `metric_grid()` / `metric_findings()`**:
   it runs inside the bus transaction, so triage reads `v_fact` instead.
 - **The compare-exchange stamp isn't readable** through a public read, so
   a stale write can only be tested as `expected: null` against existing
   state.
-- **No credential lint** for a shared extension, no reload or uninstall
-  command, and uninstall keeps an extension's private state with nothing
-  reading it.
+- **No reload or uninstall command**, and uninstall keeps an extension's
+  private state with nothing reading it.

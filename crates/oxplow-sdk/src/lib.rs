@@ -1623,6 +1623,120 @@ mod tests {
         ));
     }
 
+    /// A shared extension travels with the repository: a token in its
+    /// manifest, a script or a fixture is a warning that names the file and
+    /// line and never the value. A private extension isn't scanned.
+    #[tokio::test]
+    async fn check_warns_about_a_credential_in_a_shared_extension_only() {
+        let token = format!("ghp_{}", "Zz9Yy8Xx7W".repeat(4));
+        let dir = tempfile::tempdir().unwrap();
+        for (name, sharing) in [("team", "shared"), ("mine", "private")] {
+            let shared = if sharing == "shared" {
+                "engine: \">=0.1\"\nversion: 0.1.0\n"
+            } else {
+                ""
+            };
+            write(
+                dir.path(),
+                &format!("oxplow/extensions/{name}/extension.yaml"),
+                &format!("manifest: 2\nname: {name}\nsharing: {sharing}\n{shared}intent:\n  purpose: x\n  examples: [{{ name: a }}]\n# token: {token}\n"),
+            );
+            write(
+                dir.path(),
+                &format!("oxplow/extensions/{name}/fixtures/a.yaml"),
+                &format!("input: {{}}\nsecret: {token}\n"),
+            );
+        }
+        let text = |report: &CheckReport| render_findings(report, Format::Text);
+        let team = check(
+            dir.path(),
+            "team",
+            &ExtensionCatalog::new(),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let team_text = text(&team);
+        assert!(team.ok, "{team_text}");
+        assert!(
+            team_text.contains("warning: oxplow/extensions/team/extension.yaml:9: looks like a GitHub token (`ghp_…`, 44 characters)"),
+            "{team_text}"
+        );
+        assert!(
+            team_text.contains(
+                "warning: oxplow/extensions/team/fixtures/a.yaml:2: looks like a GitHub token"
+            ),
+            "{team_text}"
+        );
+        assert!(!team_text.contains(&token), "{team_text}");
+        let mine = check(
+            dir.path(),
+            "mine",
+            &ExtensionCatalog::new(),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(!text(&mine).contains("GitHub token"), "{}", text(&mine));
+    }
+
+    /// A fixture that no intent example names never runs, and an example
+    /// without a fixture runs nothing: each is a finding that names the file
+    /// or example and the fix, not a bare "not found" later.
+    #[tokio::test]
+    async fn check_reports_fixtures_and_intent_examples_that_do_not_pair_up() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "oxplow/extensions/pairs/extension.yaml",
+            "manifest: 2\nname: pairs\nsharing: private\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: listed }, { name: missing }]\n",
+        );
+        for fixture in ["listed", "orphan", "model-counts", "provider-feed"] {
+            write(
+                dir.path(),
+                &format!("oxplow/extensions/pairs/fixtures/{fixture}.yaml"),
+                "input: {}\n",
+            );
+        }
+        let report = check(
+            dir.path(),
+            "pairs",
+            &ExtensionCatalog::new(),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let text = render_findings(&report, Format::Text);
+        assert!(
+            text.contains(
+                "oxplow/extensions/pairs/fixtures/orphan.yaml:1: no intent example names this fixture, so it never runs — fix: add `orphan` to intent.examples"
+            ),
+            "{text}"
+        );
+        let tested = extension_test::test_extension(dir.path(), "pairs", false)
+            .await
+            .unwrap();
+        assert!(
+            tested.warnings.iter().any(|w| w.starts_with(
+                "oxplow/extensions/pairs/extension.yaml:1: intent example `missing` has no fixture, so it isn't run — fix: add fixtures/missing.yaml"
+            )),
+            "{:?}",
+            tested.warnings
+        );
+        // A kit's fixtures aren't intent examples.
+        assert!(
+            !text.contains("model-counts") && !text.contains("provider-feed"),
+            "{text}"
+        );
+        assert!(!text.contains("`listed`"), "{text}");
+    }
+
     /// P9.D1: an effect reacting to another extension's event type checks
     /// clean with a warning — a check sees one extension, and the type's
     /// owner may simply not be in this repo.
