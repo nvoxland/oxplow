@@ -3329,7 +3329,34 @@ pub async fn validate_extension(
     let path = ext.path.clone();
     let read = |rel: &str| files_at(root, &path).ok().and_then(|f| f.read(rel));
     prepare(layer, catalog, root, &mut ext, &read, commands).await;
+    if let Ok(files) = files_at(root, &path) {
+        check_fixture_pairing(&mut ext, files.as_ref());
+    }
     Ok(ext)
+}
+
+/// A fixture runs only when an intent example names it, so a
+/// `fixtures/<name>.yaml` no example lists silently runs nothing (the
+/// reverse, an example with no fixture, is `extension test`'s warning: a
+/// fresh scaffold has such examples). `model-*` and `provider-*` fixtures
+/// belong to a model or a provider, not to an example.
+fn check_fixture_pairing(ext: &mut Extension, files: &dyn ExtensionFiles) {
+    let Some(intent) = &ext.intent else { return };
+    let fixtures = files.list("fixtures");
+    let mut orphans: Vec<&str> = fixtures
+        .iter()
+        .filter_map(|f| f.strip_suffix(".yaml"))
+        .filter(|n| !n.starts_with("model-") && !n.starts_with("provider-"))
+        .filter(|n| !intent.examples.iter().any(|e| e.name == *n))
+        .collect();
+    orphans.sort_unstable();
+    for name in orphans {
+        ext.warnings.push(format!(
+            "{}/fixtures/{name}.yaml:1: no intent example names this fixture, so it never runs — \
+             fix: add `{name}` to intent.examples",
+            ext.path.trim_end_matches('/'),
+        ));
+    }
 }
 
 /// What a check asks the running oxplow's command registry (the

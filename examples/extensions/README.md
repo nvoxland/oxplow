@@ -59,6 +59,10 @@ Fixed while building them:
   using it, and a command script was refused for it; a name the script
   binds itself (parameter, assignment, loop or comprehension variable,
   def) is no longer a use.
+- A fixture runs only when its name is in `intent.examples`, and an
+  unlisted one failed with a bare "not found"; `extension check` now
+  warns for an unlisted fixture, and `extension test` for an example with
+  no fixture, each naming the file and the fix.
 
 Still open:
 
@@ -84,8 +88,6 @@ Still open:
   fixture fails with "not found" rather than "withheld: import
   unavailable"; a dropped slot gets no warning of its own; the import's
   warning and each withheld lens's are worded differently for one cause.
-- **A fixture runs only when its name is in `intent.examples`**, and an
-  unlisted one fails with a bare "not found".
 - **A command script can't read `metric_grid()` / `metric_findings()`**:
   it runs inside the bus transaction, so triage reads `v_fact` instead.
 - **The compare-exchange stamp isn't readable** through a public read, so

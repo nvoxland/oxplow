@@ -537,7 +537,11 @@ one line: `file:line: what — fix`. Each of its `imports:` gets a line
 saying how it resolved here: `` import `items` → maker/model/items v1:
 available ``, or `unavailable (maker exports v2)` and the like, which is
 when an optional import's guarded contributions are withheld.
-`--impact` adds what your working
+A fixture runs only when an intent
+example names it, so `check` warns about a `fixtures/<name>.yaml` no
+example lists (`model-*` and `provider-*` fixtures belong to their model
+or provider), and `test` warns about a listed example with no fixture;
+each names the file and the fix. `--impact` adds what your working
 tree's version changes against git `HEAD`. `--services` lists the
 services each script uses.
 

@@ -1637,6 +1637,59 @@ mod tests {
         ));
     }
 
+    /// A fixture that no intent example names never runs, and an example
+    /// without a fixture runs nothing: each is a finding that names the file
+    /// or example and the fix, not a bare "not found" later.
+    #[tokio::test]
+    async fn check_reports_fixtures_and_intent_examples_that_do_not_pair_up() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "oxplow/extensions/pairs/extension.yaml",
+            "manifest: 2\nname: pairs\nsharing: private\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: listed }, { name: missing }]\n",
+        );
+        for fixture in ["listed", "orphan", "model-counts", "provider-feed"] {
+            write(
+                dir.path(),
+                &format!("oxplow/extensions/pairs/fixtures/{fixture}.yaml"),
+                "input: {}\n",
+            );
+        }
+        let report = check(
+            dir.path(),
+            "pairs",
+            &ExtensionCatalog::new(),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let text = render_findings(&report, Format::Text);
+        assert!(
+            text.contains(
+                "oxplow/extensions/pairs/fixtures/orphan.yaml:1: no intent example names this fixture, so it never runs — fix: add `orphan` to intent.examples"
+            ),
+            "{text}"
+        );
+        let tested = extension_test::test_extension(dir.path(), "pairs", false)
+            .await
+            .unwrap();
+        assert!(
+            tested.warnings.iter().any(|w| w.starts_with(
+                "oxplow/extensions/pairs/extension.yaml:1: intent example `missing` has no fixture, so it isn't run — fix: add fixtures/missing.yaml"
+            )),
+            "{:?}",
+            tested.warnings
+        );
+        // A kit's fixtures aren't intent examples.
+        assert!(
+            !text.contains("model-counts") && !text.contains("provider-feed"),
+            "{text}"
+        );
+        assert!(!text.contains("`listed`"), "{text}");
+    }
+
     /// P9.D1: an effect reacting to another extension's event type checks
     /// clean with a warning — a check sees one extension, and the type's
     /// owner may simply not be in this repo.

@@ -1191,6 +1191,11 @@ and one calling MCP read identical `file:line: what — fix` lines.
   its own unpublished model. It returns a `CheckReport { ok, errors,
   warnings, dry_run, extension }`; `render_findings` prints it as text
   (`error: <file:line …>` lines then a one-line summary) or JSON.
+  `validate_extension` also warns about a `fixtures/*.yaml` no intent
+  example names (`check_fixture_pairing`; `model-*` / `provider-*` belong
+  to a model or a provider); `extension test` warns about the reverse, an
+  example with no fixture (a fresh scaffold has some). Each names the file
+  and the fix.
 - **`scaffold(…, Kind::Provider { capability }, …)`** (`extension new
   provider <name> [--capability <cap>]`, P5.D5) adds a `providers:` entry
   (id = the name with `_` for `-`, the capability). `Kind::parse("provider")`
