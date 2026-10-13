@@ -541,7 +541,15 @@ A fixture runs only when an intent
 example names it, so `check` warns about a `fixtures/<name>.yaml` no
 example lists (`model-*` and `provider-*` fixtures belong to their model
 or provider), and `test` warns about a listed example with no fixture;
-each names the file and the fix. `--impact` adds what your working
+each names the file and the fix. For a `sharing: shared` extension, `check`
+also warns about text that looks like an embedded credential in
+`extension.yaml`, a script or a fixture: a known token prefix (`ghp_`,
+`github_pat_`, `sk-`, `sk-ant-`, `xoxb-`, `AKIA`, `glpat-`, …), a private
+key header, or a long random-looking literal (hex digests and uuids
+excepted). The warning names the file and line and shows the prefix and
+length, never the value; a collector's `credentials:` keeps a real one
+in the keychain, and one that was ever committed should be rotated.
+`--impact` adds what your working
 tree's version changes against git `HEAD`. `--services` lists the
 services each script uses.
 

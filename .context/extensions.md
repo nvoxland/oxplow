@@ -1195,7 +1195,11 @@ and one calling MCP read identical `file:line: what — fix` lines.
   example names (`check_fixture_pairing`; `model-*` / `provider-*` belong
   to a model or a provider); `extension test` warns about the reverse, an
   example with no fixture (a fresh scaffold has some). Each names the file
-  and the fix.
+  and the fix. For `sharing: shared`, `check_credentials`
+  (`credential_lint`) scans `extension.yaml`, `*.star` and `fixtures/**`
+  for known token prefixes, private-key headers and long high-entropy
+  literals (hex digests of 32/40/64 characters and uuids pass): warnings
+  `file:line` with the issuer prefix and length, never the value.
 - **`scaffold(…, Kind::Provider { capability }, …)`** (`extension new
   provider <name> [--capability <cap>]`, P5.D5) adds a `providers:` entry
   (id = the name with `_` for `-`, the capability). `Kind::parse("provider")`

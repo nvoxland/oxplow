@@ -3331,8 +3331,32 @@ pub async fn validate_extension(
     prepare(layer, catalog, root, &mut ext, &read, commands).await;
     if let Ok(files) = files_at(root, &path) {
         check_fixture_pairing(&mut ext, files.as_ref());
+        if ext.sharing == Sharing::Shared {
+            check_credentials(&mut ext, files.as_ref());
+        }
     }
     Ok(ext)
+}
+
+/// A shared extension's manifest, scripts and fixtures, read for what looks
+/// like a credential (`credential_lint`): warnings, never the value.
+fn check_credentials(ext: &mut Extension, files: &dyn ExtensionFiles) {
+    let Ok(mut paths) = files.paths() else { return };
+    paths.sort_unstable();
+    let base = ext.path.trim_end_matches('/').to_string();
+    for rel in paths {
+        let scanned =
+            rel == "extension.yaml" || rel.ends_with(".star") || rel.starts_with("fixtures/");
+        if !scanned {
+            continue;
+        }
+        if let Some(text) = files.read(&rel) {
+            ext.warnings.extend(crate::credential_lint::warnings(
+                &format!("{base}/{rel}"),
+                &text,
+            ));
+        }
+    }
 }
 
 /// A fixture runs only when an intent example names it, so a

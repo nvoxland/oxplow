@@ -63,6 +63,10 @@ Fixed while building them:
   unlisted one failed with a bare "not found"; `extension check` now
   warns for an unlisted fixture, and `extension test` for an example with
   no fixture, each naming the file and the fix.
+- A shared extension could carry a token in its files unnoticed;
+  `extension check` now warns about known token prefixes, private-key
+  headers and long high-entropy literals, showing the file and line but
+  never the value.
 
 Still open:
 
@@ -93,6 +97,5 @@ Still open:
 - **The compare-exchange stamp isn't readable** through a public read, so
   a stale write can only be tested as `expected: null` against existing
   state.
-- **No credential lint** for a shared extension, no reload or uninstall
-  command, and uninstall keeps an extension's private state with nothing
-  reading it.
+- **No reload or uninstall command**, and uninstall keeps an extension's
+  private state with nothing reading it.
