@@ -1,4 +1,4 @@
-import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { dirname, join } from "node:path";
@@ -38,12 +38,6 @@ async function install(daemon: Daemon) {
   cpSync(join(here, "..", "..", "..", "examples", "extensions", "triage"), join(daemon.project, "oxplow", "extensions", "triage"), {
     recursive: true,
   });
-  // The example's `todos` lens is hidden (only a slot or an agent's
-  // `show_lens` shows it) and nothing in the suite reaches it. This copy
-  // lists it under the launcher; the lens's query, form and action are the
-  // example's own.
-  const lens = join(daemon.project, "oxplow", "extensions", "triage", "lenses", "todos.yaml");
-  writeFileSync(lens, readFileSync(lens, "utf8").replace("hidden: true\n", "launcher: { category: Code }\n"));
   await until("triage to load", 60_000, async () => {
     const ext = await ipc<Array<{ name: string }>>(daemon, "list_extensions");
     return ext.some((e) => e.name === "triage");

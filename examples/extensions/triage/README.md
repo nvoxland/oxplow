@@ -48,8 +48,9 @@ collector `todos` (collectors/todos.star):
 - **The TODO board** (`components/todo-board`) shows the TODOs by kind,
   each card with a form to decide on it. It runs the two commands above,
   so you approve it in Settings → Data → Programs; until then it shows
-  the TODOs without decisions and says so. The `todos` lens has the same
-  decision as a row action, `Decide…`, which opens a form.
+  the TODOs without decisions and says so. The `todos` lens (under Code in
+  the launcher) has the same decision as a row action, `Decide…`, which
+  opens a form.
 
 A command composes inside oxplow's transaction, where `metric_findings()`
 can't be computed, so the commands read the TODO facts themselves

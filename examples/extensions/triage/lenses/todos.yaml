@@ -4,7 +4,7 @@ query: |
   SELECT path, line, rule AS kind
   FROM metric_findings('triage.todos')
   ORDER BY rule, path, line
-hidden: true
+launcher: { category: Code }
 actions:
   # The kit's way to the same decision: a form beside each row, its file
   # and line kept as the row's.
