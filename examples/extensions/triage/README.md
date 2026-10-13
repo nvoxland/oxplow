@@ -52,6 +52,18 @@ collector `todos` (collectors/todos.star):
   the launcher) has the same decision as a row action, `Decide…`, which
   opens a form.
 
+**What survives.** Decisions are in the extension's private state, in
+oxplow's database, so they outlive what a person does around them: a
+restart finds them; revoking the board's approval stops the board
+deciding or reading them until it is approved again, and approving
+brings them back; editing the bundle asks for the approval again (a
+comment in `extension.yaml` doesn't, since it isn't what was reviewed),
+and the decisions read back once it is approved. Uninstalling keeps the
+rows, but nothing reads them. Two decisions in a row each read the stamp
+the last left; a write holding an old stamp is refused rather than
+overwriting. `oxplow-sdk/tests/trials.rs` runs each of these over an
+on-disk database.
+
 A command composes inside oxplow's transaction, where `metric_findings()`
 can't be computed, so the commands read the TODO facts themselves
 (`v_fact`, the latest capture).
