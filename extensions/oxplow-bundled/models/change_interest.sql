@@ -5,6 +5,7 @@
 --   × (1 + 0.6 · complexity added in changed bodies)
 --   × (1 + 0.4 · parameters added to changed signatures)
 --   × (1 + (longest new function over 60 lines − 60) / 40)
+-- (The 0.6, 0.4, 60 and 40 are this extension's `changeInterest` settings.)
 -- A factor of at least 1.2 (and 32+ lines touched) gives a reason.
 WITH fns AS (
   SELECT change_id, path,
@@ -13,7 +14,7 @@ WITH fns AS (
          sum(CASE WHEN signature_changed = 1 AND params_after - params_before > 0
                   THEN params_after - params_before ELSE 0 END) AS grown_by,
          sum(CASE WHEN signature_changed = 1 AND params_after - params_before > 0 THEN 1 ELSE 0 END) AS grown,
-         max(CASE WHEN status = 'added' AND length > 60 THEN length END) AS longest_new
+         max(CASE WHEN status = 'added' AND length > config('/changeInterest/longFunctionLines') THEN length END) AS longest_new
   FROM ref('change_function')
   GROUP BY change_id, path
 ),
@@ -23,9 +24,9 @@ factors AS (
          coalesce(n.spike, 0) AS spike, coalesce(n.spiked, 0) AS spiked,
          coalesce(n.grown_by, 0) AS grown_by, coalesce(n.grown, 0) AS grown,
          n.longest_new,
-         1 + 0.6 * coalesce(n.spike, 0) AS complexity_factor,
-         1 + 0.4 * coalesce(n.grown_by, 0) AS param_factor,
-         1 + coalesce((n.longest_new - 60) / 40.0, 0) AS long_factor
+         1 + config('/changeInterest/complexityWeight') * coalesce(n.spike, 0) AS complexity_factor,
+         1 + config('/changeInterest/parameterWeight') * coalesce(n.grown_by, 0) AS param_factor,
+         1 + coalesce((n.longest_new - config('/changeInterest/longFunctionLines')) / (1.0 * config('/changeInterest/longFunctionScale')), 0) AS long_factor
   FROM ref('change_file') f
   LEFT JOIN fns n ON n.change_id = f.change_id AND n.path = f.path
 )

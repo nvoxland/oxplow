@@ -1,5 +1,5 @@
--- A change's surprising files. Dormant first: no commit touched it in 90
--- days (never touched counts as 90). Otherwise, its usual partners — its
+-- A change's surprising files. Dormant first: no commit touched it in
+-- `coChange.dormantDays` days (never touched counts as that many). Otherwise, its usual partners — its
 -- top three co-changers in `co_change_pair` — are all absent from the
 -- change.
 WITH files AS (
@@ -11,7 +11,7 @@ WITH files AS (
 ),
 idle AS (
   SELECT change_id, path,
-         CASE WHEN last_touched IS NULL THEN 90
+         CASE WHEN last_touched IS NULL THEN config('/coChange/dormantDays')
               ELSE CAST(julianday('now') - last_touched AS INTEGER) END AS days
   FROM files
 ),
@@ -20,10 +20,10 @@ usual AS (
          row_number() OVER (PARTITION BY i.change_id, i.path
                             ORDER BY p.together DESC, p.other) AS rank
   FROM idle i JOIN ref('co_change_pair') p ON p.path = i.path
-  WHERE i.days < 90
+  WHERE i.days < config('/coChange/dormantDays')
 )
 SELECT change_id, path, 'dormant' AS reason, NULL AS expected, days AS dormant_days
-FROM idle WHERE days >= 90
+FROM idle WHERE days >= config('/coChange/dormantDays')
 UNION ALL
 SELECT u.change_id, u.path, 'usual-co-changers-absent',
        group_concat(u.other, ', ' ORDER BY u.together DESC, u.other), NULL

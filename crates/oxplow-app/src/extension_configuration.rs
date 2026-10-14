@@ -272,6 +272,18 @@ impl ConfigurationHost {
     }
 }
 
+/// An extension's effective configuration as stored now — its declared defaults
+/// under the project and personal layers — which the SQL that reads it with
+/// `config()` is compiled and run against.
+pub(crate) fn effective_values(
+    conn: &Connection,
+    extension: &str,
+    declaration: &ConfigurationFile,
+) -> Result<Value, ConfigurationError> {
+    let (project, personal) = layers(conn, extension)?;
+    Ok(resolve(extension, declaration, project.as_ref(), personal.as_ref())?.values)
+}
+
 fn layers(
     conn: &Connection,
     extension: &str,

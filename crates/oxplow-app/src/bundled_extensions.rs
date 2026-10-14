@@ -690,6 +690,12 @@ mod tests {
                         .map(|q| (format!("collector {} input", s.id), q.sql.clone()))
                 }));
             for (what, sql) in queries {
+                // Its own settings, at their defaults.
+                let sql = oxplow_db::models::substitute_config(
+                    &sql,
+                    ext.default_configuration().as_ref(),
+                )
+                .unwrap_or_else(|e| panic!("{}/{what}: {e}", ext.name));
                 let reads = f
                     .svc
                     .sql

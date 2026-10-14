@@ -130,7 +130,7 @@ advisories:
                || 'when a commit lands its work.', count(DISTINCT f.path)) AS message
       FROM v_effort e JOIN v_effort_file f ON f.effort_id = e.id
       WHERE e.id = :effort_id AND e.ended_at IS NULL
-      HAVING count(DISTINCT f.path) >= 15
+      HAVING count(DISTINCT f.path) >= config('/largeUncommitted/files')
   # An item still in progress though a commit landed its work (closing its
   # effort), with nothing open on it now: the person may want to mark it
   # done. Once per item; oxplow never marks anything done itself.
@@ -222,6 +222,48 @@ collectors:
       FROM v_change c JOIN v_change_file f ON f.change_id = c.id
       WHERE c.kind = 'effort' AND c.target = CAST(:effort_id AS TEXT)
     facts: [oxplow_bundled.effort_churn_lines]
+configuration:
+  version: 1
+  schema:
+    type: object
+    additionalProperties: false
+    properties:
+      changeInterest:
+        type: object
+        additionalProperties: false
+        description: How "Look here first" ranks a changed file.
+        properties:
+          complexityWeight: { type: number, minimum: 0, description: Weight of complexity added in changed bodies. }
+          parameterWeight: { type: number, minimum: 0, description: Weight of parameters added to changed signatures. }
+          longFunctionLines: { type: integer, minimum: 1, description: A new function longer than this many lines raises the file's priority. }
+          longFunctionScale: { type: number, exclusiveMinimum: 0, description: Lines over the limit that double that factor. }
+      coChange:
+        type: object
+        additionalProperties: false
+        description: Which files count as usually committed together, and when one is dormant.
+        properties:
+          minShared: { type: integer, minimum: 1, description: Commits two files must share to be a pair. }
+          windowDays: { type: integer, minimum: 1, description: How far back commits count. }
+          maxFilesPerCommit: { type: integer, minimum: 1, description: Commits touching more files than this are ignored (mass renames). }
+          dormantDays: { type: integer, minimum: 1, description: A file no commit touched in this many days is dormant. }
+      struggle:
+        type: object
+        additionalProperties: false
+        description: When the agent is said to have struggled in an effort.
+        properties:
+          repeatedEdits: { type: integer, minimum: 1, description: Edits of one file at or above which it counts. }
+          failedCommands: { type: integer, minimum: 1, description: Failed shell commands at or above which they count. }
+      largeUncommitted:
+        type: object
+        additionalProperties: false
+        description: The large-uncommitted advisory.
+        properties:
+          files: { type: integer, minimum: 1, description: Files an open effort holds before the agent is told to commit. }
+  defaults:
+    changeInterest: { complexityWeight: 0.6, parameterWeight: 0.4, longFunctionLines: 60, longFunctionScale: 40 }
+    coChange: { minShared: 3, windowDays: 180, maxFilesPerCommit: 50, dormantDays: 90 }
+    struggle: { repeatedEdits: 5, failedCommands: 3 }
+    largeUncommitted: { files: 15 }
 models:
   - name: change_interest
     version: 1
@@ -370,6 +412,19 @@ effects:
     entry: effects/store_decisions.star
     needs: [jobs.read]
 commands:
+  # This extension's review-policy settings (`configuration:` above), through
+  # the host's configuration scope. A person sets them; a change republishes
+  # the models that read them.
+  - name: review_policy.read
+    summary: The review policy's effective settings, where each came from, and the stamps a write needs.
+    scope: extension_config.read
+    op: snapshot
+    invokers: { human: true, agent: true, lens: true }
+  - name: review_policy.write
+    summary: Set the review policy's project or personal settings (a compare-and-swap on the stamps `review_policy.read` returns).
+    scope: extension_config.write
+    op: compare_exchange
+    invokers: { human: true, agent: false, lens: true }
   # The decisions job's lifecycle, through the host's jobs scope.
   - name: decisions.ask
     summary: Ask a model for one effort's unrecorded decisions; returns the job. The intent key `decisions:<effort ref>` makes it one job per effort.

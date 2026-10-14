@@ -326,6 +326,52 @@ Raw secrets do not belong in defaults, schema or overrides. Secrets are host-own
 references ("Host-owned secret references"); this service resolves non-secret
 settings only.
 
+### Configuration in SQL
+
+An extension's own SQL — its models, its lenses' queries and its
+advisories' queries — reads its own configuration with
+`config('/pointer')`, a JSON pointer into the extension's effective values
+(`defaults < project < personal`, the `ConfigurationHost` resolution above):
+`HAVING count(*) >= config('/struggle/repeatedEdits')`.
+
+- **Resolved, not a function.** Like `ref()` and `source()`, `config()` is
+  not a SQL function: where the SQL is compiled or run, each call is
+  replaced by the literal of its value (a number as is, a string quoted, a
+  boolean 1 or 0). Nothing registers a global function, so there is no `v_*`
+  view or `query_sql` call that reads configuration, and no way to name
+  another extension's: the owner is fixed by where the SQL is declared
+  (`ExtensionModels.config` for a model, the lens's or advisory's own
+  extension for those). Core SQL reads none. Settings are non-secret by
+  construction; a literal in a view or a query is no more exposed than they
+  are.
+- **Models** are compiled with the values read in the activation's own
+  transaction (`PreparedExtensionDatabase::replace_tx`), so the view carries
+  the literal; a stored configuration that can't be resolved holds that
+  extension back like a model that doesn't compile. **A change republishes:**
+  the generation records the configuration the models were compiled against
+  (`ConfigSignature`, beside the entity signature), the entities consumer
+  checks it after each `command.executed` (`request_config_refresh`; a write
+  through `extension_config.write` is one) and requests an activation when it
+  differs; a changed definition refills a materialized model.
+- **Lenses and advisories** read the values stored now each time they run
+  (`SqlGateway::with_extension_config`), so a change applies to the next
+  run with no republish. A check (`oxplow extension check`, the effect report)
+  reads no stored settings and compiles against the declared `defaults`.
+- **Errors at load.** A read must name a key of the extension's own
+  `configuration.schema` (under `properties`) whose `type` is a number,
+  string or boolean: an unknown key, an object or array, a read in an
+  extension that declares no configuration, or a pointer that isn't a quoted
+  string starting with `/` is a load error at the SQL, naming the key.
+- **A computed type.** A literal has no declared type to SQLite: a model
+  column over a `config()` read declares `type: ""` (untyped), and integer
+  division applies to an integer setting (write `1.0 * config(...)` to divide
+  as a real).
+
+oxplow-bundled uses it for its review-policy constants (README "Settings");
+`oxplow.review_policy.read` / `.write` are its commands over the scope above.
+Pinned by `extension_sql_config_tests.rs` and
+`models::tests::config_reads_become_the_owners_literals`.
+
 ## Private state host boundary
 
 `extension_state.rs` supplies `StateHost`, bound by the host to the primary

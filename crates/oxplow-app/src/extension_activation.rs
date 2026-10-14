@@ -21,6 +21,8 @@ struct GenerationState {
     active: Option<Arc<CatalogSnapshot>>,
     unavailable: bool,
     entities: crate::extension_models::EntitySignature,
+    /// The configuration the published models were compiled against.
+    configs: crate::extension_generation::ConfigSignature,
 }
 
 /// How often a publication waiting on readers says who they are.
@@ -188,6 +190,37 @@ impl ExtensionActivation {
             .read(crate::extension_models::entity_signature_tx)
             .await?;
         if pin.state.entities != entities {
+            self.request();
+        }
+        Ok(())
+    }
+
+    /// An extension's stored configuration only changes what its models were
+    /// compiled against when one of them reads it: republish when it has.
+    pub(crate) async fn request_config_refresh(
+        &self,
+        db: &oxplow_db::Database,
+    ) -> Result<(), DomainError> {
+        let pin = self.pin().await?;
+        let extensions = pin
+            .snapshot()
+            .map(|snapshot| snapshot.extensions().clone())
+            .unwrap_or_default();
+        if !extensions
+            .iter()
+            .any(crate::extension_generation::reads_configuration)
+        {
+            return Ok(());
+        }
+        let configs = db
+            .read(move |conn| {
+                Ok(crate::extension_generation::config_signature_tx(
+                    conn,
+                    &extensions,
+                ))
+            })
+            .await?;
+        if pin.state.configs != configs {
             self.request();
         }
         Ok(())
@@ -524,6 +557,10 @@ impl ExtensionActivation {
                     providers.validate_live().map_err(TxError::Aborted)?;
                     let entities =
                         crate::extension_models::entity_signature_tx(publication.transaction()?)?;
+                    let configs = crate::extension_generation::config_signature_tx(
+                        publication.transaction()?,
+                        published.extensions(),
+                    );
                     // Set this before the commit attempt so an unwind in either commit
                     // or publication cannot expose mismatched database/memory state.
                     boundary.unavailable = true;
@@ -568,6 +605,7 @@ impl ExtensionActivation {
                         .activated
                         .store(true, std::sync::atomic::Ordering::Release);
                     boundary.entities = entities;
+                    boundary.configs = configs;
                     boundary.unavailable = false;
                     Ok((published.clone(), retired))
                 })

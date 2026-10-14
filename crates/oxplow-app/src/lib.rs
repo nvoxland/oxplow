@@ -114,6 +114,8 @@ mod extension_run_health_tests;
 mod extension_run_pin_tests;
 pub mod extension_runtime_adapters;
 pub mod extension_secrets;
+#[cfg(test)]
+mod extension_sql_config_tests;
 pub mod extension_state;
 pub mod extensions;
 pub mod external_process;

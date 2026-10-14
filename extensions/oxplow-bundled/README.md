@@ -12,6 +12,26 @@ What comes with oxplow, built as an ordinary extension:
 
 The rest of this page is about the review packet.
 
+## Settings
+
+The review policy's constants are this extension's `configuration:`, with
+today's values as the defaults, so a project tunes them without forking:
+
+| Key | Default | Reads |
+|---|---|---|
+| `changeInterest.complexityWeight`, `.parameterWeight` | 0.6, 0.4 | "Look here first" weights for complexity added and parameters added |
+| `changeInterest.longFunctionLines`, `.longFunctionScale` | 60, 40 | a new function longer than this raises the file's priority; lines over it that double the factor |
+| `coChange.minShared`, `.windowDays`, `.maxFilesPerCommit` | 3, 180, 50 | what makes two files a co-change pair |
+| `coChange.dormantDays` | 90 | a file no commit touched in this long is dormant |
+| `struggle.repeatedEdits`, `.failedCommands` | 5, 3 | when edits of one file, or failed shell commands, count as struggle |
+| `largeUncommitted.files` | 15 | files an open effort holds before the agent is told to commit |
+
+`oxplow.review_policy.read` returns the effective values and where each came
+from; `oxplow.review_policy.write` sets the project's or the person's layer
+(a compare-and-swap on the stamps `read` returns). A change takes effect
+without a restart: the models that read it are republished (and the
+materialized ones refilled), and the advisory reads it on its next run.
+
 ## What it reads
 
 - `v_claim` — what the agent said about its work, and what it cites.

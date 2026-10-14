@@ -256,6 +256,11 @@ impl SemanticLayer {
         Self { db }
     }
 
+    /// The database this layer reads.
+    pub fn database(&self) -> &Database {
+        &self.db
+    }
+
     /// Run one read-only `SELECT`/`WITH` statement.
     pub async fn run(&self, query: SqlQuery) -> Result<SqlQueryResult, DomainError> {
         crate::sql_tokens::check_single_read(&query.sql)?;

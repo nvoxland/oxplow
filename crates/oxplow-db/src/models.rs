@@ -687,6 +687,84 @@ pub fn import_references(sql: &str) -> Result<Vec<ImportReference>, DomainError>
         .collect()
 }
 
+/// An extension's own configuration read in its SQL: `config('/pointer')`
+/// is replaced, where the SQL is compiled or run, by the literal value at
+/// that JSON pointer in the owning extension's effective configuration
+/// (`defaults < project < personal`). The owner is fixed by where the SQL
+/// is declared, so an extension reads only its own; core SQL reads none.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigRead {
+    pub pointer: String,
+    pub start: usize,
+    pub end: usize,
+}
+
+/// Every `config('/pointer')` in `sql`.
+pub fn config_reads(sql: &str) -> Result<Vec<ConfigRead>, DomainError> {
+    calls(sql, "config")?
+        .into_iter()
+        .map(|call| {
+            let pointer = match call.args.as_slice() {
+                [arg] => string_literal(arg),
+                _ => None,
+            }
+            .filter(|p| p.starts_with('/'))
+            .ok_or_else(|| {
+                let (line, column) = line_col(sql, call.start);
+                invalid(format!(
+                    "{line}:{column}: config() takes one quoted JSON pointer, e.g. config('/coChange/minShared')"
+                ))
+            })?;
+            Ok(ConfigRead {
+                pointer,
+                start: call.start,
+                end: call.end,
+            })
+        })
+        .collect()
+}
+
+/// The SQL literal for the value at `pointer` in `config`, or why there is
+/// none: no configuration declared, no such key, or a value that is not a
+/// scalar (an object or an array has no SQL literal).
+pub fn config_literal(config: Option<&serde_json::Value>, pointer: &str) -> Result<String, String> {
+    use serde_json::Value;
+    let Some(config) = config else {
+        return Err(
+            "config() reads the extension's own configuration, which it doesn't declare \
+             (`configuration:` in extension.yaml)"
+                .into(),
+        );
+    };
+    match config.pointer(pointer) {
+        None => Err(format!(
+            "config('{pointer}') names no key of the extension's configuration"
+        )),
+        Some(Value::Null) => Ok("NULL".into()),
+        Some(Value::Bool(b)) => Ok(if *b { "1" } else { "0" }.into()),
+        Some(Value::Number(n)) => Ok(n.to_string()),
+        Some(Value::String(text)) => Ok(format!("'{}'", text.replace('\'', "''"))),
+        Some(_) => Err(format!(
+            "config('{pointer}') is an object or array; read a number, string or boolean"
+        )),
+    }
+}
+
+/// `sql` with each `config('/pointer')` replaced by its literal in `config`.
+pub fn substitute_config(
+    sql: &str,
+    config: Option<&serde_json::Value>,
+) -> Result<String, DomainError> {
+    let mut out = sql.to_string();
+    for read in config_reads(sql)?.into_iter().rev() {
+        let (line, column) = line_col(sql, read.start);
+        let literal = config_literal(config, &read.pointer)
+            .map_err(|why| invalid(format!("{line}:{column}: {why}")))?;
+        out.replace_range(read.start..read.end, &literal);
+    }
+    Ok(out)
+}
+
 fn resolve<'a>(
     conn: &Connection,
     sources: &'a [ModelSource],
@@ -704,7 +782,7 @@ fn resolve<'a>(
     };
     sources
         .iter()
-        .map(|src| resolve_one(src, view_of(&src.decl.name), &ref_view, &source_ok))
+        .map(|src| resolve_one(src, view_of(&src.decl.name), &ref_view, &source_ok, None))
         .collect()
 }
 
@@ -716,10 +794,16 @@ fn resolve_one<'a>(
     view: String,
     ref_view: &dyn Fn(&str) -> Option<String>,
     source_ok: &dyn Fn(&str) -> Result<(), String>,
+    config: Option<&serde_json::Value>,
 ) -> Result<Resolved<'a>, DomainError> {
     crate::sql_tokens::check_single_read(&src.sql)
         .map_err(|e| invalid(format!("{}: {e}", src.file)))?;
     let mut edits: Vec<(usize, usize, String)> = Vec::new();
+    for read in config_reads(&src.sql).map_err(|e| invalid(format!("{}: {e}", src.file)))? {
+        let literal = config_literal(config, &read.pointer)
+            .map_err(|why| invalid(format!("{}: {why}", at(src, read.start))))?;
+        edits.push((read.start, read.end, literal));
+    }
     let mut refs = BTreeSet::new();
     let mut first_ref_at = None;
     for call in calls(&src.sql, "ref").map_err(|e| invalid(format!("{}: {e}", src.file)))? {
@@ -1530,6 +1614,10 @@ fn test_sql(
 pub struct ExtensionModels {
     pub extension: String,
     pub sources: Vec<ModelSource>,
+    /// The extension's effective configuration (`defaults < project <
+    /// personal`) that its models' `config('/pointer')` reads are compiled
+    /// against; `None` when it declares none.
+    pub config: Option<serde_json::Value>,
 }
 
 /// Source-located candidate diagnostics, grouped by owning extension.
@@ -1691,6 +1779,7 @@ fn pass(
         ready.push(ExtensionModels {
             extension: e.extension.clone(),
             sources,
+            config: e.config.clone(),
         });
     }
     let extensions = &ready;
@@ -1816,7 +1905,7 @@ fn pass(
             if declared.get(&view) != Some(&e.extension) || existing.contains(&view) {
                 continue; // reported above
             }
-            match resolve_one(src, view, &ref_view, &source_ok) {
+            match resolve_one(src, view, &ref_view, &source_ok, e.config.as_ref()) {
                 Ok(m) => resolved.push((e.extension.clone(), m)),
                 Err(err) => push(&mut errors, &e.extension, err.to_string()),
             }
@@ -1945,6 +2034,39 @@ fn push(errors: &mut BTreeMap<String, Vec<String>>, extension: &str, message: St
 
 #[cfg(test)]
 mod tests {
+    /// `config('/pointer')` becomes the literal of the owner's value: a
+    /// number as it is, a string quoted, a boolean 1/0; a missing key, a
+    /// non-scalar and a call with no configuration are errors that name it.
+    #[test]
+    fn config_reads_become_the_owners_literals() {
+        let config = serde_json::json!({
+            "a": { "n": 3, "x": 0.5, "s": "it's", "on": true, "off": false },
+            "list": [1]
+        });
+        let sub = |sql: &str, config: Option<&serde_json::Value>| substitute_config(sql, config);
+        assert_eq!(
+            sub(
+                "SELECT config('/a/n'), config('/a/x'), config('/a/s'), config('/a/on'), config('/a/off')",
+                Some(&config)
+            )
+            .unwrap(),
+            "SELECT 3, 0.5, 'it''s', 1, 0"
+        );
+        // A call in a string or comment is not a call.
+        assert_eq!(
+            sub("SELECT 'config(''/a/n'')' -- config('/a/n')", Some(&config)).unwrap(),
+            "SELECT 'config(''/a/n'')' -- config('/a/n')"
+        );
+        let err = |sql: &str, config: Option<&serde_json::Value>| {
+            sub(sql, config).unwrap_err().to_string()
+        };
+        assert!(err("SELECT config('/nope')", Some(&config)).contains("names no key"));
+        assert!(err("SELECT config('/list')", Some(&config)).contains("object or array"));
+        assert!(err("SELECT config('/a/n')", None).contains("doesn't declare"));
+        assert!(err("SELECT config(1)", Some(&config)).contains("quoted JSON pointer"));
+        assert!(err("SELECT config('a/n')", Some(&config)).contains("quoted JSON pointer"));
+    }
+
     use super::*;
 
     fn fresh() -> Connection {
@@ -2571,6 +2693,7 @@ mod tests {
                     m
                 })
                 .collect(),
+            config: None,
         }
     }
 

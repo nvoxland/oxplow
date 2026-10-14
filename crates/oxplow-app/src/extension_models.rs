@@ -61,14 +61,22 @@ impl crate::event_pump::AsyncEventConsumer for EntitiesConsumer {
     }
 
     fn handles(&self, event_type: &str) -> bool {
-        event_type == "collector.synced"
+        // A command ran: it may have changed an extension's configuration
+        // that its models read.
+        matches!(event_type, "collector.synced" | "command.executed")
     }
 
-    async fn handle(&self, _event: &oxplow_domain::StoredEvent) -> Result<(), DomainError> {
+    async fn handle(&self, event: &oxplow_domain::StoredEvent) -> Result<(), DomainError> {
         if let Some(svc) = self.services.upgrade() {
-            svc.extension_activation
-                .request_entity_refresh(&svc.db)
-                .await?;
+            if event.envelope.event_type == "command.executed" {
+                svc.extension_activation
+                    .request_config_refresh(&svc.db)
+                    .await?;
+            } else {
+                svc.extension_activation
+                    .request_entity_refresh(&svc.db)
+                    .await?;
+            }
         }
         Ok(())
     }

@@ -165,9 +165,16 @@ impl AdvisoryRunner {
                     continue;
                 }
                 evaluated.push(id.clone());
+                let query = match layer.with_extension_config(ext, &a.query).await {
+                    Ok(query) => query,
+                    Err(error) => {
+                        tracing::warn!(advisory = %id, %error, "advisory configuration failed");
+                        continue;
+                    }
+                };
                 let result = match layer
                     .run(
-                        oxplow_db::SqlQuery::new(&a.query)
+                        oxplow_db::SqlQuery::new(&query)
                             .named(scope.params())
                             .limit(None),
                     )

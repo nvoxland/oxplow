@@ -597,6 +597,7 @@ mod tests {
                         false,
                     ),
                 ],
+                config: None,
             }])
             .await
             .unwrap();
@@ -713,6 +714,7 @@ mod tests {
                     .compile_extension_models(vec![ExtensionModels {
                         extension: "acme".into(),
                         sources,
+                        config: None,
                     }])
                     .await
                     .unwrap();

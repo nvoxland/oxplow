@@ -375,6 +375,44 @@ impl SqlGateway {
         self.vocabulary.current()
     }
 
+    /// `sql`, an extension's own (a lens's or an advisory's), with each
+    /// `config('/pointer')` replaced by the value in that extension's
+    /// effective configuration as stored now. Nothing is read when `sql` has
+    /// no such call. A change of settings applies to the next run.
+    pub(crate) async fn with_extension_config(
+        &self,
+        ext: &crate::extensions::Extension,
+        sql: &str,
+    ) -> Result<String, DomainError> {
+        if oxplow_db::models::config_reads(sql)?.is_empty() {
+            return Ok(sql.to_string());
+        }
+        let values = match ext.configuration.clone() {
+            Some(declaration) => {
+                let name = ext.name.clone();
+                Some(
+                    self.layer
+                        .database()
+                        .read(move |conn| {
+                            crate::extension_configuration::effective_values(
+                                conn,
+                                &name,
+                                &declaration,
+                            )
+                            .map_err(|error| {
+                                DomainError::Invalid(format!(
+                                    "the extension's stored configuration can't be read: {error:?}"
+                                ))
+                            })
+                        })
+                        .await?,
+                )
+            }
+            None => None,
+        };
+        oxplow_db::models::substitute_config(sql, values.as_ref())
+    }
+
     /// The name of every view in the database.
     pub async fn view_names(&self) -> Result<std::collections::HashSet<String>, DomainError> {
         self.activation.read(self.view_names_unpinned()).await?

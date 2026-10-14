@@ -19,6 +19,48 @@ pub struct PreparedExtensionDatabase {
     vocabulary: PreparedVocabulary,
     contributions: Vec<oxplow_domain::contribution::Descriptor>,
     capabilities: Option<PreparedCapabilities>,
+    /// The declarations of the extensions whose models read their own
+    /// configuration (`config()`): their effective values are resolved in the
+    /// publishing transaction and compiled into the views.
+    configurations: Vec<(String, crate::extensions::config_schema::ConfigurationFile)>,
+}
+
+/// The effective configuration the published models were compiled against,
+/// per extension that reads any; a change in it republishes them.
+pub type ConfigSignature = std::collections::BTreeMap<String, String>;
+
+/// Whether any model of `extension` reads its configuration with `config()`.
+pub fn reads_configuration(extension: &crate::extensions::Extension) -> bool {
+    extension.configuration.is_some()
+        && extension
+            .models
+            .iter()
+            .any(|model| models::config_reads(&model.sql).is_ok_and(|reads| !reads.is_empty()))
+}
+
+/// The effective configuration of each extension in `extensions` whose models
+/// read theirs, as it is stored now. A configuration that can't be resolved
+/// signs as its failure, so repairing it republishes too.
+pub fn config_signature_tx(
+    conn: &rusqlite::Connection,
+    extensions: &[crate::extensions::Extension],
+) -> ConfigSignature {
+    extensions
+        .iter()
+        .filter(|extension| extension.enabled && reads_configuration(extension))
+        .filter_map(|extension| {
+            let declaration = extension.configuration.as_ref()?;
+            let signed = match crate::extension_configuration::effective_values(
+                conn,
+                &extension.name,
+                declaration,
+            ) {
+                Ok(values) => values.to_string(),
+                Err(error) => format!("unresolved: {error:?}"),
+            };
+            Some((extension.name.clone(), signed))
+        })
+        .collect()
 }
 
 impl PreparedExtensionDatabase {
@@ -62,6 +104,7 @@ impl PreparedExtensionDatabase {
             .map(|extension| ExtensionModels {
                 extension: extension.name.clone(),
                 sources: extension.models.clone(),
+                config: None,
             })
             .collect();
         let contributions = snapshot
@@ -70,7 +113,16 @@ impl PreparedExtensionDatabase {
             .filter(|extension| extension.enabled)
             .flat_map(|extension| extension.contributions.iter().cloned())
             .collect();
+        let configurations = snapshot
+            .extensions()
+            .iter()
+            .filter(|extension| extension.enabled && reads_configuration(extension))
+            .filter_map(|extension| {
+                Some((extension.name.clone(), extension.configuration.clone()?))
+            })
+            .collect();
         Self {
+            configurations,
             entities: crate::collector_runner::declared_entity_tables(snapshot.extensions()),
             models,
             vocabulary,
@@ -101,7 +153,24 @@ impl PreparedExtensionDatabase {
             .map_err(oxplow_db::map_sql_err)?;
         let result = (|| {
             oxplow_db::collector_store::ensure_entities_tx(tx, &self.entities)?;
-            models::replace_extensions(tx, &self.models)?;
+            let mut candidate = self.models.clone();
+            for (extension, declaration) in &self.configurations {
+                let values =
+                    crate::extension_configuration::effective_values(tx, extension, declaration)
+                        .map_err(|error| {
+                            TxError::Aborted(VocabularyErrors::from([(
+                                extension.clone(),
+                                vec![format!(
+                                    "its stored configuration can't be read for its models' \
+                                     config() ({error:?}); fix or reset it"
+                                )],
+                            )]))
+                        })?;
+                if let Some(models) = candidate.iter_mut().find(|m| &m.extension == extension) {
+                    models.config = Some(values);
+                }
+            }
+            models::replace_extensions(tx, &candidate)?;
             let vocabulary = self.vocabulary.replace_tx(tx, now)?;
             oxplow_db::contribution_store::reset_tx(tx, &self.contributions)?;
             if let Some(capabilities) = &self.capabilities {

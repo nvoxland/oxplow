@@ -228,11 +228,11 @@ whole alternative review built that way.
 |---|---|---|
 | An effort's verdict (tests, diff coverage, claims, decisions) | oxplow-bundled `effort-verdict`, the `effort.verdict` replacement; core shows none | `oxplow.coverage.abs_pct` `warnAt`; replace the target |
 | A claim is backed (evidence, or a latest green run for `tests pass`) | oxplow-bundled `claim_status`; core `v_claim` keeps only what it cites | fork the model |
-| Struggle (a file edited 5+ times, 3+ failed shell commands) | oxplow-bundled `struggle` | fork the model |
+| Struggle (a file edited 5+ times, 3+ failed shell commands) | oxplow-bundled `struggle` | `struggle.repeatedEdits`, `struggle.failedCommands` |
 | Per-effort test outcome and time to green | oxplow-foundation collector `oxplow.effort_test_outcome` | metric specs over its facts |
-| Look here first, co-change surprise, deviation, tests weakened | oxplow-bundled models and lenses | fork |
+| Look here first, co-change surprise, deviation, tests weakened | oxplow-bundled models and lenses | `changeInterest.*`, `coChange.*`; the rest fork |
 | Metric thresholds (coverage 80/50, complexity > 10, length > 60) | oxplow-foundation metric specs | `metrics: [{ use: …, target, warnAt, failAt }]` |
-| Advisories (15-file uncommitted, threshold crossed, landed in progress) | oxplow-bundled advisories | fork |
+| Advisories (15-file uncommitted, threshold crossed, landed in progress) | oxplow-bundled advisories | `largeUncommitted.files`; the rest fork |
 | Accept / request changes and their verdict events | oxplow-bundled commands | another extension's commands |
 
 **What stays in core, and why.** These are collection's own mechanics
@@ -251,12 +251,19 @@ or operational limits, not a view of what good work is:
   minutes), contribution disabling after three failures, steering and
   token-waste attribution.
 
-**Gaps.** A bundled model or advisory can't read extension
-configuration, so its constants (`change_interest`'s weights, the
-co-change windows, the 15-file advisory, the complexity and length
-cut-offs) are changed by forking the extension, not by setting a key.
-Only a metric's `target` / `warnAt` / `failAt` are tunable from
-`project.yaml`.
+**Knobs.** An extension's SQL reads its own configuration
+(`config('/pointer')`, `.context/extensions.md` "Configuration in SQL"),
+so oxplow-bundled's constants are settings, not forks: `changeInterest.*`
+(weights and the long-function cut-off), `coChange.*` (pair threshold,
+window, per-commit file cap, dormant days), `struggle.*` and
+`largeUncommitted.files`, with today's values as defaults; set them with
+`oxplow.review_policy.write`. A metric's `target` / `warnAt` / `failAt` stay
+tunable from `project.yaml`.
+
+**Gaps.** The complexity and length cut-offs of the metric specs, the
+"look here first" reason threshold (a factor of 1.2) and the verdict's
+rules are still fixed in the extension; the verdict is replaced by another
+extension, not tuned.
 
 ## Capabilities
 

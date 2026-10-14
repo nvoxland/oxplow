@@ -1147,6 +1147,15 @@ pub struct Extension {
 }
 
 impl Extension {
+    /// Its declared configuration with no project or personal override: what a
+    /// check, which reads no stored settings, compiles `config()` reads against.
+    pub fn default_configuration(&self) -> Option<serde_json::Value> {
+        self.configuration
+            .as_ref()
+            .and_then(|declared| declared.resolve(&self.name, None, None).ok())
+            .map(|resolved| resolved.values)
+    }
+
     /// The project's own: in its `oxplow/extensions/` folder and not
     /// installed from elsewhere. Only it may run its own programs to record
     /// facts and parse reports, each once a person approved it.
@@ -2663,10 +2672,78 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             at(&file, line.or(key_line(&manifest, "panels")), e)
         }));
     }
+    check_config_reads(&mut ext);
     ext.contributions = descriptors::describe(&ext);
     descriptors::check_ids(&mut ext);
     public_contracts::prepare(&mut ext);
     ext
+}
+
+/// The SQL of `ext` that may read its own configuration — a model, a lens, an
+/// advisory — with where each is declared.
+fn config_sql(ext: &Extension) -> Vec<(String, &str)> {
+    let models = ext.models.iter().map(|m| (m.file.clone(), m.sql.as_str()));
+    let lenses = ext
+        .lenses
+        .iter()
+        .map(|l| (l.path.clone(), l.query.as_str()));
+    let advisories = ext
+        .advisories
+        .iter()
+        .map(|a| (format!("advisory `{}`", a.id), a.query.as_str()));
+    models.chain(lenses).chain(advisories).collect()
+}
+
+/// A `config('/pointer')` read names a scalar key the extension's own
+/// `configuration.schema` declares, or the extension fails to load saying
+/// which: an unknown key, a key that is an object or array (no SQL literal), or
+/// a read in an extension that declares no configuration.
+fn check_config_reads(ext: &mut Extension) {
+    let mut problems = Vec::new();
+    for (place, sql) in config_sql(ext) {
+        let reads = match oxplow_db::models::config_reads(sql) {
+            Ok(reads) => reads,
+            Err(e) => {
+                problems.push(format!("{place}: {e}"));
+                continue;
+            }
+        };
+        for read in reads {
+            let Some(declaration) = &ext.configuration else {
+                problems.push(format!(
+                    "{place}: config('{}') reads the extension's own configuration, which it \
+                     doesn't declare (`configuration:` in extension.yaml)",
+                    read.pointer
+                ));
+                continue;
+            };
+            match config_key_type(&declaration.schema, &read.pointer) {
+                Some("integer" | "number" | "string" | "boolean") => {}
+                Some(other) => problems.push(format!(
+                    "{place}: config('{}') is a `{other}` in the configuration schema; \
+                     SQL reads a number, string or boolean",
+                    read.pointer
+                )),
+                None => problems.push(format!(
+                    "{place}: config('{}') names no key of `configuration.schema` (declare it \
+                     under `properties` with a scalar `type`)",
+                    read.pointer
+                )),
+            }
+        }
+    }
+    ext.errors.extend(problems);
+}
+
+/// The `type` of the schema property at JSON pointer `pointer`, following
+/// `properties`; `None` when the schema declares no such property or type.
+fn config_key_type<'a>(schema: &'a serde_json::Value, pointer: &str) -> Option<&'a str> {
+    let mut node = schema;
+    for token in pointer.split('/').skip(1) {
+        let token = token.replace("~1", "/").replace("~0", "~");
+        node = node.get("properties")?.get(&token)?;
+    }
+    node.get("type")?.as_str()
 }
 
 /// Check the manifest's `pages:`: a kebab-case, unique id, a launcher
@@ -3168,7 +3245,15 @@ async fn run_lens_unpinned(
     params: BTreeMap<String, SqlCell>,
     ctx: &LensContext,
 ) -> Result<LensRun, DomainError> {
-    let lens = catalog.find_lens(root, id)?;
+    let mut lens = catalog.find_lens(root, id)?;
+    // Its own extension's settings, as they are stored now.
+    if let Some(ext) = catalog
+        .unpinned(root, "a lens reads its own extension's settings")
+        .iter()
+        .find(|e| e.name == lens.extension)
+    {
+        lens.query = layer.with_extension_config(ext, &lens.query).await?;
+    }
     if let Some(active) = &ctx.active {
         let unmet = active.unmet(&lens.needs);
         if !unmet.is_empty() {
@@ -3351,10 +3436,26 @@ pub type LensRuns = BTreeMap<String, Result<LensRun, String>>;
 pub async fn run_lenses(layer: &crate::sql_gateway::SqlGateway, ext: &Extension) -> LensRuns {
     let mut out = LensRuns::new();
     for lens in &ext.lenses {
-        let run = run_lens_spec(layer, lens.clone())
+        // A check reads no stored settings: the declared defaults.
+        let mut lens = lens.clone();
+        match oxplow_db::models::substitute_config(
+            &lens.query,
+            ext.default_configuration().as_ref(),
+        ) {
+            Ok(query) => lens.query = query,
+            Err(e) => {
+                out.insert(
+                    lens.slug.clone(),
+                    Err(e.to_string().replacen("invalid value: ", "", 1)),
+                );
+                continue;
+            }
+        }
+        let slug = lens.slug.clone();
+        let run = run_lens_spec(layer, lens)
             .await
             .map_err(|e| e.to_string().replacen("invalid value: ", "", 1));
-        out.insert(lens.slug.clone(), run);
+        out.insert(slug, run);
     }
     out
 }
@@ -3614,6 +3715,7 @@ async fn model_overlay(
         .map(|ext| oxplow_db::models::ExtensionModels {
             extension: ext.name.clone(),
             sources: ext.models.clone(),
+            config: ext.default_configuration(),
         })
         .collect();
     let stubs = candidate
@@ -3701,9 +3803,24 @@ async fn prepare(
     let layer = &layer.with_overlay(overlay.clone());
     crate::extension_commands::check_extension_commands(layer, ext, commands).await;
     for a in ext.advisories.clone() {
+        // A check reads no stored settings: the declared defaults.
+        let query = match oxplow_db::models::substitute_config(
+            &a.query,
+            ext.default_configuration().as_ref(),
+        ) {
+            Ok(query) => query,
+            Err(e) => {
+                ext.errors.push(format!(
+                    "advisory {}: {}",
+                    a.id,
+                    e.to_string().replacen("invalid value: ", "", 1)
+                ));
+                continue;
+            }
+        };
         let run = layer
             .run(
-                oxplow_db::SqlQuery::new(&a.query)
+                oxplow_db::SqlQuery::new(&query)
                     .named(
                         crate::advisories::PARAMS
                             .iter()
@@ -6528,6 +6645,8 @@ commands:
         assert_eq!(
             commands,
             [
+                "oxplow.review_policy.read",
+                "oxplow.review_policy.write",
                 "oxplow.decisions.ask",
                 "oxplow.decisions.status",
                 "oxplow.decisions.cancel",
