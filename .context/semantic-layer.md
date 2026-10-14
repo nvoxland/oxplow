@@ -116,14 +116,14 @@ What core publishes, by where it comes from. Each row names its models
 
 | Source | Models | Facts |
 |---|---|---|
-| work | `stream`, `thread`, `thread_note`, `task`, `task_note`, `task_link`, `effort`, `effort_file`, `decision`, `claim`, `context_read`, `struggle` | cycle time, steering, lifecycle |
+| work | `stream`, `thread`, `thread_note`, `task`, `task_note`, `task_link`, `effort`, `effort_file`, `decision`, `claim`, `context_read` | cycle time, steering, lifecycle |
 | knowledge | `wiki_page`, `comment` | freshness |
 | git | `commit`, `commit_file`, `commit_work_item`, `branch`, and change analysis (`change`, `change_file`, `change_function`, `change_import`, `change_duplicate`, `change_test_file`) | churn |
 | snapshots | `snapshot`, `snapshot_op` | — |
 | lsp | `diagnostic` | diagnostic counts by severity |
 | tests & coverage | `test_run`, `test_case` | coverage, pass/fail |
 | code metrics | `function`, `file_metric` over `tree_fact` (the current tree of every per-path measure — the engine's fold) | complexity, length, params, TODOs, doc coverage |
-| agent | `agent_turn`, `tool_call`, `token_usage`, `agent_nudge`, and agent events (hooks, sessions) as `v_event` `agent.*` | tokens, struggle |
+| agent | `agent_turn`, `tool_call`, `token_usage`, `agent_nudge`, and agent events (hooks, sessions) as `v_event` `agent.*` | tokens |
 | ai | `ai_call` | tokens, latency |
 | usage | `page_visit` | — |
 | ui | `op_error` (operations that failed in front of the person, from `ui.op_failed` events) | — |
@@ -133,7 +133,7 @@ What core publishes, by where it comes from. Each row names its models
 Live-only for now — read over LSP or git when asked, not stored, so no
 model: blame lines, and LSP references. A collector that
 stores them would add their models. Decisions, claims, context reads and
-struggle signals are what a person reviewing agent work needs most —
+struggle signals (the bundled review policy's `v_oxplow_bundled_struggle`, over `v_tool_call`) are what a person reviewing agent work needs most —
 **exceptions and decisions**, not trends and totals.
 
 ## Models (P4.2)
@@ -630,7 +630,7 @@ and `v_model_test` are the catalog of all of them:
 | `v_claim` | agent claims ("tests pass") and what each cites (`evidence_ref`; `reviewer` when a person verified it with `oxplow.effort.verify_claim`). Whether anything else backs a claim is a review policy's: oxplow-bundled's `v_oxplow_bundled_claim_status` counts a `tests_pass` claim backed when its effort's **latest** `v_test_run` has `failed = 0 AND total > 0` |
 | `v_tool_call` | every agent tool call: the `tool_call.project` pump consumer's projection of `agent.tool.finished` (one row per event; the call as its harness mapped it, `oxplow-app/src/tool_calls.rs`; paths worktree-relative; a shell call's `ok` is NULL when its harness reports no exit code). `tool` is the harness's own name, `kind` oxplow's (V42; v3) (V77; `turn_id`, `event_id` since V102) |
 | `v_context_read` | reads (`kind = 'read'`) of `.context/*.md` (V77) |
-| `v_struggle` | per effort: a file edited 5+ times, or 3+ failed shell commands, by kind (v2: `subject` `shell`) (V77) |
+| `v_oxplow_bundled_struggle` | oxplow-bundled's model (review policy, not core): per effort, a file edited 5+ times, or 3+ failed shell commands, by kind (`subject` `shell`), over `v_tool_call` |
 | `v_ai_call` | oxplow's own model calls: role, provider, model, caller, tokens, latency, ok/error, and a recorded computation's `input_hash` (V78, V118; see [ai-providers.md](./ai-providers.md)) |
 | `v_ai_result` | recorded AI computations (`classify` / `score` / `summarize` / `extract`), keyed by input hash, model and prompt version, with the output, tokens and the computing call (V118; [ai-providers.md](./ai-providers.md) "Recorded computations") |
 | `v_metric_spec` | metric definitions: aggregation, direction, target / warn / fail (enabled lives in project.yaml) (V80) |

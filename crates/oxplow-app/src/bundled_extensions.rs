@@ -199,6 +199,7 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-bundled", "models/deviation.sql"),
             ext_file!("oxplow-bundled", "models/finished_cleared.sql"),
             ext_file!("oxplow-bundled", "models/thread_work.sql"),
+            ext_file!("oxplow-bundled", "models/struggle.sql"),
             ext_file!("oxplow-bundled", "models/verdict.sql"),
             ext_file!("oxplow-bundled", "models/verdicts.sql"),
             ext_file!("oxplow-bundled", "questions.yaml"),
@@ -423,6 +424,97 @@ mod tests {
     }
 
     /// oxplow-bundled's rule for a backed claim: it cites evidence, or it
+    /// oxplow-bundled's struggle rule: a file edited five times, or three
+    /// failed shell commands, in an effort. Four edits and two failures
+    /// are not struggle; a shell call with no known outcome is no failure.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn struggle_is_five_edits_of_a_file_or_three_failed_commands() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let call = |kind: &str, path: Option<&str>, ok: Option<bool>| oxplow_db::NewToolCall {
+            thread_id: f.thread.value(),
+            effort_id: Some(f.effort.value()),
+            tool: kind.into(),
+            kind: kind.into(),
+            path: path.map(str::to_string),
+            ok,
+            ..Default::default()
+        };
+        let store = &f.svc.tool_call_store;
+        for _ in 0..5 {
+            store
+                .record(call("edit", Some("src/hot.rs"), Some(true)))
+                .await
+                .unwrap();
+        }
+        for _ in 0..4 {
+            store
+                .record(call("edit", Some("src/calm.rs"), Some(true)))
+                .await
+                .unwrap();
+        }
+        for _ in 0..3 {
+            store
+                .record(call("shell", None, Some(false)))
+                .await
+                .unwrap();
+        }
+        store.record(call("shell", None, None)).await.unwrap();
+        let rows = |sql: String| {
+            let svc = f.svc.clone();
+            async move {
+                serde_json::to_value(svc.sql.query_sql(&sql, vec![], None).await.unwrap().rows)
+                    .unwrap()
+            }
+        };
+        assert_eq!(
+            rows("SELECT kind, subject, count FROM v_oxplow_bundled_struggle ORDER BY kind".into())
+                .await,
+            serde_json::json!([
+                ["failed_commands", "shell", 3],
+                ["repeated_edits", "src/hot.rs", 5]
+            ])
+        );
+        // One fewer of each, and nothing is struggle.
+        let g = crate::test_fixtures::services_with_effort().await;
+        let few = |kind: &str, path: Option<&str>, ok| oxplow_db::NewToolCall {
+            thread_id: g.thread.value(),
+            effort_id: Some(g.effort.value()),
+            tool: kind.into(),
+            kind: kind.into(),
+            path: path.map(str::to_string),
+            ok,
+            ..Default::default()
+        };
+        for _ in 0..4 {
+            g.svc
+                .tool_call_store
+                .record(few("edit", Some("a.rs"), Some(true)))
+                .await
+                .unwrap();
+        }
+        for _ in 0..2 {
+            g.svc
+                .tool_call_store
+                .record(few("shell", None, Some(false)))
+                .await
+                .unwrap();
+        }
+        let none = g
+            .svc
+            .sql
+            .query_sql(
+                "SELECT count(*) FROM v_oxplow_bundled_struggle",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(none.rows).unwrap(),
+            serde_json::json!([[0]])
+        );
+    }
+
     /// says the tests pass and its effort's LATEST run passed with at
     /// least one test (its own or one claimed through attribution).
     #[tokio::test]

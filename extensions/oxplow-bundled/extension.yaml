@@ -256,6 +256,16 @@ models:
       - { name: effort_id, type: INTEGER, doc: "The effort (v_effort.id)." }
       - { name: path, type: TEXT, doc: "Repo-relative file path." }
       - { name: change_kind, type: TEXT, doc: "`created`, `updated` or `deleted`." }
+  - name: struggle
+    version: 1
+    description: "Where the agent had trouble in an effort, by this review policy's thresholds: a file edited 5+ times (`repeated_edits`) or 3+ failed shell commands (`failed_commands`). Likely places for mistakes."
+    columns:
+      - { name: effort_id, type: INTEGER, doc: "Effort." }
+      - { name: thread_id, type: INTEGER, doc: "Thread." }
+      - { name: agent_session_id, type: INTEGER, doc: "The agent session it happened in; NULL when not recorded." }
+      - { name: kind, type: "", doc: "`repeated_edits` or `failed_commands`." }
+      - { name: subject, type: TEXT, doc: "The file path, or `shell` (failed shell commands, whatever the harness)." }
+      - { name: count, type: "", doc: "How many edits / failures." }
   - name: claim_status
     version: 1
     key: [ref]

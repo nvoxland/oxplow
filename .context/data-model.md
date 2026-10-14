@@ -801,7 +801,7 @@ named the file) and `shared` (`NOT NULL DEFAULT 0`: an observed file more
 than one session's turns could have changed) — set by `observe_files_tx` from `agent_stores::sessions_active_tx` (one session active in the window: the row carries it; more: `shared = 1`, no session; a path two sessions observe becomes shared; a claimed row is never touched); `claim.agent_session_id`
 (the acting session — a reasoning claim lands on *that session's* open
 turn, not the thread's newest). `v_tool_call`, `v_effort_file`, `v_claim`
-and `v_struggle` (grouped by session too) expose them.
+expose them (oxplow-bundled's `v_oxplow_bundled_struggle` groups tool calls by session too).
 See agent-model.md's "Per-effort write log" for the flow. Consumed by `get_effort_files`
 (`crates/oxplow-tauri-ipc/src/commands/effort.rs`) over the
 `EffortStore` and `SnapshotStore`: when ≥2 efforts share an end

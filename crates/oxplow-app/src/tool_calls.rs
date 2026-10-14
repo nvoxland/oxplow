@@ -1,6 +1,6 @@
 //! What a tool call records of itself (`agent.tool.*`, then the
 //! `agent_tool_call` row behind `v_tool_call` / `v_context_read` /
-//! `v_struggle`): the files it names, relative to the thread's worktree,
+//! the bundled struggle model): the files it names, relative to the thread's worktree,
 //! and a short detail. The call is already in oxplow's vocabulary (its
 //! harness mapped it, `AgentHarness::tool_use`). Pure so it's tested
 //! without a hook server.

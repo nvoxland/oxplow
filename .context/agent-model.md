@@ -389,7 +389,7 @@ its outcome (`ok`, `exit_code`) and an `ask`'s `question`.
   status derivation (`subagent`, `ask`, `plan`), the ROLE CHANGE banner
   (`plan`), effort claims (`edit`), test-run collection (`shell`, its
   `command` and `exit_code`), a turn's writing calls
-  (`thread.checkpoint`, by `v_tool_call.kind`), `v_struggle` and
+  (`thread.checkpoint`, by `v_tool_call.kind`), the bundled struggle model and
   `v_context_read`, and the events: `agent.tool.requested@3` /
   `agent.tool.finished@3` carry `tool` (the harness's name), `kind` and
   `paths` (V70 rewrote the v1 events, which named only Claude Code's

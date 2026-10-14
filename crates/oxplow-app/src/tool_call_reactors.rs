@@ -4,7 +4,7 @@
 //! instead of the best-effort writes the hook route used to make inline.
 //!
 //! - `tool_call.project` (sync) — the `agent_tool_call` row, a projection
-//!   of the event (`v_tool_call`, `v_context_read`, `v_struggle`); one row
+//!   of the event (`v_tool_call`, `v_context_read`); one row
 //!   per event however often it is delivered.
 //! - `effort.claim` (async) — an edit (`kind: edit`, whatever its harness
 //!   calls it) claims every file it names for the effort that was open
