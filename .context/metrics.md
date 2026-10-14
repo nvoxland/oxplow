@@ -1349,7 +1349,7 @@ reached through `run_command`, audited like every command):
   `extension test`. Refused for an existing folder, a bad or reserved name,
   or a language with no starter sample.
 
-Running one fact collector now is **`oxplow.collector.sync { owner, id }`** (the
+Running one fact collector now is **`oxplow.collector.sync { collector }`** (the
 one manual run for every collector; `metric.run` is deleted) — it reaches
 `MetricsService::run_collector_by_key` and returns the `facts` count (see
 "Producers" below and [commands.md](./commands.md)).

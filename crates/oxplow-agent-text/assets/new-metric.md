@@ -94,8 +94,8 @@ copy-paste templates.
    `validate_extension`). It dry-runs the lens, so a bad query shows here.
 2. `oxplow extension test <name>` — the collector runs over the fixture's
    files and must return the facts the example expects.
-3. Once the extension loads, `oxplow.collector.sync { owner: "<name>", id:
-   "<ns>.scan" }` (`run_command`) runs the collector now and returns the
+3. Once the extension loads, `oxplow.collector.sync { collector:
+   "collector:<name>/<ns>.scan" }` (`run_command`) runs the collector now and returns the
    `facts` count.
 4. `query_sql`: `SELECT bucket, MEASURE('<ns>.complex_functions') FROM
    metric_grid('day')` — confirm the value; slice it with `metric_grid('day',

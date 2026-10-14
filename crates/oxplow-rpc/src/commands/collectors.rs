@@ -372,7 +372,7 @@ mod tests {
                 "run_command",
                 json!({
                     "id": "oxplow.collector.sync",
-                    "input": { "owner": "my-gh", "id": "gh" },
+                    "input": { "collector": "collector:my-gh/gh" },
                     "confirmed": false,
                 }),
                 &svc,

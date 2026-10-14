@@ -14,8 +14,8 @@ team — the authoring surface is public config + a small script.
 
 ## The four blocks
 
-An extension's `extension.yaml` (a code metric you author) or `.oxplow/project.yaml`
-has four orthogonal metric blocks, mirroring the substrate:
+An extension's `extension.yaml` (a code metric you author, or the project's own
+extension, `oxplow/extensions/project/extension.yaml`) has four orthogonal metric blocks, mirroring the substrate:
 
 | block | what it declares | cardinality |
 |---|---|---|
@@ -113,13 +113,16 @@ metrics:
     sliceableDims: [acme.area]
 ```
 
-The same four blocks work in `.oxplow/project.yaml` (a project's own metric,
-e.g. a report-derived or `exec` collector — add each entry with
-`oxplow.config.set`; `collectors` is person-only, so that asks the person to
-confirm) with the collector `entry` project-relative under `oxplow/collectors/`.
-Prefer the extension for a code metric: it carries its fixture and lens.
+The project's own metrics (a report-derived or `exec` collector) go in the same
+four blocks of its own extension, `oxplow/extensions/project/extension.yaml` —
+`.oxplow/project.yaml` takes no `collectors:`, `measures:`, `dimensions:` or
+`metrics:` definitions, only `use:` entries and `enabled: false` markers. Create
+the file with the `manifest: 2` / `name: project` / `intent:` header when it is
+missing; the collector `entry` is relative to the extension folder
+(`collectors/…`), and `report.path` stays project-relative. Prefer a scaffolded
+extension for a code metric: it carries its fixture and lens.
 
-Namespace every key (`<extension namespace>.<id>`, or `<vendor>.<id>` in the project's config: `repo.todo_count`, `acme.bundle_size`).
+Namespace every key (`<extension namespace>.<id>`, or `<vendor>.<id>` in the project's extension: `repo.todo_count`, `acme.bundle_size`).
 
 ### `measures:` fields
 
@@ -213,7 +216,7 @@ the return (an old `samples` / `findings` shape) is refused.
   collectors, which in turn get no `files()`).
 
 ```python
-# oxplow/collectors/todo.star — one per-file fact on repo.todo_count
+# oxplow/extensions/project/collectors/todo.star — one per-file fact on repo.todo_count
 def transform(input):
     facts = []
     for f in files("**/*.rs"):
@@ -234,9 +237,10 @@ The `metrics:` spec `aggregation: sum` re-adds the per-file facts into the headl
 the parsed report is `input.report`.
 
 **C) exec (escape hatch)** — a program that prints the fact JSON to stdout:
-`runtime: exec`, `entry: oxplow/collectors/bundle-size.sh`. Lower trust (it does
-I/O) — tagged `exec:<id>`. Only the project's own collectors may be
-`exec` (an extension's fact collector is starlark or jaq), and it gets no
+`runtime: exec`, `entry: collectors/bundle-size.sh` (in `oxplow/extensions/project/`). Lower trust (it does
+I/O) — tagged `exec:<id>`. Only an own extension's collectors (no `source.yaml`, e.g. the project's
+`oxplow/extensions/project/`) may be `exec` (any other extension's fact
+collector is starlark or jaq), and it gets no
 `env` / `credentials` / `network`. Use it only when no in-process tier can
 compute it: **it won't run until the user approves it** in Settings → Data →
 Programs (you can't approve it; `oxplow.collector.sync` tells you when it's waiting),
@@ -251,8 +255,10 @@ copy-paste templates — each emits per-item facts.
 - **Extension** (the default for a code metric you author): the extension's
   `extension.yaml` declares its own measures, dimensions, collectors and
   metrics (its fact collectors are sandboxed — starlark or jaq).
-- **Project**: `.oxplow/project.yaml` + scripts under `oxplow/collectors/`
-  (checked into the repo, shared with the team) — for a collector that must be
+- **Project**: the project's own extension,
+  `oxplow/extensions/project/extension.yaml` + scripts under its `collectors/`
+  (checked into the repo, shared with the team; turn a metric on/off or set
+  its target with `use:` / `enabled: false` in `.oxplow/project.yaml`) — for a collector that must be
   an approved `exec` program, or a report-derived one.
 - **User-global** (cross-project): `*.yaml` files under the user's global config
   dir — a `measures/`, `metrics/` and `dimensions/` folder — hot-reloaded.
@@ -271,8 +277,8 @@ one of the metrics naming it is on.
    errors, no warnings; it dry-runs the lens) and `oxplow extension test
    <name>` (the collector over the fixture returns the expected facts).
 2. **Run the collector now:** the `oxplow.collector.sync` command,
-   `{ "owner": "<extension name>", "id": "<ns>.scan" }` (`owner: "project"` for
-   a project collector) — runs it against the latest snapshot and records its
+   `{ "collector": "collector:<extension name>/<ns>.scan" }` (`collector:project/<id>`
+   for a project collector) — runs it against the latest snapshot and records its
    facts; returns the `facts` count. `oxplow.metric.rebuild`
    (`{ "force": true }` to redo everything) runs every snapshot collector's
    whole-tree baseline.
@@ -366,8 +372,8 @@ dimensions:
 - **Declare-to-collect.** A fact is dropped unless its measure is (a) declared in
   `measures:` (or a built-in) AND (b) in the collector's own `facts` list.
 - **`oxplow.*` is oxplow's own** (its foundation extension's) — define new
-  measures/collectors/metrics under a project/vendor namespace.
-- **`entry` is project-relative**, no leading `/`, no `..`.
+  measures/collectors/metrics under a project/vendor namespace, in an extension.
+- **`entry` is relative to the extension folder**, no leading `/`, no `..`.
 - **No `gauges:` block.** It's an unknown key; write `collectors:`.
 - **Scripts do no I/O** (jaq/starlark) — that's what keeps facts `observed`. Reach
   for `exec` only when you truly must shell out.

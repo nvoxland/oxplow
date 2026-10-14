@@ -273,7 +273,16 @@ testing:
   fastCommand: bun run test:fast     # the same without coverage, for iterating
   runPatterns: [bun test]            # extra substrings that count as a test run
   agentHint: Run tests with bun run test:collect.
+```
 
+The collectors are declared in the project's own extension, not in
+`project.yaml` (which takes no `collectors:`, `measures:`, `dimensions:`
+or `metrics:` definitions, only `use:` entries and `enabled: false`
+markers). Create `oxplow/extensions/project/extension.yaml` with a
+`manifest: 2`, `name: project` and `intent:` header when it is missing:
+
+```yaml
+# oxplow/extensions/project/extension.yaml
 collectors:
   - { id: tests.rust_coverage, records: coverage, entry: "oxplow:lcov", report: { path: target/coverage/lcov.info }, trigger: { on_run: test } }
   - { id: tests.rust_junit, records: tests, entry: "oxplow:junit", report: { path: target/nextest/default/junit.xml }, trigger: { on_run: test } }
@@ -295,17 +304,19 @@ A parser is a small script that maps a report into oxplow's
 coverage/test/analysis shape:
 
 ```yaml
+# oxplow/extensions/project/extension.yaml
 collectors:
   - id: tests.clover
     records: coverage
     runtime: jaq                        # jaq (jq) | starlark | exec
-    entry: oxplow/parsers/clover.jq     # the script file
+    entry: collectors/clover.jq         # the script file, relative to the extension folder
     report: { path: target/clover.xml, format: xml }   # pre-parse: text | json | xml | lcov | lines
     trigger: { on_run: test }
 ```
 
-The script lives in its own file (`entry`, a project-relative path), not
-inline in the yaml. The host reads it and pre-parses the report for you
+The script lives in its own file (`entry`, relative to the extension folder, e.g.
+`oxplow/extensions/project/collectors/clover.jq`; `report.path` stays
+project-relative), not inline in the yaml. The host reads it and pre-parses the report for you
 (per `format`), so the script only reshapes JSON. `jaq` (jq) is the
 simplest for XML/JSON; `starlark` covers logic jq can't express; `exec`
 runs an external program — `entry` is the executable — (raw report on

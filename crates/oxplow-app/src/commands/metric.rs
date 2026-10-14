@@ -641,7 +641,7 @@ mod tests {
         let out = run(
             &svc,
             crate::collector_runner::SYNC,
-            json!({ "owner": "project", "id": "repo.answer" }),
+            json!({ "collector": "collector:project/repo.answer" }),
         )
         .await
         .unwrap();
@@ -693,7 +693,7 @@ mod tests {
             run(
                 &svc,
                 crate::collector_runner::SYNC,
-                json!({ "owner": "project", "id": "repo.bad" }),
+                json!({ "collector": "collector:project/repo.bad" }),
             )
         };
         for _ in 0..3 {

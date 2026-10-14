@@ -75,7 +75,7 @@ section for the column.
   `project`, the project's own extension, as `list_collectors` lists every
   extension's): each with its trigger ("after a test run"), last run
   (`collector_run`), why failures turned it off with **Enable Again**, and **Sync
-  Now** (`oxplow.collector.sync { owner: "project", id }`). A report collector with a
+  Now** (`oxplow.collector.sync { collector: "collector:project/<id>" }`). A report collector with a
   bundled parser needs no approval (`collector_runner::needs_approval`; the
   loader doesn't look for an `oxplow:` entry file). An own extension's `exec`
   program or its own jaq/starlark parser is approved in its Collectors row
@@ -256,7 +256,7 @@ hook + MCP wiring):
   the analyzer-ran record: when an analyzer is detected but regenerated no
   parseable report, it's stored command-only (no findings, no metric), the
   same way a `test-run` records command-only when no JUnit report is fresh.
-- **Active (commands)** — `oxplow.collector.sync { owner: "project", id,
+- **Active (commands)** — `oxplow.collector.sync { collector: "collector:project/<id>",
   thread? }` runs a report collector by hand
   (`CollectionService::sync_report_collector`, tsk863): it reads the
   report as it is now, whenever it was written, records what it parsed in

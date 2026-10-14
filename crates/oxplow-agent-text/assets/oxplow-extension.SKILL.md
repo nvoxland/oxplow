@@ -334,7 +334,7 @@ empty: Nothing is waiting on you.
   e.g. `{ id: finish, label: Finish, command: oxplow.work_item.transition,
   row: true, input: { ref: "{{row.ref}}", to: done } }`,
   or `{ id: sync, label: Sync PRs, command: oxplow.collector.sync, input:
-  { owner: github, id: prs } }`. With `group: <value>` (on a lens with
+  { collector: "collector:github/prs" } }`. With `group: <value>` (on a lens with
   `group`), the action is a button in that group's heading instead — it
   shows in a compact panel too; it can't be a row action. Copy and Add
   to Agent Context are on every lens already — don't declare them.
@@ -624,7 +624,7 @@ SELECT work_item, review FROM import_ref('reviews')
 An extension can add to the metric catalog with `measures:`, `metrics:`
 and `dimensions:` in `extension.yaml`, plus **fact collectors** (a
 `collectors:` entry with `facts:` instead of `entities:`) that record the
-facts — in exactly the `.oxplow/project.yaml` schema (the `oxplow-metrics`
+facts — in the same schema the project's own extension uses (the `oxplow-metrics`
 skill and `/oxplow:new-metric` cover it).
 
 ```yaml
@@ -642,13 +642,15 @@ collectors:
 
 - `entry` is inside the extension folder.
 - An extension's fact collector runs `starlark` or `jaq` only. `exec` is
-  refused (only the project's own fact collectors may be `exec`); it gets
+  refused (only an own extension's fact collectors — no `source.yaml`, e.g. `oxplow/extensions/project/` — may be `exec`); it gets
   no `env`, `credentials` or `network`. Its script reads the snapshot
   with `files()` / `ast_query()` and returns `{"facts": [...]}`. It may
   also read the semantic layer or ask a model when it declares them
   (`needs: [sql.read]`, `[ai.compute]`; "Host services" below).
 - A collector has `entities:` or `facts:`, never both.
 - A `gauges:` block is an unknown key; write `collectors:`.
+- `.oxplow/project.yaml` takes no definitions: the project's own measures,
+  collectors and metrics go in `oxplow/extensions/project/extension.yaml`.
 - Metrics are `key:` definitions and are on while the extension is
   enabled. A project can still turn one off or change its target with a
   `use:` entry in `.oxplow/project.yaml`. `use:` isn't allowed in an

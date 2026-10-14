@@ -112,8 +112,9 @@ looks low.
 
 The `/oxplow:new-metric` skill walks the same path with more structure.
 A metric that has to run an external program, or parse a report a tool
-writes, goes in `.oxplow/project.yaml` instead (below); the external
-program needs your approval first.
+writes, goes in the project's own extension,
+`oxplow/extensions/project/extension.yaml` (below); the external program
+needs your approval first.
 
 ## Where the numbers come from
 
@@ -125,13 +126,14 @@ team-relevant category, or any other declared breakdown. The goal is
 understanding the software and its development, not only measuring agent
 collaboration. See [Lenses and extensions](lenses.md).
 
-A metric extension and `.oxplow/project.yaml` take the same four blocks:
+A metric extension, including the project's own
+(`oxplow/extensions/project/extension.yaml`), takes four blocks:
 
 - `measures` -- what is being counted, and how it aggregates.
 - `collectors` -- the script that produces the raw numbers, and when it
   runs (after each snapshot, when an effort finishes, on a schedule, or
   by hand). Starlark, jq, or an external program. An external program
-  from the project's config runs only after you approve it in Settings →
+  from the project's own extension runs only after you approve it in Settings →
   Data → Programs, so pulling a repo can't run something behind your
   back. A changed program needs approving again.
 - `metrics` -- a chartable view over a measure: aggregation, filters,
@@ -140,7 +142,8 @@ A metric extension and `.oxplow/project.yaml` take the same four blocks:
   branch, and any you add).
 
 A metric extension's metrics are on while the extension is enabled, and
-your `.oxplow/project.yaml` can still turn one off or change its target.
+your `.oxplow/project.yaml` can still turn one off or change its target
+(`use:` and `enabled: false`; it takes no definitions).
 An extension's collectors run Starlark or jq only, never an external
 program.
 

@@ -884,7 +884,7 @@ files (not `unchanged`, `file_count > 0`) and a whole-tree one on every
 take — an unchanged take after a ref move has a new revision to restate; `effort.finished` runs it over the
 effort's end snapshot; any other type over the stream's latest snapshot.
 `every:` collectors run from the scheduler as the system through
-`oxplow.collector.sync`. **`oxplow.collector.sync { owner, id }` is the one manual run
+`oxplow.collector.sync`. **`oxplow.collector.sync { collector }` is the one manual run
 for every collector** — it replaced `source.sync` and `metric.run`; for a
 fact collector it returns `facts`. (`oxplow.metric.rebuild` still runs the
 whole-tree baseline.)
@@ -1048,7 +1048,7 @@ entities from data already in the semantic layer:
   - A teammate who pulls the repo approves it themselves, and a changed
     script needs re-approval.
   - Approving is its own UI-only step (`approve_collector`, the version
-    the person reviewed); running is the `oxplow.collector.sync { owner, id }`
+    the person reviewed); running is the `oxplow.collector.sync { collector }`
     command, which never approves — from the UI, a lens action, the
     scheduler or MCP `run_collector` alike — so an agent can't consent on
     a person's behalf. The approval key stays `<owner>/<id>`.

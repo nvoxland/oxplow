@@ -576,7 +576,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       agent's input, never sent) — kit affordances, not declared. A
       compact strip and a grid's children (`toolbar={false}`) show no
       toolbar.
-    - Running a collector is the command **`oxplow.collector.sync { owner, id }`**
+    - Running a collector is the command **`oxplow.collector.sync { collector }`**
       (External, `Invokers::ALL`; `collector_runner::CollectorRunner::sync`,
       which the scheduler uses too). It **never approves**: approving is
       `collector_runner::approve_reviewed` behind the UI-only
@@ -1055,7 +1055,7 @@ intent:                  # required
   examples:              # inputs → expected outputs; fixtures for `extension test`
     - { name: …, input: {…}, expect: … }
 # kinds
-measures:    [...]   # same schema as .oxplow/project.yaml
+measures:    [...]   # also what the project's own extension declares
 metrics:     [...]   # `key:` definitions; sourceMeasure must be declared here or oxplow.*
 dimensions:  [...]
 collectors:  [...]   # entity collectors (exec / starlark / jaq / read → entities) and

@@ -28,6 +28,7 @@ import {
   type CollectorListing,
 } from "../api.js";
 import type { DataEntity, ProjectProgram } from "../tauri-bridge/generated/bindings.js";
+import { collectorRef } from "../refs/ref.js";
 import { indexRef } from "../tabs/pageRefs.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { enableAgain, type ContributionHealth } from "../contributionHealth.js";
@@ -154,7 +155,7 @@ export function DataSection() {
         if (!l.version) throw new Error(`${key} can't be read, so it can't be approved`);
         await approveCollector(l.owner, l.spec.id, l.version);
       }
-      const report = await syncCollector(l.owner, l.spec.id);
+      const report = await syncCollector(collectorRef(l.owner, l.spec.id));
       const counts = Object.entries(report.rowCounts)
         .map(([e, n]) => `${n} ${e}`)
         .join(", ");

@@ -107,7 +107,7 @@ async fn a_scaffolded_collector_checks_before_its_first_sync_and_runs() {
         .run(
             &oxplow_domain::Actor::Human,
             "oxplow.collector.sync",
-            serde_json::json!({ "owner": "open-items", "id": collector.id }),
+            serde_json::json!({ "collector": format!("collector:open-items/{}", collector.id) }),
             true,
         )
         .await

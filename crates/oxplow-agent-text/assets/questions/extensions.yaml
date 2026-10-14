@@ -31,4 +31,4 @@
   skill: oxplow-extension
   reaches:
     command: oxplow.collector.sync
-    input: { owner: tracker, id: issues }
+    input: { collector: "collector:tracker/issues" }

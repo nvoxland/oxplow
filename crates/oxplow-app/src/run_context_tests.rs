@@ -213,7 +213,7 @@ async fn every_run_is_recorded_once_as_itself() {
         .run(
             &Actor::Human,
             crate::collector_runner::SYNC,
-            json!({ "owner": "acme", "id": "star" }),
+            json!({ "collector": "collector:acme/star" }),
             false,
         )
         .await

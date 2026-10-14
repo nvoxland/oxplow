@@ -554,10 +554,9 @@ pub struct AiSummarizeParams {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RunCollectorParams {
-    /// The extension that declares it (its folder under `oxplow/extensions/`).
-    pub owner: String,
-    /// The collector's `id` in its `collectors:`.
-    pub id: String,
+    /// The collector's ref: `collector:<extension>/<id>` (the extension's
+    /// folder under `oxplow/extensions/`, the `id` in its `collectors:`).
+    pub collector: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -865,7 +864,7 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Run an approved extension collector now, refreshing its entities \
+        description = "Run an approved extension collector now (`collector`: its ref, `collector:<extension>/<id>`), refreshing its entities \
                        (`v_<extension>_<entity>`). You cannot approve a collector: running code \
                        the human hasn't approved fails, so ask them to use Settings → Data → \
                        Approve & Run. Returns row counts per entity."
@@ -884,7 +883,7 @@ impl OxplowMcp {
             .run(
                 &actor,
                 oxplow_app::collector_runner::SYNC,
-                serde_json::json!({ "owner": p.owner, "id": p.id }),
+                serde_json::json!({ "collector": p.collector }),
                 false,
             )
             .await
@@ -3724,8 +3723,7 @@ mod tests {
             .run_collector(
                 as_writer(&services).await,
                 Parameters(RunCollectorParams {
-                    owner: "my-gh".into(),
-                    id: "gh".into(),
+                    collector: "collector:my-gh/gh".into(),
                 }),
             )
             .await

@@ -740,8 +740,8 @@ export async function revokeCollector(owner: string, id: string): Promise<void> 
 }
 
 /** Run a collector now (`oxplow.collector.sync`); it never approves. */
-export async function syncCollector(owner: string, id: string): Promise<CollectorRunReport> {
-  return (await runCommand("oxplow.collector.sync", { owner, id })).result as CollectorRunReport;
+export async function syncCollector(collector: string): Promise<CollectorRunReport> {
+  return (await runCommand("oxplow.collector.sync", { collector })).result as CollectorRunReport;
 }
 
 /// Analyze a change (a commit, an effort, or a stream's working tree) if

@@ -307,6 +307,14 @@ opt-in. A collector that metrics name runs only while one of them is on,
 so an opt-in metric costs nothing until someone wants it. Keys starting
 `oxplow.` are oxplow's own.
 
+The project's own measures, collectors and metrics are an extension too:
+`oxplow/extensions/project/extension.yaml`, with no `source.yaml` (an
+*own* extension). Only an own extension may declare an `exec` fact
+collector, a `records:` report collector (test, coverage and analysis
+reports) or `promote:`, and its programs are approved like any
+extension's. `.oxplow/project.yaml` takes only `use:` entries and
+`enabled: false` markers for them.
+
 ### Commands
 
 ```yaml

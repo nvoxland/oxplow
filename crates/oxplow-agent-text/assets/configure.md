@@ -1,5 +1,5 @@
 ---
-description: Set up oxplow collection — wire EVERY test stack in the project to emit standard-format coverage + test reports and record them in .oxplow/project.yaml.
+description: Set up oxplow collection — wire EVERY test stack in the project to emit standard-format coverage + test reports and declare them as report collectors in the project's own extension (oxplow/extensions/project/extension.yaml) and the test commands in .oxplow/project.yaml.
 ---
 
 Set up oxplow's **collection** so it can track which tests ran (the
@@ -14,7 +14,8 @@ JS/TS frontend, or a backend + a separate e2e suite. Find them all
 (look for `Cargo.toml`, `package.json`, `pyproject.toml`/`pytest.ini`,
 `go.mod`, `pom.xml`/`build.gradle`, etc.). You will wire **each** one
 to emit reports and declare **each** report as a report collector in
-`.oxplow/project.yaml` — oxplow reads every collector a run's kind
+the project's own extension (`oxplow/extensions/project/extension.yaml`) —
+oxplow reads every collector a run's kind
 triggers and keeps what that run wrote, so every stack lights up.
 
 ## 1. Make each stack emit a coverage report
@@ -45,11 +46,9 @@ splitting `classname`+`name` on `::` / `.`.
 Make the **smallest** change that makes each report automatic, and
 leave the diffs for the user to review — these are committed files.
 
-## 3. Record the test commands and every report in .oxplow/project.yaml
+## 3. Record the test commands, and declare every report
 
-The commands go under `testing:`; each report is read by a **report
-collector** under `collectors:` — one per report, across **all**
-stacks:
+The commands go under `testing:` in `.oxplow/project.yaml`:
 
 ```yaml
 testing:
@@ -60,7 +59,22 @@ testing:
   runPatterns: [bun test]
   analysisPatterns: [lint:collect]
   agentHint: "Run tests with <command>."   # injected into every agent prompt
+```
 
+Each report is read by a **report collector** under `collectors:` in
+`oxplow/extensions/project/extension.yaml` — one per report, across
+**all** stacks. `project.yaml` no longer takes `collectors:`. Create the
+file with this header when it is missing (keep any other blocks it
+already has):
+
+```yaml
+manifest: 2
+name: project
+description: This repository's own collectors, measures and metrics.
+intent:
+  purpose: >-
+    Measure what this repository cares about: its test, coverage and
+    analysis reports, and any metrics of its own.
 collectors:
   # Rust
   - { id: tests.rust_coverage, records: coverage, entry: "oxplow:lcov", report: { path: target/coverage/lcov.info }, trigger: { on_run: test } }
@@ -70,12 +84,12 @@ collectors:
   - { id: tests.desktop_junit, records: tests, entry: "oxplow:junit", report: { path: apps/desktop/test-report.xml }, trigger: { on_run: test } }
 ```
 
-`records` is what the report holds: `tests` (JUnit), `coverage` or
+`report.path` is project-relative. `records` is what the report holds: `tests` (JUnit), `coverage` or
 `analysis` (linter findings). `entry: "oxplow:<parser>"` names a bundled
 parser: `junit`, `lcov`, `cobertura`, `jacoco`, `clippy`, `eslint`.
 `trigger: { on_run: test }` reads the report after each test run oxplow
 sees, when that run wrote it (an analyzer's report: `on_run: analysis`);
-without a trigger it runs only by hand (`oxplow.collector.sync`). So a frontend
+without a trigger it runs only by hand (`oxplow.collector.sync { collector: "collector:project/<id>" }`). So a frontend
 run uses the frontend reports, a Rust run the Rust reports, JUnit
 merging into the per-test tree and coverage into diff coverage. You
 never parse or report any of these numbers yourself — oxplow does, so
@@ -93,17 +107,20 @@ script that maps the report into oxplow's coverage/test/analysis shape,
 run in-process (no recompile):
 
 ```yaml
+# in oxplow/extensions/project/extension.yaml
 collectors:
   - id: tests.clover
     records: coverage
     runtime: jaq                        # jaq (jq) | starlark | exec
-    entry: oxplow/parsers/clover.jq     # the script file
+    entry: collectors/clover.jq         # the script file, relative to oxplow/extensions/project/
     report: { path: target/clover.xml, format: xml }   # host pre-parse: text | json | xml | lcov | lines
     trigger: { on_run: test }
 ```
 
-The script goes in its own file (`entry`, project-relative), not inline
-in the yaml. Prefer `jaq` (jq) — the host pre-parses the report
+The script goes in its own file under
+`oxplow/extensions/project/collectors/` (`entry` is relative to the
+extension folder; `report.path` stays project-relative), not inline in
+the yaml. Prefer `jaq` (jq) — the host pre-parses the report
 (`format`) so the script just reshapes JSON. Use `starlark` for logic jq
 can't express, or `exec` (`entry` is the executable; the raw report on
 stdin, JSON on stdout) as a last resort: a program runs only once a

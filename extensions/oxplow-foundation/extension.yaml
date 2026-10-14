@@ -498,7 +498,7 @@ commands:
     confirm: always
   # metrics.read
   - name: metric.scaffold
-    summary: "A starter for a new metric; writes nothing. Returns `scriptPath` + `script` (a Starlark gauge) and `projectYaml` (the measure, gauge and metric entries). Write the script, then add the entries with `oxplow.config.set` on `measures`, `gauges` and `metrics` (a gauge runs a program, so a person confirms it)."
+    summary: "A starter for a new metric, as a private extension; writes nothing. Returns `name`, `dir` (`oxplow/extensions/<name>`) and `files`, each with its project-relative path: the extension.yaml (a measure, a Starlark fact collector, the metric), the collector script, a lens and an example with its fixture. Write them with your own tools, then check it (`validate_extension`); its collector runs only once a person approves it. `oxplow.metric.enable` turns the metric on or off in .oxplow/project.yaml."
     scope: metrics.read
     op: scaffold
     invokers: { human: true, agent: true, lens: true }

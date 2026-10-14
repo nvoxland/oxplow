@@ -323,7 +323,9 @@ async fn run_due_collectors_unpinned(state: &crate::Services) -> Vec<(String, St
         tracing::warn!(error = ?e, "recording the collectors' next due times failed");
     }
     for (owner, id) in &due {
-        let input = serde_json::json!({ "owner": owner, "id": id });
+        let input = serde_json::json!({
+            "collector": oxplow_domain::refs::build::collector_ref(owner, id),
+        });
         if let Err(e) = state
             .commands
             .run(&oxplow_domain::Actor::System, SYNC, input, false)
@@ -2053,7 +2055,7 @@ impl CollectorRunner {
     }
 }
 
-/// `collector.sync { owner, id, thread? }`: run an approved collector now
+/// `collector.sync { collector, thread? }`: run an approved collector now
 /// (External: it runs the collector's program or script). Any actor may
 /// run it; none approves through it — consent is a person's, in Settings
 /// → Data. Run by the system it's the `every:` schedule's run. A project
@@ -2064,14 +2066,35 @@ pub const SYNC: &str = "oxplow.collector.sync";
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SyncInput {
-    /// The extension that declares it.
-    pub owner: String,
-    /// The collector's `id` in its owner's `collectors:`.
-    pub id: String,
+    /// The collector's ref (`collector:<extension>/<id>`).
+    pub collector: String,
     /// For a report collector: the thread its run is recorded in
     /// (`thread:thr3`); an agent's is always its own.
     #[serde(default)]
     pub thread: Option<String>,
+}
+
+/// A collector ref's extension and `id` (`collector:work/hot` → `work`,
+/// `hot`).
+fn collector_parts(collector: &str) -> Result<(String, String), oxplow_domain::CommandError> {
+    let invalid = |message: String| oxplow_domain::CommandError::Invalid {
+        field: Some("/collector".into()),
+        message,
+    };
+    let id = oxplow_domain::refs::build::id_of(collector, oxplow_domain::refs::kind::COLLECTOR)
+        .map_err(|e| {
+            invalid(format!(
+                "`{}` isn't a collector ref (collector:<extension>/<id>)",
+                e.text
+            ))
+        })?;
+    id.split_once('/')
+        .map(|(owner, id)| (owner.to_string(), id.to_string()))
+        .ok_or_else(|| {
+            invalid(format!(
+                "`{collector}` isn't a collector ref (collector:<extension>/<id>)"
+            ))
+        })
 }
 
 pub fn sync_op(sync: CollectorRunner) -> crate::commands::ops::Op {
@@ -2098,28 +2121,25 @@ pub fn sync_op(sync: CollectorRunner) -> crate::commands::ops::Op {
                         field: None,
                         message: e.to_string(),
                     })?;
+                let (owner, id) = collector_parts(&input.collector)?;
                 let failed = |e: RunCollectorError| match e {
                     RunCollectorError::NotFound => CommandError::Invalid {
-                        field: Some("/id".into()),
+                        field: Some("/collector".into()),
                         message: format!(
-                            "no collector `{}/{}` in the project's extensions",
-                            input.owner, input.id
+                            "no collector `{}` in the project's extensions",
+                            input.collector
                         ),
                     },
                     RunCollectorError::NeedsApproval(m) | RunCollectorError::Disabled(m) => {
                         CommandError::Invalid {
-                            field: Some("/id".into()),
+                            field: Some("/collector".into()),
                             message: m,
                         }
                     }
                     RunCollectorError::Failed(m) => CommandError::Failed { message: m },
                     RunCollectorError::Storage(e) => CommandError::from(e),
                 };
-                if sync
-                    .collection
-                    .is_report_collector(&input.owner, &input.id)
-                    .await
-                {
+                if sync.collection.is_report_collector(&owner, &id).await {
                     let thread = crate::commands::thread::acting_thread_of(
                         &acting,
                         input.thread.as_deref(),
@@ -2128,8 +2148,8 @@ pub fn sync_op(sync: CollectorRunner) -> crate::commands::ops::Op {
                         .collection
                         .sync_report_collector(
                             &thread,
-                            &input.owner,
-                            &input.id,
+                            &owner,
+                            &id,
                             &source,
                             sync.collection.command_turn(&acting, thread).await,
                         )
@@ -2137,8 +2157,8 @@ pub fn sync_op(sync: CollectorRunner) -> crate::commands::ops::Op {
                         .map_err(failed)?;
                     return Ok(HandlerOutput {
                         result: serde_json::json!({
-                            "owner": input.owner,
-                            "id": input.id,
+                            "owner": owner,
+                            "id": id,
                             "recorded": recorded.to_json(),
                         }),
                         ..HandlerOutput::default()
@@ -2151,7 +2171,7 @@ pub fn sync_op(sync: CollectorRunner) -> crate::commands::ops::Op {
                     });
                 }
                 let report = sync
-                    .sync(&run, &input.owner, &input.id, trigger)
+                    .sync(&run, &owner, &id, trigger)
                     .await
                     .map_err(failed)?;
                 Ok(HandlerOutput {
@@ -3014,6 +3034,46 @@ pub(crate) mod tests {
         }
     }
 
+    /// The command names a collector by its ref: a string that isn't a
+    /// collector ref (or has no `<extension>/<id>`) is refused at
+    /// `/collector`, and an unknown collector is not found.
+    #[tokio::test]
+    async fn sync_takes_a_collector_ref() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        for bad in ["work/bad", "effort:eff1", "collector:nowhere"] {
+            let err = fx
+                .svc
+                .commands
+                .run(
+                    &oxplow_domain::Actor::Human,
+                    SYNC,
+                    json!({ "collector": bad }),
+                    false,
+                )
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(&err, CommandError::Invalid { field: Some(f), .. } if f == "/collector"),
+                "{bad}: {err:?}"
+            );
+        }
+        let err = fx
+            .svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                SYNC,
+                json!({ "collector": "collector:ghost/none" }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Invalid { message, .. } if message.contains("no collector")),
+            "{err:?}"
+        );
+    }
+
     /// P7.C2: three failed runs in a row disable a collector; then
     /// `oxplow.collector.sync` refuses it naming the reason, and a person's
     /// `oxplow.contribution.enable` lets it run again. An agent can't enable it.
@@ -3032,7 +3092,7 @@ pub(crate) mod tests {
             fx.svc.commands.run(
                 &oxplow_domain::Actor::Human,
                 SYNC,
-                json!({ "owner": "work", "id": "bad" }),
+                json!({ "collector": "collector:work/bad" }),
                 false,
             )
         };

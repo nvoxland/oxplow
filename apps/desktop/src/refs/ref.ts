@@ -222,6 +222,11 @@ export function pageRef(name: string, params?: Record<string, ParamValue>): stri
   return params ? withParams(head, params) : head;
 }
 
+/** An extension's collector: the contribution `collector:<extension>/<id>`. */
+export function collectorRef(extension: string, id: string): string {
+  return refOf("collector", `${extension}/${id}`);
+}
+
 /** An extension's page: the contribution `page:<extension>/<page>[?params]`
  *  (a shell route has no slash). */
 export function extPageRef(extension: string, page: string, params?: Record<string, ParamValue>): string {

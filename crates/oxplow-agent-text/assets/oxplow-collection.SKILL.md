@@ -15,7 +15,8 @@ automatic; your job is small and is about making sure the data exists,
 Which tests you run, and when, is up to you and the project — oxplow
 doesn't ask for any. What it needs is to **see the runs you do make**,
 so their results and coverage attach to the effort. The project's
-commands are in the `testing:` block of `.oxplow/project.yaml`.
+commands are in the `testing:` block of `.oxplow/project.yaml`, and its report
+collectors in the project's own extension, `oxplow/extensions/project/extension.yaml`.
 
 - **Run tests through a report-emitting command.** A bare
   `bun test <file>` / `cargo test <name>` writes no report, so the run
@@ -43,7 +44,7 @@ commands are in the `testing:` block of `.oxplow/project.yaml`.
   against the effort (command + exit code, + the parsed suite tree). You don't
   report it: the run is the effort whose tool call ran it.
 - **Individual tests + coverage are parsed by oxplow, not you.** Each
-  report collector (`collectors:` with `records:` — JUnit → per-test
+  report collector (`collectors:` with `records:` in the project's extension — JUnit → per-test
   tree; lcov / cobertura / jacoco → diff coverage over the effort's
   changed lines) reads its report after a run that wrote it — so in a
   polyglot repo each stack's report lights up on its own run. **Never read a
@@ -56,7 +57,7 @@ commands are in the `testing:` block of `.oxplow/project.yaml`.
   the project has none yet) → run `/oxplow:configure`, which wires
   **every** test stack in the repo.
 - **A report was written outside a run oxplow saw** → run its collector
-  by hand: `oxplow.collector.sync { owner: "project", id }`
+  by hand: `oxplow.collector.sync { collector: "collector:project/<id>" }`
   (`mcp__oxplow__run_command`); it reads the report now and records it
   in your thread, through the same deterministic parse.
 

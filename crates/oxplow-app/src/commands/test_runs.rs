@@ -126,7 +126,7 @@ mod tests {
         };
         let out = sync(
             agent.clone(),
-            json!({ "owner": "project", "id": "tests.coverage" }),
+            json!({ "collector": "collector:project/tests.coverage" }),
         )
         .await
         .unwrap();
@@ -141,14 +141,14 @@ mod tests {
 
         let err = sync(
             Actor::Human,
-            json!({ "owner": "project", "id": "tests.coverage" }),
+            json!({ "collector": "collector:project/tests.coverage" }),
         )
         .await
         .unwrap_err();
         assert!(matches!(err, CommandError::Invalid { .. }), "{err:?}");
         let err = sync(
             agent,
-            json!({ "owner": "project", "id": "other", "thread": "thread:thr1" }),
+            json!({ "collector": "collector:project/other", "thread": "thread:thr1" }),
         )
         .await
         .unwrap_err();
