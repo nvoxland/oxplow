@@ -44,6 +44,46 @@ use oxplow_db::Database;
 use oxplow_domain::{DomainError, StoredEvent};
 use tokio::sync::Notify;
 
+/// Core's own event consumers, by name: what an extension's `after:` may
+/// name as `consumer:<name>` (`oxplow_domain::ordering`). The two that run
+/// extensions' effects and collectors aren't here: an `after:` names the
+/// effect or collector itself.
+pub const CORE_CONSUMERS: &[&str] = &[
+    "advisories.post_tool",
+    "advisories.turn_end",
+    "capabilities.agent_text",
+    "change.analyze",
+    "collection",
+    "collection.run_reports",
+    "config.extensions",
+    "config.metrics",
+    "config.providers",
+    "config.scripts",
+    "config.workspace_filter",
+    "effort.claim",
+    "effort.commits",
+    "effort.evidence",
+    "effort.landing",
+    "effort.lifecycle",
+    "effort.observe",
+    "effort.policy",
+    "extension_models.entities",
+    "knowledge.records",
+    "knowledge.switch",
+    "metrics.entity_states",
+    "page_ref.work_item",
+    "search.index",
+    "snapshots.switch",
+    "symbols.collect",
+    "thread.checkpoint",
+    "token_usage.otlp",
+    "token_usage.turns",
+    "tool_call.project",
+    "ui.push",
+    "wiki.attribution",
+    "work_items.project",
+];
+
 /// A consumer whose work runs outside the pump's transaction (see the
 /// module docs). `handle` must be idempotent: it is re-run after a crash
 /// between the work and the checkpoint.
@@ -592,7 +632,9 @@ fn retryable(event: &StoredEvent, id: i64) -> Result<(), DomainError> {
 
 /// `slots` grouped so each consumer comes in a level after every consumer
 /// it runs `after` (among these slots; one outside the set is the loop's
-/// business). A cycle falls back to one last level.
+/// business). The catalog refuses an extension order that would make
+/// consumers wait on each other, so a cycle here is core's own mistake:
+/// logged as an error, its members put in one last level.
 fn settle_levels(mut slots: Vec<Arc<AsyncSlot>>) -> Vec<Vec<Arc<AsyncSlot>>> {
     let mut levels: Vec<Vec<Arc<AsyncSlot>>> = Vec::new();
     let mut placed: Vec<&'static str> = Vec::new();
@@ -605,6 +647,10 @@ fn settle_levels(mut slots: Vec<Arc<AsyncSlot>>) -> Vec<Vec<Arc<AsyncSlot>>> {
                 .all(|dep| placed.contains(&dep.as_str()) || !names.contains(&dep.as_str()))
         });
         if ready.is_empty() {
+            tracing::error!(
+                consumers = ?waiting.iter().map(|s| s.consumer.name()).collect::<Vec<_>>(),
+                "event pump: these consumers wait on each other"
+            );
             levels.push(waiting);
             break;
         }
@@ -1321,5 +1367,35 @@ mod tests {
         *flaky.busy_left.lock() = 0;
         assert_eq!(pump.run_once().await.unwrap().handled, 1);
         assert_eq!(store.checkpoint("flaky".into()).await.unwrap(), 2);
+    }
+}
+
+#[cfg(test)]
+mod core_consumer_list {
+    /// Every consumer a booted app registers is in
+    /// [`super::CORE_CONSUMERS`] or is one of the two that run extensions'
+    /// contributions: the list `after:` targets resolve against.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_core_consumer_list_is_what_a_booted_app_registers() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::test_fixtures::init_git_repo(dir.path());
+        let svc = crate::Services::in_memory(dir.path()).await.unwrap();
+        crate::boot::run_boot_orchestration(&svc).await.unwrap();
+        let mut registered: Vec<&str> = svc
+            .event_pump
+            .consumer_names()
+            .into_iter()
+            .filter(|n| {
+                ![
+                    crate::effect_triggers::NAME,
+                    crate::collector_triggers::NAME,
+                ]
+                .contains(n)
+            })
+            .collect();
+        registered.sort();
+        let mut listed = super::CORE_CONSUMERS.to_vec();
+        listed.sort();
+        assert_eq!(registered, listed);
     }
 }

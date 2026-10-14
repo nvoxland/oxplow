@@ -502,6 +502,37 @@ An effect runs as a program you approve in Settings → Data, and only
 on events logged after the approval. Any edit to the extension's files
 stops it until it's approved again.
 
+### Ordering
+
+When one event reaches several effects or collectors, `after:` says
+which run first:
+
+```yaml
+effects:
+  - id: notify
+    on: [work_item.state_changed]
+    entry: effects/notify.star
+    after: [react, "collector:acme/gather", change.analyze]
+```
+
+An entry is one of:
+- a bare id: this extension's own effect or collector;
+- a ref: `effect:<extension>/<id>` or `collector:<extension>/<id>`,
+  any extension's;
+- one of oxplow's own steps, by name (`change.analyze`, `collection`,
+  `page_ref.work_item`, …), or as `consumer:<name>`.
+
+A target nothing declares, or contributions that wait on each other, is
+a load error, and the contribution doesn't run. A target in a disabled
+extension is a warning: it runs without waiting. `oxplow extension
+check` prints each one's place (`order effect:acme/notify → level 2,
+after …`), and `v_contribution` holds it (`after`, `order_level`).
+
+Ordering is only about one event's handling. It isn't a dependency
+(`imports:` holds an extension back when a contract it reads is
+missing) and it isn't causality (an event's `cause` says which event's
+handling logged it).
+
 ### The event your script gets
 
 An effect, an effort policy and an `on:` collector all get the same

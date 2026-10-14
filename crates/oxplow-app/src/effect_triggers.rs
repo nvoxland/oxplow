@@ -60,8 +60,10 @@ use std::time::Duration;
 use crate::effects::{self, EffectDecl, Gate, Reaction};
 use crate::event_pump::AsyncEventConsumer;
 use crate::extension_commands::own_events;
+use crate::extensions::descriptors::{gates, placement};
 use crate::extensions::Extension;
 use crate::Services;
+use oxplow_domain::contribution::ContributionKind;
 
 /// The consumer's name: its checkpoint and dead letters.
 pub const NAME: &str = "effect.triggers";
@@ -71,10 +73,6 @@ pub use crate::event_lineage::MAX_CHAIN;
 pub struct EffectTriggers {
     services: Weak<Services>,
     hashes: std::sync::Mutex<FolderHashes>,
-    /// The `(effect, consumer)` pairs whose unknown `after` was warned about.
-    warned: std::sync::Mutex<std::collections::BTreeSet<(String, String)>>,
-    /// How many such warnings it gave (tests).
-    warnings: std::sync::atomic::AtomicUsize,
 }
 
 /// The effects' approval hashes for one catalog load: each extension's
@@ -94,8 +92,6 @@ impl EffectTriggers {
         Self {
             services,
             hashes: std::sync::Mutex::default(),
-            warned: std::sync::Mutex::default(),
-            warnings: std::sync::atomic::AtomicUsize::new(0),
         }
     }
 
@@ -124,11 +120,6 @@ impl EffectTriggers {
     fn folder_hashes(&self) -> usize {
         self.hashes.lock().unwrap().computed
     }
-
-    #[cfg(test)]
-    fn unknown_after_warnings(&self) -> usize {
-        self.warnings.load(std::sync::atomic::Ordering::Relaxed)
-    }
 }
 
 /// Register the consumer on `svc`'s pump (boot, before it spawns), and
@@ -147,11 +138,22 @@ pub(crate) fn effects(svc: &Services) -> Vec<(Extension, EffectDecl)> {
     effects_of(&svc.extension_catalog.get(&svc.layout.project_dir))
 }
 
+/// The enabled extensions' effects in the order one event runs them: by
+/// their compiled level (each after the effects its `after:` names), then
+/// by ref.
 fn effects_of(load: &[Extension]) -> Vec<(Extension, EffectDecl)> {
-    load.iter()
+    let mut out: Vec<(u32, String, Extension, EffectDecl)> = load
+        .iter()
         .filter(|e| e.enabled)
-        .flat_map(|e| e.effects.iter().map(move |d| (e.clone(), d.clone())))
-        .collect()
+        .flat_map(|e| {
+            e.effects.iter().map(move |d| {
+                let (level, _) = placement(e, ContributionKind::Effect, &d.id);
+                (level, d.name(), e.clone(), d.clone())
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
+    out.into_iter().map(|(_, _, e, d)| (e, d)).collect()
 }
 
 fn reacts_to(decl: &EffectDecl, event: &StoredEvent) -> bool {
@@ -159,37 +161,29 @@ fn reacts_to(decl: &EffectDecl, event: &StoredEvent) -> bool {
 }
 
 impl EffectTriggers {
-    /// The `after:` consumers of the effects `event_type` triggers (all of
-    /// them for `None`), limited to consumers the pump has.
+    /// The consumers the effects `event_type` triggers wait on (all of
+    /// them for `None`): the core consumers their `after:` names, and
+    /// `collector.triggers` when one runs after a collector.
     fn predecessors(&self, event_type: Option<&str>) -> Vec<String> {
         let Some(svc) = self.services.upgrade() else {
             return Vec::new();
         };
-        let known = svc.event_pump.consumer_names();
-        let mut after: Vec<String> = Vec::new();
-        for (_, decl) in effects(&svc) {
+        // Load checked every name against core's consumers; one this pump
+        // doesn't run (a test's partial pump) has nothing to wait for.
+        let running = svc.event_pump.consumer_names();
+        let mut out: Vec<String> = Vec::new();
+        for (ext, decl) in effects(&svc) {
             if event_type.is_some_and(|t| !decl.on.iter().any(|o| o == t)) {
                 continue;
             }
-            for name in &decl.after {
-                if !known.contains(&name.as_str()) {
-                    let pair = (decl.name(), name.clone());
-                    let first = self
-                        .warned
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .insert(pair.clone());
-                    if first {
-                        self.warnings
-                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        tracing::warn!(effect = %pair.0, consumer = %name, "`after` names no consumer; ignored");
-                    }
-                } else if !after.contains(name) {
-                    after.push(name.clone());
+            let (_, after) = placement(&ext, ContributionKind::Effect, &decl.id);
+            for gate in gates(ContributionKind::Effect, &after) {
+                if running.contains(&gate.as_str()) && !out.contains(&gate) {
+                    out.push(gate);
                 }
             }
         }
-        after
+        out
     }
 }
 
@@ -1125,6 +1119,63 @@ mod tests {
         serde_json::to_value(svc.sql.query_sql(sql, vec![], None).await.unwrap().rows).unwrap()
     }
 
+    /// On one event, effects run in their compiled order, not their
+    /// manifest's: each after the effects its `after:` names.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn effects_run_after_the_effects_they_name() {
+        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let svc = &fx.svc;
+        let skip = "def transform(x):\n    return {\"skip\": \"noted\"}\n";
+        let effect = |id: &str, after: &str| {
+            format!(
+                "  - id: {id}\n    summary: s\n    on: [work_item.state_changed]\n    entry: skip.star\n    after: [{after}]\n"
+            )
+        };
+        extension(
+            svc,
+            &format!(
+                "{}{}{}",
+                effect("last", "middle"),
+                effect("middle", "first"),
+                effect("first", "")
+            ),
+            &[("skip.star", skip)],
+        )
+        .await;
+        approve(svc).await;
+        let consumer = EffectTriggers::new(Arc::downgrade(svc));
+        let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        consumer.handle(&ev).await.unwrap();
+        assert_eq!(
+            rows(svc, "SELECT effect FROM v_effect_run ORDER BY id").await,
+            json!([["acme/first"], ["acme/middle"], ["acme/last"]])
+        );
+        assert!(
+            consumer.after().is_empty(),
+            "effects naming effects gate nothing"
+        );
+    }
+
+    /// An effect that runs after a collector or a core consumer makes the
+    /// consumer wait on that consumer's checkpoint for the events it handles.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_effect_after_a_collector_or_core_consumer_gates_its_events() {
+        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let svc = &fx.svc;
+        extension(
+            svc,
+            "  - id: react\n    summary: s\n    on: [work_item.state_changed]\n    entry: skip.star\n    after: [page_ref.work_item]\n",
+            &[("skip.star", "def transform(x):\n    return {\"skip\": \"x\"}\n")],
+        )
+        .await;
+        let consumer = EffectTriggers::new(Arc::downgrade(svc));
+        assert_eq!(
+            consumer.after_for("work_item.state_changed"),
+            vec!["page_ref.work_item".to_string()]
+        );
+        assert!(consumer.after_for("snapshot.taken").is_empty());
+    }
+
     /// An approved effect reacts once per matching event: its command runs
     /// as the effect, caused by the event; its `effect.result` is caused by
     /// that run; a redelivery writes nothing.
@@ -1238,26 +1289,6 @@ mod tests {
             json!([[2]]),
             "the edited effect didn't run"
         );
-    }
-
-    /// tsk798: an `after` naming no consumer is warned about once, not on
-    /// every ordering question the pump asks.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn an_unknown_after_is_warned_about_once() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        let svc = &fx.svc;
-        extension(
-            svc,
-            &format!("{MARK_DONE}    after: [no.such.consumer]\n"),
-            &[("mark.star", MARK)],
-        )
-        .await;
-        let consumer = EffectTriggers::new(Arc::downgrade(svc));
-        for _ in 0..3 {
-            assert!(consumer.after().is_empty());
-            assert!(consumer.after_for("work_item.state_changed").is_empty());
-        }
-        assert_eq!(consumer.unknown_after_warnings(), 1);
     }
 
     /// tsk798: a reaction's command shares `oxplow.command.sequence`'s compiled

@@ -1891,8 +1891,9 @@ export type CollectorSpec = {
 	provider: ProviderRead | null,
 	trigger: Trigger,
 	/**
-	 *  With an `on:` trigger: the pump consumers that must have handled
-	 *  the event first (`change.analyze`).
+	 *  With an `on:` trigger: what it runs after on one event — an effect,
+	 *  a collector or a core consumer (`change.analyze`), as written; the
+	 *  catalog resolves it to refs.
 	 */
 	after: string[],
 	/**
@@ -2490,8 +2491,19 @@ export type Descriptor = {
 	 *  (`capability::check_need`'s forms). Never what it was granted.
 	 */
 	needs: string[],
-	// Contributions it runs after (by alias, as the manifest names them).
+	/**
+	 *  What it runs after when an event reaches it and them (an effect's
+	 *  or a collector's `after:`), as refs once the catalog resolved them
+	 *  (`oxplow_domain::ordering`): `effect:<ext>/<id>`,
+	 *  `collector:<ext>/<id>` or `consumer:<name>`.
+	 */
 	after: string[],
+	/**
+	 *  Where it runs among the effects and collectors one event reaches:
+	 *  0 first, each after every contribution it names. `None` for a kind
+	 *  that isn't ordered.
+	 */
+	order_level: number | null,
 	/**
 	 *  The name it takes in a space extensions share (a metric key, an
 	 *  event type, a skill name, `<capability>/<id>`); two contributions
@@ -2599,7 +2611,10 @@ export type EffectDecl = {
 	entry: string,
 	// Its source.
 	script: string,
-	// Consumers it waits for on each event.
+	/**
+	 *  What it runs after on one event, as written (resolved to refs on
+	 *  its descriptor; `extensions.md` "Ordering").
+	 */
 	after: string[],
 	// `file:line` of the declaration.
 	declaredAt: string,

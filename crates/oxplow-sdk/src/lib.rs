@@ -1154,6 +1154,24 @@ pub enum Format {
 /// <contribution> v<n>: available `` or `unavailable (<why>)` — what an
 /// author reads to see whether a contract it consumes is there, and what
 /// it withholds when it isn't.
+/// Where each of `ext`'s effects and collectors that names an `after:`
+/// runs on an event, as the catalog compiled it: `effect:acme/notify →
+/// level 2, after effect:acme/react`.
+pub fn order_lines(ext: &Extension) -> Vec<String> {
+    ext.contributions
+        .iter()
+        .filter(|d| !d.after.is_empty())
+        .map(|d| {
+            format!(
+                "{} → level {}, after {}",
+                d.id,
+                d.order_level.unwrap_or(0),
+                d.after.join(", ")
+            )
+        })
+        .collect()
+}
+
 pub fn import_lines(ext: &Extension) -> Vec<String> {
     ext.public_contracts
         .bindings
@@ -1260,6 +1278,9 @@ pub fn render_findings(report: &CheckReport, format: Format) -> String {
             }
             for i in import_lines(&report.extension) {
                 out.push_str(&format!("import {i}\n"));
+            }
+            for o in order_lines(&report.extension) {
+                out.push_str(&format!("order {o}\n"));
             }
             for line in &report.profiles {
                 out.push_str(&format!("{line}\n"));
@@ -1687,6 +1708,39 @@ mod tests {
             .await,
             Err(SdkError::NotFound(_))
         ));
+    }
+
+    /// `check` prints where each effect that names an `after:` runs.
+    #[tokio::test]
+    async fn check_prints_the_compiled_order() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "oxplow/extensions/ord/extension.yaml",
+            "manifest: 2\nname: ord\nsharing: private\nintent:\n  purpose: x\n  examples: [{ name: a }]\neffects:\n  - { id: first, summary: s, on: [work_item.state_changed], entry: e.star }\n  - { id: second, summary: s, on: [work_item.state_changed], entry: e.star, after: [first, change.analyze] }\n",
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/ord/e.star",
+            "def transform(x):\n    return {\"skip\": \"x\"}\n",
+        );
+        let report = check(
+            dir.path(),
+            "ord",
+            &ExtensionCatalog::new(),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let text = render_findings(&report, Format::Text);
+        assert!(
+            text.contains(
+                "order effect:ord/second → level 1, after effect:ord/first, consumer:change.analyze\n"
+            ),
+            "{text}"
+        );
     }
 
     /// `check` prints a line per `ai_profiles:` entry: what serves it.

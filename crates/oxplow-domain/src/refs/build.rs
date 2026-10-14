@@ -295,6 +295,12 @@ pub fn collector_ref(owner: &str, id: &str) -> String {
     of(k::COLLECTOR, &format!("{owner}/{id}"))
 }
 
+/// One of core's event consumers (`consumer:change.analyze`), as an
+/// `after:` names it.
+pub fn consumer_ref(name: &str) -> String {
+    of(k::CONSUMER, name)
+}
+
 /// The provider-scoped id inside a `work_item` ref (`oxplow:tsk42`,
 /// `issues:ENG-12`) — the `page_ref` id of the work item.
 pub fn work_item_id_of_ref(r: &str) -> Option<&str> {
@@ -496,6 +502,7 @@ mod tests {
             claim_ref(1),
             decision_ref(1),
             collector_ref("a", "b"),
+            consumer_ref("change.analyze"),
         ]
         .iter()
         .map(|r| kind_of(r).unwrap())

@@ -2922,6 +2922,41 @@ design, so building it is filling in, not deciding:
   reviewed. Until something reads it, building it would be an unproven
   contract.
 
+## Ordering
+
+When one event reaches several effects or collectors, their `after:`
+says which run first (`oxplow_domain::ordering`, compiled by
+`extensions::descriptors::check_catalog`).
+
+- **Targets are refs.** `effect:<ext>/<id>`, `collector:<ext>/<id>` (any
+  enabled extension's) or `consumer:<name>`, one of core's event consumers
+  (`event_pump::CORE_CONSUMERS`, kept equal to what a booted app registers
+  by `the_core_consumer_list_is_what_a_booted_app_registers`; the two
+  that run extensions' contributions aren't targets). A bare name is this
+  extension's own effect or collector, else a core consumer.
+  `Descriptor.after` and `v_contribution.after` hold the resolved refs.
+- **Mistakes are load errors.** A target nothing declares, a cycle (each
+  member's extension gets the error once), or effects and collectors that
+  wait on each other both ways (the two consumers would each wait on the
+  other) take the contribution out of its extension with a `file` error.
+  A target in a disabled extension is a warning and the edge is dropped.
+- **Levels.** Each ordered contribution gets `order_level` (0 first),
+  stored in `contribution.order_level` (V68).
+  `extensions::descriptors::placement` reads it with the resolved targets.
+- **Running.** `effect.triggers` runs an event's effects sorted by
+  level, then ref. `collector.triggers` runs level by level: a level's
+  fact collectors over one corpus (`run_fact_collectors`' `select`), then
+  its entity collectors. Both keep their one checkpoint (renaming a
+  consumer restarts it from seq 0). Cross-consumer targets become pump
+  gates (`descriptors::gates`): a core consumer by name, the other
+  kind's consumer for a contribution of the other kind; a gate on a
+  consumer the pump doesn't run (a test's partial pump) is left out.
+- **Inspection.** `oxplow extension check` prints an `order` line per
+  contribution that names an `after:` (`oxplow_sdk::order_lines`).
+- **Not dependency, not causality.** `imports:` is a dependency (a
+  missing contract holds the consumer back); an event's `cause` is
+  causality. `after:` only orders one event's handling.
+
 ## Effects
 
 `effects:` (stable since P11, tsk956 — a shared or bundled extension's
@@ -2942,7 +2977,7 @@ effects:
     where: { to: done }            # optional: payload fields equal to these
     needs: [sql.read]              # the scopes its script calls: only what a script can (`scope_calls::CALLABLE`)
     entry: effects/announce.star   # transform({event}) → {commands, events?} | {skip}
-    after: [page_ref.work_item]    # optional: consumers it waits for
+    after: [page_ref.work_item]    # optional: what it runs after on one event ("Ordering")
 ```
 
 **Loading** (P8.D9) reads `on`/`where` through the collectors'
@@ -2986,10 +3021,9 @@ effect comes with oxplow and offers **Read the script** — the
 lives.
 
 **Running** (P8.D10, `effect_triggers.rs`): one async pump consumer,
-`effect.triggers` (registered at boot beside `collector.triggers`, with
-the same `after`/`after_for` handling of each effect's `after:` — one
-naming no consumer is warned about once per effect and name, not on each
-ordering question the pump asks). Per
+`effect.triggers` (registered at boot beside `collector.triggers`). It
+runs an event's effects in their compiled order and waits, through the
+pump's `after_for`, for the consumers they name ("Ordering"). Per
 event, each enabled effect whose `on`/`where` match **reacts at most
 once**, keyed by `effect_run (effect, event_id)` (V149, `v_effect_run`):
 1. a row exists — a redelivery: nothing. A `started` row the live
