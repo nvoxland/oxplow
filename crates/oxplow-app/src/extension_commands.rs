@@ -1295,7 +1295,7 @@ impl ExtensionCommands {
                 );
                 let live: std::sync::Arc<dyn Fn() -> Result<(), String> + Send + Sync> =
                     std::sync::Arc::new(move || {
-                        let snapshot = catalog.runtime_snapshot(&root);
+                        let snapshot = catalog.live_snapshot(&root);
                         let current = snapshot
                             .extensions()
                             .iter()

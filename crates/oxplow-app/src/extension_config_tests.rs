@@ -531,7 +531,7 @@ fn host(fx: &EffortFixture) -> ConfigurationHost {
 
 fn owner(fx: &EffortFixture, generation: Option<String>) -> ContributionRef {
     let root = &fx.svc.layout.project_dir;
-    let snapshot = fx.svc.extension_catalog.runtime_snapshot(root);
+    let snapshot = fx.svc.extension_catalog.live_snapshot(root);
     let ext = snapshot
         .extensions()
         .iter()

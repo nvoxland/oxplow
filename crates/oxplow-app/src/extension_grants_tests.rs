@@ -110,7 +110,7 @@ async fn a_qualified_read_reaches_only_its_model_and_what_derives_from_it() {
     let errors = fx
         .svc
         .extension_catalog
-        .get(&root)
+        .unpinned(&root, "a test reads declarations")
         .iter()
         .find(|e| e.name == "acme")
         .map(|e| e.errors.join("\n"))

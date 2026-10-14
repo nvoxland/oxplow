@@ -559,7 +559,7 @@ pub fn validate_with_blocked(
                         import.binding,
                         import.target,
                         import.version,
-                        reason.describe(&import.target.extension)
+                        reason.describe(import.target.producer_label())
                     ),
                 );
                 if !import.optional || invalid_contract {

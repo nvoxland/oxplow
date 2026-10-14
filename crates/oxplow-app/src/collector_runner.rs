@@ -177,7 +177,10 @@ pub fn set_credential(
 ) -> Result<(), DomainError> {
     let ext = ctx
         .catalog
-        .get(ctx.root)
+        .unpinned(
+            ctx.root,
+            "a collector is found on its declaration; its run pins",
+        )
         .iter()
         .find(|e| e.name == extension)
         .cloned()
@@ -206,7 +209,15 @@ pub async fn list_collectors(ctx: &Collectors<'_>) -> Result<Vec<CollectorListin
     let health =
         crate::contribution_health::ContributionHealth::new(ctx.db.clone(), ctx.vocabulary.clone());
     let mut out = Vec::new();
-    for ext in ctx.catalog.get(ctx.root).iter().cloned() {
+    for ext in ctx
+        .catalog
+        .unpinned(
+            ctx.root,
+            "a collector is found on its declaration; its run pins",
+        )
+        .iter()
+        .cloned()
+    {
         let ext_dir = ctx.root.join(&ext.path);
         for spec in ext.collectors {
             let guarded = needs_approval(ctx.root, &ext.name, &spec);
@@ -1769,7 +1780,10 @@ pub fn find_collector(
 ) -> Result<(crate::extensions::Extension, CollectorSpec), RunCollectorError> {
     let ext = ctx
         .catalog
-        .get(ctx.root)
+        .unpinned(
+            ctx.root,
+            "a collector is found on its declaration; its run pins",
+        )
         .iter()
         .find(|e| e.name == owner)
         .cloned()

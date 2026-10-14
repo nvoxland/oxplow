@@ -258,6 +258,11 @@ pub struct ExtensionCatalog {
     /// The primary worktree's extensions may have changed.
     changes: tokio::sync::broadcast::Sender<()>,
     runtime_changes: tokio::sync::broadcast::Sender<()>,
+    /// A private catalog holding one candidate for staging: it is no
+    /// generation a reader could straddle, so reading it needs no pin. Only
+    /// the pin assertion reads it.
+    #[cfg(test)]
+    staged: bool,
 }
 
 impl Default for ExtensionCatalog {
@@ -269,6 +274,8 @@ impl Default for ExtensionCatalog {
             loads: AtomicUsize::default(),
             changes: tokio::sync::broadcast::channel(64).0,
             runtime_changes: tokio::sync::broadcast::channel(64).0,
+            #[cfg(test)]
+            staged: false,
         }
     }
 }
@@ -287,6 +294,18 @@ impl ExtensionCatalog {
             project: Some(project_dir.to_path_buf()),
             ..Self::default()
         }
+    }
+
+    /// A private catalog whose only generation is `candidate`, for staging
+    /// it before it is published.
+    pub(crate) fn staged(project_dir: &Path, candidate: Arc<CatalogSnapshot>) -> Self {
+        let catalog = Self {
+            #[cfg(test)]
+            staged: true,
+            ..Self::for_project(project_dir)
+        };
+        catalog.publish_active(candidate);
+        catalog
     }
 
     /// Replace the active primary-project catalog after coordinated
@@ -365,14 +384,46 @@ impl ExtensionCatalog {
     /// snapshot, with only immediate disable/removal revocations applied.
     /// Other roots and the not-yet-activated state use the current raw load.
     /// `snapshot` remains the current-files API for authoring and staging.
+    ///
+    /// A reader that combines this with another generation-owned map
+    /// (commands, capabilities, providers, models) must hold a generation
+    /// pin (`ExtensionActivation::read`, or a run's pin): tests assert one is
+    /// in scope. A revocation gate that has to answer even while a
+    /// publication waits uses [`Self::live_snapshot`].
     pub fn runtime_snapshot(&self, root: &Path) -> Arc<CatalogSnapshot> {
+        #[cfg(test)]
+        assert!(
+            self.staged
+                || self.active.lock().is_none()
+                || crate::extension_activation::ExtensionActivation::reader_in_scope(),
+            "a generation read outside a generation pin: pin it (`ExtensionActivation::read`), \
+             or read it explicitly (`unpinned`, `live_snapshot`)\n{}",
+            std::backtrace::Backtrace::force_capture()
+        );
+        self.live_snapshot(root)
+    }
+
+    /// The declarations as one value, read by a caller that needs nothing
+    /// else of the generation: everything it uses comes from the returned
+    /// snapshot, and what it starts (a command, a run) pins for itself.
+    /// `reason` says why that holds, so each such reader is explicit.
+    pub fn unpinned(&self, root: &Path, _reason: &'static str) -> Arc<Vec<Extension>> {
+        self.live_snapshot(root).extensions.clone()
+    }
+
+    /// The same declarations as [`Self::runtime_snapshot`], read as a
+    /// revocation gate: whether an owner is still enabled and current
+    /// right now, to refuse a callback, a job's publication or a run built
+    /// against a generation that has since moved. Such a check must not
+    /// wait on a publication (which waits on its readers), so it holds no
+    /// pin and decides nothing about which generation other maps are at.
+    pub fn live_snapshot(&self, root: &Path) -> Arc<CatalogSnapshot> {
         let Some(project) = self.project.as_deref().filter(|project| *project == root) else {
             return self.snapshot(root);
         };
         let Some(active) = self.active.lock().clone() else {
             return self.snapshot(root);
         };
-
         let mut revoked = oxplow_config::disabled_extensions(project)
             .into_iter()
             .collect::<std::collections::BTreeSet<_>>();
@@ -431,7 +482,7 @@ impl ExtensionCatalog {
     /// One extension by name. A disabled one is an error saying so; an
     /// unknown one is `NotFound`.
     pub fn named(&self, root: &Path, name: &str) -> Result<Extension, DomainError> {
-        let all = self.get(root);
+        let all = self.unpinned(root, "a lookup by name reads one snapshot");
         // A project extension using a bundled name never shadows it.
         let ext = all
             .iter()

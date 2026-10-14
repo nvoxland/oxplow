@@ -802,7 +802,7 @@ impl CapabilityRegistry {
         let Some((catalog, root)) = &self.catalog else {
             return implementations;
         };
-        let snapshot = catalog.runtime_snapshot(root);
+        let snapshot = catalog.live_snapshot(root);
         implementations.retain(|implementation| {
             implementation.extension.as_ref().is_none_or(|owner| {
                 snapshot
@@ -1209,7 +1209,11 @@ pub fn agent_text(svc: &crate::Services) -> oxplow_domain::agent::text::AgentTex
 /// outlived an upgrade, tsk376), when the extensions change, and on a
 /// switch.
 pub async fn refresh_agent_text(svc: &crate::Services) {
-    let text = agent_text(svc);
+    // The offered capabilities and the extensions' files are read from one
+    // generation; an unavailable one is refreshed by the next publication.
+    let Ok(text) = svc.sql.read_generation(async { agent_text(svc) }).await else {
+        return;
+    };
     let project_dir = &svc.layout.project_dir;
     let workspaces: Vec<std::path::PathBuf> = match svc.stream_store.list().await {
         Ok(streams) => streams

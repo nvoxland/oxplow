@@ -56,7 +56,11 @@ pub async fn data_entities(
         })
         .collect();
     let published: BTreeSet<String> = out.iter().map(|e| e.name.clone()).collect();
-    for ext in catalog.get(root).iter().filter(|e| e.enabled) {
+    for ext in catalog
+        .unpinned(root, "sources are listed from declarations")
+        .iter()
+        .filter(|e| e.enabled)
+    {
         for collector in &ext.collectors {
             for e in &collector.entities {
                 if published.contains(&e.view) {

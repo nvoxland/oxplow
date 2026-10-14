@@ -1180,7 +1180,10 @@ pub fn import_lines(ext: &Extension) -> Vec<String> {
             let state = match &b.unavailable_reason {
                 None if b.available => "available".to_string(),
                 None => "unavailable".to_string(),
-                Some(why) => format!("unavailable ({})", why.describe(&b.contribution.extension)),
+                Some(why) => format!(
+                    "unavailable ({})",
+                    why.describe(b.contribution.producer_label())
+                ),
             };
             format!("`{}` → {} v{}: {state}", b.id, b.contribution, b.version)
         })

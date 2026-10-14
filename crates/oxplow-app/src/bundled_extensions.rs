@@ -359,7 +359,12 @@ mod tests {
         crate::test_fixtures::activate_with_problems(&f.svc).await;
         let bundled: Vec<&str> = super::BUNDLED.iter().map(|b| b.name).collect();
         let mut checked = 0;
-        for ext in f.svc.extension_catalog.get(f._dir.path()).iter() {
+        for ext in f
+            .svc
+            .extension_catalog
+            .unpinned(f._dir.path(), "a test reads declarations")
+            .iter()
+        {
             if !bundled.contains(&ext.name.as_str()) {
                 continue;
             }
@@ -2041,7 +2046,10 @@ mod tests {
             &f.svc.approvals,
             &root,
             &config,
-            f.svc.extension_catalog.get(&root).as_ref(),
+            f.svc
+                .extension_catalog
+                .unpinned(&root, "a test reads declarations")
+                .as_ref(),
         );
         let follow_up = programs
             .iter()

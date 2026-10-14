@@ -97,7 +97,7 @@ impl JobGrantResolver for DeclaredJobGrants {
         {
             return Err(JobAuthorityError::Denied);
         }
-        let snapshot = self.catalog.runtime_snapshot(&self.project);
+        let snapshot = self.catalog.live_snapshot(&self.project);
         let extension = snapshot
             .extensions()
             .iter()
@@ -367,7 +367,7 @@ fn current_descriptor(
 ) -> Result<Descriptor, JobAuthorityError> {
     JobOperationKey::new(owner.clone(), "authority".into())
         .map_err(|_| JobAuthorityError::Denied)?;
-    let snapshot = catalog.runtime_snapshot(project);
+    let snapshot = catalog.live_snapshot(project);
     let extension = snapshot
         .extensions()
         .iter()

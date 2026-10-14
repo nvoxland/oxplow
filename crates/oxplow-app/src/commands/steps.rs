@@ -527,7 +527,7 @@ impl CommandBus {
         let (c, input, run) = (compose.clone(), input.clone(), run.clone());
         let (sql, db) = (self.sql.clone(), self.db.clone());
         let runtime = tokio::runtime::Handle::current();
-        let routed = tokio::task::spawn_blocking(move || {
+        let routed = crate::extension_activation::ExtensionActivation::spawn_blocking(move || {
             let composing = super::compose::Composing {
                 sql: &sql,
                 db: &db,

@@ -201,7 +201,7 @@ impl StateHost {
         if !matches!(run.decide(Need::Scope(service.into())), Decision::Allowed) {
             return Err(StateHostError::Denied("live run authority refused access"));
         }
-        let snapshot = self.catalog.runtime_snapshot(&self.project);
+        let snapshot = self.catalog.live_snapshot(&self.project);
         if owner.generation.as_deref() != Some(snapshot.generation()) {
             return Err(StateHostError::Denied(
                 "the owning catalog generation is not current",

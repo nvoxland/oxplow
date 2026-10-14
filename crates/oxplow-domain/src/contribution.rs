@@ -526,9 +526,21 @@ impl ContributionId {
         }
     }
 
+    /// Who a report names as its producer: the extension, or for an
+    /// import of a global name nothing declares, the name itself.
+    pub fn producer_label(&self) -> &str {
+        if self.extension.is_empty() {
+            &self.local
+        } else {
+            &self.extension
+        }
+    }
+
     /// What's wrong with it, if anything.
     pub fn problem(&self) -> Option<String> {
-        if !valid_extension_name(&self.extension) {
+        // An import of a global name nothing declares has no owner to name.
+        let ownerless = self.extension.is_empty() && self.kind.global_name();
+        if !ownerless && !valid_extension_name(&self.extension) {
             return Some(format!(
                 "`{}` isn't an extension name (lowercase letters, digits and single dashes, \
                  starting with a letter)",

@@ -455,7 +455,7 @@ impl Instance {
                         && self
                             .deps
                             .catalog
-                            .runtime_snapshot(&self.deps.project_dir)
+                            .live_snapshot(&self.deps.project_dir)
                             .extensions()
                             .iter()
                             .any(|ext| {
@@ -660,7 +660,7 @@ impl Instance {
                 let snapshot = registry
                     .deps
                     .catalog
-                    .runtime_snapshot(&registry.deps.project_dir);
+                    .live_snapshot(&registry.deps.project_dir);
                 if !snapshot.extensions().iter().any(|current| {
                     current.name == ext.name
                         && current.origin == ext.origin
@@ -1608,7 +1608,10 @@ impl ProviderRegistry {
 
     /// The primary worktree's extensions.
     fn extensions(&self) -> Arc<Vec<Extension>> {
-        self.deps.catalog.get(&self.deps.project_dir)
+        self.deps.catalog.unpinned(
+            &self.deps.project_dir,
+            "an instance resolves against one snapshot; a start checks the live gate",
+        )
     }
 
     /// The enabled extension, provider and instance id behind `instance`

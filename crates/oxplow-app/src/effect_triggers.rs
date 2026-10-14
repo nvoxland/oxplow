@@ -135,7 +135,10 @@ pub fn register(svc: &Arc<Services>) {
 /// The enabled extensions' effects, in the primary worktree (where, like
 /// providers and commands, they run from).
 pub(crate) fn effects(svc: &Services) -> Vec<(Extension, EffectDecl)> {
-    effects_of(&svc.extension_catalog.get(&svc.layout.project_dir))
+    effects_of(&svc.extension_catalog.unpinned(
+        &svc.layout.project_dir,
+        "an effect is matched on its declaration; its run pins through the bus",
+    ))
 }
 
 /// The enabled extensions' effects in the order one event runs them: by
@@ -231,7 +234,10 @@ impl EffectTriggers {
             svc.db.clone(),
             svc.vocabulary.clone(),
         );
-        let load = svc.extension_catalog.get(&svc.layout.project_dir);
+        let load = svc.extension_catalog.unpinned(
+            &svc.layout.project_dir,
+            "an effect is matched on its declaration; its run pins through the bus",
+        );
         for (ext, decl) in effects_of(&load) {
             if !reacts_to(&decl, event) {
                 continue;

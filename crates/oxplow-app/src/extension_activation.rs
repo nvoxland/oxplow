@@ -101,7 +101,19 @@ pub struct ExtensionActivation {
     problems: parking_lot::Mutex<VocabularyErrors>,
     readers: Arc<Readers>,
     #[cfg(test)]
-    panic_after_commit: std::sync::atomic::AtomicBool,
+    panics: parking_lot::Mutex<Vec<(PanicPoint, u32)>>,
+}
+
+/// Where in a publication, past its database commit, a test makes the
+/// worker panic.
+#[cfg(test)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum PanicPoint {
+    /// Right after the commit: no in-memory map has been swapped.
+    AfterCommit,
+    /// After the maps, catalog and providers are published, before the
+    /// boundary shows the new generation.
+    BeforeBoundary,
 }
 
 impl ExtensionActivation {
@@ -143,7 +155,26 @@ impl ExtensionActivation {
     /// The next publication panics once its database state has committed.
     #[cfg(test)]
     pub(crate) fn panic_once_after_commit(&self) {
-        self.panic_after_commit.store(true, Ordering::SeqCst);
+        self.panic_at(PanicPoint::AfterCommit, 1);
+    }
+
+    /// The next `times` publications reaching `point` panic there.
+    #[cfg(test)]
+    pub(crate) fn panic_at(&self, point: PanicPoint, times: u32) {
+        self.panics.lock().push((point, times));
+    }
+
+    #[cfg(test)]
+    fn maybe_panic(&self, point: PanicPoint) {
+        let mut panics = self.panics.lock();
+        if let Some((_, left)) = panics
+            .iter_mut()
+            .find(|(at, left)| *at == point && *left > 0)
+        {
+            *left -= 1;
+            drop(panics);
+            panic!("injected panic at {point:?}");
+        }
     }
 
     /// Data changes do not require provider restarts. Only a changed entity
@@ -203,7 +234,7 @@ impl ExtensionActivation {
         // rejected an in-flight candidate before this receiver existed.
         if svc
             .extension_catalog
-            .runtime_snapshot(&svc.layout.project_dir)
+            .live_snapshot(&svc.layout.project_dir)
             .source_generation()
             != svc
                 .extension_catalog
@@ -239,6 +270,21 @@ impl ExtensionActivation {
                 }
             }
         });
+    }
+
+    /// `spawn_blocking` that keeps the caller's reader scope: a task-local
+    /// does not cross into the blocking pool, and the code there reads the
+    /// same generation the caller pinned.
+    pub fn spawn_blocking<T: Send + 'static>(
+        work: impl FnOnce() -> T + Send + 'static,
+    ) -> tokio::task::JoinHandle<T> {
+        let pins = READERS.try_with(Clone::clone).unwrap_or_default();
+        tokio::task::spawn_blocking(move || READERS.sync_scope(pins, work))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn reader_in_scope() -> bool {
+        READERS.try_with(|pins| !pins.is_empty()).unwrap_or(false)
     }
 
     fn inherited(&self) -> Option<GenerationPin> {
@@ -486,13 +532,8 @@ impl ExtensionActivation {
                         return Err(TxError::Storage(error));
                     }
                     #[cfg(test)]
-                    if svc
-                        .extension_activation
-                        .panic_after_commit
-                        .swap(false, Ordering::SeqCst)
-                    {
-                        panic!("injected panic after the generation committed");
-                    }
+                    svc.extension_activation
+                        .maybe_panic(PanicPoint::AfterCommit);
                     commands.apply();
                     capabilities.apply();
                     svc.vocabulary.swap(vocabulary);
@@ -519,6 +560,9 @@ impl ExtensionActivation {
                     crate::extension_runtime_adapters::PreparedRuntimeAdapters::follow_selected(
                         &svc, &knowledge, &snapshots,
                     );
+                    #[cfg(test)]
+                    svc.extension_activation
+                        .maybe_panic(PanicPoint::BeforeBoundary);
                     boundary.active = Some(published.clone());
                     svc.extension_activation
                         .activated

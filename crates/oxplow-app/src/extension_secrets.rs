@@ -122,7 +122,7 @@ impl ExtensionSecrets {
 
     fn current_owner(&self, extension: &str) -> Result<(), DomainError> {
         valid_owner(extension)?;
-        let snapshot = self.catalog.runtime_snapshot(&self.root);
+        let snapshot = self.catalog.live_snapshot(&self.root);
         let current = snapshot
             .extensions()
             .iter()

@@ -6,8 +6,29 @@ use std::path::{Path, PathBuf};
 
 use super::Extension;
 
-/// Serializes this process's install, update and startup recovery decisions.
-pub(super) static INSTALL_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+/// Held while an install, update or startup recovery decides and publishes:
+/// an exclusive lock on `.oxplow/install.lock` in the project, so it
+/// serializes across threads and across processes sharing the project.
+/// Released when dropped (or when the process dies).
+#[must_use = "the lock is released when this is dropped"]
+pub(super) struct InstallLock {
+    _file: std::fs::File,
+}
+
+impl InstallLock {
+    /// Wait for the project's install lock.
+    pub(super) fn acquire(root: &Path) -> std::io::Result<Self> {
+        let dir = root.join(".oxplow");
+        std::fs::create_dir_all(&dir)?;
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(dir.join("install.lock"))?;
+        fs2::FileExt::lock_exclusive(&file)?;
+        Ok(Self { _file: file })
+    }
+}
 
 const STAGE_PREFIX: &str = ".ext-publish-";
 const MARKER: &str = "install-marker";
@@ -88,7 +109,7 @@ pub(super) fn install_parent(root: &Path, create: bool) -> std::io::Result<Optio
 pub fn recover_installations(
     root: &Path,
 ) -> Result<InstallRecoveryReport, oxplow_domain::DomainError> {
-    let _guard = INSTALL_LOCK.lock();
+    let _guard = InstallLock::acquire(root).map_err(|_| recovery_error())?;
     let Some(parent) = install_parent(root, false).map_err(|_| recovery_error())? else {
         return Ok(InstallRecoveryReport::default());
     };

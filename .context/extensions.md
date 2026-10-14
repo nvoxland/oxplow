@@ -126,6 +126,9 @@ does not make a contribution public.
   warnings. Malformed declarations, zero versions, duplicate local bindings,
   self-imports and ambiguous exports are errors even when optional. There is
   no catalog-order winner for duplicate identities.
+  An optional import of a global name (`command:`, `event_type:`) that no
+  extension declares is just a missing target: it degrades with the
+  rest, and a report names the global name as its producer.
 - A blocked producer cannot supply a binding. Required failure propagates
   to consumers to a fixed point; optional bindings become unavailable.
   Disabled consumers do not impose activation dependencies. Among otherwise
@@ -210,7 +213,10 @@ package's public identity. Runtime generation activation is integrated; import
 withdrawal and activation behavior are covered end to end by
 `extension_imports_tests.rs` (compatible, mismatched, missing, optional,
 cyclic, private/experimental, producer disabled, and an update that would break
-a consumer). A contract-blocked extension is cleared to `enabled: false` by the
+a consumer; collector, event-type and command exports and imports; diamonds, three-way
+and self cycles, an available optional edge closing a cycle, shared and
+experimental combinations, a repaired producer bringing its consumer back, and a
+guarded lens pruning its slot mounts). A contract-blocked extension is cleared to `enabled: false` by the
 load, so `CatalogSnapshot::admitted` holds it by `public_contracts.blocked`,
 not by `enabled`.
 
@@ -676,8 +682,11 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       lowercase letters, digits and single dashes.
     - `oxplow.extension.update { name, reviewed_sha }` re-clones from the recorded source. The old
       folder is replaced only after the staged copy validates, and only for
-      git-installed extensions. Candidate check and publication are serialized
-      within the process. Publication renames the installed folder into the
+      git-installed extensions. Candidate check and publication (and startup
+      install recovery) are serialized by an exclusive lock on
+      `.oxplow/install.lock`, so two installs of one name wait for each other
+      across threads and across processes on the project; the clone is
+      fetched before the lock, in a temp dir unique to the attempt. Publication renames the installed folder into the
       staging directory, then renames the complete candidate into place. A
       failed second rename restores the old folder; if restoration also fails,
       retain the backup and report its path rather than deleting it. Cleanup
@@ -4130,7 +4139,15 @@ recovered at once: the database is the truth, so the activation stages the
 generation again from it and publishes that, which clears `unavailable`; if
 that fails too, the boundary stays unavailable and the failure is a `<host>`
 problem in Settings → Extensions. Cancelling the async caller does not release
-the worker's writer while it can still commit.
+the worker's writer while it can still commit. Test hooks (`panic_at`) inject
+the panic right after the commit or after the maps and providers are published,
+any number of times, so both points and the failed restage are pinned
+(`a_panic_after_the_maps_are_published_recovers_the_generation`,
+`a_panic_on_the_restage_too_leaves_the_boundary_unavailable`).
+Activations serialize on one lock: a second `activate` waits and both return the
+same generation, and an edit landing while a candidate is staged rejects that
+publication ("catalog changed while activation was staged"); the next one
+carries the edit.
 
 **Who a publication waits for.** Every pin is listed while it's held, with
 what holds it (a run's contribution or actor and run id, or the reading
@@ -4174,6 +4191,28 @@ writer, so callback live checks cannot mistake a just-admitted owner for the
 previous generation. Callback registrations use a drop guard: cancellation
 releases retained run contexts and their generation pins. Explicit stop, disable,
 removal and changed credential scope deny admitted callback authority immediately.
+
+**Reading the catalog.** Every read of the activated declarations is one of
+four, and a test build checks the rule: `runtime_snapshot` (and `get`, which
+wraps it) panics when no generation pin is in scope and a generation is
+active, so a new unpinned reader fails the suite where it first runs.
+
+- *Pinned* (`ExtensionActivation::read`, or the pin a `RunContext` carries):
+  a reader that joins declarations to another generation-owned map —
+  commands, capabilities, providers, models. The agent-text refresh and the
+  effort policy's owner lookup pin for exactly this. A task-local does not
+  cross into `spawn_blocking`; use `ExtensionActivation::spawn_blocking`,
+  which carries the caller's pins (the command router does).
+- `ExtensionCatalog::unpinned(root, reason)`: a reader whose whole answer
+  comes from the one snapshot it takes (an effect or collector matched on its
+  declaration, a lookup by name, a listing). The `reason` says why that is
+  enough — typically that what it starts pins for itself.
+- `live_snapshot(root)`: a revocation gate — is this owner still enabled and
+  current now — for callbacks, job authorization and publication, a provider's
+  start check, secret ownership, and the generation stamp of a new run. It
+  must answer while a publication waits on readers, so it holds no pin.
+- `ExtensionCatalog::staged`: the private catalog one candidate is prepared
+  in (metric declarations); it is no generation a reader could straddle.
 
 Collector scheduling and fact-collector lookup retain a reader before selecting
 declarations. A carried RunContext pin can re-enter a reader on another task

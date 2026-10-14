@@ -580,7 +580,15 @@ impl MetricsService {
     /// extension (read from the project's primary worktree).
     fn extension_catalog(&self) -> ExtensionCatalog {
         let mut out = ExtensionCatalog::default();
-        for e in self.extensions_cache.get(&self.project_dir).iter().cloned() {
+        for e in self
+            .extensions_cache
+            .unpinned(
+                &self.project_dir,
+                "metric declarations are read whole from one snapshot",
+            )
+            .iter()
+            .cloned()
+        {
             if !e.enabled {
                 continue;
             }
@@ -2041,7 +2049,7 @@ impl MetricsService {
     fn approved_to_ask(&self, c: &FactCollector) -> bool {
         let root = &self.project_dir;
         self.extensions_cache
-            .get(root)
+            .unpinned(root, "approval is read from the declaration")
             .iter()
             .find(|e| e.name == c.owner)
             .and_then(|ext| {
@@ -2067,7 +2075,9 @@ impl MetricsService {
         mode: Mode,
     ) -> RunContext {
         let root = &self.project_dir;
-        let extensions = self.extensions_cache.get(root);
+        let extensions = self
+            .extensions_cache
+            .unpinned(root, "a run is parented to its collector's declaration");
         let Some(ext) = extensions.iter().find(|e| e.name == collector.owner) else {
             return parent.child(None, mode);
         };

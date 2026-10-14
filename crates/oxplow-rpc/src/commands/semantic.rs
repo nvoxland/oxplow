@@ -69,7 +69,9 @@ pub async fn effective_config(
         .map_err(|_| IpcError::internal("config lock poisoned"))?
         .clone();
     let root = svc.worktrees.resolve(None).await.into_local_path();
-    let extensions = svc.extension_catalog.get(&root);
+    let extensions = svc
+        .extension_catalog
+        .unpinned(&root, "the effective config lists declared programs");
     let ai = svc.ai.settings().await.ok();
     let global = oxplow_config::global_config_dir();
     Ok(oxplow_app::effective_config::effective_config(

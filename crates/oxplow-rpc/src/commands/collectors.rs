@@ -100,7 +100,9 @@ pub async fn program_source(
 /// The primary worktree's extensions, whose advisories are approved here.
 async fn shared_extensions(svc: &Services) -> Vec<oxplow_app::extensions::Extension> {
     let root = svc.worktrees.resolve(None).await.into_local_path();
-    svc.extension_catalog.get(&root).to_vec()
+    svc.extension_catalog
+        .unpinned(&root, "advisory approvals are read from declarations")
+        .to_vec()
 }
 
 /// What approving provider `instance` as it is on disk would change

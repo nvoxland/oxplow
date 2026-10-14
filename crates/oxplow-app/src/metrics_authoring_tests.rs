@@ -326,7 +326,7 @@ async fn the_lens_rows_carry_file_refs_to_the_path_and_line() {
     let ext = p
         .svc
         .extension_catalog
-        .get(p.dir.path())
+        .unpinned(p.dir.path(), "a test reads declarations")
         .iter()
         .find(|e| e.name == NAME)
         .cloned()
