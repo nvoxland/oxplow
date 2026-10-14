@@ -55,6 +55,13 @@ closure or lambda gets no record; its decisions count toward the enclosing
 named function. `FunctionMetrics.id` is the definition's id within its file
 (`Parser::parse(String,int)`, `main~2`).
 
+A change's functions are keyed by that id: base and head are matched on
+`(path, id)`, and each `v_change_function` row carries the function's
+symbol `ref` (`symbol:<path>/<id>`, `build::symbol_ref`), unique per change.
+Two overloads (or two same-named functions) in one file are two rows, each
+matched to its own base. The Function Changes and Tests Weakened lenses
+link the function by that ref.
+
 `FunctionMetrics.container_path` (and `AnalyzedFunction.container_path`)
 is the definition's symbol container: the outer-to-inner names of what it
 lives inside (class / impl / trait / mod / namespace / interface / enum),
@@ -241,8 +248,9 @@ The result also carries a `churn: Vec<AnalyzedFileChurn>` rollup
 added / deleted / modified line counts to the head-side function
 whose `[start_line, end_line]` interval contains each line.
 Deletions on the base side map to the corresponding head-side
-function via qualified-name match
-(`container::container::name`); base-only functions count toward
+function by symbol id
+(`Parser::parse(String)`, so overloads and same-named functions stay
+apart); base-only functions count toward
 `file_deleted` but produce no per-function row. `modified_lines`
 = `min(added_lines, deleted_lines)` per function — a cheap,
 explainable "edited both ways" signal. The diff is

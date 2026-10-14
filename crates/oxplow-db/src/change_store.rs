@@ -49,6 +49,8 @@ pub struct ChangeFileRow {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ChangeFunctionRow {
     pub path: String,
+    /// The function's symbol ref (`symbol:<path>/<id>`), which keys the row.
+    pub symbol_ref: String,
     pub container: String,
     pub name: String,
     pub status: String,
@@ -257,12 +259,12 @@ impl SqliteChangeStore {
                 write_files(tx, id, &results.files, &at, events_to)?;
                 for f in &results.functions {
                     tx.execute(
-                        "INSERT OR REPLACE INTO change_function (change_id, path, container, name, status, signature_changed,
+                        "INSERT OR REPLACE INTO change_function (change_id, path, ref, container, name, status, signature_changed,
                            body_changed, start_line, visibility, is_test, complexity, length, params_before, params_after,
                            complexity_delta, length_delta, added_lines, deleted_lines, modified_lines, churn_share)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
                         rusqlite::params![
-                            id, f.path, f.container, f.name, f.status, i64::from(f.signature_changed),
+                            id, f.path, f.symbol_ref, f.container, f.name, f.status, i64::from(f.signature_changed),
                             i64::from(f.body_changed), f.start_line, f.visibility, i64::from(f.is_test), f.complexity,
                             f.length, f.params_before, f.params_after, f.complexity_delta, f.length_delta,
                             f.added_lines, f.deleted_lines, f.modified_lines, f.churn_share

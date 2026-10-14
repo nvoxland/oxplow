@@ -207,11 +207,12 @@
     - { name: "zone", type: "TEXT", doc: "Architectural zone from the project's zone rules (`other` when none match)." }
     - { name: "is_test", type: "INTEGER", doc: "1 if the path looks like a test file." }
 - name: change_function
-  version: 1
+  version: 2
   description: "Functions a change added, deleted or modified (signature and/or body), with metric deltas and per-function churn. Unchanged functions aren't listed."
   columns:
     - { name: "change_id", type: "INTEGER", doc: "The change (v_change.id)." }
     - { name: "path", type: "TEXT", doc: "File." }
+    - { name: "ref", type: "TEXT", doc: "The function's symbol ref, `symbol:<path>/<id>` (`v_symbol.ref` without the snapshot): overloads and same-named functions are separate rows. Unique per change." }
     - { name: "container", type: "TEXT", doc: "Enclosing class/impl/module path, `::`-joined; '' at top level." }
     - { name: "name", type: "TEXT", doc: "Function name." }
     - { name: "status", type: "TEXT", doc: "`added`, `deleted` or `modified`." }
@@ -1457,7 +1458,7 @@
     - { name: "numerator", type: "REAL", doc: "Ratio numerator, for ratio measures." }
     - { name: "denominator", type: "REAL", doc: "Ratio denominator, for ratio measures." }
     - { name: "subject_kind", type: "TEXT", doc: "What the fact is about: `file` or `symbol`." }
-    - { name: "subject_ref", type: "TEXT", doc: "Logical id of the subject (`symbol:<path>::<name>`, `file:<path>`)." }
+    - { name: "subject_ref", type: "TEXT", doc: "Logical id of the subject (`symbol:<path>/<id>`, `file:<path>`)." }
     - { name: "path", type: "TEXT", doc: "File path." }
     - { name: "line", type: "INTEGER", doc: "Line number, when it has one." }
     - { name: "severity", type: "TEXT", doc: "Finding severity, for lint-like facts." }
@@ -1473,13 +1474,15 @@
     - { not_null: id }
     - { unique: id }
 - name: function
-  version: 1
-  description: "Functions in the current code tree, one row per function and stream: its latest cyclomatic complexity, length and parameter count from the code gauges (over `v_tree_fact`)."
+  version: 2
+  description: "Functions in the current code tree, one row per function ref and stream: its latest cyclomatic complexity, length and parameter count from the code gauges (over `v_tree_fact`), named by `v_symbol`: a function the symbol index doesn't have isn't listed."
   columns:
     - { name: "stream_id", type: "INTEGER", doc: "The stream (worktree) whose tree it's in." }
-    - { name: "symbol", type: "TEXT", doc: "`symbol:<path>::<name>`." }
+    - { name: "symbol", type: "TEXT", doc: "The function's `symbol:<path>/<id>` ref (`v_symbol.ref`)." }
     - { name: "path", type: "TEXT", doc: "The file it's in." }
-    - { name: "name", doc: "The function's name." }
+    - { name: "name", type: "TEXT", doc: "The function's own name (`v_symbol.name`)." }
+    - { name: "container", type: "TEXT", doc: "What it's inside, `::`-joined; NULL at top level (`v_symbol.container`)." }
+    - { name: "kind", type: "TEXT", doc: "`function`, `method` or `constructor` (`v_symbol.kind`)." }
     - { name: "line", doc: "Its first line." }
     - { name: "language", doc: "Its language (`rust`, `typescript`, …)." }
     - { name: "complexity", doc: "Cyclomatic complexity; NULL when not measured." }

@@ -87,15 +87,6 @@ pub fn is_test_function(path: &str, name: &str, container: &[String]) -> bool {
         || container.iter().any(|c| is_test_container(c))
 }
 
-fn qualified(f: &AnalyzedFunction) -> String {
-    f.container_path
-        .iter()
-        .chain([&f.name])
-        .cloned()
-        .collect::<Vec<_>>()
-        .join("::")
-}
-
 /// One function's base and head versions (either may be absent).
 type BaseHead<'a> = (Option<&'a AnalyzedFunction>, Option<&'a AnalyzedFunction>);
 
@@ -105,11 +96,12 @@ pub fn build_results(
     analysis: &AnalyzeFunctionsResult,
     zones: &ZoneRules,
 ) -> ChangeResults {
-    // (path, qualified name) → (base, head); the first of a duplicated name wins.
+    // (path, symbol id) → (base, head): an overload or a same-named function
+    // is its own entry.
     let mut index: BTreeMap<(String, String), BaseHead<'_>> = BTreeMap::new();
     for side in &analysis.sides {
         for f in &side.functions {
-            let slot = index.entry((side.path.clone(), qualified(f))).or_default();
+            let slot = index.entry((side.path.clone(), f.id.clone())).or_default();
             match side.side.as_str() {
                 "base" if slot.0.is_none() => slot.0 = Some(f),
                 "head" if slot.1.is_none() => slot.1 = Some(f),
@@ -126,14 +118,7 @@ pub fn build_results(
     let mut churn = BTreeMap::new();
     for c in &analysis.churn {
         for f in &c.functions {
-            let key = f
-                .container_path
-                .iter()
-                .chain([&f.name])
-                .cloned()
-                .collect::<Vec<_>>()
-                .join("::");
-            churn.insert((c.path.clone(), key), f);
+            churn.insert((c.path.clone(), f.id.clone()), f);
         }
     }
 
@@ -156,6 +141,7 @@ pub fn build_results(
         let c = churn.get(&(path.clone(), key.clone()));
         functions.push(ChangeFunctionRow {
             path: path.clone(),
+            symbol_ref: oxplow_domain::refs::build::symbol_ref(path, key),
             container: f.container_path.join("::"),
             name: f.name.clone(),
             status: status.into(),
@@ -1122,6 +1108,61 @@ mod tests {
         ));
     }
 
+    /// Two Java overloads in one change are two functions, each matched to
+    /// its own base: distinct symbol refs, and each one's churn is its own.
+    #[test]
+    fn overloads_are_two_rows_with_distinct_refs() {
+        let base = "class P {\n    void parse(String s) {\n        run(s);\n    }\n\n    int parse(int i) {\n        return i;\n    }\n}\n";
+        let head = "class P {\n    void parse(String s) {\n        if (s == null) {\n            return;\n        }\n        run(s);\n    }\n\n    int parse(int i) {\n        if (i < 0) {\n            return 0;\n        }\n        return i;\n    }\n}\n";
+        let files = vec![ChangedFile {
+            path: "src/P.java".into(),
+            status: "M".into(),
+            additions: 8,
+            deletions: 0,
+            base: Some(base.into()),
+            head: Some(head.into()),
+        }];
+        let analysis = crate::code_analysis::analyze_files(
+            vec![crate::code_analysis::AnalyzeFileSpec {
+                path: "src/P.java".into(),
+                base_content: Some(base.into()),
+                head_content: Some(head.into()),
+            }],
+            &ZoneRules::from_config(&[]),
+        );
+        let r = build_results(&files, &analysis, &ZoneRules::from_config(&[]));
+        let mut refs: Vec<_> = r
+            .functions
+            .iter()
+            .map(|f| (f.symbol_ref.clone(), f.status.clone(), f.added_lines))
+            .collect();
+        refs.sort();
+        assert_eq!(
+            refs,
+            vec![
+                (
+                    "symbol:src/P.java/P::parse(String)".to_string(),
+                    "modified".to_string(),
+                    Some(3)
+                ),
+                (
+                    "symbol:src/P.java/P::parse(int)".to_string(),
+                    "modified".to_string(),
+                    Some(3)
+                ),
+            ]
+        );
+    }
+
+    fn qualified_id(name: &str, container: &[&str]) -> String {
+        container
+            .iter()
+            .copied()
+            .chain([name])
+            .collect::<Vec<_>>()
+            .join("::")
+    }
+
     fn func(
         name: &str,
         params: u32,
@@ -1131,6 +1172,7 @@ mod tests {
         container: &[&str],
     ) -> AnalyzedFunction {
         AnalyzedFunction {
+            id: qualified_id(name, container),
             name: name.into(),
             start_line: start,
             length,
@@ -1174,6 +1216,7 @@ mod tests {
                 file_deleted: 4,
                 functions: vec![
                     AnalyzedFunctionChurn {
+                        id: "beta".into(),
                         name: "beta".into(),
                         container_path: vec![],
                         start_line_head: 12,
@@ -1182,6 +1225,7 @@ mod tests {
                         modified_lines: 2,
                     },
                     AnalyzedFunctionChurn {
+                        id: "fresh".into(),
                         name: "fresh".into(),
                         container_path: vec![],
                         start_line_head: 28,

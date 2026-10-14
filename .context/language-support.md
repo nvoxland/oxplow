@@ -233,5 +233,4 @@ Live: the single `Language` enum, the registry bundle, the LSP symbol surface,
 generic unit listing (`list_units` + `list_code_units`), and tree-sitter
 symbols with their index. **Still open:** exercising `unit_kinds` against the
 `metric_subject` roll-up hierarchy so metrics can be grouped by package/module
-in the Metrics Explorer; keying change analysis and the function metrics
-(`v_function`) by symbol id; and grammars from extensions (WASM).
+in the Metrics Explorer; and grammars from extensions (WASM).

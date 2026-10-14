@@ -1242,6 +1242,116 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "change_id",
+          "type": "INTEGER",
+          "doc": "The change (v_change.id)."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "File."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "The function's symbol ref, `symbol:<path>/<id>` (`v_symbol.ref` without the snapshot): overloads and same-named functions are separate rows. Unique per change."
+        },
+        {
+          "name": "container",
+          "type": "TEXT",
+          "doc": "Enclosing class/impl/module path, `::`-joined; '' at top level."
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "Function name."
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "doc": "`added`, `deleted` or `modified`."
+        },
+        {
+          "name": "signature_changed",
+          "type": "INTEGER",
+          "doc": "1 if its parameter count changed."
+        },
+        {
+          "name": "body_changed",
+          "type": "INTEGER",
+          "doc": "1 if its complexity or length changed."
+        },
+        {
+          "name": "start_line",
+          "type": "INTEGER",
+          "doc": "First line (head side, or base side if deleted)."
+        },
+        {
+          "name": "visibility",
+          "type": "TEXT",
+          "doc": "`public`, `private` or `unknown`."
+        },
+        {
+          "name": "is_test",
+          "type": "INTEGER",
+          "doc": "1 if it's a test (test file, test name or test container)."
+        },
+        {
+          "name": "complexity",
+          "type": "REAL",
+          "doc": "Cyclomatic complexity (head side, or base if deleted)."
+        },
+        {
+          "name": "length",
+          "type": "INTEGER",
+          "doc": "Length in lines."
+        },
+        {
+          "name": "params_before",
+          "type": "INTEGER",
+          "doc": "Parameter count before; NULL if added."
+        },
+        {
+          "name": "params_after",
+          "type": "INTEGER",
+          "doc": "Parameter count after; NULL if deleted."
+        },
+        {
+          "name": "complexity_delta",
+          "type": "REAL",
+          "doc": "Complexity change, for modified functions."
+        },
+        {
+          "name": "length_delta",
+          "type": "INTEGER",
+          "doc": "Length change, for modified functions."
+        },
+        {
+          "name": "added_lines",
+          "type": "INTEGER",
+          "doc": "Lines added inside it."
+        },
+        {
+          "name": "deleted_lines",
+          "type": "INTEGER",
+          "doc": "Lines deleted inside it."
+        },
+        {
+          "name": "modified_lines",
+          "type": "INTEGER",
+          "doc": "min(added, deleted): edited both ways."
+        },
+        {
+          "name": "churn_share",
+          "type": "REAL",
+          "doc": "Its share of the change's function churn (0–1)."
+        }
+      ],
+      "key": []
     }
   },
   "change_import": {
@@ -8219,7 +8329,7 @@
         {
           "name": "subject_ref",
           "type": "TEXT",
-          "doc": "Logical id of the subject (`symbol:<path>::<name>`, `file:<path>`)."
+          "doc": "Logical id of the subject (`symbol:<path>/<id>`, `file:<path>`)."
         },
         {
           "name": "path",
@@ -8302,6 +8412,71 @@
           "name": "name",
           "type": "",
           "doc": "The function's name."
+        },
+        {
+          "name": "line",
+          "type": "",
+          "doc": "Its first line."
+        },
+        {
+          "name": "language",
+          "type": "",
+          "doc": "Its language (`rust`, `typescript`, …)."
+        },
+        {
+          "name": "complexity",
+          "type": "",
+          "doc": "Cyclomatic complexity; NULL when not measured."
+        },
+        {
+          "name": "length",
+          "type": "",
+          "doc": "Length in lines; NULL when not measured."
+        },
+        {
+          "name": "parameters",
+          "type": "",
+          "doc": "Parameter count; NULL when not measured."
+        },
+        {
+          "name": "captured_at",
+          "type": "",
+          "doc": "When its latest capture ran."
+        }
+      ],
+      "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream (worktree) whose tree it's in."
+        },
+        {
+          "name": "symbol",
+          "type": "TEXT",
+          "doc": "The function's `symbol:<path>/<id>` ref (`v_symbol.ref`)."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "The file it's in."
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "The function's own name (`v_symbol.name`)."
+        },
+        {
+          "name": "container",
+          "type": "TEXT",
+          "doc": "What it's inside, `::`-joined; NULL at top level (`v_symbol.container`)."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`function`, `method` or `constructor` (`v_symbol.kind`)."
         },
         {
           "name": "line",

@@ -12,8 +12,8 @@
 //! old sides respectively. Then attribute each added line to the
 //! head-side function whose `[start_line, end_line]` interval
 //! contains it; each deleted line to the base-side function, then
-//! map to the head-side row via qualified-name lookup
-//! (`container::container::name`).
+//! map to the head-side row by symbol id (`Parser::parse(String)`),
+//! so overloads and same-named functions stay apart.
 //!
 //! `modified_lines = min(added, deleted)` per function — cheap,
 //! explainable, and good enough as a "this function was edited
@@ -27,6 +27,8 @@ use similar::{ChangeTag, TextDiff};
 /// Per-function churn for one file.
 #[derive(Debug, Clone)]
 pub struct FunctionChurn {
+    /// The function's symbol id, which matches base to head.
+    pub id: String,
     pub name: String,
     pub container_path: Vec<String>,
     pub start_line_head: u32,
@@ -71,15 +73,16 @@ pub fn compute_file_churn(
         };
     }
 
-    // Per-head-function counters keyed by qualified name. Vec keeps
+    // Per-head-function counters keyed by symbol id. Vec keeps
     // deterministic ordering and avoids pulling in a hash dep just
     // for this.
     let mut counters: Vec<(String, FunctionChurn)> = head_metrics
         .iter()
         .map(|m| {
             (
-                qualified_key(&m.container_path, &m.name),
+                m.id.clone(),
                 FunctionChurn {
+                    id: m.id.clone(),
                     name: m.name.clone(),
                     container_path: m.container_path.clone(),
                     start_line_head: m.start_line,
@@ -115,13 +118,7 @@ pub fn compute_file_churn(
 
     let mut base_intervals: Vec<(u32, u32, String)> = base_metrics
         .iter()
-        .map(|m| {
-            (
-                m.start_line,
-                m.end_line,
-                qualified_key(&m.container_path, &m.name),
-            )
-        })
+        .map(|m| (m.start_line, m.end_line, m.id.clone()))
         .collect();
     base_intervals.sort_by_key(|t| t.0);
 
@@ -175,14 +172,6 @@ fn diff_line_numbers(base: &str, head: &str) -> (Vec<u32>, Vec<u32>) {
         }
     }
     (added, deleted)
-}
-
-fn qualified_key(container_path: &[String], name: &str) -> String {
-    if container_path.is_empty() {
-        name.to_string()
-    } else {
-        format!("{}::{}", container_path.join("::"), name)
-    }
 }
 
 /// Walk `intervals` (sorted by start_line) and return the index of
@@ -277,7 +266,7 @@ mod tests {
     }
 
     #[test]
-    fn deletions_attribute_via_qualified_key_to_head_side() {
+    fn deletions_attribute_via_symbol_id_to_head_side() {
         let base = "fn foo() {\n    let a = 1;\n    let b = 2;\n    let c = 3;\n}\n";
         let head = "fn foo() {\n    let a = 1;\n}\n";
         let base_metrics = vec![fm("foo", 1, 5)];

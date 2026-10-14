@@ -576,6 +576,10 @@ mod tests {
         let functions = run_analytics_lens(&f, "change-functions", "change_id", change.id).await;
         assert_eq!(functions[0][1], serde_json::json!("grow"));
         assert_eq!(functions[0][3], serde_json::json!("signature"));
+        assert_eq!(
+            functions[0].as_array().unwrap().last().unwrap(),
+            "symbol:src/lib.rs/grow"
+        );
         let tests = run_analytics_lens(&f, "change-test-files", "change_id", change.id).await;
         assert_eq!(tests[0][0], serde_json::json!("tests/it.rs"));
     }
@@ -2572,12 +2576,12 @@ mod tests {
                        VALUES (90, 'src/hot.rs', 'modified', 10, 2, 'other', 0),
                               (90, 'src/calm.rs', 'modified', 3, 1, 'other', 0),
                               (90, 'src/big.rs', 'modified', 40, 20, 'other', 0);
-                     INSERT INTO change_function (change_id, path, container, name, status, signature_changed,
+                     INSERT INTO change_function (change_id, path, ref, container, name, status, signature_changed,
                          body_changed, start_line, visibility, is_test, length, params_before, params_after,
                          complexity_delta)
-                       VALUES (90, 'src/hot.rs', '', 'grow', 'modified', 0, 1, 1, 'public', 0, 20, 1, 1, 3),
-                              (90, 'src/hot.rs', '', 'widen', 'modified', 1, 0, 30, 'public', 0, 10, 1, 3, NULL),
-                              (90, 'src/hot.rs', '', 'fresh', 'added', 0, 0, 50, 'public', 0, 70, NULL, 0, NULL);",
+                       VALUES (90, 'src/hot.rs', 'symbol:src/hot.rs/grow', '', 'grow', 'modified', 0, 1, 1, 'public', 0, 20, 1, 1, 3),
+                              (90, 'src/hot.rs', 'symbol:src/hot.rs/widen', '', 'widen', 'modified', 1, 0, 30, 'public', 0, 10, 1, 3, NULL),
+                              (90, 'src/hot.rs', 'symbol:src/hot.rs/fresh', '', 'fresh', 'added', 0, 0, 50, 'public', 0, 70, NULL, 0, NULL);",
                 )
                 .map_err(oxplow_db::map_sql_err)
             })

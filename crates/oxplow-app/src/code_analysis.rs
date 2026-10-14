@@ -22,6 +22,8 @@ pub struct AnalyzeFileSpec {
 /// Function metadata for one (path, side) pair.
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct AnalyzedFunction {
+    /// Its symbol id within the file (`Parser::parse(String,int)`).
+    pub id: String,
     pub name: String,
     pub start_line: u32,
     pub length: u32,
@@ -50,6 +52,7 @@ pub struct AnalyzedFileSide {
 
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct AnalyzedFunctionChurn {
+    pub id: String,
     pub name: String,
     pub container_path: Vec<String>,
     pub start_line_head: u32,
@@ -146,6 +149,7 @@ pub fn analyze_files(files: Vec<AnalyzeFileSpec>, zones: &ZoneRules) -> AnalyzeF
                     .functions
                     .into_iter()
                     .map(|f| AnalyzedFunctionChurn {
+                        id: f.id,
                         name: f.name,
                         container_path: f.container_path,
                         start_line_head: f.start_line_head,
@@ -315,6 +319,7 @@ fn to_analyzed(metrics: Vec<FunctionMetrics>) -> Vec<AnalyzedFunction> {
     metrics
         .into_iter()
         .map(|m| AnalyzedFunction {
+            id: m.id,
             name: m.name,
             start_line: m.start_line,
             length: m.length,
