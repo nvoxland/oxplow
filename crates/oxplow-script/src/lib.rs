@@ -746,6 +746,38 @@ def transform(input):
     }
 
     #[test]
+    fn code_metrics_names_each_function_by_its_symbol_ref() {
+        // A function's id, ref, container and kind come from the same
+        // extraction `v_symbol` is built from: overloads are two functions.
+        let script = r#"
+def transform(input):
+    facts = []
+    for f in source_files():
+        for m in code_metrics(f["text"], f["language"], f["path"]):
+            facts.append({"measure": "acme.params", "value": m["parameter_count"], "subject": m["ref"], "dims": {"acme.kind": m["kind"], "acme.container": m["container"] or "-", "acme.id": m["id"]}})
+    return {"facts": facts}
+"#;
+        let mut map = std::collections::HashMap::new();
+        map.insert(
+            "src/Parser.java".to_string(),
+            "class Parser {\n  void parse(String s) {}\n  void parse(int n) {}\n}\n".to_string(),
+        );
+        let out = facts(script, map);
+        let mut subjects: Vec<_> = out.iter().filter_map(|f| f.subject.clone()).collect();
+        subjects.sort();
+        assert_eq!(
+            subjects,
+            vec![
+                "symbol:src/Parser.java/Parser::parse(String)".to_string(),
+                "symbol:src/Parser.java/Parser::parse(int)".to_string(),
+            ]
+        );
+        let dims = out[0].dims.as_ref().unwrap();
+        assert_eq!(dims["acme.kind"], serde_json::json!("method"));
+        assert_eq!(dims["acme.container"], serde_json::json!("Parser"));
+    }
+
+    #[test]
     fn source_files_and_markers_builtins_are_language_agnostic() {
         // A single script sweeps source_files() (each tagged with language) and
         // counts TODO/FIXME markers per file via the markers() capability — no

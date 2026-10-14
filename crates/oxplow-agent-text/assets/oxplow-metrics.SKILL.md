@@ -181,7 +181,7 @@ shape** — one atomic fact per subject, NOT a pre-aggregated total:
   (`oxplow.language`), one of your own `<namespace>.<name>`. A bare key
   (`language`) is refused, and the error names the conformed one.
 - `value` is the atomic number for this subject.
-- `subject` is a `"kind:ref"` string (`file:src/a.rs`, `symbol:src/a.rs::foo`).
+- `subject` is a `"kind:ref"` string (`file:src/a.rs`, `symbol:src/a.rs/foo`).
 - `rule` is a conformed slice value read as the `oxplow.rule` dimension (so a spec
   can `filter: { dimEq: [oxplow.rule, …] }` or slice by it).
 - `num`/`den` (optional) are ratio components — supply them when the measure is a
@@ -200,8 +200,10 @@ the return (an old `samples` / `findings` shape) is refused.
 - `files(glob)` → `[{path, text}]` of snapshot files (deterministic → `observed`).
 - `ast_query(text, language, sexpr)` → flat tree-sitter matches. Languages:
   `rust`/`typescript`/`tsx`/`javascript`/`python`/`go`/`java`/`c`/`cpp`/`clojure`.
-- `code_metrics(text, language)` → per-function `[{name, complexity, length,
-  parameter_count, start_line, end_line, visibility}]`.
+- `code_metrics(text, language, path)` → per-function `[{name, id, ref,
+  container, kind, complexity, length, parameter_count, start_line,
+  end_line, visibility, has_doc}]`. `ref` is the function's
+  `symbol:<path>/<id>` ref: use it as a per-function fact's `subject`.
 - `duplicate_blocks(min_lines)` → every duplicated block pair among the
   snapshot files `[{a_path, a_start_line, a_end_line, b_path, b_start_line,
   b_end_line, line_count}]` (see the built-in `oxplow.duplicate_lines`).

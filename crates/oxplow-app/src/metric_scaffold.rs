@@ -273,7 +273,7 @@ fn collector_script(starter: &MetricStarter, measure: &str, area: &str) -> Strin
          \x20   for f in files(GLOB):\n\
          \x20       if languages.get(f[\"path\"]) != LANGUAGE:\n\
          \x20           continue\n\
-         \x20       over = [m for m in code_metrics(f[\"text\"], LANGUAGE) if m[\"complexity\"] > LIMIT]\n\
+         \x20       over = [m for m in code_metrics(f[\"text\"], LANGUAGE, f[\"path\"]) if m[\"complexity\"] > LIMIT]\n\
          \x20       if len(over) == 0:\n\
          \x20           continue  # a clean file records nothing; its old fact is replaced\n\
          \x20       worst = over[0]\n\

@@ -30,11 +30,11 @@ test("problems group by file, errors first, with counts; a severity filter narro
 test("symbols nest under their container, in file order", () => {
   const symbols = symbolsFromResult(
     result(
-      ["ref", "path", "name", "kind", "container", "line", "col"],
+      ["ref", "path", "name", "kind", "container", "signature", "line", "col"],
       [
-        ["symbol:a.rs/Widget@snap:1", "a.rs", "Widget", "struct", null, 1, 1],
-        ["symbol:a.rs/Widget::spin@snap:1", "a.rs", "spin", "method", "Widget", 3, 5],
-        ["symbol:a.rs/main@snap:1", "a.rs", "main", "function", null, 9, 1],
+        ["symbol:a.rs/Widget", "a.rs", "Widget", "struct", null, null, 1, 1],
+        ["symbol:a.rs/Widget::spin(int)", "a.rs", "spin", "method", "Widget", "int", 3, 5],
+        ["symbol:a.rs/main", "a.rs", "main", "function", null, null, 9, 1],
       ],
     ),
   );
@@ -43,6 +43,21 @@ test("symbols nest under their container, in file order", () => {
     ["Widget", ["spin"]],
     ["main", []],
   ]);
+  expect(tree[0]!.children[0]!.symbol.signature).toBe("int");
+});
+
+test("a container that is a nested path holds its members under their full path", () => {
+  const symbols = symbolsFromResult(
+    result(
+      ["ref", "path", "name", "kind", "container", "signature", "line", "col"],
+      [
+        ["symbol:P.cs/Acme::P", "P.cs", "P", "class", "Acme", null, 2, 1],
+        ["symbol:P.cs/Acme::P::run", "P.cs", "run", "method", "Acme::P", null, 3, 1],
+      ],
+    ),
+  );
+  const tree = symbolTree(symbols);
+  expect(tree.map((n) => [n.symbol.name, n.children.map((c) => c.symbol.name)])).toEqual([["P", ["run"]]]);
 });
 
 test("a symbol: ref is a page kind of its own, current or pinned", () => {

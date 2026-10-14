@@ -1135,17 +1135,6 @@ fn script_and_sql_sources() -> Vec<(String, String)> {
     out
 }
 
-/// The built-in metrics that still spell a symbol subject: `code_metrics()`
-/// doesn't yet return the container-qualified name and overload ordinal
-/// the symbol indexer computes, so they can't build `v_symbol.ref`. A
-/// follow-up makes the host return that identity and these build it with
-/// `ref.build("symbol", …)`; then this list goes empty again.
-const KEPT_SYMBOL_SUBJECTS: &[&str] = &[
-    "crates/oxplow-script/src/metrics/code/fn_count.star",
-    "crates/oxplow-script/src/metrics/code/high_complexity_fns.star",
-    "crates/oxplow-script/src/metrics/code/long_functions.star",
-];
-
 /// Every place a script, lens query or model SQL spells or takes apart a
 /// ref of a core kind by hand, as `path:line text`. A kind's owning model
 /// (`oxplow_db::ref_models::REF_MODELS`) spells its prefix in its `ref`
@@ -1177,7 +1166,7 @@ fn hand_made_script_refs() -> Vec<String> {
         .collect();
     let mut out = Vec::new();
     for (path, text) in script_and_sql_sources() {
-        if owners.contains(&path) || KEPT_SYMBOL_SUBJECTS.contains(&path.as_str()) {
+        if owners.contains(&path) {
             continue;
         }
         for (i, line) in text.lines().enumerate() {
@@ -1193,7 +1182,7 @@ fn hand_made_script_refs() -> Vec<String> {
 /// ref with `ref.build` and read one with `ref.id` / `ref.parse`, and SQL
 /// selects or joins on the owning model's `ref` column — never
 /// `"file:" + path`, `'effort:eff' || id`, `startswith("effort:eff")`
-/// (`.context/refs.md`, "Using refs"). The kept list is the three symbol metrics.
+/// (`.context/refs.md`, "Using refs"). The kept list is empty.
 #[test]
 fn scripts_and_sql_carry_refs_rather_than_spelling_them() {
     let offenders = hand_made_script_refs();

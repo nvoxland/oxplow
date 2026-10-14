@@ -98,6 +98,7 @@ function SymbolItem({ node, onOpen }: { node: SymbolNode; onOpen(s: SymbolRow): 
         )}
         <button type="button" data-testid="symbols-item" style={itemStyle} onClick={() => onOpen(s)} title={`${s.path}:${s.line}`}>
           <span style={kindStyle}>{s.kind}</span> {s.name}
+          {s.signature != null ? `(${s.signature})` : null}
         </button>
       </div>
       {open && node.children.length > 0 ? (

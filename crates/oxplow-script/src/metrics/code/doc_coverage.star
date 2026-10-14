@@ -13,7 +13,7 @@ def transform(input):
         lang = f["language"]
         public = 0
         documented = 0
-        for m in code_metrics(f["text"], lang):
+        for m in code_metrics(f["text"], lang, f["path"]):
             if m["visibility"] == "public":
                 public += 1
                 if m["has_doc"]:

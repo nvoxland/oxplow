@@ -1828,6 +1828,16 @@ The mechanics behind those controls (unchanged by tsk117):
   tsk1034), which `resolved_specs` uses unless the project mentions them;
   producers/extensions are default-ON unless an `enabled: false` marker
   disables them, and so are those four.
+- **Function facts are keyed by symbol ref.** `code_metrics(text, language,
+  path)` returns each function with its `id`, `ref` (`symbol:<path>/<id>`,
+  built by the host through `refs::build::symbol_ref`), `container` and
+  `kind`; `fn_count`, `high_complexity_fns` and `long_functions` use `ref`
+  as the fact's `subject`, so a function has the one identity `v_symbol`
+  has. `v_function` is one row per ref and stream (overloads and
+  same-named functions are separate rows): `symbol` is the whole ref, and
+  `name`, `container` and `kind` are joined from `v_symbol` on
+  `(stream_id, ref)` — a function the symbol index doesn't hold isn't listed.
+  Token-usage facts use `ai_model:<name>` subjects (`ai_model_ref`).
 - **Enable/disable** via the `oxplow.metric.enable { keys, enabled }` command
   (`commands/metric.rs`; the desktop's `enable_metrics` IPC runs it as the
   person) — it computes the new `metrics:` list and hands it to

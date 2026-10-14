@@ -80,6 +80,8 @@ export interface SymbolRow {
   kind: string;
   /** The enclosing symbol path (`Widget`), or null at top level. */
   container: string | null;
+  /** Its parameter types as written (an overload's identity), or null. */
+  signature: string | null;
   line: number;
   col: number;
 }
@@ -91,6 +93,7 @@ export function symbolsFromResult(result: SqlQueryResult): SymbolRow[] {
     name: String(at(result, row, "name")),
     kind: String(at(result, row, "kind") ?? ""),
     container: text(at(result, row, "container")),
+    signature: text(at(result, row, "signature")),
     line: Number(at(result, row, "line") ?? 1),
     col: Number(at(result, row, "col") ?? 1),
   }));
@@ -115,7 +118,7 @@ export function symbolsQuery(
     where.push(`name LIKE ?${params.length} ESCAPE '\\'`);
   }
   return {
-    sql: `SELECT ref, path, name, kind, container, line, col FROM v_symbol
+    sql: `SELECT ref, path, name, kind, container, signature, line, col FROM v_symbol
       WHERE ${where.join(" AND ")} ORDER BY path, line, col`,
     params,
   };

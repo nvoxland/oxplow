@@ -4158,7 +4158,7 @@ mod tests {
                 .iter()
                 .map(|(path, name, v)| NewFact {
                     subject_kind: Some("symbol".into()),
-                    subject_ref: Some(format!("symbol:{path}::{name}")),
+                    subject_ref: Some(format!("{path}/{name}")),
                     path: Some((*path).to_string()),
                     line: Some(3),
                     dims_json: Some(r#"{"oxplow.language":"rust"}"#.into()),
@@ -4168,13 +4168,45 @@ mod tests {
             (c, facts)
         };
         snapshot_with(&store, 1, &[("a.rs", "oxplow"), ("b.rs", "oxplow")]).await;
+        // The symbol index names them: `v_function` takes a function's
+        // name and kind from the `v_symbol` row its ref is.
+        let row = |id: &str, container: Option<&str>| crate::SymbolRow {
+            id: id.into(),
+            name: id.rsplit("::").next().unwrap().into(),
+            kind: "function".into(),
+            container: container.map(Into::into),
+            signature: None,
+            line: 3,
+            col: 1,
+            start_line: 3,
+            start_col: 1,
+            end_line: 5,
+            end_col: 1,
+        };
+        let file = |path: &str, rows: Vec<crate::SymbolRow>| crate::FileSymbols {
+            path: path.into(),
+            language: "rust".into(),
+            rows: Some(rows),
+        };
+        crate::SqliteSymbolStore::new(store.db.clone())
+            .record(
+                1,
+                1,
+                vec![
+                    file("a.rs", vec![row("one", None), row("two", None)]),
+                    file("b.rs", vec![row("Widget::three", Some("Widget"))]),
+                ],
+                crate::SymbolCapture::default(),
+            )
+            .await
+            .unwrap();
         let (c, f) = capture(
             1,
             "2026-06-30T10:00:00.000000Z",
             &[
                 ("a.rs", "one", 4.0),
                 ("a.rs", "two", 7.0),
-                ("b.rs", "three", 2.0),
+                ("b.rs", "Widget::three", 2.0),
             ],
         );
         store.record_facts(c, f).await.unwrap();

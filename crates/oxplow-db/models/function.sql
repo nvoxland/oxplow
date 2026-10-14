@@ -1,10 +1,14 @@
 -- One row per function in the current tree (per stream): its latest
--- complexity, length and parameter count from the code gauges' facts
--- (`symbol:<path>::<name>` subjects on the per-path code measures).
+-- complexity, length and parameter count from the code gauges (facts whose
+-- subject is the function's `symbol:<path>/<id>` ref, stored as the kind and
+-- the id after it), named by the symbol
+-- index (`v_symbol`) those refs come from.
 SELECT t.stream_id,
-       t.subject_ref AS symbol,
+       CAST(t.subject_kind || ':' || t.subject_ref AS TEXT) AS symbol,
        t.path,
-       substr(t.subject_ref, instr(t.subject_ref, '::') + 2) AS name,
+       s.name,
+       s.container,
+       s.kind,
        min(t.line) AS line,
        max(json_extract(t.dims_json, '$."oxplow.language"')) AS language,
        max(CASE WHEN t.measure_key = 'oxplow.complexity' THEN t.value END) AS complexity,
@@ -12,6 +16,7 @@ SELECT t.stream_id,
        max(CASE WHEN t.measure_key = 'oxplow.parameter_count' THEN t.value END) AS parameters,
        max(t.captured_at) AS captured_at
   FROM ref('tree_fact') t
+  JOIN ref('symbol') s ON s.stream_id = t.stream_id AND s.ref = t.subject_kind || ':' || t.subject_ref
  WHERE t.subject_kind = 'symbol'
    AND t.measure_key IN ('oxplow.complexity', 'oxplow.fn_length', 'oxplow.parameter_count')
- GROUP BY t.stream_id, t.subject_ref, t.path
+ GROUP BY t.stream_id, t.subject_ref

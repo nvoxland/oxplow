@@ -209,20 +209,29 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
             .collect();
         Ok(heap.alloc(serde_json::Value::Array(arr)))
     }
-    /// Per-function code metrics for `text` in `language` — a flat list of
-    /// `{name, complexity, length, parameter_count, start_line, end_line,
-    /// visibility, has_doc}`. Backed by `oxplow_code_metrics`' tree-sitter walker (the
+    /// Per-function code metrics for `text` (the file at `path`) in
+    /// `language` — a flat list of `{name, id, ref, container, kind,
+    /// complexity, length, parameter_count, start_line, end_line,
+    /// visibility, has_doc}`. `id` is the symbol's id within the file,
+    /// `ref` its `symbol:<path>/<id>` ref (a fact's subject), `container`
+    /// the `::`-joined names it sits in (or None), `kind` its symbol kind. Backed by `oxplow_code_metrics`' tree-sitter walker (the
     /// cyclomatic-complexity / length / param computations that the in-process
     /// code-quality producer used), exposed generically so a bundled or
     /// user-authored metric can project them. Pure → `observed`.
     fn code_metrics<'v>(
         text: &str,
         language: &str,
+        path: &str,
         heap: starlark::values::Heap<'v>,
     ) -> anyhow::Result<starlark::values::Value<'v>> {
         let lang = oxplow_code_metrics::language_from_name(language)
             .ok_or_else(|| anyhow::anyhow!("unknown language \"{language}\""))?;
-        let fns = oxplow_code_metrics::analyze_with_language("", text, lang);
+        let fns = oxplow_code_metrics::analyze_with_language(path, text, lang);
+        let kinds: std::collections::HashMap<String, &'static str> =
+            oxplow_code_metrics::extract_with_language(text, lang)
+                .into_iter()
+                .map(|d| (d.id, d.kind.as_str()))
+                .collect();
         let arr: Vec<serde_json::Value> = fns
             .into_iter()
             .map(|m| {
@@ -233,6 +242,10 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
                 };
                 serde_json::json!({
                     "name": m.name,
+                    "id": m.id,
+                    "ref": oxplow_domain::refs::build::symbol_ref(path, &m.id),
+                    "container": (!m.container_path.is_empty()).then(|| m.container_path.join("::")),
+                    "kind": kinds.get(&m.id).copied().unwrap_or("function"),
                     "complexity": m.complexity,
                     "length": m.length,
                     "parameter_count": m.parameter_count,

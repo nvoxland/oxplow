@@ -5053,8 +5053,8 @@ def transform(input):
 def transform(input):
     facts = []
     for f in files("**/*.rs"):
-        for m in code_metrics(f["text"], "rust"):
-            facts.append({"measure": "oxplow.fn_length", "value": m["length"], "subject": "symbol:" + f["path"] + "::" + m["name"], "path": f["path"], "line": m["start_line"], "dims": {"oxplow.language": "rust"}})
+        for m in code_metrics(f["text"], "rust", f["path"]):
+            facts.append({"measure": "oxplow.fn_length", "value": m["length"], "subject": m["ref"], "path": f["path"], "line": m["start_line"], "dims": {"oxplow.language": "rust"}})
     return {"facts": facts}
 "#,
         )
@@ -5095,7 +5095,7 @@ def transform(input):
         assert_eq!(facts.len(), 1, "one function → one fact");
         assert_eq!(facts[0].path.as_deref(), Some("src/a.rs"));
         assert_eq!(facts[0].subject_kind.as_deref(), Some("symbol"));
-        assert_eq!(facts[0].subject_ref.as_deref(), Some("src/a.rs::big"));
+        assert_eq!(facts[0].subject_ref.as_deref(), Some("src/a.rs/big"));
         assert!(facts[0].value >= 3.0);
     }
 
