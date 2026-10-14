@@ -331,6 +331,7 @@ macro_rules! oxplow_command_table {
                 search_workspace_text => $crate::commands::workspace::search_workspace_text { stream_id: Option<String>, query: String, limit: Option<usize> } -> Vec<::oxplow_app::workspace_files::TextSearchHit>,
                 read_at => $crate::commands::trees::read_at { stream_id: Option<String>, path: String, revision: ::oxplow_domain::vcs::Revision } -> Option<String>,
                 // workspace
+                resolve_symbol => $crate::commands::trees::resolve_symbol { stream_id: String, symbol: String } -> Option<::oxplow_app::symbol_resolve::SymbolLocation>,
                 files_at => $crate::commands::trees::files_at { stream_id: Option<String>, revision: ::oxplow_domain::vcs::Revision } -> Vec<String>,
                 vcs_head => $crate::commands::vcs::vcs_head { stream_id: Option<String> } -> ::oxplow_app::vcs::reads::HeadInfo,
                 vcs_status => $crate::commands::vcs::vcs_status { stream_id: Option<String> } -> ::oxplow_domain::vcs::WorkspaceStatus,

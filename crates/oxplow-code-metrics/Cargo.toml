@@ -20,6 +20,8 @@ tree-sitter-c-sharp = { workspace = true }
 # Streaming-iterator trait for tree-sitter 0.26 query cursors (re-exported by
 # tree-sitter, pinned here so `.matches(...).next()` resolves).
 streaming-iterator = "0.1"
+serde = { workspace = true }
+serde_yaml = { workspace = true }
 
 [lints]
 workspace = true

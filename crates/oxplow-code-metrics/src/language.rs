@@ -65,8 +65,9 @@ pub struct LanguageSupport {
     /// Curated Mason-registry package suggestion for this language's LSP
     /// server, if oxplow ships one. `None` ⇒ no built-in suggestion.
     pub lsp_mason_package: Option<&'static str>,
-    /// Code unit kinds this language exposes (always includes
-    /// [`UnitKind::Function`]).
+    /// Code unit kinds this language's definitions give (always includes
+    /// [`UnitKind::Function`]). [`UnitKind::Package`] is path-derived:
+    /// `list_units` emits it only for a language that declares it here.
     pub unit_kinds: &'static [UnitKind],
 }
 
@@ -113,14 +114,14 @@ static REGISTRY: &[LanguageSupport] = &[
         display_name: "Python",
         extensions: &["py"],
         lsp_mason_package: Some("pyright"),
-        unit_kinds: &[UnitKind::Function, UnitKind::Class, UnitKind::Module],
+        unit_kinds: &[UnitKind::Function, UnitKind::Class],
     },
     LanguageSupport {
         language: Language::Go,
         display_name: "Go",
         extensions: &["go"],
         lsp_mason_package: Some("gopls"),
-        unit_kinds: &[UnitKind::Function, UnitKind::Package],
+        unit_kinds: &[UnitKind::Function, UnitKind::Class, UnitKind::Package],
     },
     LanguageSupport {
         language: Language::Java,
@@ -134,7 +135,7 @@ static REGISTRY: &[LanguageSupport] = &[
         display_name: "C",
         extensions: &["c", "h"],
         lsp_mason_package: Some("clangd"),
-        unit_kinds: &[UnitKind::Function],
+        unit_kinds: &[UnitKind::Function, UnitKind::Class],
     },
     LanguageSupport {
         language: Language::Cpp,
@@ -148,7 +149,7 @@ static REGISTRY: &[LanguageSupport] = &[
         display_name: "Clojure",
         extensions: &["clj", "cljs", "cljc"],
         lsp_mason_package: None,
-        unit_kinds: &[UnitKind::Function, UnitKind::Module],
+        unit_kinds: &[UnitKind::Function, UnitKind::Class, UnitKind::Module],
     },
     LanguageSupport {
         language: Language::CSharp,

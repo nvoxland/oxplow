@@ -479,6 +479,19 @@ pub async fn run_boot_orchestration(
         });
     }
 
+    // The symbol index, when empty (a new database, or one a migration
+    // cleared), is filled from each stream's latest snapshot.
+    {
+        let state = state.clone();
+        tokio::spawn(async move {
+            match crate::symbol_collector::backfill(&state).await {
+                Ok(0) => {}
+                Ok(n) => tracing::info!(files = n, "symbol index backfilled"),
+                Err(error) => tracing::warn!(%error, "symbol index backfill failed"),
+            }
+        });
+    }
+
     // Duplicate scans a stop cut off: redone, so a change whose tree
     // doesn't move again still gets its duplicates.
     {

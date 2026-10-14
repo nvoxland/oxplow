@@ -136,7 +136,6 @@ import { BoardPage } from "./pages/BoardPage.js";
 import { ProblemsPage } from "./pages/ProblemsPage.js";
 import { ExtensionPageView } from "./pages/ExtensionPageView.js";
 import { SymbolsPage } from "./pages/SymbolsPage.js";
-import { resolveSymbol } from "./codeIntel.js";
 import { ClosedThreadsPage } from "./pages/ClosedThreadsPage.js";
 import { ExternalUrlPage } from "./pages/ExternalUrlPage.js";
 import { WorkItemPage } from "./pages/WorkItemPage.js";
@@ -172,7 +171,7 @@ import {
   writePersistedCenterActive,
   writePersistedFileSessionPaths,
 } from "./tabs/pageTabsPersistence.js";
-import { forgetPage, generatedPaths, recordPageVisit, recordUserInterrupt, reportOpenPage } from "./api.js";
+import { forgetPage, generatedPaths, recordPageVisit, recordUserInterrupt, reportOpenPage, resolveSymbol } from "./api.js";
 import { openProject, createProject, listRecentProjects, shellAvailable } from "./api.js";
 import { onRemoteReconnect, triggerRemoteResync } from "./api.js";
 import type { CommandOutcome, RecentProjectView } from "./tauri-bridge/generated/bindings.js";
@@ -661,12 +660,22 @@ export function App() {
     logUi("info", "opened file", { streamId: stream.id, path });
   }
 
-  /** A `symbol:` ref opens its file at the symbol's line (`v_symbol`). */
+  /** A `symbol:` ref opens its file at the symbol's line; one pinned to a
+   *  version opens the file as it was then. A pin whose version is gone
+   *  opens the current symbol and says so. */
   async function openSymbol(ref: string) {
+    if (!stream) return;
     try {
-      const at = await resolveSymbol(ref);
+      const at = await resolveSymbol(stream.id, ref);
       if (!at) {
-        recordOpError({ label: "Open symbol", message: `${ref} isn't a known symbol now (the file changed, or its language server isn't running).` });
+        recordOpError({ label: "Open symbol", message: `${ref} isn't a symbol in this stream now.` });
+        return;
+      }
+      if (at.versionGone) {
+        recordOpError({ label: "Open symbol", message: `The version ${ref} pins is gone; showing the symbol as it is now.` });
+      }
+      if (at.revision) {
+        handleOpenPage(fileRef(at.path, at.revision));
         return;
       }
       await handleNavigateToLocation({ path: at.path, line: at.line, column: at.col });

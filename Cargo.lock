@@ -4501,6 +4501,8 @@ dependencies = [
 name = "oxplow-code-metrics"
 version = "0.7.0"
 dependencies = [
+ "serde",
+ "serde_yaml",
  "streaming-iterator",
  "tree-sitter",
  "tree-sitter-c",

@@ -1,9 +1,8 @@
 //! Per-language tree-sitter node-name tables.
 //!
 //! Each `LanguageSpec` says:
-//! - which AST node kinds are "function-like" (so we count them as
-//!   metric subjects),
-//! - which child field name holds the function name,
+//! - which AST node kinds are function-like syntax (the duplication
+//!   detector's units; definitions come from `languages/<lang>/symbols.scm`),
 //! - which field holds the parameter list and which child kinds count
 //!   as one parameter,
 //! - which AST node kinds count as a "decision point" for cyclomatic
@@ -40,25 +39,17 @@ pub enum Language {
 }
 
 pub struct LanguageSpec {
-    /// AST node kinds that represent a function/method/closure body.
+    /// AST node kinds of function-like syntax, closures included — the
+    /// duplication detector's units (`oxplow-code-dup`). What a file
+    /// *defines* (and so what has metrics) comes from its symbol query
+    /// (`languages/<lang>/symbols.scm`, [`crate::symbols`]).
     pub function_kinds: &'static [&'static str],
-    /// Field names to try (in order) for the function's identifier.
-    pub name_fields: &'static [&'static str],
     /// Field names to try (in order) for the parameter list.
     pub param_list_fields: &'static [&'static str],
     /// AST node kinds inside a parameter list that represent one parameter.
     pub parameter_kinds: &'static [&'static str],
     /// AST node kinds that increment cyclomatic complexity by 1.
     pub decision_kinds: &'static [&'static str],
-    /// AST node kinds that act as named containers for the
-    /// hierarchical "where does this function live" path
-    /// (class, impl, module, namespace, etc.).
-    pub container_kinds: &'static [&'static str],
-    /// Field names tried (in order) on a container node to locate
-    /// its identifier. `name` covers most languages; Rust's
-    /// `impl_item` exposes the type via `type` instead, so we try
-    /// multiple fields.
-    pub container_name_fields: &'static [&'static str],
     /// Strategy used to classify a function's visibility (public /
     /// private / unknown). The strategy is language-specific because
     /// each language encodes "private" differently — modifier nodes
@@ -250,7 +241,6 @@ pub fn language_from_lsp_id(language_id: &str) -> Option<Language> {
 
 static RUST: LanguageSpec = LanguageSpec {
     function_kinds: &["function_item", "closure_expression"],
-    name_fields: &["name"],
     param_list_fields: &["parameters"],
     parameter_kinds: &["parameter", "self_parameter"],
     decision_kinds: &[
@@ -266,8 +256,6 @@ static RUST: LanguageSpec = LanguageSpec {
         // boolean operators (&&, ||) are tokens inside binary_expression,
         // not their own nodes — skipping for simplicity.
     ],
-    container_kinds: &["impl_item", "trait_item", "mod_item"],
-    container_name_fields: &["name", "type"],
     visibility: VisibilityStrategy::RustModifier,
     function_form_heads: &[],
     decision_form_heads: &[],
@@ -279,12 +267,9 @@ static RUST: LanguageSpec = LanguageSpec {
 
 static TYPESCRIPT: LanguageSpec = LanguageSpec {
     function_kinds: JS_FUNCTION_KINDS,
-    name_fields: JS_NAME_FIELDS,
     param_list_fields: JS_PARAM_FIELDS,
     parameter_kinds: JS_PARAM_KINDS,
     decision_kinds: JS_DECISION_KINDS,
-    container_kinds: TS_CONTAINER_KINDS,
-    container_name_fields: JS_NAME_FIELDS,
     visibility: VisibilityStrategy::TsClassModifier,
     function_form_heads: &[],
     decision_form_heads: &[],
@@ -294,12 +279,9 @@ static TYPESCRIPT: LanguageSpec = LanguageSpec {
 
 static TSX: LanguageSpec = LanguageSpec {
     function_kinds: JS_FUNCTION_KINDS,
-    name_fields: JS_NAME_FIELDS,
     param_list_fields: JS_PARAM_FIELDS,
     parameter_kinds: JS_PARAM_KINDS,
     decision_kinds: JS_DECISION_KINDS,
-    container_kinds: TS_CONTAINER_KINDS,
-    container_name_fields: JS_NAME_FIELDS,
     visibility: VisibilityStrategy::TsClassModifier,
     function_form_heads: &[],
     decision_form_heads: &[],
@@ -309,30 +291,15 @@ static TSX: LanguageSpec = LanguageSpec {
 
 static JAVASCRIPT: LanguageSpec = LanguageSpec {
     function_kinds: JS_FUNCTION_KINDS,
-    name_fields: JS_NAME_FIELDS,
     param_list_fields: JS_PARAM_FIELDS,
     parameter_kinds: JS_PARAM_KINDS,
     decision_kinds: JS_DECISION_KINDS,
-    container_kinds: JS_CONTAINER_KINDS,
-    container_name_fields: JS_NAME_FIELDS,
     visibility: VisibilityStrategy::TsClassModifier,
     function_form_heads: &[],
     decision_form_heads: &[],
     doc: DocStrategy::PrecedingComment(&["/**"]),
     grammar: || tree_sitter_javascript::LANGUAGE.into(),
 };
-
-static TS_CONTAINER_KINDS: &[&str] = &[
-    "class_declaration",
-    "class",
-    "abstract_class_declaration",
-    "interface_declaration",
-    "internal_module",
-    "module",
-    "namespace_declaration",
-    "enum_declaration",
-];
-static JS_CONTAINER_KINDS: &[&str] = &["class_declaration", "class"];
 
 static JS_FUNCTION_KINDS: &[&str] = &[
     "function_declaration",
@@ -343,7 +310,6 @@ static JS_FUNCTION_KINDS: &[&str] = &[
     "generator_function_declaration",
     "function_signature",
 ];
-static JS_NAME_FIELDS: &[&str] = &["name"];
 static JS_PARAM_FIELDS: &[&str] = &["parameters"];
 static JS_PARAM_KINDS: &[&str] = &[
     "required_parameter",
@@ -371,7 +337,6 @@ static JS_DECISION_KINDS: &[&str] = &[
 
 static PYTHON: LanguageSpec = LanguageSpec {
     function_kinds: &["function_definition", "lambda"],
-    name_fields: &["name"],
     param_list_fields: &["parameters"],
     parameter_kinds: &[
         "identifier",
@@ -395,8 +360,6 @@ static PYTHON: LanguageSpec = LanguageSpec {
         "match_statement",
         "case_clause",
     ],
-    container_kinds: &["class_definition"],
-    container_name_fields: &["name"],
     visibility: VisibilityStrategy::PythonUnderscore,
     function_form_heads: &[],
     decision_form_heads: &[],
@@ -408,7 +371,6 @@ static PYTHON: LanguageSpec = LanguageSpec {
 
 static GO: LanguageSpec = LanguageSpec {
     function_kinds: &["function_declaration", "method_declaration", "func_literal"],
-    name_fields: &["name"],
     param_list_fields: &["parameters"],
     parameter_kinds: &["parameter_declaration", "variadic_parameter_declaration"],
     decision_kinds: &[
@@ -421,10 +383,6 @@ static GO: LanguageSpec = LanguageSpec {
         "select_statement",
         "communication_case",
     ],
-    // Go has no class-like containers; the package is implicit at
-    // the file level so there's nothing meaningful to attach.
-    container_kinds: &[],
-    container_name_fields: &["name"],
     visibility: VisibilityStrategy::GoCapitalization,
     function_form_heads: &[],
     decision_form_heads: &[],
@@ -440,7 +398,6 @@ static JAVA: LanguageSpec = LanguageSpec {
         "constructor_declaration",
         "lambda_expression",
     ],
-    name_fields: &["name"],
     param_list_fields: &["parameters"],
     parameter_kinds: &["formal_parameter", "spread_parameter"],
     decision_kinds: &[
@@ -454,14 +411,6 @@ static JAVA: LanguageSpec = LanguageSpec {
         "catch_clause",
         "ternary_expression",
     ],
-    container_kinds: &[
-        "class_declaration",
-        "interface_declaration",
-        "enum_declaration",
-        "record_declaration",
-        "annotation_type_declaration",
-    ],
-    container_name_fields: &["name"],
     visibility: VisibilityStrategy::JavaModifier,
     function_form_heads: &[],
     decision_form_heads: &[],
@@ -473,7 +422,6 @@ static JAVA: LanguageSpec = LanguageSpec {
 
 static C: LanguageSpec = LanguageSpec {
     function_kinds: &["function_definition"],
-    name_fields: &["declarator"],
     param_list_fields: &["parameters"],
     parameter_kinds: &["parameter_declaration"],
     decision_kinds: &[
@@ -484,9 +432,6 @@ static C: LanguageSpec = LanguageSpec {
         "do_statement",
         "conditional_expression",
     ],
-    // C has no class-like containers — top-level functions only.
-    container_kinds: &[],
-    container_name_fields: &["name"],
     visibility: VisibilityStrategy::CStatic,
     function_form_heads: &[],
     decision_form_heads: &[],
@@ -498,7 +443,6 @@ static C: LanguageSpec = LanguageSpec {
 
 static CPP: LanguageSpec = LanguageSpec {
     function_kinds: &["function_definition", "lambda_expression"],
-    name_fields: &["declarator"],
     param_list_fields: &["parameters"],
     parameter_kinds: &["parameter_declaration", "optional_parameter_declaration"],
     decision_kinds: &[
@@ -511,12 +455,6 @@ static CPP: LanguageSpec = LanguageSpec {
         "catch_clause",
         "conditional_expression",
     ],
-    container_kinds: &[
-        "class_specifier",
-        "struct_specifier",
-        "namespace_definition",
-    ],
-    container_name_fields: &["name"],
     visibility: VisibilityStrategy::CppAccessSpecifier,
     function_form_heads: &[],
     decision_form_heads: &[],
@@ -533,12 +471,9 @@ static CPP: LanguageSpec = LanguageSpec {
 
 static CLOJURE: LanguageSpec = LanguageSpec {
     function_kinds: &[],
-    name_fields: &[],
     param_list_fields: &[],
     parameter_kinds: &[],
     decision_kinds: &[],
-    container_kinds: &[],
-    container_name_fields: &[],
     visibility: VisibilityStrategy::ClojureForm,
     function_form_heads: &[
         "defn",
@@ -581,7 +516,6 @@ static CSHARP: LanguageSpec = LanguageSpec {
         "local_function_statement",
         "lambda_expression",
     ],
-    name_fields: &["name"],
     param_list_fields: &["parameters"],
     parameter_kinds: &["parameter"],
     decision_kinds: &[
@@ -598,16 +532,6 @@ static CSHARP: LanguageSpec = LanguageSpec {
         "conditional_expression",
         "when_clause",
     ],
-    container_kinds: &[
-        "class_declaration",
-        "struct_declaration",
-        "interface_declaration",
-        "record_declaration",
-        "enum_declaration",
-        "namespace_declaration",
-        "file_scoped_namespace_declaration",
-    ],
-    container_name_fields: &["name"],
     // C# encodes visibility via `modifier` child nodes; no clean
     // single-signal strategy in the shared enum, so functions report
     // Unknown (none of the bundled C# metrics filter on visibility).

@@ -10,6 +10,7 @@ import type {
   OxplowEvent,
   ProviderImpact,
   Reads,
+  SymbolLocation,
   Scope,
   SignInCompletion,
   SnapshotTrigger,
@@ -2351,6 +2352,14 @@ export async function listWorkspaceFiles(streamId: string): Promise<{
 
 export async function readWorkspaceFile(streamId: string, path: string): Promise<WorkspaceFile> {
   return unwrap(await commands.readWorkspaceFile(streamId || null, path));
+}
+
+/** Where a `symbol:` ref points in `streamId` — the current symbol, or,
+ *  for a ref pinned `@snap:`/`@git:`, where it was in that version (with
+ *  `versionGone` when the pin is gone and this is the current one); null
+ *  for a dead link. */
+export async function resolveSymbol(streamId: string, ref: string): Promise<SymbolLocation | null> {
+  return unwrap(await commands.resolveSymbol(streamId, ref));
 }
 
 /** `path` at `revision` (`working`, `snap:<id>`, `git:<rev>`); null

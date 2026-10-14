@@ -1,0 +1,4 @@
+signature:
+  name_fields: [name]
+  # `String... parts`: the name is in a variable_declarator, no field.
+  name_kinds: [variable_declarator]

@@ -130,6 +130,29 @@ capability's active provider.
 `build::agent_session_ref`) is registered with the `ses` id. It isn't
 `agent:` — that name is kept for the harness registry.
 
+`symbol` (`symbol:<path>/<id>`, `build::symbol_ref(path, id)`) names a
+definition in a file. The id is oxplow's own, from tree-sitter
+(language-support.md "Symbols"): containers and name joined by `::`,
+then `(param types)` in languages that overload by parameters (Java, C#,
+C++) or a Clojure defmethod dispatch value, then `~n` for the nth repeat
+of the same id in the file. The identity carries no revision: the ref
+names the symbol as it is now. Pin a version with `@snap:<id>` or
+`@git:<sha>` (`build::at`); the pin is how you read, never part of the
+identity. The id regex is `^[^/\n][^\n]*/[^\n]+$` (the path is the longest
+`/`-prefix naming a file). Examples:
+
+- `symbol:crates/oxplow-app/src/lib.rs/Services::boot`
+- `symbol:src/parse.rs/<Parser as Display>::fmt` (Rust trait impl)
+- `symbol:src/main/java/com/acme/Parser.java/Parser::parse(String,int)`
+- `symbol:src/acme/core.clj/area(:circle)`
+- `symbol:scripts/build.py/main~2`
+
+Not built: a location inside a symbol. The design is a fragment of a
+content fingerprint plus the nth instance (`…/Parser::parse#h:3f9a~2`),
+not a line offset: a relative line silently points at the wrong line
+after an insert, a fingerprint fails visibly. There is no rename
+following: a renamed symbol is a dead link.
+
 `config` (a config key, `config:zones`) is registered too (P2.4b, tsk450).
 `extension` (`extension:<name>`, an extension by its name) is the subject
 of a contribution's `contribution.disabled@1` / `contribution.enabled@1`
@@ -160,7 +183,7 @@ the id as the grammar escapes it, and the kind names are constants
 - records: `project_ref`, `stream_ref`, `thread_ref`, `effort_ref`,
   `turn_ref`, `snapshot_ref`, `commit_ref`, `branch_ref`;
 - files and code: `file_ref`, `file_ref_at(path, rev, lines)`, `dir_ref`,
-  `symbol_ref(path, name, snapshot)`, `wiki_ref`;
+  `symbol_ref(path, id)`, `wiki_ref`;
 - activity: `comment_ref`, `event_ref`, `lens_ref`, `answer_ref`,
   `page_ref(name, query)`, `extension_page_ref`;
 - catalog: `metric_ref`, `model_ref`, `extension_ref`, `command_ref`,

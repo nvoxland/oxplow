@@ -297,8 +297,8 @@ function extPageOf(head: string): { extension: string; page: string } | null {
   return { extension: head.slice(0, slash), page: head.slice(slash + 1) };
 }
 
-/** A symbol (`symbol:<path>/<name>@snap:<id>`, `v_symbol.ref`): opening
- *  it opens its file at the symbol's line (P6.E3). */
+/** A symbol (`symbol:<path>/<id>`, `v_symbol.ref`, optionally pinned
+ *  `@snap:`/`@git:`): opening it opens its file at the symbol (`openSymbol`). */
 export function symbolRef(ref: string): TabRef {
   return { id: ref, kind: "symbol", payload: { ref } };
 }

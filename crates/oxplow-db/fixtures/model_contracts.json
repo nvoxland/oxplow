@@ -5270,6 +5270,86 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`symbol:<path>/<id>`, the current symbol (no revision; pin one with `@snap:<id>` / `@git:<sha>`). The id is the containers and the name joined by `::` (`Parser::parse`, `<Parser as Display>::fmt`), the parameter types in languages that overload by them (`Parser::parse(String,int)`), and `~n` for the nth same id in a file (`main~2`). Unique per stream."
+        },
+        {
+          "name": "snapshot_id",
+          "type": "INTEGER",
+          "doc": "The snapshot the file's symbols were read at."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream (v_stream.id)."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "Workspace-relative file."
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "The symbol's own name."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`function`, `method`, `constructor`, `class`, `struct`, `enum`, `enum_member`, `interface`, `trait`, `type`, `field`, `constant`, `variable`, `module`, `namespace` or `macro` — one vocabulary for every language."
+        },
+        {
+          "name": "container",
+          "type": "TEXT",
+          "doc": "What it's inside, `::`-joined (`Parser`, `acme::Parser`); NULL at top level."
+        },
+        {
+          "name": "signature",
+          "type": "TEXT",
+          "doc": "Its parameter types (or dispatch value) as written, without parentheses, in languages that tell overloads apart by them; NULL otherwise."
+        },
+        {
+          "name": "language",
+          "type": "TEXT",
+          "doc": "Its language (`rust`, `typescript`, …)."
+        },
+        {
+          "name": "line",
+          "type": "INTEGER",
+          "doc": "Where its name is (what to jump to), 1-based."
+        },
+        {
+          "name": "col",
+          "type": "INTEGER",
+          "doc": "1-based."
+        },
+        {
+          "name": "start_line",
+          "type": "INTEGER",
+          "doc": "Where the whole definition starts, 1-based."
+        },
+        {
+          "name": "start_col",
+          "type": "INTEGER",
+          "doc": "1-based."
+        },
+        {
+          "name": "end_line",
+          "type": "INTEGER",
+          "doc": "Where the whole definition ends (its body included), 1-based: the lines `start_line`..`end_line` are the symbol."
+        },
+        {
+          "name": "end_col",
+          "type": "INTEGER",
+          "doc": "1-based, exclusive."
+        }
+      ],
+      "key": []
     }
   },
   "symbol_capture": {
@@ -5304,6 +5384,36 @@
           "name": "files_failed",
           "type": "INTEGER",
           "doc": "Changed files the server was asked about but failed on (an error, or no answer in time); they count against the bound."
+        },
+        {
+          "name": "captured_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        }
+      ],
+      "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "snapshot_id",
+          "type": "INTEGER",
+          "doc": "The snapshot (v_snapshot.id)."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream (v_stream.id)."
+        },
+        {
+          "name": "files_collected",
+          "type": "INTEGER",
+          "doc": "Changed files in a supported language whose definitions were read."
+        },
+        {
+          "name": "files_failed",
+          "type": "INTEGER",
+          "doc": "Changed files whose content couldn't be read at the snapshot (not kept, or not text)."
         },
         {
           "name": "captured_at",

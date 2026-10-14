@@ -176,6 +176,7 @@ pub mod sql_gateway;
 #[cfg(test)]
 mod stream_service_tests;
 pub mod symbol_collector;
+pub mod symbol_resolve;
 pub mod terminal_sessions;
 #[cfg(test)]
 pub(crate) mod test_fixtures;

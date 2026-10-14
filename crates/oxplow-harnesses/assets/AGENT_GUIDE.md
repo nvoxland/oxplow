@@ -17,7 +17,7 @@ The person's input can carry references oxplow inserted for them:
   lines; `@git:<sha>` or `@snap:<id>` is that revision — `read_file_at_ref`),
   `commit:<sha>` (`v_commit`, `v_commit_file`), `work_item:<provider>:<id>`
   (`get_work_item`), `wiki:<slug>`, `lens:<ext>/<slug>` (`run_lens`),
-  `answer:<n>` (`v_thread_answer`), `metric:<key>`, `symbol:…`
+  `answer:<n>` (`v_thread_answer`), `metric:<key>`, `symbol:<path>/<id>`
   (`v_symbol`), `effort:<n>` (`v_effort`), `page:<name>` (the page they
   have open: `get_open_page`). Anything else: `query_sql` over the model
   whose `ref` column holds it.

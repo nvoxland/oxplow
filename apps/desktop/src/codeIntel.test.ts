@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import type { SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
-import { diagnosticsFromResult, problemsByFile, symbolLocation, symbolsFromResult, symbolsQuery, symbolTree } from "./codeIntel.js";
+import { diagnosticsFromResult, problemsByFile, symbolsFromResult, symbolsQuery, symbolTree } from "./codeIntel.js";
 import { refFromTabId, symbolRef } from "./tabs/pageRefs.js";
 
 const result = (columns: string[], rows: SqlQueryResult["rows"]): SqlQueryResult =>
@@ -45,12 +45,11 @@ test("symbols nest under their container, in file order", () => {
   ]);
 });
 
-test("a symbol: ref is a page kind of its own, resolved to its file's line", () => {
-  const ref = refFromTabId("symbol:src/a.rs/Widget::spin@snap:4");
-  expect(ref).toEqual(symbolRef("symbol:src/a.rs/Widget::spin@snap:4"));
+test("a symbol: ref is a page kind of its own, current or pinned", () => {
+  const ref = refFromTabId("symbol:Sources/a.rs/Widget::spin");
+  expect(ref).toEqual(symbolRef("symbol:Sources/a.rs/Widget::spin"));
   expect(ref?.kind).toBe("symbol");
-  expect(symbolLocation(result(["path", "line", "col"], [["src/a.rs", 3, 5]]))).toEqual({ path: "src/a.rs", line: 3, col: 5 });
-  expect(symbolLocation(result(["path", "line", "col"], []))).toBeNull();
+  expect(refFromTabId("symbol:src/a.rs/Widget::spin@snap:4")?.kind).toBe("symbol");
 });
 
 // A name filter is a substring, not a pattern: `%` and `_` in it match

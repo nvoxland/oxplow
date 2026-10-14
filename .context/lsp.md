@@ -148,26 +148,11 @@ registrations). Install/remove emit `OxplowEvent::LspServersChanged`.
   `workspace.symbol` and `textDocument.callHierarchy` are declared in
   `client_capabilities()`; keep the declared set + the pump's auto-answers
   in lockstep.
-- **Symbols (P5.C6)**: the `symbols.collect` pump consumer
-  (`crates/oxplow-app/src/symbol_collector.rs`, after `search.index`) turns
-  each `snapshot.taken` into `symbol` rows (`v_symbol`): for each changed
-  file a configured server covers, `document_symbols` restates the file
-  (a deleted one drops out), refs `symbol:<path>/<name>@snap:<id>` —
-  unique: a name path's later symbols in a file (an overload, a setter
-  after its getter) are numbered in position order, `Widget::value~2` —
-  with the name's position (`line`, `col`) and the whole extent
-  (`start_*`..`end_*`, V123). It is
-  bounded by config `symbolsMaxFilesPerSnapshot` (default 50; 0 turns it
-  off) — the bound counts **attempts** (collected + failed), so a
-  snapshot of files that all error or time out can't cost more than the
-  bound in server time; the rest are recorded as over budget, and a
-  failed file is counted in `files_failed`, never an error — and
-  **never starts a server** (`LspSessionManager::is_running`): a collector
-  doesn't run programs on a person's machine, so a file whose server
-  isn't running is recorded as such. Each snapshot's coverage is a
-  `symbol_capture` row (`v_symbol_capture`). Symbols are read from the
-  file as it is when the event is handled, pinned to the snapshot that
-  triggered it.
+- **Symbols index**: not from the servers. `v_symbol` is oxplow's own
+  tree-sitter extraction (language-support.md "Symbols"); the servers stay
+  for the live features: definition, references, hover, call hierarchy,
+  document and workspace symbols (the editor outline and the MCP `code_*`
+  tools). None of them read `v_symbol`.
 - **Conformance**: `code_intel_conformance::suite(provider, probe)` —
   definition and references come back as 1-based locations, a hover says
   something, document symbols name known kinds and nest through real
@@ -186,15 +171,8 @@ The desktop reads code intelligence from the models (`apps/desktop/src/codeIntel
   `v_diagnostic` rows by file (files with errors first, then warnings),
   a severity filter with counts; a problem opens its file at its line.
   It re-reads when `v_diagnostic` changes.
-- **Symbols** (`page:symbols[?path=]`, `SymbolsPage.tsx`) — `v_symbol`
-  nested under each symbol's `container` (`symbolTree`): one file's
-  outline, or every file's symbols matching a name filter (a substring:
-  `symbolsQuery` escapes LIKE's wildcards; the read follows typing after a
-  200 ms pause). A symbol opens
-  its file at its name's line.
-- **`symbol:` refs** (a wikilink, an Ask, an answer) open the same way:
-  `openSymbol` looks the ref up in `v_symbol`; a symbol that's gone (its
-  file changed, or no server is running) is reported, not opened.
+- **Symbols** (`page:symbols[?path=]`, `SymbolsPage.tsx`) — the
+  tree-sitter index, not the servers: see language-support.md "Symbols".
 
 Both pages are in the launcher under Code. References and hover stay
 live (the MCP `code_*` tools and the editor) — no model holds them.

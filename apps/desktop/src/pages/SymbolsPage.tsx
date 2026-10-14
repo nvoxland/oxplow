@@ -64,7 +64,7 @@ export function SymbolsPage({
           <EmptyState
             testId="symbols-empty"
             title="No symbols"
-            text="Symbols come from the running language servers, collected at each snapshot; a language without a running server has none."
+            text="Symbols come from oxplow's own parsing of each supported language, collected at each snapshot."
           />
         ) : (
           [...byFile.entries()].map(([file, nodes]) => (

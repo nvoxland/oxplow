@@ -532,17 +532,16 @@ fn clojure_branching_increments_complexity() {
 }
 
 #[test]
-fn clojure_nested_fn_inside_defn_recorded_separately() {
+fn clojure_closures_are_not_symbols_and_count_toward_the_enclosing_defn() {
     let src = r#"
 (defn outer [xs]
-  (map (fn [x] (* x 2)) xs))
+  (map (fn [x] (if x 1 2)) xs))
 "#;
     let m = analyze_file("src/demo.clj", src);
-    assert_eq!(m.len(), 2, "got {m:#?}");
-    let outer = m.iter().find(|f| f.name == "outer").unwrap();
-    let inner = m.iter().find(|f| f.name != "outer").unwrap();
-    assert_eq!(inner.name, "(anonymous)");
-    assert_eq!(outer.parameter_count, 1);
+    assert_eq!(m.len(), 1, "got {m:#?}");
+    assert_eq!(m[0].name, "outer");
+    assert_eq!(m[0].parameter_count, 1);
+    assert!(m[0].complexity >= 2, "got {}", m[0].complexity);
 }
 
 #[test]

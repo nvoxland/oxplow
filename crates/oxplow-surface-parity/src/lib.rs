@@ -402,6 +402,10 @@ pub const MANIFEST: &[Capability] = &[
     both("vcs_log"),
     both("vcs_blame"),
     both("read_at"),
+    ui(
+        "resolve_symbol",
+        "opening a symbol link; an agent reads v_symbol, and read_file_at_snapshot for a pinned version",
+    ),
     both("vcs_branches"),
     ui(
         "search_workspace_text",

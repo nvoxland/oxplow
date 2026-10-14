@@ -250,7 +250,8 @@ pub fn core_kinds() -> KindRegistry {
         KindSpec::new(BRANCH, r"^[^\s]+$"),
         KindSpec::new(FILE, PATH_ID).map(KindSpec::revisioned),
         KindSpec::new(DIR, PATH_ID).map(KindSpec::revisioned),
-        KindSpec::new(SYMBOL, r"^[a-z0-9_-]+/.+$").map(KindSpec::revisioned),
+        // `<path>/<id>`: any repo path, then the symbol's id in the file.
+        KindSpec::new(SYMBOL, r"^[^/\n][^\n]*/[^\n]+$").map(KindSpec::revisioned),
         KindSpec::new(WORK_ITEM, r"^[a-z][a-z0-9_-]*:.+$").map(KindSpec::provider_scoped),
         KindSpec::new(WIKI, r"^[A-Za-z0-9][A-Za-z0-9_-]*$"),
         KindSpec::new(COMMENT, &prefixed("cmt")),

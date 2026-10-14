@@ -1,0 +1,2 @@
+# A trait impl's methods live in `<Type as Trait>`, Rust's own spelling.
+trait_container: "<{type} as {trait}>"

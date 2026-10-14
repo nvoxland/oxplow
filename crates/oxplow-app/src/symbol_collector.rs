@@ -1,19 +1,21 @@
-//! The symbol collector (P5.C6, `.context/lsp.md`): the `symbols.collect`
-//! pump consumer on `snapshot.taken` (registered after `search.index`).
-//! For each file a snapshot changed, whose language a configured server
-//! covers, it asks that server for the file's symbols
-//! (`CodeIntelligence::document_symbols`) and restates the file in
-//! `symbol` (`v_symbol`); a deleted file drops out. It is bounded by
-//! `symbolsMaxFilesPerSnapshot` — the rest are recorded as over budget,
-//! never an error — and **never starts a server**: a collector doesn't run
-//! programs on a person's machine, so a file whose server isn't running is
-//! recorded as such. Each snapshot's coverage is a `symbol_capture` row
-//! (`v_symbol_capture`). Symbols are read from the file as it is on disk
-//! when the event is handled, and pinned to the snapshot that triggered it.
+//! The symbol collector (`.context/language-support.md` "Symbols"): the
+//! `symbols.collect` pump consumer on `snapshot.taken` (registered after
+//! `search.index`). For each file a snapshot changed in a supported
+//! language, it reads the file as the snapshot captured it, extracts its
+//! definitions with oxplow's own tree-sitter queries
+//! (`oxplow_code_metrics::extract`) and restates the file in `symbol`
+//! (`v_symbol`); a deleted file drops out. No language server is involved.
+//! A snapshot that kept no contents ("Track changes only") is read from the
+//! working tree instead. Each snapshot's coverage is a `symbol_capture` row
+//! (`v_symbol_capture`). At boot, an empty index is filled from each
+//! stream's latest snapshot ([`backfill`]).
 
+use std::path::PathBuf;
 use std::sync::{Arc, Weak};
 
 use oxplow_db::{FileSymbols, SnapshotStorage, SymbolCapture, SymbolRow};
+use oxplow_domain::stores::StreamStore;
+use oxplow_domain::vcs::Revision;
 use oxplow_domain::{DomainError, StoredEvent, StreamId};
 
 use crate::event_pump::AsyncEventConsumer;
@@ -66,52 +68,43 @@ impl AsyncEventConsumer for SymbolCollector {
 
 /// Collect `snapshot`'s changed files' symbols for `stream`.
 pub async fn collect(svc: &Services, stream: StreamId, snapshot: i64) -> Result<(), DomainError> {
-    let bound = svc
-        .config
-        .read()
-        .map(|c| c.symbols_max_files_per_snapshot as usize)
-        .unwrap_or(oxplow_config::DEFAULT_SYMBOLS_MAX_FILES_PER_SNAPSHOT as usize);
     let mut changed = svc.snapshot_store.list_files_for_snapshot(snapshot).await?;
     changed.sort_by(|a, b| a.path.cmp(&b.path));
-    let stream_key = stream.to_string();
+    let keeps_contents = svc.snapshot_captures.no_contents_reason().is_none();
+    let files_api = svc.snapshot_files();
     let mut files = Vec::new();
     let mut capture = SymbolCapture::default();
     for file in changed {
-        let Some(language) = svc.lsp_sessions.language_for_path(&file.path) else {
+        let Some(language) = oxplow_code_metrics::language_for_path(&file.path) else {
             continue;
         };
         if file.storage == SnapshotStorage::Deleted {
             files.push(FileSymbols {
                 path: file.path,
-                language,
+                language: language.name().into(),
                 rows: None,
             });
             continue;
         }
-        if !svc.lsp_sessions.is_running(&stream_key, &language).await {
-            capture.files_without_server += 1;
-            continue;
-        }
-        // Every file asked about counts, answered or not.
-        if (capture.files_collected + capture.files_failed) as usize >= bound {
-            capture.files_over_budget += 1;
-            continue;
-        }
-        match svc.code_intel.document_symbols(stream, &file.path).await {
-            Ok(symbols) => {
+        let bytes = if keeps_contents {
+            files_api
+                .read_file_at_snapshot(snapshot, &file.path)
+                .await
+                .ok()
+                .flatten()
+        } else {
+            svc.workspace_files
+                .read(Some(&stream.to_string()), file.path.clone())
+                .await
+                .ok()
+                .map(|f| f.content.into_bytes())
+        };
+        match bytes.and_then(|b| String::from_utf8(b).ok()) {
+            Some(text) => {
                 capture.files_collected += 1;
-                files.push(FileSymbols {
-                    path: file.path,
-                    language,
-                    rows: Some(symbols.into_iter().map(row).collect()),
-                });
+                files.push(file_symbols(&file.path, &text, language));
             }
-            Err(e) => {
-                // A server that can't answer for one file leaves it as it
-                // was; the rest go on, and the capture records it.
-                capture.files_failed += 1;
-                tracing::warn!(path = file.path, error = %e, "document symbols failed");
-            }
+            None => capture.files_failed += 1,
         }
     }
     if files.is_empty() && capture == SymbolCapture::default() {
@@ -122,18 +115,78 @@ pub async fn collect(svc: &Services, stream: StreamId, snapshot: i64) -> Result<
         .await
 }
 
-fn row(s: oxplow_domain::code_intel::Symbol) -> SymbolRow {
-    let (at, extent) = (s.location.range.start, s.extent);
-    SymbolRow {
-        name: s.name,
-        kind: s.kind,
-        container: s.container,
-        line: at.line.into(),
-        col: at.col.into(),
-        start_line: extent.start.line.into(),
-        start_col: extent.start.col.into(),
-        end_line: extent.end.line.into(),
-        end_col: extent.end.col.into(),
+/// Fill an empty index (a new database, or one a migration cleared) from
+/// each live stream's latest snapshot: every file of a supported language
+/// in that snapshot's tree, recorded as that snapshot's collection.
+pub async fn backfill(svc: &Services) -> Result<usize, DomainError> {
+    if !svc.symbol_store.is_empty().await? {
+        return Ok(0);
+    }
+    let keeps_contents = svc.snapshot_captures.no_contents_reason().is_none();
+    let project_dir = svc.snapshot_files().project_dir;
+    let mut filled = 0;
+    for stream in svc.stream_store.list().await? {
+        if stream.archived_at.is_some() {
+            continue;
+        }
+        let Some(snapshot) = svc
+            .snapshot_store
+            .latest_snapshot_id_for_stream(stream.id)
+            .await?
+        else {
+            continue;
+        };
+        let ws = match stream.worktree_path.as_str() {
+            "" => project_dir.clone(),
+            p => PathBuf::from(p),
+        };
+        let rev = if keeps_contents {
+            Revision::Snapshot(snapshot)
+        } else {
+            Revision::Working
+        };
+        let supported = |p: &str| oxplow_code_metrics::language_for_path(p).is_some();
+        let corpus = svc.trees.corpus(&ws, &rev, supported).await?;
+        let files: Vec<FileSymbols> = corpus
+            .iter()
+            .filter_map(|(path, text)| {
+                let language = oxplow_code_metrics::language_for_path(path)?;
+                Some(file_symbols(path, text, language))
+            })
+            .collect();
+        let capture = SymbolCapture {
+            files_collected: files.len() as i64,
+            files_failed: 0,
+        };
+        filled += files.len();
+        svc.symbol_store
+            .record(stream.id.value(), snapshot, files, capture)
+            .await?;
+    }
+    Ok(filled)
+}
+
+fn file_symbols(path: &str, text: &str, language: oxplow_code_metrics::Language) -> FileSymbols {
+    let rows = oxplow_code_metrics::extract_with_language(text, language)
+        .into_iter()
+        .map(|d| SymbolRow {
+            container: (!d.container.is_empty()).then(|| d.container.join("::")),
+            kind: d.kind.as_str().into(),
+            id: d.id,
+            name: d.name,
+            signature: d.signature,
+            line: d.name_line.into(),
+            col: d.name_col.into(),
+            start_line: d.start_line.into(),
+            start_col: d.start_col.into(),
+            end_line: d.end_line.into(),
+            end_col: d.end_col.into(),
+        })
+        .collect();
+    FileSymbols {
+        path: path.into(),
+        language: language.name().into(),
+        rows: Some(rows),
     }
 }
 
@@ -142,72 +195,56 @@ mod tests {
     use super::*;
     use oxplow_domain::events::schema::{SnapshotTaken, SnapshotTakenV2};
 
-    fn sql(e: rusqlite::Error) -> DomainError {
-        DomainError::Storage(e.to_string())
-    }
-
-    /// Services over a repo with three python files the fake server covers
-    /// (and a README no server does), collecting at most `bound` files.
-    async fn fixture(bound: u32) -> (Arc<Services>, tempfile::TempDir, StreamId) {
+    /// Services over a repo, with the collector registered.
+    async fn fixture() -> (Arc<Services>, tempfile::TempDir, StreamId) {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
-        for f in ["a.py", "b.py", "c.py", "README.md"] {
-            std::fs::write(
-                dir.path().join(f),
-                "class Widget:\n    def spin(self): pass\n",
-            )
-            .unwrap();
-        }
         let svc = Services::in_memory(dir.path()).await.unwrap();
-        {
-            let mut cfg = svc.config.write().unwrap();
-            cfg.lsp_servers
-                .push(crate::lsp_fake::config("python", &["py"]));
-            cfg.symbols_max_files_per_snapshot = bound;
-        }
         let stream = svc.streams.ensure_primary().await.unwrap();
         register(&svc);
         (svc, dir, stream.id)
     }
 
-    /// A snapshot in which `paths` changed, announced as `snapshot.taken`.
-    async fn snapshot(svc: &Services, stream: StreamId, paths: &[&str], deleted: &[&str]) -> i64 {
-        let rows: Vec<(String, &str)> = paths
-            .iter()
-            .map(|p| (p.to_string(), "oxplow"))
-            .chain(deleted.iter().map(|p| (p.to_string(), "deleted")))
-            .collect();
-        let id = svc
-            .db
-            .transaction(move |c| {
-                c.execute(
-                    "INSERT INTO snapshot (stream_id, created_at) VALUES (?1, '2026-09-30T00:00:00.000000Z')",
-                    [stream.value()],
-                )
-                .map_err(sql)?;
-                let id = c.last_insert_rowid();
-                for (path, storage) in &rows {
-                    c.execute(
-                        "INSERT INTO file_snapshot (stream_id, path, blob_hash, size_bytes, captured_at, storage, snapshot_id)
-                         VALUES (?1, ?2, 'h', 1, '2026-09-30T00:00:00.000000Z', ?3, ?4)",
-                        rusqlite::params![stream.value(), path, storage, id],
-                    )
-                    .map_err(sql)?;
-                }
-                Ok(id)
-            })
-            .await
-            .unwrap();
+    /// A snapshot capturing `files` (`None` content: deleted), announced as
+    /// `snapshot.taken` and handled.
+    async fn snapshot(svc: &Services, stream: StreamId, files: &[(&str, Option<&str>)]) -> i64 {
+        use oxplow_domain::Timestamp;
+        let snap = svc.snapshot_store.create_snapshot(stream).await.unwrap();
+        for (path, content) in files {
+            let (blob_hash, size, storage) = match content {
+                Some(text) => (
+                    Some(svc.blobs.write(text.as_bytes()).unwrap()),
+                    text.len() as i64,
+                    SnapshotStorage::Oxplow,
+                ),
+                None => (None, 0, SnapshotStorage::Deleted),
+            };
+            svc.snapshot_store
+                .capture(oxplow_db::FileSnapshot {
+                    id: 0,
+                    stream_id: stream,
+                    path: path.to_string(),
+                    blob_hash,
+                    size_bytes: size,
+                    captured_at: Timestamp::from_unix_ms(0),
+                    storage,
+                    snapshot_id: Some(snap),
+                    mtime_ms: Some(0),
+                    content_hash: None,
+                })
+                .await
+                .unwrap();
+        }
         svc.event_log_store
             .append(oxplow_domain::Envelope::typed::<SnapshotTaken>(
                 "system:test",
                 &SnapshotTakenV2 {
                     stream: format!("stream:{stream}"),
-                    snapshot: format!("snapshot:{id}"),
+                    snapshot: format!("snapshot:{snap}"),
                     parent: None,
                     trigger: oxplow_domain::snapshot::SnapshotTrigger::TurnEnd,
                     unchanged: false,
-                    file_count: (paths.len() + deleted.len()) as u32,
+                    file_count: files.len() as u32,
                     elapsed_ms: 1,
                     budget_ms: None,
                     over_budget: false,
@@ -216,7 +253,7 @@ mod tests {
             .await
             .unwrap();
         svc.event_pump.run_once().await.unwrap();
-        id
+        snap
     }
 
     async fn rows(svc: &Services, sql_text: &'static str) -> serde_json::Value {
@@ -227,118 +264,79 @@ mod tests {
         serde_json::to_value(r.rows).unwrap()
     }
 
-    /// P5.C6: a snapshot's changed files get their `v_symbol` rows, pinned
-    /// `@snap:`; the bound truncates, and the capture records it.
+    const WIDGET: &str = "class Widget:\n    def spin(self): pass\n";
+
+    /// A snapshot's changed files get their `v_symbol` rows from
+    /// tree-sitter — no language server running — under rev-less refs; a
+    /// later snapshot restates what changed and a deleted file drops out.
     #[tokio::test]
-    async fn a_snapshots_files_get_their_symbols_within_the_bound() {
-        let (svc, dir, stream) = fixture(2).await;
-        svc.lsp_sessions
-            .ensure(&stream.to_string(), "python", dir.path().to_path_buf())
-            .await
-            .unwrap();
-        let snap = snapshot(&svc, stream, &["a.py", "b.py", "c.py", "README.md"], &[]).await;
+    async fn a_snapshots_files_get_their_symbols_without_a_language_server() {
+        let (svc, _dir, stream) = fixture().await;
+        let snap = snapshot(
+            &svc,
+            stream,
+            &[
+                ("a.py", Some(WIDGET)),
+                ("Lib/b.py", Some(WIDGET)),
+                ("README.md", Some("# hi")),
+            ],
+        )
+        .await;
         assert_eq!(
             rows(
                 &svc,
-                "SELECT ref, kind, container FROM v_symbol ORDER BY ref"
+                "SELECT ref, kind, container, snapshot_id FROM v_symbol ORDER BY ref"
             )
             .await,
             serde_json::json!([
-                [
-                    format!("symbol:a.py/Widget::spin@snap:{snap}"),
-                    "method",
-                    "Widget"
-                ],
-                [format!("symbol:a.py/Widget@snap:{snap}"), "class", null],
-                [
-                    format!("symbol:b.py/Widget::spin@snap:{snap}"),
-                    "method",
-                    "Widget"
-                ],
-                [format!("symbol:b.py/Widget@snap:{snap}"), "class", null],
+                ["symbol:Lib/b.py/Widget", "class", null, snap],
+                ["symbol:Lib/b.py/Widget::spin", "method", "Widget", snap],
+                ["symbol:a.py/Widget", "class", null, snap],
+                ["symbol:a.py/Widget::spin", "method", "Widget", snap],
             ])
         );
         assert_eq!(
             rows(
                 &svc,
-                "SELECT files_collected, files_over_budget, files_without_server FROM v_symbol_capture"
+                "SELECT files_collected, files_failed FROM v_symbol_capture"
             )
             .await,
-            serde_json::json!([[2, 1, 0]])
+            serde_json::json!([[2, 0]])
         );
 
-        // A later snapshot restates what changed; a deleted file drops out.
-        let later = snapshot(&svc, stream, &["b.py"], &["a.py"]).await;
+        let later = snapshot(
+            &svc,
+            stream,
+            &[("Lib/b.py", Some("def go(): pass\n")), ("a.py", None)],
+        )
+        .await;
         assert_eq!(
-            rows(
-                &svc,
-                "SELECT DISTINCT path, snapshot_id FROM v_symbol ORDER BY path"
-            )
-            .await,
-            serde_json::json!([["b.py", later]])
+            rows(&svc, "SELECT ref, snapshot_id FROM v_symbol ORDER BY ref").await,
+            serde_json::json!([["symbol:Lib/b.py/go", later]])
         );
     }
 
-    /// The collector never starts a server: with none running, nothing is
-    /// collected and the capture says why.
+    /// An empty index is filled from each stream's latest snapshot; a
+    /// filled one is left alone.
     #[tokio::test]
-    async fn without_a_running_server_nothing_is_started() {
-        let (svc, _dir, stream) = fixture(50).await;
-        snapshot(&svc, stream, &["a.py", "b.py"], &[]).await;
-        assert!(
-            !svc.lsp_sessions
-                .is_running(&stream.to_string(), "python")
-                .await
-        );
-        assert_eq!(
-            rows(&svc, "SELECT count(*) FROM v_symbol").await,
-            serde_json::json!([[0]])
-        );
-        assert_eq!(
-            rows(
-                &svc,
-                "SELECT files_collected, files_over_budget, files_without_server FROM v_symbol_capture"
-            )
-            .await,
-            serde_json::json!([[0, 0, 2]])
-        );
-    }
-
-    /// tsk557: every file asked about counts against the bound, and one
-    /// the server fails on (an error, or no answer in time) is recorded
-    /// as failed — never asked about past the bound, never invisible.
-    #[tokio::test]
-    async fn failures_count_against_the_bound_and_are_recorded() {
-        let (svc, dir, stream) = fixture(3).await;
-        for f in ["broken.py", "hang.py"] {
-            std::fs::write(dir.path().join(f), "x = 1\n").unwrap();
-        }
-        svc.lsp_sessions
-            .ensure(&stream.to_string(), "python", dir.path().to_path_buf())
+    async fn backfill_fills_an_empty_index_from_the_latest_snapshot() {
+        let (svc, _dir, stream) = fixture().await;
+        let snap = snapshot(&svc, stream, &[("a.py", Some(WIDGET))]).await;
+        svc.db
+            .transaction(|tx| {
+                tx.execute("DELETE FROM symbol", [])
+                    .map_err(oxplow_db::map_sql_err)
+            })
             .await
             .unwrap();
-        // Sorted: a, b, broken (fails), c (over the bound of 3 attempts).
-        snapshot(&svc, stream, &["a.py", "b.py", "broken.py", "c.py"], &[]).await;
+        assert_eq!(backfill(&svc).await.unwrap(), 1);
         assert_eq!(
-            rows(
-                &svc,
-                "SELECT files_collected, files_over_budget, files_without_server, files_failed \
-                 FROM v_symbol_capture"
-            )
-            .await,
-            serde_json::json!([[2, 1, 0, 1]])
+            rows(&svc, "SELECT ref, snapshot_id FROM v_symbol ORDER BY ref").await,
+            serde_json::json!([
+                ["symbol:a.py/Widget", snap],
+                ["symbol:a.py/Widget::spin", snap]
+            ])
         );
-        // A server that never answers times out and is counted.
-        let started = std::time::Instant::now();
-        snapshot(&svc, stream, &["hang.py"], &[]).await;
-        assert!(started.elapsed() < std::time::Duration::from_secs(10));
-        assert_eq!(
-            rows(
-                &svc,
-                "SELECT files_failed FROM v_symbol_capture ORDER BY snapshot_id DESC LIMIT 1"
-            )
-            .await,
-            serde_json::json!([[1]])
-        );
+        assert_eq!(backfill(&svc).await.unwrap(), 0);
     }
 }

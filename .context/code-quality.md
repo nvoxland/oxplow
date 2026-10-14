@@ -48,27 +48,32 @@ capitalization; Python uses the leading-underscore convention; C
 treats `static` storage class as private. It lands in
 `v_change_function.visibility`.
 
-`FunctionMetrics.container_path` (and `AnalyzedFunction.container_path`
-carries the outer-to-inner names of the named-declaration ancestors a
-function lives inside (class / impl / trait / mod / namespace / interface /
-enum / record); it's stored `::`-joined as `v_change_function.container`.
-Top-level functions report an empty `container_path`. The set of
-container kinds is per-language — `LanguageSpec.container_kinds` plus
-`container_name_fields` in `crates/oxplow-code-metrics/src/spec.rs`.
-Go and C have no class-like containers and use an empty list.
+Function metrics are a projection of symbol extraction
+(language-support.md "Symbols"): a metric record exists for each callable
+definition (function, method, constructor) and nothing else. An anonymous
+closure or lambda gets no record; its decisions count toward the enclosing
+named function. `FunctionMetrics.id` is the definition's id within its file
+(`Parser::parse(String,int)`, `main~2`).
+
+`FunctionMetrics.container_path` (and `AnalyzedFunction.container_path`)
+is the definition's symbol container: the outer-to-inner names of what it
+lives inside (class / impl / trait / mod / namespace / interface / enum),
+stored `::`-joined as `v_change_function.container`. Top-level functions
+report an empty `container_path`. What counts as a container, and how it is
+named, is in the language's `symbols.scm`, not in `LanguageSpec`.
 
 Languages: Rust, TypeScript (incl. TSX), JavaScript, Python, Go,
-Java, C, C++. Adding a language is one entry in
-`crates/oxplow-code-metrics/src/spec.rs` listing the function /
-parameter / decision-point / container AST node names plus a grammar
-loader. Files in unsupported languages are silently skipped.
+Java, C, C++, C#, Clojure. Adding a language is in
+language-support.md's checklist (`spec.rs` decision / parameter node names,
+`symbols.scm`, a grammar loader). Files in unsupported languages are
+silently skipped.
 
 **Duplicate blocks** (tool name `"duplication"`) — handled by
 `oxplow-code-dup`. **Function-anchored AST subtree-hash detector
 (Deckard-style).** Pipeline:
 
 1. Walk the tree-sitter AST of each file, find every function-like
-   node (per `Language::spec().function_kinds` — covers Rust
+   node (per `Language::spec().function_kinds`, function-like syntax kept for this detector — covers Rust
    `function_item` / `closure_expression`, JS/TS function /
    arrow-function / method, Python / Go / Java / C / C++
    equivalents). **Code outside any function body is not in the
@@ -251,7 +256,7 @@ it.
 
 ### `oxplow-code-deps`
 
-Tree-sitter-based import extractor + zone classifier. Same nine
+Tree-sitter-based import extractor + zone classifier. Same
 languages as `oxplow-code-metrics` (it depends on that crate's
 grammar table). Public API:
 

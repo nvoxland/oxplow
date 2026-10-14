@@ -216,6 +216,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::git_resolve_commit_ref_labels,
             commands::generated::git_list_recent_remote_branches,
             commands::generated::read_at,
+            commands::generated::resolve_symbol,
             commands::generated::search_workspace_text,
             commands::generated::git_change_scopes,
             // hooks / agent lifecycle

@@ -621,13 +621,13 @@ archived, never deleted in use: a hard delete (tests) cascades oxplow's
 task rows but leaves their interface rows (V29 dropped the trigger that
 followed it).
 
-### `symbol` + `symbol_capture` — code symbols (migration `V117__symbol.sql`, P5.C6)
+### `symbol` + `symbol_capture` — code symbols (migration `V62__symbols_from_tree_sitter.sql`)
 
-The symbols the running language servers report for each stream's
-files, restated per changed file at each snapshot by the
-`symbols.collect` pump consumer, and one `symbol_capture` row per
-snapshot saying what the collection covered. Read as `v_symbol` /
-`v_symbol_capture`; details in [lsp.md](./lsp.md) and
+The definitions oxplow's own tree-sitter extraction finds in each stream's
+files, restated per changed file at each snapshot by the `symbols.collect`
+pump consumer, and one `symbol_capture` row per snapshot saying what the
+collection covered. Read as `v_symbol` / `v_symbol_capture`; details in
+[language-support.md](./language-support.md) "Symbols" and
 [semantic-layer.md](./semantic-layer.md).
 
 ### `ai_result` — recorded AI computations (`crates/oxplow-db/src/ai_result_store.rs`, migration `V118__ai_result.sql`, P5.E1)
@@ -1134,16 +1134,21 @@ command rebuilds the `WorkspaceFilter` and calls
 filter on every live per-stream `SnapshotCaptureService` (each holds
 it behind an `RwLock`) and on the copy used to build future ones.
 
-### `symbol` + `symbol_capture` — `SqliteSymbolStore` (`crates/oxplow-db/src/symbol_store.rs`, migration `V117__symbol.sql`)
+### `symbol` + `symbol_capture` — `SqliteSymbolStore` (`crates/oxplow-db/src/symbol_store.rs`, migration `V62__symbols_from_tree_sitter.sql`)
 
-The symbol index (P5.C6): each stream's files' symbols as the running
-language servers report them, restated per changed file by the symbol
-collector at each snapshot (`ref` `symbol:<path>/<name>@snap:<id>`,
-`snapshot_id` the snapshot it was read at, `name`, `kind`, `container`,
-`language`, 1-based `line`/`col`/`end_line`/`end_col`), and one
-`symbol_capture` row per snapshot handled (`files_collected`,
-`files_over_budget`, `files_without_server`). Read as `v_symbol` /
-`v_symbol_capture`; see [lsp.md](./lsp.md).
+The symbol index: each stream's files' definitions, restated per changed
+file by the symbol collector at each snapshot. `symbol` columns: `ref`
+(`symbol:<path>/<id>`, no revision; unique per `(stream_id, ref)`),
+`snapshot_id` (the snapshot the file was read at), `name`, `kind`,
+`container`, `signature` (parameter types or dispatch value, NULL where the
+language doesn't overload), `language`, 1-based `line`/`col` (the name) and
+`start_*`/`end_*` (the extent). `symbol_capture` has one row per snapshot
+handled: `files_collected` and `files_failed` (content unreadable at the
+snapshot). V62 cleared both tables, added `signature`, made the ref unique
+per stream and dropped `files_over_budget` / `files_without_server`; the
+boot backfill (`symbol_collector::backfill`) refills an empty index from each
+live stream's latest snapshot. Read as `v_symbol` / `v_symbol_capture`; see
+[language-support.md](./language-support.md) "Symbols".
 
 ### `wiki_page` — `WikiPageStore` (`crates/oxplow-db/src/wiki_page_store.rs`)
 

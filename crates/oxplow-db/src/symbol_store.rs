@@ -1,21 +1,25 @@
 //! The symbol index (`symbol`, `symbol_capture`; read as `v_symbol`,
-//! `v_symbol_capture`): what the running language servers report for each
-//! stream's files, restated per changed file at each snapshot by the
-//! symbol collector (P5.C6, `.context/lsp.md`).
+//! `v_symbol_capture`): what each stream's files define, as oxplow's
+//! tree-sitter extraction reads them, restated per changed file at each
+//! snapshot by the symbol collector (`.context/language-support.md`
+//! "Symbols").
 
 use oxplow_domain::{DomainError, Timestamp};
 
 use crate::database::{map_sql_err, ts_to_string};
 use crate::Database;
 
-/// One symbol, 1-based positions. `name` is the symbol's own name,
-/// `container` its enclosing path; `line`/`col` is where its name is,
-/// `start_*`..`end_*` its whole extent.
+/// One definition, 1-based positions. `id` is its symbol id within the
+/// file (`Parser::parse`, `main~2`) — its ref is `symbol:<path>/<id>`;
+/// `name` its own name, `container` what it's inside (`::`-joined);
+/// `line`/`col` is where its name is, `start_*`..`end_*` its whole extent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SymbolRow {
+    pub id: String,
     pub name: String,
     pub kind: String,
     pub container: Option<String>,
+    pub signature: Option<String>,
     pub line: i64,
     pub col: i64,
     pub start_line: i64,
@@ -24,8 +28,8 @@ pub struct SymbolRow {
     pub end_col: i64,
 }
 
-/// A file's symbols as read at a snapshot, from one language's server;
-/// `None` rows means the file is gone.
+/// A file's definitions as read at a snapshot; `None` rows means the file
+/// is gone (or no longer in a supported language).
 #[derive(Debug, Clone)]
 pub struct FileSymbols {
     pub path: String,
@@ -37,10 +41,7 @@ pub struct FileSymbols {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SymbolCapture {
     pub files_collected: i64,
-    pub files_over_budget: i64,
-    pub files_without_server: i64,
-    /// Asked about, but the server failed (an error, or no answer in
-    /// time).
+    /// Content that couldn't be read at the snapshot.
     pub files_failed: i64,
 }
 
@@ -72,41 +73,22 @@ impl SqliteSymbolStore {
                         rusqlite::params![stream_id, file.path],
                     )
                     .map_err(map_sql_err)?;
-                    // In position order, so a name path's later symbols (an
-                    // overload, a setter after its getter) are numbered
-                    // stably: `Widget::value`, `Widget::value~2`.
-                    let mut rows: Vec<&SymbolRow> = file.rows.iter().flatten().collect();
-                    rows.sort_by_key(|r| (r.line, r.col));
-                    let mut seen: std::collections::HashMap<String, u32> =
-                        std::collections::HashMap::new();
-                    for r in rows {
-                        let qualified = match &r.container {
-                            Some(c) => format!("{c}::{}", r.name),
-                            None => r.name.clone(),
-                        };
-                        let nth = seen.entry(qualified.clone()).or_insert(0);
-                        *nth += 1;
-                        let id = match *nth {
-                            1 => qualified,
-                            n => format!("{qualified}~{n}"),
-                        };
+                    for r in file.rows.iter().flatten() {
                         tx.execute(
                             "INSERT INTO symbol (ref, snapshot_id, stream_id, path, name, kind,
-                               container, language, line, col, start_line, start_col,
-                               end_line, end_col)
-                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                               container, signature, language, line, col, start_line,
+                               start_col, end_line, end_col)
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+                                     ?14, ?15)",
                             rusqlite::params![
-                                oxplow_domain::refs::build::symbol_ref(
-                                    &file.path,
-                                    &id,
-                                    snapshot_id
-                                ),
+                                oxplow_domain::refs::build::symbol_ref(&file.path, &r.id),
                                 snapshot_id,
                                 stream_id,
                                 file.path,
                                 r.name,
                                 r.kind,
                                 r.container,
+                                r.signature,
                                 file.language,
                                 r.line,
                                 r.col,
@@ -121,15 +103,12 @@ impl SqliteSymbolStore {
                 }
                 tx.execute(
                     "INSERT OR REPLACE INTO symbol_capture (snapshot_id, stream_id,
-                       files_collected, files_over_budget, files_without_server, files_failed,
-                       captured_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                       files_collected, files_failed, captured_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
                     rusqlite::params![
                         snapshot_id,
                         stream_id,
                         capture.files_collected,
-                        capture.files_over_budget,
-                        capture.files_without_server,
                         capture.files_failed,
                         at
                     ],
@@ -139,17 +118,26 @@ impl SqliteSymbolStore {
             })
             .await
     }
+
+    /// Whether the index holds nothing (the boot backfill fills it).
+    pub async fn is_empty(&self) -> Result<bool, DomainError> {
+        self.db
+            .call(|c| c.query_row("SELECT NOT EXISTS (SELECT 1 FROM symbol)", [], |r| r.get(0)))
+            .await
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn row(name: &str, line: i64) -> SymbolRow {
+    fn row(id: &str, line: i64) -> SymbolRow {
         SymbolRow {
-            name: name.into(),
+            id: id.into(),
+            name: id.rsplit("::").next().unwrap().into(),
             kind: "method".into(),
             container: Some("Widget".into()),
+            signature: None,
             line,
             col: 5,
             start_line: line - 1,
@@ -159,43 +147,67 @@ mod tests {
         }
     }
 
-    /// tsk571: two symbols with one name path in a file (overloads, a
-    /// getter and a setter) get distinct refs — the later ones numbered
-    /// in position order — and the extent is stored beside the name.
-    #[tokio::test]
-    async fn same_named_symbols_get_distinct_refs() {
-        let db = Database::in_memory();
-        db.call(|c| {
+    async fn stream(db: &Database, id: i64) {
+        db.call(move |c| {
             c.execute(
                 "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source,
                                       worktree_path, created_at, updated_at)
-                 VALUES (1, 'primary', 's', 'main', 'r', 'r', '/r', 'now', 'now')",
-                [],
+                 VALUES (?1, CASE ?1 WHEN 1 THEN 'primary' ELSE 'worktree' END, 's', 'main', 'r', 'r', '/r' || ?1, 'now', 'now')",
+                [id],
             )
             .map(|_| ())
         })
         .await
         .unwrap();
+    }
+
+    /// A file's rows are restated whole, each under its rev-less ref; the
+    /// same symbol in two streams is a row in each.
+    #[tokio::test]
+    async fn a_files_symbols_are_restated_under_their_refs_per_stream() {
+        let db = Database::in_memory();
+        stream(&db, 1).await;
+        stream(&db, 2).await;
         let store = SqliteSymbolStore::new(db.clone());
+        assert!(store.is_empty().await.unwrap());
+        let file = |rows| FileSymbols {
+            path: "README.md/w.py".into(),
+            language: "python".into(),
+            rows,
+        };
+        for (stream, snap) in [(1, 7), (2, 8)] {
+            store
+                .record(
+                    stream,
+                    snap,
+                    vec![file(Some(vec![
+                        row("Widget::value", 10),
+                        row("Widget::value~2", 20),
+                    ]))],
+                    SymbolCapture::default(),
+                )
+                .await
+                .unwrap();
+        }
         store
             .record(
                 1,
-                7,
-                vec![FileSymbols {
-                    path: "w.py".into(),
-                    language: "python".into(),
-                    rows: Some(vec![row("value", 20), row("value", 10), row("spin", 30)]),
-                }],
-                SymbolCapture::default(),
+                9,
+                vec![file(Some(vec![row("Widget::spin", 30)]))],
+                SymbolCapture {
+                    files_collected: 1,
+                    files_failed: 0,
+                },
             )
             .await
             .unwrap();
-        let refs: Vec<(String, i64, i64, i64)> = db
+        let refs: Vec<(i64, String, i64)> = db
             .call(|c| {
-                let mut stmt =
-                    c.prepare("SELECT ref, line, start_line, end_line FROM symbol ORDER BY line")?;
+                let mut stmt = c.prepare(
+                    "SELECT stream_id, ref, snapshot_id FROM symbol ORDER BY stream_id, line",
+                )?;
                 let rows = stmt
-                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
                     .collect::<rusqlite::Result<Vec<_>>>();
                 rows
             })
@@ -204,10 +216,11 @@ mod tests {
         assert_eq!(
             refs,
             vec![
-                ("symbol:w.py/Widget::value@snap:7".into(), 10, 9, 12),
-                ("symbol:w.py/Widget::value~2@snap:7".into(), 20, 19, 22),
-                ("symbol:w.py/Widget::spin@snap:7".into(), 30, 29, 32),
+                (1, "symbol:README.md/w.py/Widget::spin".into(), 9),
+                (2, "symbol:README.md/w.py/Widget::value".into(), 8),
+                (2, "symbol:README.md/w.py/Widget::value~2".into(), 8),
             ]
         );
+        assert!(!store.is_empty().await.unwrap());
     }
 }

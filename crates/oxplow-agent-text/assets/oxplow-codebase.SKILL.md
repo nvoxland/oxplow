@@ -35,14 +35,18 @@ terminal.
 
 ## Code (`v_symbol`, `v_diagnostic`, the `code_*` tools)
 
-- **`v_symbol`** — the functions, classes, methods … the running language
-  servers report for each stream's files (`path`, `name`, `kind`,
-  `container`, `line`, `col`), restated at each snapshot. Where
+- **`v_symbol`** — what each stream's files define, as oxplow's own
+  tree-sitter parsing reads them, in every supported language (`ref`, `path`,
+  `name`, `kind`, `container`, `signature`, `line`, `col`), restated at each
+  snapshot. `kind` is one of function, method, constructor, class, struct,
+  enum, enum_member, interface, trait, type, field, constant, variable,
+  module, namespace, macro. `signature` holds the parameter types in
+  languages that overload by them (Java, C#, C++), else NULL. Where
   something is defined: `SELECT path, line, kind, container FROM
   v_symbol WHERE name = 'main'`; what a file declares: `WHERE path = …
-  ORDER BY line`. Only files whose language has a running server are
-  covered; `v_symbol_capture` says what each snapshot's collection
-  covered.
+  ORDER BY line`. `ref` is `symbol:<path>/<id>` (no revision); no language
+  server is needed. `v_symbol_capture` says what each snapshot's collection
+  covered (`files_collected`, `files_failed`).
 - **`v_diagnostic`** — what the language servers report now (`path`,
   `severity`, `message`, `line`). Which files are broken:
   `SELECT path, count(*) FROM v_diagnostic WHERE severity = 'error'

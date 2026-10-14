@@ -608,6 +608,21 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	resolveSymbol: (streamId: string, symbol: string) => typedError<{
+	path: string,
+	line: number,
+	col: number,
+	revision: string | null,
+	/**
+	 *  The ref pinned a version that's gone (or no longer holds it): this
+	 *  is the current symbol instead.
+	 */
+	versionGone: boolean,
+} | null, IpcError>(__TAURI_INVOKE("resolve_symbol", { streamId, symbol })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	searchWorkspaceText: (streamId: string | null, query: string, limit: number | null) => typedError<TextSearchHit[], IpcError>(__TAURI_INVOKE("search_workspace_text", { streamId, query, limit })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -4921,12 +4936,6 @@ export type OxplowConfig = {
 	 */
 	snapshotTurnBudgetMs: number,
 	/**
-	 *  How many of a snapshot's changed files the symbol collector asks
-	 *  the running language servers about; the rest are recorded as
-	 *  skipped. Default 50.
-	 */
-	symbolsMaxFilesPerSnapshot: number,
-	/**
 	 *  When true, the UserPromptSubmit hook injects a session-context
 	 *  block into every agent prompt.
 	 */
@@ -6152,6 +6161,22 @@ export type StreamId = string;
 
 // Whether a stream is the project's primary stream or a worktree.
 export type StreamKind = "primary" | "worktree";
+
+/**
+ *  Where a symbol is: its file and the line/column of its name (1-based),
+ *  at `revision` when the ref pinned one that still holds it.
+ */
+export type SymbolLocation = {
+	path: string,
+	line: number,
+	col: number,
+	revision: string | null,
+	/**
+	 *  The ref pinned a version that's gone (or no longer holds it): this
+	 *  is the current symbol instead.
+	 */
+	versionGone: boolean,
+};
 
 /**
  *  One declared test, written as a one-key map: `{ not_null: id }`,

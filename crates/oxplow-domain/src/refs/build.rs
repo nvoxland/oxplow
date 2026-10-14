@@ -136,10 +136,12 @@ pub fn dir_ref(path: &str) -> String {
     of(k::DIR, path)
 }
 
-/// A symbol: `<path>/<name>` at the snapshot it was read from.
-pub fn symbol_ref(path: &str, name: &str, snapshot_id: i64) -> String {
-    let snap = format!("snap:{snapshot_id}");
-    at(k::SYMBOL, &format!("{path}/{name}"), Some(&snap), None)
+/// A symbol: `<path>/<id>`, `id` its symbol id within the file
+/// (`oxplow_code_metrics::Definition::id`: `Parser::parse`, `main~2`).
+/// The current symbol; pin a version with [`at`] (`@snap:<id>`,
+/// `@git:<sha>`).
+pub fn symbol_ref(path: &str, id: &str) -> String {
+    of(k::SYMBOL, &format!("{path}/{id}"))
 }
 
 pub fn wiki_ref(slug: &str) -> String {
@@ -406,7 +408,17 @@ mod tests {
             file_ref("src/a@b.rs"),
             file_ref_at("src/a.rs", Some("git:HEAD"), Some("L10-20")),
             dir_ref("src/ui"),
-            symbol_ref("src/a.rs", "parse", 7),
+            symbol_ref("src/a.rs", "parse"),
+            symbol_ref("README.md", "Parser::parse(String,int)"),
+            symbol_ref("Sources/App/Main.swift", "<Parser as Display>::fmt~2"),
+            symbol_ref("src/core.clj", "area([:a :b])"),
+            at(k::SYMBOL, "src/a.rs/Parser::parse", Some("snap:812"), None),
+            at(
+                k::SYMBOL,
+                "src/a.rs/Parser::parse",
+                Some("git:3f2a9c1"),
+                None,
+            ),
             wiki_ref("architecture"),
             comment_ref(CommentId::new(4)),
             event_ref("01a1369e-b063-76f8-968f-902d392f882d"),
@@ -461,7 +473,7 @@ mod tests {
             branch_ref("b"),
             file_ref("a"),
             dir_ref("a"),
-            symbol_ref("a", "b", 1),
+            symbol_ref("a", "b"),
             "work_item:oxplow:tsk1".to_string(),
             wiki_ref("w"),
             comment_ref(CommentId::new(1)),

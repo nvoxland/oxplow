@@ -93,6 +93,27 @@ pub async fn extension_impact_between(
     Ok(oxplow_app::extensions::extension_changes_between(svc, &ws, start.as_ref(), &end).await?)
 }
 
+/// Where the `symbol:` ref `symbol` points in `stream_id`: the current symbol, or —
+/// for a ref pinned `@snap:`/`@git:` — where it was in that version
+/// (`oxplow_app::symbol_resolve`). `None` when it's a dead link.
+pub async fn resolve_symbol(
+    svc: &Services,
+    stream_id: String,
+    symbol: String,
+) -> Result<Option<oxplow_app::symbol_resolve::SymbolLocation>, IpcError> {
+    let stream = oxplow_domain::StreamId::try_from_str(&stream_id).ok_or_else(|| {
+        IpcError::from(oxplow_domain::DomainError::Invalid(format!(
+            "`{stream_id}` isn't a stream id"
+        )))
+    })?;
+    let ws = svc
+        .worktrees
+        .resolve(Some(&stream_id))
+        .await
+        .into_local_path();
+    Ok(oxplow_app::symbol_resolve::resolve(svc, stream, &ws, &symbol).await?)
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;

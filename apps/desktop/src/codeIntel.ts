@@ -151,18 +151,3 @@ export function symbolTree(symbols: SymbolRow[]): SymbolNode[] {
   }
   return roots;
 }
-
-export function symbolLocation(result: SqlQueryResult): { path: string; line: number; col: number } | null {
-  const row = result.rows[0];
-  if (!row) return null;
-  return {
-    path: String(at(result, row, "path")),
-    line: Number(at(result, row, "line") ?? 1),
-    col: Number(at(result, row, "col") ?? 1),
-  };
-}
-
-/** Where a `symbol:` ref's name is, or null when it isn't a symbol now. */
-export async function resolveSymbol(ref: string): Promise<{ path: string; line: number; col: number } | null> {
-  return symbolLocation(await querySql("SELECT path, line, col FROM v_symbol WHERE ref = ?1", [ref], 1));
-}

@@ -16,6 +16,7 @@
 //! Files in unsupported languages are silently skipped (the caller
 //! sees no findings for them).
 
+use std::collections::HashSet;
 use std::path::Path;
 
 use tree_sitter::Node;
@@ -23,6 +24,7 @@ use tree_sitter::Node;
 mod ast;
 pub mod language;
 mod spec;
+pub mod symbols;
 
 pub use ast::{ast_query, parse, query, AstQueryError, QueryMatch};
 pub use language::{
@@ -32,6 +34,7 @@ pub use language::{
 pub use spec::{
     language_from_lsp_id, language_from_name, Language, LanguageSpec, VisibilityStrategy,
 };
+pub use symbols::{extract, extract_with_language, Definition, SymbolKind};
 pub use tree_sitter::Tree;
 
 /// Coarse public/private classification. Heuristic per language —
@@ -51,8 +54,11 @@ pub enum Visibility {
 pub struct FunctionMetrics {
     /// Repo-relative file path (caller-supplied; pass-through).
     pub path: String,
-    /// Best-effort function name. May include receiver/class qualifier.
+    /// The function's own name.
     pub name: String,
+    /// Its symbol id within the file (`Parser::parse`, `main~2`) — the
+    /// same id [`extract`] gives it.
+    pub id: String,
     /// Cyclomatic complexity (decision points + 1).
     pub complexity: u32,
     /// Body line count (end_line - start_line + 1).
@@ -63,10 +69,8 @@ pub struct FunctionMetrics {
     pub start_line: u32,
     /// 1-based end line.
     pub end_line: u32,
-    /// Outer-to-inner names of the named-declaration ancestors this
-    /// function lives inside (class / impl / module / namespace).
-    /// Empty for top-level functions. Language-specific — see
-    /// `LanguageSpec::container_kinds`.
+    /// The names of what it's inside, outermost first — its symbol's
+    /// container (empty at top level).
     pub container_path: Vec<String>,
     /// Coarse public/private classification (heuristic per language).
     pub visibility: Visibility,
@@ -106,15 +110,14 @@ pub fn analyze_file(path: &str, source: &str) -> Vec<FunctionMetrics> {
     analyze_with_language(path, source, lang)
 }
 
-/// List the code units in a file — functions, class-like containers,
+/// List the code units in a file — functions, class-like types,
 /// modules/namespaces, and (when the language declares it) the package the
-/// file belongs to. The generic "list the things that make sense for this
-/// language" surface, deterministic and offline (tree-sitter), complementing
-/// the LSP `documentSymbol` path. Returns an empty Vec for unsupported /
-/// unparseable input.
+/// file belongs to: the navigable subset of its [`extract`]ed definitions,
+/// deterministic and offline (tree-sitter). Returns an empty Vec for
+/// unsupported / unparseable input.
 ///
-/// Units are returned in a stable order: package (if any) → containers and
-/// functions in source order.
+/// Units are returned in a stable order: package (if any) → the rest in
+/// source order.
 pub fn list_units(path: &str, source: &str) -> Vec<CodeUnit> {
     let Some(lang) = language_for_path(path) else {
         return Vec::new();
@@ -137,17 +140,19 @@ pub fn list_units(path: &str, source: &str) -> Vec<CodeUnit> {
             });
         }
     }
-
-    let Some(tree) = parse(source, lang) else {
-        return out;
-    };
-    let spec = lang.spec();
-    let src = source.as_bytes();
-    let mut nodes: Vec<CodeUnit> = Vec::new();
-    walk_units(tree.root_node(), src, spec, &mut nodes);
-    // Source order (start line, then end line) for a stable, readable list.
-    nodes.sort_by_key(|u| (u.start_line, u.end_line));
-    out.extend(nodes);
+    out.extend(
+        extract_with_language(source, lang)
+            .into_iter()
+            .filter_map(|d| {
+                Some(CodeUnit {
+                    kind: unit_kind(d.kind)?,
+                    name: d.name,
+                    container_path: d.container,
+                    start_line: d.start_line,
+                    end_line: d.end_line,
+                })
+            }),
+    );
     out
 }
 
@@ -163,44 +168,18 @@ fn package_for_path(path: &str) -> Option<String> {
     }
 }
 
-/// Map a container node kind to its [`UnitKind`]. Module-like containers
-/// (`mod`, `module`, `namespace`) become [`UnitKind::Module`]; everything
-/// else in `container_kinds` (class / struct / interface / impl / trait /
-/// enum / record) is a [`UnitKind::Class`].
-fn container_unit_kind(node_kind: &str) -> UnitKind {
-    if node_kind.contains("mod") || node_kind.contains("namespace") {
-        UnitKind::Module
+/// The unit a definition is, if it is one: callables are functions,
+/// types are classes, modules and namespaces are modules; fields,
+/// constants, variables, enum members and macros aren't units.
+fn unit_kind(kind: SymbolKind) -> Option<UnitKind> {
+    if kind.is_callable() {
+        Some(UnitKind::Function)
+    } else if kind.is_type() {
+        Some(UnitKind::Class)
+    } else if matches!(kind, SymbolKind::Module | SymbolKind::Namespace) {
+        Some(UnitKind::Module)
     } else {
-        UnitKind::Class
-    }
-}
-
-/// Recursive unit-finder: emits a [`CodeUnit`] for every function-like and
-/// container node, descending so nested units are captured.
-fn walk_units(node: Node<'_>, src: &[u8], spec: &LanguageSpec, out: &mut Vec<CodeUnit>) {
-    if is_function_node(node, src, spec) {
-        let name = function_name(node, src, spec).unwrap_or_else(|| "(anonymous)".into());
-        out.push(CodeUnit {
-            kind: UnitKind::Function,
-            name,
-            container_path: container_path(node, src, spec),
-            start_line: node.start_position().row as u32 + 1,
-            end_line: node.end_position().row as u32 + 1,
-        });
-    } else if spec.container_kinds.contains(&node.kind()) {
-        if let Some(name) = container_name(node, src, spec) {
-            out.push(CodeUnit {
-                kind: container_unit_kind(node.kind()),
-                name,
-                container_path: container_path(node, src, spec),
-                start_line: node.start_position().row as u32 + 1,
-                end_line: node.end_position().row as u32 + 1,
-            });
-        }
-    }
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        walk_units(child, src, spec, out);
+        None
     }
 }
 
@@ -212,9 +191,16 @@ pub fn analyze_with_language(path: &str, source: &str, language: Language) -> Ve
         return Vec::new();
     };
     let spec = language.spec();
-    let mut out = Vec::new();
-    walk_functions(tree.root_node(), source.as_bytes(), spec, path, &mut out);
-    out
+    let src = source.as_bytes();
+    let callables: Vec<(Definition, Node<'_>)> = symbols::extract_tree(&tree, src, language)
+        .into_iter()
+        .filter(|(d, _)| d.kind.is_callable())
+        .collect();
+    let bodies: HashSet<usize> = callables.iter().map(|(_, n)| n.id()).collect();
+    callables
+        .into_iter()
+        .map(|(d, node)| function_metrics(d, node, src, spec, path, &bodies))
+        .collect()
 }
 
 /// A code marker (TODO / FIXME / …) found inside a comment — the
@@ -315,30 +301,6 @@ fn clean_comment_line(line: &str) -> String {
         .to_string()
 }
 
-/// Recursive function-finder. When we hit a node whose kind matches
-/// one of `spec.function_kinds` (or, for grammars with form-head
-/// matchers, a `list_lit` whose head sym is in
-/// `spec.function_form_heads`), compute its metrics. We always
-/// descend so nested closures / methods get their own records.
-fn walk_functions(
-    node: Node<'_>,
-    src: &[u8],
-    spec: &LanguageSpec,
-    path: &str,
-    out: &mut Vec<FunctionMetrics>,
-) {
-    if is_function_node(node, src, spec) {
-        if let Some(rec) = function_metrics(node, src, spec, path) {
-            out.push(rec);
-        }
-        // Still descend so we capture nested closures / methods.
-    }
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        walk_functions(child, src, spec, path, out);
-    }
-}
-
 /// Whether `node` should be treated as a function root. Either
 /// `node.kind()` is in `spec.function_kinds`, or — for grammars
 /// with a generic list node like Clojure's `list_lit` — the head
@@ -403,34 +365,28 @@ fn sym_lit_name<'a>(sym_lit: Node<'_>, src: &'a [u8]) -> Option<&'a str> {
 }
 
 fn function_metrics(
+    def: Definition,
     node: Node<'_>,
     src: &[u8],
     spec: &LanguageSpec,
     path: &str,
-) -> Option<FunctionMetrics> {
+    bodies: &HashSet<usize>,
+) -> FunctionMetrics {
     let start_line = node.start_position().row as u32 + 1;
     let end_line = node.end_position().row as u32 + 1;
-    let length = end_line.saturating_sub(start_line) + 1;
-
-    let name = function_name(node, src, spec).unwrap_or_else(|| "(anonymous)".into());
-    let parameter_count = count_parameters(node, src, spec);
-    let complexity = count_decision_points(node, src, spec) + 1;
-    let container_path = container_path(node, src, spec);
-    let visibility = visibility_for(node, src, spec, &name);
-    let has_doc = has_doc_for(node, src, spec);
-
-    Some(FunctionMetrics {
+    FunctionMetrics {
         path: path.into(),
-        name,
-        complexity,
-        length,
-        parameter_count,
+        complexity: count_decision_points(node, src, spec, bodies) + 1,
+        length: end_line.saturating_sub(start_line) + 1,
+        parameter_count: count_parameters(node, src, spec),
         start_line,
         end_line,
-        container_path,
-        visibility,
-        has_doc,
-    })
+        visibility: visibility_for(node, src, spec, &def.name),
+        has_doc: has_doc_for(node, src, spec),
+        name: def.name,
+        id: def.id,
+        container_path: def.container,
+    }
 }
 
 /// Whether `node` (a function) carries documentation, per the language's
@@ -723,106 +679,6 @@ fn has_ancestor_kind(node: Node<'_>, kinds: &[&str]) -> bool {
     false
 }
 
-/// Walk parents of `node` and collect outer-to-inner names of every
-/// ancestor whose kind is in `spec.container_kinds`. Stops at the
-/// nearest enclosing function — a closure inside a method does not
-/// inherit the method's class as a container (the method itself is
-/// already its own record with that container_path).
-fn container_path(node: Node<'_>, src: &[u8], spec: &LanguageSpec) -> Vec<String> {
-    let mut names: Vec<String> = Vec::new();
-    let mut current = node.parent();
-    while let Some(parent) = current {
-        if spec.function_kinds.contains(&parent.kind()) {
-            break;
-        }
-        if spec.container_kinds.contains(&parent.kind()) {
-            if let Some(name) = container_name(parent, src, spec) {
-                names.push(name);
-            }
-        }
-        current = parent.parent();
-    }
-    names.reverse();
-    names
-}
-
-fn container_name(node: Node<'_>, src: &[u8], spec: &LanguageSpec) -> Option<String> {
-    for field in spec.container_name_fields {
-        if let Some(name_node) = node.child_by_field_name(field) {
-            let leaf = innermost_identifier(name_node).unwrap_or(name_node);
-            if let Ok(text) = leaf.utf8_text(src) {
-                return Some(text.to_string());
-            }
-        }
-    }
-    None
-}
-
-fn function_name(node: Node<'_>, src: &[u8], spec: &LanguageSpec) -> Option<String> {
-    // Clojure: list_lit shaped as (defn name [args] …). Head sym
-    // is the form (`defn`/`defmacro`/etc.); name is the next
-    // sym_lit child (skipping comments + metadata).
-    if !spec.function_form_heads.is_empty() && node.kind() == "list_lit" {
-        return clojure_function_name(node, src);
-    }
-    for field in spec.name_fields {
-        if let Some(name_node) = node.child_by_field_name(field) {
-            // C/C++ functions store the name inside a nested
-            // `function_declarator` subtree, not directly on the
-            // declarator field. Descend until we find a leaf
-            // identifier so we report `foo` rather than the whole
-            // `foo(int x)` declarator text.
-            let leaf = innermost_identifier(name_node).unwrap_or(name_node);
-            if let Ok(text) = leaf.utf8_text(src) {
-                return Some(text.to_string());
-            }
-        }
-    }
-    None
-}
-
-/// Extract the function name from a Clojure `list_lit`. Skips the
-/// head form symbol and any leading comments. The actual
-/// identifier text is the `sym_name` child of the second sym_lit
-/// (the first sym_lit is the form head like `defn`). Anonymous
-/// `(fn …)` returns None — caller falls back to "(anonymous)".
-fn clojure_function_name(node: Node<'_>, src: &[u8]) -> Option<String> {
-    let mut cursor = node.walk();
-    let mut saw_head = false;
-    for child in node.named_children(&mut cursor) {
-        match child.kind() {
-            "comment" => continue,
-            "sym_lit" => {
-                if !saw_head {
-                    saw_head = true;
-                    continue;
-                }
-                return sym_lit_name(child, src).map(|s| s.to_string());
-            }
-            _ => return None,
-        }
-    }
-    None
-}
-
-/// Walk down a declarator subtree to the innermost identifier-like
-/// node. Used by C/C++ where the `declarator` field is a composite.
-fn innermost_identifier<'a>(node: Node<'a>) -> Option<Node<'a>> {
-    if matches!(
-        node.kind(),
-        "identifier" | "field_identifier" | "type_identifier" | "destructor_name" | "operator_name"
-    ) {
-        return Some(node);
-    }
-    let mut cursor = node.walk();
-    for child in node.named_children(&mut cursor) {
-        if let Some(found) = innermost_identifier(child) {
-            return Some(found);
-        }
-    }
-    None
-}
-
 fn count_parameters(node: Node<'_>, src: &[u8], spec: &LanguageSpec) -> u32 {
     // Clojure: param vector is the first vec_lit child after the
     // head + name (or just after the head for `(fn [x] …)`).
@@ -889,33 +745,36 @@ fn find_parameter_list<'a>(node: Node<'a>) -> Option<Node<'a>> {
     None
 }
 
-fn count_decision_points(node: Node<'_>, src: &[u8], spec: &LanguageSpec) -> u32 {
-    // We never want to count the function node itself (function kinds
-    // never appear in `decision_kinds` anyway), so just descend into
-    // children and tally there.
+fn count_decision_points(
+    node: Node<'_>,
+    src: &[u8],
+    spec: &LanguageSpec,
+    bodies: &HashSet<usize>,
+) -> u32 {
     let mut count = 0u32;
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        count += count_decision_subtree(child, src, spec, node.id());
+        count += count_decision_subtree(child, src, spec, bodies);
     }
     count
 }
 
-fn count_decision_subtree(node: Node<'_>, src: &[u8], spec: &LanguageSpec, root_id: usize) -> u32 {
-    let mut count = 0u32;
-    if node.id() != root_id && is_decision_node(node, src, spec) {
-        count += 1;
+/// Decisions under `node`, up to (not into) a nested callable
+/// definition — its decisions are its own. An anonymous closure isn't
+/// one, so its decisions count toward the function around it.
+fn count_decision_subtree(
+    node: Node<'_>,
+    src: &[u8],
+    spec: &LanguageSpec,
+    bodies: &HashSet<usize>,
+) -> u32 {
+    if bodies.contains(&node.id()) {
+        return 0;
     }
-    // Stop descending into nested function bodies — their decisions
-    // belong to that function's own metrics record. (Don't stop at
-    // the root function itself, which is the same node id we
-    // started from.)
-    if node.id() != root_id && is_function_node(node, src, spec) {
-        return count;
-    }
+    let mut count = u32::from(is_decision_node(node, src, spec));
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        count += count_decision_subtree(child, src, spec, root_id);
+        count += count_decision_subtree(child, src, spec, bodies);
     }
     count
 }
