@@ -491,11 +491,6 @@ const LEGACY_KEPT: &[(&str, &str, &str)] = &[
         "legacy: \"\"",
         "the label of that trigger",
     ),
-    (
-        "apps/desktop/src/components/Comments/selectors.ts",
-        "egacy",
-        "comment selectors stored as a per-surface position object: rows already in the database",
-    ),
 ];
 
 /// The desktop's own TypeScript, tests and generated bindings aside.

@@ -52,9 +52,6 @@ impl TreeEntry {
             return h.clone();
         }
         match (self.storage, &self.address) {
-            // An oxplow address IS the xxh3 of the bytes (rows written
-            // before V96 or by raw SQL may lack the column).
-            (SnapshotStorage::Oxplow, Some(a)) => a.clone(),
             (SnapshotStorage::Git, Some(oid)) => format!("git:{oid}"),
             _ => format!(
                 "oversize:{}:{}",
@@ -126,11 +123,6 @@ mod tests {
         let oid = "a".repeat(40);
         assert_eq!(
             entry(SnapshotStorage::Oxplow, Some("x1"), Some("x1")).identity(),
-            "x1"
-        );
-        // Pre-V96 oxplow row: the address is the content hash.
-        assert_eq!(
-            entry(SnapshotStorage::Oxplow, Some("x1"), None).identity(),
             "x1"
         );
         // Git row: its OID never stands in for a content hash.

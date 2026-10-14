@@ -10,9 +10,8 @@
 //!   - a `TextPositionSelector` — the `[start, end)` char offsets in the
 //!     anchoring element's flattened `textContent`, a proximity hint.
 //!
-//! Editor surfaces (Monaco, ProseMirror) historically stored a single
-//! position *object* instead; [`anchorInputFromSelectors`] reads either
-//! shape so every surface shares one resolver ([`resolveAnchor`]).
+//! Every surface shares one resolver ([`resolveAnchor`]) through
+//! [`anchorInputFromSelectors`].
 
 import { CONTEXT_LEN, type AnchorInput, extractContext } from "./anchor.js";
 
@@ -57,12 +56,8 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 }
 
 /// Read an [`AnchorInput`] (for [`resolveAnchor`]) out of a stored
-/// `selectors_json` + the comment's durable `quote`. Tolerant of two
-/// shapes:
-///
-///   - the W3C array this module writes (TextQuote + TextPosition);
-///   - the legacy per-surface position *object* the Monaco / ProseMirror
-///     layers write (`{ prefix, suffix, textOffset }`).
+/// `selectors_json` + the comment's durable `quote`: the W3C array this
+/// module writes (TextQuote + TextPosition).
 ///
 /// `quote` always wins over a selector's `exact` — it is the durable
 /// fact; the selectors are only hints. Missing/garbage JSON degrades to
@@ -84,17 +79,12 @@ export function anchorInputFromSelectors(selectorsJson: string, quote: string): 
           if (typeof sel.start === "number") hintOffset = sel.start;
         }
       }
-    } else if (isRecord(parsed)) {
-      // Legacy position-object shape (Monaco / ProseMirror).
-      if (typeof parsed.prefix === "string") prefix = parsed.prefix;
-      if (typeof parsed.suffix === "string") suffix = parsed.suffix;
-      if (typeof parsed.textOffset === "number") hintOffset = parsed.textOffset;
     }
   } catch {
     // fall through to a bare quote anchor
   }
 
-  // Clamp stored context to the resolver's window so a longer legacy
+  // Clamp stored context to the resolver's window so a longer
   // prefix/suffix can't skew the fuzzy needle.
   if (prefix && prefix.length > CONTEXT_LEN) prefix = prefix.slice(-CONTEXT_LEN);
   if (suffix && suffix.length > CONTEXT_LEN) suffix = suffix.slice(0, CONTEXT_LEN);

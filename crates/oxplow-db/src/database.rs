@@ -923,14 +923,13 @@ impl TxError<std::convert::Infallible> {
 /// A `Timestamp` as the TEXT SQLite stores: the fixed-width RFC 3339 form
 /// (`YYYY-MM-DDTHH:MM:SS.ffffffZ`, 27 chars) that `Timestamp` itself
 /// produces, so lexicographic `ORDER BY` / `BETWEEN` on a timestamp column
-/// is chronological. Every store goes through this one helper (tsk387);
-/// V95 normalized the rows written before the serializer was fixed.
+/// is chronological. Every store goes through this one helper.
 pub fn ts_to_string(ts: Timestamp) -> String {
     ts.to_text()
 }
 
-/// The inverse of [`ts_to_string`]; accepts any RFC 3339 text (rows from
-/// before V95, other producers).
+/// The inverse of [`ts_to_string`]; accepts any RFC 3339 text (other
+/// producers).
 pub fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
     Timestamp::parse(s).map_err(|e| DomainError::Invalid(format!("bad timestamp `{s}`: {e}")))
 }
@@ -1279,7 +1278,7 @@ mod tests {
         let text = ts_to_string(half);
         assert_eq!(text, "2023-11-14T22:13:20.500000Z");
         assert_eq!(text.len(), Timestamp::TEXT_LEN);
-        // Rows written before V95 (trimmed) still read back.
+        // Trimmed fractional seconds still read back.
         assert_eq!(string_to_ts("2023-11-14T22:13:20.5Z").unwrap(), half);
         assert_eq!(string_to_ts(&text).unwrap(), half);
         let err = string_to_ts("nope").unwrap_err();
@@ -1660,8 +1659,8 @@ mod tests {
             "metric_live_fact",
             "metric_cube_state",
             "metric_cube_epoch",
-            // V93 — the event log as an outbox, its checkpoints and dead
-            // letters, and the command audit (tsk406).
+            // The event log as an outbox, its checkpoints and dead
+            // letters, and the command audit.
             "event_log",
             "event_consumer_checkpoint",
             "event_dead_letter",
@@ -1670,7 +1669,7 @@ mod tests {
         // `effort_observation` was dropped in V39 (tsk215); the V38
         // `metric_*` cluster was dropped in V49 (T-E3, tsk50) — assert gone.
         let expected_absent = [
-            // V93 dropped the dead per-task audit table (tsk406).
+            // The dead per-task audit table is gone.
             "task_event",
             "hook_event",
             "agent_status",
