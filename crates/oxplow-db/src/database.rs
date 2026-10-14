@@ -923,14 +923,13 @@ impl TxError<std::convert::Infallible> {
 /// A `Timestamp` as the TEXT SQLite stores: the fixed-width RFC 3339 form
 /// (`YYYY-MM-DDTHH:MM:SS.ffffffZ`, 27 chars) that `Timestamp` itself
 /// produces, so lexicographic `ORDER BY` / `BETWEEN` on a timestamp column
-/// is chronological. Every store goes through this one helper (tsk387);
-/// V95 normalized the rows written before the serializer was fixed.
+/// is chronological. Every store goes through this one helper.
 pub fn ts_to_string(ts: Timestamp) -> String {
     ts.to_text()
 }
 
-/// The inverse of [`ts_to_string`]; accepts any RFC 3339 text (rows from
-/// before V95, other producers).
+/// The inverse of [`ts_to_string`]; accepts any RFC 3339 text (other
+/// producers).
 pub fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
     Timestamp::parse(s).map_err(|e| DomainError::Invalid(format!("bad timestamp `{s}`: {e}")))
 }
@@ -1279,7 +1278,7 @@ mod tests {
         let text = ts_to_string(half);
         assert_eq!(text, "2023-11-14T22:13:20.500000Z");
         assert_eq!(text.len(), Timestamp::TEXT_LEN);
-        // Rows written before V95 (trimmed) still read back.
+        // Trimmed fractional seconds still read back.
         assert_eq!(string_to_ts("2023-11-14T22:13:20.5Z").unwrap(), half);
         assert_eq!(string_to_ts(&text).unwrap(), half);
         let err = string_to_ts("nope").unwrap_err();
@@ -1660,8 +1659,8 @@ mod tests {
             "metric_live_fact",
             "metric_cube_state",
             "metric_cube_epoch",
-            // V93 — the event log as an outbox, its checkpoints and dead
-            // letters, and the command audit (tsk406).
+            // The event log as an outbox, its checkpoints and dead
+            // letters, and the command audit.
             "event_log",
             "event_consumer_checkpoint",
             "event_dead_letter",
@@ -1670,7 +1669,7 @@ mod tests {
         // `effort_observation` was dropped in V39 (tsk215); the V38
         // `metric_*` cluster was dropped in V49 (T-E3, tsk50) — assert gone.
         let expected_absent = [
-            // V93 dropped the dead per-task audit table (tsk406).
+            // The dead per-task audit table is gone.
             "task_event",
             "hook_event",
             "agent_status",
@@ -2038,6 +2037,80 @@ mod tests {
                 r#"2 {"note":"thread_note:not8","thread":"thread:thr3"}"#,
             ]
         );
+    }
+
+    /// V70: every event written at a version older than its type's newest
+    /// is rewritten to the newest, so no reader carries an upcast: an old
+    /// tool event gets its kind from the tool's name and its path as a list.
+    #[test]
+    fn v70_rewrites_old_event_versions_to_the_newest() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::models::drop_all(&conn).unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(69))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            r#"INSERT INTO event_log (id, type, v, at, source, subject, payload) VALUES
+                 ('a', 'agent.tool.requested', 1, 't', 'agent', '[]',
+                  '{"tool":"Edit","path":"src/a.rs","decision":"allowed"}'),
+                 ('b', 'agent.tool.finished', 1, 't', 'agent', '[]',
+                  '{"tool":"mcp__oxplow__query_sql","ok":true}'),
+                 ('c', 'agent.tool.finished', 1, 't', 'agent', '[]',
+                  '{"tool":"Bash","detail":"ls","exit_code":0}'),
+                 ('d', 'agent.tool.requested', 1, 't', 'agent', '[]',
+                  '{"tool":"SendMessage","decision":"allowed"}'),
+                 ('e', 'agent.tool.requested', 2, 't', 'agent', '[]',
+                  '{"tool":"Read","kind":"read","paths":["b.rs"],"decision":"allowed"}'),
+                 ('f', 'agent.session.started', 1, 't', 'agent', '[]',
+                  '{"session":"s1","thread":"thread:thr1","harness":"claude","resumed":false}'),
+                 ('g', 'command.executed', 1, 't', 'human', '[]',
+                  '{"command":"oxplow.config.set","actor_kind":"human","outcome":"ok","audit_id":1,"undoable":true}'),
+                 ('h', 'command.executed', 2, 't', 'effect', '[]',
+                  '{"command":"oxplow.config.set","actor_kind":"effect","outcome":"ok","audit_id":2,"undoable":false}'),
+                 ('i', 'command.proposed', 1, 't', 'agent', '[]',
+                  '{"proposal":"proposal:1","command":"oxplow.config.set","actor_kind":"agent","destructive":false}'),
+                 ('j', 'effect.result', 2, 't', 'effect', '[]',
+                  '{"effect":"effect:x/y","outcome":"ok","detail":null}'),
+                 ('k', 'effect.result', 3, 't', 'effect', '[]',
+                  '{"effect":"effect:x/y","outcome":"ok","detail":null,"attempt":2,"origin":"retry"}'),
+                 ('l', 'agent.turn.ended', 1, 't', 'agent', '[]',
+                  '{"turn":"turn:1","thread":"thread:thr1","outcome":"completed"}');"#,
+        )
+        .unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(70))
+            .run(&mut conn)
+            .unwrap();
+        let rows: Vec<(String, String, u32, String)> = conn
+            .prepare("SELECT id, type, v, payload FROM event_log ORDER BY seq")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let registry = oxplow_domain::events::schema::EventSchemaRegistry::core();
+        for (id, kind, v, payload) in &rows {
+            assert_eq!(Some(*v), registry.latest(kind), "{id} {kind}@{v}");
+            let value: serde_json::Value = serde_json::from_str(payload).unwrap();
+            registry
+                .validate(kind, *v, &value)
+                .unwrap_or_else(|e| panic!("{id}: {e}"));
+        }
+        let payload = |id: &str| -> serde_json::Value {
+            let (.., p) = rows.iter().find(|r| r.0 == id).unwrap();
+            serde_json::from_str(p).unwrap()
+        };
+        assert_eq!(
+            payload("a"),
+            serde_json::json!({"tool":"Edit","kind":"edit","paths":["src/a.rs"],"decision":"allowed"})
+        );
+        assert_eq!(payload("b")["kind"], "mcp");
+        assert_eq!(payload("c")["kind"], "shell");
+        assert_eq!(payload("d")["kind"], "other");
+        assert_eq!(payload("k")["origin"], "retry");
+        assert_eq!(payload("j")["origin"], "live");
+        assert_eq!(payload("j")["attempt"], 1);
     }
 
     /// V36: the health table, the enable command, the contribution events,

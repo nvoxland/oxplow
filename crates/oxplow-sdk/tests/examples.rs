@@ -338,7 +338,6 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
         "summary-delivered",
         "todo-board",
         "todos-and-open-work",
-        "an-older-snapshot-event",
     ] {
         assert!(
             tested.ran.contains(&format!("example {example}")),

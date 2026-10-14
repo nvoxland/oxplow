@@ -92,20 +92,13 @@ export function inProgressNotice(subject: DiffSubject): string {
 }
 
 /** The snapshot `snapshotId` grew from — a single-snapshot diff's
- *  `start`. It's the parent its creating take recorded (P2.11); a
- *  snapshot no op created (older data) falls back to the largest id
- *  strictly before it. Null for the stream's first capture. */
+ *  `start`. It's the parent its creating take recorded (P2.11). Null for
+ *  the stream's first capture. */
 export function previousSnapshotId(
   snapshotId: number,
   rows: ReadonlyArray<{ id: number; parentSnapshotId: number | null }>,
 ): number | null {
-  const own = rows.find((r) => r.id === snapshotId);
-  if (own?.parentSnapshotId != null) return own.parentSnapshotId;
-  let prev: number | null = null;
-  for (const { id } of rows) {
-    if (id < snapshotId && (prev === null || id > prev)) prev = id;
-  }
-  return prev;
+  return rows.find((r) => r.id === snapshotId)?.parentSnapshotId ?? null;
 }
 
 /** A single captured snapshot, framed as a diff: it's the `end`, and
@@ -136,9 +129,8 @@ export function pickerBranch(
 
 /** Drop snapshots *known* to be on a different branch than `branch`, so
  *  the diff picker never mixes in another branch of the same stream's
- *  worktree. A snapshot with an unrecorded branch (null/undefined —
- *  pre-V42 rows, detached HEAD) is kept: it isn't provably different, and
- *  excluding it would empty the picker on existing snapshots. A null
+ *  worktree. A snapshot with an unrecorded branch (null/undefined — a
+ *  detached HEAD) is kept: it isn't provably different. A null
  *  reference `branch` (unknown) disables filtering entirely. */
 export function snapshotsOnBranch<T extends { branch?: string | null }>(
   snapshots: T[],

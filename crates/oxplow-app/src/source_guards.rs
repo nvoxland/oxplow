@@ -487,19 +487,9 @@ const LEGACY_KEPT: &[(&str, &str, &str)] = &[
         "the `legacy` trigger V97 gave the snapshots taken before the op log: rows already in the database",
     ),
     (
-        "crates/oxplow-domain/src/events/schema.rs",
-        "Legacy,",
-        "`snapshot.taken`'s trigger for those same V97 rows",
-    ),
-    (
         "apps/desktop/src/pages/LocalHistoryDashboardPage.tsx",
         "legacy: \"\"",
         "the label of that trigger",
-    ),
-    (
-        "apps/desktop/src/components/Comments/selectors.ts",
-        "egacy",
-        "comment selectors stored as a per-surface position object: rows already in the database",
     ),
 ];
 
@@ -865,10 +855,7 @@ fn only_workspace_providers_take_a_local_path() {
 /// whichever harnesses are declared (`.context/agent-model.md`). Each file
 /// still here says why.
 #[rustfmt::skip]
-const HARNESS_IMPLEMENTATION: &[(&str, &str)] = &[
-    ("crates/oxplow-domain/src/events/schema.rs",
-     "a v1 `agent.tool.*` named its tool by Claude Code's names, then the vocabulary every transport mapped onto; its upcast reads its kind from them"),
-];
+const HARNESS_IMPLEMENTATION: &[(&str, &str)] = &[];
 
 /// The crates that implement harnesses.
 const HARNESS_CRATES: &[&str] = &["crates/oxplow-harnesses/", "crates/oxplow-harness-fake/"];

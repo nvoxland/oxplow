@@ -560,20 +560,20 @@ export const commands = {
 	 */
 	storage: SnapshotStorage,
 	/**
-	 *  `snapshot.id` this row was captured under, or `None` for
-	 *  pre-V13 rows that predate the snapshot grouping table.
+	 *  `snapshot.id` this row was captured under, or `None` for a row not
+	 *  captured under a snapshot.
 	 */
 	snapshot_id: number | null,
 	/**
 	 *  File mtime in unix milliseconds at capture time. NULL for
-	 *  rows written before V15 added the column. The startup sweep
+	 *  oversize and tombstone rows. The startup sweep
 	 *  uses `(size_bytes, mtime_ms)` as a fast equality check: if
 	 *  both match the current stat, the file is presumed unchanged
 	 *  and the bytes aren't re-read or re-hashed.
 	 */
 	mtime_ms: number | null,
 	/**
-	 *  The content identity (V96): xxh3-128 of the bytes, whatever the
+	 *  The content identity: xxh3-128 of the bytes, whatever the
 	 *  storage class. `blob_hash` is only the address. [`capture_batch`]
 	 *  fills it from `blob_hash` for `oxplow` rows; `git` rows get it
 	 *  lazily ([`SqliteSnapshotStore::with_content_hasher`]).
@@ -2742,11 +2742,7 @@ export type EffortFile = {
 	effort_id: EffortId,
 	path: string,
 	change: EffortFileChange,
-	/**
-	 *  The snapshot the file ref was captured at. Always set since
-	 *  V20; 0 only on pre-V20 rows whose owning effort had no
-	 *  snapshot pin.
-	 */
+	// The snapshot the file ref was captured at.
 	local_snapshot_id: number,
 	/**
 	 *  Closest known git commit at capture time. See V20 column
@@ -3432,20 +3428,20 @@ export type FileSnapshot = {
 	 */
 	storage: SnapshotStorage,
 	/**
-	 *  `snapshot.id` this row was captured under, or `None` for
-	 *  pre-V13 rows that predate the snapshot grouping table.
+	 *  `snapshot.id` this row was captured under, or `None` for a row not
+	 *  captured under a snapshot.
 	 */
 	snapshot_id: number | null,
 	/**
 	 *  File mtime in unix milliseconds at capture time. NULL for
-	 *  rows written before V15 added the column. The startup sweep
+	 *  oversize and tombstone rows. The startup sweep
 	 *  uses `(size_bytes, mtime_ms)` as a fast equality check: if
 	 *  both match the current stat, the file is presumed unchanged
 	 *  and the bytes aren't re-read or re-hashed.
 	 */
 	mtime_ms: number | null,
 	/**
-	 *  The content identity (V96): xxh3-128 of the bytes, whatever the
+	 *  The content identity: xxh3-128 of the bytes, whatever the
 	 *  storage class. `blob_hash` is only the address. [`capture_batch`]
 	 *  fills it from `blob_hash` for `oxplow` rows; `git` rows get it
 	 *  lazily ([`SqliteSnapshotStore::with_content_hasher`]).
@@ -5996,25 +5992,26 @@ export type Snapshot = {
 	revision: string | null,
 	/**
 	 *  The branch the workspace was on when this snapshot was captured
-	 *  (e.g. `main`). `None` for pre-V42 rows, a detached head, or a
+	 *  (e.g. `main`). `None` for a detached head or a
 	 *  directory not under version control.
 	 */
 	branch: string | null,
 	/**
-	 *  Whole-tree identity (V96): the xxh3-128 of the sorted manifest of
+	 *  Whole-tree identity: the xxh3-128 of the sorted manifest of
 	 *  the reconstructed tree ([`crate::snapshot_tree::manifest_hash`]).
 	 *  Two snapshots with equal `tree_hash` hold the same files. `None`
-	 *  on snapshots taken before V96.
+	 *  on a snapshot taken without a reconstructed tree.
 	 */
 	tree_hash: string | null,
 	/**
 	 *  What the take that CREATED this snapshot recorded (its first
 	 *  `snapshot_op`, P2.11): the snapshot it grew from — the "previous"
 	 *  a single-snapshot diff starts at — why it was taken, and whether
-	 *  it ran over its budget. `None` / `false` for a snapshot with no op.
+	 *  it ran over its budget. `parent_snapshot_id` is `None` for a stream's
+	 *  first snapshot.
 	 */
 	parent_snapshot_id: number | null,
-	trigger: SnapshotTrigger | null,
+	trigger: SnapshotTrigger,
 	over_budget: boolean,
 };
 
@@ -6033,12 +6030,12 @@ export type SnapshotOp = {
 	budget_ms: number | null,
 	over_budget: boolean,
 	file_count: number,
-	// What took it; `None` for ops recorded before V45.
+	// What took it; `None` for a take by core's capture pipeline.
 	provider: string | null,
 	// Whether the take kept file contents (`false`: hashes only).
 	contents: boolean,
 	/**
-	 *  The provider's name for the state it marked (V46); `None` for a take
+	 *  The provider's name for the state it marked; `None` for a take
 	 *  by core's capture pipeline.
 	 */
 	handle: string | null,
@@ -6060,7 +6057,7 @@ export type SnapshotStats = {
 
 /**
  *  Where a captured file's bytes live — the explicit `file_snapshot.storage`
- *  discriminator (V37). Replaces the old implicit `(blob_hash NULL?,
+ *  discriminator. Replaces the old implicit `(blob_hash NULL?,
  *  oversize?)` 2-bit encoding. The `blob_hash` column means different
  *  things per variant:
  *  - [`Oxplow`](SnapshotStorage::Oxplow): `blob_hash` is an xxh3-128, bytes

@@ -54,23 +54,6 @@ describe("anchorInputFromSelectors round-trips through resolveAnchor", () => {
     expect(input.quote).toBe("quick");
   });
 
-  test("reads the legacy Monaco/ProseMirror position object", () => {
-    const start = TEXT.indexOf("runs away");
-    const legacy = JSON.stringify({
-      startLine: 1,
-      startColumn: 1,
-      prefix: "dog and ",
-      suffix: ".",
-      textOffset: start,
-      approx: false,
-    });
-    const input = anchorInputFromSelectors(legacy, "runs away");
-    expect(input.prefix).toBe("dog and ");
-    expect(input.hintOffset).toBe(start);
-    const res = resolveAnchor(TEXT, input);
-    expect(res.offset).toBe(start);
-  });
-
   test("garbage json degrades to a bare quote anchor", () => {
     const input = anchorInputFromSelectors("not json{", "fox");
     expect(input.quote).toBe("fox");

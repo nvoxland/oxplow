@@ -428,7 +428,7 @@ schema.
 SQLite-indexed table (`file_snapshot`) plus an on-disk content-
 addressed blob store at `.oxplow/snapshots/objects/xx/yyyy…`. A take
 is one transaction (`record_take`: the snapshot row, its file rows, a
-`snapshot_op` row and `snapshot.taken@1`); a snapshot's identity is its
+`snapshot_op` row and `snapshot.taken@2`); a snapshot's identity is its
 `tree_hash`, and the operation log records each take's parent, so there
 is an ancestry chain (see data-model.md "Takes and the operation log").
 Rows returned by `listSnapshotsForStream` carry their creating op's
@@ -438,7 +438,7 @@ snapshots through `effort.start_snapshot_id` / `end_snapshot_id` and
 agent turns through `agent_turn.start_snapshot_id` / `snapshot_id`.
 Unlike other stores it doesn't expose a `subscribe()`; the renderer
 hears a take that recorded something as `SnapshotTaken`, which the
-`ui.push` consumer derives from the logged `snapshot.taken@1` (and a
+`ui.push` consumer derives from the logged `snapshot.taken@2` (and a
 re-stamp from `vcs.head.moved@1`).
 
 IPC methods (all go through `ipc-contract.ts` → `main.ts` →

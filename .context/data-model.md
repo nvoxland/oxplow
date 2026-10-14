@@ -701,7 +701,7 @@ cascaded away the child rows. In Rust
 `Effort.work_item` is `Option<String>`; `start_tx(conn, ev,
 work_item: Option<&str>, …)` and `finish_tx(conn, ev, id, &EffortEnd)`;
 the events are `effort.opened@2` / `effort.closed@2` (with `closed_by`) /
-`effort.finished@2`, each v1 upcast as is, plus `effort.linked@1` and
+`effort.finished@2`, plus `effort.linked@1` and
 `effort.retitled@1`. Opening an effort on a thread that has one open
 closes that one first (`switch`).
 
@@ -922,7 +922,7 @@ the worktree was at when it ended — set in the `turn_end` take's
 transaction (`record_take` stamps it whenever the take carries a
 `turn_id`). The turn's changes are start → end, like an effort's. `agent_turn.task_id` is gone (nothing ever set
 it). `agent_turn` open/close log `agent.turn.started@1` /
-`agent.turn.ended@1` in the same transaction as the row change;
+`agent.turn.ended@2` in the same transaction as the row change;
 `event_log` has a `turn_id` index. `SqliteAgentTurnStore::
 stream_has_open_turn` answers "is an agent mid-turn on this worktree?".
 
@@ -958,7 +958,7 @@ deleted. The sweep's reverse-deletion pass tombstones oversize files too
 the dirty set and hands the rows to `SqliteSnapshotStore::record_take`,
 which writes — in **one transaction** — the new `snapshot` row (with
 `branch`, `revision` when the tree is clean, and `tree_hash`), its
-`file_snapshot` rows, one `snapshot_op` row and a `snapshot.taken@1`
+`file_snapshot` rows, one `snapshot_op` row and a `snapshot.taken@2`
 event (anchors: stream, thread, turn, effort, snapshot). It is the only
 production write path; `create_snapshot` / `capture` / `capture_batch` /
 `set_snapshot_revision` / `set_snapshot_branch` remain as fixture
@@ -1412,7 +1412,11 @@ never an internal enum whose doc comments and variants (a derived-only
 `tests/event_schemas.rs` regenerates it from the Rust type and fails on
 any difference. A published event shape is a contract, so a change is a
 new version — `V + 1` with an `upcast` from the old shape — never an edit
-of the old file. `OXPLOW_BLESS=1` writes a golden for a type that has
+of the old file. **Core keeps only each type's newest version:** when core
+bumps one, a migration rewrites the logged rows to it in the same change
+(V31, V70), and the old version's type, upcast, golden and fixture go.
+An extension's declared types keep their older versions and upcasts,
+since their rows can't be rewritten by core. `OXPLOW_BLESS=1` writes a golden for a type that has
 never shipped. Every `type@v` also has an example payload at
 `tests/fixtures/events/<type>@<v>.json`; the test validates each at its
 own version and, upcast through the chain (`upcast_to_latest`), at the
@@ -1424,11 +1428,8 @@ at an older version still reaches a consumer written against the current
 one; a row that can't be upcast dead-letters. A type the running
 vocabulary doesn't know at all (its extension was removed) passes through
 at its logged version instead (P8.D2): there is no newer shape to carry
-it to, and the row was valid when it was appended. The first versioned type is
-`agent.turn.ended@2` (adds `transcript_path?`, `usage?`); its v1 stays
-registered (`AgentTurnEndedAtV1`) and upcasts unchanged. A superseded
-version's Rust doc comment is part of its published schema — don't edit
-it.
+it to, and the row was valid when it was appended. A published version's
+Rust doc comment is part of its schema — don't edit it.
 
 **`event_content` (V102, P3.2)** holds large or sensitive event bodies —
 tool input and output, prompts — by the xxh3-128 hex of their bytes (the
@@ -2164,7 +2165,7 @@ NULL when it can't be dry-run), and `decision` — `pending`, `approved`
 `oxplow.config.unset`, else the command and its input with keys sorted;
 `insert_tx` marks pending rows with the same key `superseded` (with
 `superseded_by`) and returns which (`Inserted { id, superseded }`, for
-`command.proposed@1.supersedes`). `approve_tx` / `decline_tx` decide a
+`command.proposed@2.supersedes`). `approve_tx` / `decline_tx` decide a
 pending row once — a decided one is `Invalid`, a missing one `NotFound`.
 An `External` command's approval is the claim trio instead: `claim_tx`
 marks it approved with no `audit_id` before the run, `finish_claim_tx`
@@ -2175,7 +2176,7 @@ before, after, changed }`, a composite `{ result, children: [{ name,
 input, result, inverse? }] }`, any other command its own result. No
 expiry. Written
 inside the bus's transactions; read as `v_command_proposal` (ref
-`proposal:<id>`). Events `command.proposed@1`, `command.approved@1`,
+`proposal:<id>`). Events `command.proposed@2`, `command.approved@1`,
 `command.declined@1`.
 
 ### `page_visit` — `PageVisitStore` (`crates/oxplow-db/src/analytics_stores.rs`)

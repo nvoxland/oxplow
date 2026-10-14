@@ -74,7 +74,7 @@ describe("snapshotsOnBranch", () => {
   ];
   test("excludes known other-branch snapshots but keeps unknown (null) ones", () => {
     // null branch is unknown, not provably-different, so it's kept — this
-    // is what keeps the picker populated on pre-V42 snapshots.
+    // is what keeps a detached-HEAD snapshot in the picker.
     expect(snapshotsOnBranch(rows, "main").map((r) => r.id)).toEqual([1, 3]);
   });
   test("a null reference branch (unknown) disables filtering entirely", () => {
@@ -89,8 +89,8 @@ describe("previousSnapshotId", () => {
     // 9 grew from 3 (5 was another take that 9's op didn't follow).
     expect(previousSnapshotId(9, rows([[3, null], [5, 3], [9, 3], [12, 9]]))).toBe(3);
   });
-  test("a snapshot no op created falls back to the largest id before it", () => {
-    expect(previousSnapshotId(9, rows([[12, null], [9, null], [5, null], [3, null]]))).toBe(5);
+  test("null for a snapshot with no recorded parent, whatever the ids around it", () => {
+    expect(previousSnapshotId(9, rows([[12, null], [9, null], [5, null], [3, null]]))).toBeNull();
   });
   test("null when the target is the first capture", () => {
     expect(previousSnapshotId(3, rows([[3, null], [5, 3], [9, 5]]))).toBeNull();

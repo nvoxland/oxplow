@@ -1160,7 +1160,7 @@ mod tests {
             "versions"
         }
         fn handles(&self, event_type: &str) -> bool {
-            event_type == "agent.turn.ended"
+            event_type == "acme.thing"
         }
         fn handle(
             &self,
@@ -1169,35 +1169,54 @@ mod tests {
         ) -> Result<(), DomainError> {
             conn.execute(
                 "INSERT INTO seen (consumer, key) VALUES ('versions', ?1)",
-                [format!(
-                    "v{} transcript={}",
-                    event.envelope.v,
-                    event.envelope.payload.get("transcript_path").is_some()
-                )],
+                [format!("v{} {}", event.envelope.v, event.envelope.payload)],
             )
             .map_err(|e| DomainError::Storage(e.to_string()))?;
             Ok(())
         }
     }
 
-    /// P3.1 (tsk471): a consumer reads only the newest shape of a type. A
-    /// row written at `agent.turn.ended@1` is delivered upcast to v2.
+    /// A consumer reads only the newest shape of a type: a row an
+    /// extension's type logged at v1 is delivered upcast to its v2.
     #[tokio::test]
     async fn consumers_receive_the_newest_version_of_a_type() {
-        let (db, store) = setup().await;
-        let v1 = Envelope::new(
-            "agent.turn.ended",
-            1,
-            "test",
-            json!({ "turn": "turn:trn1", "thread": "thread:thr1", "outcome": "completed" }),
-        )
-        .unwrap();
+        use oxplow_domain::events::schema::{DeclaredEventType, EventSchemaRegistry};
+        use oxplow_domain::refs::kind::core_kinds;
+        use oxplow_domain::vocabulary::Vocabulary;
+        let (db, _) = setup().await;
+        let object = |field: &str| {
+            json!({ "type": "object", "properties": { field: { "type": "integer" } },
+                    "required": [field], "additionalProperties": false })
+        };
+        let mut registry = EventSchemaRegistry::core();
+        for (v, schema) in [(1, object("count")), (2, object("n"))] {
+            registry
+                .register_declared(
+                    "acme",
+                    DeclaredEventType {
+                        event_type: "acme.thing".into(),
+                        v,
+                        schema,
+                        summary: "A thing, for the test.".into(),
+                        upcast: (v == 2).then(|| {
+                            Arc::new(|_: u32, payload: serde_json::Value| {
+                                Ok(json!({ "n": payload["count"] }))
+                            }) as _
+                        }),
+                    },
+                )
+                .unwrap();
+        }
+        let vocabulary = VocabularyHandle::core();
+        vocabulary.swap(Vocabulary::new(registry, core_kinds()));
+        let store = SqliteEventLogStore::new(db.clone(), vocabulary);
+        let v1 = Envelope::new("acme.thing", 1, "test", json!({ "count": 3 })).unwrap();
         store.append(v1).await.unwrap();
         pump(&db, &store, vec![Arc::new(VersionRecorder)])
             .run_once()
             .await
             .unwrap();
-        assert_eq!(seen(&db, "versions").await, vec!["v2 transcript=false"]);
+        assert_eq!(seen(&db, "versions").await, vec![r#"v2 {"n":3}"#]);
     }
 
     /// A row whose type the running vocabulary no longer knows (its
@@ -1250,8 +1269,9 @@ mod tests {
         store.append(config_changed("a")).await.unwrap();
         let mut other = config_changed("x");
         other.event_type = "effect.result".into();
-        other.v = 1;
-        other.payload = json!({"effect": "notify.desktop", "ok": true, "detail": null});
+        other.v = 4;
+        other.payload = json!({"effect": "effect:notify/desktop", "outcome": "ok",
+                               "detail": null, "attempt": 1, "origin": "live"});
         store.append(other).await.unwrap();
         let pump = pump(&db, &store, vec![Recorder::new("rec", None)]);
         let report = pump.run_once().await.unwrap();
