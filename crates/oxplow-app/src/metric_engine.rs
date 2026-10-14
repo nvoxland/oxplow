@@ -1288,6 +1288,9 @@ pub struct MetricEngine {
     visibility: Option<std::sync::Arc<crate::metric_visibility::VisibilityResolver>>,
     /// Entity metrics read through the semantic layer (tsk322).
     layer: crate::sql_gateway::SqlGateway,
+    /// Metrics an extension under check declares that the store has not
+    /// been given yet: resolved when the store has no spec of the key.
+    declared: Arc<Vec<MetricSpec>>,
 }
 
 impl MetricEngine {
@@ -1297,7 +1300,16 @@ impl MetricEngine {
             facts,
             fold_memo: Arc::new(Mutex::new(FoldMemo::default())),
             visibility: None,
+            declared: Arc::default(),
         }
+    }
+
+    /// Also resolve `specs`, the metrics an extension declares, when the
+    /// store has none of that key (`oxplow extension check` before the app
+    /// has loaded the extension).
+    pub fn with_declared(mut self, specs: Vec<MetricSpec>) -> Self {
+        self.declared = Arc::new(specs);
+        self
     }
 
     /// Attach the ancestry resolver. **The cube's builder must get the same
@@ -1765,7 +1777,10 @@ impl MetricEngine {
     /// `filter_json`.
     /// The metric spec `key`, if there is one.
     pub async fn spec(&self, key: &str) -> Result<Option<MetricSpec>, DomainError> {
-        self.facts.get_spec(key).await
+        Ok(match self.facts.get_spec(key).await? {
+            Some(stored) => Some(stored),
+            None => self.declared.iter().find(|spec| spec.key == key).cloned(),
+        })
     }
 
     /// [`missing_metric`] for `key`, read against the catalog.

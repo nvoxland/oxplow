@@ -1339,10 +1339,27 @@ reached through `run_command`, audited like every command):
   stored by stat only), `binary` (a NUL byte) or `unreadable`
   (`file_map_from_rows` builds a `Corpus` of the text and what it left out; a
   sweep logs a warning naming them and `SweepReport.excluded` carries them).
-  **A per-path metric reads an excluded path as rescanned clean** — it is in
-  the snapshot's scanned set, so its old fact is superseded by the empty
-  restatement — which is why the exclusion is reported rather than silent.
-  Oversize files can also be listed from `v_snapshot_file` (`storage`).
+  **An excluded path keeps its last good facts.** The exclusions are stored
+  with each capture (`metric_capture_exclusion`, read as `v_capture_exclusion`:
+  `capture_id`, `producer`, `path`, `reason`, `unchecked`), and the per-path
+  fold (`latest_tree_facts`, `v_tree_fact`, `scanned_paths_for_captures`) does
+  not count an excluded path as restated by that capture, so a file that grows
+  past `snapshotMaxFileBytes` (or turns binary or unreadable) no longer reads
+  as scanned clean with its facts zeroed: the numbers it last had stay, and
+  `unchecked = 1` says no later capture of that producer has scanned it since
+  (a later one that also leaves it out is its own row; a full baseline that
+  reads it, or a delta whose snapshot has it, clears it). The baseline prune
+  (`prune_dominated_tree_captures`) keeps the older captures that hold such a
+  file's last good facts. The metric's detail page lists the unchecked files
+  under its chart (`UNCHECKED_FILES_SQL`), and a lens or `query_sql` can join
+  `v_capture_exclusion` with `v_fact`/`v_capture`. A capture before this was
+  recorded has no exclusions. Oversize files can also be listed from
+  `v_snapshot_file` (`storage`).
+- `oxplow extension check` against a project database resolves a metric the
+  extension under check declares even when the app has not loaded it yet
+  (`MetricEngine::with_declared`, `declared_metric_specs`): the store's spec
+  wins, else the extension's own, so a lens reading `metric_findings()` or
+  `metric_grid()` of it dry-runs.
 - `oxplow.metric.scaffold { name, language?, glob?, origin? }` — a `Read`: the
   files of a code metric extension (`{ name, dir, files: [{ path, content }] }`),
   which the agent writes with its own tools; then `extension check` and

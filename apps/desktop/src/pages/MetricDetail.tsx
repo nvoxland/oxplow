@@ -5,6 +5,8 @@ import { formatMetricValue, formatMetricValueExact } from "../components/format.
 import {
   RANGE_PRESETS,
   type TimeRange,
+  type UncheckedFile,
+  exclusionReason,
   fromLocalInput,
   inRangeStat,
   specAggregation,
@@ -285,6 +287,36 @@ export function MetricStatsRail({ def, samples }: { def: MetricSpec; samples: Se
           <code style={{ fontSize: 11 }}>{latest.branch}</code>
         </Stat>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * The files a scan left out that no later scan has covered. Their facts are
+ * the last good ones, not a clean result, so this says so where the metric is
+ * read. Nothing renders when no file is unchecked.
+ */
+export function UncheckedFiles({ files }: { files: UncheckedFile[] }) {
+  if (files.length === 0) return null;
+  return (
+    <div
+      data-testid="metric-unchecked-files"
+      style={{ border: "1px solid var(--border, #2a2a2a)", borderRadius: 6, padding: "8px 10px", fontSize: 12 }}
+    >
+      <div style={{ fontWeight: 600 }}>
+        {files.length} {files.length === 1 ? "file was" : "files were"} left out of the last scan
+      </div>
+      <div style={{ opacity: 0.7, marginBottom: 4 }}>
+        Their numbers are the last ones recorded, not rechecked: raise snapshotMaxFileBytes or make them text.
+      </div>
+      <ul style={{ margin: 0, paddingLeft: 18, fontFamily: "monospace", fontSize: 11 }}>
+        {files.slice(0, 20).map((f) => (
+          <li key={f.path}>
+            {f.path} <span style={{ opacity: 0.6 }}>({exclusionReason(f.reason)})</span>
+          </li>
+        ))}
+      </ul>
+      {files.length > 20 ? <div style={{ opacity: 0.6 }}>…and {files.length - 20} more</div> : null}
     </div>
   );
 }

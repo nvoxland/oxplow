@@ -526,3 +526,194 @@ async fn an_oversized_file_is_reported_as_excluded_not_silently_dropped() {
         [("engine/huge.rs", "oversize"), ("ui/icon.rs", "binary")]
     );
 }
+
+/// A project whose snapshots keep files over `max` bytes by stat only.
+async fn limited_project(max: usize) -> (Project, Lines) {
+    let dir = tempfile::tempdir().unwrap();
+    crate::test_fixtures::init_git_repo(dir.path());
+    let lines = corpus(dir.path());
+    write(
+        dir.path(),
+        ".oxplow/project.yaml",
+        &format!("snapshotMaxFileBytes: {max}\n"),
+    );
+    for f in extension_files(NAME, None, &MetricStarter::default()) {
+        write(dir.path(), &f.path, &f.content);
+    }
+    let svc = crate::Services::in_memory(dir.path()).await.unwrap();
+    svc.streams.ensure_primary().await.unwrap();
+    svc.extension_activation
+        .activate(svc.clone())
+        .await
+        .expect("activates");
+    (Project { dir, svc }, lines)
+}
+
+impl Project {
+    /// `unchecked` of every exclusion of `path`.
+    async fn unchecked(&self, path: &str) -> Vec<Vec<SqlCell>> {
+        self.rows(&format!(
+            "SELECT unchecked FROM v_capture_exclusion WHERE path = '{path}'"
+        ))
+        .await
+    }
+
+    /// `(path, reason)` the latest capture left out, as `v_capture_exclusion` says.
+    async fn left_out(&self) -> Vec<(String, String)> {
+        self.rows(
+            "SELECT path, reason FROM v_capture_exclusion
+              WHERE capture_id = (SELECT max(id) FROM v_capture) ORDER BY path",
+        )
+        .await
+        .iter()
+        .map(|r| (text(&r[0]), text(&r[1])))
+        .collect()
+    }
+}
+
+/// A file that becomes excluded between two sweeps (it grew past the size
+/// limit) is not read as clean: its last good facts stay, the capture names
+/// it, and once it is readable again the next sweep restates it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_file_that_grows_past_the_limit_keeps_its_facts_and_is_named() {
+    let (p, at) = limited_project(8000).await;
+    p.baseline().await;
+    let before = vec![
+        fs("engine/plan.rs", at.plan, 2),
+        fs("engine/run.rs", at.run, 1),
+        fs("ui/view.rs", at.view, 1),
+    ];
+    assert_eq!(p.findings().await, before);
+    assert_eq!(p.left_out().await, Vec::<(String, String)>::new());
+
+    // engine/run.rs grows past the limit: the sweep is not given it.
+    let (run, _) = rust(&[("calm", 0), ("busy", 11)]);
+    write(
+        p.dir.path(),
+        "engine/run.rs",
+        &format!("{run}{}", "// padding\n".repeat(1100)),
+    );
+    let swept = p.delta().await;
+    assert_eq!(swept.failed, Vec::<String>::new());
+    assert_eq!(
+        swept
+            .excluded
+            .iter()
+            .map(|e| (e.path.as_str(), e.reason.as_str()))
+            .collect::<Vec<_>>(),
+        [("engine/run.rs", "oversize")]
+    );
+    // Its facts are the last good ones, not a clean zero…
+    assert_eq!(p.findings().await, before);
+    // …and the capture says it was not checked.
+    assert_eq!(
+        p.left_out().await,
+        [("engine/run.rs".to_string(), "oversize".to_string())]
+    );
+
+    // Every collector of the sweep left it out; none has scanned it since.
+    let flags = p.unchecked("engine/run.rs").await;
+    assert!(!flags.is_empty() && flags.iter().all(|r| int(&r[0]) == 1));
+
+    // Readable again (and now worse): the next sweep restates it.
+    let (worse, worse_at) = rust(&[("calm", 0), ("busy", 11), ("busier", 12)]);
+    write(p.dir.path(), "engine/run.rs", &worse);
+    p.delta().await;
+    assert_eq!(p.left_out().await, Vec::<(String, String)>::new());
+    // The old exclusion is history now: a later scan covered the file.
+    let flags = p.unchecked("engine/run.rs").await;
+    assert!(!flags.is_empty() && flags.iter().all(|r| int(&r[0]) == 0));
+    assert_eq!(
+        p.findings().await,
+        [
+            fs("engine/plan.rs", at.plan, 2),
+            fs("engine/run.rs", worse_at[2], 2),
+            fs("ui/view.rs", at.view, 1),
+        ]
+    );
+}
+
+/// A metric's facts join other entities in a lens: here, the files an
+/// effort changed beside how many functions over the limit each has.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_lens_joins_metric_facts_with_an_efforts_files() {
+    let (p, _) = project(|files| {
+        let manifest = files
+            .iter()
+            .find(|f| f.path.ends_with("extension.yaml"))
+            .map(|f| f.path.clone())
+            .unwrap();
+        let dir = manifest.trim_end_matches("extension.yaml").to_string();
+        files.push(ScaffoldFile {
+            path: format!("{dir}lenses/touched.yaml"),
+            content: format!(
+                "title: Touched and complex\ndescription: \"The files an effort changed, with their functions over the limit.\"\nquery: |\n  SELECT f.path AS path, f.value AS functions, e.change_kind AS change\n  FROM metric_findings('{MEASURE}') f\n  JOIN v_effort_file e ON e.path = f.path\n  ORDER BY f.path\nviz: table\ncolumns:\n  - {{ key: path, label: File }}\n  - {{ key: functions, label: Functions over the limit }}\n  - {{ key: change, label: Change }}\n"
+            ),
+        });
+    })
+    .await;
+    p.baseline().await;
+    let opened = p
+        .svc
+        .commands
+        .run(
+            &oxplow_domain::Actor::Human,
+            crate::commands::effort::OPEN,
+            serde_json::json!({ "thread": oxplow_domain::refs::build::thread_ref(oxplow_domain::ThreadId::new(1)) }),
+            false,
+        )
+        .await
+        .unwrap();
+    let effort =
+        oxplow_domain::refs::build::effort_of_ref(opened.result["effort"].as_str().unwrap())
+            .expect("an effort");
+    let effort = effort.value();
+    p.svc
+        .db
+        .transaction(move |tx| {
+            tx.execute_batch(&format!(
+                "INSERT INTO effort_file (effort_id, path, change_kind, local_snapshot_id, source)
+                   VALUES ({effort}, 'engine/plan.rs', 'updated', 0, 'claimed'),
+                          ({effort}, 'ui/theme.rs', 'created', 0, 'claimed');"
+            ))
+            .map_err(oxplow_db::map_sql_err)
+        })
+        .await
+        .unwrap();
+
+    let ext = p
+        .svc
+        .extension_catalog
+        .unpinned(p.dir.path(), "a test reads declarations")
+        .iter()
+        .find(|e| e.name == NAME)
+        .cloned()
+        .expect("the extension loads");
+    assert_eq!(ext.errors, Vec::<String>::new());
+    let lens = ext
+        .lenses
+        .iter()
+        .find(|l| l.id.ends_with("touched"))
+        .expect("the joining lens");
+    let run = crate::extensions::run_lens(
+        &p.svc.sql,
+        &p.svc.extension_catalog,
+        p.dir.path(),
+        &lens.id,
+        Default::default(),
+        &crate::extensions::LensContext::default(),
+    )
+    .await
+    .unwrap();
+    // theme.rs changed but has no function over the limit: no fact, no row.
+    let rows: Vec<(String, i64, String)> = run
+        .result
+        .rows
+        .iter()
+        .map(|r| (text(&r[0]), int(&r[1]), text(&r[2])))
+        .collect();
+    assert_eq!(
+        rows,
+        [("engine/plan.rs".to_string(), 2, "updated".to_string())]
+    );
+}

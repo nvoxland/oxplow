@@ -271,6 +271,35 @@ pub struct NewMetricSpec {
 }
 
 impl NewMetricSpec {
+    /// This spec as a stored one would read (id 0, stamped now): what a check
+    /// resolves a metric to before the app has stored it.
+    pub fn as_stored(&self) -> MetricSpec {
+        let now = Timestamp::now();
+        MetricSpec {
+            id: 0,
+            key: self.key.clone(),
+            title: self.title.clone(),
+            unit: self.unit.clone(),
+            source_measure: self.source_measure.clone(),
+            aggregation: self.aggregation.clone(),
+            filter_json: self.filter_json.clone(),
+            formula: self.formula.clone(),
+            sliceable_dims_json: self.sliceable_dims_json.clone(),
+            direction: self.direction.clone(),
+            target: self.target,
+            warn_at: self.warn_at,
+            fail_at: self.fail_at,
+            description: self.description.clone(),
+            category: self.category.clone(),
+            language: self.language.clone(),
+            scope: self.scope.clone(),
+            display_kind: self.display_kind.clone(),
+            entity_json: self.entity_json.clone(),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
     /// A base metric over `source_measure` with `aggregation`; neutral direction,
     /// `gauge` display, `built-in` scope. For a formula metric, set
     /// `source_measure = None` and populate `formula`.
@@ -417,6 +446,10 @@ pub struct NewMetricCapture {
     /// See [`MetricCapture::turn_id`]: the turn the producer knows it was
     /// measured in (its causing event's anchor), never guessed here.
     pub turn_id: Option<i64>,
+    /// Snapshot files the scan was not given, `(path, reason)`, where `reason`
+    /// is `oversize`, `binary` or `unreadable`. They are not part of the
+    /// capture's scanned set: the facts they last had stay.
+    pub excluded: Vec<(String, String)>,
 }
 
 impl NewMetricCapture {
@@ -445,6 +478,7 @@ impl NewMetricCapture {
             producer_version: None,
             scan_kind: "delta".into(),
             turn_id: None,
+            excluded: Vec::new(),
         }
     }
 }
@@ -901,7 +935,17 @@ fn insert_capture(conn: &rusqlite::Connection, c: &NewMetricCapture) -> rusqlite
             c.turn_id,
         ],
     )?;
-    Ok(conn.last_insert_rowid())
+    let id = conn.last_insert_rowid();
+    if !c.excluded.is_empty() {
+        let mut insert = conn.prepare_cached(
+            "INSERT OR IGNORE INTO metric_capture_exclusion (capture_id, path, reason)
+             VALUES (?1, ?2, ?3)",
+        )?;
+        for (path, reason) in &c.excluded {
+            insert.execute(params![id, path, reason])?;
+        }
+    }
+    Ok(id)
 }
 
 // ---------------------------------------------------------------------------
@@ -2946,6 +2990,10 @@ impl SqliteFactStore {
                         WHERE c.snapshot_id IS NOT NULL AND c.status = 'done'
                           AND c.scan_kind = 'delta'
                           AND c.producer IN (SELECT producer FROM rel)
+                          -- A path the scan was not given is not restated: its last
+                          -- good facts stay, rather than reading as scanned clean.
+                          AND NOT EXISTS (SELECT 1 FROM metric_capture_exclusion x
+                                           WHERE x.capture_id = c.id AND x.path = fs.path)
                        UNION
                        -- A FULL capture (a baseline, tsk71) restates the RECONSTRUCTED
                        -- tree as-of its snapshot — which lets a baseline anchor to an
@@ -2961,6 +3009,8 @@ impl SqliteFactStore {
                            ON t.stream_id = c.stream_id AND t.anchor = c.snapshot_id
                         WHERE c.scan_kind = 'full' AND c.status = 'done'
                           AND c.producer IN (SELECT producer FROM rel)
+                          AND NOT EXISTS (SELECT 1 FROM metric_capture_exclusion x
+                                           WHERE x.capture_id = c.id AND x.path = t.path)
                           AND NOT EXISTS (
                             SELECT 1 FROM metric_capture c3
                              WHERE c3.stream_id = c.stream_id
@@ -3167,6 +3217,15 @@ impl SqliteFactStore {
                            -- Nor one holding a chain's facts (V39).
                            AND NOT EXISTS (
                              SELECT 1 FROM fact_chain ch WHERE ch.capture_id = c.id
+                           )
+                           -- Nor one holding the last good facts of a file the
+                           -- newest baseline was not given (it did not restate it).
+                           AND NOT EXISTS (
+                             SELECT 1 FROM fact f2
+                               JOIN fact_path fp2 ON fp2.id = f2.path_id
+                               JOIN metric_capture_exclusion x
+                                 ON x.capture_id = lf.id AND x.path = fp2.path
+                              WHERE f2.capture_id = c.id
                            )",
                         )
                         .map_err(map_sql_err)?;
@@ -3613,8 +3672,10 @@ impl SqliteFactStore {
                       WHERE c.snapshot_id IS NOT NULL AND c.status = 'done'
                         AND c.scan_kind = 'delta'
                         AND c.id IN ({placeholders})
+                        AND NOT EXISTS (SELECT 1 FROM metric_capture_exclusion x
+                                         WHERE x.capture_id = c.id AND x.path = fs.path)
                      UNION
-                     SELECT capture_id, path FROM (
+                     SELECT t.capture_id, t.path FROM (
                        SELECT c.id AS capture_id, fs.path AS path,
                               ROW_NUMBER() OVER (
                                 PARTITION BY c.id, fs.path
@@ -3628,7 +3689,9 @@ impl SqliteFactStore {
                         WHERE c.snapshot_id IS NOT NULL AND c.status = 'done'
                           AND c.scan_kind = 'full'
                           AND c.id IN ({placeholders})
-                     ) WHERE tree_rn = 1
+                     ) t WHERE t.tree_rn = 1
+                       AND NOT EXISTS (SELECT 1 FROM metric_capture_exclusion x
+                                        WHERE x.capture_id = t.capture_id AND x.path = t.path)
                      UNION
                      SELECT c.id, fpath.path
                        FROM metric_capture c

@@ -5,6 +5,7 @@ import {
   branchOptions,
   defaultChartMode,
   deltaVsFirst,
+  exclusionReason,
   filterByRange,
   filterByBranch,
   fromLocalInput,
@@ -194,4 +195,11 @@ test("specAggregation shows an entity metric's own aggregation", () => {
     specAggregation({ aggregation: "sum", entity_json: '{"view":"v_work_item","aggregation":"count"}' }),
   ).toBe("count");
   expect(specAggregation({ aggregation: "last", entity_json: "not json" })).toBe("last");
+});
+
+test("exclusionReason words each reason a scan can leave a file out", () => {
+  expect(exclusionReason("oversize")).toBe("over the size limit");
+  expect(exclusionReason("binary")).toBe("binary");
+  expect(exclusionReason("unreadable")).toBe("unreadable");
+  expect(exclusionReason("other")).toBe("other");
 });

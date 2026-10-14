@@ -416,6 +416,9 @@ struct CollectorRunContext {
     /// (`collector.synced@1`'s source is its actor). Each collector runs
     /// as a child of it.
     run: RunContext,
+    /// Snapshot files the sweep's collectors were not given: the capture
+    /// records them, and does not count them as scanned.
+    excluded: Arc<Vec<ExcludedFile>>,
 }
 
 /// Measures, metrics, fact collectors and dimensions from enabled
@@ -1294,11 +1297,12 @@ impl MetricsService {
                 None => self.build_file_map(snapshot_id).await,
             };
             corpus.warn_if_excluded("snapshot collectors");
-            report.excluded.extend(corpus.excluded);
+            report.excluded.extend(corpus.excluded.iter().cloned());
             let files = Arc::new(corpus.files);
             let mut ctx = self
                 .snapshot_context(stream_id.value(), None, SNAPSHOT_TAKEN, snapshot_id)
                 .await;
+            ctx.excluded = Arc::new(corpus.excluded);
             ctx.event = event.clone();
             let r = self
                 .run_collector_sweep(&delta_collectors, &ctx, files)
@@ -1312,15 +1316,16 @@ impl MetricsService {
             let corpus = self.build_full_file_map(snapshot_id).await;
             corpus.warn_if_excluded("snapshot collectors (whole tree)");
             // Both phases may leave the same file out; say it once.
-            for e in corpus.excluded {
-                if !report.excluded.contains(&e) {
-                    report.excluded.push(e);
+            for e in &corpus.excluded {
+                if !report.excluded.contains(e) {
+                    report.excluded.push(e.clone());
                 }
             }
             let files = Arc::new(corpus.files);
             let mut ctx = self
                 .snapshot_context(stream_id.value(), None, SNAPSHOT_TAKEN, snapshot_id)
                 .await;
+            ctx.excluded = Arc::new(corpus.excluded);
             ctx.scan_kind = "full";
             ctx.event = event.clone();
             // Whole-tree collectors restate the tree on every qualifying
@@ -1823,6 +1828,7 @@ impl MetricsService {
             None
         };
         CollectorRunContext {
+            excluded: Arc::default(),
             stream_val,
             thread_id,
             trigger,
@@ -2631,6 +2637,11 @@ impl MetricsService {
             ..oxplow_db::NewMetricCapture::done(
                 ctx.stream_val,
                 collector.key.clone(),
+            excluded: ctx
+                .excluded
+                .iter()
+                .map(|e| (e.path.clone(), e.reason.as_str().to_string()))
+                .collect(),
                 source.to_string(),
             )
         };
@@ -2643,6 +2654,23 @@ impl MetricsService {
 pub(crate) fn spec_to_new_spec(s: &ResolvedSpec) -> NewMetricSpec {
     let spec = NewMetricSpec {
         key: s.key.clone(),
+/// The metrics `extension` declares, as stored specs would read: the
+/// extension's own layer alone, with the defaults applied. What a check
+/// resolves them to before the app has loaded the extension.
+pub fn declared_metric_specs(
+    extension: &crate::extensions::Extension,
+) -> Vec<oxplow_db::MetricSpec> {
+    MetricLayers {
+        global: Vec::new(),
+        extensions: vec![(extension.name.clone(), extension.metrics.clone())],
+        project: Vec::new(),
+    }
+    .resolve()
+    .iter()
+    .map(|spec| spec_to_new_spec(spec).as_stored())
+    .collect()
+}
+
         title: s.title.clone(),
         unit: s.unit.clone(),
         source_measure: s.source_measure.clone(),
@@ -3881,6 +3909,7 @@ def transform(input):
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
+            excluded: Arc::default(),
             snapshot_id: Some(42),
             closest_vcs_rev: Some("abc1234".into()),
             vcs_rev_exact: true,
@@ -3936,6 +3965,7 @@ def transform(input):
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
+            excluded: Arc::default(),
             snapshot_id: Some(snapshot_id),
             closest_vcs_rev: None,
             vcs_rev_exact: false,
@@ -3997,6 +4027,7 @@ def transform(input):
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
+            excluded: Arc::default(),
             snapshot_id: None,
             closest_vcs_rev: None,
             vcs_rev_exact: false,
@@ -4153,6 +4184,7 @@ def transform(input):
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
+            excluded: Arc::default(),
             snapshot_id: Some(snapshot_id),
             closest_vcs_rev: None,
             vcs_rev_exact: false,
@@ -4359,6 +4391,7 @@ def transform(input):
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
+            excluded: Arc::default(),
             snapshot_id: Some(snap),
             closest_vcs_rev: None,
             vcs_rev_exact: false,
@@ -4407,6 +4440,7 @@ def transform(input):
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
+            excluded: Arc::default(),
             snapshot_id: Some(snapshot_id),
             closest_vcs_rev: None,
             vcs_rev_exact: false,
@@ -4483,6 +4517,7 @@ def transform(input):
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
+            excluded: Arc::default(),
             snapshot_id: Some(snapshot_id),
             closest_vcs_rev: None,
             vcs_rev_exact: false,
@@ -4580,6 +4615,7 @@ def transform(input):
             stream_val: 1,
             thread_id: Some(1),
             trigger: "on-effort-complete",
+            excluded: Arc::default(),
             snapshot_id: None,
             closest_vcs_rev: None,
             vcs_rev_exact: false,
@@ -4701,6 +4737,7 @@ def transform(input):
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
+            excluded: Arc::default(),
             snapshot_id: None,
             closest_vcs_rev: None,
             vcs_rev_exact: false,
@@ -4800,6 +4837,7 @@ def transform(input):
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
+            excluded: Arc::default(),
             snapshot_id: Some(7),
             closest_vcs_rev: Some("abc1234".into()),
             vcs_rev_exact: true,
@@ -4868,6 +4906,7 @@ def transform(input):
             stream_val: 1,
             thread_id: None,
             trigger: "manual",
+            excluded: Arc::default(),
             snapshot_id: None,
             closest_vcs_rev: None,
             vcs_rev_exact: false,
@@ -4931,6 +4970,7 @@ def transform(input):
             stream_val: 1,
             thread_id: None,
             trigger: "manual",
+            excluded: Arc::default(),
             snapshot_id: None,
             closest_vcs_rev: None,
             vcs_rev_exact: false,
@@ -5002,6 +5042,7 @@ def transform(input):
             stream_val: 1,
             thread_id: None,
             trigger: "manual",
+            excluded: Arc::default(),
             snapshot_id: None,
             closest_vcs_rev: None,
             vcs_rev_exact: false,
@@ -5070,6 +5111,7 @@ def transform(input):
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
+            excluded: Arc::default(),
             snapshot_id: Some(9),
             closest_vcs_rev: Some("def5678".into()),
             vcs_rev_exact: true,
@@ -5140,6 +5182,7 @@ def transform(input):
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
+            excluded: Arc::default(),
             snapshot_id: Some(snap),
             closest_vcs_rev: None,
             vcs_rev_exact: false,

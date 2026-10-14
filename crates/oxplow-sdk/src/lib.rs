@@ -1039,6 +1039,18 @@ pub async fn check(
             (&empty, DryRun::EmptyDatabase)
         }
     };
+    // A metric the app has not loaded yet is the extension under check's
+    // own: resolve it from there, not only from the project's store.
+    let declared;
+    let layer = match catalog.named(root, name) {
+        Ok(under_check) if dry_run == DryRun::Project => {
+            declared = layer.with_declared_metrics(
+                oxplow_app::metrics_service::declared_metric_specs(&under_check),
+            );
+            &declared
+        }
+        _ => layer,
+    };
     let extension = extensions::validate_extension(layer, catalog, root, name, commands)
         .await
         .map_err(|e| match e {
@@ -1504,6 +1516,29 @@ mod tests {
         .unwrap();
         assert!(report.ok, "{}", render_findings(&report, Format::Text));
         assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+    }
+
+    /// A metric the app has not loaded yet: checking against a project
+    /// database resolves it from the extension under check, so its lens
+    /// (which reads `metric_findings()`) dry-runs rather than failing on an
+    /// unknown metric.
+    #[tokio::test]
+    async fn check_against_a_project_database_resolves_a_metric_it_has_not_loaded() {
+        let dir = tempfile::tempdir().unwrap();
+        scaffold(dir.path(), Kind::Metric, "demo", None).unwrap();
+        let project = SqlGateway::with_metrics(oxplow_db::Database::in_memory());
+        let report = check(
+            dir.path(),
+            "demo",
+            &ExtensionCatalog::new(),
+            Some(&project),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(report.dry_run, DryRun::Project);
+        assert!(report.ok, "{}", render_findings(&report, Format::Text));
     }
 
     /// The feature-gated harness verbs have real descriptions to declare

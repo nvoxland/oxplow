@@ -29,7 +29,7 @@ import { customDashboardRef } from "../tabs/pageRefs.js";
 import { Page, pageH1Style } from "../tabs/Page.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { MetricControls, MetricStatsRail, RecordingsTable, TrendChart } from "./MetricDetail.js";
+import { MetricControls, MetricStatsRail, RecordingsTable, TrendChart, UncheckedFiles } from "./MetricDetail.js";
 import {
   DEFAULT_RANGE_KEY,
   type TimeRange,
@@ -38,6 +38,8 @@ import {
   filterByBranch,
   filterByRange,
   rangeFromPreset,
+  UNCHECKED_FILES_SQL,
+  type UncheckedFile,
   widestPresetWindow,
   seriesPoints,
   transformSeries,
@@ -85,6 +87,8 @@ export function MetricDetailPage({
       .then((r) => setDimensions(r.rows.map(([key, label]) => ({ key: String(key), label: String(label ?? key) }))))
       .catch(() => setDimensions([]));
   }, []);
+  // Files the latest scans left out: their facts are stale, not clean.
+  const [unchecked, setUnchecked] = useState<UncheckedFile[]>([]);
   // "Add to dashboard" picker (tsk143).
   const [dashboards, setDashboards] = useState<Dashboard[]>([]);
   const addToDashboardMenu = useContextMenu();
@@ -146,6 +150,25 @@ export function MetricDetailPage({
     refresh();
   }, [refresh]);
   useRerunOnChange(reads, refresh);
+
+  const measureKey = def?.source_measure ?? null;
+  useEffect(() => {
+    if (!measureKey) {
+      setUnchecked([]);
+      return;
+    }
+    let cancelled = false;
+    void querySql(UNCHECKED_FILES_SQL, [measureKey], null)
+      .then((r) => {
+        if (!cancelled) setUnchecked(r.rows.map(([path, reason]) => ({ path: String(path), reason: String(reason) })));
+      })
+      .catch(() => {
+        if (!cancelled) setUnchecked([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [measureKey, samples]);
 
   const branches = useMemo(() => branchOptions(samples), [samples]);
   // The range + branch window feeds the chart, the recordings and the stats.
@@ -299,6 +322,7 @@ export function MetricDetailPage({
             onSelectRange={(from, to) => setRange({ from, to })}
           />
         )}
+        <UncheckedFiles files={unchecked} />
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <SectionLabel>Recordings</SectionLabel>
           <RecordingsTable samples={filtered} unit={def.unit} />
