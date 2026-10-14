@@ -21,6 +21,7 @@ oxplow-db = { workspace = true }
 rusqlite = { workspace = true }
 oxplow-ai = { workspace = true }
 oxplow-config = { workspace = true }
+globset = { workspace = true }
 oxplow-fs-watch = { workspace = true }
 oxplow-code-deps = { workspace = true }
 oxplow-git = { workspace = true }

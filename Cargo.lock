@@ -4411,6 +4411,7 @@ dependencies = [
  "fs2",
  "futures",
  "git2",
+ "globset",
  "hex",
  "hmac",
  "indexmap 2.14.2",

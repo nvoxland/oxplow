@@ -115,8 +115,13 @@ section for the column.
   The UI builds the test tree from `classname`+`name`.
 - **`testing:` block** (`TestingConfig`, `crates/oxplow-config/src/lib.rs`):
   `command`, `fastCommand`, `runPatterns`, `analysisPatterns`,
-  `agentHint` — how the project's tests run, read by the detector and the
-  agent prompt. Human-only (its hint steers every agent). The
+  `testPaths`, `agentHint` — how the project's tests run, read by the
+  detector and the agent prompt. `testPaths` is a list of globs (`spec/**`,
+  `**/it/**`; repo-relative, `*` stays within a directory) naming test
+  files on top of the built-in conventions (`.test.` / `.spec.` files,
+  `test/` and `tests/` directories, `test_*.py|rs`, `*_test.go|clj|cljc`): change
+  analysis reads them for `is_test` on its next run (stored changes aren't
+  recomputed), and a bad glob fails the config load. Human-only (its hint steers every agent). The
   `collection:` block is gone: the file
   rejects it as an unknown key (`a_collection_block_is_an_unknown_key`).
 

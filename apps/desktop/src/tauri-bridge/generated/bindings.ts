@@ -6282,6 +6282,14 @@ export type TestingConfig = {
 	 */
 	analysisPatterns: string[],
 	/**
+	 *  Globs (repo-relative, `/`-separated) naming test files, on top of the
+	 *  built-in conventions (`.test.` / `.spec.` files, `test/` and `tests/`
+	 *  directories, `test_*.py`, `*_test.go`, …): `spec/**`, `**\/it/**`. Change
+	 *  analysis reads them for `is_test` in `v_change_file` and
+	 *  `v_change_function` on its next run.
+	 */
+	testPaths: string[],
+	/**
 	 *  Free-form hint injected verbatim into every agent system prompt:
 	 *  which test command to run, what coverage to meet, and so on.
 	 */

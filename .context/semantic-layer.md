@@ -1157,7 +1157,12 @@ oxplow-bundled change cards) only read them.
   (shared with the `diff` IPC, `.context/vcs.md`), reads the
   first 200 changed files' contents, runs `code_analysis::analyze_files`
   (tree-sitter metrics per side, churn, import deltas), and builds rows:
-  - files: status, +/−, zone (project zone rules), `is_test`. The "look
+  - files: status, +/−, zone (project zone rules), `is_test` (the
+    built-in test-file conventions plus the project's `testing.testPaths`
+    globs — `change_analysis::TestPaths`, read when the analysis runs, so
+    a change in config applies to the next analysis and earlier stored
+    changes keep what they were computed with; a function in such a file is
+    a test function). The "look
     here first" score left core (P7.B5, V137 dropped its columns,
     `v_change_file` v2): oxplow-bundled's model `change_interest`
     (`v_oxplow_bundled_change_interest { change_id, path, interest,

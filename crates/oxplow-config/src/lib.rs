@@ -532,6 +532,13 @@ pub struct TestingConfig {
     /// top of the built-in defaults (cargo clippy, eslint, ruff, …).
     #[serde(rename = "analysisPatterns")]
     pub analysis_patterns: Vec<String>,
+    /// Globs (repo-relative, `/`-separated) naming test files, on top of the
+    /// built-in conventions (`.test.` / `.spec.` files, `test/` and `tests/`
+    /// directories, `test_*.py`, `*_test.go`, …): `spec/**`, `**/it/**`. Change
+    /// analysis reads them for `is_test` in `v_change_file` and
+    /// `v_change_function` on its next run.
+    #[serde(rename = "testPaths")]
+    pub test_paths: Vec<String>,
     /// Free-form hint injected verbatim into every agent system prompt:
     /// which test command to run, what coverage to meet, and so on.
     #[serde(rename = "agentHint")]
@@ -1002,6 +1009,8 @@ struct RawTestingBlock {
     run_patterns: Option<Vec<String>>,
     #[serde(rename = "analysisPatterns", default)]
     analysis_patterns: Option<Vec<String>>,
+    #[serde(rename = "testPaths", default)]
+    test_paths: Option<Vec<String>>,
     #[serde(rename = "agentHint", default)]
     agent_hint: Option<String>,
 }
@@ -1509,6 +1518,9 @@ pub fn config_entries(config: &OxplowConfig, fallback_name: &str) -> Vec<ConfigE
         }
         if !c.analysis_patterns.is_empty() {
             m.insert("analysisPatterns".into(), to_yaml(&c.analysis_patterns));
+        }
+        if !c.test_paths.is_empty() {
+            m.insert("testPaths".into(), to_yaml(&c.test_paths));
         }
         if let Some(v) = &c.agent_hint {
             m.insert("agentHint".into(), v.clone().into());
@@ -3352,11 +3364,28 @@ fn validate_testing(raw: Option<RawTestingBlock>) -> Result<TestingConfig, Confi
         }
         Ok(out)
     };
+    // Globs are checked here, so a bad one fails the load rather than
+    // silently marking nothing as a test.
+    let globs = |field: &str, list: Option<Vec<String>>| {
+        let list = patterns(field, list)?;
+        for (i, glob) in list.iter().enumerate() {
+            if let Err(e) = globset::GlobBuilder::new(glob)
+                .literal_separator(true)
+                .build()
+            {
+                return Err(ConfigError::Invalid(format!(
+                    "testing.{field}[{i}] `{glob}` isn't a valid glob: {e}"
+                )));
+            }
+        }
+        Ok(list)
+    };
     Ok(TestingConfig {
         command: opt_trimmed(raw.command),
         fast_command: opt_trimmed(raw.fast_command),
         run_patterns: patterns("runPatterns", raw.run_patterns)?,
         analysis_patterns: patterns("analysisPatterns", raw.analysis_patterns)?,
+        test_paths: globs("testPaths", raw.test_paths)?,
         agent_hint: opt_trimmed(raw.agent_hint),
     })
 }
@@ -4642,6 +4671,27 @@ lsp:
     }
 
     #[test]
+    fn test_paths_are_globs_that_round_trip_and_a_bad_one_fails_the_load() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            cfg_path(dir.path()),
+            "testing:\n  testPaths: [\"spec/**\", \"**/it/**\"]\n",
+        )
+        .unwrap();
+        let cfg = load_project_config(dir.path()).unwrap();
+        assert_eq!(cfg.testing.test_paths, vec!["spec/**", "**/it/**"]);
+
+        std::fs::write(cfg_path(dir.path()), "testing:\n  testPaths: [\"a{b\"]\n").unwrap();
+        let err = load_project_config(dir.path()).unwrap_err();
+        assert!(
+            matches!(err, ConfigError::Invalid(ref m) if m.contains("testPaths[0]")),
+            "{err:?}"
+        );
+        std::fs::write(cfg_path(dir.path()), "testing:\n  testPaths: [\" \"]\n").unwrap();
+        assert!(load_project_config(dir.path()).is_err());
+    }
+
+    #[test]
     fn testing_defaults_empty_when_absent() {
         let dir = tempdir().unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
@@ -4804,6 +4854,7 @@ testing:
                 fast_command: None,
                 run_patterns: vec!["tox".into()],
                 analysis_patterns: vec!["cargo clippy".into()],
+                test_paths: vec!["spec/**".into()],
                 agent_hint: Some("Run pytest, not bare python -m pytest".into()),
             },
             ..default_config("test".into())

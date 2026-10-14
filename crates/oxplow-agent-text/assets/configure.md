@@ -58,6 +58,8 @@ testing:
   # top of the built-in defaults (pytest, cargo test, jest, go test, …):
   runPatterns: [bun test]
   analysisPatterns: [lint:collect]
+  # Globs naming test files beyond the built-in conventions (spec/, it/ …):
+  # testPaths: ["spec/**"]
   agentHint: "Run tests with <command>."   # injected into every agent prompt
 ```
 

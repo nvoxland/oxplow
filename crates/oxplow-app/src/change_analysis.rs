@@ -28,7 +28,41 @@ pub struct ChangedFile {
     pub head: Option<String>,
 }
 
-/// True if `path` looks like a test file by convention.
+/// The project's own test-file conventions (`testing.testPaths`), added to
+/// the built-in ones [`is_test_path`] knows.
+#[derive(Debug, Clone, Default)]
+pub struct TestPaths(Option<globset::GlobSet>);
+
+impl TestPaths {
+    /// The globs of `testing.testPaths`. The config load rejects a bad
+    /// glob; one that still reaches here (a config built in memory) is
+    /// dropped rather than failing an analysis.
+    pub fn from_config(globs: &[String]) -> Self {
+        let mut set = globset::GlobSetBuilder::new();
+        let mut any = false;
+        for glob in globs {
+            if let Ok(glob) = globset::GlobBuilder::new(glob)
+                .literal_separator(true)
+                .build()
+            {
+                set.add(glob);
+                any = true;
+            }
+        }
+        Self(any.then(|| set.build().ok()).flatten())
+    }
+
+    /// A test file by the built-in conventions or the project's globs.
+    pub fn is_test(&self, path: &str) -> bool {
+        is_test_path(path)
+            || self
+                .0
+                .as_ref()
+                .is_some_and(|set| set.is_match(path.replace('\\', "/")))
+    }
+}
+
+/// True if `path` looks like a test file by the built-in conventions.
 pub fn is_test_path(path: &str) -> bool {
     let path = path.replace('\\', "/");
     let file = path.rsplit('/').next().unwrap_or(&path);
@@ -73,8 +107,8 @@ fn is_test_container(name: &str) -> bool {
 
 /// True if a function is a test: in a test file, named like one, or inside
 /// a test module/class (`mod tests`, `FooTest`, `foo.bar-test`).
-pub fn is_test_function(path: &str, name: &str, container: &[String]) -> bool {
-    is_test_path(path)
+pub fn is_test_function(path: &str, name: &str, container: &[String], tests: &TestPaths) -> bool {
+    tests.is_test(path)
         || name.starts_with("test_")
         || name.strip_prefix("test").is_some_and(|rest| {
             rest.chars()
@@ -95,6 +129,7 @@ pub fn build_results(
     files: &[ChangedFile],
     analysis: &AnalyzeFunctionsResult,
     zones: &ZoneRules,
+    tests: &TestPaths,
 ) -> ChangeResults {
     // (path, symbol id) → (base, head): an overload or a same-named function
     // is its own entry.
@@ -149,7 +184,7 @@ pub fn build_results(
             body_changed: body,
             start_line: f.start_line as i64,
             visibility: f.visibility.clone(),
-            is_test: is_test_function(path, &f.name, &f.container_path),
+            is_test: is_test_function(path, &f.name, &f.container_path, tests),
             complexity: Some(f.complexity),
             length: Some(f.length as i64),
             params_before: before.map(|b| b.parameter_count as i64),
@@ -171,7 +206,7 @@ pub fn build_results(
         });
     }
 
-    let files = file_rows(files, zones);
+    let files = file_rows(files, zones, tests);
 
     let mut imports = Vec::new();
     for d in &analysis.import_deltas {
@@ -206,7 +241,7 @@ pub fn build_results(
 
 /// The stored row of each changed file: its status and line counts, its
 /// zone and whether it's a test — what both stages write.
-fn file_rows(files: &[ChangedFile], zones: &ZoneRules) -> Vec<ChangeFileRow> {
+fn file_rows(files: &[ChangedFile], zones: &ZoneRules, tests: &TestPaths) -> Vec<ChangeFileRow> {
     files
         .iter()
         .map(|f| ChangeFileRow {
@@ -215,7 +250,7 @@ fn file_rows(files: &[ChangedFile], zones: &ZoneRules) -> Vec<ChangeFileRow> {
             additions: f.additions,
             deletions: f.deletions,
             zone: Some(zones.classify(&f.path)),
-            is_test: is_test_path(&f.path),
+            is_test: tests.is_test(&f.path),
         })
         .collect()
 }
@@ -229,6 +264,7 @@ pub fn test_file_rows(
     base: &[Option<String>],
     head: &[Option<String>],
     analysis: &AnalyzeFunctionsResult,
+    tests: &TestPaths,
 ) -> Vec<oxplow_db::ChangeTestFileRow> {
     let tests_on = |path: &str, side: &str| -> i64 {
         analysis
@@ -236,7 +272,7 @@ pub fn test_file_rows(
             .iter()
             .filter(|s| s.path == path && s.side == side)
             .flat_map(|s| s.functions.iter())
-            .filter(|f| is_test_function(path, &f.name, &f.container_path))
+            .filter(|f| is_test_function(path, &f.name, &f.container_path, tests))
             .count() as i64
     };
     let signals = |content: &Option<String>| {
@@ -250,7 +286,7 @@ pub fn test_file_rows(
         .zip(base.iter().zip(head.iter()))
         .filter_map(|(path, (b, h))| {
             let (tests_before, tests_after) = (tests_on(path, "base"), tests_on(path, "head"));
-            if !is_test_path(path) && tests_before == 0 && tests_after == 0 {
+            if !tests.is_test(path) && tests_before == 0 && tests_after == 0 {
                 return None;
             }
             let (before, after) = (signals(b), signals(h));
@@ -442,7 +478,11 @@ pub async fn refresh_files(
         .collect();
     let rows = {
         let cfg = svc.config.read().unwrap_or_else(|e| e.into_inner());
-        file_rows(&files, &ZoneRules::from_config(&cfg.zones))
+        file_rows(
+            &files,
+            &ZoneRules::from_config(&cfg.zones),
+            &TestPaths::from_config(&cfg.testing.test_paths),
+        )
     };
     let (conflicted, in_progress) = if kind == "working" {
         let status = svc.vcs.status(&root).await?;
@@ -885,9 +925,12 @@ async fn compute(
     head: Revision,
     only: Option<std::collections::HashSet<String>>,
 ) -> Result<ChangeResults, String> {
-    let zones = {
+    let (zones, tests) = {
         let cfg = svc.config.read().unwrap_or_else(|e| e.into_inner());
-        ZoneRules::from_config(&cfg.zones)
+        (
+            ZoneRules::from_config(&cfg.zones),
+            TestPaths::from_config(&cfg.testing.test_paths),
+        )
     };
     let entries: Vec<_> = svc
         .trees
@@ -944,8 +987,9 @@ async fn compute(
                 head: None,
             })
             .collect();
-        let mut results = build_results(&files, &analysis, &zones);
-        results.test_files = test_file_rows(&analyzed, &base_contents, &head_contents, &analysis);
+        let mut results = build_results(&files, &analysis, &zones, &tests);
+        results.test_files =
+            test_file_rows(&analyzed, &base_contents, &head_contents, &analysis, &tests);
         Ok(results)
     })
     .await
@@ -955,6 +999,11 @@ async fn compute(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The built-in conventions alone.
+    fn is_test_function(path: &str, name: &str, container: &[String]) -> bool {
+        super::is_test_function(path, name, container, &TestPaths::default())
+    }
     use crate::code_analysis::{AnalyzedFileChurn, AnalyzedFileSide, AnalyzedFunctionChurn};
 
     /// A duplicate scan a stop cut off is redone at boot: the change still
@@ -1037,6 +1086,47 @@ mod tests {
             moved.computed_at, first.computed_at,
             "a new tree recomputes"
         );
+    }
+
+    /// `testing.testPaths` adds to the built-in conventions: with
+    /// `spec/**` a Ruby spec is a test file, without the key it isn't, and
+    /// what was a test by convention stays one.
+    #[test]
+    fn project_test_paths_add_to_the_built_in_conventions() {
+        let file = |path: &str| ChangedFile {
+            path: path.into(),
+            status: "A".into(),
+            additions: 1,
+            ..ChangedFile::default()
+        };
+        let files = vec![
+            file("spec/foo_spec.rb"),
+            file("src/it/flow.rb"),
+            file("src/a.test.ts"),
+            file("src/lib.rb"),
+        ];
+        let zones = ZoneRules::from_config(&[]);
+        let is_test = |tests: &TestPaths| {
+            file_rows(&files, &zones, tests)
+                .iter()
+                .map(|f| f.is_test)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            is_test(&TestPaths::default()),
+            [false, false, true, false],
+            "without the key"
+        );
+        let tests = TestPaths::from_config(&["spec/**".into(), "**/it/**".into()]);
+        assert_eq!(is_test(&tests), [true, true, true, false]);
+        // A function in a project test file is a test function.
+        assert!(super::is_test_function(
+            "spec/foo_spec.rb",
+            "x",
+            &[],
+            &tests
+        ));
+        assert!(!super::is_test_function("lib/x.rb", "x", &[], &tests));
     }
 
     #[test]
@@ -1130,7 +1220,12 @@ mod tests {
             }],
             &ZoneRules::from_config(&[]),
         );
-        let r = build_results(&files, &analysis, &ZoneRules::from_config(&[]));
+        let r = build_results(
+            &files,
+            &analysis,
+            &ZoneRules::from_config(&[]),
+            &TestPaths::default(),
+        );
         let mut refs: Vec<_> = r
             .functions
             .iter()
@@ -1248,7 +1343,12 @@ mod tests {
             deletions: 4,
             ..Default::default()
         }];
-        let r = build_results(&files, &analysis(), &ZoneRules::from_config(&[]));
+        let r = build_results(
+            &files,
+            &analysis(),
+            &ZoneRules::from_config(&[]),
+            &TestPaths::default(),
+        );
         let by = |c: &str, n: &str| r.functions.iter().find(|f| f.container == c && f.name == n);
         assert!(
             by("", "alpha").is_none(),
@@ -1322,7 +1422,7 @@ mod tests {
             status: "modified".into(),
             ..Default::default()
         }];
-        let r = build_results(&files, &a, &zones);
+        let r = build_results(&files, &a, &zones, &TestPaths::default());
         assert_eq!(r.files[0].zone.as_deref(), Some("ui"));
         let imports: Vec<(&str, &str, bool)> = r
             .imports
