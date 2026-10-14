@@ -527,7 +527,9 @@ evaluator, each builtin taking its own and one whose service is missing
 naming the need, `oxplow_domain::service::undeclared`) — answers its
 `scope(…)` and `ai_*` calls on the calling thread (a command's transaction
 stays there), and enforces a `Budget` (`oxplow_domain::run`): the time answering is left
-out of its `timeout` and counted in its `ceiling`. Past either, or when
+out of its `timeout` and counted in its `ceiling`. The one call the host answers itself
+is `CallKind::Parse`: the parse results `code_metrics`, `markers` and `ast_query` share across runs
+(a file is parsed once per sweep, keyed by content hash; `.context/performance.md`). Past either, or when
 its run's `Cancel` is set (every collector, command, effect, policy and
 fact-collector script is passed its run's), the worker is **killed and reaped** (`CollectError::Timeout` /
 `Cancelled`); a run whose live allocations pass its cap is ended by the

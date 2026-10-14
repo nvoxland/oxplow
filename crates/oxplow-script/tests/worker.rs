@@ -464,3 +464,86 @@ fn a_run_past_its_ceiling_stops_asking_the_model() {
     assert_eq!(oracle.asked.lock().unwrap().len(), at_timeout);
     assert!(at_timeout < 100);
 }
+
+fn rust_tree() -> Arc<HashMap<String, String>> {
+    Arc::new(HashMap::from([
+        (
+            "a.rs".to_string(),
+            "// TODO: one\nfn a(x: i32) -> i32 {\n    if x > 1 { x } else { 0 }\n}\n".to_string(),
+        ),
+        (
+            "b.rs".to_string(),
+            "fn b() {}\nfn c() { let _ = Some(1).unwrap(); }\n".to_string(),
+        ),
+        ("d.rs".to_string(), "// FIXME: two\nfn d() {}\n".to_string()),
+    ]))
+}
+
+/// Every source file's `code_metrics`, `markers` and `ast_query`, summed up
+/// differently by each script of a sweep.
+fn sweep_script(reduce: &str) -> String {
+    format!(
+        "def transform(x):\n    out = []\n    for f in source_files():\n        fns = code_metrics(f['text'], f['language'], f['path'])\n        marks = markers(f['text'], f['language'])\n        calls = ast_query(f['text'], f['language'], '(call_expression) @c')\n        out.append({{'path': f['path'], 'fns': {reduce}, 'marks': len(marks), 'calls': len(calls)}})\n    return out\n"
+    )
+}
+
+/// A file is parsed once however many scripts of a sweep read it: the
+/// workers are one process per run, so the host keeps what they parsed,
+/// keyed by the builtin, the language and the content's hash.
+#[test]
+fn a_file_is_parsed_once_across_a_sweeps_scripts() {
+    let w = workers(limits());
+    let tree = rust_tree();
+    let run = |script: &str| {
+        w.run(
+            &budget(10_000),
+            ScriptRun::starlark(script, json!({})).with_tree(tree.clone()),
+            None,
+        )
+        .unwrap()
+        .value
+    };
+    let first = run(&sweep_script("len(fns)"));
+    let cold = w.parse_stats();
+    assert_eq!((cold.hits, cold.misses), (0, 9), "3 files x 3 builtins");
+    assert_eq!(cold.entries, 9);
+
+    // Another script over the same files reads, and parses nothing.
+    let again = run(&sweep_script("len(fns)"));
+    let other = run(&sweep_script("[g['name'] for g in fns]"));
+    let warm = w.parse_stats();
+    assert_eq!((warm.hits, warm.misses), (18, 9), "{warm:?}");
+    assert_eq!(first, again, "the same facts come out");
+    assert_ne!(first, other, "a different reduction still reads the cache");
+
+    // The facts are what a fresh worker computes without anything cached.
+    let fresh = workers(limits());
+    let uncached = fresh
+        .run(
+            &budget(10_000),
+            ScriptRun::starlark(&sweep_script("len(fns)"), json!({})).with_tree(tree.clone()),
+            None,
+        )
+        .unwrap()
+        .value;
+    assert_eq!(first, uncached);
+
+    // An edit is a new key: only that file is parsed again.
+    let mut edited = (*tree).clone();
+    edited.insert("d.rs".into(), "fn d() {}\nfn e() {}\n".into());
+    let after = w
+        .run(
+            &budget(10_000),
+            ScriptRun::starlark(&sweep_script("len(fns)"), json!({})).with_tree(Arc::new(edited)),
+            None,
+        )
+        .unwrap()
+        .value;
+    let edited_stats = w.parse_stats();
+    assert_eq!(
+        (edited_stats.hits, edited_stats.misses),
+        (warm.hits + 6, warm.misses + 3),
+        "{edited_stats:?}"
+    );
+    assert_ne!(after, first);
+}

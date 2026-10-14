@@ -149,6 +149,79 @@ pub struct ScriptWorkers {
     freed: Condvar,
     live: AtomicUsize,
     recent: Mutex<VecDeque<u32>>,
+    /// Parse results shared by every run this serves.
+    parses: ParseCache,
+}
+
+/// The most JSON text the shared parse results hold.
+const PARSE_CACHE_BYTES: usize = 256 * 1024 * 1024;
+
+/// What a worker parsed, kept by the host while it lives: workers are one
+/// process per run, so the results outlive them here. Keyed by
+/// [`crate::runtime::parse_key`] (the builtin, the language and the
+/// content's hash), so an edited file is a new entry and an unchanged one
+/// is read, not parsed, by every script of a sweep. Oldest entries go
+/// first once the bound is reached.
+#[derive(Default)]
+struct ParseCache {
+    entries: Mutex<ParseEntries>,
+    hits: AtomicUsize,
+    misses: AtomicUsize,
+}
+
+#[derive(Default)]
+struct ParseEntries {
+    by_key: HashMap<String, Arc<str>>,
+    order: VecDeque<String>,
+    bytes: usize,
+}
+
+impl ParseCache {
+    fn answer(&self, id: &str, args: &Value) -> Result<Value, String> {
+        let key = args["key"].as_str().ok_or("a parse call needs its key")?;
+        let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
+        match id {
+            "get" => Ok(match entries.by_key.get(key) {
+                Some(json) => {
+                    self.hits.fetch_add(1, Ordering::Relaxed);
+                    Value::String(json.to_string())
+                }
+                None => {
+                    self.misses.fetch_add(1, Ordering::Relaxed);
+                    Value::Null
+                }
+            }),
+            "put" => {
+                let value = args["value"]
+                    .as_str()
+                    .ok_or("a parse put needs its value")?;
+                if entries.by_key.contains_key(key) || value.len() > PARSE_CACHE_BYTES / 16 {
+                    return Ok(Value::Null);
+                }
+                entries.bytes += value.len();
+                entries.by_key.insert(key.to_string(), value.into());
+                entries.order.push_back(key.to_string());
+                while entries.bytes > PARSE_CACHE_BYTES {
+                    let Some(oldest) = entries.order.pop_front() else {
+                        break;
+                    };
+                    if let Some(gone) = entries.by_key.remove(&oldest) {
+                        entries.bytes -= gone.len();
+                    }
+                }
+                Ok(Value::Null)
+            }
+            other => Err(format!("no parse call `{other}`")),
+        }
+    }
+}
+
+/// How the shared parse results have done so far.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ParseStats {
+    pub entries: usize,
+    pub hits: usize,
+    pub misses: usize,
 }
 
 impl ScriptWorkers {
@@ -160,6 +233,22 @@ impl ScriptWorkers {
             freed: Condvar::new(),
             live: AtomicUsize::new(0),
             recent: Mutex::new(VecDeque::new()),
+            parses: ParseCache::default(),
+        }
+    }
+
+    /// What the shared parse results hold and how often they answered.
+    pub fn parse_stats(&self) -> ParseStats {
+        ParseStats {
+            entries: self
+                .parses
+                .entries
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .by_key
+                .len(),
+            hits: self.parses.hits.load(Ordering::Relaxed),
+            misses: self.parses.misses.load(Ordering::Relaxed),
         }
     }
 
@@ -273,7 +362,12 @@ impl ScriptWorkers {
                     id,
                     args,
                 })) => {
-                    let answer = clock.paused(|| host.answer(kind, &id, args));
+                    let answer = match kind {
+                        // The host's own, cheap: not the caller's, and not
+                        // time the script's clock should stop for.
+                        CallKind::Parse => self.parses.answer(&id, &args),
+                        _ => clock.paused(|| host.answer(kind, &id, args)),
+                    };
                     let (ok, err) = match answer {
                         Ok(v) => (Some(v), None),
                         Err(e) => (None, Some(e)),
@@ -410,6 +504,7 @@ impl Answering<'_> {
                 Some(serve) => serve(id, args),
                 None => Err(oxplow_domain::service::undeclared("scope")),
             },
+            CallKind::Parse => Err("a parse call is answered by the workers".into()),
             CallKind::Ai => match &self.ai {
                 Some(oracle) => ask(&**oracle, id, &args),
                 None => Err(oxplow_domain::service::undeclared(&format!("ai_{id}"))),

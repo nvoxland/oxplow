@@ -709,12 +709,54 @@ on the host under 1%, so neither a lazy protocol nor a bigger host cache
 pays for itself. **Decided: the tree stays shipped whole.** The cost is
 the scripts: each of the 16 walks every file it globs and parses it
 again (`ast_query`, `code_metrics`, `markers` per file per script), so
-a file is parsed by tree-sitter once per script that reads its
-language. That is the lever if sweeps need to get faster: parse results
-shared across a sweep's scripts, keyed by content hash. In release the
-wall time is well above the worker CPU (75 s vs 41 s); that gap is
-unexplained (output serialization and fact transfer are the suspects)
-and should be profiled before anything is built for it.
+a file was parsed by tree-sitter once per script that reads its
+language.
+
+**The 75 s wall vs 41 s CPU gap was contention, not the pipeline.**
+`cpu_ms` is the worker's own `getrusage`; wall time also counts every
+moment the worker (or the host thread feeding it) waited for a core. The
+75 s sweep was measured while other builds and test runs shared the
+machine. Re-measured on an idle machine the same sweep is 28.6 s wall for
+27.7 s of worker CPU (the other 3%: spawn, shipping the tree, the
+facts); with 28 busy loops on the 14 cores the 120-file sweep goes from
+3.1 s CPU / 3.6 s wall to 3.3 s CPU / 10.3 s wall. So output
+serialization and fact transfer, the earlier suspects, cost nothing
+visible; ranking the scripts' worker CPU (`tree_cost` prints the top
+eight) puts the time in tree-sitter parsing: the four `code_metrics`
+scripts at about 2 s each over this repo, the Rust and TypeScript
+`ast_query` scripts at 1.4–4.6 s, `duplicate_lines` at 3.4–3.9 s.
+(Attributed by script CPU, not with samply: the parse is inside one
+builtin call per file, so a per-script ranking already names it.)
+
+**Parse results are shared across a sweep.** Workers are one process per
+run, so nothing in them can outlive a script; the host does
+(`ScriptWorkers`' parse cache, `workers.rs`). `code_metrics`, `markers`
+and `ast_query` ask the host for the JSON they would return under a key
+of (builtin, language, whatever else the answer depends on, SHA-256 of the
+content) — `CallKind::Parse` `get`, and on a miss compute and `put`. An
+edited file is a new key; an unchanged one is read, not parsed, by every
+later script, sweep and snapshot while the host lives. The cache holds up
+to 256 MB of JSON text, dropping the oldest first. In-process runs have no
+cache and compute as before. Pinned by
+`a_file_is_parsed_once_across_a_sweeps_scripts` (hit and miss counts,
+identical facts to a cold worker, an edit re-parses only its file).
+
+| `tree_cost`, release, idle machine | Before | After |
+|---|---|---|
+| fixture, 120 files | 3,087 ms CPU | 1,401 ms CPU |
+| repo, 2,068 files / 20 MB | 28.6 s wall, 27.7 s CPU | 21.6 s wall, 20.7 s CPU |
+| repo ×6, 12,408 files / 123 MB | 192.8 s wall, 166.8 s CPU | 43.7 s wall, 40.6 s CPU |
+
+What is left: the first script to read a language pays its parse, and
+`ast_query` scripts with different queries over one file (the three Rust
+and four TypeScript ones) each parse it again, because the shared
+thing is a *result*, which depends on the query, not the syntax tree,
+which can't cross a process. `code_metrics` keys on the path too (its ids
+and refs contain it), so the ×6 tree's copies still parse once per path
+there; `markers` and `ast_query` hit across copies. The next lever is one
+parse serving several queries (the host running the queries, or a script
+naming all its queries in one call); `duplicate_lines` is its own cost.
+`TREE_COST_SKIP_X6=1` skips the ×6 tree for a quick run.
 
 ## Duplicate detection on clone-dense trees (measured 2026-10-09)
 

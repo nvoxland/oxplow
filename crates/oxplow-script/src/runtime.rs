@@ -190,24 +190,27 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
         text: &str,
         language: &str,
         query: &str,
-        heap: starlark::values::Heap<'v>,
+        eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<starlark::values::Value<'v>> {
-        let matches = oxplow_code_metrics::ast_query(text, language, query)
-            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-        let arr: Vec<serde_json::Value> = matches
-            .into_iter()
-            .map(|m| {
-                serde_json::json!({
-                    "capture": m.capture,
-                    "text": m.text,
-                    "start_row": m.start_row,
-                    "start_col": m.start_col,
-                    "end_row": m.end_row,
-                    "end_col": m.end_col,
+        let value = Hosts::memoized(eval, &["ast_query", language, query], text, || {
+            let matches = oxplow_code_metrics::ast_query(text, language, query)
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            let arr: Vec<serde_json::Value> = matches
+                .into_iter()
+                .map(|m| {
+                    serde_json::json!({
+                        "capture": m.capture,
+                        "text": m.text,
+                        "start_row": m.start_row,
+                        "start_col": m.start_col,
+                        "end_row": m.end_row,
+                        "end_col": m.end_col,
+                    })
                 })
-            })
-            .collect();
-        Ok(heap.alloc(serde_json::Value::Array(arr)))
+                .collect();
+            Ok(serde_json::Value::Array(arr))
+        })?;
+        Ok(eval.heap().alloc(value))
     }
     /// Per-function code metrics for `text` (the file at `path`) in
     /// `language` — a flat list of `{name, id, ref, container, kind,
@@ -222,12 +225,13 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
         text: &str,
         language: &str,
         path: &str,
-        heap: starlark::values::Heap<'v>,
+        eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<starlark::values::Value<'v>> {
-        let lang = oxplow_code_metrics::language_from_name(language)
-            .ok_or_else(|| anyhow::anyhow!("unknown language \"{language}\""))?;
-        let fns = oxplow_code_metrics::analyze_with_language(path, text, lang);
-        let arr: Vec<serde_json::Value> = fns
+        let value = Hosts::memoized(eval, &["code_metrics", language, path], text, || {
+            let lang = oxplow_code_metrics::language_from_name(language)
+                .ok_or_else(|| anyhow::anyhow!("unknown language \"{language}\""))?;
+            let fns = oxplow_code_metrics::analyze_with_language(path, text, lang);
+            let arr: Vec<serde_json::Value> = fns
             .into_iter()
             .map(|m| {
                 let visibility = match m.visibility {
@@ -251,7 +255,9 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
                 })
             })
             .collect();
-        Ok(heap.alloc(serde_json::Value::Array(arr)))
+            Ok(serde_json::Value::Array(arr))
+        })?;
+        Ok(eval.heap().alloc(value))
     }
     /// Return the snapshot files matching `glob` as `[{path, text}]`, read from
     /// the run's [`TreeHost`]. A run given no tree (one that didn't declare
@@ -351,15 +357,18 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
     fn markers<'v>(
         text: &str,
         language: &str,
-        heap: starlark::values::Heap<'v>,
+        eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<starlark::values::Value<'v>> {
-        let lang = oxplow_code_metrics::language_from_name(language)
-            .ok_or_else(|| anyhow::anyhow!("unknown language \"{language}\""))?;
-        let arr: Vec<serde_json::Value> = oxplow_code_metrics::markers(text, lang)
-            .into_iter()
-            .map(|m| serde_json::json!({ "line": m.line, "kind": m.kind, "text": m.text }))
-            .collect();
-        Ok(heap.alloc(serde_json::Value::Array(arr)))
+        let value = Hosts::memoized(eval, &["markers", language], text, || {
+            let lang = oxplow_code_metrics::language_from_name(language)
+                .ok_or_else(|| anyhow::anyhow!("unknown language \"{language}\""))?;
+            let arr: Vec<serde_json::Value> = oxplow_code_metrics::markers(text, lang)
+                .into_iter()
+                .map(|m| serde_json::json!({ "line": m.line, "kind": m.kind, "text": m.text }))
+                .collect();
+            Ok(serde_json::Value::Array(arr))
+        })?;
+        Ok(eval.heap().alloc(value))
     }
 }
 
@@ -462,6 +471,59 @@ pub struct Hosts {
     pub tree: Option<TreeHost>,
     pub ai: Option<crate::ai::AiHost>,
     pub scope: Option<crate::scope::ScopeHost>,
+    /// Where parse results are shared across runs (a worker's line to its
+    /// host); none in process, where every call computes.
+    pub parses: Option<std::sync::Arc<dyn ParseMemo>>,
+}
+
+/// A store of parse results shared across runs, keyed by [`parse_key`].
+/// The values are JSON text, as a builtin returns them.
+pub trait ParseMemo: Send + Sync {
+    fn get(&self, key: &str) -> Option<String>;
+    fn put(&self, key: &str, value: &str);
+}
+
+/// The key of a parse result: what computed it (`parts`: the builtin, the
+/// language, and whatever else the answer depends on) and the content's
+/// SHA-256, so an edit is a new key and an unchanged file is a hit in any
+/// run, sweep or snapshot.
+pub fn parse_key(parts: &[&str], text: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    for part in parts {
+        hash.update((part.len() as u64).to_le_bytes());
+        hash.update(part.as_bytes());
+    }
+    hash.update(Sha256::digest(text.as_bytes()));
+    hex::encode(hash.finalize())
+}
+
+impl Hosts {
+    /// `compute`'s answer for (`parts`, `text`), shared through the run's
+    /// [`ParseMemo`] when it has one: a file is parsed once however many
+    /// scripts of a sweep read it.
+    pub(crate) fn memoized(
+        eval: &starlark::eval::Evaluator<'_, '_, '_>,
+        parts: &[&str],
+        text: &str,
+        compute: impl FnOnce() -> anyhow::Result<Value>,
+    ) -> anyhow::Result<Value> {
+        let Some(memo) = Self::of(eval).and_then(|h| h.parses.as_ref()) else {
+            return compute();
+        };
+        let key = parse_key(parts, text);
+        if let Some(hit) = memo
+            .get(&key)
+            .and_then(|json| serde_json::from_str(&json).ok())
+        {
+            return Ok(hit);
+        }
+        let value = compute()?;
+        if let Ok(json) = serde_json::to_string(&value) {
+            memo.put(&key, &json);
+        }
+        Ok(value)
+    }
 }
 
 impl Hosts {

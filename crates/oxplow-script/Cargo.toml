@@ -36,6 +36,9 @@ jaq-std = { workspace = true }
 starlark = { workspace = true }
 # The script worker's memory cap and CPU accounting.
 libc = { workspace = true }
+# The parse results' content hashes.
+sha2 = { workspace = true }
+hex = { workspace = true }
 
 [lints]
 workspace = true

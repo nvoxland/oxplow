@@ -94,6 +94,10 @@ pub enum CallKind {
     Scope,
     /// `ai_<id>(…)`: `classify`, `score`, `summarize`, `extract`.
     Ai,
+    /// The host's parse results, shared across runs: `get { key }` answers
+    /// the JSON text stored under `key` (or null), `put { key, value }`
+    /// stores it. Answered by the host itself, never by the caller.
+    Parse,
 }
 
 /// A run's failure, as the worker reports it.
@@ -284,6 +288,32 @@ fn fail_hard(message: &str) -> ! {
     std::process::exit(2)
 }
 
+/// The host's parse results, as the worker's builtins reach them: a miss
+/// is computed here and stored there, so the next run (of another script
+/// over the same file) finds it.
+struct RemoteParses(Arc<Mutex<Line>>);
+
+impl crate::runtime::ParseMemo for RemoteParses {
+    fn get(&self, key: &str) -> Option<String> {
+        match self.0.lock().unwrap_or_else(|e| e.into_inner()).call(
+            CallKind::Parse,
+            "get",
+            serde_json::json!({ "key": key }),
+        ) {
+            Ok(Value::String(json)) => Some(json),
+            _ => None,
+        }
+    }
+
+    fn put(&self, key: &str, value: &str) {
+        let _ = self.0.lock().unwrap_or_else(|e| e.into_inner()).call(
+            CallKind::Parse,
+            "put",
+            serde_json::json!({ "key": key, "value": value }),
+        );
+    }
+}
+
 /// The model, as the worker's `ai_*` builtins see it: each call crosses to
 /// the host, which asks its oracle (with the run's clock paused).
 struct RemoteOracle(Arc<Mutex<Line>>);
@@ -405,6 +435,7 @@ fn run(
         ai: given
             .ai
             .then(|| crate::ai::AiHost::new(Arc::new(RemoteOracle(line.clone())))),
+        parses: Some(Arc::new(RemoteParses(line.clone()))),
         scope: given.scope.then(|| {
             let line = line.clone();
             crate::scope::ScopeHost::new(Box::new(move |id, args| {

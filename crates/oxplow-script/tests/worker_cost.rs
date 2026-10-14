@@ -287,7 +287,14 @@ fn tree_cost() {
     for (name, (tree, load)) in [
         ("fixture", fixture),
         ("repo", repo_tree(1)),
-        ("repo x6", repo_tree(6)),
+        (
+            "repo x6",
+            repo_tree(if std::env::var_os("TREE_COST_SKIP_X6").is_some() {
+                0
+            } else {
+                6
+            }),
+        ),
     ] {
         let bytes: usize = tree.iter().map(|(k, v)| k.len() + v.len()).sum();
         let tree = Arc::new(tree);
@@ -306,6 +313,7 @@ fn tree_cost() {
                 .collect(),
         );
         let (mut wall, mut cpu) = (0.0, 0);
+        let mut each = Vec::new();
         for (key, script) in foundation_scripts() {
             let started = Instant::now();
             let ran = w
@@ -317,6 +325,11 @@ fn tree_cost() {
                 .unwrap_or_else(|e| panic!("{name} {key}: {e}"));
             wall += ms(started.elapsed());
             cpu += ran.cpu_ms;
+            each.push((ran.cpu_ms, key));
+        }
+        each.sort_by(|a, b| b.cmp(a));
+        for (ms, key) in each.iter().take(8) {
+            eprintln!("    {name}: {key:44} {ms:>7} ms cpu");
         }
         let runs = foundation_scripts().len() as f64;
         eprintln!(
