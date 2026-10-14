@@ -205,3 +205,31 @@ export function inRangeStat(
   if (pts.length < 2) return null;
   return { label: "Δ in range", value: pts[pts.length - 1]!.v - pts[0]!.v, signed: true };
 }
+
+/** A file the latest scans of a metric's collectors were not given. */
+export type UncheckedFile = { path: string; reason: string };
+
+/**
+ * The files a metric's collectors left out (oversize, binary, unreadable) and
+ * no later scan has covered: the facts they last had stay, unchecked. `?1` is
+ * the metric's measure key. Read through the `capture_exclusion` model.
+ */
+export const UNCHECKED_FILES_SQL =
+  "SELECT DISTINCT e.path, e.reason FROM v_capture_exclusion e " +
+  "WHERE e.unchecked = 1 AND e.producer IN (" +
+  "SELECT DISTINCT c.producer FROM v_capture c JOIN v_fact f ON f.capture_id = c.id WHERE f.measure_key = ?1) " +
+  "ORDER BY e.path LIMIT 200";
+
+/** The notice's words for a reason. */
+export function exclusionReason(reason: string): string {
+  switch (reason) {
+    case "oversize":
+      return "over the size limit";
+    case "binary":
+      return "binary";
+    case "unreadable":
+      return "unreadable";
+    default:
+      return reason;
+  }
+}

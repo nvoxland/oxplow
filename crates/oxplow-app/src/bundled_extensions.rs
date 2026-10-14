@@ -166,6 +166,7 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-bundled", "lenses/recent-snapshots.yaml"),
             ext_file!("oxplow-bundled", "lenses/review-prompt.yaml"),
             ext_file!("oxplow-bundled", "lenses/review.yaml"),
+            ext_file!("oxplow-bundled", "lenses/extension-runs.yaml"),
             ext_file!("oxplow-bundled", "lenses/runs.yaml"),
             ext_file!("oxplow-bundled", "lenses/session-files.yaml"),
             ext_file!("oxplow-bundled", "lenses/struggled.yaml"),
@@ -710,9 +711,44 @@ mod tests {
             .await
             .unwrap();
         let rows = run_bundled_lens(&f, "oxplow-bundled/runs", &[]).await;
+        // Each extension links to its runs, one by one.
+        let runs_of = |ext: &str| format!("lens:oxplow-bundled/extension-runs?extension={ext}");
         assert_eq!(
             rows,
-            serde_json::json!([["acme", 3, 1, 1, 20.0, 2], ["beta", 2, 0, 0, 6.0, 0]])
+            serde_json::json!([
+                ["acme", runs_of("acme"), 3, 1, 1, 20.0, 2],
+                ["beta", runs_of("beta"), 2, 0, 0, 6.0, 0]
+            ])
+        );
+        let detail = run_bundled_lens_with(
+            &f,
+            "oxplow-bundled/extension-runs",
+            &[("extension", oxplow_db::SqlCell::Text("acme".into()))],
+        )
+        .await;
+        let outcomes: Vec<_> = detail
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| (row[0].clone(), row[6].clone()))
+            .collect();
+        // Newest first, the week and a day old run out.
+        assert_eq!(
+            outcomes,
+            vec![
+                (
+                    serde_json::json!("collector:acme/pull"),
+                    serde_json::json!("ok")
+                ),
+                (
+                    serde_json::json!("collector:acme/pull"),
+                    serde_json::json!("failed")
+                ),
+                (
+                    serde_json::json!("collector:acme/pull"),
+                    serde_json::json!("denied")
+                ),
+            ]
         );
     }
 

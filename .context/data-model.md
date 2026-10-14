@@ -2107,7 +2107,14 @@ scripts held), `ai_calls`, `scopes_json`, `decisions_json`. STRICT.
   with no contribution.
 - **What it never holds:** an input, a result, a credential's value, a
   prompt. What a run read or was answered stays where it already is
-  (`command_audit`, `event_content`).
+  (`command_audit`, `event_content`). A program's own words in an `error`
+  have the credentials the run was handed replaced by `[redacted]`.
+- **`generation` is NULL for a run that holds none:** a collector's, an
+  effect's and a job's run belongs to its extension's `version` (its live
+  check rechecks that at each host call and at publication), so only a
+  command's run, which pins a generation, records one. A run stopped by a
+  person, or because its extension changed or was revoked, is `cancelled`
+  and says nothing of the contribution's health.
 - **Linked from the records that already existed:** `command_audit`,
   `effect_run`, `collector_run` and `ai_call` each gained `run_id`
   (V48). A person's `oxplow.collector.sync` run is the collector run's
@@ -2136,7 +2143,8 @@ three failures in a row disable it, the row and `contribution.disabled@1` in
 one transaction; `oxplow.contribution.enable` clears it (`contribution.enabled@1`).
 `v_contribution_health` adds `dead_letters` (pending dead letters of its
 consumer `extension:<extension>/<contribution>`, or of events whose subject
-is `extension:<extension>`) and `fresh` (0 once `next_due_at` has passed).
+is `extension:<extension>`) and `fresh` (0 once `next_due_at` has passed, and 0 for a collector whose
+last run failed: its rows are the last good run's, not current).
 `v_contribution_health` shows `repair_item`: the open work item whose title starts
 `Repair <extension> <contribution>:`, which the bundled repair effect files (V136
 added `repair_item`/`repair_seq` columns for the old core consumer; V58 drops them).

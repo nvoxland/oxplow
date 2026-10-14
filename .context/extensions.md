@@ -2369,6 +2369,28 @@ its scope trace.
   runs, failures, denials, mean `cpu_ms` and model calls, the ones needing
   attention first. Settings → Extensions shows each extension's worst current
   run (`v_extension_run`, `latest = 1`).
+  Opening an extension's row (the hidden `oxplow-bundled/extension-runs`
+  lens, param `extension`) lists its runs one by one for the same week:
+  contribution, version, generation (blank for a run that holds none),
+  actor, causing event, outcome, error, wall and CPU time, model calls — the
+  small inspector, with no log or secret to read.
+- **Failure, retry and freshness are the same everywhere it matters.** A run
+  that ends `failed` counts toward the contribution's failure policy (three in
+  a row disable it; `v_contribution_health`); one that ends `cancelled` — a
+  person's cancel, or its extension changing or being revoked mid-run — does
+  not. What a *refused* run is: `denied` (a caller or grant the contract
+  rejects) is never retried; a *failed* effect attempt is sent again by itself
+  only when it was `Unavailable`, every step it composed goes to a provider
+  keeping `idempotent_writes`, and it has retries left (otherwise a person
+  retries it); a job replays only if it declares `replay: idempotent` (up to
+  three attempts); a collector is not retried by itself, its schedule runs it
+  again. A collector whose last run failed is not `fresh` in
+  `v_contribution_health` — its rows are the last good run's — and a failed
+  attempt keeps its own `extension_run` row, reachable from its data effects
+  (`effect_run.run_id`, `collector_run.run_id`, `job_run.run_id`). A program's
+  words in an `error` have the credentials it was handed replaced. Runs are
+  kept 90 days (`EXTENSION_RUN_DAYS`). Pinned by `extension_run_health_tests.rs`
+  and `event_retention::tests::extension_runs_past_their_window_are_swept`.
 - **Cancel reaches the worker.** Every script a collector, command,
   effect, policy or fact collector runs is passed its run's cancel flag;
   an exec collector's program is killed when it's set. Upcasts, report

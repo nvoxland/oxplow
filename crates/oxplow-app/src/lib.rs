@@ -109,6 +109,8 @@ pub mod extension_models;
 mod extension_private_state_tests;
 pub mod extension_ref_kinds;
 #[cfg(test)]
+mod extension_run_health_tests;
+#[cfg(test)]
 mod extension_run_pin_tests;
 pub mod extension_runtime_adapters;
 pub mod extension_secrets;

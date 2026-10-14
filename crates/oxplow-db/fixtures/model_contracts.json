@@ -9770,7 +9770,87 @@
         {
           "name": "fresh",
           "type": "",
-          "doc": "1 unless a scheduled run is overdue (`next_due_at` has passed)."
+          "doc": "1 unless a scheduled run is overdue (`next_due_at` has passed)"
+        },
+        {
+          "name": "repair_item",
+          "type": "TEXT",
+          "doc": "The open repair work item for it — the one whose title starts `Repair <extension> <contribution>:`, filed by the bundled repair effect; NULL when none is open."
+        }
+      ],
+      "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "The contribution's ref (`effect:tracker/fake`): the same as its `v_contribution.ref`."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension it belongs to."
+        },
+        {
+          "name": "contribution",
+          "type": "TEXT",
+          "doc": "The provider's, collector's or effect's id within it."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`provider`, `collector` or `effect`."
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "doc": "`ok`, `failing` or `disabled`."
+        },
+        {
+          "name": "reason",
+          "type": "TEXT",
+          "doc": "Why it's disabled."
+        },
+        {
+          "name": "consecutive_failures",
+          "type": "INTEGER",
+          "doc": "Failures since its last success."
+        },
+        {
+          "name": "last_ok_at",
+          "type": "TEXT",
+          "doc": "When it last succeeded (RFC 3339)."
+        },
+        {
+          "name": "last_error",
+          "type": "TEXT",
+          "doc": "Its last failure."
+        },
+        {
+          "name": "mean_ms",
+          "type": "REAL",
+          "doc": "A moving average of its successful runs or calls, in milliseconds."
+        },
+        {
+          "name": "next_due_at",
+          "type": "TEXT",
+          "doc": "When it should next run (a schedule's next slot), if it runs on one."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "When this row last changed."
+        },
+        {
+          "name": "dead_letters",
+          "type": "",
+          "doc": "Events it couldn't handle and that wait for a person: dead letters of its consumer (its `ref`) or of events whose subject names it (its `ref`)."
+        },
+        {
+          "name": "fresh",
+          "type": "",
+          "doc": "1 unless a scheduled run is overdue (`next_due_at` has passed) or a collector's last run failed (`state` isn't `ok`): its data is then the last good run's, not current. (v3)"
         },
         {
           "name": "repair_item",
@@ -10055,7 +10135,154 @@
         {
           "name": "generation",
           "type": "TEXT",
-          "doc": "The extension catalog's generation it ran against (`v_*` query results name theirs the same way)."
+          "doc": "The extension catalog's generation it ran against (`v_*` query results name theirs the same way)"
+        },
+        {
+          "name": "actor_kind",
+          "type": "TEXT",
+          "doc": "`human`, `agent`, `lens`, `system` or `effect`."
+        },
+        {
+          "name": "actor",
+          "type": "TEXT",
+          "doc": "Who, as an event source: `human`, `agent:thr3`, `system`, `effect:<ext>/<id>`, `effect:effort_policy:<id>`."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream it ran for; NULL when none."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread it ran for; NULL when none."
+        },
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "The effort it ran for; NULL when none."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "The agent turn it ran for; NULL when none."
+        },
+        {
+          "name": "agent_session_id",
+          "type": "INTEGER",
+          "doc": "The agent session it ran for; NULL when none."
+        },
+        {
+          "name": "snapshot_id",
+          "type": "INTEGER",
+          "doc": "The snapshot it ran over; NULL when none."
+        },
+        {
+          "name": "cause_event_id",
+          "type": "TEXT",
+          "doc": "The event that caused it (`v_event.id`); NULL for a run a person or schedule started."
+        },
+        {
+          "name": "mode",
+          "type": "TEXT",
+          "doc": "`pure` (no I/O but scope reads), `transactional` or `external` (may call out)."
+        },
+        {
+          "name": "started_at",
+          "type": "TEXT",
+          "doc": "When it began (RFC 3339)."
+        },
+        {
+          "name": "finished_at",
+          "type": "TEXT",
+          "doc": "When it ended (RFC 3339)."
+        },
+        {
+          "name": "outcome",
+          "type": "TEXT",
+          "doc": "`ok`, `skipped`, `failed`, `denied` (its grant refused something), `cancelled` or `stale` (the extension changed under it)."
+        },
+        {
+          "name": "error",
+          "type": "TEXT",
+          "doc": "Why it failed, was denied or stopped."
+        },
+        {
+          "name": "wall_ms",
+          "type": "INTEGER",
+          "doc": "How long it ran."
+        },
+        {
+          "name": "cpu_ms",
+          "type": "INTEGER",
+          "doc": "Its scripts' CPU time, summed (0 for a run that ran no script)."
+        },
+        {
+          "name": "peak_bytes",
+          "type": "INTEGER",
+          "doc": "The most any one of its scripts held live at once."
+        },
+        {
+          "name": "ai_calls",
+          "type": "INTEGER",
+          "doc": "The model calls it made."
+        },
+        {
+          "name": "scopes",
+          "type": "TEXT",
+          "doc": "The scopes it called, counted, as JSON (`{\"sql.read\": 2}`)."
+        },
+        {
+          "name": "decisions",
+          "type": "TEXT",
+          "doc": "What its grant decided for what it asked, as a JSON array of `{ need, decision, reason? }` (`allowed`, `denied`, `unenforced`)."
+        },
+        {
+          "name": "latest",
+          "type": "",
+          "doc": "1 on its contribution's most recent run."
+        }
+      ],
+      "key": [
+        "run_id"
+      ]
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "run_id",
+          "type": "TEXT",
+          "doc": "The run (a UUIDv7). `v_command_audit`-style records name it in their `run_id`."
+        },
+        {
+          "name": "parent_run_id",
+          "type": "TEXT",
+          "doc": "The run it was nested in (a person's `oxplow.collector.sync`, an effect's composing script); NULL for a top-level run."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension it belongs to."
+        },
+        {
+          "name": "contribution",
+          "type": "TEXT",
+          "doc": "The contribution's ref (`v_contribution.ref`): `command:oxplow.review.accept`, `job:effort-review/review`."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`collector`, `effect`, `command`, `implementation`, …"
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "The extension's declared `version:` when it ran; NULL when it declares none."
+        },
+        {
+          "name": "generation",
+          "type": "TEXT",
+          "doc": "The extension catalog's generation it ran against (`v_*` query results name theirs the same way); NULL for a run that holds none — a collector's, an effect's or a job's belongs to its extension's version. (v2)"
         },
         {
           "name": "actor_kind",
@@ -10678,6 +10905,38 @@
       "key": [
         "id"
       ]
+    }
+  },
+  "capture_exclusion": {
+    "1": {
+      "columns": [
+        {
+          "name": "capture_id",
+          "type": "INTEGER",
+          "doc": "The capture that left it out (v_capture.id)."
+        },
+        {
+          "name": "producer",
+          "type": "TEXT",
+          "doc": "What produced that capture (v_capture.producer)."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "The file's path in the snapshot."
+        },
+        {
+          "name": "reason",
+          "type": "TEXT",
+          "doc": "`oversize` (over snapshotMaxFileBytes, or stored by stat only), `binary` (holds a NUL byte) or `unreadable`."
+        },
+        {
+          "name": "unchecked",
+          "type": "INT",
+          "doc": "1 while no later capture of the same producer has scanned the file: the facts it last had are still its last good ones, unchecked."
+        }
+      ],
+      "key": []
     }
   }
 }

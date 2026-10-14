@@ -45,6 +45,10 @@ restated AS (
    WHERE c.snapshot_id IS NOT NULL AND c.status = 'done'
      AND c.scan_kind = 'delta'
      AND c.producer IN (SELECT producer FROM rel)
+     -- A path the scan was not given is not restated: its last good facts
+     -- stay, rather than reading as scanned clean.
+     AND NOT EXISTS (SELECT 1 FROM source('metric_capture_exclusion') x
+                      WHERE x.capture_id = c.id AND x.path = fs.path)
   UNION
   SELECT c.id, c.stream_id, c.producer, c.captured_at, t.path, t.storage
     FROM source('metric_capture') c
@@ -52,6 +56,8 @@ restated AS (
       ON t.stream_id = c.stream_id AND t.anchor = c.snapshot_id
    WHERE c.scan_kind = 'full' AND c.status = 'done'
      AND c.producer IN (SELECT producer FROM rel)
+     AND NOT EXISTS (SELECT 1 FROM source('metric_capture_exclusion') x
+                      WHERE x.capture_id = c.id AND x.path = t.path)
      AND NOT EXISTS (
        SELECT 1 FROM source('metric_capture') c3
         WHERE c3.stream_id = c.stream_id

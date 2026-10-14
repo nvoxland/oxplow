@@ -416,6 +416,9 @@ struct CollectorRunContext {
     /// (`collector.synced@1`'s source is its actor). Each collector runs
     /// as a child of it.
     run: RunContext,
+    /// Snapshot files the sweep's collectors were not given: the capture
+    /// records them, and does not count them as scanned.
+    excluded: Arc<Vec<ExcludedFile>>,
 }
 
 /// Measures, metrics, fact collectors and dimensions from enabled
@@ -1294,11 +1297,12 @@ impl MetricsService {
                 None => self.build_file_map(snapshot_id).await,
             };
             corpus.warn_if_excluded("snapshot collectors");
-            report.excluded.extend(corpus.excluded);
+            report.excluded.extend(corpus.excluded.iter().cloned());
             let files = Arc::new(corpus.files);
             let mut ctx = self
                 .snapshot_context(stream_id.value(), None, SNAPSHOT_TAKEN, snapshot_id)
                 .await;
+            ctx.excluded = Arc::new(corpus.excluded);
             ctx.event = event.clone();
             let r = self
                 .run_collector_sweep(&delta_collectors, &ctx, files)
@@ -1312,15 +1316,16 @@ impl MetricsService {
             let corpus = self.build_full_file_map(snapshot_id).await;
             corpus.warn_if_excluded("snapshot collectors (whole tree)");
             // Both phases may leave the same file out; say it once.
-            for e in corpus.excluded {
-                if !report.excluded.contains(&e) {
-                    report.excluded.push(e);
+            for e in &corpus.excluded {
+                if !report.excluded.contains(e) {
+                    report.excluded.push(e.clone());
                 }
             }
             let files = Arc::new(corpus.files);
             let mut ctx = self
                 .snapshot_context(stream_id.value(), None, SNAPSHOT_TAKEN, snapshot_id)
                 .await;
+            ctx.excluded = Arc::new(corpus.excluded);
             ctx.scan_kind = "full";
             ctx.event = event.clone();
             // Whole-tree collectors restate the tree on every qualifying
@@ -1823,6 +1828,7 @@ impl MetricsService {
             None
         };
         CollectorRunContext {
+            excluded: Arc::default(),
             stream_val,
             thread_id,
             trigger,
@@ -2410,6 +2416,9 @@ impl MetricsService {
                     )
                     .await
             }
+            // Stopped (cancelled, or its extension changed or was revoked): the
+            // run says nothing of the collector's health.
+            Some(_) if this_run.cancel().is_cancelled() => Ok(()),
             Some(e) => health.failed(&key, e).await.map(|_| ()),
         };
         if let Err(e) = counted {
@@ -2628,6 +2637,11 @@ impl MetricsService {
             // detectable and can re-baseline instead of silently no-opping (tsk45).
             producer_version: collector_fingerprint(collector, &self.project_dir),
             scan_kind: ctx.scan_kind.into(),
+            excluded: ctx
+                .excluded
+                .iter()
+                .map(|e| (e.path.clone(), e.reason.as_str().to_string()))
+                .collect(),
             ..oxplow_db::NewMetricCapture::done(
                 ctx.stream_val,
                 collector.key.clone(),
@@ -2640,6 +2654,23 @@ impl MetricsService {
 
 /// Map a resolved `ResolvedSpec` to a `metric_spec` write (for config-declared
 /// metrics). A formula metric has no `source_measure`.
+/// The metrics `extension` declares, as stored specs would read: the
+/// extension's own layer alone, with the defaults applied. What a check
+/// resolves them to before the app has loaded the extension.
+pub fn declared_metric_specs(
+    extension: &crate::extensions::Extension,
+) -> Vec<oxplow_db::MetricSpec> {
+    MetricLayers {
+        global: Vec::new(),
+        extensions: vec![(extension.name.clone(), extension.metrics.clone())],
+        project: Vec::new(),
+    }
+    .resolve()
+    .iter()
+    .map(|spec| spec_to_new_spec(spec).as_stored())
+    .collect()
+}
+
 pub(crate) fn spec_to_new_spec(s: &ResolvedSpec) -> NewMetricSpec {
     let spec = NewMetricSpec {
         key: s.key.clone(),
@@ -3878,6 +3909,7 @@ def transform(input):
         files.insert("src/b.rs".to_string(), "fn c() {}".to_string());
 
         let ctx = CollectorRunContext {
+            excluded: Arc::default(),
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
@@ -3933,6 +3965,7 @@ def transform(input):
         seed_with_every_builtin_on(&svc).await;
         let collector = builtin_collector_fixture("oxplow.rust.unsafe_blocks");
         let ctx = |snapshot_id: i64| CollectorRunContext {
+            excluded: Arc::default(),
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
@@ -3994,6 +4027,7 @@ def transform(input):
 
     fn sweep_ctx() -> CollectorRunContext {
         CollectorRunContext {
+            excluded: Arc::default(),
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
@@ -4150,6 +4184,7 @@ def transform(input):
         )
         .await;
         let ctx = |snapshot_id: i64| CollectorRunContext {
+            excluded: Arc::default(),
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
@@ -4356,6 +4391,7 @@ def transform(input):
 
         let snap = snapshot_with_files(&svc, &[("a.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
         let ctx = CollectorRunContext {
+            excluded: Arc::default(),
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
@@ -4404,6 +4440,7 @@ def transform(input):
         seed_with_every_builtin_on(&svc).await;
         let collector = builtin_collector_fixture("oxplow.rust.unsafe_blocks");
         let ctx = |snapshot_id: i64| CollectorRunContext {
+            excluded: Arc::default(),
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
@@ -4480,6 +4517,7 @@ def transform(input):
         seed_with_every_builtin_on(&svc).await;
         let collector = builtin_collector_fixture("oxplow.rust.unsafe_blocks");
         let ctx = |snapshot_id: i64| CollectorRunContext {
+            excluded: Arc::default(),
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
@@ -4577,6 +4615,7 @@ def transform(input):
             vec!["oxplow.ast_hit".into()],
         );
         let ctx = CollectorRunContext {
+            excluded: Arc::default(),
             stream_val: 1,
             thread_id: Some(1),
             trigger: "on-effort-complete",
@@ -4698,6 +4737,7 @@ def transform(input):
             "fn big() {\n    let x = 1;\n    let y = 2;\n}\n".to_string(),
         );
         let ctx = CollectorRunContext {
+            excluded: Arc::default(),
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
@@ -4797,6 +4837,7 @@ def transform(input):
 
         let files = Arc::new(equivalence_corpus());
         let ctx = CollectorRunContext {
+            excluded: Arc::default(),
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
@@ -4865,6 +4906,7 @@ def transform(input):
             vec!["oxplow.complexity".into(), "acme.undefined".into()],
         );
         let ctx = CollectorRunContext {
+            excluded: Arc::default(),
             stream_val: 1,
             thread_id: None,
             trigger: "manual",
@@ -4928,6 +4970,7 @@ def transform(input):
             vec!["oxplow.complexity".into()],
         );
         let ctx = CollectorRunContext {
+            excluded: Arc::default(),
             stream_val: 1,
             thread_id: None,
             trigger: "manual",
@@ -4999,6 +5042,7 @@ def transform(input):
             vec!["oxplow.complexity".into()],
         );
         let ctx = CollectorRunContext {
+            excluded: Arc::default(),
             stream_val: 1,
             thread_id: None,
             trigger: "manual",
@@ -5067,6 +5111,7 @@ def transform(input):
         );
         let files = Arc::new(corpus);
         let ctx = CollectorRunContext {
+            excluded: Arc::default(),
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
@@ -5137,6 +5182,7 @@ def transform(input):
         let snap =
             snapshot_with_files(&svc, &[("src/lib.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
         let ctx = CollectorRunContext {
+            excluded: Arc::default(),
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",

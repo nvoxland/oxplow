@@ -1,7 +1,8 @@
 title: Extension runs
-description: What each extension did in the last 7 days — its runs, how many failed or were denied by their grant, the CPU they took on average, and the model calls they made. The ones needing attention come first.
+description: What each extension did in the last 7 days — open one for its runs, one by one with version, generation, cause, outcome and error. Each row counts its runs, how many failed or were denied by their grant, the CPU they took on average, and the model calls they made. The ones needing attention come first.
 query: |
   SELECT extension,
+         lens_ref('oxplow-bundled/extension-runs', 'extension', extension) AS runs_ref,
          count(*) AS runs,
          sum(outcome = 'failed') AS failures,
          sum(outcome = 'denied') AS denials,
@@ -13,7 +14,7 @@ query: |
   ORDER BY failures DESC, denials DESC, runs DESC, extension
 viz: table
 columns:
-  - { key: extension, label: Extension }
+  - { key: extension, label: Extension, link: { kind: page, from: runs_ref } }
   - { key: runs, label: Runs }
   - { key: failures, label: Failed }
   - { key: denials, label: Denied }
