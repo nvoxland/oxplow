@@ -892,9 +892,12 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Dry-run a collector from a stream's worktree and return the rows it would \
-                       store (first 50 per entity, coerced to the declared columns), storing \
-                       nothing. Use it to check a collector you're writing, especially in a \
+        description = "Dry-run a collector from a stream's worktree and return what it would \
+                       store, storing nothing: an entity collector's rows (first 50 per entity, \
+                       coerced to the declared columns), or a fact collector's (`facts:`) facts \
+                       as `{ owner, id, facts: [{ measure, value, subject, … }] }`, computed over \
+                       the stream's latest snapshot (a collector that reads `input` rows is \
+                       previewed through an example: `oxplow extension test`). Use it to check a collector you're writing, especially in a \
                        worktree stream: run_collector always runs the primary's copy, and \
                        collected data is project-wide. Pass `event` (`{ type, payload, anchors? }`) \
                        to preview an `on:` collector on the event it reacts to. An exec \
@@ -918,8 +921,33 @@ impl OxplowMcp {
             .resolve(stream.as_deref())
             .await
             .into_local_path();
+        let collectors = oxplow_app::collector_runner::Collectors::of(&self.services, &root);
+        // A fact collector (`facts:`) previews through the fact engine: the
+        // facts it would record, over that stream's latest snapshot.
+        if let Ok((_, spec)) =
+            oxplow_app::collector_runner::find_collector(&collectors, &p.owner, &p.id)
+        {
+            if !spec.facts.is_empty() {
+                let stream_id = stream
+                    .as_deref()
+                    .map(parse_stream_id)
+                    .transpose()?
+                    .map(|s| s.value());
+                let facts = self
+                    .services
+                    .metrics
+                    .preview_fact_collector_in(&p.owner, &spec, &root, stream_id, p.event.as_ref())
+                    .await
+                    .map_err(|m| McpError::invalid_params(m, None))?;
+                return json_result(&serde_json::json!({
+                    "owner": p.owner,
+                    "id": p.id,
+                    "facts": facts,
+                }));
+            }
+        }
         let preview = oxplow_app::collector_runner::preview_collector(
-            &oxplow_app::collector_runner::Collectors::of(&self.services, &root),
+            &collectors,
             &p.owner,
             &p.id,
             p.event.as_ref(),
@@ -4129,6 +4157,63 @@ mod tests {
             .unwrap();
         let v: serde_json::Value = serde_json::from_str(&text_payload(r)).unwrap();
         assert_eq!(v["entities"][0]["rows"], serde_json::json!([[1]]));
+        assert!(svc.collector_store.list_runs().await.unwrap().is_empty());
+    }
+
+    /// A fact collector previews through the fact engine: the facts it
+    /// would record over the stream's latest snapshot, nothing stored.
+    #[tokio::test]
+    async fn preview_collector_returns_a_fact_collectors_facts() {
+        let (proj, svc, server) = boot().await;
+        let ext = proj.path().join("oxplow/extensions/work");
+        std::fs::create_dir_all(&ext).unwrap();
+        std::fs::write(
+            ext.join("extension.yaml"),
+            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: files\n    runtime: starlark\n    entry: files.star\n    needs: [tree.read]\n    facts: [work.files]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            ext.join("files.star"),
+            "def transform(x):\n    return {\"facts\": [{\"measure\": \"work.files\", \"value\": len(files(\"**\")), \"subject\": ref.build(\"file\", \"src/a.rs\")}]}\n",
+        )
+        .unwrap();
+        svc.extension_activation
+            .activate(svc.clone())
+            .await
+            .unwrap();
+        let primary = svc.streams.list_streams().await.unwrap()[0].id;
+        let snap = svc.snapshot_store.create_snapshot(primary).await.unwrap();
+        svc.snapshot_store
+            .capture_batch(vec![oxplow_db::FileSnapshot {
+                id: 0,
+                stream_id: primary,
+                path: "src/a.rs".into(),
+                blob_hash: Some(svc.blobs.write(b"fn a() {}\n").unwrap()),
+                size_bytes: 10,
+                captured_at: oxplow_domain::Timestamp::now(),
+                storage: oxplow_db::SnapshotStorage::Oxplow,
+                snapshot_id: Some(snap),
+                mtime_ms: None,
+                content_hash: None,
+            }])
+            .await
+            .unwrap();
+        let r = server
+            .preview_collector(
+                rmcp::model::Extensions::new(),
+                Parameters(PreviewCollectorParams {
+                    owner: "work".into(),
+                    id: "files".into(),
+                    stream_id: None,
+                    event: None,
+                }),
+            )
+            .await
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&text_payload(r)).unwrap();
+        assert_eq!(v["facts"][0]["measure"], "work.files", "{v}");
+        assert_eq!(v["facts"][0]["value"], 1, "{v}");
+        assert_eq!(v["facts"][0]["subject"], "file:src/a.rs", "{v}");
         assert!(svc.collector_store.list_runs().await.unwrap().is_empty());
     }
 

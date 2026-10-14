@@ -1762,7 +1762,7 @@ pub async fn preview_collector(
 }
 
 /// The extension and spec of collector `owner/id` in `ctx.root`.
-fn find_collector(
+pub fn find_collector(
     ctx: &Collectors<'_>,
     owner: &str,
     id: &str,

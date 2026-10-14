@@ -3782,7 +3782,12 @@ tool list stable no matter how many extensions are installed.
   approval of that exact hash, and so does a Starlark one that calls a
   model; other derived collectors don't) and returns the coerced
   rows per entity (first 50, plus totals), storing nothing and recording
-  no run.
+  no run. A **fact collector** (`facts:` declared) previews through the fact
+  engine instead (`MetricsService::preview_fact_collector_in`, the same
+  runner `oxplow extension test` uses): it runs that worktree's script over
+  the stream's latest snapshot and returns `{ owner, id, facts }`, the
+  facts it would record, recording nothing. One that reads `input` rows is
+  previewed through an example, and a program (`exec`) is never previewed.
 
 **Teaching the agent**
 

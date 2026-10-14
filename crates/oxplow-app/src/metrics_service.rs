@@ -1833,8 +1833,14 @@ impl MetricsService {
     /// from its extension or the project, or — for a project's `exec`
     /// collector a person approved on this machine — its program.
     fn fact_runner(&self, c: &FactCollector) -> Result<FactRunner, String> {
+        self.fact_runner_at(c, &self.project_dir)
+    }
+
+    /// [`Self::fact_runner`] reading the script from the worktree `root`
+    /// (a preview of a stream's own copy).
+    fn fact_runner_at(&self, c: &FactCollector, root: &Path) -> Result<FactRunner, String> {
         let script = || {
-            collector_script_text(c, &self.project_dir).ok_or_else(|| {
+            collector_script_text(c, root).ok_or_else(|| {
                 format!(
                     "collector `{}`: entry `{}` can't be read",
                     c.key,
@@ -1916,18 +1922,94 @@ impl MetricsService {
     ) -> Result<Vec<serde_json::Value>, String> {
         let collector = FactCollector::from_spec(owner, spec)
             .ok_or_else(|| format!("collector `{}` declares no `facts:`", spec.id))?;
-        if matches!(collector.runtime, CollectorRuntime::Exec) {
+        let runner = self.preview_runner(&collector, &self.project_dir)?;
+        self.preview_with(&collector, runner, files, input, mode)
+            .await
+    }
+
+    /// Preview `owner`'s fact collector `spec` as the worktree `root` has
+    /// it, over the tree of `stream`'s latest snapshot — what a real run
+    /// there would read — recording nothing (the MCP `preview_collector`).
+    /// `event` is the event an `on:` collector reacts to, as a fixture
+    /// writes it. A collector that reads `input` rows is previewed through
+    /// an example instead.
+    pub async fn preview_fact_collector_in(
+        &self,
+        owner: &str,
+        spec: &oxplow_config::collectors::CollectorSpec,
+        root: &Path,
+        stream: Option<i64>,
+        event: Option<&serde_json::Value>,
+    ) -> Result<Vec<serde_json::Value>, String> {
+        use crate::services::TreeSource as _;
+        let collector = FactCollector::from_spec(owner, spec)
+            .ok_or_else(|| format!("collector `{}` declares no `facts:`", spec.id))?;
+        if collector.input.is_some() {
             return Err(format!(
-                "collector `{}` runs a program, which only a person's approval runs",
+                "collector `{}` reads `input` rows from the database; preview it through an \
+                 example (`oxplow extension test`)",
                 spec.id
             ));
         }
-        let runner = self.fact_runner(&collector)?;
+        let runner = self.preview_runner(&collector, root)?;
+        let anchors = oxplow_domain::events::Anchors {
+            stream_id: stream.map(StreamId::new),
+            ..Default::default()
+        };
+        let files = (*self.tree(&anchors).await?).clone();
+        let mut input = serde_json::Map::new();
+        if let Some(report) = &collector.report {
+            let text = crate::services::project_file(root, &report.path)?.unwrap_or_default();
+            input.insert(
+                "report".into(),
+                oxplow_script::parse_report(&report.format, &text)
+                    .map_err(|e| format!("collector `{}` report: {e}", collector.key))?,
+            );
+        }
+        if let Some(given) = event {
+            let vocabulary = match &self.run_log {
+                Some(log) => log.vocabulary.current(),
+                None => oxplow_domain::vocabulary::VocabularyHandle::core().current(),
+            };
+            let view = oxplow_domain::events::EventView::fixture(given, &vocabulary)
+                .map_err(|e| format!("its event: {}", e.message()))?;
+            input.insert("event".into(), view.to_json());
+        }
+        self.preview_with(
+            &collector,
+            runner,
+            files,
+            serde_json::Value::Object(input),
+            Mode::External,
+        )
+        .await
+    }
+
+    /// The runner a preview uses: refused for a program, which only a
+    /// person's approval runs.
+    fn preview_runner(&self, collector: &FactCollector, root: &Path) -> Result<FactRunner, String> {
+        if matches!(collector.runtime, CollectorRuntime::Exec) {
+            return Err(format!(
+                "collector `{}` runs a program, which only a person's approval runs",
+                collector.key
+            ));
+        }
+        self.fact_runner_at(collector, root)
+    }
+
+    async fn preview_with(
+        &self,
+        collector: &FactCollector,
+        runner: FactRunner,
+        files: HashMap<String, String>,
+        input: serde_json::Value,
+        mode: Mode,
+    ) -> Result<Vec<serde_json::Value>, String> {
         let parent = RunContext::core(Actor::System, mode);
-        let run = self.collector_run_in(&collector, &parent, mode);
-        let run = self.pin_fact_script(&collector, &runner, run);
+        let run = self.collector_run_in(collector, &parent, mode);
+        let run = self.pin_fact_script(collector, &runner, run);
         let given = self
-            .given(&collector, &runner, &run, Arc::new(files))
+            .given(collector, &runner, &run, Arc::new(files))
             .await?;
         let layer = self.run_log.as_ref().map(|l| l.layer.clone());
         let run = match &layer {

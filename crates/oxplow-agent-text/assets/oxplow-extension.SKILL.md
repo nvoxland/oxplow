@@ -699,7 +699,9 @@ Rules:
 - `list_collectors` shows each collector's last run and error.
 - **Check a collector before it's merged** with
   `preview_collector(owner, id, stream_id)`: it runs your worktree's
-  version and returns the rows it would store, storing nothing.
+  version and returns the rows it would store, storing nothing. For a
+  fact collector (`facts:`) it returns the facts it would record
+  (`{ owner, id, facts }`), computed over the stream's latest snapshot.
   `run_collector` always runs the primary's copy (collected data is
   shared by the whole project), so in a worktree stream it won't see your
   changes. An exec collector still needs a person's approval for the
