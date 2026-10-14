@@ -2117,8 +2117,10 @@ impl MetricEngine {
 /// Classify a value against a metric's thresholds, interpreted via `direction`.
 /// Returns `Some("fail")` / `Some("warn")` when the value is in that zone, else
 /// `None`. `neutral` metrics (no better/worse) never cross. The worse side is
-/// "higher" for `lower-better` and "lower" for `higher-better`. Shared by the
-/// effort panel's read (`collection.rs`) and the fact finding view.
+/// "higher" for `lower-better` and "lower" for `higher-better`. A value AT a
+/// threshold hasn't crossed it (`target: 80, warnAt: 80` means 80 is fine),
+/// as the Metrics page's `metricStatus` reads it too. Shared by the effort
+/// panel's read (`collection.rs`) and the fact finding view.
 pub fn threshold_state(
     direction: &str,
     value: f64,
@@ -2133,9 +2135,9 @@ pub fn threshold_state(
     };
     let crosses = |t: f64| {
         if worse_when_above {
-            value >= t
+            value > t
         } else {
-            value <= t
+            value < t
         }
     };
     if let Some(f) = fail_at {

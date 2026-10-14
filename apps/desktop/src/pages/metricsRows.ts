@@ -49,7 +49,9 @@ export type StatusSpec = {
 
 /** How a value stands against its target: `ok` meets the target/warn
  *  threshold, `fail` is past `fail_at`, `warn` is any other threshold miss,
- *  `none` means there's no target (or a neutral metric) to be off of. Colors
+ *  `none` means there's no target (or a neutral metric) to be off of. A
+ *  value AT a threshold hasn't crossed it, as the server's
+ *  `metric_engine::threshold_state` reads it. Colors
  *  the Metrics rows and the dashboard tiles alike. */
 export type MetricStatus = "ok" | "warn" | "fail" | "none";
 

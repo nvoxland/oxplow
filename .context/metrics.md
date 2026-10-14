@@ -2117,11 +2117,17 @@ hand-authored in the four blocks of `oxplow/extensions/project/extension.yaml`.
 ## Targets & feedback (advise-only, P5/tsk220)
 
 A definition's `target` / `warn_at` / `fail_at` (interpreted via `direction`) are
-the single source of red/green: the Metrics page colors from them
-(`MetricsPage.statusColor`, three tiers) — no hardcoded UI ramps (the coverage
-50/80 ramp is retired; the thresholds live on `oxplow.coverage.diff_pct` as
-`target: 80` / `fail_at: 50`, set in `collection.rs::record_coverage_metric`).
-See [theming.md](./theming.md).
+the single source of red/green — no hardcoded UI ramps. The coverage cut-offs
+are the foundation's `oxplow.coverage.abs_pct` spec (`target: 80`, `warnAt:
+80`, `failAt: 50`), which a project tunes with `metrics: [{ use: … }]`;
+oxplow-bundled's effort verdict judges diff coverage against its `warnAt`.
+
+**One rule for crossing.** A value *past* a threshold has crossed it; a value
+*at* it has not (`target: 80, warnAt: 80` means 80 is fine). The server's
+`metric_engine::threshold_state` (findings' severity, `v_effort_metric_delta.crossing`,
+the effort panel) and the Metrics page's `metricsRows.ts::metricStatus` (rows
+and dashboard tiles, three tiers) draw that same line. See
+[theming.md](./theming.md).
 
 Feedback is **advisory — oxplow never blocks**. It lives in the bundled
 `oxplow-bundled` extension as **advisories** (see

@@ -3990,6 +3990,25 @@ mod tests {
             threshold_state("higher-better", 90.0, Some(80.0), Some(50.0)),
             None
         );
+        // A value AT a threshold hasn't crossed it — the Metrics page
+        // (`metricsRows.ts::metricStatus`) draws the same line, so
+        // `target: 80, warnAt: 80` means 80 is fine.
+        assert_eq!(
+            threshold_state("higher-better", 80.0, Some(80.0), Some(50.0)),
+            None
+        );
+        assert_eq!(
+            threshold_state("higher-better", 50.0, Some(80.0), Some(50.0)),
+            Some("warn")
+        );
+        assert_eq!(
+            threshold_state("lower-better", 10.0, Some(5.0), Some(10.0)),
+            Some("warn")
+        );
+        assert_eq!(
+            threshold_state("lower-better", 5.0, Some(5.0), Some(10.0)),
+            None
+        );
         // neutral never crosses.
         assert_eq!(
             threshold_state("neutral", 999.0, Some(1.0), Some(1.0)),

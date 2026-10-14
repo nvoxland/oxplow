@@ -122,6 +122,13 @@ describe("metricStatus (tsk121)", () => {
   it("fails when the value is past fail_at", () => {
     expect(metricStatus(spec({ target: 80, fail_at: 50 }), 40)).toBe("fail");
   });
+  // The server's `threshold_state` draws the same line: a value AT a
+  // threshold hasn't crossed it.
+  it("reads a value at a threshold as not past it", () => {
+    expect(metricStatus(spec({ warn_at: 80, fail_at: 50 }), 80)).toBe("ok");
+    expect(metricStatus(spec({ warn_at: 80, fail_at: 50 }), 50)).toBe("warn");
+    expect(metricStatus(spec({ direction: "lower-better", warn_at: 5, fail_at: 10 }), 10)).toBe("warn");
+  });
   it("honors lower-better direction", () => {
     expect(metricStatus(spec({ direction: "lower-better", target: 10 }), 8)).toBe("ok");
     expect(metricStatus(spec({ direction: "lower-better", target: 10 }), 14)).toBe("warn");
