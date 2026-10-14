@@ -141,6 +141,72 @@ async fn publication_waits_for_the_readers_of_the_last_generation() {
     assert_eq!(answer(&svc, "alpha").await, Ok(json!(2)));
 }
 
+/// A publication waiting on readers can say who they are: each reader is
+/// listed with what holds it and for how long, and leaves the list when it
+/// lets go.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_waiting_publication_names_the_readers_it_waits_for() {
+    let (dir, svc) = project().await;
+    let release = Arc::new(tokio::sync::Notify::new());
+    let reader = {
+        let (svc, release) = (svc.clone(), release.clone());
+        tokio::spawn(async move {
+            svc.extension_activation
+                .read(async move { release.notified().await })
+                .await
+        })
+    };
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    write_ext(dir.path(), "alpha", 2, "");
+    let activating = {
+        let svc = svc.clone();
+        tokio::spawn(async move { svc.extension_activation.activate(svc.clone()).await })
+    };
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(
+        !activating.is_finished(),
+        "publication waits for the reader"
+    );
+    let readers = svc.extension_activation.readers();
+    assert!(
+        readers
+            .iter()
+            .any(|r| r.held_by.contains("extension_activation_tests")
+                && r.held_for >= Duration::from_millis(300)),
+        "{readers:?}"
+    );
+
+    release.notify_one();
+    reader.await.unwrap().unwrap();
+    tokio::time::timeout(Duration::from_secs(10), activating)
+        .await
+        .expect("publication goes ahead once the reader is done")
+        .unwrap()
+        .unwrap();
+    assert!(
+        svc.extension_activation.readers().is_empty(),
+        "{:?}",
+        svc.extension_activation.readers()
+    );
+}
+
+/// A panic after the generation's database state committed doesn't leave
+/// the boundary refusing every reader: the activation stages again from
+/// what committed and serves it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_panic_after_commit_recovers_the_generation() {
+    let (dir, svc) = project().await;
+    write_ext(dir.path(), "alpha", 2, "");
+    svc.extension_activation.panic_once_after_commit();
+    svc.extension_activation
+        .activate(svc.clone())
+        .await
+        .expect("the activation recovers");
+    assert!(svc.extension_activation.pin().await.is_ok());
+    assert_eq!(answer(&svc, "alpha").await, Ok(json!(2)));
+}
+
 /// Disabling an extension withdraws its commands with the next generation.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_disabled_extension_exposes_nothing() {
@@ -233,4 +299,31 @@ async fn the_documented_examples_activate() {
             "{name} is active"
         );
     }
+}
+
+/// A background loop runs while the services do, and `shutdown` stops it.
+#[tokio::test(flavor = "multi_thread")]
+async fn shutdown_stops_the_background_loops() {
+    let (_dir, svc) = project().await;
+    let ticks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let looping = {
+        let ticks = ticks.clone();
+        svc.spawn_every(Duration::ZERO, Duration::from_millis(20), move |_svc| {
+            let ticks = ticks.clone();
+            async move {
+                ticks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        })
+    };
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert!(ticks.load(std::sync::atomic::Ordering::SeqCst) >= 2);
+
+    svc.shutdown().await;
+    tokio::time::timeout(Duration::from_secs(2), looping)
+        .await
+        .expect("the loop stops at shutdown")
+        .unwrap();
+    let after = ticks.load(std::sync::atomic::Ordering::SeqCst);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(ticks.load(std::sync::atomic::Ordering::SeqCst), after);
 }

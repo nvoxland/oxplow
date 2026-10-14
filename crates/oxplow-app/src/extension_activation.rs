@@ -1,12 +1,16 @@
 //! Publication and reader boundary for prepared extension generations.
 //! Boot adopts this boundary before exposing extension runtime consumers.
 
+use std::borrow::Cow;
+use std::collections::HashMap;
 use std::future::Future;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use oxplow_db::TxError;
 use oxplow_domain::{run::RunContext, DomainError, Timestamp};
-use tokio::sync::{OwnedRwLockReadGuard, RwLock};
+use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 
 use crate::extension_catalog::CatalogSnapshot;
 use crate::vocabulary_reactor::VocabularyErrors;
@@ -19,12 +23,43 @@ struct GenerationState {
     entities: crate::extension_models::EntitySignature,
 }
 
+/// How often a publication waiting on readers says who they are.
+const WAITING_LOG_EVERY: Duration = Duration::from_secs(10);
+
+/// A generation reader as a waiting publication sees it: what holds it
+/// (the run, or the reading future's type) and for how long.
+#[derive(Debug, Clone)]
+pub struct Reader {
+    pub held_by: String,
+    pub held_for: Duration,
+}
+
+/// The readers holding a generation now, each until its pin is dropped.
+#[derive(Default)]
+struct Readers {
+    next: AtomicU64,
+    held: parking_lot::Mutex<HashMap<u64, (Cow<'static, str>, Instant)>>,
+}
+
+/// One entry of [`Readers`], removed when the last clone of its pin goes.
+struct Held {
+    readers: Arc<Readers>,
+    id: u64,
+}
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        self.readers.held.lock().remove(&self.id);
+    }
+}
+
 /// A host-only reader lifetime. Its private guard excludes publication until
 /// the last nested run/query releases it. It conveys no service authority.
 #[derive(Clone)]
 pub struct GenerationPin {
     owner: Arc<RwLock<GenerationState>>,
     state: Arc<OwnedRwLockReadGuard<GenerationState>>,
+    _held: Arc<Held>,
 }
 
 impl std::fmt::Debug for GenerationPin {
@@ -64,6 +99,9 @@ pub struct ExtensionActivation {
     /// serves the current load.
     activated: std::sync::atomic::AtomicBool,
     problems: parking_lot::Mutex<VocabularyErrors>,
+    readers: Arc<Readers>,
+    #[cfg(test)]
+    panic_after_commit: std::sync::atomic::AtomicBool,
 }
 
 impl ExtensionActivation {
@@ -83,6 +121,29 @@ impl ExtensionActivation {
 
     pub fn problems(&self) -> VocabularyErrors {
         self.problems.lock().clone()
+    }
+
+    /// The readers holding the generation now, longest-held first: what a
+    /// publication waits for.
+    pub fn readers(&self) -> Vec<Reader> {
+        let mut readers: Vec<Reader> = self
+            .readers
+            .held
+            .lock()
+            .values()
+            .map(|(held_by, since)| Reader {
+                held_by: held_by.to_string(),
+                held_for: since.elapsed(),
+            })
+            .collect();
+        readers.sort_by_key(|reader| std::cmp::Reverse(reader.held_for));
+        readers
+    }
+
+    /// The next publication panics once its database state has committed.
+    #[cfg(test)]
+    pub(crate) fn panic_once_after_commit(&self) {
+        self.panic_after_commit.store(true, Ordering::SeqCst);
     }
 
     /// Data changes do not require provider restarts. Only a changed entity
@@ -198,6 +259,11 @@ impl ExtensionActivation {
     }
 
     pub async fn pin(&self) -> Result<GenerationPin, DomainError> {
+        self.pin_as(Cow::Borrowed("ExtensionActivation::pin")).await
+    }
+
+    /// This task's pin, or a new one held by `held_by`.
+    async fn pin_as(&self, held_by: Cow<'static, str>) -> Result<GenerationPin, DomainError> {
         if let Some(pin) = self.inherited() {
             return Ok(pin);
         }
@@ -207,16 +273,27 @@ impl ExtensionActivation {
                 "extension activation is unavailable".into(),
             ));
         }
+        let id = self.readers.next.fetch_add(1, Ordering::Relaxed);
+        self.readers
+            .held
+            .lock()
+            .insert(id, (held_by, Instant::now()));
         Ok(GenerationPin {
             owner: self.state.clone(),
             state: Arc::new(state),
+            _held: Arc::new(Held {
+                readers: self.readers.clone(),
+                id,
+            }),
         })
     }
 
     /// Nested calls inherit their existing pin, including when a writer is
     /// waiting. Reacquiring Tokio's fair lock there would deadlock the parent.
     pub async fn read<F: Future>(&self, future: F) -> Result<F::Output, DomainError> {
-        let pin = self.pin().await?;
+        let pin = self
+            .pin_as(Cow::Borrowed(std::any::type_name::<F>()))
+            .await?;
         Box::pin(self.read_pinned(&pin, future)).await
     }
 
@@ -253,7 +330,13 @@ impl ExtensionActivation {
                     "generation pin belongs to another project".into(),
                 ))
             }
-            None => self.pin().await?,
+            None => {
+                let held_by = match run.contribution_ref() {
+                    Some(contribution) => format!("{} (run {})", contribution.id, run.run()),
+                    None => format!("{} (run {})", run.actor().source(), run.run()),
+                };
+                self.pin_as(Cow::Owned(held_by)).await?
+            }
         };
         Ok(run.clone().with_host_generation(Arc::new(pin)))
     }
@@ -300,6 +383,7 @@ impl ExtensionActivation {
         // fails (a model that doesn't compile, a provider that can't stage)
         // is held the same way and the candidate prepared again.
         let mut failed = crate::extension_catalog::Failed::new();
+        let mut restaged = false;
         let (published, retired, held) = loop {
             let (snapshot, held) = if core_only {
                 (raw.core_baseline(), VocabularyErrors::new())
@@ -328,7 +412,7 @@ impl ExtensionActivation {
             let published = snapshot.clone();
             // Move the owned writer into the worker closure. Cancelling the async
             // caller must not open readers while that worker can still commit.
-            let boundary = Mutex::new(self.state.clone().write_owned().await);
+            let boundary = Mutex::new(self.write_waiting_on_readers().await);
             // Provider admission may hold this map while awaiting a DB write. Acquire
             // it before the DB permit, otherwise the publication worker can deadlock.
             let running = Mutex::new(svc.providers.reserve_running().await);
@@ -401,6 +485,14 @@ impl ExtensionActivation {
                         boundary.unavailable = false;
                         return Err(TxError::Storage(error));
                     }
+                    #[cfg(test)]
+                    if svc
+                        .extension_activation
+                        .panic_after_commit
+                        .swap(false, Ordering::SeqCst)
+                    {
+                        panic!("injected panic after the generation committed");
+                    }
                     commands.apply();
                     capabilities.apply();
                     svc.vocabulary.swap(vocabulary);
@@ -442,6 +534,20 @@ impl ExtensionActivation {
                 // the transaction, which rolled back: nothing was applied.
                 Err(TxError::Aborted(problems))
                     if !core_only && failed.hold(&snapshot, &problems) => {}
+                // Publication panicked after its database state committed,
+                // leaving the in-memory maps part swapped and the boundary
+                // refusing readers. The database is the truth: stage the
+                // generation again from it, once.
+                Err(TxError::Storage(error)) if self.state.read().await.unavailable => {
+                    if restaged {
+                        return Err(rejected(&format!(
+                            "extension publication failed after its database state \
+                             committed, and staging it again failed: {error}"
+                        )));
+                    }
+                    tracing::error!(%error, "extension publication failed after commit; staging it again");
+                    restaged = true;
+                }
                 Err(error) => return Err(error),
             }
         };
@@ -450,6 +556,29 @@ impl ExtensionActivation {
             *self.problems.lock() = held;
         }
         Ok(published)
+    }
+}
+
+impl ExtensionActivation {
+    /// The publication's writer, saying who it waits for while readers
+    /// hold the generation. The one write future is kept, so its place in
+    /// the fair lock's queue is too.
+    async fn write_waiting_on_readers(&self) -> OwnedRwLockWriteGuard<GenerationState> {
+        let started = Instant::now();
+        let write = self.state.clone().write_owned();
+        tokio::pin!(write);
+        loop {
+            tokio::select! {
+                guard = &mut write => return guard,
+                _ = tokio::time::sleep(WAITING_LOG_EVERY) => {
+                    tracing::warn!(
+                        waited = ?started.elapsed(),
+                        readers = ?self.readers(),
+                        "extension activation is waiting for the generation's readers"
+                    );
+                }
+            }
+        }
     }
 }
 

@@ -273,13 +273,10 @@ async fn run_one(
 }
 
 /// Check the pending runs every few seconds (boot).
-pub fn spawn(state: std::sync::Arc<crate::Services>) {
-    tokio::spawn(async move {
-        loop {
-            if let Err(e) = run_due(&state, oxplow_domain::Timestamp::now()).await {
-                tracing::warn!(error = %e, "running paced collectors failed");
-            }
-            tokio::time::sleep(Duration::from_secs(5)).await;
+pub fn spawn(state: &std::sync::Arc<crate::Services>) {
+    state.spawn_every(Duration::ZERO, Duration::from_secs(5), |state| async move {
+        if let Err(e) = run_due(&state, oxplow_domain::Timestamp::now()).await {
+            tracing::warn!(error = %e, "running paced collectors failed");
         }
     });
 }

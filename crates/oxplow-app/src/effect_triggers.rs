@@ -917,24 +917,18 @@ async fn drop_retry(svc: &Services, key: &EffectRunKey) -> Result<(), DomainErro
 /// Check for due automatic retries every few seconds, for as long as the
 /// services live.
 pub fn spawn_auto_retry(state: &Arc<Services>) {
-    let services = Arc::downgrade(state);
-    tokio::spawn(async move {
-        // Not before the providers the config names are up: a write sent
-        // to one not yet registered fails for nothing (tsk915).
-        match services.upgrade() {
-            Some(svc) => svc.providers.first_reconciled().await,
-            None => return,
-        }
-        loop {
-            tokio::time::sleep(Duration::from_secs(5)).await;
-            let Some(svc) = services.upgrade() else {
-                return;
-            };
+    state.spawn_every(
+        Duration::from_secs(5),
+        Duration::from_secs(5),
+        |svc| async move {
+            // Not before the providers the config names are up: a write
+            // sent to one not yet registered fails for nothing (tsk915).
+            svc.providers.first_reconciled().await;
             if let Err(error) = auto_retry_due(&svc, oxplow_domain::Timestamp::now()).await {
                 tracing::warn!(%error, "sending effect attempts again failed");
             }
-        }
-    });
+        },
+    );
 }
 
 /// The approval hash of `program`'s folder as it is now.

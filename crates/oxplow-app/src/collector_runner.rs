@@ -338,15 +338,15 @@ async fn run_due_collectors_unpinned(state: &crate::Services) -> Vec<(String, St
 }
 
 /// Background loop: once a minute, [`run_due_collectors`].
-pub fn spawn_scheduler(state: std::sync::Arc<crate::Services>) {
-    tokio::spawn(async move {
-        // Stay out of boot's way.
-        tokio::time::sleep(Duration::from_secs(30)).await;
-        loop {
+pub fn spawn_scheduler(state: &std::sync::Arc<crate::Services>) {
+    // The first waits 30 s, to stay out of boot's way.
+    state.spawn_every(
+        Duration::from_secs(30),
+        Duration::from_secs(60),
+        |state| async move {
             run_due_collectors(&state).await;
-            tokio::time::sleep(Duration::from_secs(60)).await;
-        }
-    });
+        },
+    );
 }
 
 /// SHA-256 of the entry script: what an approval is bound to.

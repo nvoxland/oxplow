@@ -183,12 +183,12 @@ pub async fn run_boot_orchestration(
     crate::extension_models::register(state);
     state.event_pump.clone().spawn();
     // `every:` collectors: the scheduler runs `oxplow.collector.sync` as the system.
-    crate::collector_runner::spawn_scheduler(state.clone());
+    crate::collector_runner::spawn_scheduler(state);
     // Paced `on:` collectors: run each deferred one once its pacing allows.
-    crate::pacing::spawn(state.clone());
+    crate::pacing::spawn(state);
     // The agent runtimes' skills: what's offered now.
     crate::capabilities::refresh_agent_text(state).await;
-    crate::providers::sync::spawn_sync_scheduler(state.clone());
+    crate::providers::sync::spawn_sync_scheduler(state);
     // Open efforts' evidence, an asset over the tables it reads (P7.B6).
     crate::effort_evidence::register(state);
 

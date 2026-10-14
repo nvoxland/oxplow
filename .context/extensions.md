@@ -4124,9 +4124,21 @@ the publication transaction and reader boundary are released. Command owner meta
 and capability state are reserved on the blocking worker before commit and held
 through all map swaps. Wiki/snapshot follow policies use the candidate's captured
 selection, avoiding recursive capability/config reads while those locks are held.
-Precommit rejection retains the previous active snapshot. A panic during commit
-or publication leaves this boundary unavailable until host recovery. Cancelling
-the async caller does not release the worker's writer while it can still commit.
+Precommit rejection retains the previous active snapshot. A panic after the
+commit (the in-memory maps part swapped, the boundary refusing readers) is
+recovered at once: the database is the truth, so the activation stages the
+generation again from it and publishes that, which clears `unavailable`; if
+that fails too, the boundary stays unavailable and the failure is a `<host>`
+problem in Settings → Extensions. Cancelling the async caller does not release
+the worker's writer while it can still commit.
+
+**Who a publication waits for.** Every pin is listed while it's held, with
+what holds it (a run's contribution or actor and run id, or the reading
+future's type for a bare `read`) and since when: `ExtensionActivation::readers`.
+A publication waiting on readers logs that list every 10 s, keeping its one
+write future (its place in the fair lock's queue). Pinned by
+`a_waiting_publication_names_the_readers_it_waits_for` and
+`a_panic_after_commit_recovers_the_generation`.
 
 `GenerationPin` is host-only and conveys no authority. RunContext can retain an
 opaque pin across spawned host work; child contexts inherit it and fresh jobs do

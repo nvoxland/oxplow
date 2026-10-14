@@ -742,9 +742,63 @@ pub struct Services {
     /// A stream's refs moved (P7.B6): what the backend's ref listeners
     /// subscribe to instead of the event bus.
     pub ref_moves: ref_moves::RefMoves,
+    /// Cancelled by [`Self::shutdown`]: what every background loop
+    /// ([`Self::spawn_every`]) stops on.
+    stopping: tokio_util::sync::CancellationToken,
 }
 
 impl Services {
+    /// Run `tick` after `first`, then again `every` after each one ends,
+    /// until [`Self::shutdown`] or until the services are gone: the loop
+    /// holds them only while a tick runs.
+    pub fn spawn_every<F, Fut>(
+        self: &Arc<Self>,
+        first: std::time::Duration,
+        every: std::time::Duration,
+        tick: F,
+    ) -> tokio::task::JoinHandle<()>
+    where
+        F: Fn(Arc<Services>) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
+    {
+        let services = Arc::downgrade(self);
+        let stopping = self.stopping.clone();
+        tokio::spawn(async move {
+            let mut wait = first;
+            loop {
+                tokio::select! {
+                    _ = stopping.cancelled() => return,
+                    _ = tokio::time::sleep(wait) => {}
+                }
+                let Some(svc) = services.upgrade() else {
+                    return;
+                };
+                tokio::select! {
+                    _ = stopping.cancelled() => return,
+                    _ = tick(svc) => {}
+                }
+                wait = every;
+            }
+        })
+    }
+
+    /// Stop what runs in the background: the loops, the job scheduler (a
+    /// running job is cancelled; recovery decides its end next time) and
+    /// the provider processes, which get two seconds.
+    pub async fn shutdown(&self) {
+        self.stopping.cancel();
+        self.jobs.shutdown();
+        if tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            self.providers.shutdown_all(),
+        )
+        .await
+        .is_err()
+        {
+            tracing::warn!("providers didn't all shut down in time");
+        }
+    }
+
     /// Runtime metadata must use the same reader boundary as lens execution.
     pub async fn lens_definition(
         &self,
@@ -1904,6 +1958,7 @@ impl Services {
             ref_moves,
             trees,
             dup_cache: Arc::new(oxplow_code_dup::DupCache::default()),
+            stopping: tokio_util::sync::CancellationToken::new(),
         })
     }
 

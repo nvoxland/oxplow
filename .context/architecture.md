@@ -282,6 +282,12 @@ window that no longer exists is worse than a clean stop. If that ever
 needs to change, the feature is reattaching to a surviving daemon — not
 leaving one running by accident.
 
+**A background loop is a `Services::spawn_every`.** It holds the
+services weakly (only while a tick runs) and stops on
+`Services::shutdown`, which the daemon's exit calls: it cancels the
+loops, stops the job scheduler, and gives provider processes 2 s to
+exit. A new periodic loop uses it rather than a bare `tokio::spawn`.
+
 **Opening a project** (`ShellWindows::open_project`) is: focus the
 window that already has it, else sweep any orphaned daemon, start a
 daemon, wait for it to report its loopback endpoint, then create a

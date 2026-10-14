@@ -1122,7 +1122,8 @@ entities from data already in the semantic layer:
   - A lens reading an uncollected entity gets "reads `v_x`, which hasn't
     been collected yet. Run collector `ext/id`…" in place of SQLite's
     bare "no such table".
-- **Scheduling.** A background loop (`spawn_scheduler`, started from boot)
+- **Scheduling.** A background loop (`spawn_scheduler`, started from boot
+  on `Services::spawn_every`, so `Services::shutdown` stops it)
   calls `run_due_collectors` once a minute: every approved collector with
   an `every:` trigger that's due (`due_collectors`, which is pure and
   tested) runs as the `oxplow.collector.sync` command with `Actor::System` — so

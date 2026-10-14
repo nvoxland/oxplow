@@ -170,8 +170,7 @@ pub async fn run_main(name: &str, secrets: Arc<dyn oxplow_ai::secrets::SecretSto
         std::process::exit(1);
     });
     let state = Arc::new(services);
-    let providers = state.providers.clone();
-    let jobs = state.jobs.clone();
+    let stopping = state.clone();
 
     // Recovery + primary stream + the standard background fleet —
     // identical to the desktop shell's boot.
@@ -241,15 +240,10 @@ pub async fn run_main(name: &str, secrets: Arc<dyn oxplow_ai::secrets::SecretSto
         signal = terminated() => format!("received {signal}"),
     };
     tracing::info!("{name} stopping: {reason}");
-    jobs.shutdown();
-    // Providers are asked to shut down — not orphaned by the exit, which
-    // runs no destructors — within the supervisor's grace for the daemon.
-    if tokio::time::timeout(std::time::Duration::from_secs(2), providers.shutdown_all())
-        .await
-        .is_err()
-    {
-        tracing::warn!("{name}: providers didn't all shut down in time");
-    }
+    // The background loops, jobs and providers are stopped — not orphaned
+    // by the exit, which runs no destructors — within the supervisor's
+    // grace for the daemon.
+    stopping.shutdown().await;
     oxplow_app::daemon_supervisor::clear_daemon_info(&project_dir);
     std::process::exit(0);
 }

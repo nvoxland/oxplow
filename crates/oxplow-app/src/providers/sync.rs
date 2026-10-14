@@ -640,15 +640,15 @@ pub fn sync_op(registry: &Arc<ProviderRegistry>) -> crate::commands::ops::Op {
 }
 
 /// Run [`ProviderRegistry::sync_due`] every minute for the app's life.
-pub fn spawn_sync_scheduler(state: Arc<crate::Services>) {
-    tokio::spawn(async move {
-        let mut tick = tokio::time::interval(std::time::Duration::from_secs(60));
-        loop {
-            tick.tick().await;
+pub fn spawn_sync_scheduler(state: &Arc<crate::Services>) {
+    state.spawn_every(
+        std::time::Duration::ZERO,
+        std::time::Duration::from_secs(60),
+        |state| async move {
             // Another project's oxplow may have changed this machine's
             // global instances.
             state.providers.reconcile_if_global_changed().await;
             state.providers.sync_due().await;
-        }
-    });
+        },
+    );
 }

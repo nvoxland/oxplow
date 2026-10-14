@@ -642,7 +642,7 @@ credentials from the instance's keychain accounts
 way** (`Connection::shutdown`): every stop — reconcile, a config or
 approval change, a disable, a sign-in renewal (`Instance::end`, outside
 the `live` lock; the renewal is recorded first, so a call it cuts off
-knows why), `check_as`, and the daemon's exit (`shutdown_all`, every
+knows why), `check_as`, and the daemon's exit (`Services::shutdown` → `shutdown_all`, every
 instance at once, within 2 s of the supervisor's grace; `process::exit`
 runs no destructors, so without it the processes were orphaned) — sends
 `shutdown` and waits `HostDeps.shutdown_grace`
