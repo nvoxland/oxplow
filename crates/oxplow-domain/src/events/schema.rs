@@ -127,25 +127,13 @@ impl EventSchemaRegistry {
     /// The registry with every core type registered.
     pub fn core() -> Self {
         let mut r = Self::new();
-        r.register::<CommandExecutedAtV1>()
-            .expect("core type registers");
-        r.register::<CommandExecutedAtV2>()
-            .expect("core type registers");
         r.register::<CommandExecuted>()
             .expect("core type registers");
         r.register::<CapabilitySwitched>()
             .expect("core type registers");
         r.register::<ConfigChanged>().expect("core type registers");
         r.register::<FileSaved>().expect("core type registers");
-        r.register::<EffectResultAtV1>()
-            .expect("core type registers");
-        r.register::<EffectResultAtV2>()
-            .expect("core type registers");
-        r.register::<EffectResultAtV3>()
-            .expect("core type registers");
         r.register::<EffectResult>().expect("core type registers");
-        r.register::<SnapshotTakenAtV1>()
-            .expect("core type registers");
         r.register::<SnapshotTaken>().expect("core type registers");
         r.register::<VcsHeadMoved>().expect("core type registers");
         r.register::<VcsCommitIndexed>()
@@ -153,26 +141,14 @@ impl EventSchemaRegistry {
         r.register::<EffortLanded>().expect("core type registers");
         r.register::<AgentTurnStarted>()
             .expect("core type registers");
-        r.register::<AgentTurnEndedAtV1>()
-            .expect("core type registers");
         r.register::<AgentTurnEnded>().expect("core type registers");
-        r.register::<AgentSessionStartedAtV1>()
-            .expect("core type registers");
         r.register::<AgentSessionStarted>()
             .expect("core type registers");
         r.register::<AgentSessionEnded>()
             .expect("core type registers");
         r.register::<AgentPromptSubmitted>()
             .expect("core type registers");
-        r.register::<AgentToolRequestedAtV1>()
-            .expect("core type registers");
-        r.register::<AgentToolRequestedAtV2>()
-            .expect("core type registers");
         r.register::<AgentToolRequested>()
-            .expect("core type registers");
-        r.register::<AgentToolFinishedAtV1>()
-            .expect("core type registers");
-        r.register::<AgentToolFinishedAtV2>()
             .expect("core type registers");
         r.register::<AgentToolFinished>()
             .expect("core type registers");
@@ -240,10 +216,7 @@ impl EventSchemaRegistry {
         r.register::<ContributionJobCompleted>()
             .expect("core type registers");
         r.register::<LensShown>().expect("core type registers");
-        r.register::<LensKeptAtV1>().expect("core type registers");
         r.register::<LensKept>().expect("core type registers");
-        r.register::<CommandProposedAtV1>()
-            .expect("core type registers");
         r.register::<CommandProposed>()
             .expect("core type registers");
         r.register::<CommandApproved>()
@@ -555,20 +528,6 @@ impl TryFrom<ActorKind> for ActorKindV2 {
     }
 }
 
-// The kinds `command.executed@1` and `command.proposed@1` were published
-// with, before effects: frozen, since a published schema never changes
-// (its doc comment, which is part of the schema, included).
-/// Who ran a command (`.context/target-architecture.md` §7).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-#[schemars(rename = "ActorKind")]
-pub enum ActorKindV1 {
-    Human,
-    Agent,
-    Lens,
-    System,
-}
-
 /// How a command run ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, specta::Type)]
 #[serde(rename_all = "snake_case")]
@@ -577,54 +536,6 @@ pub enum CommandOutcome {
     Denied,
     Invalid,
     Error,
-}
-
-/// `command.executed@1`: the bus ran a command.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct CommandExecutedV1 {
-    /// The command's name (`oxplow.work_item.transition`, `oxplow.config.set`).
-    pub command: String,
-    pub actor_kind: ActorKindV1,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub actor_id: Option<String>,
-    pub outcome: CommandOutcome,
-    /// The `command_audit` row, which holds the input and the inverse.
-    pub audit_id: i64,
-    /// Whether an inverse was recorded, i.e. `commands.undo` can apply.
-    pub undoable: bool,
-}
-
-/// The v1 shape of `command.executed`, as a registry entry.
-pub struct CommandExecutedAtV1;
-impl EventType for CommandExecutedAtV1 {
-    const TYPE: &'static str = "command.executed";
-    const V: u32 = 1;
-    type Payload = CommandExecutedV1;
-}
-
-/// `command.executed@2`: the bus ran a command — v1, with an effect among
-/// the actor kinds (P8.D8). A v1 payload is a v2 one as is.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct CommandExecutedV2 {
-    /// The command's name (`oxplow.work_item.transition`, `oxplow.config.set`).
-    pub command: String,
-    pub actor_kind: ActorKindV2,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub actor_id: Option<String>,
-    pub outcome: CommandOutcome,
-    /// The `command_audit` row, which holds the input and the inverse.
-    pub audit_id: i64,
-    /// Whether an inverse was recorded, i.e. `commands.undo` can apply.
-    pub undoable: bool,
-}
-
-pub struct CommandExecutedAtV2;
-impl EventType for CommandExecutedAtV2 {
-    const TYPE: &'static str = "command.executed";
-    const V: u32 = 2;
-    type Payload = CommandExecutedV2;
 }
 
 /// Version 3 adds durable job attribution; earlier schemas stay frozen.
@@ -648,42 +559,6 @@ impl EventType for CommandExecuted {
     const TYPE: &'static str = "command.executed";
     const V: u32 = 3;
     type Payload = CommandExecutedV3;
-    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
-        match from_v {
-            1 | 2 => Ok(payload),
-            _ => Err(DomainError::Invalid(format!(
-                "no upcast of command.executed from v{from_v}"
-            ))),
-        }
-    }
-}
-
-/// `command.proposed@1`: an agent ran a command that needs a person's
-/// confirmation; it is kept as a proposal until a person decides (P6b).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct CommandProposedV1 {
-    /// `proposal:<id>`.
-    pub proposal: String,
-    /// The command's name (`oxplow.config.set`).
-    pub command: String,
-    pub actor_kind: ActorKindV1,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub actor_id: Option<String>,
-    /// Whether the command is destructive.
-    pub destructive: bool,
-    /// The pending proposals of the same call (`proposal:<id>`) this one
-    /// replaced — marked superseded in the same transaction.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub supersedes: Vec<String>,
-}
-
-/// The v1 shape of `command.proposed`, as a registry entry.
-pub struct CommandProposedAtV1;
-impl EventType for CommandProposedAtV1 {
-    const TYPE: &'static str = "command.proposed";
-    const V: u32 = 1;
-    type Payload = CommandProposedV1;
 }
 
 /// `command.proposed@2`: an agent or an effect ran a command that needs a
@@ -713,14 +588,6 @@ impl EventType for CommandProposed {
     const TYPE: &'static str = "command.proposed";
     const V: u32 = 2;
     type Payload = CommandProposedV2;
-    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
-        match from_v {
-            1 => Ok(payload),
-            _ => Err(DomainError::Invalid(format!(
-                "no upcast of command.proposed from v{from_v}"
-            ))),
-        }
-    }
 }
 
 /// `command.approved@1`: a person approved a proposal and the command ran
@@ -833,32 +700,6 @@ impl EventType for CapabilitySwitched {
     type Payload = CapabilitySwitchedV1;
 }
 
-/// `effect.result@1`: the recorded outcome of a side effect (§5.3).
-/// Shape only in P1; the effects runtime that emits it is later.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct EffectResultV1 {
-    /// The effect's name (`notify.desktop`, `git.push`).
-    pub effect: String,
-    /// The canonical ref the effect acted on, when it had one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub target: Option<String>,
-    pub ok: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-    /// Effect-specific detail, opaque to the log.
-    #[serde(default)]
-    pub detail: Value,
-}
-
-/// The v1 shape of `effect.result`, as a registry entry.
-pub struct EffectResultAtV1;
-impl EventType for EffectResultAtV1 {
-    const TYPE: &'static str = "effect.result";
-    const V: u32 = 1;
-    type Payload = EffectResultV1;
-}
-
 /// How an effect's reaction to one event ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, specta::Type)]
 #[serde(rename_all = "snake_case")]
@@ -874,52 +715,6 @@ pub enum EffectOutcome {
     Failed,
 }
 
-/// `effect.result@2`: an extension's effect reacted to a logged event
-/// (P8.D10) — caused by its run's `command.executed` when its commands
-/// ran.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct EffectResultV2 {
-    /// The effect (`effect:<extension>/<id>`).
-    pub effect: String,
-    /// The event it reacted to (`event:<id>`); absent on a v1 result.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub event: Option<String>,
-    pub outcome: EffectOutcome,
-    /// Why it skipped or failed.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-    /// The proposal it left for a person (`proposal:<id>`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub proposal: Option<String>,
-    /// Effect-specific detail, opaque to the log.
-    #[serde(default)]
-    pub detail: Value,
-}
-
-/// The v2 shape of `effect.result`, as a registry entry.
-pub struct EffectResultAtV2;
-impl EventType for EffectResultAtV2 {
-    const TYPE: &'static str = "effect.result";
-    const V: u32 = 2;
-    type Payload = EffectResultV2;
-}
-
-// `effect.result@3`'s origin: its published schema (docs included) is
-// a contract, so it keeps `EffectOrigin`'s name and words as they were.
-/// What started an attempt at a reaction.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-#[schemars(rename = "EffectOrigin")]
-pub enum EffectOriginV3 {
-    /// The pump delivering the event.
-    Live,
-    /// A person's `effect.retry` of a reaction that failed.
-    Retry,
-    /// A person's `effect.backfill` over events the effect never saw.
-    Backfill,
-}
-
 /// What started an attempt at a reaction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, specta::Type)]
 #[serde(rename_all = "snake_case")]
@@ -933,40 +728,6 @@ pub enum EffectOrigin {
     /// Sent again by itself (P10): a failed attempt whose every step went
     /// to a provider that keeps `idempotent_writes`.
     Auto,
-}
-
-/// `effect.result@3` (P9.D4): v2, plus which attempt at the reaction it
-/// was and what started it — a failed reaction may be retried by a
-/// person, and a backfill reacts to events logged before the effect ran.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct EffectResultV3 {
-    /// The effect (`effect:<extension>/<id>`).
-    pub effect: String,
-    /// The event it reacted to (`event:<id>`); absent on a v1 result.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub event: Option<String>,
-    pub outcome: EffectOutcome,
-    /// Why it skipped or failed.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-    /// The proposal it left for a person (`proposal:<id>`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub proposal: Option<String>,
-    /// Effect-specific detail, opaque to the log.
-    #[serde(default)]
-    pub detail: Value,
-    /// Which attempt at the reaction, from 1.
-    pub attempt: u32,
-    pub origin: EffectOriginV3,
-}
-
-/// The v3 shape of `effect.result`, as a registry entry.
-pub struct EffectResultAtV3;
-impl EventType for EffectResultAtV3 {
-    const TYPE: &'static str = "effect.result";
-    const V: u32 = 3;
-    type Payload = EffectResultV3;
 }
 
 /// `effect.result@4` (P10): v3, its origin able to say `auto` — an
@@ -994,147 +755,11 @@ pub struct EffectResultV4 {
     pub origin: EffectOrigin,
 }
 
-/// A v1 result as v2: its `ok` is its outcome, its `error` the reason,
-/// and its `target` moves into `detail`.
-fn effect_result_v1_to_v2(payload: Value) -> Result<EffectResultV2, DomainError> {
-    let v1: EffectResultV1 = serde_json::from_value(payload)
-        .map_err(|e| DomainError::Invalid(format!("effect.result@1: {e}")))?;
-    let mut detail = v1.detail;
-    if let Some(target) = v1.target {
-        match &mut detail {
-            Value::Object(map) => {
-                map.insert("target".into(), Value::String(target));
-            }
-            other => *other = serde_json::json!({ "target": target, "detail": other.take() }),
-        }
-    }
-    Ok(EffectResultV2 {
-        effect: v1.effect,
-        event: None,
-        outcome: if v1.ok {
-            EffectOutcome::Ok
-        } else {
-            EffectOutcome::Failed
-        },
-        reason: v1.error,
-        proposal: None,
-        detail,
-    })
-}
-
 pub struct EffectResult;
 impl EventType for EffectResult {
     const TYPE: &'static str = "effect.result";
     const V: u32 = 4;
     type Payload = EffectResultV4;
-    /// A v3 result keeps its origin; one from before attempts (v2) was the
-    /// live consumer's first; a v1 result takes v2's shape on the way.
-    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
-        let v3 = match from_v {
-            1 | 2 => {
-                let v2: EffectResultV2 = if from_v == 1 {
-                    effect_result_v1_to_v2(payload)?
-                } else {
-                    serde_json::from_value(payload)
-                        .map_err(|e| DomainError::Invalid(format!("effect.result@2: {e}")))?
-                };
-                EffectResultV3 {
-                    effect: v2.effect,
-                    event: v2.event,
-                    outcome: v2.outcome,
-                    reason: v2.reason,
-                    proposal: v2.proposal,
-                    detail: v2.detail,
-                    attempt: 1,
-                    origin: EffectOriginV3::Live,
-                }
-            }
-            3 => serde_json::from_value(payload)
-                .map_err(|e| DomainError::Invalid(format!("effect.result@3: {e}")))?,
-            _ => {
-                return Err(DomainError::Invalid(format!(
-                    "no upcast of effect.result from v{from_v}"
-                )))
-            }
-        };
-        serde_json::to_value(EffectResultV4 {
-            effect: v3.effect,
-            event: v3.event,
-            outcome: v3.outcome,
-            reason: v3.reason,
-            proposal: v3.proposal,
-            detail: v3.detail,
-            attempt: v3.attempt,
-            origin: match v3.origin {
-                EffectOriginV3::Live => EffectOrigin::Live,
-                EffectOriginV3::Retry => EffectOrigin::Retry,
-                EffectOriginV3::Backfill => EffectOrigin::Backfill,
-            },
-        })
-        .map_err(|e| DomainError::Invariant(e.to_string()))
-    }
-}
-
-/// Why a snapshot take happened: one row of the operation log each
-/// (`snapshot_op.trigger`) and the `trigger` of `snapshot.taken`.
-// `snapshot.taken@1`'s trigger: every reason but `run_measured`. Its doc
-// comments match `SnapshotTrigger`'s, so the v1 schema stays as published.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-#[schemars(rename = "SnapshotTrigger")]
-pub enum SnapshotTriggerV1 {
-    /// An agent turn ended (Stop / interrupt).
-    TurnEnd,
-    /// The worktree went quiet with no turn open (human edits).
-    Quiet,
-    /// An effort opened (its start bracket).
-    EffortStart,
-    /// An effort closed (its end bracket), including a restart closing
-    /// an orphaned effort.
-    EffortEnd,
-    /// The boot sweep.
-    Startup,
-    /// An explicit request (metric baseline rebuild, tests).
-    Manual,
-    /// HEAD or a ref moved; the take drains whatever was dirty.
-    GitRefs,
-    /// HEAD moved on a clean tree: the latest snapshot now also is the
-    /// new commit (a re-stamp, no new snapshot).
-    HeadMoved,
-    /// Backfilled for a snapshot taken before the operation log existed.
-    Legacy,
-}
-
-/// `snapshot.taken@1`: one snapshot take (one `snapshot_op` row). Refs
-/// are canonical (`.context/refs.md`): `stream:str1`, `snapshot:123`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct SnapshotTakenV1 {
-    pub stream: String,
-    /// The snapshot the worktree is at after the take: a new one, or the
-    /// parent when nothing changed (`unchanged`).
-    pub snapshot: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent: Option<String>,
-    pub trigger: SnapshotTriggerV1,
-    /// True when the take recorded no new snapshot.
-    pub unchanged: bool,
-    /// File rows the take recorded (0 when unchanged).
-    pub file_count: u32,
-    pub elapsed_ms: u64,
-    /// The time budget the caller gave the take, when it had one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub budget_ms: Option<u64>,
-    /// `elapsed_ms > budget_ms`: reported, never silent.
-    pub over_budget: bool,
-}
-
-/// The v1 shape of `snapshot.taken`, as a registry entry.
-pub struct SnapshotTakenAtV1;
-impl EventType for SnapshotTakenAtV1 {
-    const TYPE: &'static str = "snapshot.taken";
-    const V: u32 = 1;
-    type Payload = SnapshotTakenV1;
 }
 
 /// `snapshot.taken@2` (tsk883): v1, its trigger able to say
@@ -1167,17 +792,6 @@ impl EventType for SnapshotTaken {
     const TYPE: &'static str = "snapshot.taken";
     const V: u32 = 2;
     type Payload = SnapshotTakenV2;
-    /// Every v1 trigger is a v2 trigger: the payload reads as it is.
-    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
-        if from_v != 1 {
-            return Err(DomainError::Invalid(format!(
-                "snapshot.taken@{from_v} has no upcast to v2"
-            )));
-        }
-        let _: SnapshotTakenV1 = serde_json::from_value(payload.clone())
-            .map_err(|e| DomainError::Invalid(format!("snapshot.taken@1: {e}")))?;
-        Ok(payload)
-    }
 }
 
 /// `vcs.head.moved@1`: HEAD moved while the worktree was clean, so the
@@ -1243,25 +857,6 @@ impl EventType for AgentTurnStarted {
     type Payload = AgentTurnStartedV1;
 }
 
-// Superseded by v2; kept registered so rows logged at v1 still validate
-// and upcast. (Its doc comment is part of the published schema.)
-/// `agent.turn.ended@1`: a turn closed.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct AgentTurnEndedV1 {
-    pub turn: String,
-    pub thread: String,
-    pub outcome: crate::hook::TurnOutcome,
-}
-
-/// The v1 shape of `agent.turn.ended`, as a registry entry.
-pub struct AgentTurnEndedAtV1;
-impl EventType for AgentTurnEndedAtV1 {
-    const TYPE: &'static str = "agent.turn.ended";
-    const V: u32 = 1;
-    type Payload = AgentTurnEndedV1;
-}
-
 /// A turn's token counts, when the harness reported them with the turn
 /// (ACP's prompt response). Claude's come from the transcript instead.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -1296,16 +891,6 @@ impl EventType for AgentTurnEnded {
     const TYPE: &'static str = "agent.turn.ended";
     const V: u32 = 2;
     type Payload = AgentTurnEndedV2;
-
-    /// v1 → v2 adds two optional fields: a v1 payload is a valid v2 one.
-    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
-        match from_v {
-            1 => Ok(payload),
-            _ => Err(DomainError::Invalid(format!(
-                "agent.turn.ended@{from_v} cannot be upcast to v2"
-            ))),
-        }
-    }
 }
 
 /// Where a large or sensitive body lives: `event_content.hash` (xxh3-128
@@ -1319,21 +904,6 @@ pub struct ContentRef {
     /// Only the first part was stored (bodies are capped).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub truncated: bool,
-}
-
-// v1's harness vocabulary (`agent.session.started@1`), kept for that
-// published shape; v2 carries the harness's registry key. The doc comment
-// below is part of the published schema: never edit it.
-/// The agent harness a session ran in — the event's own vocabulary, so
-/// the published contract doesn't change with the internal `AgentKind`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum Harness {
-    Claude,
-    Codex,
-    Opencode,
-    /// Any agent spoken to over the Agent Client Protocol.
-    Acp,
 }
 
 /// A status a thread's agent can be logged in. There is no `stalled`: that
@@ -1378,26 +948,6 @@ impl From<LoggedAgentStatus> for crate::hook::AgentStatusState {
     }
 }
 
-/// `agent.session.started@1`: a harness session began on a thread — first
-/// seen by id (hooks) or announced (ACP).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct AgentSessionStartedV1 {
-    pub session: String,
-    pub thread: String,
-    pub harness: Harness,
-    /// The session is the thread's resume session (a reattach), not new.
-    pub resumed: bool,
-}
-
-/// The v1 shape of `agent.session.started`, as a registry entry.
-pub struct AgentSessionStartedAtV1;
-impl EventType for AgentSessionStartedAtV1 {
-    const TYPE: &'static str = "agent.session.started";
-    const V: u32 = 1;
-    type Payload = AgentSessionStartedV1;
-}
-
 /// `agent.session.started@2`: v1 with the harness as its registry key
 /// (`claude`, or whatever an extension declares). A v1 payload is a v2 one
 /// as is: its four names are those keys.
@@ -1418,14 +968,6 @@ impl EventType for AgentSessionStarted {
     const TYPE: &'static str = "agent.session.started";
     const V: u32 = 2;
     type Payload = AgentSessionStartedV2;
-    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
-        match from_v {
-            1 => Ok(payload),
-            _ => Err(DomainError::Invalid(format!(
-                "no upcast of agent.session.started from v{from_v}"
-            ))),
-        }
-    }
 }
 
 /// `agent.session.ended@1`: the harness ended a session (`/clear`, exit).
@@ -1535,73 +1077,6 @@ pub enum ToolDecision {
     Denied,
 }
 
-/// `agent.tool.requested@1`: the agent asked to run a tool (PreToolUse),
-/// and whether the policy let it. Tool names are the canonical
-/// (Claude-shaped) vocabulary every transport maps onto.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct AgentToolRequestedV1 {
-    pub tool: String,
-    /// Repo-relative path the tool targets, when it names one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
-    /// A short summary (a truncated command, a search pattern).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub detail: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub input: Option<ContentRef>,
-    pub decision: ToolDecision,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-}
-
-/// The v1 shape of `agent.tool.requested`, as a registry entry.
-pub struct AgentToolRequestedAtV1;
-impl EventType for AgentToolRequestedAtV1 {
-    const TYPE: &'static str = "agent.tool.requested";
-    const V: u32 = 1;
-    type Payload = AgentToolRequestedV1;
-}
-
-/// `agent.tool.requested@2`: the agent asked to run a tool (PreToolUse),
-/// and whether the policy let it. `tool` is the harness's own name for it;
-/// `kind` is what it does in oxplow's vocabulary
-/// (`oxplow_domain::agent::tool`), which is all core reads. v1 named the
-/// tool by Claude Code's names and one path; it upcasts by them.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct AgentToolRequestedV2 {
-    pub tool: String,
-    pub kind: crate::agent::tool::ToolKind,
-    /// The files it names, repo-relative inside the worktree.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub paths: Vec<String>,
-    /// A short summary (a truncated command, a search pattern).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub detail: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub input: Option<ContentRef>,
-    pub decision: ToolDecision,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-}
-
-/// The v2 shape of `agent.tool.requested`, as a registry entry.
-pub struct AgentToolRequestedAtV2;
-impl EventType for AgentToolRequestedAtV2 {
-    const TYPE: &'static str = "agent.tool.requested";
-    const V: u32 = 2;
-    type Payload = AgentToolRequestedV2;
-    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
-        match from_v {
-            1 => Ok(tool_v1_to_v2(payload)),
-            _ => Err(DomainError::Invalid(format!(
-                "no upcast of agent.tool.requested from v{from_v}"
-            ))),
-        }
-    }
-}
-
 /// A subagent inside an agent session, as a tool event or a subagent
 /// event names it: not a session of its own, but who in the session acted.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -1645,89 +1120,6 @@ impl EventType for AgentToolRequested {
     const TYPE: &'static str = "agent.tool.requested";
     const V: u32 = 3;
     type Payload = AgentToolRequestedV3;
-    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
-        match from_v {
-            1 => Ok(tool_v1_to_v2(payload)),
-            2 => Ok(payload),
-            _ => Err(DomainError::Invalid(format!(
-                "no upcast of agent.tool.requested from v{from_v}"
-            ))),
-        }
-    }
-}
-
-/// `agent.tool.finished@1`: a tool call returned (PostToolUse). The
-/// recorders — tool-call rows, effort claims, collection — react to this.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct AgentToolFinishedV1 {
-    pub tool: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub detail: Option<String>,
-    /// Whether it succeeded, when the harness said.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ok: Option<bool>,
-    /// A shell command's exit code.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub exit_code: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub input: Option<ContentRef>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output: Option<ContentRef>,
-}
-
-/// The v1 shape of `agent.tool.finished`, as a registry entry.
-pub struct AgentToolFinishedAtV1;
-impl EventType for AgentToolFinishedAtV1 {
-    const TYPE: &'static str = "agent.tool.finished";
-    const V: u32 = 1;
-    type Payload = AgentToolFinishedV1;
-}
-
-/// `agent.tool.finished@2`: a tool call returned (PostToolUse). The
-/// recorders — tool-call rows, effort claims, collection — react to this.
-/// As `agent.tool.requested@2`: the harness's name, oxplow's `kind`, the
-/// files it names; and a shell call's whole `command`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct AgentToolFinishedV2 {
-    pub tool: String,
-    pub kind: crate::agent::tool::ToolKind,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub paths: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub detail: Option<String>,
-    /// A shell call's command line, whole.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub command: Option<String>,
-    /// Whether it succeeded, when the harness said.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ok: Option<bool>,
-    /// A shell command's exit code.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub exit_code: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub input: Option<ContentRef>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output: Option<ContentRef>,
-}
-
-/// The v2 shape of `agent.tool.finished`, as a registry entry.
-pub struct AgentToolFinishedAtV2;
-impl EventType for AgentToolFinishedAtV2 {
-    const TYPE: &'static str = "agent.tool.finished";
-    const V: u32 = 2;
-    type Payload = AgentToolFinishedV2;
-    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
-        match from_v {
-            1 => Ok(tool_v1_to_v2(payload)),
-            _ => Err(DomainError::Invalid(format!(
-                "no upcast of agent.tool.finished from v{from_v}"
-            ))),
-        }
-    }
 }
 
 /// `agent.tool.finished@3`: a tool call returned (PostToolUse). As
@@ -1766,15 +1158,6 @@ impl EventType for AgentToolFinished {
     const TYPE: &'static str = "agent.tool.finished";
     const V: u32 = 3;
     type Payload = AgentToolFinishedV3;
-    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
-        match from_v {
-            1 => Ok(tool_v1_to_v2(payload)),
-            2 => Ok(payload),
-            _ => Err(DomainError::Invalid(format!(
-                "no upcast of agent.tool.finished from v{from_v}"
-            ))),
-        }
-    }
 }
 
 /// `agent.subagent.started@1`: a subagent of the session started.
@@ -1812,34 +1195,6 @@ impl EventType for AgentSubagentFinished {
     const TYPE: &'static str = "agent.subagent.finished";
     const V: u32 = 1;
     type Payload = AgentSubagentFinishedV1;
-}
-
-/// A v1 tool event at v2: its one `path` as `paths`, and its kind read
-/// from its tool name. v1's names were Claude Code's — the vocabulary every
-/// transport mapped onto then — so this is the one place core reads them;
-/// a v1 shell call's command was only its `detail`, so that stands in.
-fn tool_v1_to_v2(mut payload: Value) -> Value {
-    use crate::agent::tool::ToolKind;
-    let Some(obj) = payload.as_object_mut() else {
-        return payload;
-    };
-    let kind = match obj.get("tool").and_then(|t| t.as_str()).unwrap_or("") {
-        "Write" | "Edit" | "MultiEdit" | "NotebookEdit" => ToolKind::Edit,
-        "Bash" => ToolKind::Shell,
-        "Task" | "Agent" => ToolKind::Subagent,
-        "AskUserQuestion" => ToolKind::Ask,
-        "ExitPlanMode" => ToolKind::Plan,
-        "Read" => ToolKind::Read,
-        "Grep" | "Glob" | "List" => ToolKind::Search,
-        "WebFetch" | "WebSearch" => ToolKind::Fetch,
-        n if n.starts_with("mcp__") => ToolKind::Mcp,
-        _ => ToolKind::Other,
-    };
-    obj.insert("kind".into(), Value::String(kind.as_str().into()));
-    if let Some(path) = obj.remove("path") {
-        obj.insert("paths".into(), Value::Array(vec![path]));
-    }
-    payload
 }
 
 /// `agent.status.changed@1`: a thread's agent moved to another state.
@@ -2457,25 +1812,6 @@ impl EventType for LensShown {
     type Payload = LensShownV1;
 }
 
-/// `lens.kept@1`: an answer was kept — written as a private lens
-/// (`oxplow.lens.keep`, P6.C1).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct LensKeptV1 {
-    /// `answer:<id>`.
-    pub answer: String,
-    /// `lens:<extension>/<slug>`.
-    pub lens: String,
-}
-
-/// The v1 shape of `lens.kept`, as a registry entry.
-pub struct LensKeptAtV1;
-impl EventType for LensKeptAtV1 {
-    const TYPE: &'static str = "lens.kept";
-    const V: u32 = 1;
-    type Payload = LensKeptV1;
-}
-
 /// `lens.kept@2` (P11, tsk943): a lens was kept — an answer from a thread,
 /// or a spec (Explore Data's Save as Lens) — written as a private lens.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -2493,15 +1829,6 @@ impl EventType for LensKept {
     const TYPE: &'static str = "lens.kept";
     const V: u32 = 2;
     type Payload = LensKeptV2;
-    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
-        match from_v {
-            // v1 always named its answer; v2 may.
-            1 => Ok(payload),
-            _ => Err(DomainError::Invalid(format!(
-                "no upcast of lens.kept from v{from_v}"
-            ))),
-        }
-    }
 }
 
 /// `ui.op_failed@1` (tsk1072): an operation the person started in the
@@ -2685,19 +2012,13 @@ mod tests {
             vec![
                 ("agent.prompt.submitted", 1),
                 ("agent.session.ended", 1),
-                ("agent.session.started", 1),
                 ("agent.session.started", 2),
                 ("agent.status.changed", 1),
                 ("agent.subagent.finished", 1),
                 ("agent.subagent.started", 1),
                 ("agent.tokens.reported", 1),
-                ("agent.tool.finished", 1),
-                ("agent.tool.finished", 2),
                 ("agent.tool.finished", 3),
-                ("agent.tool.requested", 1),
-                ("agent.tool.requested", 2),
                 ("agent.tool.requested", 3),
-                ("agent.turn.ended", 1),
                 ("agent.turn.ended", 2),
                 ("agent.turn.started", 1),
                 ("capability.switched", 1),
@@ -2705,18 +2026,12 @@ mod tests {
                 ("collector.synced", 1),
                 ("command.approved", 1),
                 ("command.declined", 1),
-                ("command.executed", 1),
-                ("command.executed", 2),
                 ("command.executed", 3),
-                ("command.proposed", 1),
                 ("command.proposed", 2),
                 ("config.changed", 2),
                 ("contribution.disabled", 1),
                 ("contribution.enabled", 1),
                 ("contribution.job.completed", 1),
-                ("effect.result", 1),
-                ("effect.result", 2),
-                ("effect.result", 3),
                 ("effect.result", 4),
                 ("effort.claim_verified", 1),
                 ("effort.closed", 2),
@@ -2735,10 +2050,8 @@ mod tests {
                 ("knowledge.page.deleted", 1),
                 ("knowledge.page.recorded", 1),
                 ("knowledge.page.written", 1),
-                ("lens.kept", 1),
                 ("lens.kept", 2),
                 ("lens.shown", 1),
-                ("snapshot.taken", 1),
                 ("snapshot.taken", 2),
                 ("test.coverage.recorded", 1),
                 ("test.run.recorded", 2),
@@ -2759,93 +2072,6 @@ mod tests {
         assert_eq!(r.latest("work_item.created"), Some(2));
         assert_eq!(r.latest("agent.turn.ended"), Some(2));
         assert_eq!(r.owner("config.changed", 2), Some(None));
-    }
-
-    /// P9.D4: `effect.result@3` says which attempt it was and what
-    /// started it; @4 (P10) can say `auto`. A v2 result reads as the live
-    /// consumer's first attempt; a v1 result goes through v2's shape on
-    /// the way; a v3 result keeps its attempt and origin.
-    #[test]
-    fn effect_result_v2_and_v1_upcast_to_v4_as_a_live_first_attempt() {
-        let r = crate::vocabulary::Vocabulary::core();
-        assert_eq!(r.latest("effect.result"), Some(4));
-        let v2 = json!({
-            "effect": "acme/note", "event": "event:e1", "outcome": "failed",
-            "reason": "interrupted", "detail": null
-        });
-        let (v, up) = r.upcast_to_latest("effect.result", 2, v2).unwrap();
-        assert_eq!(v, 4);
-        let typed: EffectResultV4 = serde_json::from_value(up).unwrap();
-        assert_eq!(
-            (
-                typed.attempt,
-                typed.origin,
-                typed.outcome,
-                typed.reason.as_deref()
-            ),
-            (
-                1,
-                EffectOrigin::Live,
-                EffectOutcome::Failed,
-                Some("interrupted")
-            )
-        );
-        let v1 = json!({ "effect": "git.push", "target": "branch:main", "ok": true, "detail": {} });
-        let (v, up) = r.upcast_to_latest("effect.result", 1, v1).unwrap();
-        assert_eq!(v, 4);
-        let typed: EffectResultV4 = serde_json::from_value(up).unwrap();
-        assert_eq!(
-            (typed.attempt, typed.origin, typed.outcome),
-            (1, EffectOrigin::Live, EffectOutcome::Ok)
-        );
-        assert_eq!(typed.detail, json!({ "target": "branch:main" }));
-        // A v3 result keeps its attempt and origin.
-        let v3 = json!({
-            "effect": "acme/note", "event": "event:e1", "outcome": "ok",
-            "detail": null, "attempt": 2, "origin": "retry"
-        });
-        let (v, up) = r.upcast_to_latest("effect.result", 3, v3).unwrap();
-        assert_eq!(v, 4);
-        let typed: EffectResultV4 = serde_json::from_value(up).unwrap();
-        assert_eq!((typed.attempt, typed.origin), (2, EffectOrigin::Retry));
-        assert!(r.upcast_to_latest("effect.result", 5, json!({})).is_err());
-    }
-
-    /// P3.1 (tsk471): the first versioned type. A `turn.ended` written at
-    /// v1 reads at v2 with no transcript and no usage; the v2 producer's
-    /// shape is what `Envelope::typed` emits.
-    #[test]
-    fn turn_ended_v1_upcasts_to_v2_with_nothing_added() {
-        let r = crate::vocabulary::Vocabulary::core();
-        let v1 = json!({ "turn": "turn:trn12", "thread": "thread:thr3", "outcome": "completed" });
-        let (v, up) = r
-            .upcast_to_latest("agent.turn.ended", 1, v1.clone())
-            .unwrap();
-        assert_eq!(v, 2);
-        assert_eq!(up, v1, "optional fields are absent, not null");
-        let typed: AgentTurnEndedV2 = serde_json::from_value(up).unwrap();
-        assert_eq!(typed.transcript_path, None);
-        assert_eq!(typed.usage, None);
-        let env = Envelope::typed::<AgentTurnEnded>(
-            "test",
-            &AgentTurnEndedV2 {
-                turn: "turn:trn12".into(),
-                thread: "thread:thr3".into(),
-                outcome: crate::hook::TurnOutcome::Completed,
-                transcript_path: Some("/tmp/t.jsonl".into()),
-                usage: Some(TurnUsage {
-                    input: 10,
-                    output: 4,
-                    cache_write: 0,
-                    cache_read: 6,
-                    model: Some("claude".into()),
-                }),
-            },
-        );
-        assert_eq!(env.v, 2);
-        r.validate_envelope(&env).unwrap();
-        // v1 stays a registered, validating shape for the rows already written.
-        r.validate("agent.turn.ended", 1, &v1).unwrap();
     }
 
     #[test]
@@ -3042,39 +2268,5 @@ mod tests {
         assert!(r.upcast_to_latest("acme.thing", 3, json!({})).is_err());
         // The default upcast refuses: a type that bumps V must define one.
         assert!(WorkItemStateChanged::upcast(0, json!({})).is_err());
-    }
-
-    /// A v1 tool event reads at the newest version with its kind (from
-    /// the Claude Code name v1 carried) and its one path as `paths`; a v2
-    /// one reads as it is, with no subagent.
-    #[test]
-    fn a_v1_tool_event_upcasts_with_its_kind_and_paths() {
-        let r = EventSchemaRegistry::core();
-        let (v, up) = r
-            .upcast_to_latest(
-                "agent.tool.finished",
-                1,
-                json!({"tool": "Bash", "detail": "cargo test", "exit_code": 0, "ok": true}),
-            )
-            .unwrap();
-        assert_eq!(v, 3);
-        assert_eq!(up["kind"], "shell");
-        let v2 = json!({"tool": "Bash", "kind": "shell", "command": "ls", "ok": true});
-        let (v, up) = r
-            .upcast_to_latest("agent.tool.finished", 2, v2.clone())
-            .unwrap();
-        assert_eq!((v, up), (3, v2));
-        let (_, up) = r
-            .upcast_to_latest(
-                "agent.tool.requested",
-                1,
-                json!({"tool": "MultiEdit", "path": "src/a.rs", "decision": "allowed"}),
-            )
-            .unwrap();
-        assert_eq!(up["kind"], "edit");
-        assert_eq!(up["paths"], json!(["src/a.rs"]));
-        assert!(up.get("path").is_none());
-        let typed: AgentToolRequestedV2 = serde_json::from_value(up).unwrap();
-        assert_eq!(typed.kind, crate::agent::tool::ToolKind::Edit);
     }
 }

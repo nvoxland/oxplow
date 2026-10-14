@@ -1,8 +1,0 @@
-{
-  "command": "oxplow.config.set",
-  "actor_kind": "effect",
-  "actor_id": "acme/notify",
-  "outcome": "ok",
-  "audit_id": 12,
-  "undoable": true
-}

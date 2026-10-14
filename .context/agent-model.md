@@ -390,12 +390,12 @@ its outcome (`ok`, `exit_code`) and an `ask`'s `question`.
   (`plan`), effort claims (`edit`), test-run collection (`shell`, its
   `command` and `exit_code`), a turn's writing calls
   (`thread.checkpoint`, by `v_tool_call.kind`), `v_struggle` and
-  `v_context_read`, and the events: `agent.tool.requested@2` /
-  `agent.tool.finished@2` carry `tool` (the harness's name), `kind` and
-  `paths`; a v1 event upcasts its kind from the Claude Code name it
-  carried — the one place core keeps those names
-  (`source_guards::only_harness_implementations_name_a_harness` pins it,
-  and its patterns refuse a harness's tool names anywhere else in core).
+  `v_context_read`, and the events: `agent.tool.requested@3` /
+  `agent.tool.finished@3` carry `tool` (the harness's name), `kind` and
+  `paths` (V70 rewrote the v1 events, which named only Claude Code's
+  tool, with their kinds). Core names no harness's tools
+  (`source_guards::only_harness_implementations_name_a_harness` refuses
+  them outside the harness crates).
 
 ## Caller identity
 
@@ -2072,7 +2072,7 @@ when takes happen.
   starts before the per-stream take lock, so waiting behind another take
   counts.
 - **Turn events.** `agent_turn` open/close log `agent.turn.started@1` /
-  `agent.turn.ended@1 { outcome: completed | interrupted | restart }` in
+  `agent.turn.ended@2 { outcome: completed | interrupted | restart }` in
   the same transaction, anchored to turn, thread and stream.
 - **Quiet period (P2.4).** Human edits between turns get a snapshot of
   their own: each fs-watch change arms a deadline (`DEFAULT_QUIET_PERIOD`,

@@ -524,14 +524,13 @@ commands on that stream only (`Actor::confined_to_own_stream`; an event
 with no stream reaches no worktree). Its source is
 `effect:<extension>/<id>`, and only a
 `Human` approves or declines a proposal. The audit and events say so:
-`actor_kind = 'effect'` (V147 rebuilds `command_audit`'s CHECK, keeping
-proposals' `audit_id`), carried by `command.executed@2` and
-`command.proposed@2` — v1 plus `effect` in `ActorKind`, upcast as is; the
-v1 schemas keep the frozen `ActorKindV1`; v2 schemas keep `ActorKindV2`.
-Current `command.executed@3` adds the dedicated `job` actor kind. An effect's reaction runs
+`actor_kind = 'effect'`, carried by `command.executed@3` (whose
+`ActorKind` also has `job`) and `command.proposed@2` (whose `ActorKindV2`
+has no `job`: a job can't leave a proposal). The log holds only these
+versions (V70 rewrote older rows). An effect's reaction runs
 through `CommandBus::run_effect` (P8.D10) with `RunOrigin::Effect`, the
 fourth origin beside a call, an undo and an approval: like those, its
-record (`effect_run` + `effect.result@2`) lands in the run's transaction,
+record (`effect_run` + `effect.result@4`) lands in the run's transaction,
 or is claimed before a step outside it (`claim`), and its
 `command.executed` is caused by the triggering event (extensions.md
 "Effects").
@@ -663,7 +662,7 @@ refused (`CommandBus::unconfirmed`):
    ([data-model.md](./data-model.md); `proposal_key` supersedes a pending
    proposal for the same config key or the same command and input —
    whichever thread proposed it — and `insert_tx` returns which) and
-   logs `command.proposed@1 { proposal, command, actor_kind, actor_id?,
+   logs `command.proposed@2 { proposal, command, actor_kind, actor_id?,
    destructive, supersedes? }` with the actor's anchors, `supersedes`
    naming the replaced proposals so the replacement is never silent.
 3. **`Proposed { proposal: "proposal:N", preview, supersedes }`** — IPC
