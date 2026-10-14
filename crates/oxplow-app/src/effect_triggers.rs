@@ -290,6 +290,9 @@ pub(crate) enum Reacted {
     Skipped(String),
     /// A command it composed asks a person: recorded with its proposal.
     Proposed,
+    /// It was stopped (cancelled, or revoked mid-run): the attempt is
+    /// recorded, and it says nothing of the effect's health.
+    Stopped(String),
     /// It failed, and will be sent again by itself: not counted yet.
     Retrying(String),
     /// A scheduled automatic retry that wasn't sent (tsk887): the failed
@@ -314,7 +317,11 @@ pub(crate) async fn count(
         Reacted::Failed(reason) | Reacted::NotResent(reason) => {
             health.failed(&key, reason).await.map(|_| ())
         }
-        Reacted::Skipped(_) | Reacted::Proposed | Reacted::Retrying(_) | Reacted::Nothing => Ok(()),
+        Reacted::Skipped(_)
+        | Reacted::Proposed
+        | Reacted::Stopped(_)
+        | Reacted::Retrying(_)
+        | Reacted::Nothing => Ok(()),
     };
     if let Err(error) = counted {
         tracing::warn!(effect = %decl.name(), %error, "recording the effect's health failed");
@@ -618,16 +625,27 @@ pub(crate) async fn run_reaction(
     // A failure counts once: not when the attempt was already recorded
     // (its run lost a race to another delivery, or finished it failed).
     let failed = |reason: String| async {
+        // Stopped (a person's cancel, or its approval or extension revoked):
+        // recorded `cancelled`, and no failure of the effect's own.
+        let stopped = run.cancel().is_cancelled();
         record_run(
             svc,
             &run,
-            oxplow_domain::run::Outcome::Failed,
+            if stopped {
+                oxplow_domain::run::Outcome::Cancelled
+            } else {
+                oxplow_domain::run::Outcome::Failed
+            },
             Some(&reason),
         )
         .await;
         Ok(
             if finish(svc, &key, ended(RunState::Failed, reason.clone())).await? {
-                Reacted::Failed(reason)
+                if stopped {
+                    Reacted::Stopped(reason)
+                } else {
+                    Reacted::Failed(reason)
+                }
             } else {
                 Reacted::Nothing
             },
@@ -1018,6 +1036,8 @@ pub(crate) async fn run_script(
             .with_ai_source(layer.ai_source())
             .with_configuration_source(layer.configuration_source(), &runtime);
         let reaction = effects::run_script(&script, event, given, &mut calls)?;
+        // Publication: a revocation during the script is a stopped run, not a reaction.
+        composing.check_authority()?;
         Ok((reaction, composing.trace().summary()))
     })
     .await
@@ -1916,6 +1936,53 @@ mod tests {
         let again = log(svc, state_changed(&fx, CanonicalState::Done)).await;
         consumer.handle(&again).await.unwrap();
         assert_eq!(title(&fx).await, format!("{before} (done)"));
+    }
+
+    /// A script that computes for a while, with no host call to notice a
+    /// revocation by.
+    const SPIN: &str = "def transform(x):\n    n = 0\n    for i in range(700):\n        for j in range(700):\n            n += 1\n    return {\"skip\": \"spun \" + str(n)}\n";
+
+    /// An approval revoked while the effect's script runs ends the run
+    /// `cancelled`, not `failed`, and it doesn't count toward disabling.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_revoked_effect_run_is_cancelled_not_failed() {
+        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let svc = &fx.svc;
+        extension(svc, MARK_DONE, &[("mark.star", SPIN)]).await;
+        approve(svc).await;
+        let consumer = Arc::new(EffectTriggers::new(Arc::downgrade(svc)));
+        let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let running = {
+            let (consumer, ev) = (consumer.clone(), ev.clone());
+            tokio::spawn(async move { consumer.handle(&ev).await })
+        };
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let (ext, decl) = effects(svc).into_iter().next().unwrap();
+        let key = effects::effect_program(&ext, &decl).key();
+        assert!(svc.approvals.revoke(&key).unwrap());
+        running.await.unwrap().unwrap();
+        assert_eq!(
+            rows(
+                svc,
+                "SELECT outcome FROM v_extension_run WHERE contribution = 'effect:acme/mark-done'"
+            )
+            .await,
+            json!([["cancelled"]])
+        );
+        assert_eq!(
+            rows(svc, "SELECT state FROM v_effect_run").await,
+            json!([["failed"]]),
+            "the attempt records why it stopped"
+        );
+        assert_eq!(
+            rows(
+                svc,
+                "SELECT consecutive_failures FROM v_contribution_health WHERE extension = 'acme'"
+            )
+            .await,
+            json!([]),
+            "a stopped run says nothing of the effect's health"
+        );
     }
 
     /// Skipped and proposed reactions aren't failures.

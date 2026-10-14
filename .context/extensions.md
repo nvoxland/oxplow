@@ -2424,7 +2424,9 @@ its scope trace.
   that ends `failed` counts toward the contribution's failure policy (three in
   a row disable it; `v_contribution_health`); one that ends `cancelled` — a
   person's cancel, or its extension changing or being revoked mid-run — does
-  not. What a *refused* run is: `denied` (a caller or grant the contract
+  not (an effect's script is checked once more when it returns, so a revocation
+  during it is a `cancelled` run and a `failed` attempt that doesn't count,
+  `Reacted::Stopped`). What a *refused* run is: `denied` (a caller or grant the contract
   rejects) is never retried; a *failed* effect attempt is sent again by itself
   only when it was `Unavailable`, every step it composed goes to a provider
   keeping `idempotent_writes`, and it has retries left (otherwise a person
