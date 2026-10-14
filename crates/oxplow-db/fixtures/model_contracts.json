@@ -9846,7 +9846,12 @@
         {
           "name": "after",
           "type": "TEXT",
-          "doc": "What it runs after, as the manifest names them (JSON array)."
+          "doc": "What an effect or a collector runs after when one event reaches it and them (JSON array of refs: `effect:<ext>/<id>`, `collector:<ext>/<id>`, `consumer:<name>`), as the catalog resolved its `after:`."
+        },
+        {
+          "name": "order_level",
+          "type": "INTEGER",
+          "doc": "Where an effect or a collector runs among what one event reaches: 0 first, each after every contribution it names. NULL for a kind that isn't ordered."
         },
         {
           "name": "global_name",

@@ -1139,7 +1139,8 @@
     - { name: "contract_version", type: "INTEGER", doc: "The contract's own version (a model's, an event type's), when it has one." }
     - { name: "runs_on", type: "TEXT", doc: "How it comes to run, as JSON: `{on: events, types}`, `{on: schedule, every}`, `{on: run}`, `{on: call}`, `{on: query}`, `{on: mount}`, `{on: agent}`, `{on: declared}`." }
     - { name: "needs", type: "TEXT", doc: "What it requires (capabilities, features, scopes), as a JSON array. Never what a person granted." }
-    - { name: "after", type: "TEXT", doc: "What it runs after, as the manifest names them (JSON array)." }
+    - { name: "after", type: "TEXT", doc: "What an effect or a collector runs after when one event reaches it and them (JSON array of refs: `effect:<ext>/<id>`, `collector:<ext>/<id>`, `consumer:<name>`), as the catalog resolved its `after:`." }
+    - { name: "order_level", type: "INTEGER", doc: "Where an effect or a collector runs among what one event reaches: 0 first, each after every contribution it names. NULL for a kind that isn't ordered." }
     - { name: "global_name", type: "TEXT", doc: "The name it holds in a space every extension shares (a metric key, a skill name, `<capability>/<id>`); NULL when none." }
     - { name: "file", type: "TEXT", doc: "The manifest it's declared in." }
     - { name: "line", type: "INTEGER", doc: "Its line there, when the kind tracks lines." }

@@ -32,7 +32,9 @@ use oxplow_domain::{DomainError, StoredEvent};
 
 use crate::collector_runner::{self, Collectors, EventRun};
 use crate::event_pump::AsyncEventConsumer;
+use crate::extensions::descriptors::{gates, placement};
 use crate::Services;
+use oxplow_domain::contribution::ContributionKind;
 
 /// The consumer's name: its checkpoint and dead letters.
 pub const NAME: &str = "collector.triggers";
@@ -91,12 +93,17 @@ pub fn payload_matches(
 /// triggers over one corpus: a snapshot's files (its whole tree for a
 /// whole-tree collector, which alone runs on a take that recorded none),
 /// an effort's end snapshot, or else the stream's latest snapshot.
-/// Only those that run at once: a collector whose pacing defers this
-/// event's type waits for `crate::pacing`.
-async fn run_fact_collectors(svc: &Services, event: Arc<StoredEvent>) -> Result<(), DomainError> {
+/// Only those `select` picks: one level of the compiled order, of the ones
+/// that run at once (a collector whose pacing defers this event's type
+/// waits for `crate::pacing`).
+async fn run_fact_collectors(
+    svc: &Services,
+    event: Arc<StoredEvent>,
+    select: &(dyn Fn(&crate::metrics_service::FactCollector) -> bool + Sync),
+) -> Result<(), DomainError> {
     let anchors = &event.envelope.anchors;
     let event_type = event.envelope.event_type.clone();
-    let now = |c: &crate::metrics_service::FactCollector| !c.defers(&event_type);
+    let now = |c: &crate::metrics_service::FactCollector| !c.defers(&event_type) && select(c);
     match event_type.as_str() {
         "snapshot.taken" => {
             if let (Some(stream), Some(snapshot)) = (anchors.stream_id, anchors.snapshot_id) {
@@ -142,47 +149,82 @@ impl CollectorTriggers {
             .collect()
     }
 
-    /// Every `on:` collector's trigger and `after:`, fact and entity alike.
-    fn triggers(svc: &Services) -> Vec<(String, Trigger, Vec<String>)> {
-        let entities = Self::entity_collectors(svc)
-            .into_iter()
-            .map(|(owner, s)| (format!("{owner}/{}", s.id), s.trigger, s.after));
+    /// Every `on:` collector's trigger, level and what it waits on, fact
+    /// and entity alike, by `(owner, id)`.
+    fn triggers(svc: &Services) -> Vec<Triggered> {
+        let load = svc.extension_catalog.get(&svc.layout.project_dir);
+        let place = |owner: &str, id: &str| {
+            load.iter()
+                .find(|e| e.name == owner)
+                .map(|e| placement(e, ContributionKind::Collector, id))
+                .unwrap_or_default()
+        };
+        let entities = Self::entity_collectors(svc).into_iter().map(|(owner, s)| {
+            let (level, after) = place(&owner, &s.id);
+            Triggered {
+                owner,
+                id: s.id,
+                trigger: s.trigger,
+                level,
+                after,
+            }
+        });
         let facts = svc
             .metrics
             .fact_collectors()
             .into_iter()
             .filter(|c| matches!(c.trigger, Trigger::On { .. }))
-            .map(|c| (format!("{}/{}", c.owner, c.key), c.trigger, c.after));
+            .map(|c| {
+                let (level, after) = place(&c.owner, &c.key);
+                Triggered {
+                    owner: c.owner,
+                    id: c.key,
+                    trigger: c.trigger,
+                    level,
+                    after,
+                }
+            });
         entities.chain(facts).collect()
     }
 
-    /// The `after:` consumers of the collectors `event_type` triggers (all
-    /// of them for `None`), limited to consumers the pump has.
+    /// The consumers the collectors `event_type` triggers wait on (all of
+    /// them for `None`): the core consumers their `after:` names, and
+    /// `effect.triggers` when one runs after an effect.
     fn predecessors(&self, event_type: Option<&str>) -> Vec<String> {
         let Some(svc) = self.services.upgrade() else {
             return Vec::new();
         };
-        let known = svc.event_pump.consumer_names();
-        let mut after: Vec<String> = Vec::new();
-        for (collector, trigger, names) in Self::triggers(&svc) {
-            let triggered = match (event_type, &trigger) {
+        // Load checked every name against core's consumers; one this pump
+        // doesn't run (a test's partial pump) has nothing to wait for.
+        let running = svc.event_pump.consumer_names();
+        let mut out: Vec<String> = Vec::new();
+        for t in Self::triggers(&svc) {
+            let triggered = match (event_type, &t.trigger) {
                 (None, _) => true,
-                (Some(t), Trigger::On { events, .. }) => events.iter().any(|e| e == t),
+                (Some(e), Trigger::On { events, .. }) => events.iter().any(|x| x == e),
                 (Some(_), _) => false,
             };
             if !triggered {
                 continue;
             }
-            for name in names {
-                if !known.contains(&name.as_str()) {
-                    tracing::warn!(%collector, consumer = %name, "`after` names no consumer; ignored");
-                } else if !after.contains(&name) {
-                    after.push(name);
+            for gate in gates(ContributionKind::Collector, &t.after) {
+                if running.contains(&gate.as_str()) && !out.contains(&gate) {
+                    out.push(gate);
                 }
             }
         }
-        after
+        out
     }
+}
+
+/// An `on:` collector as the consumer schedules it.
+struct Triggered {
+    owner: String,
+    id: String,
+    trigger: Trigger,
+    /// Its compiled level: it runs after every collector of a lower one.
+    level: u32,
+    after: Vec<oxplow_domain::ordering::After>,
 }
 
 #[async_trait]
@@ -210,8 +252,8 @@ impl AsyncEventConsumer for CollectorTriggers {
         let Some(svc) = self.services.upgrade() else {
             return false;
         };
-        Self::triggers(&svc).iter().any(|(_, trigger, _)| {
-            matches!(trigger, Trigger::On { events, .. } if events.iter().any(|t| t == event_type))
+        Self::triggers(&svc).iter().any(|t| {
+            matches!(&t.trigger, Trigger::On { events, .. } if events.iter().any(|e| e == event_type))
         })
     }
 
@@ -235,23 +277,29 @@ impl CollectorTriggers {
         let event = Arc::new(event.clone());
         let event_type = event.envelope.event_type.as_str();
         let now = oxplow_domain::Timestamp::now().to_text();
+        let level_of: std::collections::BTreeMap<(String, String), u32> = Self::triggers(svc)
+            .into_iter()
+            .map(|t| ((t.owner, t.id), t.level))
+            .collect();
+        let level = |owner: &str, id: &str| {
+            level_of
+                .get(&(owner.to_string(), id.to_string()))
+                .copied()
+                .unwrap_or(0)
+        };
         let facts: Vec<_> = svc
             .metrics
             .fact_collectors()
             .into_iter()
             .filter(|c| c.runs_on(event_type) && matches_where(&c.trigger, &event))
             .collect();
-        if facts.iter().any(|c| !c.defers(event_type)) {
-            run_fact_collectors(svc, event.clone()).await?;
-        }
         // The paced ones wait, recorded pending (`crate::pacing`).
         for c in facts.iter().filter(|c| c.defers(event_type)) {
             svc.collector_store
                 .mark_pending(&c.owner, &c.key, event.seq, &now)
                 .await?;
         }
-        let root = svc.layout.project_dir.clone();
-        let ctx = Collectors::of(svc, &root);
+        let mut entities = Vec::new();
         for (owner, spec) in Self::entity_collectors(svc) {
             if !triggered_by(&spec, &event) {
                 continue;
@@ -262,14 +310,42 @@ impl CollectorTriggers {
                     .await?;
                 continue;
             }
-            match collector_runner::run_for_event(&ctx, &owner, &spec.id, event.clone()).await? {
-                EventRun::Ran(Err(error)) => {
-                    tracing::warn!(collector = %format!("{owner}/{}", spec.id), %error, "collector failed");
+            entities.push((owner, spec));
+        }
+        // Level by level, each after every collector it names: a level's
+        // fact collectors over one corpus, then its entity collectors.
+        let mut levels: Vec<u32> = facts
+            .iter()
+            .filter(|c| !c.defers(event_type))
+            .map(|c| level(&c.owner, &c.key))
+            .chain(entities.iter().map(|(o, s)| level(o, &s.id)))
+            .collect();
+        levels.sort();
+        levels.dedup();
+        let root = svc.layout.project_dir.clone();
+        let ctx = Collectors::of(svc, &root);
+        for at in levels {
+            if facts
+                .iter()
+                .any(|c| !c.defers(event_type) && level(&c.owner, &c.key) == at)
+            {
+                run_fact_collectors(svc, event.clone(), &|c| level(&c.owner, &c.key) == at).await?;
+            }
+            let mut here: Vec<&(String, CollectorSpec)> = entities
+                .iter()
+                .filter(|(o, s)| level(o, &s.id) == at)
+                .collect();
+            here.sort_by(|a, b| (&a.0, &a.1.id).cmp(&(&b.0, &b.1.id)));
+            for (owner, spec) in here {
+                match collector_runner::run_for_event(&ctx, owner, &spec.id, event.clone()).await? {
+                    EventRun::Ran(Err(error)) => {
+                        tracing::warn!(collector = %format!("{owner}/{}", spec.id), %error, "collector failed");
+                    }
+                    EventRun::Guarded => {
+                        tracing::warn!(collector = %format!("{owner}/{}", spec.id), "collector skipped by the loop guard");
+                    }
+                    EventRun::Ran(Ok(_)) | EventRun::Skipped | EventRun::NeedsApproval => {}
                 }
-                EventRun::Guarded => {
-                    tracing::warn!(collector = %format!("{owner}/{}", spec.id), "collector skipped by the loop guard");
-                }
-                EventRun::Ran(Ok(_)) | EventRun::Skipped | EventRun::NeedsApproval => {}
             }
         }
         Ok(())
@@ -571,18 +647,15 @@ mod tests {
         );
     }
 
-    /// `after()` is the collectors' `after:` lists, limited to consumers
-    /// the pump has; a collector's own type never triggers one.
+    /// `after()` is the core consumers the collectors' `after:` lists
+    /// name; a collector's own type never triggers one.
     #[tokio::test]
     async fn after_and_handles_follow_the_declarations() {
         let fx = crate::test_fixtures::services_with_effort().await;
         crate::effort_reactors::register(&fx.svc);
         extension(
             &fx.svc,
-            &on_claims("").replace(
-                "    input:",
-                "    after: [effort.evidence, no.such_consumer]\n    input:",
-            ),
+            &on_claims("").replace("    input:", "    after: [effort.evidence]\n    input:"),
             &[("seen.star", SEEN)],
         )
         .await;
@@ -605,6 +678,69 @@ mod tests {
         assert!(consumer.handles("snapshot.taken"));
         assert!(!consumer.handles("work_item.created"));
         assert!(!consumer.handles("collector.synced"));
+    }
+
+    /// On one event, entity collectors run in their compiled order: each
+    /// after the collectors its `after:` names.
+    #[tokio::test]
+    async fn collectors_run_after_the_collectors_they_name() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let one = |id: &str, after: &str| {
+            on_claims("")
+                .replace("  - id: seen\n", &format!("  - id: {id}\n"))
+                .replace("name: seen,", &format!("name: {id},"))
+                .replace("entry: seen.star", &format!("entry: {id}.star"))
+                .replace("    input:", &format!("    after: [{after}]\n    input:"))
+        };
+        extension(
+            &fx.svc,
+            &format!("{}{}", one("later", "sooner"), one("sooner", "")),
+            &[
+                ("later.star", &SEEN.replace("\"seen\"", "\"later\"")),
+                ("sooner.star", &SEEN.replace("\"seen\"", "\"sooner\"")),
+            ],
+        )
+        .await;
+        let ev = log(&fx.svc, fx.effort, "e").await;
+        CollectorTriggers::new(Arc::downgrade(&fx.svc))
+            .handle(&ev)
+            .await
+            .unwrap();
+        assert_eq!(
+            rows(
+                &fx.svc,
+                "SELECT json_extract(payload, '$.collector') FROM v_event WHERE type = 'collector.synced' AND json_extract(payload, '$.collector') LIKE 'collector:work/%' ORDER BY seq",
+            )
+            .await,
+            json!([["collector:work/sooner"], ["collector:work/later"]])
+        );
+    }
+
+    /// A collector naming nothing in `after:` isn't loaded: the order
+    /// can't be honored.
+    #[tokio::test]
+    async fn a_collector_after_nothing_is_a_load_error() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        extension(
+            &fx.svc,
+            &on_claims("").replace("    input:", "    after: [no.such_consumer]\n    input:"),
+            &[("seen.star", SEEN)],
+        )
+        .await;
+        // Held back from the active catalog; the load says why.
+        let load = fx
+            .svc
+            .extension_catalog
+            .snapshot(&fx.svc.layout.project_dir);
+        let work = load.extensions().iter().find(|e| e.name == "work").unwrap();
+        assert!(work.collectors.is_empty());
+        assert!(
+            work.errors
+                .iter()
+                .any(|e| e.contains("`no.such_consumer` is none of")),
+            "{:?}",
+            work.errors
+        );
     }
 
     /// `acme-pr`: it declares `acme_pr.merged`, `.ping` and `.pong`

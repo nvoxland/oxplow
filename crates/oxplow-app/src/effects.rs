@@ -11,7 +11,7 @@
 //!     where: { to: done }        # optional: payload fields equal to these
 //!     needs: [sql.read]              # the scopes its script calls
 //!     entry: effects/announce.star   # transform({event}) → {commands, events?} | {skip}
-//!     after: [page_ref.work_item]    # optional: consumers it waits for
+//!     after: [page_ref.work_item]    # optional: what it runs after on one event
 //! ```
 //!
 //! Nothing runs until a person approves the effect on this machine
@@ -49,7 +49,8 @@ pub struct EffectDecl {
     pub entry: String,
     /// Its source.
     pub script: String,
-    /// Consumers it waits for on each event.
+    /// What it runs after on one event, as written (resolved to refs on
+    /// its descriptor; `extensions.md` "Ordering").
     pub after: Vec<String>,
     /// `file:line` of the declaration.
     pub declared_at: String,

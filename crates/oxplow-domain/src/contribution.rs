@@ -604,8 +604,15 @@ pub struct Descriptor {
     /// What it requires: capabilities, features or scopes
     /// (`capability::check_need`'s forms). Never what it was granted.
     pub needs: Vec<String>,
-    /// Contributions it runs after (by alias, as the manifest names them).
+    /// What it runs after when an event reaches it and them (an effect's
+    /// or a collector's `after:`), as refs once the catalog resolved them
+    /// (`oxplow_domain::ordering`): `effect:<ext>/<id>`,
+    /// `collector:<ext>/<id>` or `consumer:<name>`.
     pub after: Vec<String>,
+    /// Where it runs among the effects and collectors one event reaches:
+    /// 0 first, each after every contribution it names. `None` for a kind
+    /// that isn't ordered.
+    pub order_level: Option<u32>,
     /// The name it takes in a space extensions share (a metric key, an
     /// event type, a skill name, `<capability>/<id>`); two contributions
     /// of a kind that doesn't share names can't hold the same one.
@@ -624,6 +631,7 @@ impl Descriptor {
             trigger,
             needs: Vec::new(),
             after: Vec::new(),
+            order_level: None,
             global: None,
             source,
         }

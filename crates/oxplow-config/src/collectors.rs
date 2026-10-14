@@ -365,8 +365,9 @@ pub struct CollectorSpec {
     /// For `read`: the provider collector it runs.
     pub provider: Option<ProviderRead>,
     pub trigger: Trigger,
-    /// With an `on:` trigger: the pump consumers that must have handled
-    /// the event first (`change.analyze`).
+    /// With an `on:` trigger: what it runs after on one event — an effect,
+    /// a collector or a core consumer (`change.analyze`), as written; the
+    /// catalog resolves it to refs.
     pub after: Vec<String>,
     /// A script's input query: read-only SQL over the semantic layer,
     /// handed over as `input.rows`. `:stream_id`, `:snapshot_id`,

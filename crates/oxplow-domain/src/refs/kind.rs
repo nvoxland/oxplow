@@ -224,6 +224,9 @@ pub const PROPOSAL: &str = "proposal";
 pub const CLAIM: &str = "claim";
 pub const DECISION: &str = "decision";
 pub const COLLECTOR: &str = "collector";
+/// One of core's event consumers (`consumer:change.analyze`): what an
+/// `after:` may name beside an effect or a collector.
+pub const CONSUMER: &str = crate::ordering::CONSUMER;
 pub const JOB_RUN: &str = "job_run";
 
 /// A repo-relative path: no leading `/`, no `//`, no newline.
@@ -278,6 +281,7 @@ pub fn core_kinds() -> KindRegistry {
         // One run of a declared job (`v_job_run.id`); the job itself is
         // the contribution `job:<extension>/<id>`.
         KindSpec::new(JOB_RUN, r"^[0-9a-f-]{36}$"),
+        KindSpec::new(CONSUMER, r"^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$"),
     ];
     for spec in specs {
         reg.register(spec.expect("core kind spec is valid"))

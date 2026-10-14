@@ -291,7 +291,225 @@ pub fn check_catalog(exts: &mut [Extension]) -> Registry {
             remove(ext, &c);
         }
     }
+    order_catalog(exts, crate::event_pump::CORE_CONSUMERS);
     registry
+}
+
+/// Whether contribution `d` is ordered: effects and collectors, the two
+/// kinds one event runs several of.
+fn ordered(d: &Descriptor) -> bool {
+    matches!(
+        d.id.kind,
+        ContributionKind::Effect | ContributionKind::Collector
+    )
+}
+
+/// Where `ext`'s effect or collector `local` runs among what one event
+/// reaches: its level and what it waits on, as the catalog compiled them.
+pub fn placement(
+    ext: &Extension,
+    kind: ContributionKind,
+    local: &str,
+) -> (u32, Vec<oxplow_domain::ordering::After>) {
+    ext.contributions
+        .iter()
+        .find(|d| d.id.kind == kind && d.id.local == local)
+        .map(|d| {
+            (
+                d.order_level.unwrap_or(0),
+                d.after
+                    .iter()
+                    .filter_map(|a| oxplow_domain::ordering::After::parse(a).ok())
+                    .collect(),
+            )
+        })
+        .unwrap_or_default()
+}
+
+/// The pump consumers a contribution of `kind` waiting on `after` makes
+/// its consumer wait on: a core consumer by name, the other kind's
+/// consumer for a contribution of the other kind. A target of its own kind
+/// runs earlier in the same delivery.
+pub fn gates(kind: ContributionKind, after: &[oxplow_domain::ordering::After]) -> Vec<String> {
+    use oxplow_domain::ordering::After;
+    let mut out: Vec<String> = Vec::new();
+    for a in after {
+        let gate = match a {
+            After::Consumer(name) => Some(name.as_str()),
+            After::Contribution(target) if target.kind() != kind => consumer_of(target.kind()),
+            After::Contribution(_) => None,
+        };
+        if let Some(gate) = gate {
+            if !out.iter().any(|g| g == gate) {
+                out.push(gate.to_string());
+            }
+        }
+    }
+    out
+}
+
+/// The consumer that runs contributions of `kind`.
+pub fn consumer_of(kind: ContributionKind) -> Option<&'static str> {
+    match kind {
+        ContributionKind::Effect => Some(crate::effect_triggers::NAME),
+        ContributionKind::Collector => Some(crate::collector_triggers::NAME),
+        _ => None,
+    }
+}
+
+/// Resolve the enabled extensions' effects' and collectors' `after:` to
+/// refs and compile one order across them (`oxplow_domain::ordering`). A
+/// target that resolves to nothing, or a cycle, is a load error of the
+/// declaring extension, which loses the contribution; a target in a
+/// disabled extension is dropped with a warning, since it can't run. An
+/// order the pump couldn't honor — effects waiting on collectors and
+/// collectors on effects at once, the two consumers then each waiting on
+/// the other — is a load error of every contribution that crosses.
+fn order_catalog(exts: &mut [Extension], consumers: &[&str]) {
+    use oxplow_domain::ordering::{resolve, After, Node, Order, OrderError};
+    let live = |e: &Extension| e.enabled && !e.public_contracts.blocked;
+    // Extensions the catalog has but doesn't run: a target in one can't run.
+    let idle: std::collections::BTreeSet<String> = exts
+        .iter()
+        .filter(|e| !live(e))
+        .map(|e| e.name.clone())
+        .collect();
+    // Resolve each entry as its extension wrote it.
+    for ext in exts.iter_mut().filter(|e| live(e)) {
+        let own_effects: Vec<String> = ext.effects.iter().map(|e| e.id.clone()).collect();
+        let own_collectors: Vec<String> = ext.collectors.iter().map(|c| c.id.clone()).collect();
+        let own = |kind: ContributionKind, id: &str| match kind {
+            ContributionKind::Effect => own_effects.iter().any(|e| e == id),
+            ContributionKind::Collector => own_collectors.iter().any(|c| c == id),
+            _ => false,
+        };
+        let mut refused = Vec::new();
+        let mut warnings = Vec::new();
+        for d in ext.contributions.iter_mut().filter(|d| ordered(d)) {
+            let mut resolved = Vec::new();
+            for entry in &d.after {
+                match resolve(&ext.name, entry, &own, consumers) {
+                    Ok(After::Contribution(target))
+                        if target.extension().is_some_and(|x| idle.contains(x)) =>
+                    {
+                        warnings.push(format!(
+                            "{}: runs after {target}, whose extension is disabled: it runs \
+                             without waiting",
+                            d.id
+                        ))
+                    }
+                    Ok(after) => resolved.push(after.to_ref()),
+                    Err(e) => refused.push((d.id.clone(), format!("{}: `after`: {e}", d.id))),
+                }
+            }
+            d.after = resolved;
+        }
+        let file = format!("{}/extension.yaml", ext.path.trim_end_matches('/'));
+        ext.warnings
+            .extend(warnings.into_iter().map(|w| format!("{file}: {w}")));
+        for (id, message) in refused {
+            ext.errors.push(format!("{file}: {message}"));
+            remove_id(ext, &id);
+        }
+    }
+    // Compile, taking out what can't be ordered until what's left compiles.
+    loop {
+        let nodes: Vec<Node> = exts
+            .iter()
+            .filter(|e| live(e))
+            .flat_map(|e| e.contributions.iter().filter(|d| ordered(d)))
+            .map(|d| Node {
+                id: d.id.reference(),
+                after: d
+                    .after
+                    .iter()
+                    .filter_map(|a| After::parse(a).ok())
+                    .collect(),
+            })
+            .collect();
+        let mut problems: Vec<(oxplow_domain::contribution::ContributionRef, String)> =
+            match Order::compile(&nodes, consumers) {
+                Ok(order) => {
+                    let crossing = crossings(&nodes);
+                    if crossing.is_empty() {
+                        for ext in exts.iter_mut().filter(|e| live(e)) {
+                            for d in ext.contributions.iter_mut().filter(|d| ordered(d)) {
+                                d.order_level = order.level(&d.id.reference()).map(|l| l as u32);
+                            }
+                        }
+                        return;
+                    }
+                    crossing
+                }
+                Err(errors) => errors
+                    .into_iter()
+                    .flat_map(|e| match &e {
+                        OrderError::Unknown { by, .. } => vec![(by.clone(), e.to_string())],
+                        OrderError::Cycle { cycle } => {
+                            cycle.iter().map(|c| (c.clone(), e.to_string())).collect()
+                        }
+                    })
+                    .collect(),
+            };
+        problems.dedup();
+        for (id, message) in problems {
+            let Some(ext) = exts
+                .iter_mut()
+                .find(|e| Some(e.name.as_str()) == id.extension())
+            else {
+                continue;
+            };
+            let file = format!("{}/extension.yaml", ext.path.trim_end_matches('/'));
+            let error = format!("{file}: {message}");
+            if !ext.errors.contains(&error) {
+                ext.errors.push(error);
+            }
+            if let Some(id) = id.id() {
+                remove_id(ext, &id);
+            }
+        }
+    }
+}
+
+/// The contributions whose `after:` crosses between the two consumers, when
+/// it crosses both ways: each consumer would wait on the other.
+fn crossings(
+    nodes: &[oxplow_domain::ordering::Node],
+) -> Vec<(oxplow_domain::contribution::ContributionRef, String)> {
+    use oxplow_domain::ordering::After;
+    let cross: Vec<(&oxplow_domain::ordering::Node, &After)> = nodes
+        .iter()
+        .flat_map(|n| n.after.iter().map(move |a| (n, a)))
+        .filter(|(n, a)| matches!(a, After::Contribution(t) if t.kind() != n.id.kind()))
+        .collect();
+    let ways: std::collections::BTreeSet<ContributionKind> =
+        cross.iter().map(|(n, _)| n.id.kind()).collect();
+    if ways.len() < 2 {
+        return Vec::new();
+    }
+    cross
+        .into_iter()
+        .map(|(n, a)| {
+            (
+                n.id.clone(),
+                format!(
+                    "{} runs after {}, while elsewhere effects and collectors wait on each                      other the other way: on one event the two would each wait for the other.                      Order effects after collectors or collectors after effects, not both",
+                    n.id,
+                    a.to_ref()
+                ),
+            )
+        })
+        .collect()
+}
+
+/// Take contribution `id` (an effect or a collector) out of `ext`.
+fn remove_id(ext: &mut Extension, id: &ContributionId) {
+    match id.kind {
+        ContributionKind::Effect => ext.effects.retain(|e| e.id != id.local),
+        ContributionKind::Collector => ext.collectors.retain(|c| c.id != id.local),
+        _ => {}
+    }
+    ext.contributions.retain(|d| &d.id != id);
 }
 
 /// Take the refused contribution out of its extension.
@@ -320,6 +538,7 @@ fn remove(ext: &mut Extension, c: &Collision) {
                 .retain(|x| format!("{}/{}", x.capability, x.id) != global)
         }
         ContributionKind::Provider => ext.providers.retain(|x| x.id != local),
+        ContributionKind::Effect => ext.effects.retain(|x| x.id != local),
         _ => {}
     }
     ext.contributions.retain(|d| d.id != c.refused);
@@ -741,5 +960,210 @@ mod catalog_tests {
             .contributions
             .iter()
             .all(|d| d.owner.extension == "acme" && d.owner.origin == "project"));
+    }
+}
+
+#[cfg(test)]
+mod ordering_tests {
+    use std::path::Path;
+
+    use crate::extensions::{load_extensions, Extension};
+
+    const SKIP: &str = "def transform(input):\n    return {\"skip\": \"x\"}\n";
+
+    /// Write extension `name` with these `effects:` entries (each
+    /// `id: after-list`) and `collectors:` entries, then load the catalog.
+    fn write(root: &Path, name: &str, effects: &[(&str, &str)], collectors: &[(&str, &str)]) {
+        let dir = root.join(format!("oxplow/extensions/{name}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut yaml = format!(
+            "manifest: 2\nname: {name}\nsharing: private\nintent: {{ purpose: p, origin: null, examples: [] }}\n"
+        );
+        if !effects.is_empty() {
+            yaml.push_str("effects:\n");
+            for (id, after) in effects {
+                yaml.push_str(&format!(
+                    "  - {{ id: {id}, summary: s, on: [work_item.state_changed], entry: e.star, after: [{after}] }}\n"
+                ));
+            }
+        }
+        if !collectors.is_empty() {
+            yaml.push_str("collectors:\n");
+            for (id, after) in collectors {
+                yaml.push_str(&format!(
+                    "  - {{ id: {id}, runtime: starlark, entry: c.star, trigger: {{ on: [work_item.state_changed] }}, after: [{after}], entities: [{{ name: {id}, key: k, columns: {{ k: text }} }}] }}\n"
+                ));
+            }
+        }
+        std::fs::write(dir.join("extension.yaml"), yaml).unwrap();
+        std::fs::write(dir.join("e.star"), SKIP).unwrap();
+        std::fs::write(
+            dir.join("c.star"),
+            "def transform(input):\n    return {\"entities\": {}}\n",
+        )
+        .unwrap();
+    }
+
+    fn named<'a>(exts: &'a [Extension], name: &str) -> &'a Extension {
+        exts.iter().find(|e| e.name == name).unwrap()
+    }
+
+    fn placed(ext: &Extension, kind: &str, id: &str) -> Option<(u32, Vec<String>)> {
+        ext.contributions
+            .iter()
+            .find(|d| d.id.kind.segment() == kind && d.id.local == id)
+            .map(|d| (d.order_level.unwrap(), d.after.clone()))
+    }
+
+    #[test]
+    fn after_resolves_to_refs_and_levels_across_extensions() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "first", &[("seed", "")], &[]);
+        write(
+            dir.path(),
+            "second",
+            &[
+                ("notify", "react"),
+                ("react", "\"effect:first/seed\", change.analyze"),
+            ],
+            &[("gather", "")],
+        );
+        let exts = load_extensions(dir.path());
+        let second = named(&exts, "second");
+        assert_eq!(second.errors, Vec::<String>::new());
+        assert_eq!(
+            placed(named(&exts, "first"), "effect", "seed"),
+            Some((0, vec![]))
+        );
+        assert_eq!(
+            placed(second, "effect", "react"),
+            Some((
+                1,
+                vec![
+                    "effect:first/seed".to_string(),
+                    "consumer:change.analyze".to_string()
+                ]
+            ))
+        );
+        assert_eq!(
+            placed(second, "effect", "notify"),
+            Some((2, vec!["effect:second/react".to_string()]))
+        );
+        assert_eq!(placed(second, "collector", "gather"), Some((0, vec![])));
+    }
+
+    #[test]
+    fn an_unknown_target_is_a_load_error_and_the_contribution_is_gone() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "acme",
+            &[
+                ("bare", "no.such.thing"),
+                ("elsewhere", "\"effect:nobody/home\""),
+                ("fine", ""),
+            ],
+            &[],
+        );
+        let exts = load_extensions(dir.path());
+        let acme = named(&exts, "acme");
+        let errors = acme.errors.join("\n");
+        assert!(
+            errors.contains("effect:acme/bare: `after`: `no.such.thing` is none of"),
+            "{errors}"
+        );
+        assert!(
+            errors.contains(
+                "effect:acme/elsewhere runs after effect:nobody/home, which nothing declares"
+            ),
+            "{errors}"
+        );
+        let ids: Vec<&str> = acme.effects.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids, vec!["fine"]);
+    }
+
+    #[test]
+    fn a_cycle_is_a_load_error_of_every_member() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "acme",
+            &[("a", "b"), ("b", "c"), ("c", "a"), ("me", "me"), ("ok", "")],
+            &[],
+        );
+        let exts = load_extensions(dir.path());
+        let acme = named(&exts, "acme");
+        let errors = acme.errors.join("\n");
+        assert!(
+            errors.contains(
+                "these contributions wait on each other: effect:acme/a → effect:acme/b → effect:acme/c"
+            ),
+            "{errors}"
+        );
+        assert!(
+            errors.contains("these contributions wait on each other: effect:acme/me"),
+            "{errors}"
+        );
+        assert_eq!(acme.errors.len(), 2, "{errors}");
+        let ids: Vec<&str> = acme.effects.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids, vec!["ok"]);
+    }
+
+    #[test]
+    fn a_target_in_a_disabled_extension_is_dropped_with_a_warning() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "first", &[("seed", "")], &[]);
+        write(
+            dir.path(),
+            "second",
+            &[("react", "\"effect:first/seed\"")],
+            &[],
+        );
+        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
+        std::fs::write(
+            dir.path().join(".oxplow/project.yaml"),
+            "extensions:\n  disabled: [first]\n",
+        )
+        .unwrap();
+        let exts = load_extensions(dir.path());
+        let second = named(&exts, "second");
+        assert_eq!(second.errors, Vec::<String>::new());
+        assert!(
+            second
+                .warnings
+                .iter()
+                .any(|w| w.contains("runs after effect:first/seed, whose extension is disabled")),
+            "{:?}",
+            second.warnings
+        );
+        assert_eq!(placed(second, "effect", "react"), Some((0, vec![])));
+    }
+
+    #[test]
+    fn effects_and_collectors_waiting_on_each_other_both_ways_is_a_load_error() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "acme",
+            &[("react", "\"collector:acme/gather\""), ("seed", "")],
+            &[("gather", ""), ("late", "\"effect:acme/seed\"")],
+        );
+        let exts = load_extensions(dir.path());
+        let acme = named(&exts, "acme");
+        let errors = acme.errors.join("\n");
+        assert!(
+            errors.contains("the two would each wait for the other"),
+            "{errors}"
+        );
+        // One way alone is fine.
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "acme",
+            &[("react", "\"collector:acme/gather\"")],
+            &[("gather", "")],
+        );
+        let exts = load_extensions(dir.path());
+        assert_eq!(named(&exts, "acme").errors, Vec::<String>::new());
     }
 }
