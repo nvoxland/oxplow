@@ -330,7 +330,9 @@ welded to collection.
   dead V43 `component_role` column is dropped in place by V159, tsk865 —
   `ALTER TABLE … DROP COLUMN` rewrites the table without a rebuild, so the
   `fact→measure` CASCADE never fires.)
-  Seeded built-ins: `oxplow.complexity`, `oxplow.fn_length`,
+  oxplow's own measures (below) are declared in **oxplow-foundation**'s
+  `measures:` (scope `extension:oxplow-foundation`; the migration kept the
+  seeded rows and restated their scope): `oxplow.complexity`, `oxplow.fn_length`,
   `oxplow.parameter_count`, `oxplow.todo`, `oxplow.coverage`, `oxplow.test_case`,
   `oxplow.lint_hit`, `oxplow.duplicate_lines`, `oxplow.tokens`,
   `oxplow.cycle_time` (V43), plus `oxplow.coverage.branch` +
@@ -780,13 +782,12 @@ welded to collection.
   from `value` × these, never stored on a fact), `scope`/`category`/`language`.
   **Additive** beside the old `metric_definition` (still FK-referenced by the V38
   `metric_sample`/`metric_finding`); the retire migration (tsk20) drops the V38
-  cluster once reads flip (tsk26). The migration seeds no rows; the **built-in
-  specs** are seeded from Rust by the generation: the code-metric specs
-  (`oxplow.high_complexity_fns` / `long_functions` / `fn_count` / `todos` — a
-  `count` over its measure, thresholds via `min_value`; `builtin_metric_specs`,
-  tsk23) and the per-language idiom specs (`oxplow.rust.unsafe_blocks` etc. — a
-  `Sum(oxplow.ast_hit)` filtered by `dim_eq(oxplow.rule, …)`; `builtin_ast_specs`,
-  tsk30). Config/global spec seeding lands with the read-flip (tsk26).
+  cluster once reads flip (tsk26). The migration seeds no rows; the code-metric
+  specs come from oxplow-foundation's `metrics:` (`oxplow.high_complexity_fns` /
+  `long_functions` / `fn_count` / `todos` — a `count` over its measure,
+  thresholds via `min_value` — and the per-language idiom specs such as
+  `oxplow.rust.unsafe_blocks`, a `Sum(oxplow.ast_hit)` filtered by
+  `dim_eq(oxplow.rule, …)`). Config/global spec seeding lands with the read-flip (tsk26).
 
 `SqliteFactStore` API: `upsert_measure`/`get_measure`/`list_measures`,
 `upsert_dimension`/`list_dimensions`, `upsert_spec`/`get_spec`/`list_specs`,
@@ -1141,9 +1142,9 @@ effort (it stops at an existing `effort-lifecycle` capture).
 | lint hits | `collection.rs::mirror_analysis_metrics` | one `oxplow.lint_hit` fact per finding (severity/rule/detail columns + file location) |
 | coverage | `collection.rs::observe_coverage` | one `oxplow.coverage` fact per file (value=line-%, num/den=covered/instrumented → engine re-derives Σcov/Σinstr). **Branch + function coverage (tsk123)** ride the SAME capture as extra per-file facts on `oxplow.coverage.branch` / `oxplow.coverage.function` (num/den=hit/found), emitted only for files whose report carried the counts (`*_found > 0`) and only when their spec is enabled (per-measure gate via `active_coverage_measure`). Specs: `oxplow.coverage.branch_pct` / `oxplow.coverage.function_pct` (ratio %, higher-better). **Untested files (tsk124)** is a read-only spec `oxplow.coverage.untested_files` — a `count` over `oxplow.coverage` filtered `max_value: 0` (the new upper-bound `FactFilter` field, cube-ineligible like `min_value`), `findings` display so the drill-in lists which files, lower-better — no new collection |
 | test cases | `collection.rs::record_test_run` → `SqliteFactStore::record_test_run` (tsk733) | **change-only** per-case facts on `oxplow.test_case` (status as the `oxplow.status` dim, + `oxplow.test_suite`) and `oxplow.test_duration`: every **failure**, every run; a pass or skip only when the test is new on the branch or changed status; a duration when it moved more than `DURATION_MOVE_RATIO` (50%) **and** `DURATION_MOVE_MIN_MS` (20 ms) from the last one written (constants, not settings — a compression tolerance that changes no pass/fail number). The per-subject fold carries an unchanged test's last fact forward, so every `oxplow.tests.*` number is the same as recording all cases (durations within the tolerance). In the same transaction it upserts each case's `test_case_stat` row (`v_test_case_stat`: last status and duration, runs, failures, flips, last failed / passed, max and mean duration) — where per-test history lives. A replayed run (same idempotency key) changes nothing. Measured on sample usage (tsk732): ~2.6% of per-case results are written. Effort outcomes (`test_outcome`) take the effort's runs from its run records, not its facts, since an all-green repeat run writes none. MCP-asserted counts (no report) synthesize status-sliced facts (no case identity). A report-less, count-less run records its capture under the **`test-run`** producer — a run RECORD, not a measurement: an empty `tests` capture would read as "found 0 tests" to the zero-fill/currency logic and collapse the semi-additive `oxplow.tests.*` timeline |
-| duplication | the built-in collector `oxplow.duplicate_lines` — whole tree, after ref moves (paced: one scan of the latest tree once they settle for 60 s, at most every 15 min); the change analyzer's scoped scans record findings but no facts (tsk365) | one `oxplow.duplicate_lines` fact per side of each duplicate block (value=line count, subject=`block:path:start-end`); a `full` capture on the snapshot's stream. A zero-hit scan still writes its EMPTY capture (tsk44 currency) — else the last non-empty scan's blocks stay "current" forever |
-| built-in code collectors | `metrics_service.rs::run_one_collector` → `record_collector_facts` (tsk23) | the bundled code collectors return `facts`: one fact **per function** on `oxplow.complexity` (high_complexity_fns) / `oxplow.fn_length` (long_functions) / `oxplow.parameter_count` (fn_count), and one per marker on `oxplow.todo` (todos) — the raw grain, for **every** item, not just the offenders |
-| per-language idiom collectors | same path (tsk30) | the ~10 idiom collectors (`oxplow.rust.unsafe_blocks`, `oxplow.ts.any_usage`, `oxplow.csharp.empty_catch`, …) emit one **per-file** `oxplow.ast_hit` fact (value=the file's count, `rule`=the idiom slug, dims carrying the conformed `oxplow.language`); the metric is a `Sum(oxplow.ast_hit)` spec filtered by `dim_eq(oxplow.rule, <slug>)` (`builtin_ast_specs`) |
+| duplication | oxplow-foundation's collector `oxplow.duplicate_lines` — whole tree, after ref moves (paced: one scan of the latest tree once they settle for 60 s, at most every 15 min); the change analyzer's scoped scans record findings but no facts (tsk365) | one `oxplow.duplicate_lines` fact per side of each duplicate block (value=line count, subject=`block:path:start-end`); a `full` capture on the snapshot's stream. A zero-hit scan still writes its EMPTY capture (tsk44 currency) — else the last non-empty scan's blocks stay "current" forever |
+| foundation code collectors | `metrics_service.rs::run_one_collector` → `record_collector_facts` (tsk23) | oxplow-foundation's code collectors return `facts`: one fact **per function** on `oxplow.complexity` (high_complexity_fns) / `oxplow.fn_length` (long_functions) / `oxplow.parameter_count` (fn_count), and one per marker on `oxplow.todo` (todos) — the raw grain, for **every** item, not just the offenders |
+| per-language idiom collectors | same path (tsk30) | the ~10 idiom collectors (`oxplow.rust.unsafe_blocks`, `oxplow.ts.any_usage`, `oxplow.csharp.empty_catch`, …) emit one **per-file** `oxplow.ast_hit` fact (value=the file's count, `rule`=the idiom slug, dims carrying the conformed `oxplow.language`); the metric is a `Sum(oxplow.ast_hit)` spec filtered by `dim_eq(oxplow.rule, <slug>)` (the foundation's `metrics:` entries) |
 
 #### OTEL token tracking (tsk22)
 
@@ -1255,7 +1256,7 @@ writes the resolvable facts under one capture — the **only** output now (facts
 T-C3b). A ZERO-fact run still writes its (empty) capture — "this scan ran and found
 nothing" is the record the engine zero-fills a series from, so a count metric drops
 back to zero after the last offender is fixed (tsk44; the analysis ingest records
-its capture for a clean report the same way). The count-over-threshold headline is the **spec** (`builtin_metric_specs`),
+its capture for a clean report the same way). The count-over-threshold headline is the **spec** (the foundation metric's `metrics:` entry),
 and the equivalence test `code_collector_facts_reaggregate_to_the_expected_headline`
 pins `engine.headline_for_spec(spec) == the expected baked total` for every bundled
 code metric — the proof the inversion is faithful. (Strict `> N` in the old baked count
@@ -1268,7 +1269,7 @@ so they share **one** generic measure `oxplow.ast_hit` (a per-file idiom
 occurrence) and are told apart by the `oxplow.rule` dimension (the idiom slug,
 carried on the fact's `rule` column via `CollectedFact.rule`). Each collector records
 one per-file `ast_hit` fact (value=that file's count, `rule`=its slug); each metric is a `Sum(oxplow.ast_hit)` spec filtered by
-`dim_eq(oxplow.rule, <slug>)` (`builtin_ast_specs`, seeded by the generation). Idioms
+`dim_eq(oxplow.rule, <slug>)` (the foundation's `metrics:` entries). Idioms
 sharing the measure never collide because every spec read applies the rule filter
 **before** it aggregates. `per_language_collector_facts_reaggregate_to_the_baked_headline`
 pins each spec's `Sum` to its baked headline. The `<slug>` in the script and the
@@ -1280,13 +1281,14 @@ Wired into `Services` as `fact_store: Arc<SqliteFactStore>` +
 layer (`svc.fact_store`).
 
 **Producer specs (T-B).** Each always-on producer metric now has a `metric_spec`
-(`producer_metrics.rs::builtin_producer_specs`, seeded by the generation beside
-the built-in code-metric specs) — the aggregation it *is* over the measure its producer
+(a `metrics:` entry of oxplow-foundation's manifest under `# what oxplow
+records itself`, seeded by the generation like any extension's) — the aggregation it *is* over the measure its producer
 emits facts on, with conformed dims (not extra measures) distinguishing variants:
 token in/out slice `oxplow.tokens` by `oxplow.token_kind`; tests slice
 `oxplow.test_case` by `oxplow.status`; analysis filters `oxplow.lint_hit` by
-severity; coverage is a `ratio` over `oxplow.coverage`. `producer_spec_shape`
-holds the `(source_measure, aggregation, filter)` per key. Equivalence tests pin
+severity; coverage is a `ratio` over `oxplow.coverage`. Each entry holds its
+`sourceMeasure`, `aggregation` and `filter`; the producers' Rust only records
+the facts. Equivalence tests pin
 each spec's engine headline to the baked total (tokens, tests). New V46 measures:
 `oxplow.turn`, `oxplow.task_effort` (now `oxplow.work_item_effort`, V23), `oxplow.nudge` (the producers with no prior
 measure home); new dim `oxplow.token_kind`.
@@ -1397,16 +1399,13 @@ dimensions:                        # custom conformed slice axes
   catalog's signal) — (beside `seed_definitions`), upserting resolved
   measures/dimensions into the `measure`/`dimension` tables. `MetricsService`
   holds a `fact_store` via `.with_fact_store()`. Metric specs seed in two
-  passes: the override-free built-ins (`builtin_metric_specs` /
-  `builtin_ast_specs` / `builtin_producer_specs`) first, then EVERY resolved
-  config spec — including a `use:` of a built-in, which resolves to scope
-  `built-in` carrying the catalog default target plus the project's
-  target/warnAt/failAt overrides (from the `use:` entry). The
-  second pass must not skip built-in scope, or those thresholds never reach
-  the persisted `metric_spec` the engine reads. The resolve catalog's
-  built-in layer (`builtin_spec_entries`) holds the producer metrics as well
-  as the code gauges: without them a producer's `use:` was skipped with an
-  "unknown catalog key" warning and its target dropped (tsk1071).
+  passes: EVERY resolved spec — oxplow-foundation's producer, entity and
+  code metrics among them — carrying the catalog default target plus the
+  project's target/warnAt/failAt overrides (from a `use:` entry). Nothing in
+  the metric catalog has the `built-in` scope: oxplow's own measures,
+  dimensions and metrics are the foundation's declarations (the V66
+  migration restated the seeded measure/dimension rows as the foundation's,
+  keeping them so their facts survive).
   `resolve_metrics` itself is silent: it runs on every event (through
   `fact_collectors`), so a `use:` naming nothing is reported by
   `unknown_uses` once per generation (boot, config or extension
@@ -1508,7 +1507,7 @@ families:
 | family | how the delta is computed |
 |---|---|
 | **File** — snapshot-scan metric (`display_kind` ∈ {`gauge`, `findings`}, a source measure, no formula, non-producer, non-operational — includes the `static-quality` built-in code metrics, whose captures are never effort-stamped; tsk43) | Σ over the effort's **files** (`effort_file`, claimed or observed) of `(current − baseline)`, each fact contributing per the spec's **aggregation** (`count` ⇒ 1 per offender — matching the Metrics page — else the fact value); facts are scoped to the effort's **stream** (worktree). Baseline capture = latest before the effort start; current = latest at/before the effort end (newest when open; a capture STAMPED with this effort — an `effort.finished` collector run — also counts). A CLOSED effort with no in-window capture yields no row (never a post-close capture, never a fabricated drop-to-zero). An effort file absent from a capture = 0 (sparse emission → a drop-to-zero is seen), and the producers' EMPTY zero-hit captures are spliced into the timeline so a scan that found nothing is eligible as baseline/current (tsk44). **No files, or repo-scalar facts with no path** → the repo-wide before→after fallback. `file_delta_from_facts` picks the two captures from capture metadata (the producers of the spec's slice, `producers_of_slice`) and loads only those captures' facts (`facts_for_captures`); a per-path measure's repo total at a capture is the metric engine's cube-backed series point, never a replay of the history. |
-| **Run** — tests (category `testing`) + the `oxplow.analysis.*` producer pair | before→after (or `sum` flow) over `aggregate_series` of the facts of the effort's OWN captures (`facts_for_captures(measure, captures_for_effort)`). Analysis is classified Run via the producer-key check (its facts arrive on effort-stamped run-ingest captures), so it never reaches the File branch (the tsk272 guard) |
+| **Run** — tests (category `testing`) + the `oxplow.analysis.*` producer pair | before→after (or `sum` flow) over `aggregate_series` of the facts of the effort's OWN captures (`facts_for_captures(measure, captures_for_effort)`). Analysis is classified Run by its `oxplow.analysis.` key (its facts arrive on effort-stamped run-ingest captures), so it never reaches the File branch (the tsk272 guard) |
 | **Window** — operational (`agent.*`/`effort.*`/`task.*`) + formula/event specs | identical read to Run; a distinct family to document what it holds. `effort_stamped_delta` serves both |
 | **Coverage** (category `coverage`) | effort-relative: for each of the effort's coverage run CAPTURES (`captures_for_effort`, trigger `on-report` — the capture is the run), `coverage_delta_for_spec` derives the **diff-coverage** (`diff_coverage_for_effort`, start snapshot vs the capture's own snapshot — collection.md) from the capture's ABSOLUTE per-file **line-sets** (`metric_capture.detail_json`, the `coverage-detail` envelope), then before→after over the derived sequence. The coverage FACTS carry num/den counts; the line-sets live only in the detail envelope |
 
@@ -1588,7 +1587,7 @@ panel can reconstruct full detail via `effort_observations_from_metrics`:
 | otel-tokens | `crates/oxplow-app/src/token_usage.rs` (the `token_usage.otlp` consumer of `agent.tokens.reported`, which the control-plane OTLP receiver logs through `otlp_ingest` — tsk22, tsk860) | per-model `agent.tokens.{input,output,total}` from Claude's `claude_code.token.usage` OTEL counter. The fact's subject is the model's ref, `ai_model:<name>` (`refs::build::ai_model_ref`; `subject_kind` is `ai_model`), read back with `id_of(.., AI_MODEL)`. Tokens only — no derived USD cost (rates move; a stale price table is worse than none). The transcript `on_stop` path now projects only `agent.turns` + the per-turn `agent_token_usage` prompt rows |
 | effort-lifecycle | `crates/oxplow-app/src/effort_service.rs` (`project_effort_lifecycle_metrics`, run by the effort-lifecycle consumer on `effort.closed`) | derived `effort.cycle_time_ms` (close − start, subject=effort) + `work_item.efforts` (efforts-so-far on its work item, the redo-rate signal) from `effort`; branch captured when the stream has a worktree |
 | nudges | `crates/oxplow-app/src/collection.rs` (`project_nudge_metric`, called from `persist_nudge` after a fired nudge records) | `agent.nudges.fired` (event kind, run-less; value 1, subject=the nudge `kind`) — an agent-activity signal |
-| fact collectors | `crates/oxplow-app/src/metrics_service.rs` (`MetricsService`) — the fact engine. Seeds a `metric_spec` per resolved `metrics:` entry; runs each **fact collector** (`fact_collectors()` = the project's `collectors:` with `facts:` ∪ enabled extensions' ∪ `use:`-enabled built-ins and the default-on ones (`DEFAULT_ON`, unless a marker disables them); an id two owners declare runs once, project > extension > built-in) on its trigger: `on:` from the `collector.triggers` pump consumer (`run_snapshot_collectors` for `snapshot.taken` that recorded files, `run_effort_collectors` over the effort's end snapshot for `effort.finished`, `run_event_collectors` over the stream's latest snapshot otherwise), `every:` from the scheduler, `manual` and any explicit run through `oxplow.collector.sync` → `run_collector_by_key(owner, id, stream, source)` | one `fact` per `CollectedFact` the script returns (bound to a defined measure in the collector's `facts`), version/branch/snapshot-stamped, under one `metric_capture` (a failed capture on error), plus a `collector_run` row and a `collector.synced@1` event carrying the `facts` count. `facts_of` refuses any output but `{"facts": [...]}` |
+| fact collectors | `crates/oxplow-app/src/metrics_service.rs` (`MetricsService`) — the fact engine. Seeds a `metric_spec` per resolved `metrics:` entry; runs each **fact collector** (`fact_collectors()` = the project's `collectors:` with `facts:` ∪ enabled extensions' (oxplow-foundation's included); an extension's collector that metrics name runs only while one of those metrics is on; an id two owners declare runs once, project > extension) on its trigger: `on:` from the `collector.triggers` pump consumer (`run_snapshot_collectors` for `snapshot.taken` that recorded files, `run_effort_collectors` over the effort's end snapshot for `effort.finished`, `run_event_collectors` over the stream's latest snapshot otherwise), `every:` from the scheduler, `manual` and any explicit run through `oxplow.collector.sync` → `run_collector_by_key(owner, id, stream, source)` | one `fact` per `CollectedFact` the script returns (bound to a defined measure in the collector's `facts`), version/branch/snapshot-stamped, under one `metric_capture` (a failed capture on error), plus a `collector_run` row and a `collector.synced@1` event carrying the `facts` count. `facts_of` refuses any output but `{"facts": [...]}` |
 
 > Navigation / activity (`page_visit`, `usage_event`) are **deliberately not
 > projected** into the substrate: they're oxplow-usage telemetry (UI metadata),
@@ -1603,16 +1602,12 @@ the change loop announces `OxplowEvent::MetricSamplesChanged` for what landed.
 > `effort_observation` path has already been **dropped** (tsk215) — the substrate
 > is the sole store.
 
-> **Producer-metric registry (tsk286/tsk287).** Because these producers only
-> `upsert` their definition at *record* time, the Catalog (a registry of
-> *available* metrics) can't discover them before first data. So the canonical
-> always-on producer metrics live in **`producer_metrics.rs`**
-> (`builtin_producer_metrics()` + `ProducerMetric::definition()`) as the **single
-> source of truth**: the producers build their `NewMetricDefinition` via
-> `producer_metric(key).definition()` (no inline descriptors), and `catalog()`
-> unions the same list. Add/rename a producer metric in **one** place. Coverage's
-> red/green thresholds (`target`/`warn_at`/`fail_at`) are policy applied by the
-> coverage producer on top of the registry descriptor, not part of the registry.
+> **Producer metrics are the foundation's declarations.** The Catalog lists
+> them before any data because they are `metrics:` entries of
+> oxplow-foundation's manifest (default on, a `enabled: false` marker turns
+> one off), not Rust. Add or rename a producer metric there; the producers
+> only record the facts. Coverage's red/green thresholds
+> (`target`/`warnAt`/`failAt`) are on its entry.
 
 ## Read surface
 
@@ -1673,22 +1668,20 @@ just carries a Help blurb pointing there.
   navigates to the metric's **detail page** (via `onOpenDetail` → `metricRef`).
 > ### ⚠️ A seeded spec does NOT mean an enabled metric (tsk87)
 >
-> The generation seeds a built-in **gauge's** spec (`builtin_metric_specs` /
-> `builtin_ast_specs`) only while its collector runs — `use:`d, or default-on
-> (`DEFAULT_ON`) and not disabled (tsk1046). It used to seed every built-in
-> spec, so an un-`use:`d gauge kept a spec nothing recorded into: `MEASURE()`
-> of it read an empty grid, silently, and the bundled `oxplow.csharp.*` /
-> `oxplow.clojure.*` idiom specs sat in this Rust/TS repo as permanent `—` rows.
-> Now `v_metric_spec` holds only metrics with a source, and a read or write of
-> an off built-in by key says so and how to turn it on
-> (`metric_engine::missing_metric`). Producer specs (`builtin_producer_specs`)
+> The generation seeds a foundation **gauge's** spec only while its collector
+> runs: the metric is on by default, or `use:`d when it says `default: off`.
+> An off metric has no spec, so `v_metric_spec` holds only metrics with a
+> source, and a read or write of an off metric by key says so and how to turn
+> it on (`metric_engine::missing_metric` reads the `metric_catalog` table: a
+> key the catalog lists but that has no spec is "off, add `- use: <key>`";
+> any other key is "no metric"). Producer specs (`builtin_producer_specs`)
 > are still seeded unless an `enabled: false` marker prunes them. The page's
 > row set stays the **catalog** — it lists what can be turned on, too — with
 > the spec joined in by key for presentation metadata.
 >
 > (The "spec table = the enabled set" phrasing under the collection gate above is
 > about the **producer** measures, where disabling does prune. Don't generalize it
-> to built-in code metrics.)
+> to the foundation's code metrics.)
 >
 > Note enabling a C# idiom metric here still wouldn't show `0`: `oxplow.ast_hit` is
 > `capture_scope: per-path`, whose zero-fill is deliberately suppressed, so a scan
@@ -1737,21 +1730,16 @@ just carries a Help blurb pointing there.
 > Settings page; it stays the single sectioning rule so any future second
 > caller can't drift.)
 >
-> **Grouping keys off `MetricCatalogEntry.language`** (tsk87). For a built-in
-> code metric the catalog takes that slug straight from its `BuiltinMetric`
-> (`builtin_metrics()`), so catalog and spec agree by construction.
->
-> `builtin_ast_specs` nevertheless **reads each spec's language off its `BuiltinMetric` by
-> key** rather than restating the slug
-> (`builtin_ast_specs_carry_the_language_their_collector_declares` pins it). Before
-> tsk81 the specs set no `language` at all (`NewMetricSpec::base` defaults it to
-> `None`). That's no longer what sections the *page* — but `MetricSpec.language`
+> **Grouping keys off `MetricCatalogEntry.language`** (tsk87). For a foundation
+> code metric the catalog takes that slug from the metric's `language:` in
+> `extension.yaml`, and the spec carries the same value, so catalog and spec
+> agree by construction. `MetricSpec.language`
 > is still real read surface: `v_metric_spec.language` is how a query
 > filters by language, which silently matches nothing when the column is
 > null. Keep it populated.
 >
 > Note the key segment is **not** the slug: `oxplow.ts.*` is language
-> `typescript`. A built-in's `language: ""` (the language-agnostic code metrics) maps
+> `typescript`. A foundation metric with no `language:` (the language-agnostic code metrics) maps
 > to spec `None` — `""` is not a language, and `groupByLanguage` reads null/`""`
 > as its "General" bucket.
 - **Metric Detail** (`MetricDetailPage.tsx` + the pieces in `MetricDetail.tsx`
@@ -1773,7 +1761,7 @@ just carries a Help blurb pointing there.
 > **Definition descriptions (tsk309).** Every metric carries a one-line
 > `description` (on `metric_definition`). It's inherent to the definition — set
 > once and not overridable by a `use:` entry (`resolve_one` reads `def.description`,
-> like trigger). Sources: the built-in code metrics (`BuiltinMetric.description`),
+> like trigger). Sources: the foundation's code metrics (the metric's `description:`),
 > the always-on producers (`ProducerMetric.description` in `producer_metrics.rs`),
 > and config `key:` entries (`MetricEntry.description` → `ResolvedSpec` →
 > `spec_definition()`).
@@ -1814,8 +1802,8 @@ The mechanics behind those controls (unchanged by tsk117):
 - **The catalog is a registry of everything available**, NOT a list of metrics
   with recorded data — every metric the system can produce is listed via
   `list_metric_catalog`, even before any sample exists. `catalog()` unions
-  **four** sources, deduped by key: (1) the bundled code metrics
-  (`builtin_metrics()`, toggleable); (2) project/global `metrics:` entries
+  **four** sources, deduped by key: (1) the code metrics of oxplow-foundation
+  and any other extension (toggleable); (2) project/global `metrics:` entries
   (toggleable); (3) the built-in always-on producers
   (`builtin_producer_metrics()` — tokens, tests, coverage, analysis, effort
   lifecycle, nudges — listed regardless of recorded data so the user sees they
@@ -1823,11 +1811,13 @@ The mechanics behind those controls (unchanged by tsk117):
   metrics and legacy rows. **Every entry is `toggleable: true` (tsk31)** — the
   "always on" class is retired: producers/extensions can be enabled/disabled just
   like code metrics. `catalog()` reads each row's `enabled` from config
-  (`config_state`): a built-in code metric is on only when a non-disabled `use:`
-  resolves it — except `builtin_metrics::DEFAULT_ON` (`oxplow.todos`,
+  (`config_state`): a metric that says `default: off` is on only when a non-disabled `use:`
+  resolves it; the four default-on foundation metrics (`oxplow.todos`,
   `fn_count`, `long_functions`, `high_complexity_fns`: what fills
-  `v_function`, so a new project can answer "which functions are longest";
-  tsk1034), which `resolved_specs` uses unless the project mentions them;
+  `v_function`, so a new project can answer "which functions are longest")
+  are used unless the project mentions them. The catalog row's `trigger` for a
+  metric that names a collector is that collector's trigger label
+  (`trigger_label(&Trigger)`);
   producers/extensions are default-ON unless an `enabled: false` marker
   disables them, and so are those four.
 - **Function facts are keyed by symbol ref.** `code_metrics(text, language,
@@ -1874,7 +1864,7 @@ The mechanics behind those controls (unchanged by tsk117):
   `gauge` wording or default. Global metrics are authored by hand in the
   global config dir (there are no global collectors). The runner reads a
   collector's `entry` from its owner's folder (`collector_script_text`: the
-  project dir, the extension's folder, or the embedded script for a built-in).
+  project dir, or the extension's folder; oxplow-foundation's scripts are embedded like any bundled extension file).
 
 Metrics are also surfaced **organically off the Metrics pages** (tsk250): the
 effort review (`DiffViewPage`'s `effort.review.details` slot) shows the oxplow-bundled
@@ -2000,26 +1990,33 @@ metrics:                              # the read SPEC (the chartable metric)
   other output (the old `samples` / `findings` shape is gone); a fact on a
   measure not in the collector's `facts:` or not defined is dropped.
 - **Three metric scopes**, precedence **project > global > built-in** by key
-  (collectors have three owners instead: `project`, an extension, `built-in`):
-  - **built-in** — the bundled catalog
-    (`oxplow_script::builtin_metrics()`; scripts under
-    `crates/oxplow-script/src/metrics/<lang>/`, embedded via
-    `include_str!` in `builtin_metrics.rs`). Each authored through the **public**
+  (collectors have two kinds of owner instead: an extension or `project`):
+  - **oxplow's code metrics** live in the required bundled extension
+    **oxplow-foundation** (`extensions/oxplow-foundation/extension.yaml`,
+    `collectors:` and `metrics:`; scripts under
+    `extensions/oxplow-foundation/collectors/<lang>/*.star`, `<lang>` being
+    rust, ts, clojure, csharp, or `code` for the language-agnostic ones,
+    embedded through `bundled_extensions.rs` like any bundled extension file).
+    Their scope is `extension:oxplow-foundation`, their collector refs
+    `collector:oxplow-foundation/<id>`. Each is authored through the **public**
     surface (`files()`/`ast_query()`) — no privileged Rust path — and verified by
-    a golden test over a fixture corpus. A project activates one with
-    `metrics: - use: oxplow.<lang>.<name>`; that enables its `built-in`-owned
-    fact collector (`FactCollector::builtin`), which runs the embedded script,
-    never a project-disk file. Its trigger is the catalog's (`on` +
-    `filter` on `BuiltinMetric`; the Catalog shows it as `on snapshot.taken`).
-    Three families:
+    golden tests over a fixture corpus (`foundation_collectors_tests.rs`, which
+    read each script from the bundled foundation by collector id). Each metric
+    names its collector (`collector: <id>`) and the collector declares its
+    `facts:`. Four are on by default (`oxplow.todos`, `fn_count`,
+    `high_complexity_fns`, `long_functions`); the other 12 say `default: off`
+    and a project turns one on with `metrics: - use: oxplow.<lang>.<name>`. A
+    collector that metrics name runs only while one of them is on
+    (`MetricsService::fact_collectors`). A collector's trigger is its own
+    (`on` + `where` in `extension.yaml`; the Catalog shows it as
+    `on snapshot.taken`). Three families:
     - **Language-agnostic code metrics** (tsk314) — one metric, all languages —
       `oxplow.todos`, `oxplow.fn_count`, `oxplow.high_complexity_fns`,
       `oxplow.long_functions`, plus **`oxplow.doc_coverage`** (tsk125 — a per-file
       RATIO of documented-public ÷ public over `code_metrics()`'s `has_doc`;
       measure `oxplow.doc_coverage`, V69, per-path; spec is a `ratio` %,
-      higher-better, not a count so it's an inline `BuiltinMetric`/`NewMetricSpec`
-      rather than the count-only `code_metric`/`spec()` helpers). Built via the `code_metric` helper with
-      `language: ""`; the scripts (under `oxplow-script`'s `metrics/code/`) sweep the
+      higher-better, not a count). Declared with no
+      `language:`; the scripts (under the foundation's `collectors/code/`) sweep the
       `source_files()` reader and call a capability (`code_metrics()` /
       `markers()`), so the per-language knowledge lives in `oxplow-code-metrics`,
       not the metric. See "Language-agnostic capability layer" below.
@@ -2042,9 +2039,9 @@ metrics:                              # the read SPEC (the chartable metric)
       block (value = its line count, subject `block:<path>:<start>-<end>`);
       the spec is a `sum`. It runs on `snapshot.taken` with
       `where: { trigger: git_refs }` — every ref move logs one, an unchanged
-      tree included — paced (`BuiltinMetric.pacing`: settle 60 s, at most
-      every 15 min), so a burst of moves is one scan of the latest tree; and
-      it is `whole_tree`: it always reads the
+      tree included — paced (the collector's trigger: `settle: 60s`,
+      `at_most: 15m`), so a burst of moves is one scan of the latest tree; and
+      its collector is `whole_tree: true`: it always reads the
       reconstructed tree (`build_full_file_map`, `scan_kind = full`), and it
       alone runs on a take that recorded no files (a delta collector has no
       delta there). A clean tree records an empty capture, which clears the

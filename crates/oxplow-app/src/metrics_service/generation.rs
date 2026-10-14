@@ -77,32 +77,7 @@ impl MetricsService {
                         .map(|entity| serde_json::to_string(entity).expect("entity serializes")),
                 })
                 .collect();
-        let config_state = |key: &str| {
-            config
-                .metrics
-                .iter()
-                .find(|entry| {
-                    entry.use_key.as_deref() == Some(key) || entry.key.as_deref() == Some(key)
-                })
-                .map(|entry| entry.enabled.unwrap_or(true))
-        };
-        let gauges_on: BTreeSet<_> = frozen
-            .fact_collectors()
-            .into_iter()
-            .map(|collector| collector.key)
-            .collect();
         let mut specs = BTreeMap::new();
-        for spec in builtin_metric_specs()
-            .into_iter()
-            .chain(builtin_ast_specs())
-        {
-            let enabled = config_state(&spec.key) != Some(false)
-                && (!builtin_metrics()
-                    .iter()
-                    .any(|metric| metric.key == spec.key)
-                    || gauges_on.contains(&spec.key));
-            specs.insert(spec.key.clone(), enabled.then_some(spec));
-        }
         let resolved = frozen.resolved_specs();
         let project_specs = resolved
             .iter()

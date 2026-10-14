@@ -782,7 +782,12 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   check` prints — for each enabled project extension, on open and on
   `extensionsChanged`, and lists its errors with the load errors, once
   each. Bundled extensions are checked where they're built.
-- **Bundled extensions.** There is one, `oxplow-bundled` (tsk1084): the
+- **Bundled extensions.** There are two. `oxplow-foundation` is required: oxplow's own
+  commands, AI providers and harness implementations, code metrics, and the
+  measures, dimensions and metrics oxplow records itself (tokens, efforts, tests,
+  coverage, analysis, work items: its `measures:` / `dimensions:` / `metrics:`,
+  scope `extension:oxplow-foundation`; the producers' Rust only records the facts).
+  `oxplow-bundled` (tsk1084) holds the
   review packet, the analytics lenses and the agent's advisories in one
   extension, because the point is building oxplow on its own extension
   platform, not letting people pick between its features. It can still be
@@ -2706,7 +2711,7 @@ transaction**, after its rows, its `collector_run` and its
 `collector.synced`, each **caused by that `collector.synced`** — with
 the run or not at all. A run whose events aren't allowed fails whole
 (nothing stored, the run recorded `error`). Refused besides: a
-`project` or `built-in` collector's (no extension, no namespace), a type
+`project` collector's (no extension, no namespace), a type
 the collector's own `trigger.on` names (its run would trigger itself),
 and more than `MAX_RUN_EVENTS` (100) a run. A fact collector doesn't
 emit. A preview (`CollectorPreview.events`) and a `extension test` example
@@ -3802,7 +3807,7 @@ What moves out of core, and what it becomes:
 | Planning / Review / Quality dashboards | `grid` lenses (**done**: `planning`, `review`, `quality`) |
 | Code-quality runner, dup scan, FindingPage, DuplicateBlockPage | **done:** the `findings` / `duplicate-blocks` lenses; the dup scan runs in core's change analysis; `DuplicateBlockPage` stays core as the compare page |
 | Change-analysis cards (treemap, look-here-first, functions, co-change, zones) | **done:** the `change-review` grid in the `effort.review.details` / `vcs.commit.details` / `vcs.status.details` slots; core keeps a changed-files tree (`ChangedFilesTree`, `useChangedFiles`) |
-| Fact collectors (`oxplow/collectors/*.star`, idiom `.star`; gauges until P7.B3) | extensions can declare fact collectors (tsk311); the built-in catalog stays core as the opt-in standard library |
+| Fact collectors (`oxplow/collectors/*.star`, idiom `.star`; gauges until P7.B3) | extensions can declare fact collectors (tsk311); done: the code metrics are oxplow-foundation's (the opt-in ones say `default: off`) |
 | Metric-threshold nudges | **done:** the `threshold-crossed` advisory (with `metric-deltas`) |
 | Usage / page analytics / token pages, `ThreadTokenTotal`, `EffortTokenUsage` | **done:** the `usage` grid; `task-tokens` (`work_item.detail.body` slot) and `thread-tokens` (`thread.plan.header` slot) |
 | Git History's commit graph | **done:** the `history-graph` component, replacing core's plain `CommitList` (`vcs.history.graph`) |
@@ -3826,7 +3831,7 @@ effort's churn is its fact collector `oxplow_bundled.effort_churn`
 (`on: [effort.finished]`, `after: [change.analyze]`, reading the
 effort's change files) recording `oxplow_bundled.effort_churn_lines`.
 Full-tree duplicated lines (tsk388) read the tree, not tables, so they
-are a core built-in collector, `oxplow.duplicate_lines`, over the
+are oxplow-foundation's collector, `oxplow.duplicate_lines`, over the
 public `duplicate_blocks(min_lines)` builtin — what any extension could
 write. What needs two revisions' trees — files, functions, imports, test
 signals, per-function churn, the scoped duplicate scan — stays in core's

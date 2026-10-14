@@ -294,8 +294,8 @@ pub fn core_kinds() -> KindRegistry {
 /// (the id as `contribution::valid_local` allows), or `<kind>:<name>` for
 /// a kind whose names are global. A few also name things that aren't
 /// contributions: a page is also a shell route (`page:settings`), a model
-/// also one of core's (`model:effort`), a collector also a project's or
-/// the built-in catalog's (`collector:project/repo.scan`), and a lens or
+/// also one of core's (`model:effort`), a collector also a project's
+/// (`collector:project/repo.scan`), and a lens or
 /// page ref may carry its params (`lens:acme/blocked?stream_id=2`).
 fn contribution_kind(kind: crate::contribution::ContributionKind) -> Result<KindSpec, KindError> {
     use crate::contribution::ContributionKind as C;

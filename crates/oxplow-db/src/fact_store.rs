@@ -670,6 +670,20 @@ pub fn get_spec_tx(conn: &rusqlite::Connection, key: &str) -> rusqlite::Result<O
     conn.query_row(&sql, params![key], row_to_spec).optional()
 }
 
+/// Whether the metric catalog lists `key` (every metric available to the
+/// project, on or off): `Some(enabled)`, or `None` when no metric has it.
+pub fn catalog_enabled_tx(
+    conn: &rusqlite::Connection,
+    key: &str,
+) -> rusqlite::Result<Option<bool>> {
+    conn.query_row(
+        "SELECT enabled FROM metric_catalog WHERE key = ?1",
+        params![key],
+        |r| r.get::<_, i64>(0).map(|e| e != 0),
+    )
+    .optional()
+}
+
 /// Insert a capture and its facts inside the caller's transaction; when
 /// `log` is given, append the event it builds from the capture id. A
 /// capture already recorded under its idempotency key writes nothing and
@@ -1536,6 +1550,14 @@ impl SqliteFactStore {
     pub async fn get_spec(&self, key: &str) -> Result<Option<MetricSpec>, DomainError> {
         let key = key.to_string();
         self.db.call(move |conn| get_spec_tx(conn, &key)).await
+    }
+
+    /// [`catalog_enabled_tx`] on the read connection.
+    pub async fn catalog_enabled(&self, key: &str) -> Result<Option<bool>, DomainError> {
+        let key = key.to_string();
+        self.db
+            .call(move |conn| catalog_enabled_tx(conn, &key))
+            .await
     }
 
     pub async fn list_specs(&self) -> Result<Vec<MetricSpec>, DomainError> {

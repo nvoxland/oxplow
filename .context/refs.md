@@ -102,9 +102,8 @@ kind per kind of contribution, from `contribution::KINDS`
 or `<kind>:<name>` for the globally named ones (`command`, `measure`,
 `metric`, `dimension`, `event_type`, `ref_kind`). A page is also a shell
 route (`page:settings`), a model also one of core's (`model:effort`), and
-a collector also a project's or the built-in catalog's
-(`collector:project/repo.scan_clone`, `collector:built-in/…`) until those
-become extensions. `job_run` names one run of a job (`job_run:<uuid>`);
+a collector also a project's
+(`collector:project/repo.scan_clone`) until those become extensions. `job_run` names one run of a job (`job_run:<uuid>`);
 `ai_model` a language model by the name its harness reports.
 
 **Event sources aren't refs.** An event's `source` says who emitted it —
@@ -167,8 +166,8 @@ a person's decision, `proposal:12`, P6b) has a numeric id too;
 work, `claim:7`) and `decision` (one it recorded or oxplow inferred,
 `decision:3`) — what the review commands name (P7.C4); `build::claim_ref`
 and `build::decision_ref`. `collector` (`collector:<owner>/<id>`, the
-owner an extension, `project` or `built-in`, the id dotted identifiers:
-`collector:project/repo.scan_clone`) names a collector — the subject of
+owner an extension or `project`, the id dotted identifiers:
+`collector:project/repo.scan_clone`, `collector:oxplow-foundation/oxplow.fn_count`) names a collector — the subject of
 its `collector.synced@1` (P7.B3); `build::collector_ref`.
 
 ## Building refs in Rust (built, P2.4b)

@@ -72,7 +72,7 @@ pub enum EntityWrite {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CollectorRun {
-    /// The declaring extension, `project` or `built-in`.
+    /// The declaring extension, or `project`.
     pub owner: String,
     pub id: String,
     /// `ok`, `error`, `needs_approval` or `skipped` (the loop guard).

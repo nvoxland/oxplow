@@ -110,6 +110,8 @@ pub mod extensions;
 pub mod external_process;
 pub mod file_ref_version;
 pub mod followup;
+#[cfg(test)]
+mod foundation_collectors_tests;
 pub mod grants;
 pub mod harness_conformance;
 pub mod harnesses;

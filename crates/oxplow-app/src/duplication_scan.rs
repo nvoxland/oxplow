@@ -9,7 +9,7 @@
 //!
 //! It writes no facts: a scan anchors only the change's files, and a
 //! capture from it would restate the whole tree from a slice (tsk365).
-//! `oxplow.duplicate_lines` is the built-in whole-tree collector's.
+//! `oxplow.duplicate_lines` is oxplow-foundation's whole-tree collector's.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;

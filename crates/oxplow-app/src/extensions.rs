@@ -2340,21 +2340,19 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         }
         // Cross-references inside the catalog: a metric's source measure
         // and a collector's fact measures are normally ones this extension
-        // declares or oxplow's built-ins. A measure from another scope
+        // declares. A measure from another scope
         // (the project's or another extension's `measures:`) resolves
         // when the catalog is assembled, so that is a warning, not an
         // error — but a typo would be silent otherwise.
-        let measure_known = |key: &str| {
-            key.starts_with("oxplow.")
-                || ext.measures.iter().any(|mm| mm.key.as_deref() == Some(key))
-        };
+        let measure_known =
+            |key: &str| ext.measures.iter().any(|mm| mm.key.as_deref() == Some(key));
         for spec in &ext.metrics {
             if let Some(sm) = spec.source_measure.as_deref() {
                 if !measure_known(sm) {
                     ext.warnings.push(err_at(
                         "metrics",
                         format!(
-                            "metric `{}`: sourceMeasure `{sm}` is not a measure this extension declares (or a built-in `oxplow.*`); it must come from the project's or another extension's `measures:`",
+                            "metric `{}`: sourceMeasure `{sm}` is not a measure this extension declares; it must come from the project's or another extension's `measures:`",
                             spec.key.clone().unwrap_or_default()
                         ),
                     ));
@@ -2367,7 +2365,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                     ext.warnings.push(err_at(
                         "collectors",
                         format!(
-                            "collector `{}`: facts `{fact}`, which is not a measure this extension declares (or a built-in `oxplow.*`); it must come from the project's or another extension's `measures:`",
+                            "collector `{}`: facts `{fact}`, which is not a measure this extension declares; it must come from the project's or another extension's `measures:`",
                             c.id
                         ),
                     ));

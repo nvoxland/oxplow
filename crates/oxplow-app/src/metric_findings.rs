@@ -89,12 +89,12 @@ impl FindingsPlan {
         with_rows: bool,
     ) -> Result<crate::metric_grid::Materialized, DomainError> {
         let key = &self.key;
-        let spec = engine.spec(key).await?.ok_or_else(|| {
-            invalid(format!(
+        let Some(spec) = engine.spec(key).await? else {
+            return Err(invalid(format!(
                 "metric_findings('{key}'): {}",
-                crate::metric_engine::missing_metric(key)
-            ))
-        })?;
+                engine.missing(key).await
+            )));
+        };
         let measure = spec.source_measure.clone().ok_or_else(|| {
             invalid(format!(
                 "metric_findings('{key}'): `{key}` has no facts of its own (a formula or entity \

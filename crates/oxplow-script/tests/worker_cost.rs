@@ -30,6 +30,28 @@ fn ms(d: Duration) -> f64 {
     d.as_secs_f64() * 1000.0
 }
 
+/// oxplow-foundation's code-metric scripts, as `(path, text)`.
+fn foundation_scripts() -> Vec<(String, String)> {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../extensions/oxplow-foundation/collectors");
+    let mut out = Vec::new();
+    for lang in std::fs::read_dir(&dir).expect("the foundation's collectors") {
+        let lang = lang.expect("a language folder").path();
+        for f in std::fs::read_dir(&lang).expect("its scripts") {
+            let path = f.expect("a script").path();
+            let name = path
+                .strip_prefix(&dir)
+                .expect("under the folder")
+                .display()
+                .to_string();
+            let text = std::fs::read_to_string(&path).expect("a readable script");
+            out.push((name, text));
+        }
+    }
+    out.sort();
+    out
+}
+
 /// The peak live bytes of each built-in metric over the default tree,
 /// under a cap high enough to let it finish.
 #[test]
@@ -43,18 +65,18 @@ fn builtin_metric_peaks() {
         },
     );
     let tree = Arc::new(fixtures::tree::corpus(fixtures::tree::DEFAULT_FILES));
-    for m in oxplow_script::builtin_metrics() {
+    for (key, script) in foundation_scripts() {
         let started = Instant::now();
         let ran = w
             .run(
                 &Budget::default(),
-                ScriptRun::starlark(m.script, json!({})).with_tree(tree.clone()),
+                ScriptRun::starlark(&script, json!({})).with_tree(tree.clone()),
                 None,
             )
-            .unwrap_or_else(|e| panic!("{}: {e}", m.key));
+            .unwrap_or_else(|e| panic!("{key}: {e}"));
         eprintln!(
             "{:40} peak {:>6} MB  cpu {:>6} ms  wall {:>6.0} ms",
-            m.key,
+            key,
             ran.peak_bytes / (1024 * 1024),
             ran.cpu_ms,
             ms(started.elapsed())
@@ -98,18 +120,18 @@ fn worker_cost() {
     // runs them: each run ships the tree, then runs.
     let tree = Arc::new(fixtures::tree::corpus(fixtures::tree::DEFAULT_FILES));
     let tree_bytes: usize = tree.iter().map(|(k, v)| k.len() + v.len()).sum();
-    let metrics = oxplow_script::builtin_metrics();
+    let metrics = foundation_scripts();
     let mut sweep = Duration::ZERO;
     let mut cpu = 0;
-    for m in &metrics {
+    for (key, script) in &metrics {
         let started = Instant::now();
         let ran = w
             .run(
                 &budget,
-                ScriptRun::starlark(m.script, json!({})).with_tree(tree.clone()),
+                ScriptRun::starlark(script, json!({})).with_tree(tree.clone()),
                 None,
             )
-            .unwrap_or_else(|e| panic!("{}: {e}", m.key));
+            .unwrap_or_else(|e| panic!("{key}: {e}"));
         sweep += started.elapsed();
         cpu += ran.cpu_ms;
     }
@@ -170,15 +192,15 @@ fn duplicate_lines_on_this_repo() {
             memory_bytes: 8 * 1024 * 1024 * 1024,
         },
     );
-    let metric = oxplow_script::builtin_metrics()
+    let (_, script) = foundation_scripts()
         .into_iter()
-        .find(|m| m.key == "oxplow.duplicate_lines")
+        .find(|(name, _)| name == "code/duplicate_lines.star")
         .unwrap();
     let started = Instant::now();
     let ran = w
         .run(
             &Budget::default(),
-            ScriptRun::starlark(metric.script, json!({})).with_tree(Arc::new(files.clone())),
+            ScriptRun::starlark(&script, json!({})).with_tree(Arc::new(files.clone())),
             None,
         )
         .unwrap();

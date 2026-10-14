@@ -42,6 +42,34 @@ pub const BUNDLED: &[BundledExtension] = &[
         name: "oxplow-foundation",
         files: &[
             ext_file!("oxplow-foundation", "README.md"),
+            ext_file!("oxplow-foundation", "collectors/clojure/defn_count.star"),
+            ext_file!("oxplow-foundation", "collectors/code/doc_coverage.star"),
+            ext_file!("oxplow-foundation", "collectors/code/duplicate_lines.star"),
+            ext_file!("oxplow-foundation", "collectors/code/fn_count.star"),
+            ext_file!(
+                "oxplow-foundation",
+                "collectors/code/high_complexity_fns.star"
+            ),
+            ext_file!("oxplow-foundation", "collectors/code/long_functions.star"),
+            ext_file!("oxplow-foundation", "collectors/code/todos.star"),
+            ext_file!(
+                "oxplow-foundation",
+                "collectors/csharp/blocking_async_calls.star"
+            ),
+            ext_file!("oxplow-foundation", "collectors/csharp/empty_catch.star"),
+            ext_file!("oxplow-foundation", "collectors/rust/panic_macros.star"),
+            ext_file!("oxplow-foundation", "collectors/rust/unsafe_blocks.star"),
+            ext_file!(
+                "oxplow-foundation",
+                "collectors/rust/unwrap_expect_calls.star"
+            ),
+            ext_file!("oxplow-foundation", "collectors/ts/any_usage.star"),
+            ext_file!("oxplow-foundation", "collectors/ts/console_calls.star"),
+            ext_file!(
+                "oxplow-foundation",
+                "collectors/ts/non_null_assertions.star"
+            ),
+            ext_file!("oxplow-foundation", "collectors/ts/ts_ignore.star"),
             ext_file!("oxplow-foundation", "extension.yaml"),
             ext_file!("oxplow-foundation", "providers/anthropic.star"),
             ext_file!("oxplow-foundation", "providers/openai_compatible.star"),
@@ -187,8 +215,8 @@ pub fn is_required(name: &str) -> bool {
 
 pub fn is_reserved(name: &str) -> bool {
     find(name).is_some()
-        // A collector's owner names its extension, the project or oxplow.
-        || [oxplow_config::collectors::PROJECT, oxplow_config::collectors::BUILT_IN].contains(&name)
+        // A collector's owner names its extension or the project.
+        || name == oxplow_config::collectors::PROJECT
 }
 
 #[cfg(test)]
