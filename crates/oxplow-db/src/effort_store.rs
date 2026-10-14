@@ -67,9 +67,7 @@ pub struct EffortFile {
     pub effort_id: EffortId,
     pub path: String,
     pub change: EffortFileChange,
-    /// The snapshot the file ref was captured at. Always set since
-    /// V20; 0 only on pre-V20 rows whose owning effort had no
-    /// snapshot pin.
+    /// The snapshot the file ref was captured at.
     pub local_snapshot_id: i64,
     /// Closest known git commit at capture time. See V20 column
     /// docs. NULL when no git information is available (no commits

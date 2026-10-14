@@ -644,11 +644,9 @@ function SnapshotRowItem({
           slow
         </span>
       ) : null}
-      {snapshot.trigger ? (
-        <span style={{ ...subtle, flexShrink: 0 }} title="Why this snapshot was taken">
-          {TRIGGER_LABEL[snapshot.trigger]}
-        </span>
-      ) : null}
+      <span style={{ ...subtle, flexShrink: 0 }} title="Why this snapshot was taken">
+        {TRIGGER_LABEL[snapshot.trigger]}
+      </span>
       <span style={{ ...subtle, width: 130, flexShrink: 0, textAlign: "right" }} title={snapshot.createdAt}>
         {formatShortDateTime(snapshot.createdAt)}
       </span>

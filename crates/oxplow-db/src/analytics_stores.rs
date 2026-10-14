@@ -495,7 +495,6 @@ pub struct CodeQualityScan {
     /// `git:<rev>`; `oxplow_domain::vcs::Revision`).
     pub revision: String,
     /// File filter applied: `"all"` or `"explicit:<sha-of-paths>"`.
-    /// Backfilled to `"all"` for pre-V9 rows.
     pub file_filter: String,
 }
 
@@ -520,7 +519,7 @@ fn row_to_scan(row: &rusqlite::Row<'_>) -> rusqlite::Result<CodeQualityScan> {
     let ended_at: Option<String> = row.get(5)?;
     let error: Option<String> = row.get(6)?;
     let revision: String = row.get(7)?;
-    let file_filter: Option<String> = row.get(8)?;
+    let file_filter: String = row.get(8)?;
     let status = match status.as_str() {
         "pending" => CodeQualityScanStatus::Pending,
         "running" => CodeQualityScanStatus::Running,
@@ -542,7 +541,7 @@ fn row_to_scan(row: &rusqlite::Row<'_>) -> rusqlite::Result<CodeQualityScan> {
             .map_err(map_err)?,
         error,
         revision,
-        file_filter: file_filter.unwrap_or_else(|| "all".into()),
+        file_filter,
     })
 }
 
@@ -764,7 +763,7 @@ impl SqliteCodeQualityStore {
 // ---------------- File snapshots ----------------
 
 /// Where a captured file's bytes live — the explicit `file_snapshot.storage`
-/// discriminator (V37). Replaces the old implicit `(blob_hash NULL?,
+/// discriminator. Replaces the old implicit `(blob_hash NULL?,
 /// oversize?)` 2-bit encoding. The `blob_hash` column means different
 /// things per variant:
 /// - [`Oxplow`](SnapshotStorage::Oxplow): `blob_hash` is an xxh3-128, bytes
@@ -845,13 +844,9 @@ fn row_to_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileSnapshot> {
     let size_bytes: i64 = row.get(4)?;
     let captured_at: String = row.get(5)?;
     let storage: String = row.get(6)?;
-    // snapshot_id / mtime_ms only present when the SELECT asks for
-    // them (V13 / V15+); older 7-column callers see them as missing
-    // and we treat that as None.
-    let snapshot_id: Option<i64> = row.get(7).ok().flatten();
-    let mtime_ms: Option<i64> = row.get(8).ok().flatten();
-    // Present only when the SELECT names it (V96+).
-    let content_hash: Option<String> = row.get("content_hash").ok().flatten();
+    let snapshot_id: Option<i64> = row.get(7)?;
+    let mtime_ms: Option<i64> = row.get(8)?;
+    let content_hash: Option<String> = row.get(9)?;
     let map_err = |e: DomainError| {
         rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
     };
@@ -917,20 +912,21 @@ pub struct Snapshot {
     #[specta(type = Option<String>)]
     pub revision: Option<Revision>,
     /// The branch the workspace was on when this snapshot was captured
-    /// (e.g. `main`). `None` for pre-V42 rows, a detached head, or a
+    /// (e.g. `main`). `None` for a detached head or a
     /// directory not under version control.
     pub branch: Option<String>,
-    /// Whole-tree identity (V96): the xxh3-128 of the sorted manifest of
+    /// Whole-tree identity: the xxh3-128 of the sorted manifest of
     /// the reconstructed tree ([`crate::snapshot_tree::manifest_hash`]).
     /// Two snapshots with equal `tree_hash` hold the same files. `None`
-    /// on snapshots taken before V96.
+    /// on a snapshot taken without a reconstructed tree.
     pub tree_hash: Option<String>,
     /// What the take that CREATED this snapshot recorded (its first
     /// `snapshot_op`, P2.11): the snapshot it grew from — the "previous"
     /// a single-snapshot diff starts at — why it was taken, and whether
-    /// it ran over its budget. `None` / `false` for a snapshot with no op.
+    /// it ran over its budget. `parent_snapshot_id` is `None` for a stream's
+    /// first snapshot.
     pub parent_snapshot_id: Option<i64>,
-    pub trigger: Option<SnapshotTrigger>,
+    pub trigger: SnapshotTrigger,
     pub over_budget: bool,
 }
 
@@ -943,7 +939,7 @@ pub struct LatestStat {
     pub size_bytes: i64,
     pub mtime_ms: Option<i64>,
     pub storage: SnapshotStorage,
-    /// The row's content identity when known (V96): always for `oxplow`,
+    /// The row's content identity when known : always for `oxplow`,
     /// lazily for `git`, never for `oversize`/`deleted`.
     pub content_hash: Option<String>,
 }
@@ -963,16 +959,16 @@ pub struct FileSnapshot {
     /// `oversize: bool` field; deletion tombstones are
     /// `SnapshotStorage::Deleted`.
     pub storage: SnapshotStorage,
-    /// `snapshot.id` this row was captured under, or `None` for
-    /// pre-V13 rows that predate the snapshot grouping table.
+    /// `snapshot.id` this row was captured under, or `None` for a row not
+    /// captured under a snapshot.
     pub snapshot_id: Option<i64>,
     /// File mtime in unix milliseconds at capture time. NULL for
-    /// rows written before V15 added the column. The startup sweep
+    /// oversize and tombstone rows. The startup sweep
     /// uses `(size_bytes, mtime_ms)` as a fast equality check: if
     /// both match the current stat, the file is presumed unchanged
     /// and the bytes aren't re-read or re-hashed.
     pub mtime_ms: Option<i64>,
-    /// The content identity (V96): xxh3-128 of the bytes, whatever the
+    /// The content identity: xxh3-128 of the bytes, whatever the
     /// storage class. `blob_hash` is only the address. [`capture_batch`]
     /// fills it from `blob_hash` for `oxplow` rows; `git` rows get it
     /// lazily ([`SqliteSnapshotStore::with_content_hasher`]).
@@ -1111,25 +1107,13 @@ fn insert_rows_tx(
     Ok(ids)
 }
 
-/// The snapshot the stream's worktree is at: the latest op's snapshot
-/// (the op log is complete since V97's backfill), else the newest
-/// snapshot row.
+/// The snapshot the stream's worktree is at: the latest op's snapshot.
 pub(crate) fn current_snapshot_tx(
     conn: &rusqlite::Connection,
     stream_id: StreamId,
 ) -> rusqlite::Result<Option<i64>> {
-    let from_ops: Option<i64> = conn
-        .query_row(
-            "SELECT snapshot_id FROM snapshot_op WHERE stream_id = ?1 ORDER BY seq DESC LIMIT 1",
-            params![stream_id.value()],
-            |r| r.get(0),
-        )
-        .optional()?;
-    if from_ops.is_some() {
-        return Ok(from_ops);
-    }
     conn.query_row(
-        "SELECT id FROM snapshot WHERE stream_id = ?1 ORDER BY created_at DESC, id DESC LIMIT 1",
+        "SELECT snapshot_id FROM snapshot_op WHERE stream_id = ?1 ORDER BY seq DESC LIMIT 1",
         params![stream_id.value()],
         |r| r.get(0),
     )
@@ -1465,7 +1449,7 @@ pub struct TakeRecord {
     /// Whether the take kept file contents (blobs) for its rows; `false`
     /// for a hashes-only take, whose reads answer "no contents".
     pub contents: bool,
-    /// A snapshot provider's own name for the state it marked (V46);
+    /// A snapshot provider's own name for the state it marked ;
     /// `None` for core's capture pipeline.
     pub handle: Option<String>,
 }
@@ -1500,11 +1484,11 @@ pub struct SnapshotOp {
     pub budget_ms: Option<i64>,
     pub over_budget: bool,
     pub file_count: i64,
-    /// What took it; `None` for ops recorded before V45.
+    /// What took it; `None` for a take by core's capture pipeline.
     pub provider: Option<String>,
     /// Whether the take kept file contents (`false`: hashes only).
     pub contents: bool,
-    /// The provider's name for the state it marked (V46); `None` for a take
+    /// The provider's name for the state it marked; `None` for a take
     /// by core's capture pipeline.
     pub handle: Option<String>,
 }
@@ -1802,7 +1786,7 @@ impl SqliteSnapshotStore {
                     let branch: Option<String> = row.get(5)?;
                     let tree_hash: Option<String> = row.get(6)?;
                     let parent_snapshot_id: Option<i64> = row.get(7)?;
-                    let trigger: Option<String> = row.get(8)?;
+                    let trigger: String = row.get(8)?;
                     let over_budget: i64 = row.get(9)?;
                     let map_err = |e: DomainError| {
                         rusqlite::Error::FromSqlConversionFailure(
@@ -1811,6 +1795,13 @@ impl SqliteSnapshotStore {
                             Box::new(e),
                         )
                     };
+                    let trigger = SnapshotTrigger::from_db_str(&trigger).ok_or_else(|| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            8,
+                            rusqlite::types::Type::Text,
+                            format!("unknown snapshot trigger `{trigger}`").into(),
+                        )
+                    })?;
                     Ok(Snapshot {
                         id,
                         stream_id: StreamId::new(stream_id),
@@ -1820,7 +1811,7 @@ impl SqliteSnapshotStore {
                         branch,
                         tree_hash,
                         parent_snapshot_id,
-                        trigger: trigger.as_deref().and_then(SnapshotTrigger::from_db_str),
+                        trigger,
                         over_budget: over_budget != 0,
                     })
                 })?;
@@ -1865,8 +1856,7 @@ impl SqliteSnapshotStore {
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
-            // Belt-and-braces: writes are canonical and V67 normalized old
-            // rows (tsk107), so the SQL ORDER BY is chronological — but
+            // Belt-and-braces: writes are canonical, so the SQL ORDER BY is chronological — but
             // "oldest first" is load-bearing for the resolver's
             // first-stamp-at-or-after search, so the parsed-value sort stays
             // as insurance against any stray non-canonical value.
@@ -1878,7 +1868,7 @@ impl SqliteSnapshotStore {
 
     /// Created / modified / deleted counts for the rows captured under one
     /// snapshot, each compared with the most recent prior row for the same
-    /// `(stream_id, path)` by **content identity** (V96): a row whose bytes
+    /// `(stream_id, path)` by **content identity** : a row whose bytes
     /// equal its predecessor's is not a change and isn't counted (nor in
     /// `total`). A git row not yet hashed compares as `git:<oid>`, so it can
     /// read as modified against a hashed predecessor — conservative. The
@@ -2126,7 +2116,7 @@ impl SqliteSnapshotStore {
             .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, storage,
-                            snapshot_id
+                            snapshot_id, mtime_ms, content_hash
                      FROM file_snapshot WHERE snapshot_id = ?1 ORDER BY id ASC",
                 )?;
                 let rows = stmt.query_map(params![snapshot_id], row_to_snapshot)?;
@@ -2148,10 +2138,10 @@ impl SqliteSnapshotStore {
             .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, storage,
-                            snapshot_id
+                            snapshot_id, mtime_ms, content_hash
                      FROM (
                         SELECT f.id, f.stream_id, f.path, f.blob_hash, f.size_bytes, f.captured_at,
-                               f.storage, f.snapshot_id,
+                               f.storage, f.snapshot_id, f.mtime_ms, f.content_hash,
                                ROW_NUMBER() OVER (
                                  PARTITION BY f.path ORDER BY f.snapshot_id DESC, f.id DESC
                                ) AS rn
@@ -2192,10 +2182,10 @@ impl SqliteSnapshotStore {
                 };
                 let mut stmt = conn.prepare(
                     "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, storage,
-                            snapshot_id
+                            snapshot_id, mtime_ms, content_hash
                      FROM (
                         SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, storage,
-                               snapshot_id,
+                               snapshot_id, mtime_ms, content_hash,
                                ROW_NUMBER() OVER (
                                  PARTITION BY path ORDER BY snapshot_id DESC, id DESC
                                ) AS rn
@@ -2216,7 +2206,7 @@ impl SqliteSnapshotStore {
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, storage, snapshot_id, mtime_ms
+                    "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, storage, snapshot_id, mtime_ms, content_hash
                      FROM file_snapshot WHERE id = ?1",
                 )?;
                 let mut rows = stmt.query_map(params![id], row_to_snapshot)?;
@@ -2233,7 +2223,7 @@ impl SqliteSnapshotStore {
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, storage, snapshot_id, mtime_ms
+                    "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, storage, snapshot_id, mtime_ms, content_hash
                      FROM file_snapshot WHERE stream_id = ?1
                      ORDER BY captured_at DESC, id DESC LIMIT ?2",
                 )?;
@@ -2247,7 +2237,7 @@ impl SqliteSnapshotStore {
     /// by the startup sweep (when `(size, mtime)` matches, the bytes are
     /// presumed identical and not re-read) and by capture (a re-captured
     /// path whose content equals its latest row writes no new row).
-    /// `mtime_ms` is `None` for pre-V15 rows. Another stream's rows are a
+    /// `mtime_ms` is `None` for oversize and tombstone rows. Another stream's rows are a
     /// different worktree's history and never count here.
     pub async fn latest_stat_per_path(
         &self,
@@ -2351,7 +2341,7 @@ impl SqliteSnapshotStore {
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, storage, snapshot_id, mtime_ms
+                    "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, storage, snapshot_id, mtime_ms, content_hash
                      FROM file_snapshot WHERE path = ?1 ORDER BY captured_at DESC, id DESC",
                 )?;
                 let rows = stmt.query_map(params![path], row_to_snapshot)?;
@@ -2487,8 +2477,9 @@ mod tests {
                 conn.execute(
                     "INSERT INTO file_snapshot
                            (stream_id, path, blob_hash, size_bytes, captured_at,
-                            storage, snapshot_id, mtime_ms)
-                         VALUES (1, ?1, ?2, 10, '2026-01-01T00:00:00Z', ?3, ?4, 1)",
+                            storage, snapshot_id, mtime_ms, content_hash)
+                         VALUES (1, ?1, ?2, 10, '2026-01-01T00:00:00Z', ?3, ?4, 1,
+                                 CASE WHEN ?3 = 'oxplow' THEN ?2 END)",
                     params![path, hash, storage, sid],
                 )?;
             }
@@ -2911,7 +2902,7 @@ mod tests {
             ],
         )
         .await;
-        let store = SqliteSnapshotStore::new(db);
+        let store = SqliteSnapshotStore::new(db.clone());
         let h1 = store.set_tree_hash(1).await.unwrap();
         let h2 = store.set_tree_hash(2).await.unwrap();
         let h3 = store.set_tree_hash(3).await.unwrap();
@@ -2921,11 +2912,17 @@ mod tests {
         );
         assert_ne!(h1, h2);
         assert_eq!(h1, h3, "a revert restores the tree identity");
-        let listed = store
-            .list_snapshots_for_stream(StreamId::new(1), 10)
+        let unset: i64 = db
+            .call(|conn| {
+                conn.query_row(
+                    "SELECT COUNT(*) FROM snapshot WHERE tree_hash IS NULL",
+                    [],
+                    |r| r.get(0),
+                )
+            })
             .await
             .unwrap();
-        assert!(listed.iter().all(|s| s.tree_hash.is_some()));
+        assert_eq!(unset, 0);
     }
 
     #[tokio::test]
@@ -3170,16 +3167,12 @@ mod tests {
         let a = row(first.snapshot_id);
         assert_eq!(
             (a.parent_snapshot_id, a.trigger, a.over_budget),
-            (None, Some(SnapshotTrigger::Startup), false)
+            (None, SnapshotTrigger::Startup, false)
         );
         let b = row(second.snapshot_id);
         assert_eq!(
             (b.parent_snapshot_id, b.trigger, b.over_budget),
-            (
-                Some(first.snapshot_id),
-                Some(SnapshotTrigger::TurnEnd),
-                true
-            )
+            (Some(first.snapshot_id), SnapshotTrigger::TurnEnd, true)
         );
 
         let ops = store.list_ops(StreamId::new(1), 2).await.unwrap();
@@ -3462,9 +3455,14 @@ mod tests {
         let store = SqliteSnapshotStore::new(db);
         let stream = StreamId::new(1);
 
-        let on_main = store.create_snapshot(stream).await.unwrap();
-        let on_feature = store.create_snapshot(stream).await.unwrap();
-        let unstamped = store.create_snapshot(stream).await.unwrap();
+        let mut taken = Vec::new();
+        for (n, hash) in ["h1", "h2", "h3"].into_iter().enumerate() {
+            let mut t = take(1, vec![("a.txt", hash)], SnapshotTrigger::Quiet);
+            t.branch = None;
+            let rec = store.record_take(t).await.unwrap().unwrap();
+            taken.push((n, rec.snapshot_id));
+        }
+        let (on_main, on_feature, unstamped) = (taken[0].1, taken[1].1, taken[2].1);
         store
             .set_snapshot_branch(on_main, "main".into())
             .await

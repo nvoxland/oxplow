@@ -1925,13 +1925,13 @@ export interface Snapshot {
   /** The VCS revision the snapshot's tree equals (`git:<sha>`) — set when
    *  it was taken on a clean workspace at its head. */
   revision: Revision | null;
-  /** The branch the workspace was on at capture; null for pre-V42 rows, a
-   *  detached head, or a directory not under version control. */
+  /** The branch the workspace was on at capture; null for a
+   *  detached head or a directory not under version control. */
   branch: string | null;
   /** What the take that created it recorded (P2.11): the snapshot it grew
    *  from, why it was taken, and whether it ran over its time budget. */
   parentSnapshotId: number | null;
-  trigger: SnapshotTrigger | null;
+  trigger: SnapshotTrigger;
   overBudget: boolean;
 }
 
@@ -1989,7 +1989,7 @@ export async function listSnapshots(streamId: string, limit?: number): Promise<S
     revision: Revision | null;
     branch: string | null;
     parent_snapshot_id: number | null;
-    trigger: SnapshotTrigger | null;
+    trigger: SnapshotTrigger;
     over_budget: boolean;
   }>;
   return rows.map((r) => ({
