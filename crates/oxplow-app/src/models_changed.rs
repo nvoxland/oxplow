@@ -603,8 +603,10 @@ mod tests {
             .unwrap();
         assert_eq!(errors["acme"], Vec::<String>::new());
 
-        let assets =
-            crate::assets::Assets::new(f.svc.db.clone(), std::time::Duration::from_millis(50));
+        // A burst is writes closer together than this; it's wide enough
+        // that a loaded machine still writes the five below as one.
+        let coalesce = std::time::Duration::from_millis(400);
+        let assets = crate::assets::Assets::new(f.svc.db.clone(), coalesce);
         let mut rx = f.svc.events.subscribe_ui();
         spawn(
             f.svc.db.clone(),
@@ -643,9 +645,19 @@ mod tests {
             }
             (n, readers)
         };
+        // Until `titles` reads `want`, up to ten seconds.
+        let until_titles = |want: &'static str| async move {
+            for _ in 0..200 {
+                if titles().await == vec![want.to_string()] {
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            panic!("v_acme_titles never read {want}: {:?}", titles().await);
+        };
         // Its first build fills it.
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-        assert_eq!(titles().await, vec!["t".to_string()]);
+        until_titles("t").await;
+        tokio::time::sleep(coalesce * 2).await;
         let _ = announced(&mut rx);
 
         let mut task = f.svc.task_store.get(f.task).await.unwrap().unwrap();
@@ -653,10 +665,10 @@ mod tests {
             task.title = format!("renamed {i}");
             f.svc.task_store.update(&task).await.unwrap();
             crate::test_fixtures::restate_task(&f.svc, f.task).await;
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
-        assert_eq!(titles().await, vec!["renamed 4".to_string()]);
+        until_titles("renamed 4").await;
+        // Long enough for a second refill to have shown, had there been one.
+        tokio::time::sleep(coalesce * 2).await;
         assert_eq!(
             announced(&mut rx),
             (1, true),

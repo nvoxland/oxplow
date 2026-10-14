@@ -2673,6 +2673,24 @@ approved; a **decision** is what a run was allowed (`oxplow_domain::grant`,
   manifest permissions cannot widen a running frame. Asset declarations
   are included in component approval hashes.
 - **Not yet:** OS confinement and model call-count/monetary budgets.
+- **Deliberately still open** (audited sound by design; the hardening is
+  deferred until the extension API settles):
+  - adversarial tests for bounded `sql.read` (CTEs, UNIONs, table-valued
+    and pragma functions, the `metric_grid()` refusal) and bounded
+    `tree.read:` (sibling prefixes, `..`), and for `copy_directory`'s
+    refusals and a file changed mid-copy;
+  - the approved copy is writable, so a same-user process could rewrite
+    it between the last re-hash and `execve` (the poll then kills it);
+  - a shebang's interpreter resolves from `PATH` and isn't part of the
+    approval;
+  - `extension.yaml` and `lenses/` are copied into a program's copy but
+    not hashed;
+  - credentials are handed to a process at spawn: revocation kills it
+    but can't take a credential back, and a keychain deletion mid-run
+    isn't watched;
+  - a run built without authority is unbounded (core's own runs, by
+    design; not yet a tested invariant);
+  - network confinement is `sandbox-exec` on macOS only.
 
 ## The event envelope
 
