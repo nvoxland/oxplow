@@ -183,7 +183,7 @@ impl FactCollector {
             report: spec.report.clone(),
             input: spec.input.clone(),
             after: spec.after.clone(),
-            whole_tree: false,
+            whole_tree: spec.whole_tree,
             needs: crate::services::collector_needs(spec, None),
         })
     }
@@ -702,17 +702,33 @@ impl MetricsService {
     }
 
     /// The fact collectors this project runs (P7.B3): the project's own
-    /// (`collectors:` with `facts:`), enabled extensions', and the built-in
-    /// ones whose metric `metrics: - use:` enables (and no marker disables).
+    /// (`collectors:` with `facts:`), enabled extensions' (those metrics
+    /// name only while one of them is active), and the built-in ones whose
+    /// metric `metrics: - use:` enables (and no marker disables).
     /// An id two owners declare runs once — the project's over an
     /// extension's over a built-in — with a warning.
     pub fn fact_collectors(&self) -> Vec<FactCollector> {
-        let enabled: std::collections::HashSet<String> = self
-            .resolved_specs()
-            .into_iter()
+        let specs = self.resolved_specs();
+        let enabled: std::collections::HashSet<String> = specs
+            .iter()
             .filter(|s| s.scope == "built-in" && s.enabled)
-            .map(|s| s.key)
+            .map(|s| s.key.clone())
             .collect();
+        // A collector some extension metric names (`collector:`) runs only
+        // while one of those metrics is active; one no metric names runs
+        // whenever its extension is enabled.
+        let mut named: HashMap<(String, String), bool> = HashMap::new();
+        for s in &specs {
+            if let (Some(c), Some(ext)) = (&s.collector, oxplow_config::scope_extension(&s.scope)) {
+                *named.entry((ext, c.clone())).or_default() |= s.enabled;
+            }
+        }
+        let extension = self.extension_catalog().collectors.into_iter().filter(|c| {
+            named
+                .get(&(c.owner.clone(), c.key.clone()))
+                .copied()
+                .unwrap_or(true)
+        });
         let builtin: Vec<FactCollector> = builtin_metrics()
             .iter()
             .filter(|m| enabled.contains(m.key))
@@ -725,11 +741,7 @@ impl MetricsService {
             .filter_map(|spec| FactCollector::from_spec(oxplow_config::collectors::PROJECT, spec))
             .collect();
         let mut out: Vec<FactCollector> = Vec::new();
-        for c in builtin
-            .into_iter()
-            .chain(self.extension_catalog().collectors)
-            .chain(project)
-        {
+        for c in builtin.into_iter().chain(extension).chain(project) {
             match out.iter().position(|o| o.key == c.key) {
                 Some(i) => {
                     tracing::warn!(id = %c.key, kept = %c.owner, dropped = %out[i].owner,
@@ -908,7 +920,8 @@ impl MetricsService {
 
     /// Whether `key` is a default-ON metric (a producer or extension-seeded spec) —
     /// active unless a `enabled: false` marker disables it. Default-OFF metrics
-    /// (built-in code collectors + global `metrics:` definitions) instead activate by
+    /// (built-in code collectors, global `metrics:` definitions and an
+    /// extension's `default: off` ones) instead activate by
     /// the presence of a `use:` entry. Drives the config edit shape in
     /// [`Self::apply_metric_enabled`].
     fn is_default_on(&self, key: &str) -> bool {
@@ -918,7 +931,13 @@ impl MetricsService {
         let is_builtin_collector_metric = builtin_metrics().iter().any(|m| m.key == key);
         let is_global =
             self.with_global_catalog(|g| g.metrics.iter().any(|e| e.key.as_deref() == Some(key)));
-        !is_builtin_collector_metric && !is_global
+        let is_extension_off = self.extension_catalog().metrics.iter().any(|(_, entries)| {
+            entries.iter().any(|e| {
+                e.key.as_deref() == Some(key)
+                    && e.default == Some(oxplow_config::MetricDefault::Off)
+            })
+        });
+        !is_builtin_collector_metric && !is_global && !is_extension_off
     }
 
     /// Apply one enable/disable to a `metrics:` list in place (no I/O) — the
@@ -3477,6 +3496,7 @@ mod tests {
         .unwrap();
         let (specs, errors) = oxplow_config::collectors::parse_collectors(
             oxplow_config::collectors::PROJECT,
+            None,
             &serde_yaml::from_str(
                 "- { id: repo.once, runtime: starlark, entry: once.star, trigger: { on: [snapshot.taken] }, facts: [oxplow.ast_hit] }",
             )
@@ -3524,6 +3544,7 @@ mod tests {
         .unwrap();
         let (specs, errors) = oxplow_config::collectors::parse_collectors(
             oxplow_config::collectors::PROJECT,
+            None,
             &serde_yaml::from_str(
                 "- { id: repo.seen, runtime: starlark, entry: seen.star, trigger: { on: [snapshot.taken] }, facts: [oxplow.ast_hit] }",
             )
@@ -3578,6 +3599,7 @@ mod tests {
             async move {
                 let (specs, errors) = oxplow_config::collectors::parse_collectors(
                 oxplow_config::collectors::PROJECT,
+                None,
                 &serde_yaml::from_str(&format!(
                     "- {{ id: repo.seen, runtime: starlark, entry: seen.star, trigger: {trigger}, facts: [oxplow.ast_hit] }}"
                 ))
@@ -3922,6 +3944,7 @@ mod tests {
         .unwrap();
         let (specs, errors) = oxplow_config::collectors::parse_collectors(
             oxplow_config::collectors::PROJECT,
+            None,
             &serde_yaml::from_str(
                 "- { id: repo.once, runtime: starlark, entry: once.star, trigger: { on: [snapshot.taken] }, facts: [oxplow.ast_hit] }",
             )
@@ -3999,6 +4022,7 @@ mod tests {
         .unwrap();
         let (specs, errors) = oxplow_config::collectors::parse_collectors(
             oxplow_config::collectors::PROJECT,
+            None,
             &serde_yaml::from_str(
                 "- { id: repo.bare, runtime: starlark, entry: bare.star, trigger: { on: [snapshot.taken] }, facts: [oxplow.ast_hit] }",
             )
@@ -4068,6 +4092,7 @@ mod tests {
         .unwrap();
         let (specs, errors) = oxplow_config::collectors::parse_collectors(
             oxplow_config::collectors::PROJECT,
+            None,
             &serde_yaml::from_str(&format!(
                 "- {{ id: repo.{id}, runtime: starlark, entry: {id}.star, trigger: {{ on: [snapshot.taken] }}, facts: [{measure}] }}"
             ))
@@ -5013,6 +5038,7 @@ def transform(input):
         .unwrap();
         let (specs, errors) = oxplow_config::collectors::parse_collectors(
             oxplow_config::collectors::PROJECT,
+            None,
             &serde_yaml::from_str(
                 "- { id: acme.effcollector, runtime: starlark, entry: oxplow/metrics/eff.star, trigger: { on: [effort.finished] }, facts: [oxplow.ast_hit] }",
             )
@@ -6174,6 +6200,64 @@ def transform(input):
             .unwrap()
             .expect("the first extension's metric is still active");
         assert_eq!(spec.scope, "extension:alpha");
+    }
+
+    #[tokio::test]
+    async fn a_collector_metrics_name_runs_only_while_one_of_them_is_active() {
+        let (svc, dir) = fixture().await;
+        let ext = dir.path().join("oxplow/extensions/acme");
+        std::fs::create_dir_all(ext.join("collectors")).unwrap();
+        std::fs::write(
+            ext.join("extension.yaml"),
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\n\
+             measures:\n  - { key: acme.todo, title: TODOs }\n\
+             metrics:\n  - { key: acme.todos, title: TODOs, sourceMeasure: acme.todo, aggregation: sum, default: off, collector: acme.todo_scan }\n\
+             collectors:\n  - { id: acme.todo_scan, runtime: starlark, entry: collectors/todo.star, facts: [acme.todo] }\n  \
+             - { id: acme.always, runtime: starlark, entry: collectors/todo.star, facts: [acme.todo] }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            ext.join("collectors/todo.star"),
+            "def transform(input):\n    return {\"facts\": []}\n",
+        )
+        .unwrap();
+        crate::test_fixtures::activate(&svc).await;
+        let running = |svc: &crate::Services| -> Vec<String> {
+            let mut ids: Vec<String> = svc
+                .metrics
+                .fact_collectors()
+                .into_iter()
+                .filter(|c| c.owner == "acme")
+                .map(|c| c.key)
+                .collect();
+            ids.sort();
+            ids
+        };
+        // Off by default: listed, unchecked, and its collector idle; the
+        // collector no metric names runs.
+        assert_eq!(running(&svc), vec!["acme.always".to_string()]);
+        let entry = svc
+            .metrics
+            .catalog()
+            .await
+            .into_iter()
+            .find(|e| e.key == "acme.todos")
+            .expect("listed while off");
+        assert!(!entry.enabled);
+
+        // The project turns it on: its collector runs.
+        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
+        std::fs::write(
+            dir.path().join(".oxplow/project.yaml"),
+            "metrics:\n  - use: acme.todos\n",
+        )
+        .unwrap();
+        svc.reload_config_from_disk().unwrap();
+        crate::test_fixtures::activate(&svc).await;
+        assert_eq!(
+            running(&svc),
+            vec!["acme.always".to_string(), "acme.todo_scan".to_string()]
+        );
     }
 
     #[tokio::test]

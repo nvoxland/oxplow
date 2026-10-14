@@ -1321,6 +1321,14 @@ pub(super) fn resolve_catalog(mut out: Vec<Extension>, disabled: &[String]) -> V
         .collect()
 }
 
+/// A catalog block's error as the manifest's, not project.yaml's.
+fn manifest_message(e: oxplow_config::ConfigError) -> String {
+    match e {
+        oxplow_config::ConfigError::Invalid(m) => m,
+        other => other.to_string(),
+    }
+}
+
 /// A `measures:` / `metrics:` block as typed entries.
 fn parse_block<T: serde::de::DeserializeOwned>(
     v: Option<serde_yaml::Value>,
@@ -2066,8 +2074,12 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         if let Some(v) = &m.collectors {
             // A collector may follow core types, its own extension's, and
             // another's.
-            let (collectors, errors) =
-                oxplow_config::collectors::parse_collectors_indexed(name, v, &subscribable);
+            let (collectors, errors) = oxplow_config::collectors::parse_collectors_indexed(
+                name,
+                Some(&ext.namespace),
+                v,
+                &subscribable,
+            );
             let line = key_line(&manifest, "collectors");
             let lines = item_lines(&manifest, "collectors");
             ext.errors.extend(errors.into_iter().map(|(i, e)| {
@@ -2243,15 +2255,15 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             }
         }
         let err_at = |key: &str, e: String| at(&file, key_line(&manifest, key), e);
-        match parse_block(m.measures.clone())
-            .and_then(|v| oxplow_config::validate_measures(v).map_err(|e| e.to_string()))
-        {
+        match parse_block(m.measures.clone()).and_then(|v| {
+            oxplow_config::validate_measures(v, Some(&ext.namespace)).map_err(manifest_message)
+        }) {
             Ok(v) => ext.measures = v,
             Err(e) => ext.errors.push(err_at("measures", e)),
         }
-        match parse_block(m.dimensions.clone())
-            .and_then(|v| oxplow_config::validate_dimensions(v).map_err(|e| e.to_string()))
-        {
+        match parse_block(m.dimensions.clone()).and_then(|v| {
+            oxplow_config::validate_dimensions(v, Some(&ext.namespace)).map_err(manifest_message)
+        }) {
             Ok(v) => {
                 for d in v {
                     if d.promote {
@@ -2269,12 +2281,24 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             }
             Err(e) => ext.errors.push(err_at("dimensions", e)),
         }
-        match parse_block(m.metrics.clone())
-            .and_then(|v| oxplow_config::validate_metrics(v).map_err(|e| e.to_string()))
-        {
+        match parse_block(m.metrics.clone()).and_then(|v| {
+            oxplow_config::validate_metrics(v, Some(&ext.namespace)).map_err(manifest_message)
+        }) {
             Ok(v) => {
                 for e in v {
-                    if e.key.is_some() {
+                    let unknown_collector = e
+                        .collector
+                        .as_deref()
+                        .filter(|c| !ext.collectors.iter().any(|x| x.id == *c));
+                    if let Some(c) = unknown_collector {
+                        ext.errors.push(err_at(
+                            "metrics",
+                            format!(
+                                "metric `{}`: collector `{c}` is not a collector this extension declares",
+                                e.key.clone().unwrap_or_default()
+                            ),
+                        ));
+                    } else if e.key.is_some() {
                         ext.metrics.push(e);
                     } else {
                         ext.errors.push(err_at(
@@ -6862,6 +6886,26 @@ commands:
             assert!(errs.contains(param), "{param}: {errs}");
         }
         assert!(errs.contains("plain"), "{errs}");
+    }
+
+    #[test]
+    fn an_extension_metric_names_its_own_collector_and_keeps_out_of_oxplow_keys() {
+        let (_d, ext) = load_x(
+            &[],
+            "measures:\n  - { key: oxplow.loc, title: Lines }\n\
+             metrics:\n  - { key: acme.loc, title: Lines, sourceMeasure: acme.x, aggregation: sum, collector: acme.nope }\n",
+        );
+        assert!(ext.metrics.is_empty(), "{:?}", ext.metrics);
+        for needle in [
+            "uses the reserved",
+            "collector `acme.nope` is not a collector",
+        ] {
+            assert!(
+                ext.errors.iter().any(|e| e.contains(needle)),
+                "{needle}: {:?}",
+                ext.errors
+            );
+        }
     }
 
     #[test]

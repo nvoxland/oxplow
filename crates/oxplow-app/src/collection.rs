@@ -3905,6 +3905,7 @@ pub(crate) mod test_support {
         let value: serde_yaml::Value = serde_yaml::from_str(&yaml).unwrap();
         let (mut specs, errors) = oxplow_config::collectors::parse_collectors(
             oxplow_config::collectors::PROJECT,
+            None,
             &value,
             &|_| true,
         );
@@ -6910,6 +6911,7 @@ mod tests {
             .unwrap();
             let (specs, errors) = oxplow_config::collectors::parse_collectors(
                 oxplow_config::collectors::PROJECT,
+                None,
                 &value,
                 &|_| true,
             );
@@ -6989,6 +6991,7 @@ mod tests {
             .unwrap();
             let (specs, errors) = oxplow_config::collectors::parse_collectors(
                 oxplow_config::collectors::PROJECT,
+                None,
                 &value,
                 &|_| true,
             );
@@ -8004,6 +8007,7 @@ mod tests {
                         .unwrap();
                         let (mut specs, errors) = oxplow_config::collectors::parse_collectors(
                             oxplow_config::collectors::PROJECT,
+                            None,
                             &value,
                             &|_| true,
                         );

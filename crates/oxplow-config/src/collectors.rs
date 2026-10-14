@@ -390,6 +390,11 @@ pub struct CollectorSpec {
     /// The measures its facts land on (`repo.rust_clone`); a fact on any
     /// other is dropped.
     pub facts: Vec<String>,
+    /// A fact collector that reads the whole tree as of the snapshot on
+    /// every run, so its capture restates every file (a duplication scan),
+    /// rather than only the files the snapshot changed.
+    #[serde(default)]
+    pub whole_tree: bool,
     /// A report collector's kind: it parses `report` with `entry` and its
     /// output joins the run (`trigger: { on_run }`).
     pub records: Option<Records>,
@@ -436,15 +441,18 @@ pub const PROJECT: &str = "project";
 pub const BUILT_IN: &str = "built-in";
 
 /// Parse a `collectors:` list owned by `owner` (an extension's name, or
-/// [`PROJECT`]). `knows_event` says whether an `on:` type is registered.
+/// [`PROJECT`]), whose namespace is `namespace` (`None` for the project; an
+/// `oxplow.*` id is the `oxplow` namespace's). `knows_event` says whether an
+/// `on:` type is registered.
 /// Invalid collectors are skipped and described in the errors, each
 /// prefixed by its entry (`collectors[<i>]: …`); valid ones still load.
 pub fn parse_collectors(
     owner: &str,
+    namespace: Option<&str>,
     value: &serde_yaml::Value,
     knows_event: &dyn Fn(&str) -> bool,
 ) -> (Vec<CollectorSpec>, Vec<String>) {
-    let (specs, errors) = parse_collectors_indexed(owner, value, knows_event);
+    let (specs, errors) = parse_collectors_indexed(owner, namespace, value, knows_event);
     let errors = errors
         .into_iter()
         .map(|(i, e)| match i {
@@ -460,6 +468,7 @@ pub fn parse_collectors(
 /// manifest's loader can put it on that entry's line.
 pub fn parse_collectors_indexed(
     owner: &str,
+    namespace: Option<&str>,
     value: &serde_yaml::Value,
     knows_event: &dyn Fn(&str) -> bool,
 ) -> (Vec<CollectorSpec>, Vec<(Option<usize>, String)>) {
@@ -477,7 +486,7 @@ pub fn parse_collectors_indexed(
                 continue;
             }
         };
-        match validate(owner, raw, knows_event) {
+        match validate(owner, namespace, raw, knows_event) {
             Ok(spec) => {
                 if out.iter().any(|s| s.id == spec.id) {
                     errors.push((
@@ -556,6 +565,9 @@ pub struct RawCollector {
     entities: Vec<RawEntity>,
     #[serde(default)]
     facts: Vec<String>,
+    /// A fact collector that reads the whole tree on every run.
+    #[serde(default)]
+    whole_tree: bool,
     /// A report collector's kind.
     #[serde(default)]
     #[schemars(with = "Option<Records>")]
@@ -888,6 +900,7 @@ fn is_inside(path: &str) -> bool {
 
 fn validate(
     owner: &str,
+    namespace: Option<&str>,
     mut raw: RawCollector,
     knows_event: &dyn Fn(&str) -> bool,
 ) -> Result<CollectorSpec, String> {
@@ -898,10 +911,10 @@ fn validate(
              dots"
         ));
     }
-    if id.starts_with("oxplow.") {
+    if id.starts_with("oxplow.") && namespace != Some(crate::OXPLOW_NAMESPACE) {
         return Err(format!(
             "collector id `{id}`: `oxplow.` is oxplow's own collectors' (enable one with \
-             `metrics: - use: {id}`)"
+             `metrics: - use: <its metric>`)"
         ));
     }
     let ctx = |m: String| format!("collector `{id}`: {m}");
@@ -970,6 +983,8 @@ fn validate(
                     .into(),
             ));
         }
+    } else if raw.whole_tree {
+        return Err(ctx("`whole_tree` is a fact collector's (`facts:`)".into()));
     } else if report.is_some() {
         return Err(ctx(
             "`report` is read by fact collectors (`facts:`) and report collectors (`records:`)"
@@ -1205,6 +1220,7 @@ fn validate(
         needs: raw.needs,
         entities,
         facts,
+        whole_tree: raw.whole_tree,
         records: None,
     })
 }
@@ -1391,6 +1407,7 @@ fn validate_report_collector(
         needs: Vec::new(),
         entities: Vec::new(),
         facts: Vec::new(),
+        whole_tree: false,
         records: Some(records),
     })
 }
@@ -1413,7 +1430,7 @@ mod tests {
 
     fn parse(yaml: &str) -> (Vec<CollectorSpec>, Vec<String>) {
         let v: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
-        parse_collectors("my-gh", &v, &knows)
+        parse_collectors("my-gh", None, &v, &knows)
     }
 
     const GOOD: &str = r#"
@@ -1711,7 +1728,40 @@ mod tests {
         assert!(e[0].contains("`input` is for"), "{e:?}");
     }
 
-    /// tsk935: a report collector's report and its own parser are paths
+    #[test]
+    fn an_oxplow_collector_id_is_the_oxplow_namespaces() {
+        let value: serde_yaml::Value = serde_yaml::from_str(
+            "- { id: oxplow.loc, runtime: starlark, entry: loc.star, facts: [oxplow.loc] }",
+        )
+        .unwrap();
+        for ns in [None, Some("acme")] {
+            let (s, e) = parse_collectors("acme", ns, &value, &|_| true);
+            assert!(s.is_empty() && e[0].contains("oxplow's own"), "{e:?}");
+        }
+        let (s, e) = parse_collectors(
+            "oxplow-foundation",
+            Some(crate::OXPLOW_NAMESPACE),
+            &value,
+            &|_| true,
+        );
+        assert!(e.is_empty(), "{e:?}");
+        assert_eq!(s[0].id, "oxplow.loc");
+    }
+
+    #[test]
+    fn whole_tree_is_a_fact_collectors() {
+        let value: serde_yaml::Value = serde_yaml::from_str(
+            "- { id: a.dup, runtime: starlark, entry: dup.star, facts: [a.dup], whole_tree: true }\n\
+             - { id: a.ent, runtime: starlark, entry: e.star, whole_tree: true, entities: [{ name: x, key: id, columns: { id: text } }] }",
+        )
+        .unwrap();
+        let (s, e) = parse_collectors("a", Some("a"), &value, &|_| true);
+        assert_eq!(s.len(), 1, "{e:?}");
+        assert!(s[0].whole_tree);
+        assert!(e[0].contains("`whole_tree` is a fact collector's"), "{e:?}");
+    }
+
+    /// A report collector's report and its own parser are paths
     /// inside the project — `..` or an absolute path is refused at load
     /// (and a symlink out, when it is read: `in_checkout`).
     #[test]
@@ -1735,7 +1785,7 @@ mod tests {
             ),
         ] {
             let value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
-            let (s, e) = parse_collectors(PROJECT, &value, &|_| true);
+            let (s, e) = parse_collectors(PROJECT,None, &value, &|_| true);
             assert!(s.is_empty(), "{yaml}");
             assert!(e.iter().any(|m| m.contains(needle)), "{yaml}: {e:?}");
         }
@@ -1809,7 +1859,7 @@ mod tests {
 
     fn parse_project(yaml: &str) -> (Vec<CollectorSpec>, Vec<String>) {
         let v: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
-        parse_collectors(PROJECT, &v, &knows)
+        parse_collectors(PROJECT, None, &v, &knows)
     }
 
     /// tsk863: a report collector names a bundled parser or its own
@@ -1948,7 +1998,7 @@ mod tests {
         assert!(e[0].contains("sandboxed"), "{e:?}");
         let project = |yaml: &str| {
             let v: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
-            parse_collectors(PROJECT, &v, &knows)
+            parse_collectors(PROJECT, None, &v, &knows)
         };
         let (s, e) = project("- { id: a.b, runtime: exec, entry: x.sh, facts: [a.b] }");
         assert!(e.is_empty(), "{e:?}");

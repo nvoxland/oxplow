@@ -287,6 +287,26 @@ a Starlark script that calls a model (`ai_classify`, `ai_score`,
 so you approve it in Settings → Data first, like an `exec` collector.
 Any change to its files needs approving again.
 
+A collector that records facts declares `facts:` (the measures it writes)
+instead of `entities:`. Add `whole_tree: true` when it must read every file
+on every run (a duplication scan) rather than only what the snapshot changed.
+
+The metrics over those facts are declared under `metrics:`:
+
+```yaml
+metrics:
+  - key: acme.todos
+    sourceMeasure: acme.todo
+    aggregation: count
+    collector: acme.todo_scan   # the collector in this extension that computes it
+    default: off                # on only once the project lists it with `use:`
+```
+
+A metric is on unless the project turns it off; `default: off` makes it
+opt-in. A collector that metrics name runs only while one of them is on,
+so an opt-in metric costs nothing until someone wants it. Keys starting
+`oxplow.` are oxplow's own.
+
 ### Commands
 
 ```yaml

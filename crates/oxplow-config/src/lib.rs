@@ -238,6 +238,16 @@ pub struct MetricEntry {
     /// `use:` entry may carry it (unlike measure/aggregation/filter/formula).
     #[serde(default)]
     pub enabled: Option<bool>,
+    /// An extension metric's default: `on` (the default) is active unless
+    /// the project turns it off (`enabled: false`); `off` is active only
+    /// while the project lists it with `use:`.
+    #[serde(default)]
+    pub default: Option<MetricDefault>,
+    /// An extension metric's collector: the id of the collector in the same
+    /// extension that computes its facts. A collector some metric names
+    /// runs only while one of those metrics is active.
+    #[serde(default)]
+    pub collector: Option<String>,
     #[serde(default)]
     pub title: Option<String>,
     /// The measure whose facts this metric aggregates (required for a `key:`
@@ -301,6 +311,15 @@ pub struct MetricEntry {
     pub value: Option<String>,
 }
 
+/// Whether an extension's metric is active before the project says
+/// anything about it ([`MetricEntry::default`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum MetricDefault {
+    On,
+    Off,
+}
+
 /// A fully-resolved metric SPEC — the flat form the runner (oxplow-app) seeds
 /// into `metric_spec` (and, until reads flip, `metric_definition`). Produced by
 /// [`resolve_metrics`] after merging the three scopes (built-in ∪ global ∪
@@ -323,8 +342,11 @@ pub struct ResolvedSpec {
     pub target: Option<f64>,
     pub warn_at: Option<f64>,
     pub fail_at: Option<f64>,
-    /// `built-in` | `global` | `project`.
+    /// `built-in` | `global` | `project` | `extension:<name>`.
     pub scope: String,
+    /// The collector, in the defining extension, that computes its facts
+    /// ([`MetricEntry::collector`]).
+    pub collector: Option<String>,
     /// Whether this metric is active. Derived from the config entry's `enabled`
     /// flag (default `true`). A disabled spec is still resolved (so the Catalog
     /// can list it as an unchecked toggle), but `seed_catalog` prunes it from the
@@ -2164,11 +2186,11 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
 
     let testing = validate_testing(raw.testing)?;
     let scripts = validate_scripts(raw.scripts)?;
-    let metrics = validate_metrics(raw.metrics)?;
+    let metrics = validate_metrics(raw.metrics, None)?;
     let collectors_yaml = raw.collectors;
     let collectors = parse_project_collectors(collectors_yaml.as_ref())?;
-    let measures = validate_measures(raw.measures)?;
-    let dimensions = validate_dimensions(raw.dimensions)?;
+    let measures = validate_measures(raw.measures, None)?;
+    let dimensions = validate_dimensions(raw.dimensions, None)?;
 
     if raw.agent_models.is_some() {
         return Err(ConfigError::Invalid(
@@ -2461,12 +2483,28 @@ const MEASURE_CAPTURE_SCOPES: &[&str] = &["complete", "per-path", "per-subject"]
 /// table's CHECK).
 const DIMENSION_VALUE_TYPES: &[&str] = &["categorical", "numeric", "temporal", "entity-ref"];
 
-/// Validate the top-level `metrics:` block (the project scope). Mirrors the
-/// extension rules: namespaced keys, `oxplow.*` reserved for built-ins,
-/// project-relative `entryFile`, known runtime/kind/trigger. Each entry must be
-/// exactly one of the `use:` or `key:` forms. Returns the cleaned entries (the
-/// three-scope resolution happens later in [`resolve_metrics`]).
-pub fn validate_metrics(raw: Option<Vec<MetricEntry>>) -> Result<Vec<MetricEntry>, ConfigError> {
+/// The namespace oxplow's own catalog keys (`oxplow.*`) belong to: only the
+/// extension declaring `namespace: oxplow` (oxplow-foundation) defines them.
+pub const OXPLOW_NAMESPACE: &str = "oxplow";
+
+/// Why `key` can't be defined by `namespace` — the defining extension's
+/// namespace, `None` for the project's or the person's own config — or
+/// `None` when it can: `oxplow.*` is the `oxplow` namespace's.
+pub fn reserved_key(key: &str, namespace: Option<&str>) -> Option<String> {
+    (key.starts_with("oxplow.") && namespace != Some(OXPLOW_NAMESPACE)).then(|| {
+        format!("key \"{key}\" uses the reserved \"oxplow.\" namespace, which is oxplow's own")
+    })
+}
+
+/// Validate a `metrics:` block defined by `namespace` (see [`reserved_key`]):
+/// namespaced keys, `oxplow.*` only in the `oxplow` namespace, known
+/// runtime/kind/trigger. Each entry must be exactly one of the `use:` or
+/// `key:` forms. Returns the cleaned entries (the scope resolution happens
+/// later in [`resolve_metrics`]).
+pub fn validate_metrics(
+    raw: Option<Vec<MetricEntry>>,
+    namespace: Option<&str>,
+) -> Result<Vec<MetricEntry>, ConfigError> {
     let opt = |v: Option<String>| v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     let mut out = Vec::new();
     // Each metric key may appear at most once in the project block. Two entries
@@ -2496,12 +2534,12 @@ pub fn validate_metrics(raw: Option<Vec<MetricEntry>>) -> Result<Vec<MetricEntry
                 "metrics[{i}] key \"{the_key}\" must be namespaced as \"<vendor>.<id>\""
             )));
         }
-        // `oxplow.*` is reserved for built-ins; a project may `use:` one but not
-        // `key:`-define under it (mirrors the extension-name rule).
-        if is_define && the_key.starts_with("oxplow.") {
-            return Err(ConfigError::Invalid(format!(
-                "metrics[{i}] key \"{the_key}\" uses the reserved \"oxplow.\" namespace"
-            )));
+        // A project may `use:` an `oxplow.*` metric but only the `oxplow`
+        // namespace defines one.
+        if is_define {
+            if let Some(e) = reserved_key(&the_key, namespace) {
+                return Err(ConfigError::Invalid(format!("metrics[{i}] {e}")));
+            }
         }
         if !seen_keys.insert(the_key.clone()) {
             return Err(ConfigError::Invalid(format!(
@@ -2615,6 +2653,18 @@ pub fn validate_metrics(raw: Option<Vec<MetricEntry>>) -> Result<Vec<MetricEntry
             }
         }
 
+        let collector = opt(e.collector);
+        if (e.default.is_some() || collector.is_some()) && !(is_define && namespace.is_some()) {
+            return Err(ConfigError::Invalid(format!(
+                "metrics[{i}] `default` and `collector` belong on an extension's metric definition"
+            )));
+        }
+        if is_define && namespace.is_some() && e.enabled.is_some() {
+            return Err(ConfigError::Invalid(format!(
+                "metrics[{i}] an extension's metric says `default: off`, not `enabled` (the \
+                 project turns metrics on and off)"
+            )));
+        }
         let (use_key, key) = if is_define {
             (None, Some(the_key))
         } else {
@@ -2624,6 +2674,8 @@ pub fn validate_metrics(raw: Option<Vec<MetricEntry>>) -> Result<Vec<MetricEntry
             use_key,
             key,
             enabled: e.enabled,
+            default: e.default,
+            collector,
             title: opt(e.title),
             source_measure,
             aggregation,
@@ -2725,6 +2777,7 @@ fn parse_project_collectors(
     let value: serde_yaml::Value = to_yaml(raw);
     let (specs, errors) = collectors::parse_collectors(
         collectors::PROJECT,
+        None,
         &value,
         &oxplow_domain::events::schema::is_core_type,
     );
@@ -2800,9 +2853,10 @@ pub fn resolve_metrics(
             }
         }
     }
-    // An enabled extension's own definitions are active unless the project
+    // An enabled extension's own definitions are resolved unless the project
     // mentions the key (a `use:` override or disable marker, or its own
-    // definition, all handled above).
+    // definition, all handled above): active, or listed inactive when
+    // `default: off`.
     let mentioned: std::collections::HashSet<&str> = project
         .iter()
         .filter_map(|e| e.key.as_deref().or(e.use_key.as_deref()))
@@ -2816,7 +2870,10 @@ pub fn resolve_metrics(
             }
             if let Some((scope, def)) = catalog.get(k) {
                 if *scope == extension_scope(name) {
-                    out.push(resolve_one(k, scope, def, None));
+                    let mut spec = resolve_one(k, scope, def, None);
+                    // An off-by-default one is listed, inactive, until a `use:`.
+                    spec.enabled = def.default != Some(MetricDefault::Off);
+                    out.push(spec);
                 }
             }
         }
@@ -2889,6 +2946,7 @@ fn resolve_one(
         warn_at: pick_f64(|e| e.warn_at),
         fail_at: pick_f64(|e| e.fail_at),
         scope: scope.to_string(),
+        collector: def.collector.clone(),
         // The `enabled` flag lives on the acting (project) entry — the `use:`
         // override for a use'd metric, else the `key:` definition. Default on.
         enabled: over.and_then(|o| o.enabled).or(def.enabled).unwrap_or(true),
@@ -2916,7 +2974,7 @@ pub fn load_global_metric_entries(global_dir: &Path) -> Vec<MetricEntry> {
     load_global_entries(global_dir, "metrics", |raw| {
         serde_yaml::from_str::<Doc>(raw)
             .ok()
-            .map(|d| validate_metrics(d.metrics).map_err(|e| e.to_string()))
+            .map(|d| validate_metrics(d.metrics, None).map_err(|e| e.to_string()))
     })
 }
 
@@ -2975,13 +3033,14 @@ fn load_global_entries<E>(
 // ---------------------------------------------------------------------------
 
 /// Shared key check for the `measures:` / `dimensions:` catalogs: the key must
-/// be present, namespaced `<vendor>.<id>`, outside the reserved `oxplow.*`
-/// namespace (those are the migration seed), and unique within its block.
-/// Returns the cleaned key. `block` is the YAML block name for error messages.
+/// be present, namespaced `<vendor>.<id>`, definable by `namespace`
+/// ([`reserved_key`]), and unique within its block. Returns the cleaned key.
+/// `block` is the YAML block name for error messages.
 fn validate_catalog_key(
     block: &str,
     i: usize,
     raw_key: Option<String>,
+    namespace: Option<&str>,
     seen: &mut std::collections::HashSet<String>,
 ) -> Result<String, ConfigError> {
     let key = raw_key
@@ -2993,10 +3052,8 @@ fn validate_catalog_key(
             "{block}[{i}] key \"{key}\" must be namespaced as \"<vendor>.<id>\""
         )));
     }
-    if key.starts_with("oxplow.") {
-        return Err(ConfigError::Invalid(format!(
-            "{block}[{i}] key \"{key}\" uses the reserved \"oxplow.\" namespace"
-        )));
+    if let Some(e) = reserved_key(&key, namespace) {
+        return Err(ConfigError::Invalid(format!("{block}[{i}] {e}")));
     }
     if !seen.insert(key.clone()) {
         return Err(ConfigError::Invalid(format!(
@@ -3006,15 +3063,19 @@ fn validate_catalog_key(
     Ok(key)
 }
 
-/// Validate the top-level `measures:` block. Mirrors [`validate_metrics`]:
-/// namespaced keys, `oxplow.*` reserved, per-key uniqueness, known
-/// temporalSemantics/captureScope enums. Definition-only (no `use:` form).
-pub fn validate_measures(raw: Option<Vec<MeasureEntry>>) -> Result<Vec<MeasureEntry>, ConfigError> {
+/// Validate a `measures:` block defined by `namespace`. Mirrors
+/// [`validate_metrics`]: namespaced keys, `oxplow.*` only in the `oxplow`
+/// namespace, per-key uniqueness, known temporalSemantics/captureScope enums.
+/// Definition-only (no `use:` form).
+pub fn validate_measures(
+    raw: Option<Vec<MeasureEntry>>,
+    namespace: Option<&str>,
+) -> Result<Vec<MeasureEntry>, ConfigError> {
     let opt = |v: Option<String>| v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for (i, e) in raw.into_iter().flatten().enumerate() {
-        let key = validate_catalog_key("measures", i, e.key, &mut seen)?;
+        let key = validate_catalog_key("measures", i, e.key, namespace, &mut seen)?;
         let temporal_semantics = match opt(e.temporal_semantics) {
             Some(s) => {
                 if !MEASURE_TEMPORAL_SEMANTICS.contains(&s.as_str()) {
@@ -3052,16 +3113,18 @@ pub fn validate_measures(raw: Option<Vec<MeasureEntry>>) -> Result<Vec<MeasureEn
     Ok(out)
 }
 
-/// Validate the top-level `dimensions:` block. Mirrors [`validate_measures`]:
-/// namespaced keys, `oxplow.*` reserved, per-key uniqueness, known valueType.
+/// Validate a `dimensions:` block defined by `namespace`. Mirrors
+/// [`validate_measures`]: namespaced keys, `oxplow.*` only in the `oxplow`
+/// namespace, per-key uniqueness, known valueType.
 pub fn validate_dimensions(
     raw: Option<Vec<DimensionEntry>>,
+    namespace: Option<&str>,
 ) -> Result<Vec<DimensionEntry>, ConfigError> {
     let opt = |v: Option<String>| v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for (i, e) in raw.into_iter().flatten().enumerate() {
-        let key = validate_catalog_key("dimensions", i, e.key, &mut seen)?;
+        let key = validate_catalog_key("dimensions", i, e.key, namespace, &mut seen)?;
         let value_type = match opt(e.value_type) {
             Some(s) => {
                 if !DIMENSION_VALUE_TYPES.contains(&s.as_str()) {
@@ -3219,7 +3282,7 @@ pub fn load_global_measure_entries(global_dir: &Path) -> Vec<MeasureEntry> {
     load_global_entries(global_dir, "measures", |raw| {
         serde_yaml::from_str::<Doc>(raw)
             .ok()
-            .map(|d| validate_measures(d.measures).map_err(|e| e.to_string()))
+            .map(|d| validate_measures(d.measures, None).map_err(|e| e.to_string()))
     })
 }
 
@@ -3235,7 +3298,7 @@ pub fn load_global_dimension_entries(global_dir: &Path) -> Vec<DimensionEntry> {
     load_global_entries(global_dir, "dimensions", |raw| {
         serde_yaml::from_str::<Doc>(raw)
             .ok()
-            .map(|d| validate_dimensions(d.dimensions).map_err(|e| e.to_string()))
+            .map(|d| validate_dimensions(d.dimensions, None).map_err(|e| e.to_string()))
     })
 }
 
@@ -3929,7 +3992,7 @@ dimensions:
             dimensions: Option<Vec<DimensionEntry>>,
         }
         let doc: Doc = serde_yaml::from_str(yaml).unwrap();
-        let metrics = validate_metrics(doc.metrics).unwrap();
+        let metrics = validate_metrics(doc.metrics, None).unwrap();
         let resolved = resolve_metrics(&[], &[], &[], &metrics);
         assert_eq!(
             resolved[0].entity,
@@ -3942,7 +4005,7 @@ dimensions:
             })
         );
         assert_eq!(resolved[1].entity.as_ref().unwrap().aggregation, "median");
-        let dims = validate_dimensions(doc.dimensions).unwrap();
+        let dims = validate_dimensions(doc.dimensions, None).unwrap();
         let rd = resolve_dimensions(&[], &[], &dims);
         assert_eq!(
             rd[0].entity,
@@ -3958,7 +4021,7 @@ dimensions:
     fn entity_metric_mistakes_are_refused() {
         let bad = |yaml: &str| {
             let e: Vec<MetricEntry> = serde_yaml::from_str(yaml).unwrap();
-            validate_metrics(Some(e)).unwrap_err().to_string()
+            validate_metrics(Some(e), None).unwrap_err().to_string()
         };
         assert!(bad("[{key: a.b, entity: tasks}]").contains("v_*"));
         assert!(
@@ -3975,7 +4038,7 @@ dimensions:
         assert!(bad("[{use: a.b, time: x}]").contains("`use:` entry"));
         let dim = |yaml: &str| {
             let e: Vec<DimensionEntry> = serde_yaml::from_str(yaml).unwrap();
-            validate_dimensions(Some(e)).unwrap_err().to_string()
+            validate_dimensions(Some(e), None).unwrap_err().to_string()
         };
         assert!(dim("[{key: a.b, entity: v_work_item}]").contains("needs an `expr`"));
         assert!(dim("[{key: a.b, expr: x}]").contains("without `entity`"));
@@ -4904,7 +4967,7 @@ testing:
                 "[{{key: repo.x, title: X, sourceMeasure: acme.m, aggregation: sum, {extra}}}]"
             ))
             .unwrap();
-            validate_metrics(Some(e))
+            validate_metrics(Some(e), None)
         };
         for (extra, bare) in [
             ("sliceableDims: [language]", "language"),
@@ -5178,6 +5241,64 @@ metrics:
         let resolved = resolve_metrics(&builtin, &[], &[], &project);
         assert_eq!(resolved.len(), 1);
         assert!(!resolved[0].enabled);
+    }
+
+    #[test]
+    fn an_off_by_default_extension_metric_is_listed_inactive_until_used() {
+        let mut def = define("acme.loc", None);
+        def.default = Some(MetricDefault::Off);
+        def.collector = Some("acme.scan".into());
+        let extensions = vec![("acme".to_string(), vec![def])];
+        let resolved = resolve_metrics(&[], &[], &extensions, &[]);
+        assert_eq!(resolved.len(), 1);
+        assert!(!resolved[0].enabled);
+        assert_eq!(resolved[0].collector.as_deref(), Some("acme.scan"));
+        let used = vec![MetricEntry {
+            use_key: Some("acme.loc".into()),
+            ..Default::default()
+        }];
+        let resolved = resolve_metrics(&[], &[], &extensions, &used);
+        assert_eq!(resolved.len(), 1);
+        assert!(resolved[0].enabled);
+        assert_eq!(resolved[0].scope, "extension:acme");
+    }
+
+    #[test]
+    fn default_and_collector_are_an_extension_definitions() {
+        let mut def = define("acme.loc", None);
+        def.default = Some(MetricDefault::Off);
+        let err = validate_metrics(Some(vec![def.clone()]), None)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("extension's metric definition"), "{err}");
+        assert!(validate_metrics(Some(vec![def]), Some("acme")).is_ok());
+        let mut def = define("acme.loc", None);
+        def.enabled = Some(false);
+        let err = validate_metrics(Some(vec![def]), Some("acme"))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("`default: off`"), "{err}");
+    }
+
+    #[test]
+    fn oxplow_keys_are_the_oxplow_namespaces() {
+        let measure = || MeasureEntry {
+            key: Some("oxplow.loc".into()),
+            ..Default::default()
+        };
+        for ns in [None, Some("acme")] {
+            let err = validate_measures(Some(vec![measure()]), ns)
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("reserved"), "{err}");
+            assert!(validate_metrics(Some(vec![define("oxplow.loc", None)]), ns).is_err());
+        }
+        assert!(validate_measures(Some(vec![measure()]), Some(OXPLOW_NAMESPACE)).is_ok());
+        assert!(validate_metrics(
+            Some(vec![define("oxplow.loc", None)]),
+            Some(OXPLOW_NAMESPACE)
+        )
+        .is_ok());
     }
 
     #[test]

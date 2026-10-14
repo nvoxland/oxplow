@@ -1924,6 +1924,12 @@ export type CollectorSpec = {
 	 */
 	facts: string[],
 	/**
+	 *  A fact collector that reads the whole tree as of the snapshot on
+	 *  every run, so its capture restates every file (a duplication scan),
+	 *  rather than only the files the snapshot changed.
+	 */
+	wholeTree?: boolean,
+	/**
 	 *  A report collector's kind: it parses `report` with `entry` and its
 	 *  output joins the run (`trigger: { on_run }`).
 	 */
@@ -4644,6 +4650,12 @@ export type MergeReadiness =
 "conflict";
 
 /**
+ *  Whether an extension's metric is active before the project says
+ *  anything about it ([`MetricEntry::default`]).
+ */
+export type MetricDefault = "on" | "off";
+
+/**
  *  One entry in the top-level `metrics:` block — a **pure read-time SPEC** over a
  *  measure. A metric no longer *computes* anything: it names a
  *  `sourceMeasure` + an `aggregation` (+ optional `filter`), or a `formula` over
@@ -4670,6 +4682,18 @@ export type MetricEntry = {
 	 *  `use:` entry may carry it (unlike measure/aggregation/filter/formula).
 	 */
 	enabled?: boolean | null,
+	/**
+	 *  An extension metric's default: `on` (the default) is active unless
+	 *  the project turns it off (`enabled: false`); `off` is active only
+	 *  while the project lists it with `use:`.
+	 */
+	default?: MetricDefault | null,
+	/**
+	 *  An extension metric's collector: the id of the collector in the same
+	 *  extension that computes its facts. A collector some metric names
+	 *  runs only while one of those metrics is active.
+	 */
+	collector?: string | null,
 	title?: string | null,
 	/**
 	 *  The measure whose facts this metric aggregates (required for a `key:`
