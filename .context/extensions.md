@@ -2379,8 +2379,12 @@ its scope trace.
   model). What a mode may use is the services table's (`modes`), enforced
   by `RunContext::decide_service` ("Services" below): a pure run asking a
   model is refused before its script runs.
-- **Stale is checkable.** `check(current_generation)` refuses a run
-  built against a catalog generation no longer served, or cancelled.
+- **A run is checked for authority, not for staleness.** `check_authority()`
+  refuses a cancelled run or one a live guard fails (and cancels it). A
+  generation going out of date is the activation's read lock (a run that pins
+  a generation holds it; one that doesn't belongs to its extension's version,
+  `run_context::live_owner`), so a run carries no "stale" outcome: it ends
+  `cancelled`.
 - **Who carries it:** the bus (`run_in`, `TxCtx::run`, `Invocation::run`
   — an `External` call's run is a child of the command's), scope calls
   (`scope_calls::Calls::new(run, needs, read)`, counted on its trace),

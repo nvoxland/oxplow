@@ -114,12 +114,6 @@ pub fn watch_authority(run: &RunContext) -> AuthorityWatch {
     }))
 }
 
-/// The catalog generation `root` is served at now: what a run checks it
-/// was built against.
-pub fn current_generation(catalog: &ExtensionCatalog, root: &Path) -> String {
-    catalog.live_snapshot(root).generation().to_string()
-}
-
 /// A run reacting to `event`: caused by it, anchored where it happened,
 /// about what it's about.
 fn reacting(run: RunContext, event: &StoredEvent) -> RunContext {

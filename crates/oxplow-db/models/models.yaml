@@ -706,7 +706,7 @@
   tests:
     - { not_null: effect }
 - name: extension_run
-  version: 2
+  version: 3
   key: [run_id]
   description: "Each finished run of extension code, one row each: which contribution at which version and catalog generation, who ran it and on whose behalf, what caused it and where it sat, how it ended, what it cost and which scopes it called. What an extension actually did, never what it read or wrote: no input, result, credential value or prompt is kept. Kept 90 days, like a collector's events."
   columns:
@@ -729,7 +729,7 @@
     - { name: "mode", type: "TEXT", doc: "`pure` (no I/O but scope reads), `transactional` or `external` (may call out)." }
     - { name: "started_at", type: "TEXT", doc: "When it began (RFC 3339)." }
     - { name: "finished_at", type: "TEXT", doc: "When it ended (RFC 3339)." }
-    - { name: "outcome", type: "TEXT", doc: "`ok`, `skipped`, `failed`, `denied` (its grant refused something), `cancelled` or `stale` (the extension changed under it)." }
+    - { name: "outcome", type: "TEXT", doc: "`ok`, `skipped`, `failed`, `denied` (its grant refused something), or `cancelled` (stopped: a person's cancel, or its approval or extension revoked, disabled or changed under it). (v3)" }
     - { name: "error", type: "TEXT", doc: "Why it failed, was denied or stopped." }
     - { name: "wall_ms", type: "INTEGER", doc: "How long it ran." }
     - { name: "cpu_ms", type: "INTEGER", doc: "Its scripts' CPU time, summed (0 for a run that ran no script)." }
