@@ -3342,7 +3342,14 @@ project's), plus:
   declare runs once — project over extension over built-in
   (`MetricsService::fact_collectors`). An enabled extension's
   metrics are **on** unless the project mentions the key (a `use:`
-  override or disable marker, or its own definition).
+  override or disable marker, or its own definition); a `default: off`
+  one is listed inactive until the project `use:`s it. A metric's
+  `collector:` names the collector in its extension that computes it: a
+  collector metrics name runs only while one of them is active, one no
+  metric names whenever its extension is enabled. A fact collector with
+  `whole_tree: true` reads the whole tree as of the snapshot on every run.
+  `oxplow.*` measure, dimension, metric and collector keys are the
+  `oxplow` namespace's (`oxplow_config::reserved_key`).
 - `MetricsService::extension_catalog` loads enabled extensions from the
   primary worktree on each resolve; fact-collector scripts are read through
   `extensions::read_extension_file` (bundled or disk), and a collector's

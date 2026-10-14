@@ -2064,8 +2064,9 @@ metrics:                              # the read SPEC (the chartable metric)
     `metrics:` / `collectors:` (its fact collectors sandboxed: starlark or jaq).
 
   `use:` references a catalog metric key and layers threshold overrides; `key:`
-  defines a new spec. `oxplow.*` is reserved for built-ins (a project may `use:`
-  one but not `key:`-define under it). Collectors are definition-only (declared,
+  defines a new spec. `oxplow.*` keys belong to the extension whose namespace
+  is `oxplow` (`oxplow_config::reserved_key`; a project may `use:` one but not
+  `key:`-define under it). Collectors are definition-only (declared,
   never `use:`d). The project's collectors record facts — an entity collector
   belongs in an extension.
 - Validation mirrors the extension rules: namespaced keys, project-relative

@@ -814,6 +814,26 @@
           ],
           "default": null
         },
+        "default": {
+          "description": "An extension metric's default: `on` (the default) is active unless\nthe project turns it off (`enabled: false`); `off` is active only\nwhile the project lists it with `use:`.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MetricDefault"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "collector": {
+          "description": "An extension metric's collector: the id of the collector in the same\nextension that computes its facts. A collector some metric names\nruns only while one of those metrics is active.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "title": {
           "type": [
             "string",
@@ -974,6 +994,14 @@
         }
       },
       "additionalProperties": false
+    },
+    "MetricDefault": {
+      "description": "Whether an extension's metric is active before the project says\nanything about it ([`MetricEntry::default`]).",
+      "type": "string",
+      "enum": [
+        "on",
+        "off"
+      ]
     },
     "FilterConfig": {
       "description": "A fact predicate on a `metrics:` spec (the `filter:` block) — the config\nmirror of the engine's `FactFilter`. A conjunctive predicate\nkeeping only the facts that match before aggregation: `minValue` for a\ncount-over-threshold (complexity ≥ N), `severity` for a lint slice, `dimEq`\nfor a conformed-dimension slice (`[oxplow.rule, unsafe_block]`).",
@@ -1245,6 +1273,11 @@
             "type": "string"
           },
           "default": []
+        },
+        "whole_tree": {
+          "description": "A fact collector that reads the whole tree on every run.",
+          "type": "boolean",
+          "default": false
         },
         "records": {
           "description": "A report collector's kind.",

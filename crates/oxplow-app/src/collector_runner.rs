@@ -2444,7 +2444,12 @@ pub(crate) mod tests {
             "- id: gh\n  runtime: exec\n  entry: {entry}\n  env: [{}]\n  entities:\n    - name: pr\n      key: number\n      columns: {{ number: int, title: text, score: real, draft: bool, opened_at: time }}\n",
             env.join(", ")
         );
-        let (s, e) = parse_collectors("my-gh", &serde_yaml::from_str(&yaml).unwrap(), &|_| true);
+        let (s, e) = parse_collectors(
+            "my-gh",
+            None,
+            &serde_yaml::from_str(&yaml).unwrap(),
+            &|_| true,
+        );
         assert!(e.is_empty(), "{e:?}");
         s.into_iter().next().unwrap()
     }
@@ -3191,7 +3196,7 @@ pub(crate) mod tests {
             async move {
                 let v: serde_yaml::Value = serde_yaml::from_str(&yaml).unwrap();
                 let (specs, errors) =
-                    oxplow_config::collectors::parse_collectors("x", &v, &|_| true);
+                    oxplow_config::collectors::parse_collectors("x", None, &v, &|_| true);
                 assert!(errors.is_empty(), "{errors:?}");
                 match dry_run_collector(&svc.sql, &specs[0], Some(script.into()), None, None).await
                 {

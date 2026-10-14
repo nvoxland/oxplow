@@ -49,7 +49,7 @@ metrics:
     target: 0            # a use: may only re-target thresholds (target/warnAt/failAt)
 ```
 
-`oxplow.*` is reserved for built-ins — a project may `use:` one but not `key:`-define under it.
+`oxplow.*` is oxplow's own — a project may `use:` one but not `key:`-define under it.
 
 ## Step 2 — a new metric: scaffold a metric extension
 
@@ -260,7 +260,10 @@ copy-paste templates — each emits per-item facts.
   is enabled per-project with a `use:`. There are no global collectors.
 
 Precedence is **project > global > built-in** by key; an extension's metrics are
-on unless the project mentions the key.
+on unless the project mentions the key, or the definition says `default: off`
+(then on only once the project `use:`s it). A metric's `collector: <id>` names
+the collector in its extension that computes it; that collector runs only while
+one of the metrics naming it is on.
 
 ## Step 5 — verify
 
@@ -362,8 +365,8 @@ dimensions:
   returns `{ "facts": [...] }` (one fact per subject), never a baked total.
 - **Declare-to-collect.** A fact is dropped unless its measure is (a) declared in
   `measures:` (or a built-in) AND (b) in the collector's own `facts` list.
-- **`oxplow.*` is reserved** — define new measures/collectors/metrics under a
-  project/vendor namespace.
+- **`oxplow.*` is oxplow's own** (its foundation extension's) — define new
+  measures/collectors/metrics under a project/vendor namespace.
 - **`entry` is project-relative**, no leading `/`, no `..`.
 - **No `gauges:` block.** It's an unknown key; write `collectors:`.
 - **Scripts do no I/O** (jaq/starlark) — that's what keeps facts `observed`. Reach
