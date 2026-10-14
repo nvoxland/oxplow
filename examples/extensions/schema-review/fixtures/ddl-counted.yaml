@@ -1,0 +1,10 @@
+# Two kinds of statement in one migration; a source file is not one.
+input:
+  collector: ddl
+  files:
+    migrations/0002_users.sql: "CREATE TABLE users (id INT);\nALTER TABLE accounts ADD owner INT;\ncreate table roles (id INT);\n"
+    src/lib.rs: "// DROP TABLE users\nfn a() {}\n"
+expect:
+  facts:
+    - { measure: schema_review.ddl, path: migrations/0002_users.sql, value: 2 }
+    - { measure: schema_review.ddl, path: migrations/0002_users.sql, value: 1 }

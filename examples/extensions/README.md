@@ -13,6 +13,7 @@ runs them all, some against a real in-memory oxplow too.
 | [task-views](task-views/) | private | Replacing core views: the Board, the Tasks list and the work-item editor, for any work-items provider. |
 | [triage](triage/) | shared | Data, AI and workflow state together: a collector that classifies TODO comments with a model, a durable per-TODO decision in private state, a custom board with forms, and a summary job. |
 | [effort-review](effort-review/) | shared | A cancellable AI job over collected evidence: on each finished effort, a model reads its tests, diff coverage, changed functions and findings through a tool, the review streams and can be cancelled, and it is commented on the work item and exported as a model. |
+| [schema-review](schema-review/) | shared | A review policy of its own: a collector's facts about migrations, joined with oxplow's test, coverage and code-analysis evidence into the effort's verdict, in place of oxplow-bundled's. |
 | [review-badges](review-badges/) | private | Building on another extension: an optional import of effort-review's exported model, shown as a list and on the task page, withheld with a warning when effort-review isn't there. |
 
 ## What the trials prove
@@ -36,6 +37,16 @@ that run through public commands and the SDK only:
   slot withheld, the rest loaded, the reason printed — when the producer
   is disabled, missing or exports another version.
   Tests: the review-badges tests in `examples.rs`.
+
+A fourth proves a review isn't oxplow's to decide:
+
+- **An alternative review policy** (schema-review). Its collector's facts
+  (DDL per migration file, by its own dimension) join core's evidence —
+  the effort's files, its latest test run and its provenance, its diff
+  coverage, the functions its change added — in its own model, and its
+  lens replaces the effort's verdict. A migration that starts dropping a
+  table flips it. Test:
+  `the_schema_review_example_joins_its_facts_with_core_evidence`.
 
 None of them needs a machine credential: models are reached through the
 person's own AI provider by role, and the only credential (github's) is

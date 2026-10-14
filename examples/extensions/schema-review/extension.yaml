@@ -1,0 +1,67 @@
+manifest: 2
+name: schema-review
+description: Reviews an agent's schema migrations — a dropped table, untested or under-covered work, or a complicated new function asks for changes — as the effort's verdict.
+sharing: shared
+engine: ">=0.7"
+version: 0.1.0
+intent:
+  purpose: >-
+    A review policy of its own for work that touches database migrations.
+    It counts the DDL in each migration file, and judges each effort that
+    changed one from that, its tests, its diff coverage and the functions
+    it added: a dropped table, a last test run that wasn't observed green,
+    diff coverage under 90% or a new function more complex than 15 asks
+    for changes. It shows as the effort's verdict in place of oxplow's.
+  origin: null
+  examples:
+    - name: ddl-counted
+      input: { collector: ddl }
+      expect: one fact per kind of statement in each migration file, none for other files
+# What a migration file holds, per kind of statement.
+measures:
+  - key: schema_review.ddl
+    title: DDL statements
+    unit: statements
+    subjectKind: file
+    temporalSemantics: non-additive
+    captureScope: per-path
+dimensions:
+  - { key: schema_review.ddl_kind, label: DDL kind, valueType: categorical }
+metrics:
+  - key: schema_review.ddl
+    title: DDL statements
+    sourceMeasure: schema_review.ddl
+    aggregation: sum
+    direction: lower-better
+    unit: statements
+    displayKind: findings
+    sliceableDims: [schema_review.ddl_kind]
+collectors:
+  # On each snapshot: the migration files in its tree (a fact collector
+  # reads it without asking). It runs no program and asks no model.
+  - id: ddl
+    runtime: starlark
+    entry: collectors/ddl.star
+    trigger: { on: [snapshot.taken] }
+    facts: [schema_review.ddl]
+models:
+  - name: verdict
+    version: 1
+    key: [effort_id]
+    description: "Each effort that changed a migration file, judged: `changes requested` when it drops a table, its latest test run isn't an observed green one, its diff coverage is under 90%, or a function it added is more complex than 15; else `accepted`."
+    columns:
+      - { name: effort_id, type: INTEGER, doc: "The effort (v_effort.id)." }
+      - { name: ref, type: TEXT, doc: "The effort's ref (`effort:eff<id>`)." }
+      - { name: verdict, type: TEXT, doc: "`accepted` or `changes requested`." }
+      - { name: reasons, type: "", doc: "Why it asks for changes, `; `-separated ('' when accepted)." }
+      - { name: statements, type: "", doc: "DDL statements in the migration files it changed." }
+      - { name: label, type: TEXT, doc: "The verdict as its badge says it." }
+      - { name: color, type: TEXT, doc: "`green` or `red`." }
+ui:
+  # The effort's verdict on its page, in place of oxplow-bundled's.
+  replacements:
+    - { target: effort.verdict, lens: effort-verdict, version: 1 }
+  slots:
+    - { slot: effort.review.details, lens: schema-changes }
+  decorators:
+    - { model: verdict, kind: effort, placement: row-badge, label: label, color: color }

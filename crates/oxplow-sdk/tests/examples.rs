@@ -1308,3 +1308,216 @@ async fn a_review_effort_review_wrote_shows_in_review_badges() {
     .await;
     assert_eq!(elsewhere, json!([]));
 }
+
+/// The schema-review example is a review policy of its own, built on public
+/// contracts only: its collector's facts (the DDL in each migration file,
+/// sliced by its own dimension) are joined with core's evidence — the
+/// effort's files, its latest test run and the functions it added — into
+/// a verdict that replaces oxplow-bundled's on the effort's page.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_schema_review_example_joins_its_facts_with_core_evidence() {
+    use serde_json::json;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    oxplow_app::vcs::GitProvider
+        .init_repository(root)
+        .await
+        .unwrap();
+    let example =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/schema-review");
+    copy_dir(&example, &root.join("oxplow/extensions/schema-review"));
+    let report = check(
+        root,
+        "schema-review",
+        &ExtensionCatalog::new(),
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(report.ok, "{}", render_findings(&report, Format::Text));
+    let tested = test_extension(root, "schema-review", false).await.unwrap();
+    assert_eq!(tested.errors, Vec::<String>::new());
+    assert!(
+        tested.ran.contains(&"example ddl-counted".to_string()),
+        "{:?}",
+        tested.ran
+    );
+
+    // A real oxplow: an effort that adds a migration and a function.
+    let svc = oxplow_app::Services::in_memory(root).await.unwrap();
+    // Both review policies offer an effort's verdict; the person chooses.
+    let offering: Vec<String> = svc
+        .extension_catalog
+        .get(root)
+        .iter()
+        .filter(|e| e.enabled)
+        .flat_map(|e| e.ui.replacements.iter())
+        .filter(|r| r.target == "effort.verdict")
+        .map(|r| r.extension.clone())
+        .collect();
+    assert_eq!(offering, ["oxplow-bundled", "schema-review"]);
+
+    // The pump delivers events to the effort lifecycle, as in the app: it
+    // pins the effort's start and end snapshots.
+    svc.event_pump.clone().spawn();
+    svc.streams.ensure_primary().await.unwrap();
+    let stream = svc.streams.list_streams().await.unwrap()[0].id;
+    let capture = svc.snapshot_captures.get(&stream).unwrap();
+    // A snapshot of what the worktree holds now (the app's watcher marks
+    // what changed; here the tree is diffed).
+    let take = || async {
+        capture.enqueue_startup_diff().await.unwrap();
+        capture
+            .request_snapshot(oxplow_domain::snapshot::SnapshotTrigger::Manual)
+            .await
+            .unwrap();
+    };
+    take().await;
+    as_person(
+        &svc,
+        "oxplow.effort.open",
+        json!({ "thread": "thread:thr1" }),
+    )
+    .await;
+    until_row(
+        &svc,
+        "SELECT 1 FROM v_effort WHERE id = 1 AND start_snapshot_id IS NOT NULL",
+    )
+    .await;
+    let thread = oxplow_domain::ThreadId::new(1);
+    let write = |path: &str, text: &str| {
+        let p = root.join(path);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, text).unwrap();
+    };
+    write(
+        "migrations/0001_users.sql",
+        "CREATE TABLE users (id INT);\nALTER TABLE accounts ADD owner INT;\n",
+    );
+    // A function with 16 branches: complexity 17.
+    let branches: String = (0..16)
+        .map(|i| format!("    if x == {i} {{ return {i}; }}\n"))
+        .collect();
+    write(
+        "src/lib.rs",
+        &format!("pub fn pick(x: i32) -> i32 {{\n{branches}    0\n}}\n"),
+    );
+    for path in ["migrations/0001_users.sql", "src/lib.rs"] {
+        assert!(svc
+            .efforts
+            .claim_open_effort_file(&thread, path, Some(root))
+            .await
+            .unwrap());
+    }
+    // The agent reports its tests passed: reported, not observed.
+    svc.commands
+        .run(
+            &oxplow_domain::Actor::Agent {
+                session_id: None,
+                thread_id: Some(thread),
+                stream_id: None,
+            },
+            "oxplow.test.record_run",
+            json!({ "command": "cargo test", "passed": 3, "failed": 0, "total": 3 }),
+            false,
+        )
+        .await
+        .unwrap();
+    // Closing takes the effort's end snapshot of what changed.
+    capture.enqueue_startup_diff().await.unwrap();
+    as_person(
+        &svc,
+        "oxplow.effort.close",
+        json!({ "effort": "effort:eff1" }),
+    )
+    .await;
+    until_row(
+        &svc,
+        "SELECT 1 FROM v_effort WHERE id = 1 AND end_snapshot_id IS NOT NULL",
+    )
+    .await;
+    oxplow_app::change_analysis::ensure_change(
+        &svc,
+        oxplow_app::change_analysis::ChangeTarget::Effort {
+            effort_id: "eff1".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let collect = || async {
+        svc.metrics
+            .run_collector_by_key(
+                "schema-review",
+                "ddl",
+                Some(stream),
+                &oxplow_domain::run::RunContext::core(
+                    oxplow_domain::Actor::Human,
+                    oxplow_domain::run::Mode::External,
+                ),
+            )
+            .await
+            .unwrap()
+    };
+    collect().await;
+    let verdict = || async {
+        let rows = svc
+            .sql
+            .query_sql(
+                "SELECT verdict, reasons, statements FROM v_schema_review_verdict WHERE effort_id = 1",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        serde_json::to_value(&rows.rows).unwrap()
+    };
+    assert_eq!(
+        verdict().await,
+        json!([[
+            "changes requested",
+            "its last test run was only reported; a new function of complexity 17",
+            2.0
+        ]])
+    );
+
+    // The migration drops a table now: the next snapshot's facts say so.
+    write(
+        "migrations/0001_users.sql",
+        "CREATE TABLE users (id INT);\nDROP TABLE accounts;\n",
+    );
+    take().await;
+    collect().await;
+    assert_eq!(
+        verdict().await[0][1],
+        json!(
+            "drops a table; its last test run was only reported; a new function of complexity 17"
+        )
+    );
+
+    // Its verdict lens, as the effort's page shows it in place of
+    // oxplow-bundled's.
+    let layer = oxplow_app::sql_gateway::SqlGateway::new(svc.db.clone());
+    let run = oxplow_app::extensions::run_lens(
+        &layer,
+        &svc.extension_catalog,
+        root,
+        "schema-review/effort-verdict",
+        [("effort_id".to_string(), oxplow_db::SqlCell::Int(1))]
+            .into_iter()
+            .collect(),
+        &oxplow_app::extensions::LensContext::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        serde_json::to_value(&run.result.rows).unwrap(),
+        json!([
+            ["Schema review: changes requested", "danger"],
+            ["• drops a table", "danger"],
+            ["• its last test run was only reported", "danger"],
+            ["• a new function of complexity 17", "danger"],
+        ])
+    );
+}

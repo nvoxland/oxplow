@@ -3921,6 +3921,14 @@ Each loads clean (`documented_examples_load_without_errors`):
   `pull_request` (`ref`, `title`, `body`; it resolves and is searchable),
   page `pr` (the `pr` lens, given `?ref=`), `[[pr:12]]`. `crates/oxplow-
   sdk/tests/examples.rs` checks and tests it and opens a pull request.
+- **`schema-review`** — a review policy of its own: a fact collector
+  counting DDL per migration file (its own measure and dimension), a
+  model joining those facts with core's evidence (`v_effort_file`,
+  `v_test_run` and its provenance, `v_effort_observation`'s diff
+  coverage, `v_change_function`) into a verdict, and a lens replacing
+  `effort.verdict` with it — no core change.
+  `the_schema_review_example_joins_its_facts_with_core_evidence` runs it
+  over a real effort.
 
 ## The `oxplow-bundled` extension
 
