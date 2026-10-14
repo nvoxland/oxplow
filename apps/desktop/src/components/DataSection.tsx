@@ -185,10 +185,7 @@ export function DataSection() {
     setRevoking(null);
     setBusy(key);
     try {
-      // The project's own collectors are approved as Programs (by name);
-      // an extension's by `owner/id`.
-      if (l.owner === "project") await revokeProjectProgram("collector", l.spec.id);
-      else await revokeCollector(l.owner, l.spec.id);
+      await revokeCollector(l.owner, l.spec.id);
       showToast({ message: `Revoked ${key}. It won't run until you approve it again.` });
     } catch (e) {
       recordOpError({ label: `Revoke ${key}`, message: String(e) });

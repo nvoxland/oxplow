@@ -4986,31 +4986,13 @@ export type OxplowConfig = {
 	// Limits on script workers (the `scripts:` block).
 	scripts: ScriptsConfig,
 	/**
-	 *  Project-declared metric SPECS (the `metrics:` block) — the author-able
-	 *  read surface (epic tsk12, E). Each entry enables a catalog metric
-	 *  (`use:`) or defines a new spec (`key:`) over a measure. The runner resolves
-	 *  these across the built-in/global/project scopes; see [`resolve_metrics`].
+	 *  Which metrics are on in this project (the `metrics:` block): a `use:`
+	 *  turns one on, layering its thresholds; an `enabled: false` marker
+	 *  turns an on-by-default one off. Metrics, measures, dimensions and
+	 *  collectors are defined by extensions (the project's own in its own
+	 *  extension); see [`resolve_metrics`].
 	 */
 	metrics?: MetricEntry[],
-	/**
-	 *  The project's collectors (the `collectors:` block, P7.B3): fact
-	 *  producers that run on their trigger and record facts on the measures
-	 *  they declare. Owner [`collectors::PROJECT`].
-	 */
-	collectors?: CollectorSpec[],
-	/**
-	 *  Project-declared measures (the `measures:` block) — custom fact TYPES a
-	 *  collector may emit (epic tsk12, workstream E). The `oxplow.*` built-ins
-	 *  are seeded by the DB migration; these add global/project ones. Resolved
-	 *  by [`resolve_measures`] and seeded into the `measure` catalog at boot.
-	 */
-	measures?: MeasureEntry[],
-	/**
-	 *  Project-declared dimensions (the `dimensions:` block) — custom conformed
-	 *  slice axes (epic tsk12, workstream E). Resolved by [`resolve_dimensions`]
-	 *  and seeded into the `dimension` catalog at boot.
-	 */
-	dimensions?: DimensionEntry[],
 	/**
 	 *  Project-declared architectural zones (the `zones:` block) — an
 	 *  ORDERED table, first match wins. Empty (the default) means oxplow
@@ -5290,11 +5272,6 @@ export type PlanStatus = "pending" | "in_progress" | "completed";
 
 // What kind of project program it is.
 export type ProgramKind = 
-/**
- *  A project collector's program (`collectors:` with `runtime: exec`):
- *  one that records facts, or a report parser (`records:`).
- */
-"collector" | 
 // An agent spoken to over ACP (`acpAgents`, tsk335).
 "acp-agent" | 
 /**

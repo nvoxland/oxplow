@@ -9,16 +9,11 @@ use oxplow_app::Services;
 
 use crate::error::IpcError;
 
-/// Every declared collector — extensions', then the project's own — with
-/// its last run and whether this machine has approved its current entry
-/// script.
+/// Every declared collector, each extension's, with its last run and
+/// whether this machine has approved its current entry script.
 pub async fn list_collectors(svc: &Services) -> Result<Vec<CollectorListing>, IpcError> {
     let root = svc.worktrees.resolve(None).await.into_local_path();
-    let mut listed = collector_runner::list_collectors(&Collectors::of(svc, &root)).await?;
-    // The project's own (its report collectors among them), after the
-    // extensions'.
-    listed.extend(oxplow_app::project_collectors::listings(svc).await?);
-    Ok(listed)
+    Ok(collector_runner::list_collectors(&Collectors::of(svc, &root)).await?)
 }
 
 /// A person approves an exec collector at the listing's `version` they
@@ -329,13 +324,14 @@ mod tests {
     #[tokio::test]
     async fn list_collectors_includes_the_projects_own() {
         let (svc, dir) = crate::test_support::services().await;
-        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
+        let ext = dir.path().join("oxplow/extensions/project");
+        std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
-            dir.path().join(".oxplow/project.yaml"),
-            "collectors:\n  - { id: tests.cov, records: coverage, entry: \"oxplow:lcov\", report: { path: target/lcov.info } }\n",
+            ext.join("extension.yaml"),
+            "manifest: 2\nname: project\nintent:\n  purpose: test\ncollectors:\n  - { id: tests.cov, records: coverage, entry: \"oxplow:lcov\", report: { path: target/lcov.info } }\n",
         )
         .unwrap();
-        svc.reload_config_from_disk().unwrap();
+        crate::test_support::publish(&svc).await;
         let list = crate::dispatch("list_collectors", json!({}), &svc)
             .await
             .unwrap();

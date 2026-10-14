@@ -1142,6 +1142,15 @@ pub struct Extension {
     pub public_contracts: public_contracts::PublicContracts,
 }
 
+impl Extension {
+    /// The project's own: in its `oxplow/extensions/` folder and not
+    /// installed from elsewhere. Only it may run its own programs to record
+    /// facts and parse reports, each once a person approved it.
+    pub fn is_own(&self) -> bool {
+        self.origin == "project" && self.source.is_none()
+    }
+}
+
 /// What an extension adds to the core UI (`ui:` in its manifest).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -2071,12 +2080,17 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             ext.implementations = declared;
             ext.errors.extend(errors);
         }
+        // The project's own: in its folder, not installed from elsewhere.
+        let own = origin == "project" && files.read(SOURCE_FILE).is_none();
         if let Some(v) = &m.collectors {
             // A collector may follow core types, its own extension's, and
             // another's.
             let (collectors, errors) = oxplow_config::collectors::parse_collectors_indexed(
-                name,
-                Some(&ext.namespace),
+                &oxplow_config::collectors::Declarer {
+                    extension: name.to_string(),
+                    namespace: ext.namespace.clone(),
+                    own,
+                },
                 v,
                 &subscribable,
             );
@@ -2087,9 +2101,15 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 at(&file, at_entry.or(line), format!("collector: {e}"))
             }));
             // A script or program the collector runs must be in the folder,
-            // and a Starlark script must parse and define `transform`.
+            // and a Starlark script must parse and define `transform`; a
+            // report read by one of oxplow's own parsers (`oxplow:<name>`)
+            // runs nothing of the extension's.
             for c in collectors {
                 let c_line = entry_line(&manifest, "collectors", "id", &c.id).or(line);
+                if c.bundled_parser().is_some() {
+                    ext.collectors.push(c);
+                    continue;
+                }
                 match c.entry.as_deref().map(|entry| (entry, files.read(entry))) {
                     Some((entry, None)) => ext.errors.push(at(
                         &file,
@@ -2256,23 +2276,32 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         }
         let err_at = |key: &str, e: String| at(&file, key_line(&manifest, key), e);
         match parse_block(m.measures.clone()).and_then(|v| {
-            oxplow_config::validate_measures(v, Some(&ext.namespace)).map_err(manifest_message)
+            oxplow_config::validate_measures(
+                v,
+                oxplow_config::CatalogLayer::Extension(&ext.namespace),
+            )
+            .map_err(manifest_message)
         }) {
             Ok(v) => ext.measures = v,
             Err(e) => ext.errors.push(err_at("measures", e)),
         }
         match parse_block(m.dimensions.clone()).and_then(|v| {
-            oxplow_config::validate_dimensions(v, Some(&ext.namespace)).map_err(manifest_message)
+            oxplow_config::validate_dimensions(
+                v,
+                oxplow_config::CatalogLayer::Extension(&ext.namespace),
+            )
+            .map_err(manifest_message)
         }) {
             Ok(v) => {
                 for d in v {
-                    // Only oxplow's own namespace promotes: the foundation's
-                    // dimensions are the cube's grain from the first boot.
-                    if d.promote && ext.namespace != oxplow_config::OXPLOW_NAMESPACE {
+                    // Promoting rebuilds the metric cube: the project's call,
+                    // or oxplow's own (the foundation's dimensions are the
+                    // cube's grain from the first boot).
+                    if d.promote && !own && origin != "bundled" {
                         ext.errors.push(err_at(
                             "dimensions",
                             format!(
-                                "dimension `{}`: `promote` belongs in .oxplow/project.yaml (it rebuilds the metric cube)",
+                                "dimension `{}`: `promote` is the project's own extension's (it rebuilds the metric cube)",
                                 d.key.clone().unwrap_or_default()
                             ),
                         ));
@@ -2284,7 +2313,11 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             Err(e) => ext.errors.push(err_at("dimensions", e)),
         }
         match parse_block(m.metrics.clone()).and_then(|v| {
-            oxplow_config::validate_metrics(v, Some(&ext.namespace)).map_err(manifest_message)
+            oxplow_config::validate_metrics(
+                v,
+                oxplow_config::CatalogLayer::Extension(&ext.namespace),
+            )
+            .map_err(manifest_message)
         }) {
             Ok(v) => {
                 for e in v {
@@ -6889,6 +6922,22 @@ commands:
     }
 
     #[test]
+    fn this_repos_own_extension_loads_clean() {
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let ext = project_extensions(&repo)
+            .into_iter()
+            .find(|e| e.name == "project")
+            .expect("the repo's own extension");
+        assert_eq!(ext.errors, Vec::<String>::new());
+        assert!(ext.is_own());
+        assert!(ext
+            .collectors
+            .iter()
+            .any(|c| c.id == "tests.rust_junit" && c.records.is_some()));
+        assert!(ext.collectors.iter().any(|c| c.id == "repo.scan_clone"));
+    }
+
+    #[test]
     fn an_extension_metric_names_its_own_collector_and_keeps_out_of_oxplow_keys() {
         let (_d, ext) = load_x(
             &[],
@@ -6933,6 +6982,12 @@ commands:
             dir.path(),
             "oxplow/extensions/x/collectors/todo.star",
             "def transform(input):\n    return {\"facts\": []}\n",
+        );
+        // An installed one: only the project's own extension runs a program.
+        write(
+            dir.path(),
+            "oxplow/extensions/x/source.yaml",
+            "git: x\ngitRef: null\nsha: abc\n",
         );
         let ext = project_extensions(dir.path()).remove(0);
         assert_eq!(ext.measures.len(), 1, "{:?}", ext.errors);
@@ -7064,7 +7119,14 @@ commands:
             "",
         ]
         .join("\n");
-        let (_d, ext) = load_x(&[], &manifest);
+        let (d, _) = load_x(&[], &manifest);
+        // An installed one: promoting is the project's own extension's.
+        write(
+            d.path(),
+            "oxplow/extensions/x/source.yaml",
+            "git: x\ngitRef: null\nsha: abc\n",
+        );
+        let ext = project_extensions(d.path()).remove(0);
         let keys: Vec<_> = ext
             .dimensions
             .iter()
@@ -7077,6 +7139,49 @@ commands:
                 .any(|e| e.contains("acme.hot") && e.contains("promote")),
             "{:?}",
             ext.errors
+        );
+        // The project's own extension (not installed) may promote, and
+        // run a program to record facts.
+        std::fs::remove_file(d.path().join("oxplow/extensions/x/source.yaml")).unwrap();
+        let own = project_extensions(d.path()).remove(0);
+        assert!(own.is_own());
+        assert!(
+            own.dimensions
+                .iter()
+                .any(|d| d.key.as_deref() == Some("acme.hot")),
+            "{:?}",
+            own.errors
+        );
+    }
+
+    #[test]
+    fn only_an_own_extension_declares_a_program_collector() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "oxplow/extensions/x/extension.yaml",
+            "manifest: 2\nname: x\nintent:\n  purpose: test\nmeasures:\n  - { key: acme.todo }\ncollectors:\n  - { id: acme.shell, runtime: exec, entry: collectors/todo.sh, facts: [acme.todo] }\n",
+        );
+        write(dir.path(), "oxplow/extensions/x/collectors/todo.sh", "echo");
+        let own = project_extensions(dir.path()).remove(0);
+        assert!(own.is_own());
+        assert!(
+            own.collectors.iter().any(|c| c.id == "acme.shell"),
+            "{:?}",
+            own.errors
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/x/source.yaml",
+            "git: x\ngitRef: null\nsha: abc\n",
+        );
+        let installed = project_extensions(dir.path()).remove(0);
+        assert!(!installed.is_own());
+        assert!(installed.collectors.is_empty());
+        assert!(
+            installed.errors.iter().any(|e| e.contains("acme.shell")),
+            "{:?}",
+            installed.errors
         );
     }
 

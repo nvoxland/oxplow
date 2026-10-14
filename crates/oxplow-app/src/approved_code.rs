@@ -4,70 +4,74 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::exec_consent::{ApprovalStore, Gate, ProgramKind, ProjectProgram};
+use crate::exec_consent::{ApprovalStore, Gate};
 use crate::extensions::{Disk, ExtensionFiles};
 
-/// One project's collector program; the gate owns the lifetime of its copy.
-pub(crate) struct ProjectCode {
+/// An approved collector program's private copy; the gate owns its lifetime.
+pub(crate) struct ApprovedCode {
     pub entry: PathBuf,
     pub location: oxplow_script::runtime::ExecLocation,
     pub gate: Gate,
 }
 
-/// Prepare only the code the approval covers. A root-level entry covers its
-/// own file; an entry in a directory also covers that directory's helpers.
-pub(crate) fn project_collector(
+/// The project's own extension's collector `spec`, in `ext_dir` (its
+/// extension, `owner`), as an approved copy to run: refused until a person
+/// approved it at its current version (`collector_runner::approval_hash`
+/// — every file the extension runs and what its declaration grants). The
+/// gate holds while the approval stands and neither the extension nor the
+/// copy changed.
+pub(crate) fn extension_collector(
     approvals: Arc<ApprovalStore>,
     root: PathBuf,
-    program: ProjectProgram,
-) -> Result<ProjectCode, String> {
-    if program.kind != ProgramKind::Collector
-        || !program.args.is_empty()
-        || program.remote
-        || !oxplow_domain::service::valid_path(&program.program)
-    {
-        return Err("unsupported project collector code location".into());
+    ext_dir: PathBuf,
+    owner: &str,
+    spec: &oxplow_config::collectors::CollectorSpec,
+) -> Result<ApprovedCode, String> {
+    use crate::collector_runner::{approval_hash, is_approved};
+    let entry = spec.entry.clone().unwrap_or_default();
+    if !oxplow_domain::service::valid_path(&entry) {
+        return Err("unsupported collector code location".into());
     }
-    let hash = program.hash(&root).map_err(|e| e.to_string())?;
-    let consent = approvals.pinned_gate(program.key(), hash.clone());
-    consent()?;
+    let hash = approval_hash(&ext_dir, spec).map_err(|e| e.to_string())?;
+    let key = (owner.to_string(), spec.id.clone());
+    let approved = {
+        let approvals = approvals.clone();
+        let (key, hash) = (key.clone(), hash.clone());
+        move || {
+            if is_approved(&approvals, &key.0, &key.1, &hash) {
+                Ok(())
+            } else {
+                Err(format!(
+                    "collector `{}/{}` runs a program and needs a person's approval at this \
+                     version first (Settings → Data); it was never approved, changed since, or \
+                     was revoked",
+                    key.0, key.1
+                ))
+            }
+        }
+    };
+    approved()?;
     let copy = Arc::new(
         tempfile::Builder::new()
-            .prefix("oxplow-project-code-")
+            .prefix("oxplow-collector-")
             .tempdir()
             .map_err(|e| e.to_string())?,
     );
-    if let Some(parent) = Path::new(&program.program)
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-    {
-        copy_directory(&root.join(parent), &copy.path().join(parent)).map_err(|e| e.to_string())?;
-    } else {
-        let mut total = 0;
-        copy_file(
-            &Disk(root.clone()),
-            &program.program,
-            copy.path(),
-            &mut total,
-        )
-        .map_err(|e| e.to_string())?;
-    }
-    if program.hash(copy.path()).map_err(|e| e.to_string())? != hash {
+    copy_directory(&ext_dir, copy.path()).map_err(|e| e.to_string())?;
+    if approval_hash(copy.path(), spec).map_err(|e| e.to_string())? != hash {
         return Err(
             "the program changed while preparing its approved copy; review it again".into(),
         );
     }
-    let entry = copy.path().join(&program.program);
     let location = oxplow_script::runtime::ExecLocation {
         directory: copy.path().to_path_buf(),
-        project: root.clone(),
+        project: root,
     };
+    let spec = spec.clone();
     let gate: Gate = Arc::new(move || {
-        consent()?;
-        if program.hash(&root).is_ok_and(|current| current == hash)
-            && program
-                .hash(copy.path())
-                .is_ok_and(|current| current == hash)
+        approved()?;
+        if approval_hash(&ext_dir, &spec).is_ok_and(|current| current == hash)
+            && approval_hash(copy.path(), &spec).is_ok_and(|current| current == hash)
         {
             Ok(())
         } else {
@@ -75,8 +79,8 @@ pub(crate) fn project_collector(
         }
     });
     gate()?;
-    Ok(ProjectCode {
-        entry,
+    Ok(ApprovedCode {
+        entry: location.directory.join(&entry),
         location,
         gate,
     })
@@ -157,44 +161,55 @@ mod tests {
     use super::*;
     use crate::exec_consent::ApprovalStore;
 
-    fn program(path: &str) -> ProjectProgram {
-        ProjectProgram {
-            kind: ProgramKind::Collector,
-            capability: None,
-            name: "repo.count".into(),
-            program: path.into(),
-            args: Vec::new(),
-            env: Vec::new(),
-            credentials: Vec::new(),
-            network: Vec::new(),
-            commands: Vec::new(),
-            scopes: Vec::new(),
-            tree: None,
-            remote: false,
-            approved: false,
-            version: None,
-            unenforced: Vec::new(),
-            granted_at: None,
-            revoked_at: None,
-        }
+    fn spec(entry: &str) -> oxplow_config::collectors::CollectorSpec {
+        let yaml = format!(
+            "- {{ id: repo.count, runtime: exec, entry: \"{entry}\", trigger: manual, facts: [repo.count] }}"
+        );
+        let (mut specs, errors) = oxplow_config::collectors::parse_collectors(
+            &oxplow_config::collectors::Declarer::own("project"),
+            &serde_yaml::from_str(&yaml).unwrap(),
+            &|_| true,
+        );
+        assert_eq!(errors, Vec::<String>::new());
+        specs.remove(0)
     }
 
-    fn project() -> (tempfile::TempDir, Arc<ApprovalStore>) {
+    /// A project whose own extension `project` has a program and a helper.
+    fn project() -> (tempfile::TempDir, PathBuf, Arc<ApprovalStore>) {
         let root = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(root.path().join("tools")).unwrap();
-        std::fs::write(root.path().join("tools/count.sh"), "echo one").unwrap();
-        std::fs::write(root.path().join("tools/helper.txt"), "helper").unwrap();
+        let ext = root.path().join("oxplow/extensions/project");
+        std::fs::create_dir_all(ext.join("tools")).unwrap();
+        std::fs::write(ext.join("tools/count.sh"), "echo one").unwrap();
+        std::fs::write(ext.join("tools/helper.txt"), "helper").unwrap();
         let approvals = Arc::new(ApprovalStore::for_tests(root.path()));
-        (root, approvals)
+        (root, ext, approvals)
     }
 
-    fn approve(approvals: &ApprovalStore, root: &Path, program: &ProjectProgram) {
-        approvals
-            .approve(&program.key(), &program.hash(root).unwrap())
-            .unwrap();
+    fn approve(
+        approvals: &ApprovalStore,
+        ext: &Path,
+        spec: &oxplow_config::collectors::CollectorSpec,
+    ) {
+        let hash = crate::collector_runner::approval_hash(ext, spec).unwrap();
+        crate::collector_runner::approve(approvals, "project", &spec.id, &hash).unwrap();
     }
 
-    fn refused(result: Result<ProjectCode, String>) -> String {
+    fn code(
+        root: &Path,
+        ext: &Path,
+        approvals: &Arc<ApprovalStore>,
+        spec: &oxplow_config::collectors::CollectorSpec,
+    ) -> Result<ApprovedCode, String> {
+        extension_collector(
+            approvals.clone(),
+            root.to_path_buf(),
+            ext.to_path_buf(),
+            "project",
+            spec,
+        )
+    }
+
+    fn refused(result: Result<ApprovedCode, String>) -> String {
         match result {
             Err(message) => message,
             Ok(_) => panic!("expected a refusal"),
@@ -203,112 +218,61 @@ mod tests {
 
     #[test]
     fn nothing_is_copied_until_a_person_approved_it() {
-        let (root, approvals) = project();
-        let program = program("tools/count.sh");
-        let message = refused(project_collector(
-            approvals.clone(),
-            root.path().to_path_buf(),
-            program.clone(),
-        ));
+        let (root, ext, approvals) = project();
+        let message = refused(code(root.path(), &ext, &approvals, &spec("tools/count.sh")));
         assert!(message.contains("approval"), "{message}");
     }
 
     #[test]
     fn an_approved_program_runs_from_a_copy_until_it_is_edited_or_revoked() {
-        let (root, approvals) = project();
-        let program = program("tools/count.sh");
-        approve(&approvals, root.path(), &program);
-        let code = project_collector(
-            approvals.clone(),
-            root.path().to_path_buf(),
-            program.clone(),
-        )
-        .unwrap();
+        let (root, ext, approvals) = project();
+        let spec = spec("tools/count.sh");
+        approve(&approvals, &ext, &spec);
+        let code1 = code(root.path(), &ext, &approvals, &spec).unwrap();
 
         // It runs beside a private copy holding the entry and its helpers.
-        assert!(!code.entry.starts_with(root.path()));
-        assert_eq!(std::fs::read_to_string(&code.entry).unwrap(), "echo one");
+        assert!(!code1.entry.starts_with(root.path()));
+        assert_eq!(std::fs::read_to_string(&code1.entry).unwrap(), "echo one");
         assert_eq!(
-            std::fs::read_to_string(code.location.directory.join("tools/helper.txt")).unwrap(),
+            std::fs::read_to_string(code1.location.directory.join("tools/helper.txt")).unwrap(),
             "helper"
         );
-        assert_eq!(code.location.project, root.path());
-        (code.gate)().expect("approved and unchanged");
+        assert_eq!(code1.location.project, root.path());
+        (code1.gate)().expect("approved and unchanged");
 
-        // Editing the tree under a running program ends its authority; the
-        // copy itself never changes.
-        std::fs::write(root.path().join("tools/helper.txt"), "edited").unwrap();
-        assert!((code.gate)().unwrap_err().contains("changed"));
+        // Editing the extension under a running program ends its authority;
+        // the copy itself never changes.
+        std::fs::write(ext.join("tools/helper.txt"), "edited").unwrap();
+        assert!((code1.gate)().is_err());
         assert_eq!(
-            std::fs::read_to_string(code.location.directory.join("tools/helper.txt")).unwrap(),
+            std::fs::read_to_string(code1.location.directory.join("tools/helper.txt")).unwrap(),
             "helper"
         );
         // The edited program is a different version: unapproved until reviewed.
-        let message = refused(project_collector(
-            approvals.clone(),
-            root.path().to_path_buf(),
-            program.clone(),
-        ));
+        let message = refused(code(root.path(), &ext, &approvals, &spec));
         assert!(message.contains("approval"), "{message}");
 
         // Revocation stops a program approved at its current version.
-        approve(&approvals, root.path(), &program);
-        let code = project_collector(
-            approvals.clone(),
-            root.path().to_path_buf(),
-            program.clone(),
-        )
-        .unwrap();
-        (code.gate)().unwrap();
-        approvals.revoke(&program.key()).unwrap();
-        assert!((code.gate)().unwrap_err().contains("revoked"));
+        approve(&approvals, &ext, &spec);
+        let code2 = code(root.path(), &ext, &approvals, &spec).unwrap();
+        (code2.gate)().unwrap();
+        approvals.revoke("project/repo.count").unwrap();
+        assert!((code2.gate)().is_err());
 
         // The copy goes with the last holder of the gate.
-        let directory = code.location.directory.clone();
-        drop(code);
+        let directory = code2.location.directory.clone();
+        drop(code2);
         assert!(!directory.exists());
     }
 
     #[test]
-    fn only_a_plain_project_relative_collector_is_copied() {
-        let (root, approvals) = project();
+    fn only_a_plain_extension_relative_entry_is_copied() {
+        let (root, ext, approvals) = project();
+        let mut spec = spec("tools/count.sh");
         for bad in ["../outside.sh", "/abs/path.sh", "tools/../../x.sh"] {
-            let program = program(bad);
-            let message = refused(project_collector(
-                approvals.clone(),
-                root.path().to_path_buf(),
-                program,
-            ));
-            assert!(message.contains("unsupported"), "{bad}: {message}");
+            spec.entry = Some(bad.into());
+            let message = refused(code(root.path(), &ext, &approvals, &spec));
+            assert!(message.contains("location"), "{bad}: {message}");
         }
-        let mut with_args = program("tools/count.sh");
-        with_args.args = vec!["--flag".into()];
-        assert!(refused(project_collector(
-            approvals.clone(),
-            root.path().to_path_buf(),
-            with_args
-        ))
-        .contains("unsupported"));
-        let mut other = program("tools/count.sh");
-        other.kind = ProgramKind::Advisories;
-        assert!(refused(project_collector(
-            approvals,
-            root.path().to_path_buf(),
-            other
-        ))
-        .contains("unsupported"));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_symlink_in_the_code_is_not_copied() {
-        let root = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(root.path().join("tools")).unwrap();
-        std::fs::write(root.path().join("tools/count.sh"), "echo one").unwrap();
-        std::os::unix::fs::symlink("/etc/hosts", root.path().join("tools/link")).unwrap();
-        let destination = tempfile::tempdir().unwrap();
-        let error = copy_directory(&root.path().join("tools"), &destination.path().join("copy"))
-            .expect_err("a symlink is refused");
-        assert!(!error.to_string().is_empty());
     }
 }

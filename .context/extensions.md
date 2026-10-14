@@ -987,13 +987,26 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
 - `oxplow/extensions/<name>/`: project extensions, authored by the user or
   their agent and **committed with the repo**. This is how a team shares
   them.
+- **The project's own.** An extension in `oxplow/extensions/` with no
+  `source.yaml` (not installed from elsewhere) is the project's own
+  (`Extension::is_own()`; collectors parse with
+  `oxplow_config::collectors::Declarer { extension, namespace, own }`). The
+  project's own collectors, measures, dimensions and metrics live there, never
+  in `.oxplow/project.yaml` (which refuses `collectors:`, `measures:`,
+  `dimensions:` and `key:` metrics with an error naming
+  `oxplow/extensions/project/extension.yaml`). By convention that extension is
+  `oxplow/extensions/project/` (`oxplow_config::collectors::PROJECT_EXTENSION`),
+  where the tools write new ones; `project` is an ordinary extension name.
+  Collector script `entry` paths are relative to the extension folder. Only an
+  own extension may declare an `exec` fact collector, declare report collectors
+  (`records:`), and `promote` a dimension (bundled extensions may promote too).
 
 **Why `oxplow/` and not `.oxplow/`:** `.oxplow/` is oxplow's *local
 state*. Its `.gitignore` ignores everything except `project.yaml`, and the
 fs watcher prunes its subdirectories wholesale, so files there are neither
 committed nor snapshotted nor attributed to efforts. Project-authored
 oxplow content already lives in `oxplow/` at the repo root (for example
-`oxplow/collectors/*.star`). Extensions follow that convention, so they are
+`oxplow/extensions/project/collectors/*.star`). Extensions follow that convention, so they are
 ordinary project files: visible in the file tree, diffed, reviewed and
 merged like code.
 
@@ -3316,13 +3329,14 @@ models still refresh independently. A launcher `{ command }` entry may name one.
 
 ## Contributing metrics (current)
 
-`extension.yaml` takes `measures:`, `metrics:` and `dimensions:` in the
-`.oxplow/project.yaml` schema, checked with the same
-`oxplow_config::validate_*` functions, and fact collectors (a `collectors:`
-entry with `facts:`, parsed by `oxplow_config::collectors` like the
-project's), plus:
+`extension.yaml` takes `measures:`, `metrics:` and `dimensions:` (the
+catalog schema), checked with the same `oxplow_config::validate_*` functions
+given `CatalogLayer::Extension(ns)` (`Project` and `Global` say where a block
+is written elsewhere), and fact collectors (a `collectors:` entry with
+`facts:`, parsed by `oxplow_config::collectors` with a `Declarer`), plus:
 
-- Metrics must be `key:` definitions; `use:` belongs to the project.
+- Metrics must be `key:` definitions; `use:` belongs to the project's
+  `.oxplow/project.yaml`.
 - Entity metrics (`entity:` + `where` / `time` / `value`, tsk322) work
   here too, usually over the extension's own source views. Their fragments
   are checked at seed time, so one over a view whose source hasn't synced
@@ -3331,21 +3345,24 @@ project's), plus:
   like metrics (`resolve_dimensions` takes an `extensions` layer) and slice
   an extension's entity metrics over the same view. They are stored as
   `scope = 'global'` plus the `extension` column (V89).
-  - `promote` is refused: toggling the extension would rebuild the
-    metric cube each time, so promoting stays a project decision.
+  - `promote` is refused unless the extension is the project's own or
+    bundled: toggling an installed extension would rebuild the metric cube
+    each time.
   - A disabled or removed extension's dimensions are deleted
     (`delete_extension_dimensions_not_in`, never a promoted one). Facts
     don't reference dimension rows, so nothing else is lost.
 - Fact collectors run `starlark` / `jaq` only, with no `env` /
-  `credentials` / `network`. `exec` is refused: a program that records
-  facts runs only from the project's own `collectors:`, with approval;
-  an extension's programs are entity collectors, which a person approves.
+  `credentials` / `network`. `exec` is refused unless the extension is the project's own: an own
+  extension's exec program is approved like any extension collector
+  (`collector_runner::approval_hash`, key `<ext>/<id>`) and runs from a
+  private approved copy (`approved_code::extension_collector`).
   `entry` must exist in the extension.
-- Precedence is built-in < global < each extension < project
+- Precedence is global (the person's) < each extension, and the project's
+  `use:` layers thresholds
   (`oxplow_config::resolve_{metrics,measures,dimensions}` take an
-  `extensions` layer; scope `extension:<name>`). A collector id two owners
-  declare runs once — project over extension over built-in
-  (`MetricsService::fact_collectors`). An enabled extension's
+  `extensions` layer; scope `global` or `extension:<name>`; there is no
+  built-in or project scope). `MetricsService::fact_collectors()` is the
+  enabled extensions' fact collectors. An enabled extension's
   metrics are **on** unless the project mentions the key (a `use:`
   override or disable marker, or its own definition); a `default: off`
   one is listed inactive until the project `use:`s it. A metric's
@@ -3358,8 +3375,8 @@ project's), plus:
 - `MetricsService::extension_catalog` loads enabled extensions from the
   primary worktree on each resolve; fact-collector scripts are read through
   `extensions::read_extension_file` (bundled or disk), and a collector's
-  `report` still resolves against the project.
-- Storage: the scope CHECK only allows built-in / global / project, and
+  `report` path resolves against the project root (the checkout).
+- Storage: the scope CHECK allows only a fixed set, and
   rebuilding `measure` / `metric_spec` would cascade-delete facts (V54),
   so the store writes `extension:<name>` as `scope = 'global'` plus the
   `extension` column (V84) and reads it back. `v_metric_spec` shows
@@ -3807,7 +3824,7 @@ What moves out of core, and what it becomes:
 | Planning / Review / Quality dashboards | `grid` lenses (**done**: `planning`, `review`, `quality`) |
 | Code-quality runner, dup scan, FindingPage, DuplicateBlockPage | **done:** the `findings` / `duplicate-blocks` lenses; the dup scan runs in core's change analysis; `DuplicateBlockPage` stays core as the compare page |
 | Change-analysis cards (treemap, look-here-first, functions, co-change, zones) | **done:** the `change-review` grid in the `effort.review.details` / `vcs.commit.details` / `vcs.status.details` slots; core keeps a changed-files tree (`ChangedFilesTree`, `useChangedFiles`) |
-| Fact collectors (`oxplow/collectors/*.star`, idiom `.star`; gauges until P7.B3) | extensions can declare fact collectors (tsk311); done: the code metrics are oxplow-foundation's (the opt-in ones say `default: off`) |
+| Fact collectors (`oxplow/extensions/project/collectors/*.star`, idiom `.star`; gauges until P7.B3) | extensions can declare fact collectors (tsk311); done: the code metrics are oxplow-foundation's (the opt-in ones say `default: off`) |
 | Metric-threshold nudges | **done:** the `threshold-crossed` advisory (with `metric-deltas`) |
 | Usage / page analytics / token pages, `ThreadTokenTotal`, `EffortTokenUsage` | **done:** the `usage` grid; `task-tokens` (`work_item.detail.body` slot) and `thread-tokens` (`thread.plan.header` slot) |
 | Git History's commit graph | **done:** the `history-graph` component, replacing core's plain `CommitList` (`vcs.history.graph`) |

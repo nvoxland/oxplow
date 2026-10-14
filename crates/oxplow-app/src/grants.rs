@@ -54,10 +54,7 @@ pub fn script_request(needs: &[String]) -> GrantRequest {
 
 /// A project program's request, as Settings → Data → Programs lists it.
 pub fn program_request(p: &ProjectProgram) -> GrantRequest {
-    let runs_program = matches!(
-        p.kind,
-        ProgramKind::Collector | ProgramKind::AcpAgent | ProgramKind::Provider
-    );
+    let runs_program = matches!(p.kind, ProgramKind::AcpAgent | ProgramKind::Provider);
     GrantRequest {
         scopes: scopes(&p.scopes),
         program: runs_program.then(|| p.program.clone()),

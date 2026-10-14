@@ -7,12 +7,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) struct PreparedMetricCatalog {
     frozen: MetricsService,
-    core_only: bool,
     measures: Vec<NewMeasure>,
     dimensions: Vec<NewDimension>,
     specs: BTreeMap<String, Option<NewMetricSpec>>,
-    project_measures: BTreeSet<String>,
-    project_specs: BTreeSet<String>,
     extension_specs: BTreeSet<String>,
     extension_dimensions: BTreeSet<String>,
 }
@@ -27,10 +24,7 @@ impl MetricsService {
         let mut frozen = self.clone();
         let mut config = config.clone();
         if core_only {
-            config.measures.clear();
             config.metrics.clear();
-            config.dimensions.clear();
-            config.collectors.clear();
         }
         frozen.config = Arc::new(RwLock::new(config.clone()));
         frozen.published_inputs = Arc::default();
@@ -45,7 +39,7 @@ impl MetricsService {
         let ext = frozen.extension_catalog();
         let (global_measures, global_dims) = frozen
             .with_global_catalog(|global| (global.measures.clone(), global.dimensions.clone()));
-        let measures: Vec<_> = resolve_measures(&global_measures, &ext.measures, &config.measures)
+        let measures: Vec<_> = resolve_measures(&global_measures, &ext.measures)
             .into_iter()
             .map(|measure| NewMeasure {
                 key: measure.key,
@@ -58,53 +52,29 @@ impl MetricsService {
                 description: measure.description,
             })
             .collect();
-        let dimensions: Vec<_> =
-            resolve_dimensions(&global_dims, &ext.dimensions, &config.dimensions)
-                .into_iter()
-                .map(|dim| NewDimension {
-                    key: dim.key,
-                    label: dim.label,
-                    value_type: dim.value_type,
-                    subject_kind: dim.subject_kind,
-                    vocabulary_json: (!dim.vocabulary.is_empty()).then(|| {
-                        serde_json::to_string(&dim.vocabulary).expect("dimension serializes")
-                    }),
-                    scope: dim.scope,
-                    promoted: dim.promote,
-                    entity_json: dim
-                        .entity
-                        .as_ref()
-                        .map(|entity| serde_json::to_string(entity).expect("entity serializes")),
-                })
-                .collect();
+        let dimensions: Vec<_> = resolve_dimensions(&global_dims, &ext.dimensions)
+            .into_iter()
+            .map(|dim| NewDimension {
+                key: dim.key,
+                label: dim.label,
+                value_type: dim.value_type,
+                subject_kind: dim.subject_kind,
+                vocabulary_json: (!dim.vocabulary.is_empty())
+                    .then(|| serde_json::to_string(&dim.vocabulary).expect("dimension serializes")),
+                scope: dim.scope,
+                promoted: dim.promote,
+                entity_json: dim
+                    .entity
+                    .as_ref()
+                    .map(|entity| serde_json::to_string(entity).expect("entity serializes")),
+            })
+            .collect();
         let mut specs = BTreeMap::new();
         let resolved = frozen.resolved_specs();
-        let project_specs = resolved
-            .iter()
-            .filter(|spec| spec.scope == "project")
-            .map(|spec| spec.key.clone())
-            .collect();
         let extension_specs = resolved
             .iter()
             .filter(|spec| oxplow_config::scope_extension(&spec.scope).is_some())
             .map(|spec| spec.key.clone())
-            .collect();
-        let project_measures = measures
-            .iter()
-            .filter(|measure| measure.scope == "project")
-            .map(|measure| measure.key.clone())
-            .chain(
-                resolved
-                    .iter()
-                    .filter(|spec| {
-                        spec.scope == "project"
-                            && spec
-                                .entity
-                                .as_ref()
-                                .is_some_and(|entity| entity.time.is_none())
-                    })
-                    .map(|spec| spec.key.clone()),
-            )
             .collect();
         let extension_dimensions = dimensions
             .iter()
@@ -130,12 +100,9 @@ impl MetricsService {
             .map_err(|_| problem("<host>", "metric candidate exceeds metadata limits"))?;
         Ok(PreparedMetricCatalog {
             frozen,
-            core_only,
             measures,
             dimensions,
             specs,
-            project_measures,
-            project_specs,
             extension_specs,
             extension_dimensions,
         })
@@ -245,18 +212,12 @@ impl PreparedMetricCatalog {
             }
             fact_store::upsert_spec_tx(tx, &spec)?;
         }
-        prune(tx, "metric_spec", "scope = 'project'", &self.project_specs)?;
         prune(
             tx,
             "metric_spec",
             "extension IS NOT NULL",
             &self.extension_specs,
         )?;
-        // The repair baseline temporarily hides optional declarations. That
-        // must never retire their measures and cascade away recorded facts.
-        if !self.core_only {
-            prune(tx, "measure", "scope = 'project'", &self.project_measures)?;
-        }
         let specs = {
             let mut statement = tx
                 .prepare("SELECT key FROM metric_spec ORDER BY key")

@@ -241,10 +241,9 @@ function baseRow(p: ProjectProgram): BaseRow {
     };
   }
   const command = [...(p.env ?? []), p.program, ...p.args].join(" ");
-  const what = p.kind === "collector" ? "Collector" : "ACP agent";
   return {
     key: `${p.kind}:${p.name}`,
-    label: `${what} ${p.name}`,
+    label: `ACP agent ${p.name}`,
     command,
     status: p.approved ? "Approved on this machine" : "Not approved: it won't run",
     approved: p.approved,

@@ -695,32 +695,13 @@ pub struct OxplowConfig {
     pub testing: TestingConfig,
     /// Limits on script workers (the `scripts:` block).
     pub scripts: ScriptsConfig,
-    /// Project-declared metric SPECS (the `metrics:` block) — the author-able
-    /// read surface (epic tsk12, E). Each entry enables a catalog metric
-    /// (`use:`) or defines a new spec (`key:`) over a measure. The runner resolves
-    /// these across the built-in/global/project scopes; see [`resolve_metrics`].
+    /// Which metrics are on in this project (the `metrics:` block): a `use:`
+    /// turns one on, layering its thresholds; an `enabled: false` marker
+    /// turns an on-by-default one off. Metrics, measures, dimensions and
+    /// collectors are defined by extensions (the project's own in its own
+    /// extension); see [`resolve_metrics`].
     #[serde(default)]
     pub metrics: Vec<MetricEntry>,
-    /// The project's collectors (the `collectors:` block, P7.B3): fact
-    /// producers that run on their trigger and record facts on the measures
-    /// they declare. Owner [`collectors::PROJECT`].
-    #[serde(default)]
-    pub collectors: Vec<collectors::CollectorSpec>,
-    /// The `collectors:` block as the file has it: what the writer puts
-    /// back (a parsed spec isn't the shape the file declares).
-    #[serde(skip)]
-    pub collectors_yaml: Option<serde_json::Value>,
-    /// Project-declared measures (the `measures:` block) — custom fact TYPES a
-    /// collector may emit (epic tsk12, workstream E). The `oxplow.*` built-ins
-    /// are seeded by the DB migration; these add global/project ones. Resolved
-    /// by [`resolve_measures`] and seeded into the `measure` catalog at boot.
-    #[serde(default)]
-    pub measures: Vec<MeasureEntry>,
-    /// Project-declared dimensions (the `dimensions:` block) — custom conformed
-    /// slice axes (epic tsk12, workstream E). Resolved by [`resolve_dimensions`]
-    /// and seeded into the `dimension` catalog at boot.
-    #[serde(default)]
-    pub dimensions: Vec<DimensionEntry>,
     /// Project-declared architectural zones (the `zones:` block) — an
     /// ORDERED table, first match wins. Empty (the default) means oxplow
     /// classifies nothing: every file is `other` and the Change-analysis
@@ -951,18 +932,21 @@ struct RawConfig {
     /// Limits on the processes that run scripts: `maxConcurrent` (workers at once, minimum 1) and `memoryMb` (one worker's memory cap, minimum 64). Defaults: min(4, cores) and 512.
     #[serde(default)]
     scripts: Option<RawScriptsBlock>,
-    /// Metric specs: enable a catalog metric (`use`) or define one (`key`) over a measure.
+    /// Which metrics are on: `use` turns one on (with optional target/warnAt/failAt), `enabled: false` turns an on-by-default one off. Metrics are defined in extensions.
     #[serde(default)]
     metrics: Option<Vec<MetricEntry>>,
-    /// Collectors: scripts (starlark, jaq) and programs (`runtime: exec`, approved by a person) that record facts on declared measures when their trigger fires. Runs programs.
+    /// Retired: read as an error naming the project's extension.
     #[serde(default)]
-    collectors: Option<serde_json::Value>,
-    /// Custom fact types collectors may emit.
+    #[schemars(skip)]
+    collectors: Option<serde_yaml::Value>,
+    /// Retired: read as an error naming the project's extension.
     #[serde(default)]
-    measures: Option<Vec<MeasureEntry>>,
-    /// Custom slice axes for facts.
+    #[schemars(skip)]
+    measures: Option<serde_yaml::Value>,
+    /// Retired: read as an error naming the project's extension.
     #[serde(default)]
-    dimensions: Option<Vec<DimensionEntry>>,
+    #[schemars(skip)]
+    dimensions: Option<serde_yaml::Value>,
     /// Architectural zones: an ORDERED rule table, first match wins; `other`/`external` are reserved labels.
     #[serde(default)]
     zones: Option<Vec<RawZoneRule>>,
@@ -1552,30 +1536,6 @@ pub fn config_entries(config: &OxplowConfig, fallback_name: &str) -> Vec<ConfigE
         serde_yaml::Value::Sequence(config.metrics.iter().map(minimal_yaml).collect()),
         !config.metrics.is_empty(),
     );
-    put(
-        "collectors",
-        config
-            .collectors_yaml
-            .as_ref()
-            .map_or(serde_yaml::Value::Null, to_yaml),
-        config.collectors_yaml.is_some(),
-    );
-    put(
-        "measures",
-        serde_yaml::Value::Sequence(config.measures.iter().map(minimal_yaml).collect()),
-        !config.measures.is_empty(),
-    );
-    put(
-        "dimensions",
-        serde_yaml::Value::Sequence(
-            config
-                .dimensions
-                .iter()
-                .map(dimension_entry_to_yaml)
-                .collect(),
-        ),
-        !config.dimensions.is_empty(),
-    );
     put("zones", to_yaml(&config.zones), !config.zones.is_empty());
     put(
         "agentConfig",
@@ -1669,18 +1629,6 @@ fn minimal_yaml<T: Serialize>(entry: &T) -> serde_yaml::Value {
     prune(to_yaml(entry)).unwrap_or_else(|| serde_yaml::Value::Mapping(serde_yaml::Mapping::new()))
 }
 
-/// Serialize one [`DimensionEntry`] to a YAML mapping, omitting unset fields.
-fn dimension_entry_to_yaml(e: &DimensionEntry) -> serde_yaml::Value {
-    // `promote` is a plain bool; only `true` is worth writing.
-    let mut v = minimal_yaml(e);
-    if let serde_yaml::Value::Mapping(m) = &mut v {
-        if m.get("promote") == Some(&serde_yaml::Value::Bool(false)) {
-            m.remove("promote");
-        }
-    }
-    v
-}
-
 fn default_config(project_name: String) -> OxplowConfig {
     OxplowConfig {
         agents: Vec::new(),
@@ -1699,10 +1647,6 @@ fn default_config(project_name: String) -> OxplowConfig {
         testing: TestingConfig::default(),
         scripts: ScriptsConfig::default(),
         metrics: Vec::new(),
-        collectors: Vec::new(),
-        collectors_yaml: None,
-        measures: Vec::new(),
-        dimensions: Vec::new(),
         zones: Vec::new(),
         agent_config: Default::default(),
         acp_agents: Vec::new(),
@@ -2189,11 +2133,19 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
 
     let testing = validate_testing(raw.testing)?;
     let scripts = validate_scripts(raw.scripts)?;
-    let metrics = validate_metrics(raw.metrics, None)?;
-    let collectors_yaml = raw.collectors;
-    let collectors = parse_project_collectors(collectors_yaml.as_ref())?;
-    let measures = validate_measures(raw.measures, None)?;
-    let dimensions = validate_dimensions(raw.dimensions, None)?;
+    let metrics = validate_metrics(raw.metrics, CatalogLayer::Project)?;
+    for (key, moved) in [
+        ("collectors", raw.collectors.is_some()),
+        ("measures", raw.measures.is_some()),
+        ("dimensions", raw.dimensions.is_some()),
+    ] {
+        if moved {
+            return Err(ConfigError::Invalid(format!(
+                "`{key}:` is an extension's: declare the project's in its own extension \
+                 (`oxplow/extensions/project/extension.yaml`)"
+            )));
+        }
+    }
 
     if raw.agent_models.is_some() {
         return Err(ConfigError::Invalid(
@@ -2267,10 +2219,6 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         testing,
         scripts,
         metrics,
-        collectors,
-        collectors_yaml,
-        measures,
-        dimensions,
         zones,
         agent_config,
         acp_agents,
@@ -2499,15 +2447,39 @@ pub fn reserved_key(key: &str, namespace: Option<&str>) -> Option<String> {
     })
 }
 
-/// Validate a `metrics:` block defined by `namespace` (see [`reserved_key`]):
-/// namespaced keys, `oxplow.*` only in the `oxplow` namespace, known
-/// runtime/kind/trigger. Each entry must be exactly one of the `use:` or
+/// Where a catalog block (`metrics:`, `measures:`, `dimensions:`) is
+/// written, which decides what it may say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CatalogLayer<'a> {
+    /// `.oxplow/project.yaml`: the project's choices — which metrics are on
+    /// (`use:`, an `enabled: false` marker) and their thresholds. Its
+    /// definitions are its own extension's.
+    Project,
+    /// The person's own files in the global config dir.
+    Global,
+    /// An extension's manifest, in its namespace (see [`reserved_key`]).
+    Extension(&'a str),
+}
+
+impl CatalogLayer<'_> {
+    fn namespace(&self) -> Option<&str> {
+        match self {
+            CatalogLayer::Extension(ns) => Some(ns),
+            _ => None,
+        }
+    }
+}
+
+/// Validate a `metrics:` block written in `layer`: namespaced keys, `oxplow.*`
+/// only in the `oxplow` namespace ([`reserved_key`]), definitions (`key:`)
+/// only outside the project. Each entry must be exactly one of the `use:` or
 /// `key:` forms. Returns the cleaned entries (the scope resolution happens
 /// later in [`resolve_metrics`]).
 pub fn validate_metrics(
     raw: Option<Vec<MetricEntry>>,
-    namespace: Option<&str>,
+    layer: CatalogLayer<'_>,
 ) -> Result<Vec<MetricEntry>, ConfigError> {
+    let namespace = layer.namespace();
     let opt = |v: Option<String>| v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     let mut out = Vec::new();
     // Each metric key may appear at most once in the project block. Two entries
@@ -2535,6 +2507,13 @@ pub fn validate_metrics(
         if !the_key.contains('.') {
             return Err(ConfigError::Invalid(format!(
                 "metrics[{i}] key \"{the_key}\" must be namespaced as \"<vendor>.<id>\""
+            )));
+        }
+        if is_define && layer == CatalogLayer::Project {
+            return Err(ConfigError::Invalid(format!(
+                "metrics[{i}] defines `{the_key}`: the project's metrics are defined in its own \
+                 extension (`oxplow/extensions/project/extension.yaml`); `.oxplow/project.yaml` \
+                 turns metrics on (`use:`) and off"
             )));
         }
         // A project may `use:` an `oxplow.*` metric but only the `oxplow`
@@ -2770,38 +2749,15 @@ fn validate_formula(i: usize, f: FormulaConfig) -> Result<FormulaConfig, ConfigE
     Ok(FormulaConfig { op, left, right })
 }
 
-/// The project's `collectors:` block, parsed with owner
-/// [`collectors::PROJECT`]: every error at once, naming each collector.
-fn parse_project_collectors(
-    raw: Option<&serde_json::Value>,
-) -> Result<Vec<collectors::CollectorSpec>, ConfigError> {
-    let Some(raw) = raw else {
-        return Ok(Vec::new());
-    };
-    let value: serde_yaml::Value = to_yaml(raw);
-    let (specs, errors) = collectors::parse_collectors(
-        collectors::PROJECT,
-        None,
-        &value,
-        &oxplow_domain::events::schema::is_core_type,
-    );
-    if errors.is_empty() {
-        Ok(specs)
-    } else {
-        Err(ConfigError::Invalid(errors.join("; ")))
-    }
-}
-
 /// Every metric definition (`key:` entry) by key, with the scope it came
-/// from; a later scope wins (project > extension > global > built-in).
+/// from; a later scope wins (extension > global > built-in).
 fn definition_catalog<'a>(
     builtin: &'a [MetricEntry],
     global: &'a [MetricEntry],
     extensions: &'a [ExtensionLayer<MetricEntry>],
-    project: &'a [MetricEntry],
 ) -> std::collections::HashMap<String, (String, &'a MetricEntry)> {
     let mut catalog = std::collections::HashMap::new();
-    for (scope, entries) in scoped_layers(builtin, global, extensions, project) {
+    for (scope, entries) in scoped_layers(builtin, global, extensions) {
         for e in entries {
             if let Some(k) = e.key.as_deref() {
                 catalog.insert(k.to_string(), (scope.clone(), e));
@@ -2821,10 +2777,10 @@ pub fn unknown_uses(
     extensions: &[ExtensionLayer<MetricEntry>],
     project: &[MetricEntry],
 ) -> Vec<String> {
-    let catalog = definition_catalog(builtin, global, extensions, project);
+    let catalog = definition_catalog(builtin, global, extensions);
     project
         .iter()
-        .filter(|e| e.key.is_none() && e.enabled != Some(false))
+        .filter(|e| e.enabled != Some(false))
         .filter_map(|e| e.use_key.clone())
         .filter(|k| !catalog.contains_key(k))
         .collect()
@@ -2845,25 +2801,21 @@ pub fn resolve_metrics(
     extensions: &[ExtensionLayer<MetricEntry>],
     project: &[MetricEntry],
 ) -> Vec<ResolvedSpec> {
-    let catalog = definition_catalog(builtin, global, extensions, project);
+    let catalog = definition_catalog(builtin, global, extensions);
     let mut out = Vec::new();
     for e in project {
-        if let Some(k) = e.key.as_deref() {
-            // A project definition: it is its own resolved spec.
-            out.push(resolve_one(k, "project", e, None));
-        } else if let Some(uk) = e.use_key.as_deref() {
+        if let Some(uk) = e.use_key.as_deref() {
             if let Some((scope, def)) = catalog.get(uk) {
                 out.push(resolve_one(uk, scope, def, Some(e)));
             }
         }
     }
     // An enabled extension's own definitions are resolved unless the project
-    // mentions the key (a `use:` override or disable marker, or its own
-    // definition, all handled above): active, or listed inactive when
-    // `default: off`.
+    // mentions the key (a `use:` override or disable marker, handled above):
+    // active, or listed inactive when `default: off`.
     let mentioned: std::collections::HashSet<&str> = project
         .iter()
-        .filter_map(|e| e.key.as_deref().or(e.use_key.as_deref()))
+        .filter_map(|e| e.use_key.as_deref())
         .collect();
     let mut seen = std::collections::HashSet::new();
     for (name, entries) in extensions {
@@ -2899,12 +2851,11 @@ pub fn scope_extension(scope: &str) -> Option<String> {
 }
 
 /// Scopes in precedence order (later wins): built-in, global, each
-/// extension, project.
+/// extension.
 fn scoped_layers<'a, T>(
     builtin: &'a [T],
     global: &'a [T],
     extensions: &'a [ExtensionLayer<T>],
-    project: &'a [T],
 ) -> Vec<(String, &'a [T])> {
     let mut out = vec![
         ("built-in".to_string(), builtin),
@@ -2915,7 +2866,6 @@ fn scoped_layers<'a, T>(
             .iter()
             .map(|(n, e)| (extension_scope(n), e.as_slice())),
     );
-    out.push(("project".to_string(), project));
     out
 }
 
@@ -2978,7 +2928,7 @@ pub fn load_global_metric_entries(global_dir: &Path) -> Vec<MetricEntry> {
     load_global_entries(global_dir, "metrics", |raw| {
         serde_yaml::from_str::<Doc>(raw)
             .ok()
-            .map(|d| validate_metrics(d.metrics, None).map_err(|e| e.to_string()))
+            .map(|d| validate_metrics(d.metrics, CatalogLayer::Global).map_err(|e| e.to_string()))
     })
 }
 
@@ -3067,14 +3017,15 @@ fn validate_catalog_key(
     Ok(key)
 }
 
-/// Validate a `measures:` block defined by `namespace`. Mirrors
-/// [`validate_metrics`]: namespaced keys, `oxplow.*` only in the `oxplow`
-/// namespace, per-key uniqueness, known temporalSemantics/captureScope enums.
-/// Definition-only (no `use:` form).
+/// Validate a `measures:` block written in `layer` (an extension's or the
+/// person's global files). Mirrors [`validate_metrics`]: namespaced keys,
+/// `oxplow.*` only in the `oxplow` namespace, per-key uniqueness, known
+/// temporalSemantics/captureScope enums. Definition-only (no `use:` form).
 pub fn validate_measures(
     raw: Option<Vec<MeasureEntry>>,
-    namespace: Option<&str>,
+    layer: CatalogLayer<'_>,
 ) -> Result<Vec<MeasureEntry>, ConfigError> {
+    let namespace = layer.namespace();
     let opt = |v: Option<String>| v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -3117,13 +3068,14 @@ pub fn validate_measures(
     Ok(out)
 }
 
-/// Validate a `dimensions:` block defined by `namespace`. Mirrors
+/// Validate a `dimensions:` block written in `layer`. Mirrors
 /// [`validate_measures`]: namespaced keys, `oxplow.*` only in the `oxplow`
 /// namespace, per-key uniqueness, known valueType.
 pub fn validate_dimensions(
     raw: Option<Vec<DimensionEntry>>,
-    namespace: Option<&str>,
+    layer: CatalogLayer<'_>,
 ) -> Result<Vec<DimensionEntry>, ConfigError> {
+    let namespace = layer.namespace();
     let opt = |v: Option<String>| v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -3199,11 +3151,10 @@ pub fn validate_dimensions(
 pub fn resolve_measures(
     global: &[MeasureEntry],
     extensions: &[ExtensionLayer<MeasureEntry>],
-    project: &[MeasureEntry],
 ) -> Vec<ResolvedMeasure> {
     let mut out: Vec<ResolvedMeasure> = Vec::new();
     let mut pos: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    for (scope, entries) in scoped_layers(&[], global, extensions, project) {
+    for (scope, entries) in scoped_layers(&[], global, extensions) {
         for e in entries {
             let Some(key) = e.key.as_deref() else {
                 continue;
@@ -3238,11 +3189,10 @@ pub fn resolve_measures(
 pub fn resolve_dimensions(
     global: &[DimensionEntry],
     extensions: &[ExtensionLayer<DimensionEntry>],
-    project: &[DimensionEntry],
 ) -> Vec<ResolvedDimension> {
     let mut out: Vec<ResolvedDimension> = Vec::new();
     let mut pos: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    for (scope, entries) in scoped_layers(&[], global, extensions, project) {
+    for (scope, entries) in scoped_layers(&[], global, extensions) {
         for e in entries {
             let Some(key) = e.key.as_deref() else {
                 continue;
@@ -3286,7 +3236,7 @@ pub fn load_global_measure_entries(global_dir: &Path) -> Vec<MeasureEntry> {
     load_global_entries(global_dir, "measures", |raw| {
         serde_yaml::from_str::<Doc>(raw)
             .ok()
-            .map(|d| validate_measures(d.measures, None).map_err(|e| e.to_string()))
+            .map(|d| validate_measures(d.measures, CatalogLayer::Global).map_err(|e| e.to_string()))
     })
 }
 
@@ -3300,9 +3250,9 @@ pub fn load_global_dimension_entries(global_dir: &Path) -> Vec<DimensionEntry> {
         dimensions: Option<Vec<DimensionEntry>>,
     }
     load_global_entries(global_dir, "dimensions", |raw| {
-        serde_yaml::from_str::<Doc>(raw)
-            .ok()
-            .map(|d| validate_dimensions(d.dimensions, None).map_err(|e| e.to_string()))
+        serde_yaml::from_str::<Doc>(raw).ok().map(|d| {
+            validate_dimensions(d.dimensions, CatalogLayer::Global).map_err(|e| e.to_string())
+        })
     })
 }
 
@@ -3996,8 +3946,9 @@ dimensions:
             dimensions: Option<Vec<DimensionEntry>>,
         }
         let doc: Doc = serde_yaml::from_str(yaml).unwrap();
-        let metrics = validate_metrics(doc.metrics, None).unwrap();
-        let resolved = resolve_metrics(&[], &[], &[], &metrics);
+        let metrics = validate_metrics(doc.metrics, CatalogLayer::Extension("work")).unwrap();
+        let extensions = vec![("work".to_string(), metrics)];
+        let resolved = resolve_metrics(&[], &[], &extensions, &[]);
         assert_eq!(
             resolved[0].entity,
             Some(EntitySpec {
@@ -4009,8 +3960,8 @@ dimensions:
             })
         );
         assert_eq!(resolved[1].entity.as_ref().unwrap().aggregation, "median");
-        let dims = validate_dimensions(doc.dimensions, None).unwrap();
-        let rd = resolve_dimensions(&[], &[], &dims);
+        let dims = validate_dimensions(doc.dimensions, CatalogLayer::Extension("work")).unwrap();
+        let rd = resolve_dimensions(&[], &[("work".to_string(), dims)]);
         assert_eq!(
             rd[0].entity,
             Some(EntityDimensionSpec {
@@ -4025,7 +3976,9 @@ dimensions:
     fn entity_metric_mistakes_are_refused() {
         let bad = |yaml: &str| {
             let e: Vec<MetricEntry> = serde_yaml::from_str(yaml).unwrap();
-            validate_metrics(Some(e), None).unwrap_err().to_string()
+            validate_metrics(Some(e), CatalogLayer::Global)
+                .unwrap_err()
+                .to_string()
         };
         assert!(bad("[{key: a.b, entity: tasks}]").contains("v_*"));
         assert!(
@@ -4042,7 +3995,9 @@ dimensions:
         assert!(bad("[{use: a.b, time: x}]").contains("`use:` entry"));
         let dim = |yaml: &str| {
             let e: Vec<DimensionEntry> = serde_yaml::from_str(yaml).unwrap();
-            validate_dimensions(Some(e), None).unwrap_err().to_string()
+            validate_dimensions(Some(e), CatalogLayer::Global)
+                .unwrap_err()
+                .to_string()
         };
         assert!(dim("[{key: a.b, entity: v_work_item}]").contains("needs an `expr`"));
         assert!(dim("[{key: a.b, expr: x}]").contains("without `entity`"));
@@ -4064,9 +4019,7 @@ dimensions:
         let dir = tempdir().unwrap();
         let original = "# The cart project.\n\
                         agents: [claude]\n\
-                        testing:\n  command: bun test   # with reports\n\
-                        collectors:\n\
-                        - { id: tests.junit, doc: Cases., records: tests, entry: \"oxplow:junit\", report: { path: junit.xml }, trigger: { on_run: test } }\n";
+                        testing:\n  command: bun test   # with reports\n";
         std::fs::write(cfg_path(dir.path()), original).unwrap();
         let metrics = serde_json::json!([{ "use": "oxplow.fn_count" }]);
         write_project_key(dir.path(), "metrics", Some(&metrics)).unwrap();
@@ -4424,33 +4377,6 @@ lsp:
     /// an entity metric without its entity no longer validates and the
     /// whole config stops loading.
     #[test]
-    fn write_round_trips_entity_metrics_and_dimensions() {
-        let dir = tempdir().unwrap();
-        std::fs::write(
-            cfg_path(dir.path()),
-            "metrics:\n\
-             - key: work.open_bugs\n  title: Open Bugs\n  entity: v_work_item\n  aggregation: count\n  where: \"e.state = 'todo'\"\n  time: e.created_at\n\
-             - key: work.mean_priority\n  entity: v_work_item\n  aggregation: avg\n  value: e.rank\n\
-             dimensions:\n\
-             - key: work.thread_title\n  label: Thread\n  entity: v_work_item\n  expr: t.title\n  join: LEFT JOIN v_thread t ON t.id = e.thread_id\n",
-        )
-        .unwrap();
-        let cfg = load_project_config(dir.path()).unwrap();
-        write_rendered(dir.path(), &cfg);
-        let reloaded = load_project_config(dir.path()).expect("still loads after a write");
-        assert_eq!(reloaded.metrics, cfg.metrics);
-        assert_eq!(reloaded.dimensions, cfg.dimensions);
-        assert_eq!(
-            reloaded.metrics[0].where_.as_deref(),
-            Some("e.state = 'todo'")
-        );
-        assert_eq!(
-            reloaded.dimensions[0].join.as_deref(),
-            Some("LEFT JOIN v_thread t ON t.id = e.thread_id")
-        );
-    }
-
-    #[test]
     fn write_round_trips_zones_preserving_order() {
         let dir = tempdir().unwrap();
         std::fs::write(
@@ -4498,32 +4424,6 @@ lsp:
         );
     }
 
-    /// The `collectors:` block is written back as the file declares it
-    /// (a parsed spec isn't the declared shape), so a write that changes
-    /// another key leaves it loading the same.
-    #[test]
-    fn a_write_keeps_the_collectors_block_as_declared() {
-        let dir = tempdir().unwrap();
-        std::fs::write(
-            cfg_path(dir.path()),
-            "collectors:\n\
-             - id: repo.scan_one\n  \
-               doc: One\n  \
-               runtime: starlark\n  \
-               entry: oxplow/collectors/one.star\n  \
-               trigger: { on: [snapshot.taken] }\n  \
-               facts: [repo.one]\n",
-        )
-        .unwrap();
-        let mut cfg = load_project_config(dir.path()).unwrap();
-        assert_eq!(cfg.collectors.len(), 1);
-        cfg.snapshot_retention_days = 3;
-        write_rendered(dir.path(), &cfg);
-        let reloaded = load_project_config(dir.path()).unwrap();
-        assert_eq!(reloaded.collectors, cfg.collectors);
-        assert_eq!(reloaded.snapshot_retention_days, 3);
-    }
-
     #[test]
     fn managed_keys_covers_every_block_the_writer_emits() {
         // Every top-level key the renderer emits reads back the same: what
@@ -4531,14 +4431,7 @@ lsp:
         let dir = tempdir().unwrap();
         std::fs::write(
             cfg_path(dir.path()),
-            "collectors:\n\
-             - id: repo.scan_one\n  \
-               doc: One\n  \
-               runtime: starlark\n  \
-               entry: oxplow/collectors/one.star\n  \
-               trigger: { on: [snapshot.taken] }\n  \
-               facts: [repo.one]\n\
-             projectName: demo\n\
+            "projectName: demo\n\
              snapshotRetentionDays: 3\n",
         )
         .unwrap();
@@ -4552,12 +4445,11 @@ lsp:
         // Every key present after a write must round-trip through a reload,
         // which is what being MANAGED buys.
         let reloaded = load_project_config(dir.path()).unwrap();
-        assert_eq!(reloaded.collectors.len(), 1);
         assert_eq!(reloaded.project_name, "demo");
         assert_eq!(reloaded.snapshot_retention_days, 3);
         assert!(
-            map.contains_key(serde_yaml::Value::String("collectors".into())),
-            "collectors block written, got:\n{raw}"
+            map.contains_key(serde_yaml::Value::String("projectName".into())),
+            "projectName written, got:\n{raw}"
         );
     }
 
@@ -4961,6 +4853,58 @@ testing:
         load_project_config(dir.path())
     }
 
+    /// Parse a `metrics:` document the way a global catalog file is
+    /// validated (the layer that accepts `key:` definitions).
+    fn global_metrics(yaml: &str) -> Result<Vec<MetricEntry>, String> {
+        #[derive(Deserialize)]
+        struct Doc {
+            metrics: Option<Vec<MetricEntry>>,
+        }
+        let doc: Doc = serde_yaml::from_str(yaml).map_err(|e| e.to_string())?;
+        validate_metrics(doc.metrics, CatalogLayer::Global).map_err(|e| e.to_string())
+    }
+
+    /// The project's `metrics:` only `use:`s a metric: a `key:` definition
+    /// is refused, naming where the project's metrics are defined.
+    #[test]
+    fn a_project_metric_definition_is_refused_but_a_use_loads() {
+        let err = load_from_yaml(
+            "metrics:\n  - key: acme.loc\n    sourceMeasure: acme.m\n    aggregation: count\n",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("the project's metrics are defined in its own extension"),
+            "{err}"
+        );
+        let cfg =
+            load_from_yaml("metrics:\n  - use: acme.loc\n    target: 5\n    warnAt: 7\n").unwrap();
+        assert_eq!(cfg.metrics.len(), 1);
+        assert_eq!(cfg.metrics[0].use_key.as_deref(), Some("acme.loc"));
+        assert_eq!(cfg.metrics[0].target, Some(5.0));
+    }
+
+    /// `collectors:`, `measures:` and `dimensions:` are an extension's, not
+    /// project.yaml's: any of them fails the load.
+    #[test]
+    fn project_yaml_refuses_collectors_measures_and_dimensions() {
+        for (key, yaml) in [
+            (
+                "collectors",
+                "collectors:\n  - { id: acme.scan, runtime: starlark, entry: x.star, facts: [acme.todo] }\n",
+            ),
+            ("measures", "measures:\n  - key: acme.loc\n"),
+            ("dimensions", "dimensions:\n  - key: acme.license\n"),
+        ] {
+            let err = load_from_yaml(yaml).unwrap_err().to_string();
+            assert!(
+                err.contains(&format!("`{key}:` is an extension's"))
+                    && err.contains("oxplow/extensions/project/extension.yaml"),
+                "{key}: {err}"
+            );
+        }
+    }
+
     /// tsk945: a dimension key has one name — its namespaced one. A metric
     /// declaring a bare one to slice or filter by is refused, saying what
     /// the key is called.
@@ -4971,7 +4915,7 @@ testing:
                 "[{{key: repo.x, title: X, sourceMeasure: acme.m, aggregation: sum, {extra}}}]"
             ))
             .unwrap();
-            validate_metrics(Some(e), None)
+            validate_metrics(Some(e), CatalogLayer::Global)
         };
         for (extra, bare) in [
             ("sliceableDims: [language]", "language"),
@@ -4990,7 +4934,7 @@ testing:
 
     #[test]
     fn parses_both_metric_forms() {
-        let cfg = load_from_yaml(
+        let metrics = global_metrics(
             r#"
 metrics:
   - key: repo.unsafe_blocks
@@ -5007,28 +4951,22 @@ metrics:
 "#,
         )
         .unwrap();
-        assert_eq!(cfg.metrics.len(), 2);
-        assert_eq!(cfg.metrics[0].key.as_deref(), Some("repo.unsafe_blocks"));
+        assert_eq!(metrics.len(), 2);
+        assert_eq!(metrics[0].key.as_deref(), Some("repo.unsafe_blocks"));
+        assert_eq!(metrics[0].source_measure.as_deref(), Some("acme.ast_hit"));
+        assert_eq!(metrics[0].aggregation.as_deref(), Some("sum"));
         assert_eq!(
-            cfg.metrics[0].source_measure.as_deref(),
-            Some("acme.ast_hit")
-        );
-        assert_eq!(cfg.metrics[0].aggregation.as_deref(), Some("sum"));
-        assert_eq!(
-            cfg.metrics[0].filter.as_ref().unwrap().dim_eq.as_deref(),
+            metrics[0].filter.as_ref().unwrap().dim_eq.as_deref(),
             Some(["acme.rule".to_string(), "unsafe_block".to_string()].as_slice())
         );
-        assert_eq!(cfg.metrics[0].sliceable_dims, vec!["acme.rule".to_string()]);
-        assert_eq!(
-            cfg.metrics[1].use_key.as_deref(),
-            Some("myglobal.todo_density")
-        );
-        assert_eq!(cfg.metrics[1].target, Some(5.0));
+        assert_eq!(metrics[0].sliceable_dims, vec!["acme.rule".to_string()]);
+        assert_eq!(metrics[1].use_key.as_deref(), Some("myglobal.todo_density"));
+        assert_eq!(metrics[1].target, Some(5.0));
     }
 
     #[test]
     fn parses_formula_metric() {
-        let cfg = load_from_yaml(
+        let metrics = global_metrics(
             r#"
 metrics:
   - key: acme.bugs_per_kloc
@@ -5037,18 +4975,18 @@ metrics:
 "#,
         )
         .unwrap();
-        let f = cfg.metrics[0].formula.as_ref().unwrap();
+        let f = metrics[0].formula.as_ref().unwrap();
         assert_eq!(f.op, "div");
         assert_eq!(f.left, "acme.bug_count");
         assert_eq!(f.right, "acme.kloc");
-        assert!(cfg.metrics[0].source_measure.is_none());
+        assert!(metrics[0].source_measure.is_none());
     }
 
     #[test]
     fn formula_op_is_one_of_add_sub_mul_div() {
         for op in ["add", "sub", "mul", "div"] {
             assert!(
-                load_from_yaml(&format!(
+                global_metrics(&format!(
                     "metrics:\n  - key: a.b\n    formula: {{ op: {op}, left: a.c, right: a.d }}\n"
                 ))
                 .is_ok(),
@@ -5056,7 +4994,7 @@ metrics:
             );
         }
         // `div` is the only ratio primitive; there is no alias for it.
-        assert!(load_from_yaml(
+        assert!(global_metrics(
             "metrics:\n  - key: a.b\n    formula: { op: ratio, left: a.c, right: a.d }\n"
         )
         .is_err());
@@ -5066,35 +5004,35 @@ metrics:
     fn metric_validation_rejects_bad_entries() {
         // Reserved namespace for a definition.
         assert!(
-            load_from_yaml("metrics:\n  - key: oxplow.foo\n    sourceMeasure: acme.m\n").is_err()
+            global_metrics("metrics:\n  - key: oxplow.foo\n    sourceMeasure: acme.m\n").is_err()
         );
         // `key:` with neither sourceMeasure nor formula.
-        assert!(load_from_yaml("metrics:\n  - key: acme.foo\n    displayKind: gauge\n").is_err());
+        assert!(global_metrics("metrics:\n  - key: acme.foo\n    displayKind: gauge\n").is_err());
         // `key:` with BOTH sourceMeasure and formula.
-        assert!(load_from_yaml(
+        assert!(global_metrics(
             "metrics:\n  - key: a.b\n    sourceMeasure: acme.m\n    formula: { op: div, left: a.c, right: a.d }\n"
         )
         .is_err());
         // `use:` carrying a structural field (sourceMeasure).
         assert!(
-            load_from_yaml("metrics:\n  - use: acme.foo\n    sourceMeasure: acme.m\n").is_err()
+            global_metrics("metrics:\n  - use: acme.foo\n    sourceMeasure: acme.m\n").is_err()
         );
         // both use and key.
-        assert!(load_from_yaml("metrics:\n  - use: a.b\n    key: c.d\n").is_err());
+        assert!(global_metrics("metrics:\n  - use: a.b\n    key: c.d\n").is_err());
         // un-namespaced key.
-        assert!(load_from_yaml("metrics:\n  - key: foo\n    sourceMeasure: acme.m\n").is_err());
+        assert!(global_metrics("metrics:\n  - key: foo\n    sourceMeasure: acme.m\n").is_err());
         // bad aggregation.
-        assert!(load_from_yaml(
+        assert!(global_metrics(
             "metrics:\n  - key: a.b\n    sourceMeasure: acme.m\n    aggregation: median\n"
         )
         .is_err());
         // bad displayKind.
-        assert!(load_from_yaml(
+        assert!(global_metrics(
             "metrics:\n  - key: a.b\n    sourceMeasure: acme.m\n    displayKind: sparkline\n"
         )
         .is_err());
         // a full valid spec is accepted.
-        assert!(load_from_yaml(
+        assert!(global_metrics(
             "metrics:\n  - key: a.b\n    sourceMeasure: acme.m\n    aggregation: count\n    displayKind: findings\n    category: static-quality\n"
         )
         .is_ok());
@@ -5104,24 +5042,24 @@ metrics:
         // on `coverage` — the built-in coverage specs' own category).
         for cat in METRIC_CATEGORIES {
             assert!(
-                load_from_yaml(&format!(
+                global_metrics(&format!(
                     "metrics:\n  - key: a.b\n    sourceMeasure: acme.m\n    category: {cat}\n"
                 ))
                 .is_ok(),
                 "category {cat} should validate"
             );
         }
-        assert!(load_from_yaml(
+        assert!(global_metrics(
             "metrics:\n  - key: a.b\n    sourceMeasure: acme.m\n    category: coverage\n"
         )
         .is_ok());
         // the same key declared twice (a `key:` define + a `use:`).
-        assert!(load_from_yaml(
+        assert!(global_metrics(
             "metrics:\n  - key: a.b\n    sourceMeasure: acme.m\n  - use: a.b\n    target: 5\n"
         )
         .is_err());
         // the same key defined twice.
-        assert!(load_from_yaml(
+        assert!(global_metrics(
             "metrics:\n  - key: a.b\n    sourceMeasure: acme.m\n  - key: a.b\n    sourceMeasure: acme.n\n"
         )
         .is_err());
@@ -5159,11 +5097,11 @@ metrics:
     }
 
     #[test]
-    fn resolve_project_definition_is_active_and_scoped() {
-        let project = vec![define("acme.loc", None)];
-        let resolved = resolve_metrics(&[], &[], &[], &project);
+    fn resolve_extension_definition_is_active_and_scoped() {
+        let extensions = vec![("acme".to_string(), vec![define("acme.loc", None)])];
+        let resolved = resolve_metrics(&[], &[], &extensions, &[]);
         assert_eq!(resolved.len(), 1);
-        assert_eq!(resolved[0].scope, "project");
+        assert_eq!(resolved[0].scope, "extension:acme");
         assert_eq!(resolved[0].display_kind, "gauge");
         assert_eq!(resolved[0].aggregation, "count");
     }
@@ -5226,8 +5164,8 @@ metrics:
 
     #[test]
     fn resolve_defaults_enabled_true() {
-        let project = vec![define("acme.loc", None)];
-        let resolved = resolve_metrics(&[], &[], &[], &project);
+        let extensions = vec![("acme".to_string(), vec![define("acme.loc", None)])];
+        let resolved = resolve_metrics(&[], &[], &extensions, &[]);
         assert!(resolved[0].enabled, "a bare definition is active");
     }
 
@@ -5271,14 +5209,14 @@ metrics:
     fn default_and_collector_are_an_extension_definitions() {
         let mut def = define("acme.loc", None);
         def.default = Some(MetricDefault::Off);
-        let err = validate_metrics(Some(vec![def.clone()]), None)
+        let err = validate_metrics(Some(vec![def.clone()]), CatalogLayer::Global)
             .unwrap_err()
             .to_string();
         assert!(err.contains("extension's metric definition"), "{err}");
-        assert!(validate_metrics(Some(vec![def]), Some("acme")).is_ok());
+        assert!(validate_metrics(Some(vec![def]), CatalogLayer::Extension("acme")).is_ok());
         let mut def = define("acme.loc", None);
         def.enabled = Some(false);
-        let err = validate_metrics(Some(vec![def]), Some("acme"))
+        let err = validate_metrics(Some(vec![def]), CatalogLayer::Extension("acme"))
             .unwrap_err()
             .to_string();
         assert!(err.contains("`default: off`"), "{err}");
@@ -5290,27 +5228,36 @@ metrics:
             key: Some("oxplow.loc".into()),
             ..Default::default()
         };
-        for ns in [None, Some("acme")] {
-            let err = validate_measures(Some(vec![measure()]), ns)
+        for layer in [CatalogLayer::Global, CatalogLayer::Extension("acme")] {
+            let err = validate_measures(Some(vec![measure()]), layer)
                 .unwrap_err()
                 .to_string();
             assert!(err.contains("reserved"), "{err}");
-            assert!(validate_metrics(Some(vec![define("oxplow.loc", None)]), ns).is_err());
+            assert!(validate_metrics(Some(vec![define("oxplow.loc", None)]), layer).is_err());
         }
-        assert!(validate_measures(Some(vec![measure()]), Some(OXPLOW_NAMESPACE)).is_ok());
+        assert!(validate_measures(
+            Some(vec![measure()]),
+            CatalogLayer::Extension(OXPLOW_NAMESPACE)
+        )
+        .is_ok());
         assert!(validate_metrics(
             Some(vec![define("oxplow.loc", None)]),
-            Some(OXPLOW_NAMESPACE)
+            CatalogLayer::Extension(OXPLOW_NAMESPACE)
         )
         .is_ok());
     }
 
     #[test]
-    fn resolve_marks_disabled_key_definition() {
-        // Disabling a config-DEFINED metric keeps its definition but flags it off.
-        let mut def = define("acme.loc", None);
-        def.enabled = Some(false);
-        let resolved = resolve_metrics(&[], &[], &[], &[def]);
+    fn resolve_marks_disabled_extension_metric() {
+        // The project turning an extension's metric off keeps its definition
+        // but flags it off.
+        let extensions = vec![("acme".to_string(), vec![define("acme.loc", None)])];
+        let off = vec![MetricEntry {
+            use_key: Some("acme.loc".into()),
+            enabled: Some(false),
+            ..Default::default()
+        }];
+        let resolved = resolve_metrics(&[], &[], &extensions, &off);
         assert_eq!(resolved.len(), 1);
         assert!(!resolved[0].enabled);
     }
@@ -5349,7 +5296,11 @@ metrics:
     fn metrics_round_trip_through_write() {
         let dir = tempdir().unwrap();
         let cfg = OxplowConfig {
-            metrics: vec![define("acme.loc", Some(2.0))],
+            metrics: vec![MetricEntry {
+                use_key: Some("acme.loc".into()),
+                target: Some(2.0),
+                ..Default::default()
+            }],
             ..default_config("test".into())
         };
         write_rendered(dir.path(), &cfg);
@@ -5380,39 +5331,11 @@ metrics:
 
     // --- collectors (the fact producers, P7.B3) ------------------------------
 
-    #[test]
-    fn parses_the_collectors_block_as_the_projects() {
-        let cfg = load_from_yaml(
-            "collectors:\n  - { id: acme.scan, runtime: starlark, entry: oxplow/collectors/scan.star, trigger: { on: [snapshot.taken] }, facts: [acme.todo, acme.complexity] }\n",
-        )
-        .unwrap();
-        assert_eq!(cfg.collectors.len(), 1);
-        assert_eq!(cfg.collectors[0].id, "acme.scan");
-        assert_eq!(
-            cfg.collectors[0].facts,
-            vec!["acme.complexity", "acme.todo"]
-        );
-        // An invalid one fails the load, naming it.
-        let err = load_from_yaml(
-            "collectors:\n  - { id: acme.scan, runtime: starlark, entry: x.star, trigger: { on: [nope.happened] }, facts: [acme.todo] }\n",
-        )
-        .unwrap_err();
-        assert!(err.to_string().contains("acme.scan"), "{err}");
-    }
-
-    /// This repo's own `.oxplow/project.yaml` loads, its collectors
-    /// included.
+    /// This repo's own `.oxplow/project.yaml` loads.
     #[test]
     fn this_repos_project_config_loads() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let cfg = load_project_config(&root).expect("the repo's project.yaml loads");
-        assert!(
-            cfg.collectors
-                .iter()
-                .any(|c| c.id == "repo.scan_type_coverage"),
-            "{:?}",
-            cfg.collectors.iter().map(|c| &c.id).collect::<Vec<_>>()
-        );
+        load_project_config(&root).expect("the repo's project.yaml loads");
     }
 
     /// tsk865: `gauges:` is a key the file doesn't have (they're
@@ -5425,96 +5348,109 @@ metrics:
 
     // --- measures + dimensions (workstream E) ------------------------------
 
+    fn measure_entries(yaml: &str) -> Vec<MeasureEntry> {
+        serde_yaml::from_str(yaml).unwrap()
+    }
+
+    fn dimension_entries(yaml: &str) -> Vec<DimensionEntry> {
+        serde_yaml::from_str(yaml).unwrap()
+    }
+
     #[test]
-    fn parses_measures_and_dimensions_blocks() {
-        let cfg = load_from_yaml(
-            r#"
-measures:
-  - key: acme.api_latency
-    title: "API latency"
-    unit: ms
-    subjectKind: endpoint
-    temporalSemantics: non-additive
-    description: "p95 request latency"
-dimensions:
-  - key: acme.license
-    label: License
-    valueType: categorical
-    vocabulary: [MIT, Apache-2.0, GPL-3.0]
-  - key: acme.endpoint
-    valueType: entity-ref
-    subjectKind: endpoint
-    promote: true
+    fn parses_measures_and_dimensions_definitions() {
+        let measures = validate_measures(
+            Some(measure_entries(
+                r#"
+- key: acme.api_latency
+  title: "API latency"
+  unit: ms
+  subjectKind: endpoint
+  temporalSemantics: non-additive
+  description: "p95 request latency"
 "#,
+            )),
+            CatalogLayer::Extension("acme"),
         )
         .unwrap();
-        assert_eq!(cfg.measures.len(), 1);
-        let m = &cfg.measures[0];
+        assert_eq!(measures.len(), 1);
+        let m = &measures[0];
         assert_eq!(m.key.as_deref(), Some("acme.api_latency"));
         assert_eq!(m.unit.as_deref(), Some("ms"));
         assert_eq!(m.subject_kind.as_deref(), Some("endpoint"));
         assert_eq!(m.temporal_semantics.as_deref(), Some("non-additive"));
 
-        assert_eq!(cfg.dimensions.len(), 2);
-        assert_eq!(cfg.dimensions[0].key.as_deref(), Some("acme.license"));
+        let dimensions = validate_dimensions(
+            Some(dimension_entries(
+                r#"
+- key: acme.license
+  label: License
+  valueType: categorical
+  vocabulary: [MIT, Apache-2.0, GPL-3.0]
+- key: acme.endpoint
+  valueType: entity-ref
+  subjectKind: endpoint
+  promote: true
+"#,
+            )),
+            CatalogLayer::Extension("acme"),
+        )
+        .unwrap();
+        assert_eq!(dimensions.len(), 2);
+        assert_eq!(dimensions[0].key.as_deref(), Some("acme.license"));
         assert_eq!(
-            cfg.dimensions[0].vocabulary,
+            dimensions[0].vocabulary,
             vec!["MIT", "Apache-2.0", "GPL-3.0"]
         );
-        assert!(!cfg.dimensions[0].promote);
-        assert_eq!(cfg.dimensions[1].value_type.as_deref(), Some("entity-ref"));
-        assert!(cfg.dimensions[1].promote);
+        assert!(!dimensions[0].promote);
+        assert_eq!(dimensions[1].value_type.as_deref(), Some("entity-ref"));
+        assert!(dimensions[1].promote);
     }
 
     #[test]
     fn measure_validation_rejects_bad_entries() {
+        let check =
+            |yaml: &str| validate_measures(Some(measure_entries(yaml)), CatalogLayer::Global);
         // Reserved namespace.
-        assert!(load_from_yaml("measures:\n  - key: oxplow.foo\n").is_err());
+        assert!(check("[{key: oxplow.foo}]").is_err());
         // Un-namespaced key.
-        assert!(load_from_yaml("measures:\n  - key: foo\n").is_err());
+        assert!(check("[{key: foo}]").is_err());
         // Missing key.
-        assert!(load_from_yaml("measures:\n  - title: nokey\n").is_err());
+        assert!(check("[{title: nokey}]").is_err());
         // Bad temporalSemantics.
+        assert!(check("[{key: acme.x, temporalSemantics: sideways}]").is_err());
+        // Bad captureScope (tsk41).
+        assert!(check("[{key: acme.x, captureScope: sometimes}]").is_err());
+        // `per-path` is the tree-gauge scope and must be accepted.
+        let valid = check("[{key: acme.x, captureScope: per-path}]").unwrap();
+        assert_eq!(valid[0].capture_scope.as_deref(), Some("per-path"));
+        let resolved = resolve_measures(&valid, &[]);
+        assert_eq!(resolved[0].capture_scope, "per-path");
+        // Default is `complete` — a capture restates the whole population.
+        let plain = check("[{key: acme.y}]").unwrap();
+        assert_eq!(resolve_measures(&plain, &[])[0].capture_scope, "complete");
+        // Duplicate key.
+        assert!(check("[{key: acme.x}, {key: acme.x}]").is_err());
+        // componentRole is gone (tsk865): ratio components ride each fact.
         assert!(
-            load_from_yaml("measures:\n  - key: acme.x\n    temporalSemantics: sideways\n")
+            serde_yaml::from_str::<Vec<MeasureEntry>>("[{key: acme.x, componentRole: none}]")
                 .is_err()
         );
-        // componentRole is gone (tsk865): ratio components ride each fact.
-        assert!(load_from_yaml("measures:\n  - key: acme.x\n    componentRole: none\n").is_err());
-        // Bad captureScope (tsk41).
-        assert!(
-            load_from_yaml("measures:\n  - key: acme.x\n    captureScope: sometimes\n").is_err()
-        );
-        // `per-path` is the tree-gauge scope and must be accepted.
-        let cfg =
-            load_from_yaml("measures:\n  - key: acme.x\n    captureScope: per-path\n").unwrap();
-        assert_eq!(cfg.measures[0].capture_scope.as_deref(), Some("per-path"));
-        // Default is `complete` — a capture restates the whole population.
-        let resolved = resolve_measures(&[], &[], &cfg.measures);
-        assert_eq!(resolved[0].capture_scope, "per-path");
-        let plain = load_from_yaml("measures:\n  - key: acme.y\n").unwrap();
-        assert_eq!(
-            resolve_measures(&[], &[], &plain.measures)[0].capture_scope,
-            "complete"
-        );
-        // Duplicate key.
-        assert!(load_from_yaml("measures:\n  - key: acme.x\n  - key: acme.x\n").is_err());
-        // A minimal valid measure parses.
-        assert!(load_from_yaml("measures:\n  - key: acme.x\n").is_ok());
     }
 
     #[test]
     fn dimension_validation_rejects_bad_entries() {
+        let check =
+            |yaml: &str| validate_dimensions(Some(dimension_entries(yaml)), CatalogLayer::Global);
         // Reserved namespace.
-        assert!(load_from_yaml("dimensions:\n  - key: oxplow.foo\n").is_err());
+        assert!(check("[{key: oxplow.foo}]").is_err());
         // Un-namespaced key.
-        assert!(load_from_yaml("dimensions:\n  - key: foo\n").is_err());
+        assert!(check("[{key: foo}]").is_err());
         // Bad valueType.
-        assert!(load_from_yaml("dimensions:\n  - key: acme.x\n    valueType: blob\n").is_err());
+        assert!(check("[{key: acme.x, valueType: blob}]").is_err());
         // Duplicate key.
-        assert!(load_from_yaml("dimensions:\n  - key: acme.x\n  - key: acme.x\n").is_err());
+        assert!(check("[{key: acme.x}, {key: acme.x}]").is_err());
         // A minimal valid dimension parses (defaults to categorical).
-        assert!(load_from_yaml("dimensions:\n  - key: acme.x\n").is_ok());
+        assert!(check("[{key: acme.x}]").is_ok());
     }
 
     #[test]
@@ -5524,24 +5460,27 @@ dimensions:
             title: Some("Global LOC".into()),
             ..Default::default()
         }];
-        // Project redefines the same key AND adds a fresh one.
-        let project = vec![
-            MeasureEntry {
-                key: Some("acme.loc".into()),
-                title: Some("Project LOC".into()),
-                temporal_semantics: Some("additive".into()),
-                ..Default::default()
-            },
-            MeasureEntry {
-                key: Some("acme.churn".into()),
-                ..Default::default()
-            },
-        ];
-        let resolved = resolve_measures(&global, &[], &project);
+        // An extension redefines the same key AND adds a fresh one.
+        let extensions = vec![(
+            "acme".to_string(),
+            vec![
+                MeasureEntry {
+                    key: Some("acme.loc".into()),
+                    title: Some("Extension LOC".into()),
+                    temporal_semantics: Some("additive".into()),
+                    ..Default::default()
+                },
+                MeasureEntry {
+                    key: Some("acme.churn".into()),
+                    ..Default::default()
+                },
+            ],
+        )];
+        let resolved = resolve_measures(&global, &extensions);
         assert_eq!(resolved.len(), 2, "same key merges, distinct key adds");
         let loc = resolved.iter().find(|m| m.key == "acme.loc").unwrap();
-        assert_eq!(loc.title, "Project LOC", "project wins over global");
-        assert_eq!(loc.scope, "project");
+        assert_eq!(loc.title, "Extension LOC", "extension wins over global");
+        assert_eq!(loc.scope, "extension:acme");
         assert_eq!(loc.temporal_semantics, "additive");
         let churn = resolved.iter().find(|m| m.key == "acme.churn").unwrap();
         // Defaults applied.
@@ -5557,47 +5496,21 @@ dimensions:
             promote: false,
             ..Default::default()
         }];
-        let project = vec![DimensionEntry {
-            key: Some("acme.license".into()),
-            label: Some("License".into()),
-            promote: true,
-            ..Default::default()
-        }];
-        let resolved = resolve_dimensions(&global, &[], &project);
-        assert_eq!(resolved.len(), 1);
-        assert_eq!(resolved[0].label, "License", "project wins");
-        assert_eq!(resolved[0].scope, "project");
-        assert_eq!(resolved[0].value_type, "categorical", "default valueType");
-        assert!(resolved[0].promote);
-    }
-
-    #[test]
-    fn measures_and_dimensions_round_trip_through_write() {
-        let dir = tempdir().unwrap();
-        let cfg = OxplowConfig {
-            measures: vec![MeasureEntry {
-                key: Some("acme.loc".into()),
-                unit: Some("lines".into()),
-                temporal_semantics: Some("additive".into()),
-                ..Default::default()
-            }],
-            dimensions: vec![DimensionEntry {
+        let extensions = vec![(
+            "acme".to_string(),
+            vec![DimensionEntry {
                 key: Some("acme.license".into()),
                 label: Some("License".into()),
-                vocabulary: vec!["MIT".into(), "Apache-2.0".into()],
                 promote: true,
                 ..Default::default()
             }],
-            ..default_config("test".into())
-        };
-        write_rendered(dir.path(), &cfg);
-        let raw = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
-        assert!(raw.contains("measures:"), "got:\n{raw}");
-        assert!(raw.contains("dimensions:"), "got:\n{raw}");
-        assert!(!raw.contains("null"), "minimal write, got:\n{raw}");
-        let loaded = load_project_config(dir.path()).unwrap();
-        assert_eq!(loaded.measures, cfg.measures);
-        assert_eq!(loaded.dimensions, cfg.dimensions);
+        )];
+        let resolved = resolve_dimensions(&global, &extensions);
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].label, "License", "extension wins");
+        assert_eq!(resolved[0].scope, "extension:acme");
+        assert_eq!(resolved[0].value_type, "categorical", "default valueType");
+        assert!(resolved[0].promote);
     }
 
     #[test]

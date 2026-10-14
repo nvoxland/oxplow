@@ -215,8 +215,6 @@ pub fn is_required(name: &str) -> bool {
 
 pub fn is_reserved(name: &str) -> bool {
     find(name).is_some()
-        // A collector's owner names its extension or the project.
-        || name == oxplow_config::collectors::PROJECT
 }
 
 #[cfg(test)]

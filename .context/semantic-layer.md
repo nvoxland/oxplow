@@ -81,8 +81,8 @@ declare collectors in the same format. A collector runs on its `trigger`: `manua
 
 A **dimension** is a SQL expression or a join over an entity. Examples:
 `task.priority`, `file → package`, `file → owner via CODEOWNERS`,
-`pr.author`, `issue.cycle`. A dimension can be declared anywhere (core,
-project config, any extension). It applies to every metric whose entity has
+`pr.author`, `issue.cycle`. A dimension can be declared in any
+extension (the project's own included) or the person's global files. It applies to every metric whose entity has
 the columns it needs. So an extension can add a dimension over data that a
 different source owns.
 
@@ -791,10 +791,11 @@ A **collector** brings data in: a program (`exec`), a sandboxed script
 (`starlark` / `jaq`) or a provider's read (`read`). It writes
 **entities** (rows a model can `ref()`), **facts** (measurements on
 declared measures) or **records** (a test / coverage / analysis report it
-parses — the project's report collectors, tsk863), one of the three. One declaration, `oxplow_config::collectors`
+parses — an own extension's report collectors, tsk863), one of the three. One declaration, `oxplow_config::collectors`
 (`CollectorSpec`, `parse_collectors`), serves `extension.yaml` (v1
-`sources:` is migrated to it, each `schedule:` becoming a `trigger:`) and
-`.oxplow/project.yaml`. The real, tested example
+`sources:` is migrated to it, each `schedule:` becoming a `trigger:`),
+parsed with a `Declarer { extension, namespace, own }`; `.oxplow/project.yaml`
+has no `collectors:` (it is refused). The real, tested example
 is `examples/extensions/github/` (PRs from the GitHub API via `gh` or
 `GITHUB_TOKEN`); the user guide is `docs/guide/lenses.md`.
 
@@ -844,34 +845,37 @@ extension's own declared event types, logged with the run (P9.D2;
   Snapshot runs keep the delta / full-baseline machinery (pending-baseline
   queue, `scan_kind`, fingerprint, dominated-capture prune).
 - A **report collector** (`records: tests | coverage | analysis`,
-  tsk863) is the project's: it parses one `report:` file with a bundled
+  tsk863) is an own extension's (`Extension::is_own()`; the project's, in
+  `oxplow/extensions/project/`): it parses one `report:` file with a bundled
   parser (`entry: "oxplow:<junit|lcov|cobertura|jacoco|clippy|eslint>"`)
-  or its own jaq / Starlark / exec script, on `trigger: { on_run: test |
+  or its own jaq / Starlark / exec script (paths relative to the extension
+  folder; `report.path` relative to the project root), on `trigger: { on_run: test |
   analysis }` — when the `collection` reactor detects that kind of run and
   the run wrote the report — or by hand (`oxplow.collector.sync`, which records
   in a thread). The collection service runs it and merges its output into
   the run (`.context/collection.md`); its run, health and consent are any
-  collector's (`collector_run`, `collector.synced@1`, `contribution_health`, a
-  project program's approval).
+  collector's (`collector_run`, `collector.synced@1`, `contribution_health`, the
+  extension collector approval).
 
-**Owners.** An extension (its name) or `project` (`.oxplow/project.yaml`'s
-`collectors:`). `project` is a reserved extension name. There are no global
-collectors. oxplow's `oxplow.*` code collectors are oxplow-foundation's; one
+**Owners.** An extension (its name), always: the project's own collectors
+belong to its own extension, `project` by convention
+(`oxplow/extensions/project/`, `collector:project/<id>`), and `project` is an
+ordinary extension name. There are no global collectors. oxplow's `oxplow.*` code collectors are oxplow-foundation's; one
 that metrics name runs only while one of them is on.
 
-- **The project's collectors record facts** (`collectors:` in
-  `.oxplow/project.yaml`; scripts under `oxplow/collectors/`); an entity
-  collector belongs in an extension.
-- **An extension's fact collector is sandboxed** (starlark or jaq). Only
-  the project's own fact collectors may be `exec`, and those need a
-  person's approval (Settings → Data → Programs; `exec_consent`
-  `ProgramKind::Collector`, key `collector:<id>`).
+- **The project's own extension** declares its collectors in its
+  `extension.yaml`, scripts under `collectors/` (relative to the extension
+  folder).
+- **An extension's fact collector is sandboxed** (starlark or jaq). Only an
+  own extension (no `source.yaml`) may declare an `exec` fact collector or
+  report collectors, and those need a person's approval like any extension
+  collector (Settings → Data → Collectors; `collector_runner::approval_hash`,
+  key `<ext>/<id>`, run from `approved_code::extension_collector`).
 - **A fact collector gets no `env` / `credentials` / `network`**, and
   `report` is for fact collectors only.
 
 **No `gauges:`.** The retired producer block is a key neither file has
-(tsk865): `.oxplow/project.yaml` and `extension.yaml` reject it like any
-unknown key. There is no migrator.
+(tsk865): `extension.yaml` rejects it like any unknown key. There is no migrator.
 
 **Running.** `on:` collectors, entity and fact alike, run from the
 `collector.triggers` consumer (below). For a fact collector:
@@ -890,8 +894,8 @@ collector }` (and nothing a script needs) for `read`, whose records land
 in the capability's model and which `oxplow.provider.sync` runs; `env`,
 `credentials`, `network` only on an exec entity collector; `input` only on
 starlark/jaq; exactly one of `entities` / `facts`; `report` only with
-`facts`; a project collector must have `facts`; an extension's fact
-collector isn't `exec`; `after` and `where` only with `on:`,
+`facts`; a fact collector isn't `exec` unless its extension is own;
+`records:` only on an own extension; `after` and `where` only with `on:`,
 whose types must be registered (`v_event_type`); `oxplow.` ids are
 oxplow's own.
 

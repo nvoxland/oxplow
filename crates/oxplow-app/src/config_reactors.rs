@@ -254,14 +254,31 @@ mod tests {
     async fn a_metrics_change_reseeds_the_catalog_through_the_pump() {
         let f = crate::test_fixtures::services_with_effort().await;
         let svc = &f.svc;
+        // The project's own extension defines the metric, off by default.
+        let ext = svc.layout.project_dir.join("oxplow/extensions/project");
+        std::fs::create_dir_all(&ext).unwrap();
+        std::fs::write(
+            ext.join("extension.yaml"),
+            "manifest: 2\nname: project\nintent:\n  purpose: test\nmetrics:\n  - { key: work.ready_now, entity: v_work_item, where: \"state = 'todo'\", default: off }\n",
+        )
+        .unwrap();
+        crate::test_fixtures::activate(&f.svc).await;
+        let enabled = || async {
+            svc.metrics
+                .catalog()
+                .await
+                .into_iter()
+                .find(|e| e.key == "work.ready_now")
+                .expect("listed")
+                .enabled
+        };
+        assert!(!enabled().await);
         crate::config_reactors::register(&svc_arc(&f));
         svc.commands
             .run(
                 &Actor::Human,
                 "oxplow.config.set",
-                json!({ "key": "metrics", "value": [
-                    { "key": "work.ready_now", "entity": "v_work_item", "where": "state = 'todo'" }
-                ] }),
+                json!({ "key": "metrics", "value": [{ "use": "work.ready_now" }] }),
                 false,
             )
             .await
@@ -273,12 +290,7 @@ mod tests {
         );
         // The reactor asked for a generation; the owner publishes it.
         crate::test_fixtures::activate(&f.svc).await;
-        assert!(svc
-            .fact_store
-            .get_spec("work.ready_now")
-            .await
-            .unwrap()
-            .is_some());
+        assert!(enabled().await);
     }
 
     /// P7.B6: turning an extension off reaches whatever follows the

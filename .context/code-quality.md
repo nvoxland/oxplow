@@ -393,8 +393,8 @@ also render in the core changed-files tree (`ChangedFilesTree`).
 
 ## Adding a new code/quality signal
 
-Code/quality signals are now authored as **metrics** (bundled or project
-`.oxplow/project.yaml` `metrics:` entries) over the `code_metrics()` / `ast_query()` host
+Code/quality signals are now authored as **metrics** (oxplow-foundation's, or the project's own extension's, turned on by
+`.oxplow/project.yaml` `metrics:` `use:` entries) over the `code_metrics()` / `ast_query()` host
 builtins — see [metrics.md](./metrics.md), duplicated lines included (the
 `duplicate_blocks` builtin). The change analyzer's scoped scan stays an
 in-process scan here: it needs the change's files as its scope.

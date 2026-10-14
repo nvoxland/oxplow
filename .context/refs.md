@@ -102,8 +102,8 @@ kind per kind of contribution, from `contribution::KINDS`
 or `<kind>:<name>` for the globally named ones (`command`, `measure`,
 `metric`, `dimension`, `event_type`, `ref_kind`). A page is also a shell
 route (`page:settings`), a model also one of core's (`model:effort`), and
-a collector also a project's
-(`collector:project/repo.scan_clone`) until those become extensions. `job_run` names one run of a job (`job_run:<uuid>`);
+a collector's owner is always an extension name (the project's own
+extension is `project`: `collector:project/repo.scan_clone`). `job_run` names one run of a job (`job_run:<uuid>`);
 `ai_model` a language model by the name its harness reports.
 
 **Event sources aren't refs.** An event's `source` says who emitted it —

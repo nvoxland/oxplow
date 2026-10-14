@@ -1,12 +1,13 @@
 //! `collectors:` (P7.B3, `.context/semantic-layer.md` "Collectors"): the
-//! one declaration for bringing data in — an extension's in
-//! `extension.yaml`, the project's in `.oxplow/project.yaml`.
+//! one declaration for bringing data in, in an extension's
+//! `extension.yaml` (the project's own collectors are its own extension's,
+//! `oxplow/extensions/project/` by convention).
 //!
 //! A collector is a program (`exec`, approved by a person), a sandboxed
 //! script (`starlark` / `jaq`, no I/O, no approval) or a provider's read
 //! (`read`). It writes **entities** (rows a model can `ref()`),
 //! **facts** (measurements on declared measures) or **records** (a test,
-//! coverage or analysis report it parses — the project's, tsk863), and it
+//! coverage or analysis report it parses — the project's own, tsk863), and it
 //! runs when its **trigger** says: `manual`, `{ every: 15m }`,
 //! `{ on: [<event types>], where: { <payload field>: <value> } }` — when
 //! such an event is logged, after the consumers named in `after:` have
@@ -17,7 +18,7 @@
 //! collectors:
 //!   - id: repo.scan_clone            # a dotted id keeps a producer's name
 //!     runtime: starlark
-//!     entry: oxplow/collectors/repo_clone.star
+//!     entry: collectors/repo_clone.star
 //!     trigger: { on: [snapshot.taken] }
 //!     facts: [repo.rust_clone]
 //!   - id: prs
@@ -424,7 +425,7 @@ pub fn valid_host_pattern(p: &str) -> bool {
 
 /// SQL name of an entity's view: `v_<owner>_<entity>` (dashes in the
 /// owner become underscores; extension names have none, so the mapping
-/// is unambiguous). The project's own collectors' owner is `project`.
+/// is unambiguous).
 pub fn entity_view_name(owner: &str, entity: &str) -> String {
     format!(
         "v_{}_{}",
@@ -433,22 +434,57 @@ pub fn entity_view_name(owner: &str, entity: &str) -> String {
     )
 }
 
-/// The owner of the collectors in `.oxplow/project.yaml`.
-pub const PROJECT: &str = "project";
+/// The extension the project's own collectors, measures and metrics go in
+/// when a tool writes one (`/oxplow:configure`, `oxplow.metric.scaffold`):
+/// `oxplow/extensions/project/`. Any of the project's own extensions may
+/// hold them; this is only where tools put new ones.
+pub const PROJECT_EXTENSION: &str = "project";
 
-/// Parse a `collectors:` list owned by `owner` (an extension's name, or
-/// [`PROJECT`]), whose namespace is `namespace` (`None` for the project; an
-/// `oxplow.*` id is the `oxplow` namespace's). `knows_event` says whether an
-/// `on:` type is registered.
+/// Who declares a `collectors:` list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Declarer {
+    /// Its extension's name: each collector's owner.
+    pub extension: String,
+    /// Its extension's namespace: an `oxplow.*` id is the `oxplow`
+    /// namespace's.
+    pub namespace: String,
+    /// The project's own (in `oxplow/extensions/`, not installed from
+    /// elsewhere): only it may run its own programs to record facts and
+    /// parse reports (`records:`), each once a person approved it.
+    pub own: bool,
+}
+
+impl Declarer {
+    /// The project's own extension `name`, in its default namespace.
+    pub fn own(name: &str) -> Self {
+        Declarer {
+            extension: name.to_string(),
+            namespace: oxplow_domain::contribution::extension_namespace(name),
+            own: true,
+        }
+    }
+
+    /// Extension `name` in `namespace`, installed or bundled: it records
+    /// facts only from sandboxed scripts.
+    pub fn shared(name: &str, namespace: &str) -> Self {
+        Declarer {
+            extension: name.to_string(),
+            namespace: namespace.to_string(),
+            own: false,
+        }
+    }
+}
+
+/// Parse a `collectors:` list `declarer` declares. `knows_event` says
+/// whether an `on:` type is registered.
 /// Invalid collectors are skipped and described in the errors, each
 /// prefixed by its entry (`collectors[<i>]: …`); valid ones still load.
 pub fn parse_collectors(
-    owner: &str,
-    namespace: Option<&str>,
+    declarer: &Declarer,
     value: &serde_yaml::Value,
     knows_event: &dyn Fn(&str) -> bool,
 ) -> (Vec<CollectorSpec>, Vec<String>) {
-    let (specs, errors) = parse_collectors_indexed(owner, namespace, value, knows_event);
+    let (specs, errors) = parse_collectors_indexed(declarer, value, knows_event);
     let errors = errors
         .into_iter()
         .map(|(i, e)| match i {
@@ -463,8 +499,7 @@ pub fn parse_collectors(
 /// the index of the entry it is about (`None` for the list itself), so a
 /// manifest's loader can put it on that entry's line.
 pub fn parse_collectors_indexed(
-    owner: &str,
-    namespace: Option<&str>,
+    declarer: &Declarer,
     value: &serde_yaml::Value,
     knows_event: &dyn Fn(&str) -> bool,
 ) -> (Vec<CollectorSpec>, Vec<(Option<usize>, String)>) {
@@ -482,7 +517,7 @@ pub fn parse_collectors_indexed(
                 continue;
             }
         };
-        match validate(owner, namespace, raw, knows_event) {
+        match validate(declarer, raw, knows_event) {
             Ok(spec) => {
                 if out.iter().any(|s| s.id == spec.id) {
                     errors.push((
@@ -895,11 +930,11 @@ fn is_inside(path: &str) -> bool {
 }
 
 fn validate(
-    owner: &str,
-    namespace: Option<&str>,
+    declarer: &Declarer,
     mut raw: RawCollector,
     knows_event: &dyn Fn(&str) -> bool,
 ) -> Result<CollectorSpec, String> {
+    let owner = declarer.extension.as_str();
     let id = std::mem::take(&mut raw.id);
     if !is_collector_id(&id) {
         return Err(format!(
@@ -907,7 +942,7 @@ fn validate(
              dots"
         ));
     }
-    if id.starts_with("oxplow.") && namespace != Some(crate::OXPLOW_NAMESPACE) {
+    if id.starts_with("oxplow.") && declarer.namespace != crate::OXPLOW_NAMESPACE {
         return Err(format!(
             "collector id `{id}`: `oxplow.` is oxplow's own collectors' (enable one with \
              `metrics: - use: <its metric>`)"
@@ -916,7 +951,7 @@ fn validate(
     let ctx = |m: String| format!("collector `{id}`: {m}");
     let trigger = parse_trigger(raw.trigger.as_ref(), knows_event).map_err(&ctx)?;
     if raw.records.is_some() {
-        return validate_report_collector(owner, id, raw, trigger);
+        return validate_report_collector(declarer, id, raw, trigger);
     }
     if matches!(trigger, Trigger::OnRun { .. }) {
         return Err(ctx(
@@ -957,18 +992,11 @@ fn validate(
             "records entities or facts, not both: split it into two collectors".into(),
         ));
     }
-    if owner == PROJECT && !records_facts {
-        return Err(ctx(
-            "a project collector records facts (`facts:`) or a report (`records:`); one that \
-             writes entities belongs in an extension"
-                .into(),
-        ));
-    }
     if records_facts {
-        if runtime == CollectorRuntime::Exec && owner != PROJECT {
+        if runtime == CollectorRuntime::Exec && !declarer.own {
             return Err(ctx(
-                "an extension's fact collector runs sandboxed (starlark or jaq); a program that \
-                 fetches data writes entities"
+                "an installed or bundled extension's fact collector runs sandboxed (starlark or \
+                 jaq); only the project's own extension runs a program to record facts"
                     .into(),
             ));
         }
@@ -1227,7 +1255,7 @@ fn validate(
 /// no `input`, `env`, `credentials` or `network`: its whole input is the
 /// report.
 fn validate_report_collector(
-    owner: &str,
+    declarer: &Declarer,
     id: String,
     raw: RawCollector,
     trigger: Trigger,
@@ -1244,9 +1272,11 @@ fn validate_report_collector(
             )))
         }
     };
-    if owner != PROJECT {
+    if !declarer.own {
         return Err(ctx(
-            "a report collector (`records:`) is the project's, in `.oxplow/project.yaml`".into(),
+            "a report collector (`records:`) is the project's own: declare it in an extension \
+             of the project's (`oxplow/extensions/project/`)"
+                .into(),
         ));
     }
     if !raw.facts.is_empty() || !raw.entities.is_empty() {
@@ -1426,7 +1456,7 @@ mod tests {
 
     fn parse(yaml: &str) -> (Vec<CollectorSpec>, Vec<String>) {
         let v: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
-        parse_collectors("my-gh", None, &v, &knows)
+        parse_collectors(&Declarer::own("my-gh"), &v, &knows)
     }
 
     const GOOD: &str = r#"
@@ -1725,18 +1755,40 @@ mod tests {
     }
 
     #[test]
+    fn parses_the_own_extensions_collectors_block() {
+        let own = Declarer::own("project");
+        let knows = |e: &str| e == "snapshot.taken";
+        let value: serde_yaml::Value = serde_yaml::from_str(
+            "- { id: acme.scan, runtime: starlark, entry: oxplow/collectors/scan.star, trigger: { on: [snapshot.taken] }, facts: [acme.todo, acme.complexity] }",
+        )
+        .unwrap();
+        let (specs, errors) = parse_collectors(&own, &value, &knows);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(specs.len(), 1);
+        assert_eq!(specs[0].id, "acme.scan");
+        assert_eq!(specs[0].facts, vec!["acme.complexity", "acme.todo"]);
+        // An invalid one is refused, naming it.
+        let bad: serde_yaml::Value = serde_yaml::from_str(
+            "- { id: acme.scan, runtime: starlark, entry: x.star, trigger: { on: [nope.happened] }, facts: [acme.todo] }",
+        )
+        .unwrap();
+        let (specs, errors) = parse_collectors(&own, &bad, &knows);
+        assert!(specs.is_empty());
+        assert!(errors.iter().any(|e| e.contains("acme.scan")), "{errors:?}");
+    }
+
+    #[test]
     fn an_oxplow_collector_id_is_the_oxplow_namespaces() {
         let value: serde_yaml::Value = serde_yaml::from_str(
             "- { id: oxplow.loc, runtime: starlark, entry: loc.star, facts: [oxplow.loc] }",
         )
         .unwrap();
-        for ns in [None, Some("acme")] {
-            let (s, e) = parse_collectors("acme", ns, &value, &|_| true);
+        for declarer in [Declarer::shared("acme", "acme"), Declarer::own("acme")] {
+            let (s, e) = parse_collectors(&declarer, &value, &|_| true);
             assert!(s.is_empty() && e[0].contains("oxplow's own"), "{e:?}");
         }
         let (s, e) = parse_collectors(
-            "oxplow-foundation",
-            Some(crate::OXPLOW_NAMESPACE),
+            &Declarer::shared("oxplow-foundation", crate::OXPLOW_NAMESPACE),
             &value,
             &|_| true,
         );
@@ -1751,7 +1803,7 @@ mod tests {
              - { id: a.ent, runtime: starlark, entry: e.star, whole_tree: true, entities: [{ name: x, key: id, columns: { id: text } }] }",
         )
         .unwrap();
-        let (s, e) = parse_collectors("a", Some("a"), &value, &|_| true);
+        let (s, e) = parse_collectors(&Declarer::shared("a", "a"), &value, &|_| true);
         assert_eq!(s.len(), 1, "{e:?}");
         assert!(s[0].whole_tree);
         assert!(e[0].contains("`whole_tree` is a fact collector's"), "{e:?}");
@@ -1781,7 +1833,7 @@ mod tests {
             ),
         ] {
             let value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
-            let (s, e) = parse_collectors(PROJECT,None, &value, &|_| true);
+            let (s, e) = parse_collectors(&Declarer::own("project"),&value, &|_| true);
             assert!(s.is_empty(), "{yaml}");
             assert!(e.iter().any(|m| m.contains(needle)), "{yaml}: {e:?}");
         }
@@ -1855,7 +1907,7 @@ mod tests {
 
     fn parse_project(yaml: &str) -> (Vec<CollectorSpec>, Vec<String>) {
         let v: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
-        parse_collectors(PROJECT, None, &v, &knows)
+        parse_collectors(&Declarer::own("project"), &v, &knows)
     }
 
     /// tsk863: a report collector names a bundled parser or its own
@@ -1967,8 +2019,14 @@ mod tests {
             "goes with `records:`",
         );
         // An extension's collectors don't read reports.
-        let (_, errors) = parse(&format!("{base}  records: tests\n  entry: oxplow:junit\n"));
-        assert!(errors.iter().any(|e| e.contains("project's")), "{errors:?}");
+        let v: serde_yaml::Value =
+            serde_yaml::from_str(&format!("{base}  records: tests\n  entry: oxplow:junit\n"))
+                .unwrap();
+        let (_, errors) = parse_collectors(&Declarer::shared("my-gh", "my-gh"), &v, &knows);
+        assert!(
+            errors.iter().any(|e| e.contains("project's own")),
+            "{errors:?}"
+        );
     }
 
     #[test]
@@ -1989,12 +2047,18 @@ mod tests {
         );
         assert!(s.is_empty());
         assert!(e[0].contains("entities or facts, not both"), "{e:?}");
-        let (s, e) = parse("- { id: a.b, runtime: exec, entry: x.sh, facts: [a.b] }");
+        let v: serde_yaml::Value =
+            serde_yaml::from_str("- { id: a.b, runtime: exec, entry: x.sh, facts: [a.b] }")
+                .unwrap();
+        let (s, e) = parse_collectors(&Declarer::shared("my-gh", "my-gh"), &v, &knows);
         assert!(s.is_empty());
-        assert!(e[0].contains("sandboxed"), "{e:?}");
+        assert!(
+            e[0].contains("only the project's own extension runs a program"),
+            "{e:?}"
+        );
         let project = |yaml: &str| {
             let v: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
-            parse_collectors(PROJECT, None, &v, &knows)
+            parse_collectors(&Declarer::own("project"), &v, &knows)
         };
         let (s, e) = project("- { id: a.b, runtime: exec, entry: x.sh, facts: [a.b] }");
         assert!(e.is_empty(), "{e:?}");
@@ -2004,9 +2068,10 @@ mod tests {
         );
         assert!(s.is_empty());
         assert!(e[0].contains("gets no `env`"), "{e:?}");
+        // An own extension may declare entity collectors too.
         let (s, e) = project(GOOD);
-        assert!(s.is_empty());
-        assert!(e[0].contains("records facts"), "{e:?}");
+        assert!(e.is_empty(), "{e:?}");
+        assert_eq!(s.len(), 1);
     }
 
     #[test]

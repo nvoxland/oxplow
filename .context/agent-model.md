@@ -1518,9 +1518,10 @@ triggers the same flow on demand.
 The `/oxplow:configure` command (asset `crates/oxplow-agent-text/assets/configure.md`)
 sets up the **collection** subsystem (see `.context/collection.md`): it has
 the agent instrument the project's test tooling to emit standard-format
-reports at stable paths, then records the `testing:` block and one report
-collector per report (`collectors:` with `records:`) in
-`.oxplow/project.yaml`. The standing `oxplow-collection` skill
+reports at stable paths, then records the `testing:` block in
+`.oxplow/project.yaml` and writes one report collector per report
+(`collectors:` with `records:`) into the project's extension
+(`oxplow/extensions/project/extension.yaml`). The standing `oxplow-collection` skill
 (`crates/oxplow-agent-text/assets/oxplow-collection.SKILL.md`) loads when a task
 closes and on `/oxplow:configure`; it tells the agent to run the tests
 before completing (so a report exists) and — critically — to **never parse

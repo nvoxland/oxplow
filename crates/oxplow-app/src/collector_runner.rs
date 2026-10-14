@@ -360,6 +360,11 @@ pub fn entry_hash(ext_dir: &Path, entry: &str) -> std::io::Result<String> {
 /// which spends the person's key each time it runs — on a schedule, as
 /// nobody. Any other derived script does no I/O an approval would guard.
 pub fn needs_approval(root: &Path, extension: &str, spec: &CollectorSpec) -> bool {
+    // A report read by one of oxplow's own parsers runs nothing of the
+    // extension's.
+    if spec.bundled_parser().is_some() {
+        return false;
+    }
     match spec.runtime {
         CollectorRuntime::Starlark => {
             crate::extensions::read_extension_file(root, extension, entry_of(spec))
@@ -1295,8 +1300,7 @@ pub const MAX_RUN_EVENTS: usize = 100;
 /// The events a collector's script returned as it may log them (P9.D2):
 /// each one of its **extension's own declared types**, at that type's
 /// newest version, from `collector:<owner>/<id>` — the rule a command's
-/// or an effect's script is held to ([`own_events`]). Refused: a project
-/// collector's (it has no namespace to declare types in), a
+/// or an effect's script is held to ([`own_events`]). Refused: a
 /// type the collector itself runs on (its run would trigger itself), and
 /// more than [`MAX_RUN_EVENTS`].
 ///
@@ -1309,17 +1313,11 @@ fn plan_events(
     spec: &CollectorSpec,
     events: Vec<crate::extension_commands::ComposedEvent>,
 ) -> Result<Vec<Envelope>, String> {
-    use oxplow_config::collectors::{Trigger, PROJECT};
+    use oxplow_config::collectors::Trigger;
     if events.is_empty() {
         return Ok(Vec::new());
     }
     let id = &spec.id;
-    if owner == PROJECT {
-        return Err(format!(
-            "collector `{owner}/{id}` returned `events`, which only an extension's collector \
-             may: event types are declared by an extension (`event_types:`)"
-        ));
-    }
     if events.len() > MAX_RUN_EVENTS {
         return Err(format!(
             "collector `{owner}/{id}` returned {} events; a run may emit at most {MAX_RUN_EVENTS}",
@@ -2117,8 +2115,10 @@ pub fn sync_op(sync: CollectorRunner) -> crate::commands::ops::Op {
                     RunCollectorError::Failed(m) => CommandError::Failed { message: m },
                     RunCollectorError::Storage(e) => CommandError::from(e),
                 };
-                if input.owner == oxplow_config::collectors::PROJECT
-                    && sync.collection.is_report_collector(&input.id)
+                if sync
+                    .collection
+                    .is_report_collector(&input.owner, &input.id)
+                    .await
                 {
                     let thread = crate::commands::thread::acting_thread_of(
                         &acting,
@@ -2128,6 +2128,7 @@ pub fn sync_op(sync: CollectorRunner) -> crate::commands::ops::Op {
                         .collection
                         .sync_report_collector(
                             &thread,
+                            &input.owner,
                             &input.id,
                             &source,
                             sync.collection.command_turn(&acting, thread).await,
@@ -2445,8 +2446,7 @@ pub(crate) mod tests {
             env.join(", ")
         );
         let (s, e) = parse_collectors(
-            "my-gh",
-            None,
+            &oxplow_config::collectors::Declarer::own("my-gh"),
             &serde_yaml::from_str(&yaml).unwrap(),
             &|_| true,
         );
@@ -3195,8 +3195,11 @@ pub(crate) mod tests {
             let svc = &fx.svc;
             async move {
                 let v: serde_yaml::Value = serde_yaml::from_str(&yaml).unwrap();
-                let (specs, errors) =
-                    oxplow_config::collectors::parse_collectors("x", None, &v, &|_| true);
+                let (specs, errors) = oxplow_config::collectors::parse_collectors(
+                    &oxplow_config::collectors::Declarer::own("x"),
+                    &v,
+                    &|_| true,
+                );
                 assert!(errors.is_empty(), "{errors:?}");
                 match dry_run_collector(&svc.sql, &specs[0], Some(script.into()), None, None).await
                 {
@@ -3639,17 +3642,6 @@ pub(crate) mod tests {
         assert_eq!(
             plan_events(&vocabulary, "my-gh", &s, Vec::new()).unwrap(),
             Vec::new()
-        );
-        let refused = plan_events(
-            &vocabulary,
-            oxplow_config::collectors::PROJECT,
-            &s,
-            out.events.clone(),
-        )
-        .unwrap_err();
-        assert!(
-            refused.contains("only an extension's collector may"),
-            "{refused}"
         );
         // Its extension declares no such type.
         let refused = plan_events(&vocabulary, "my-gh", &s, out.events).unwrap_err();

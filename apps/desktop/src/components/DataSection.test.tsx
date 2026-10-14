@@ -349,11 +349,11 @@ test("a collector failures turned off says why and Enable Again turns it back on
   );
 });
 
-test("revoking a project collector revokes its program, not an extension-style key", async () => {
+test("the project's own collector is revoked like any extension's", async () => {
   collectorListings = [projectCollector({ version: "h1", spec: { ...projectCollector().spec, runtime: "exec", entry: "tools/fetch.sh" } })];
   const view = render(<DataSection />);
   fireEvent.contextMenu(await view.findByTestId("collector-row-project/tests.cov"));
   fireEvent.click(await view.findByTestId("menu-item-revoke"));
   fireEvent.click(await view.findByTestId("collector-revoke-confirm-project/tests.cov"));
-  await waitFor(() => expect(revoked).toEqual(["collector:tests.cov"]));
+  await waitFor(() => expect(revoked).toEqual(["collector project/tests.cov"]));
 });

@@ -625,18 +625,18 @@ mod tests {
     #[tokio::test]
     async fn collector_sync_runs_a_project_fact_collector() {
         let (svc, dir) = services().await;
+        let ext = dir.path().join("oxplow/extensions/project");
+        std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
-            dir.path().join("count.star"),
+            ext.join("count.star"),
             "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 42, \"rule\": \"answer\", \"subject\": \"tree:.\"}]}\n",
         )
         .unwrap();
-        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
         std::fs::write(
-            dir.path().join(".oxplow/project.yaml"),
-            "collectors:\n  - { id: repo.answer, doc: answer, runtime: starlark, entry: count.star, facts: [oxplow.ast_hit] }\n",
+            ext.join("extension.yaml"),
+            "manifest: 2\nname: project\nintent:\n  purpose: test\ncollectors:\n  - { id: repo.answer, doc: answer, runtime: starlark, entry: count.star, facts: [oxplow.ast_hit] }\n",
         )
         .unwrap();
-        svc.reload_config_from_disk().unwrap();
         crate::test_fixtures::activate_with_problems(&svc).await;
         let out = run(
             &svc,
@@ -676,18 +676,18 @@ mod tests {
     #[tokio::test]
     async fn a_failing_fact_collector_is_disabled() {
         let (svc, dir) = services().await;
+        let ext = dir.path().join("oxplow/extensions/project");
+        std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
-            dir.path().join("bad.star"),
+            ext.join("bad.star"),
             "def transform(input):\n    return 1 // 0\n",
         )
         .unwrap();
-        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
         std::fs::write(
-            dir.path().join(".oxplow/project.yaml"),
-            "collectors:\n  - { id: repo.bad, runtime: starlark, entry: bad.star, facts: [oxplow.ast_hit] }\n",
+            ext.join("extension.yaml"),
+            "manifest: 2\nname: project\nintent:\n  purpose: test\ncollectors:\n  - { id: repo.bad, runtime: starlark, entry: bad.star, facts: [oxplow.ast_hit] }\n",
         )
         .unwrap();
-        svc.reload_config_from_disk().unwrap();
         crate::test_fixtures::activate_with_problems(&svc).await;
         let sync = || {
             run(

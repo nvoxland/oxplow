@@ -198,10 +198,7 @@ impl FactCollector {
 
     /// The scope its captures record (the metric catalog's vocabulary).
     fn scope(&self) -> String {
-        match self.owner.as_str() {
-            o @ oxplow_config::collectors::PROJECT => o.to_string(),
-            ext => oxplow_config::extension_scope(ext),
-        }
+        oxplow_config::extension_scope(&self.owner)
     }
 }
 
@@ -675,14 +672,8 @@ impl MetricsService {
                 .copied()
                 .unwrap_or(true)
         });
-        let project: Vec<FactCollector> = self
-            .read_metric_config()
-            .collectors
-            .iter()
-            .filter_map(|spec| FactCollector::from_spec(oxplow_config::collectors::PROJECT, spec))
-            .collect();
         let mut out: Vec<FactCollector> = Vec::new();
-        for c in extension.chain(project) {
+        for c in extension {
             match out.iter().position(|o| o.key == c.key) {
                 Some(i) => {
                     tracing::warn!(id = %c.key, kept = %c.owner, dropped = %out[i].owner,
@@ -1868,26 +1859,31 @@ impl MetricsService {
             }
             CollectorRuntime::Jaq => FactRunner::Jaq(script()?),
             CollectorRuntime::Exec => {
-                if c.owner != oxplow_config::collectors::PROJECT {
-                    return Err("external extension fact collectors have no credential/environment host; use a contained script or a project collector".into());
-                }
-                // A project collector's program comes from the repo: it runs
-                // only once a person approved it on this machine (tsk331).
-                use crate::exec_consent::{needs_approval, project_collector_program, ProgramKind};
-                let entry = c.entry.as_deref().unwrap_or_default();
-                let program = project_collector_program(ProgramKind::Collector, &c.key, entry, &[]);
-                let gate = crate::exec_consent::script_gate(
+                // The project's own extension's program: it runs from an
+                // approved copy, once a person approved it on this machine.
+                let root = &self.project_dir;
+                let extensions = self.extensions_cache.get(root);
+                let ext = extensions
+                    .iter()
+                    .find(|e| e.name == c.owner && e.is_own())
+                    .ok_or_else(|| {
+                        format!(
+                            "collector `{}/{}` runs a program; only the project's own extension \
+                             runs one to record facts",
+                            c.owner, c.key
+                        )
+                    })?;
+                let spec = ext
+                    .collectors
+                    .iter()
+                    .find(|s| s.id == c.key)
+                    .ok_or_else(|| format!("collector `{}/{}` isn't declared", c.owner, c.key))?;
+                let code = crate::approved_code::extension_collector(
                     self.approvals.clone(),
-                    self.project_dir.clone(),
-                    program.clone(),
-                );
-                if gate().is_err() {
-                    return Err(needs_approval(ProgramKind::Collector, &c.key, entry));
-                }
-                let code = crate::approved_code::project_collector(
-                    self.approvals.clone(),
-                    self.project_dir.clone(),
-                    program,
+                    root.clone(),
+                    root.join(&ext.path),
+                    &c.owner,
+                    spec,
                 )?;
                 FactRunner::Exec(
                     vec![code.entry.to_string_lossy().into_owned()],
@@ -1961,21 +1957,6 @@ impl MetricsService {
     /// approval covers its extension's files), the project's under
     /// Programs.
     fn approved_to_ask(&self, c: &FactCollector) -> bool {
-        use crate::exec_consent::ProgramKind;
-        if c.owner == oxplow_config::collectors::PROJECT {
-            let program = crate::exec_consent::project_collector_program(
-                ProgramKind::Collector,
-                &c.key,
-                c.entry.as_deref().unwrap_or_default(),
-                &[],
-            );
-            return crate::exec_consent::script_gate(
-                self.approvals.clone(),
-                self.project_dir.clone(),
-                program,
-            )()
-            .is_ok();
-        }
         let root = &self.project_dir;
         self.extensions_cache
             .get(root)
@@ -1991,9 +1972,8 @@ impl MetricsService {
     }
 
     /// Fact collector `collector`'s run, a child of `parent`: named for the
-    /// collector when an extension declares it (core's and the project's
-    /// are core's own work), and deciding what it does against what it
-    /// declares — or, once a person approved it, their grant.
+    /// collector its extension declares, and deciding what it does against
+    /// what it declares — or, once a person approved it, their grant.
     fn collector_run(&self, collector: &FactCollector, parent: &RunContext) -> RunContext {
         self.collector_run_in(collector, parent, Mode::External)
     }
@@ -2007,43 +1987,7 @@ impl MetricsService {
         let root = &self.project_dir;
         let extensions = self.extensions_cache.get(root);
         let Some(ext) = extensions.iter().find(|e| e.name == collector.owner) else {
-            let mut run = parent.child(None, mode);
-            if collector.owner == oxplow_config::collectors::PROJECT {
-                let program = crate::exec_consent::project_collector_program(
-                    crate::exec_consent::ProgramKind::Collector,
-                    &collector.key,
-                    collector.entry.as_deref().unwrap_or_default(),
-                    &[],
-                );
-                let guarded = collector.runtime == CollectorRuntime::Exec
-                    || collector_script_text(collector, root)
-                        .is_some_and(|text| oxplow_script::ai::calls_ai(&text));
-                let approved = guarded
-                    && crate::exec_consent::script_gate(
-                        self.approvals.clone(),
-                        root.clone(),
-                        program.clone(),
-                    )()
-                    .is_ok();
-                let mut request = crate::grants::script_request(&collector.needs);
-                if collector.runtime == CollectorRuntime::Exec {
-                    request.program = collector.entry.clone();
-                }
-                run = run.authorized(crate::grants::authority(
-                    &self.approvals,
-                    &program.key(),
-                    approved,
-                    request,
-                ));
-                if guarded {
-                    run = run.guarded(crate::exec_consent::script_gate(
-                        self.approvals.clone(),
-                        root.clone(),
-                        program,
-                    ));
-                }
-            }
-            return run;
+            return parent.child(None, mode);
         };
         let run = parent.child(
             Some(crate::run_context::contribution(
@@ -2804,13 +2748,9 @@ impl FactRunner {
 }
 
 /// The script a fact collector runs — its entry read through its extension
-/// (bundled or on disk), or the project's file. `None` when it
-/// can't be read.
+/// (bundled or on disk). `None` when it can't be read.
 fn collector_script_text(collector: &FactCollector, root: &Path) -> Option<String> {
     let entry = collector.entry.as_deref()?;
-    if collector.owner == oxplow_config::collectors::PROJECT {
-        return crate::services::project_file(root, entry).ok().flatten();
-    }
     crate::extensions::read_extension_file(root, &collector.owner, entry)
 }
 
@@ -3049,6 +2989,39 @@ mod tests {
         snap
     }
 
+    /// A file of the project extension (`oxplow/extensions/project/`) under
+    /// `root`, its folder made: where its collectors' scripts live.
+    fn project_ext_file(root: &Path, rel: &str) -> std::path::PathBuf {
+        let path = root.join("oxplow/extensions/project").join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        path
+    }
+
+    /// Declare the project extension's `blocks` (`measures:` / `metrics:` /
+    /// `collectors:` YAML), replacing what it declared.
+    fn write_project_extension(root: &Path, blocks: &str) {
+        let manifest = project_ext_file(root, "extension.yaml");
+        std::fs::write(
+            manifest,
+            format!("manifest: 2\nname: project\nintent:\n  purpose: test\n{blocks}"),
+        )
+        .unwrap();
+    }
+
+    /// Declare `collectors` (a YAML list of collector entries) as the project
+    /// extension's only block, checking they parse for an own extension.
+    fn declare_project_collectors(root: &Path, collectors: &str) {
+        let value: serde_yaml::Value = serde_yaml::from_str(collectors).unwrap();
+        let (_, errors) = oxplow_config::collectors::parse_collectors(
+            &oxplow_config::collectors::Declarer::own("project"),
+            &value,
+            &|_| true,
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        let indented: String = collectors.lines().map(|l| format!("  {l}\n")).collect();
+        write_project_extension(root, &format!("collectors:\n{indented}"));
+    }
+
     /// P7.B3: a snapshot runs each enabled fact collector exactly once.
     /// The `collector.triggers` consumer is the one path (the event loop no
     /// longer runs them), and a redelivered `snapshot.taken` runs nothing
@@ -3057,21 +3030,14 @@ mod tests {
     async fn a_snapshot_runs_each_enabled_collector_exactly_once() {
         let (svc, dir) = fixture().await;
         std::fs::write(
-            dir.path().join("once.star"),
+            project_ext_file(dir.path(), "once.star"),
             "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 1, \"rule\": \"once\", \"subject\": \"tree:.\"}]}\n",
         )
         .unwrap();
-        let (specs, errors) = oxplow_config::collectors::parse_collectors(
-            oxplow_config::collectors::PROJECT,
-            None,
-            &serde_yaml::from_str(
+        declare_project_collectors(
+                dir.path(),
                 "- { id: repo.once, runtime: starlark, entry: once.star, trigger: { on: [snapshot.taken] }, facts: [oxplow.ast_hit] }",
-            )
-            .unwrap(),
-            &|_| true,
-        );
-        assert!(errors.is_empty(), "{errors:?}");
-        svc.config.write().unwrap().collectors = specs;
+            );
         crate::test_fixtures::activate_with_problems(&svc).await;
         let snap =
             snapshot_with_files(&svc, &[("src/a.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
@@ -3105,21 +3071,14 @@ mod tests {
     async fn a_fact_collector_gets_the_event_envelope() {
         let (svc, dir) = fixture().await;
         std::fs::write(
-            dir.path().join("seen.star"),
+            project_ext_file(dir.path(), "seen.star"),
             "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 1, \"rule\": json.encode(input[\"event\"]), \"subject\": \"tree:.\"}]}\n",
         )
         .unwrap();
-        let (specs, errors) = oxplow_config::collectors::parse_collectors(
-            oxplow_config::collectors::PROJECT,
-            None,
-            &serde_yaml::from_str(
+        declare_project_collectors(
+                dir.path(),
                 "- { id: repo.seen, runtime: starlark, entry: seen.star, trigger: { on: [snapshot.taken] }, facts: [oxplow.ast_hit] }",
-            )
-            .unwrap(),
-            &|_| true,
-        );
-        assert!(errors.is_empty(), "{errors:?}");
-        svc.config.write().unwrap().collectors = specs;
+            );
         crate::test_fixtures::activate_with_problems(&svc).await;
         let snap =
             snapshot_with_files(&svc, &[("src/a.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
@@ -3156,25 +3115,19 @@ mod tests {
     async fn a_deferred_snapshot_run_covers_every_skipped_snapshot() {
         let (svc, dir) = fixture().await;
         std::fs::write(
-            dir.path().join("seen.star"),
+            project_ext_file(dir.path(), "seen.star"),
             "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 1, \"rule\": \"seen\", \"subject\": \"file:\" + f[\"path\"], \"path\": f[\"path\"]} for f in files(\"**\")]}\n",
         )
         .unwrap();
+        let root = dir.path().to_path_buf();
         let configure = |trigger: &str| {
             let svc = svc.clone();
+            let root = root.clone();
             let trigger = trigger.to_string();
             async move {
-                let (specs, errors) = oxplow_config::collectors::parse_collectors(
-                oxplow_config::collectors::PROJECT,
-                None,
-                &serde_yaml::from_str(&format!(
+                declare_project_collectors(&root, &format!(
                     "- {{ id: repo.seen, runtime: starlark, entry: seen.star, trigger: {trigger}, facts: [oxplow.ast_hit] }}"
-                ))
-                .unwrap(),
-                &|_| true,
-            );
-                assert!(errors.is_empty(), "{errors:?}");
-                svc.config.write().unwrap().collectors = specs;
+                ));
                 crate::test_fixtures::activate_with_problems(&svc).await;
             }
         };
@@ -3505,21 +3458,14 @@ mod tests {
     async fn a_fact_collectors_capture_and_run_record_commit_together() {
         let (svc, dir) = fixture().await;
         std::fs::write(
-            dir.path().join("once.star"),
+            project_ext_file(dir.path(), "once.star"),
             "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 1, \"rule\": \"once\", \"subject\": \"tree:.\"}]}\n",
         )
         .unwrap();
-        let (specs, errors) = oxplow_config::collectors::parse_collectors(
-            oxplow_config::collectors::PROJECT,
-            None,
-            &serde_yaml::from_str(
+        declare_project_collectors(
+                dir.path(),
                 "- { id: repo.once, runtime: starlark, entry: once.star, trigger: { on: [snapshot.taken] }, facts: [oxplow.ast_hit] }",
-            )
-            .unwrap(),
-            &|_| true,
-        );
-        assert!(errors.is_empty(), "{errors:?}");
-        svc.config.write().unwrap().collectors = specs;
+            );
         crate::test_fixtures::activate_with_problems(&svc).await;
         let snap =
             snapshot_with_files(&svc, &[("src/a.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
@@ -3583,21 +3529,14 @@ mod tests {
     async fn a_run_whose_facts_are_refused_is_a_failed_run() {
         let (svc, dir) = fixture().await;
         std::fs::write(
-            dir.path().join("bare.star"),
+            project_ext_file(dir.path(), "bare.star"),
             "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 1, \"rule\": \"bare\", \"subject\": \"tree:.\", \"dims\": {\"language\": \"rust\"}}]}\n",
         )
         .unwrap();
-        let (specs, errors) = oxplow_config::collectors::parse_collectors(
-            oxplow_config::collectors::PROJECT,
-            None,
-            &serde_yaml::from_str(
+        declare_project_collectors(
+                dir.path(),
                 "- { id: repo.bare, runtime: starlark, entry: bare.star, trigger: { on: [snapshot.taken] }, facts: [oxplow.ast_hit] }",
-            )
-            .unwrap(),
-            &|_| true,
-        );
-        assert!(errors.is_empty(), "{errors:?}");
-        svc.config.write().unwrap().collectors = specs;
+            );
         crate::test_fixtures::activate_with_problems(&svc).await;
         let snap =
             snapshot_with_files(&svc, &[("src/a.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
@@ -3649,25 +3588,21 @@ mod tests {
         dir: &tempfile::TempDir,
         id: &str,
         measure: &str,
+        measures: &str,
     ) -> (String, Option<String>, i64) {
         std::fs::write(
-            dir.path().join(format!("{id}.star")),
+            project_ext_file(dir.path(), &format!("{id}.star")),
             format!(
                 "def transform(input):\n    return {{\"facts\": [{{\"measure\": \"{measure}\", \"value\": 1, \"subject\": \"file:src/a.rs\"}}]}}\n"
             ),
         )
         .unwrap();
-        let (specs, errors) = oxplow_config::collectors::parse_collectors(
-            oxplow_config::collectors::PROJECT,
-            None,
-            &serde_yaml::from_str(&format!(
-                "- {{ id: repo.{id}, runtime: starlark, entry: {id}.star, trigger: {{ on: [snapshot.taken] }}, facts: [{measure}] }}"
-            ))
-            .unwrap(),
-            &|_| true,
+        write_project_extension(
+            dir.path(),
+            &format!(
+                "{measures}collectors:\n  - {{ id: repo.{id}, runtime: starlark, entry: {id}.star, trigger: {{ on: [snapshot.taken] }}, facts: [{measure}] }}\n"
+            ),
         );
-        assert!(errors.is_empty(), "{errors:?}");
-        svc.config.write().unwrap().collectors = specs;
         crate::test_fixtures::activate_with_problems(svc).await;
         let snap =
             snapshot_with_files(svc, &[("src/a.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
@@ -3703,7 +3638,7 @@ mod tests {
     #[tokio::test]
     async fn a_fact_for_an_undefined_measure_fails_the_run_naming_it() {
         let (svc, dir) = fixture().await;
-        let (status, error, facts) = run_one_fact(&svc, &dir, "nope", "repo.nope.count").await;
+        let (status, error, facts) = run_one_fact(&svc, &dir, "nope", "repo.nope.count", "").await;
         assert_eq!(status, "error");
         assert!(
             error
@@ -3722,13 +3657,20 @@ mod tests {
     #[tokio::test]
     async fn a_measure_declared_after_the_catalog_was_seeded_is_found() {
         let (svc, dir) = fixture().await;
-        svc.config.write().unwrap().measures = vec![oxplow_config::MeasureEntry {
-            key: Some("repo.lines.count".into()),
-            subject_kind: Some("file".into()),
-            ..Default::default()
-        }];
         crate::test_fixtures::activate_with_problems(&svc).await;
-        let (status, error, facts) = run_one_fact(&svc, &dir, "lines", "repo.lines.count").await;
+        // Its collector runs before the measure is declared: a failed run.
+        let (status, _, _) = run_one_fact(&svc, &dir, "lines", "repo.lines.count", "").await;
+        assert_eq!(status, "error");
+        // The extension then declares the measure: the next generation seeds
+        // it and the run records.
+        let (status, error, facts) = run_one_fact(
+            &svc,
+            &dir,
+            "lines",
+            "repo.lines.count",
+            "measures:\n  - { key: repo.lines.count, subjectKind: file }\n",
+        )
+        .await;
         assert_eq!((status.as_str(), error), ("ok", None));
         assert_eq!(facts, 1);
     }
@@ -3786,7 +3728,7 @@ mod tests {
     fn starlark_collector_emits(key: &str, entry_file: &str, facts: Vec<String>) -> FactCollector {
         FactCollector {
             key: key.into(),
-            owner: oxplow_config::collectors::PROJECT.into(),
+            owner: oxplow_config::collectors::PROJECT_EXTENSION.into(),
             trigger: Trigger::On {
                 events: vec![SNAPSHOT_TAKEN.into()],
                 filter: Default::default(),
@@ -3807,9 +3749,8 @@ mod tests {
     async fn run_one_collector_records_facts_with_version_and_branch() {
         let (svc, dir) = fixture().await;
         // A tree-derived collector emitting a per-file `oxplow.ast_hit` FACT.
-        std::fs::create_dir_all(dir.path().join("oxplow/metrics")).unwrap();
         std::fs::write(
-            dir.path().join("oxplow/metrics/unsafe.star"),
+            project_ext_file(dir.path(), "metrics/unsafe.star"),
             r#"
 def transform(input):
     facts = []
@@ -3823,7 +3764,7 @@ def transform(input):
         .unwrap();
         let metric = starlark_collector_emits(
             "repo.unsafe_blocks",
-            "oxplow/metrics/unsafe.star",
+            "metrics/unsafe.star",
             vec!["oxplow.ast_hit".into()],
         );
 
@@ -4258,12 +4199,12 @@ def transform(input):
         // failure that let two built-in metrics read empty for weeks.
         let (svc, dir) = fixture().await;
 
-        let script = dir.path().join("oxplow/metrics/boom.star");
+        let script = project_ext_file(dir.path(), "metrics/boom.star");
         std::fs::create_dir_all(script.parent().unwrap()).unwrap();
         std::fs::write(&script, "def transform(input):\n    fail(\"boom\")\n").unwrap();
         let collector = starlark_collector_emits(
             "acme.boom",
-            "oxplow/metrics/boom.star",
+            "metrics/boom.star",
             vec!["oxplow.todo".to_string()],
         );
 
@@ -4300,7 +4241,7 @@ def transform(input):
         // teaching repo_allow.star to also match inner `#![allow]` silently no-opped.)
         let (svc, dir) = fixture().await;
 
-        let script = dir.path().join("oxplow/metrics/g.star");
+        let script = project_ext_file(dir.path(), "metrics/g.star");
         std::fs::create_dir_all(script.parent().unwrap()).unwrap();
         let write = |body: &str| std::fs::write(&script, body).unwrap();
         write(
@@ -4308,11 +4249,8 @@ def transform(input):
              return {\"facts\": [{\"measure\": \"oxplow.todo\", \"value\": 1.0, \
              \"subject\": \"file:a.rs\", \"path\": \"a.rs\"}]}\n",
         );
-        let collector = starlark_collector_emits(
-            "acme.g",
-            "oxplow/metrics/g.star",
-            vec!["oxplow.todo".to_string()],
-        );
+        let collector =
+            starlark_collector_emits("acme.g", "metrics/g.star", vec!["oxplow.todo".to_string()]);
 
         let snap = snapshot_with_files(&svc, &[("a.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
         let ctx = CollectorRunContext {
@@ -4523,9 +4461,8 @@ def transform(input):
             .await
             .unwrap();
 
-        std::fs::create_dir_all(dir.path().join("oxplow/metrics")).unwrap();
         std::fs::write(
-            dir.path().join("oxplow/metrics/eff.star"),
+            project_ext_file(dir.path(), "metrics/eff.star"),
             r#"
 def transform(input):
     return {"facts": [{"measure": "oxplow.ast_hit", "value": 1, "rule": "eff", "subject": "tree:."}]}
@@ -4534,7 +4471,7 @@ def transform(input):
         .unwrap();
         let metric = starlark_collector_emits(
             "acme.effcollector",
-            "oxplow/metrics/eff.star",
+            "metrics/eff.star",
             vec!["oxplow.ast_hit".into()],
         );
         let ctx = CollectorRunContext {
@@ -4601,23 +4538,15 @@ def transform(input):
             .await
             .unwrap();
         crate::collector_triggers::register(&svc);
-        std::fs::create_dir_all(dir.path().join("oxplow/metrics")).unwrap();
         std::fs::write(
-            dir.path().join("oxplow/metrics/eff.star"),
+            project_ext_file(dir.path(), "metrics/eff.star"),
             "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 1, \"rule\": \"eff\", \"subject\": \"tree:.\"}]}\n",
         )
         .unwrap();
-        let (specs, errors) = oxplow_config::collectors::parse_collectors(
-            oxplow_config::collectors::PROJECT,
-            None,
-            &serde_yaml::from_str(
-                "- { id: acme.effcollector, runtime: starlark, entry: oxplow/metrics/eff.star, trigger: { on: [effort.finished] }, facts: [oxplow.ast_hit] }",
-            )
-            .unwrap(),
-            &|_| true,
-        );
-        assert!(errors.is_empty(), "{errors:?}");
-        svc.config.write().unwrap().collectors = specs;
+        declare_project_collectors(
+                dir.path(),
+                "- { id: acme.effcollector, runtime: starlark, entry: metrics/eff.star, trigger: { on: [effort.finished] }, facts: [oxplow.ast_hit] }",
+            );
         crate::test_fixtures::activate_with_problems(&svc).await;
         svc.effort_store
             .finish(&effort.id, None, None)
@@ -4643,9 +4572,8 @@ def transform(input):
         let (svc, dir) = fixture().await;
         // A collector emitting a per-function `oxplow.fn_length` FACT — the located
         // items behind the metric (the drill-in reads them via findings_for_spec).
-        std::fs::create_dir_all(dir.path().join("oxplow/metrics")).unwrap();
         std::fs::write(
-            dir.path().join("oxplow/metrics/longfns.star"),
+            project_ext_file(dir.path(), "metrics/longfns.star"),
             r#"
 def transform(input):
     facts = []
@@ -4658,7 +4586,7 @@ def transform(input):
         .unwrap();
         let metric = starlark_collector_emits(
             "repo.long_fns",
-            "oxplow/metrics/longfns.star",
+            "metrics/longfns.star",
             vec!["oxplow.fn_length".into()],
         );
 
@@ -4706,8 +4634,10 @@ def transform(input):
         let manifest: serde_yaml::Value =
             serde_yaml::from_str(foundation.file("extension.yaml").unwrap()).unwrap();
         let (specs, errors) = oxplow_config::collectors::parse_collectors(
-            "oxplow-foundation",
-            Some(oxplow_config::OXPLOW_NAMESPACE),
+            &oxplow_config::collectors::Declarer::shared(
+                "oxplow-foundation",
+                oxplow_config::OXPLOW_NAMESPACE,
+            ),
             &manifest["collectors"],
             &|_| true,
         );
@@ -4816,9 +4746,8 @@ def transform(input):
         // measures. A fact on an undefined one fails the run (tsk1029: it was
         // dropped behind an "ok"), so nothing of that run is written.
         let (svc, dir) = fixture().await;
-        std::fs::create_dir_all(dir.path().join("oxplow/metrics")).unwrap();
         std::fs::write(
-            dir.path().join("oxplow/metrics/mixed.star"),
+            project_ext_file(dir.path(), "metrics/mixed.star"),
             r#"
 def transform(input):
     return {"facts": [
@@ -4830,7 +4759,7 @@ def transform(input):
         .unwrap();
         let metric = starlark_collector_emits(
             "acme.mixed_facts",
-            "oxplow/metrics/mixed.star",
+            "metrics/mixed.star",
             vec!["oxplow.complexity".into(), "acme.undefined".into()],
         );
         let ctx = CollectorRunContext {
@@ -4880,9 +4809,8 @@ def transform(input):
         // (tsk1029: it was dropped behind an "ok"). Here it declares only
         // `oxplow.complexity` and emits `oxplow.fn_length` too.
         let (svc, dir) = fixture().await;
-        std::fs::create_dir_all(dir.path().join("oxplow/collectors")).unwrap();
         std::fs::write(
-            dir.path().join("oxplow/collectors/emits.star"),
+            project_ext_file(dir.path(), "collectors/emits.star"),
             r#"
 def transform(input):
     return {"facts": [
@@ -4894,7 +4822,7 @@ def transform(input):
         .unwrap();
         let collector = starlark_collector_emits(
             "acme.only_complexity",
-            "oxplow/collectors/emits.star",
+            "collectors/emits.star",
             vec!["oxplow.complexity".into()],
         );
         let ctx = CollectorRunContext {
@@ -4952,9 +4880,8 @@ def transform(input):
         // re-derives Σnum/Σden exactly (coverage %, pass rate) rather than
         // averaging pre-divided values. Prove they round-trip onto the fact row.
         let (svc, dir) = fixture().await;
-        std::fs::create_dir_all(dir.path().join("oxplow/collectors")).unwrap();
         std::fs::write(
-            dir.path().join("oxplow/collectors/ratio.star"),
+            project_ext_file(dir.path(), "collectors/ratio.star"),
             r#"
 def transform(input):
     return {"facts": [
@@ -4966,7 +4893,7 @@ def transform(input):
         .unwrap();
         let collector = starlark_collector_emits(
             "acme.ratio",
-            "oxplow/collectors/ratio.star",
+            "collectors/ratio.star",
             vec!["oxplow.complexity".into()],
         );
         let ctx = CollectorRunContext {
@@ -5291,12 +5218,10 @@ def transform(input):
             .await
             .unwrap();
         // A project entity metric with a typo'd column never reaches the catalog.
-        std::fs::write(
-            oxplow_config::config_path(dir.path()),
+        write_project_extension(
+            dir.path(),
             "metrics:\n  - key: repo.bad\n    entity: v_work_item\n    where: \"no_such_col = 1\"\n",
-        )
-        .unwrap();
-        svc.reload_config_from_disk().unwrap();
+        );
         crate::test_fixtures::activate_with_problems(&svc).await;
         let f = &svc.fact_store;
         assert!(f.get_spec("repo.bad").await.unwrap().is_none());
@@ -5375,12 +5300,10 @@ def transform(input):
         // T-E2: config `metrics:` entries seed metric SPECS (the legacy
         // definition seeding is gone).
         let (svc, dir) = fixture().await;
-        std::fs::write(
-            oxplow_config::config_path(dir.path()),
+        write_project_extension(
+            dir.path(),
             "metrics:\n  - key: repo.loc\n    title: \"lines\"\n    sourceMeasure: acme.lines\n    aggregation: sum\n",
-        )
-        .unwrap();
-        svc.reload_config_from_disk().unwrap();
+        );
         crate::test_fixtures::activate_with_problems(&svc).await;
         let spec = svc
             .fact_store
@@ -5390,7 +5313,7 @@ def transform(input):
             .expect("seeded");
         assert_eq!(spec.display_kind, "gauge"); // displayKind defaults to gauge
         assert_eq!(spec.aggregation, "sum");
-        assert_eq!(spec.scope, "project");
+        assert_eq!(spec.scope, "extension:project");
         assert_eq!(spec.source_measure.as_deref(), Some("acme.lines"));
     }
 
@@ -5427,14 +5350,12 @@ def transform(input):
     #[tokio::test]
     async fn a_generation_publishes_configured_measures_and_dimensions() {
         let (svc, dir) = fixture().await;
-        std::fs::write(
-            oxplow_config::config_path(dir.path()),
+        write_project_extension(
+            dir.path(),
             "measures:\n  - key: acme.api_latency\n    unit: ms\n    \
              temporalSemantics: non-additive\ndimensions:\n  - key: acme.endpoint\n    \
              label: Endpoint\n    vocabulary: [list, get]\n",
-        )
-        .unwrap();
-        svc.reload_config_from_disk().unwrap();
+        );
         crate::test_fixtures::activate_with_problems(&svc).await;
         // The custom measure lands beside the migration-seeded `oxplow.*` built-ins.
         let measure = svc
@@ -5443,7 +5364,7 @@ def transform(input):
             .await
             .unwrap()
             .expect("measure seeded");
-        assert_eq!(measure.scope, "project");
+        assert_eq!(measure.scope, "extension:project");
         assert_eq!(measure.unit.as_deref(), Some("ms"));
         assert_eq!(measure.temporal_semantics, "non-additive");
 
@@ -5452,46 +5373,46 @@ def transform(input):
             .iter()
             .find(|d| d.key == "acme.endpoint")
             .expect("dimension seeded");
-        assert_eq!(ep.scope, "project");
+        assert_eq!(ep.scope, "extension:project");
         assert_eq!(ep.vocabulary_json.as_deref(), Some("[\"list\",\"get\"]"));
     }
 
     #[tokio::test]
     async fn a_generation_prunes_project_rows_removed_from_config() {
-        // tsk61: a project metric/measure deleted from project.yaml entirely
+        // tsk61: a project metric deleted from its extension entirely
         // (not merely `enabled: false`) must not linger as a zombie catalog
         // row — four forever-blank collectors did exactly that for a week.
         let (svc, dir) = fixture().await;
         // Zombies: a project measure + spec that no config declares.
         svc.fact_store
             .upsert_measure(oxplow_db::NewMeasure {
-                scope: "project".into(),
+                scope: "extension:project".into(),
                 ..oxplow_db::NewMeasure::new("repo.zombie", "Zombie")
             })
             .await
             .unwrap();
         let mut spec =
             oxplow_db::NewMetricSpec::base("repo.zombie", "Zombie", "repo.zombie", "sum");
-        spec.scope = "project".into();
+        spec.scope = "extension:project".into();
         svc.fact_store.upsert_spec(spec).await.unwrap();
         // A DECLARED project measure+metric that must survive.
-        std::fs::write(
-            oxplow_config::config_path(dir.path()),
+        write_project_extension(
+            dir.path(),
             "measures:\n  - key: repo.kept\n    unit: count\n    \
              temporalSemantics: semi-additive\nmetrics:\n  - key: repo.kept\n    \
              title: Kept\n    sourceMeasure: repo.kept\n    aggregation: sum\n",
-        )
-        .unwrap();
-        svc.reload_config_from_disk().unwrap();
+        );
         crate::test_fixtures::activate_with_problems(&svc).await;
 
+        // Measures are never pruned (their facts stay for when the extension
+        // declares them again); the specs over them are.
         assert!(
             svc.fact_store
                 .get_measure("repo.zombie")
                 .await
                 .unwrap()
-                .is_none(),
-            "undeclared project measure pruned"
+                .is_some(),
+            "an undeclared measure keeps its facts"
         );
         assert!(
             svc.fact_store
@@ -5538,19 +5459,18 @@ def transform(input):
         // uncomputable spec ever arrives another way (a typo'd BUILT-IN list,
         // which no config validation sees).
         let (svc, dir) = fixture().await;
-        std::fs::write(
-            oxplow_config::config_path(dir.path()),
+        write_project_extension(
+            dir.path(),
             "metrics:\n  - key: repo.latency_p95\n    title: \"p95\"\n    \
              sourceMeasure: acme.latency\n    aggregation: p95\n",
-        )
-        .unwrap();
-        let err = svc.reload_config_from_disk().unwrap_err();
-        assert!(
-            err.to_string().contains("aggregation must be one of"),
-            "config names the allowed vocabulary, got: {err}"
         );
-        // The bad config never loaded; seeding runs with the prior (empty)
-        // config and nothing reaches the catalog or the gate.
+        let problems = crate::test_fixtures::activate_with_problems(&svc).await;
+        assert!(
+            format!("{problems:?}").contains("aggregation must be one of"),
+            "the extension names the allowed vocabulary, got: {problems:?}"
+        );
+        // The bad extension never loaded: nothing reaches the catalog or the
+        // gate.
         assert!(
             svc.fact_store
                 .get_spec("repo.latency_p95")
@@ -5571,13 +5491,11 @@ def transform(input):
     #[tokio::test]
     async fn a_generation_threads_promote_flag_to_dimension_row() {
         let (svc, dir) = fixture().await;
-        std::fs::write(
-            oxplow_config::config_path(dir.path()),
+        write_project_extension(
+            dir.path(),
             "dimensions:\n  - key: acme.hot\n    label: Hot\n    promote: true\n  \
              - key: acme.cold\n    label: Cold\n",
-        )
-        .unwrap();
-        svc.reload_config_from_disk().unwrap();
+        );
         crate::test_fixtures::activate_with_problems(&svc).await;
 
         let dims = svc.fact_store.list_dimensions().await.unwrap();
@@ -5985,20 +5903,18 @@ def transform(input):
     async fn a_project_exec_collector_runs_only_once_a_person_approved_it() {
         use std::os::unix::fs::PermissionsExt;
         let (svc, dir) = fixture().await;
-        let script = dir.path().join("tools/count.sh");
-        std::fs::create_dir_all(script.parent().unwrap()).unwrap();
+        let script = project_ext_file(dir.path(), "tools/count.sh");
         std::fs::write(
             &script,
             "#!/bin/sh\necho '{\"facts\":[{\"measure\":\"repo.n\",\"value\":2}]}'\n",
         )
         .unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-        std::fs::write(
-            oxplow_config::config_path(dir.path()),
-            "measures:\n  - { key: repo.n, title: N }\ncollectors:\n  - { id: repo.count, runtime: exec, entry: tools/count.sh, facts: [repo.n] }\n",
-        )
-        .unwrap();
-        svc.reload_config_from_disk().unwrap();
+        let entry = "- { id: repo.count, runtime: exec, entry: tools/count.sh, facts: [repo.n] }";
+        write_project_extension(
+            dir.path(),
+            &format!("measures:\n  - {{ key: repo.n, title: N }}\ncollectors:\n  {entry}\n"),
+        );
         crate::test_fixtures::activate_with_problems(&svc).await;
         let err = svc
             .metrics
@@ -6011,23 +5927,18 @@ def transform(input):
             .await
             .unwrap_err();
         assert!(err.contains("approval"), "{err}");
-        let cfg = svc.config.read().unwrap().clone();
-        crate::exec_consent::approve_program(
-            &svc.approvals,
-            dir.path(),
-            &cfg,
-            &[],
-            crate::exec_consent::ProgramKind::Collector,
-            "repo.count",
-            &crate::exec_consent::version_of(
-                &svc.approvals,
-                dir.path(),
-                &cfg,
-                crate::exec_consent::ProgramKind::Collector,
-                "repo.count",
-            ),
+        let (specs, errors) = oxplow_config::collectors::parse_collectors(
+            &oxplow_config::collectors::Declarer::own("project"),
+            &serde_yaml::from_str(&format!("[{}]", entry.trim_start_matches("- "))).unwrap(),
+            &|_| true,
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        let hash = crate::collector_runner::approval_hash(
+            &dir.path().join("oxplow/extensions/project"),
+            &specs[0],
         )
         .unwrap();
+        crate::collector_runner::approve(&svc.approvals, "project", "repo.count", &hash).unwrap();
         assert_eq!(
             svc.metrics
                 .run_collector_by_key(

@@ -49,13 +49,17 @@ section for the column.
   `static-analysis`, `metric_value`, `payload_json`, freshness pin) is the
   read/IPC shape only — see [metrics.md](./metrics.md) for the substrate.
 - **Report collectors** (tsk863) — reading a report is a **collector**:
-  a `collectors:` entry in `.oxplow/project.yaml` with `records: tests |
-  coverage | analysis`, the `report: { path }` it reads, a parser in
+  a `collectors:` entry in the project's own extension
+  (`oxplow/extensions/project/extension.yaml`; never `.oxplow/project.yaml`,
+  which refuses `collectors:`) with `records: tests |
+  coverage | analysis`, the `report: { path }` it reads (relative to the
+  project root, the checkout), a parser in
   `entry`, and `trigger: { on_run: test | analysis }` (or none: by hand).
   One declaration, runtime, consent and run log for "read a report file",
   shared with every other collector (`.context/semantic-layer.md`
   "Collectors"). Validation (`crates/oxplow-config/src/collectors.rs`,
-  `validate_report_collector`): the project's only (not an extension's);
+  `validate_report_collector`): an own extension's only (`Extension::is_own()`, `Declarer.own`;
+  a bundled or installed extension's is refused);
   no `input`, `env`, `credentials`, `network`, `after` or `sync`; the
   trigger is `on_run` or `manual`, and an `on_run` matches what it records
   — `tests` / `coverage` on `test`, `analysis` on `analysis` (tsk892: each
@@ -68,13 +72,19 @@ section for the column.
     - { id: lint.clippy, records: analysis, entry: "oxplow:clippy", report: { path: target/clippy.json }, trigger: { on_run: analysis } }
   ```
   **Listed in Settings → Data → Collectors** beside the extensions' (owner
-  `project`; `project_collectors::listings`, which `list_collectors` adds after
-  the extensions'): each with its trigger ("after a test run"), last run
+  `project`, the project's own extension, as `list_collectors` lists every
+  extension's): each with its trigger ("after a test run"), last run
   (`collector_run`), why failures turned it off with **Enable Again**, and **Sync
-  Now** (`oxplow.collector.sync { owner: "project", id }`). A bundled parser or a
-  derived script needs no approval; a project `exec` collector is approved in
-  its row under Programs (the Collectors button points there), and revoking it
-  from the Collectors list revokes that program.
+  Now** (`oxplow.collector.sync { owner: "project", id }`). A report collector with a
+  bundled parser needs no approval (`collector_runner::needs_approval`; the
+  loader doesn't look for an `oxplow:` entry file). An own extension's `exec`
+  program or its own jaq/starlark parser is approved in its Collectors row
+  like any extension collector (`collector_runner::approval_hash`, key
+  `<ext>/<id>`), and runs from a private approved copy
+  (`approved_code::extension_collector`); revoking it there revokes that
+  approval. `CollectionService` reads report collectors from the extension
+  catalog (`with_extensions`, `report_collectors(root)`,
+  `is_report_collector(owner, id)`).
 - **Parsers — `oxplow-script`** (`crates/oxplow-script/`).
   A parser turns report text into a **typed output** for its kind
   (coverage = per-file `{ instrumented, covered }` line-sets; tests =
@@ -90,8 +100,8 @@ section for the column.
   program is the reference, and the collector runs a native parser
   (`helpers::lcov_coverage`, in process, one linear pass) that a test holds
   to the program's reading, because the program took seconds on a 12 MB
-  report ([performance.md](./performance.md) "Reading a big lcov"). Any other `entry` is the project's own `jaq` / `starlark` /
-  `exec` parser (`runtime:`, `report.format` = the host pre-parse). There
+  report ([performance.md](./performance.md) "Reading a big lcov"). Any other `entry` is the own extension's `jaq` / `starlark` /
+  `exec` parser (its path relative to the extension folder) (`runtime:`, `report.format` = the host pre-parse). There
   is no format registry: a collector names its parser. A parser writes
   paths as the report has them (`cargo llvm-cov` and eslint write absolute
   ones); `read_report` maps every coverage file and finding path to
@@ -129,8 +139,9 @@ section for the column.
 - **`/oxplow:configure` command** + **`oxplow-collection` skill** (assets in
   `crates/oxplow-agent-text/`). `/configure` does two durable things: instruments
   the project's test tooling to emit a standard-format report at a stable
-  path, and records the `testing:` block and the report collectors in
-  `.oxplow/project.yaml`. The standing skill keeps
+  path, and records the `testing:` block in
+  `.oxplow/project.yaml` and writes the report collectors into the project's
+  extension (`oxplow/extensions/project/extension.yaml`). The standing skill keeps
   coverage flowing after configure (run tests through the report-emitting
   commands — which, and when, is the agent's call; never type the numbers)
   so instrumentation doesn't bit-rot.
@@ -496,8 +507,9 @@ JSON→JSON reshaping), `starlark` (general/imperative; note: standard Starlark
 forbids recursion + `while`, so deep tree-walks are impractical — jaq suits XML
 better), `exec` (external process, JSON stdin→stdout — the escape hatch; can do
 I/O, so it's tagged lower-trust, and **runs only once a person approved it on
-this machine** — a project collector's program (`ProgramKind::Collector`),
-approved in Settings → Data → Programs like any other; until then its run is
+this machine** — an own extension's exec program,
+approved in Settings → Data → Collectors like any extension collector
+(`<ext>/<id>`); until then its run is
 recorded `needs_approval` and nothing is read (see architecture.md → "A
 repo's config never runs a program without consent").
 
@@ -654,25 +666,26 @@ null `ruleId` → no rule).
 ### Authoring a parser
 
 Declare a report collector with its own `entry` — no recompile. The
-**script lives in its own file** (project-relative; absolute paths and `..`
-are rejected), not inline in the yaml. The entry and the report `path` are
+**script lives in its own file** (relative to the extension folder, e.g.
+`collectors/clover.jq`; absolute paths and `..` are rejected), not inline in the yaml. The entry and the report `path` are
 also resolved through every symlink before anything is read, and one that
 lands outside the checkout is refused (`in_checkout`, tsk927): a repo can't
 point a collector at a file of the person's. Example: a Clover (XML) coverage
 parser in jaq:
 
 ```yaml
+# oxplow/extensions/project/extension.yaml
 collectors:
   - id: tests.clover
     records: coverage            # tests | coverage | analysis
     runtime: jaq                 # jaq | starlark | exec
-    entry: oxplow/parsers/clover.jq
+    entry: collectors/clover.jq
     report: { path: target/clover.xml, format: xml }   # text | json | xml | lcov | lines
     trigger: { on_run: test }
 ```
 
 ```jq
-# oxplow/parsers/clover.jq — input value (.) → coverage output schema
+# oxplow/extensions/project/collectors/clover.jq — input value (.) → coverage output schema
 { files: reduce ([.. | select((type=="object") and (.tag=="file"))][]) as $f
     ({}; . + { ($f.attrs.path): {
         instrumented: [ $f | .. | select(.tag?=="line") | (.attrs.num|tonumber?) ],
@@ -702,7 +715,7 @@ The fact engine reads the report, parses it per `format` (`parse_report`) and
 hands it to the jaq/starlark script as `input.report`; the script returns a
 `{facts:[{measure, value, num, den}]}` ratio fact. tsk126 dogfoods this as
 the `repo.scan_type_coverage` collector → `repo.type_coverage`
-(`oxplow/collectors/type_coverage.jq`, `format: text` +
+(`oxplow/extensions/project/collectors/type_coverage.jq`, `format: text` +
 `[… | try fromjson catch null][0]` so a missing report yields no facts rather
 than failing the collector. **jaq gotcha:** `"" | fromjson` emits *nothing*
 (no error, so `try … catch` never fires) where jq raises; a script whose

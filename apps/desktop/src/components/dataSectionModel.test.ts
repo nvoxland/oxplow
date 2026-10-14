@@ -43,12 +43,12 @@ test("a count still loading says so, and one that failed reads as a dash with wh
 });
 
 test("programRow says what runs and whether it will", () => {
-  const m = programRow({ kind: "collector", name: "tests.parse", program: "tools/parse.sh", args: ["--x"], env: [], approved: false });
-  expect(m.label).toBe("Collector tests.parse");
+  const m = programRow({ kind: "acp-agent", name: "tests.parse", program: "tools/parse.sh", args: ["--x"], env: [], approved: false });
+  expect(m.label).toBe("ACP agent tests.parse");
   expect(m.command).toBe("tools/parse.sh --x");
   expect(m.status).toBe("Not approved: it won't run");
   expect(m.approveTitle).toContain("tools/parse.sh --x");
-  expect(programRow({ kind: "collector", name: "repo.n", program: "t.sh", args: [], env: [], approved: true }).status).toBe(
+  expect(programRow({ kind: "acp-agent", name: "repo.n", program: "t.sh", args: [], env: [], approved: true }).status).toBe(
     "Approved on this machine",
   );
   // An ACP agent shows the env it runs with, since that's part of what's approved.
@@ -283,8 +283,8 @@ test("a provider's approve waits for its declaration diff", () => {
   expect(canApprove(provider, "loading")).toBe(false);
   expect(canApprove(provider, { change: "added" } as ProviderImpact)).toBe(true);
   expect(canApprove(provider, { error: "no provider.json" })).toBe(false);
-  const collector = { kind: "collector", name: "g", program: "p", args: [], env: [], approved: false } as never;
-  expect(canApprove(collector, undefined)).toBe(true);
+  const agent = { kind: "acp-agent", name: "g", program: "p", args: [], env: [], approved: false } as never;
+  expect(canApprove(agent, undefined)).toBe(true);
 });
 
 // The wording is the server's (`extension_impact::approval_lines`,
@@ -355,7 +355,7 @@ test("a backfill's button says how many one run reacts to", () => {
 // given or taken back, and offers to take it back (tsk: grants).
 const when = (iso: string) => `<${iso}>`;
 const program = (over: Record<string, unknown> = {}) =>
-  ({ kind: "collector", name: "tests.parse", program: "tools/parse.sh", args: [], env: [], approved: true, ...over }) as Parameters<typeof programRow>[0];
+  ({ kind: "acp-agent", name: "tests.parse", program: "tools/parse.sh", args: [], env: [], approved: true, ...over }) as Parameters<typeof programRow>[0];
 
 test("a program row says what isn't held here, worded as the review line says it", () => {
   expect(programRow(program()).unenforced).toBeNull();
@@ -377,7 +377,7 @@ test("a program row says when it was approved, or revoked", () => {
 test("only an approved program can be revoked, and the ask names what stops", () => {
   const m = programRow(program());
   expect(m.canRevoke).toBe(true);
-  expect(m.revokeAsk).toContain("Collector tests.parse");
+  expect(m.revokeAsk).toContain("ACP agent tests.parse");
   expect(m.revokeAsk).toMatch(/until you approve it again/);
   expect(programRow(program({ approved: false })).canRevoke).toBe(false);
 });

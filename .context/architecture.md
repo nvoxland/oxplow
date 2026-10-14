@@ -82,9 +82,9 @@ which is that oxplow steers and never drives a doing-agent.
 A cloned or pulled repo is **untrusted** (decided 2026-09-27, tsk331 /
 tsk162). Its committed config can name programs:
 
-- `exec` collectors (the project's fact and report collectors) in
-  `.oxplow/project.yaml`;
-- `exec` sources in `oxplow/extensions/*/extension.yaml`;
+- `exec` collectors and report parsers in `oxplow/extensions/*/extension.yaml`
+  (the project's own are in `oxplow/extensions/project/`, approved like any
+  extension's);
 - advisories in a shared extension (committed or git-installed): SQL whose
   results go into the agent's context (tsk352). Approved as a unit per
   extension, and the listing shows each advisory's query. Bundled
@@ -97,8 +97,7 @@ None of these run until a person approves that program on their machine.
 
 - **What an approval covers.** It is bound to a hash of what runs
   (tsk347):
-  - the program's content, plus for a project collector every file in its
-    directory (a helper it sources), unless that's the project root;
+  - the program's content;
   - its args, plus the content of any arg that names a file, read where
     the program runs (an ACP agent from its stream's worktree), so
     `node tools/agent.js` covers `agent.js`;

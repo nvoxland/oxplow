@@ -446,6 +446,8 @@ pub struct CollectionService {
     config: Arc<RwLock<OxplowConfig>>,
     /// This machine's program approvals (`exec_consent`).
     approvals: Arc<crate::exec_consent::ApprovalStore>,
+    /// The project's extensions: its own declare its report collectors.
+    extensions: Arc<crate::extension_catalog::ExtensionCatalog>,
     /// Where a report collector's run is recorded (`collector_run`,
     /// `collector.synced`) and its health kept (tsk863). Without one (unit
     /// harnesses) a report is still read, its run unrecorded.
@@ -612,6 +614,7 @@ impl CollectionService {
             vcs,
             config,
             approvals: Arc::new(crate::exec_consent::ApprovalStore::disabled()),
+            extensions: Arc::new(crate::extension_catalog::ExtensionCatalog::new()),
             run_log: None,
             metric_engine,
             delta_memo: Default::default(),
@@ -639,6 +642,15 @@ impl CollectionService {
     /// The program approvals an `exec` report collector is checked against.
     pub fn with_approvals(mut self, approvals: Arc<crate::exec_consent::ApprovalStore>) -> Self {
         self.approvals = approvals;
+        self
+    }
+
+    /// The extension catalog report collectors are read from.
+    pub fn with_extensions(
+        mut self,
+        extensions: Arc<crate::extension_catalog::ExtensionCatalog>,
+    ) -> Self {
+        self.extensions = extensions;
         self
     }
 
@@ -678,24 +690,32 @@ impl CollectionService {
             .unwrap_or_default()
     }
 
-    /// The project's report collectors (`collectors:` with `records:`), as
-    /// they are now.
-    fn report_collectors(&self) -> Vec<CollectorSpec> {
-        self.config
-            .read()
-            .map(|c| {
-                c.collectors
+    /// The report collectors (`collectors:` with `records:`) the project's
+    /// own extensions in checkout `root` declare, as they are now.
+    fn report_collectors(&self, root: &std::path::Path) -> Vec<ReportCollector> {
+        self.extensions
+            .get(root)
+            .iter()
+            .filter(|e| e.enabled && e.is_own())
+            .flat_map(|e| {
+                e.collectors
                     .iter()
                     .filter(|s| s.records.is_some())
-                    .cloned()
-                    .collect()
+                    .map(|s| ReportCollector {
+                        owner: e.name.clone(),
+                        dir: e.path.clone(),
+                        spec: s.clone(),
+                    })
             })
-            .unwrap_or_default()
+            .collect()
     }
 
-    /// Whether the project declares report collector `id`.
-    pub fn is_report_collector(&self, id: &str) -> bool {
-        self.report_collectors().iter().any(|s| s.id == id)
+    /// Whether `owner/id` is a report collector of the project's.
+    pub async fn is_report_collector(&self, owner: &str, id: &str) -> bool {
+        let root = self.worktrees.resolve(None).await.into_local_path();
+        self.report_collectors(&root)
+            .iter()
+            .any(|r| r.owner == owner && r.spec.id == id)
     }
 
     /// `rel` under the checkout `root`, after every symlink (tsk927): `None`
@@ -719,9 +739,10 @@ impl CollectionService {
     /// it on this machine, as it is now (tsk331).
     fn report_parser(
         &self,
-        spec: &CollectorSpec,
+        collector: &ReportCollector,
         root: &std::path::Path,
     ) -> Result<Collector, ParserProblem> {
+        let spec = &collector.spec;
         let records = spec
             .records
             .ok_or_else(|| ParserProblem::Broken(format!("`{}` records nothing", spec.id)))?;
@@ -735,29 +756,36 @@ impl CollectionService {
             Records::Coverage => CollectorKind::Coverage,
             Records::Analysis => CollectorKind::Analysis,
         };
-        let entry = spec.entry.as_deref().unwrap_or_default();
-        let abs = Self::in_checkout(root, entry)
+        let entry = format!(
+            "{}/{}",
+            collector.dir,
+            spec.entry.as_deref().unwrap_or_default()
+        );
+        let abs = Self::in_checkout(root, &entry)
             .map_err(|e| ParserProblem::Broken(format!("entry {e}")))?
-            .unwrap_or_else(|| root.join(entry));
+            .unwrap_or_else(|| root.join(&entry));
         if spec.runtime == oxplow_config::collectors::CollectorRuntime::Exec {
-            use crate::exec_consent::{needs_approval, project_collector_program, ProgramKind};
-            let program = project_collector_program(ProgramKind::Collector, &spec.id, entry, &[]);
-            let gate = crate::exec_consent::script_gate(
-                self.approvals.clone(),
-                root.to_path_buf(),
-                program,
-            );
-            if gate().is_err() {
-                return Err(ParserProblem::NeedsApproval(needs_approval(
-                    ProgramKind::Collector,
-                    &spec.id,
-                    entry,
+            let ext_dir = root.join(&collector.dir);
+            let hash = crate::collector_runner::approval_hash(&ext_dir, spec)
+                .map_err(|e| ParserProblem::Broken(format!("entry `{entry}`: {e}")))?;
+            if !crate::collector_runner::is_approved(
+                &self.approvals,
+                &collector.owner,
+                &spec.id,
+                &hash,
+            ) {
+                return Err(ParserProblem::NeedsApproval(format!(
+                    "collector `{}/{}` runs a program (`{entry}`) and needs a person's approval \
+                     at this version first (Settings → Data)",
+                    collector.owner, spec.id
                 )));
             }
-            let code = crate::approved_code::project_collector(
+            let code = crate::approved_code::extension_collector(
                 self.approvals.clone(),
                 root.to_path_buf(),
-                project_collector_program(ProgramKind::Collector, &spec.id, entry, &[]),
+                ext_dir,
+                &collector.owner,
+                spec,
             )
             .map_err(ParserProblem::Broken)?;
             return Ok(Collector::exec(
@@ -799,11 +827,12 @@ impl CollectionService {
     /// `root`'s: the checkout the run ran in (tsk890).
     async fn read_report(
         &self,
-        spec: &CollectorSpec,
+        collector: &ReportCollector,
         window: Option<FreshWindow>,
         how: &ReportRun<'_>,
         root: &std::path::Path,
     ) -> ReportRead {
+        let spec = &collector.spec;
         let Some(report) = spec.report.as_ref() else {
             return ReportRead::Missing(String::new());
         };
@@ -820,8 +849,7 @@ impl CollectionService {
         let Ok(content) = std::fs::read_to_string(&abs) else {
             return ReportRead::Missing(report.path.clone());
         };
-        let key =
-            crate::collector_runner::contribution_key(oxplow_config::collectors::PROJECT, &spec.id);
+        let key = crate::collector_runner::contribution_key(&collector.owner, &spec.id);
         if let Some(log) = &self.run_log {
             match log.health().disabled_reason(&key).await {
                 Ok(Some(reason)) => {
@@ -838,12 +866,12 @@ impl CollectionService {
             }
         }
         let started = std::time::Instant::now();
-        let parsed = match self.report_parser(spec, root) {
+        let parsed = match self.report_parser(collector, root) {
             Err(ParserProblem::NeedsApproval(reason)) => {
                 if let Some(log) = &self.run_log {
                     if let Err(e) = log
                         .record_needs_approval(
-                            oxplow_config::collectors::PROJECT,
+                            &collector.owner,
                             &spec.id,
                             how.cause.map(|c| c.seq),
                             reason.clone(),
@@ -879,7 +907,7 @@ impl CollectionService {
         };
         let elapsed = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
         let error = parsed.as_ref().err().cloned();
-        self.record_report_run(&spec.id, how, &key, elapsed, error)
+        self.record_report_run(&collector.owner, &spec.id, how, &key, elapsed, error)
             .await;
         match parsed {
             Ok((output, exec, label)) => ReportRead::Parsed {
@@ -897,6 +925,7 @@ impl CollectionService {
     /// counted.
     async fn record_report_run(
         &self,
+        owner: &str,
         id: &str,
         how: &ReportRun<'_>,
         key: &oxplow_db::ContributionKey,
@@ -909,7 +938,7 @@ impl CollectionService {
         let recorded = log
             .record_with(
                 crate::collector_runner::RunRecord {
-                    owner: oxplow_config::collectors::PROJECT,
+                    owner,
                     id,
                     trigger: how.trigger,
                     source: how.source,
@@ -982,13 +1011,14 @@ impl CollectionService {
             cause,
         };
         let mut out = RunReports::default();
-        for spec in self.report_collectors() {
+        for collector in self.report_collectors(root) {
+            let spec = &collector.spec;
             if spec.trigger != (Trigger::OnRun { run })
                 || records.is_some_and(|r| spec.records != Some(r))
             {
                 continue;
             }
-            match self.read_report(&spec, Some(window), &how, root).await {
+            match self.read_report(&collector, Some(window), &how, root).await {
                 ReportRead::Parsed {
                     output,
                     exec,
@@ -1464,15 +1494,17 @@ impl CollectionService {
     pub async fn sync_report_collector(
         &self,
         thread: &ThreadId,
+        owner: &str,
         id: &str,
         source: &str,
         turn: Option<i64>,
     ) -> Result<ReportSync, crate::collector_runner::RunCollectorError> {
         use crate::collector_runner::RunCollectorError;
-        let spec = self
-            .report_collectors()
+        let root = self.worktree(thread).await;
+        let collector = self
+            .report_collectors(&root)
             .into_iter()
-            .find(|s| s.id == id)
+            .find(|r| r.owner == owner && r.spec.id == id)
             .ok_or(RunCollectorError::NotFound)?;
         let how = ReportRun {
             trigger: "manual",
@@ -1480,8 +1512,7 @@ impl CollectionService {
             cause: None,
         };
         let mut reads = RunReports::default();
-        let root = self.worktree(thread).await;
-        match self.read_report(&spec, None, &how, &root).await {
+        match self.read_report(&collector, None, &how, &root).await {
             ReportRead::Parsed {
                 output,
                 exec,
@@ -1497,9 +1528,9 @@ impl CollectionService {
             }
             ReportRead::NotFresh => unreachable!("a by-hand run reads the report as it is"),
         }
-        let command = format!("oxplow.collector.sync project/{id}");
+        let command = format!("oxplow.collector.sync {owner}/{id}");
         let storage = RunCollectorError::Storage;
-        Ok(match spec.records {
+        Ok(match collector.spec.records {
             Some(Records::Tests) => {
                 let Some((report, source)) = reads.tests() else {
                     return Ok(ReportSync::Tests { run: None });
@@ -2445,7 +2476,8 @@ impl CollectionService {
                 .is_some_and(|run| names_configured_runner(&cfg, &run));
         if !produced_report && !ran_the_runner && self.mark_nudged(&effort).await {
             let msg = if reads.unread.is_empty() {
-                report_nudge_message(&cfg, !self.report_collectors().is_empty())
+                let root = self.worktree(thread).await;
+                report_nudge_message(&cfg, !self.report_collectors(&root).is_empty())
             } else {
                 unread_reports_message(&reads.unread)
             };
@@ -3691,6 +3723,15 @@ enum ParserProblem {
 
 /// How a report collector is being run: what ran it (`on` / `manual`), as
 /// whom (an event source), and for which detected run.
+/// A report collector and the extension that declares it.
+#[derive(Debug, Clone)]
+struct ReportCollector {
+    owner: String,
+    /// Its extension's folder, project-relative (`oxplow/extensions/project`).
+    dir: String,
+    spec: CollectorSpec,
+}
+
 struct ReportRun<'a> {
     trigger: &'static str,
     source: &'a str,
@@ -3874,30 +3915,45 @@ fn diff_new_side_lines(old: &str, new: &str) -> BTreeSet<u32> {
 /// What the collection tests declare (tsk863).
 #[cfg(test)]
 pub(crate) mod test_support {
-    use oxplow_config::collectors::CollectorSpec;
-
-    /// A project report collector: `records` (`tests` / `coverage` /
-    /// `analysis`) read from `path` by `entry` (`oxplow:<parser>` or a
-    /// script) after a `run` (`test` / `analysis`).
+    /// A project report collector's manifest entry: `records` (`tests` /
+    /// `coverage` / `analysis`) read from `path` by `entry`
+    /// (`oxplow:<parser>` or a script) after a `run` (`test` / `analysis`).
+    /// It is declared by [`write_project_extension`].
     pub(crate) fn report_collector(
         id: &str,
         records: &str,
         entry: &str,
         path: &str,
         run: &str,
-    ) -> CollectorSpec {
+    ) -> String {
         let yaml = format!(
             "- {{ id: {id}, records: {records}, entry: \"{entry}\", report: {{ path: \"{path}\" }}, trigger: {{ on_run: {run} }} }}"
         );
         let value: serde_yaml::Value = serde_yaml::from_str(&yaml).unwrap();
-        let (mut specs, errors) = oxplow_config::collectors::parse_collectors(
-            oxplow_config::collectors::PROJECT,
-            None,
+        let (specs, errors) = oxplow_config::collectors::parse_collectors(
+            &oxplow_config::collectors::Declarer::own("project"),
             &value,
             &|_| true,
         );
         assert_eq!(errors, Vec::<String>::new());
-        specs.remove(0)
+        assert_eq!(specs.len(), 1);
+        yaml
+    }
+
+    /// Declare `entries` (from [`report_collector`]) as the collectors of the
+    /// project extension under `root` (`oxplow/extensions/project/`),
+    /// replacing what it declared.
+    pub(crate) fn write_project_extension(root: &std::path::Path, entries: &[String]) {
+        let dir = root.join("oxplow/extensions/project");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut manifest =
+            String::from("manifest: 2\nname: project\nintent:\n  purpose: test\ncollectors:\n");
+        for entry in entries {
+            manifest.push_str("  ");
+            manifest.push_str(entry);
+            manifest.push('\n');
+        }
+        std::fs::write(dir.join("extension.yaml"), manifest).unwrap();
     }
 }
 
@@ -4246,8 +4302,8 @@ mod tests {
         use super::super::test_support::report_collector;
 
         /// Declare `specs` as the project's report collectors.
-        fn declare(h: &Harness, specs: Vec<CollectorSpec>) {
-            h.service.config.write().unwrap().collectors = specs;
+        fn declare(h: &Harness, specs: Vec<String>) {
+            super::super::test_support::write_project_extension(h.tmp.path(), &specs);
         }
 
         /// What a run of `kind` that ended just now reads.
@@ -4266,7 +4322,7 @@ mod tests {
         async fn sync_coverage(h: &Harness) -> CoverageIngest {
             match h
                 .service
-                .sync_report_collector(&h.thread, "tests.coverage", "human", None)
+                .sync_report_collector(&h.thread, "project", "tests.coverage", "human", None)
                 .await
                 .unwrap()
             {
@@ -4408,17 +4464,19 @@ mod tests {
                 git_commit(&project_dir, "base");
             }
 
-            let mut cfg = oxplow_config::load_project_config(&project_dir).unwrap();
+            let cfg = oxplow_config::load_project_config(&project_dir).unwrap();
             if let Some(xml) = report_xml {
                 std::fs::write(project_dir.join("coverage.xml"), xml).unwrap();
-                cfg.collectors
-                    .push(super::super::test_support::report_collector(
+                super::super::test_support::write_project_extension(
+                    &project_dir,
+                    &[super::super::test_support::report_collector(
                         "tests.coverage",
                         "coverage",
                         "oxplow:cobertura",
                         "coverage.xml",
                         "test",
-                    ));
+                    )],
+                );
             }
 
             let nudges = Arc::new(SqliteAgentNudgeStore::new(db.clone()));
@@ -4593,6 +4651,17 @@ mod tests {
             std::fs::remove_file(h.tmp.path().join("coverage.xml")).unwrap();
             let worktree = tempfile::tempdir().unwrap();
             std::fs::write(worktree.path().join("coverage.xml"), COBERTURA_50PCT).unwrap();
+            // A worktree is a checkout of the repo: it has the project extension.
+            super::super::test_support::write_project_extension(
+                worktree.path(),
+                &[super::super::test_support::report_collector(
+                    "tests.coverage",
+                    "coverage",
+                    "oxplow:cobertura",
+                    "coverage.xml",
+                    "test",
+                )],
+            );
             let now = Timestamp::now();
             let stream = Stream {
                 id: StreamId::new(2),
@@ -4636,7 +4705,7 @@ mod tests {
                 .unwrap();
             match h
                 .service
-                .sync_report_collector(&thread.id, "tests.coverage", "human", None)
+                .sync_report_collector(&thread.id, "project", "tests.coverage", "human", None)
                 .await
             {
                 Ok(ReportSync::Coverage(CoverageIngest::Stored { summary_pct, .. })) => {
@@ -4699,15 +4768,25 @@ mod tests {
             const ESLINT: &str = r#"[{"filePath":"src/a.ts","messages":[{"ruleId":"r","severity":2,"message":"m","line":1,"column":1}]}]"#;
             let h = build(Some(COBERTURA_50PCT)).await;
             std::fs::write(h.tmp.path().join("eslint.json"), ESLINT).unwrap();
-            let mut specs = h.service.report_collectors();
-            specs.push(report_collector(
-                "lint.eslint",
-                "analysis",
-                "oxplow:eslint",
-                "eslint.json",
-                "analysis",
-            ));
-            declare(&h, specs);
+            declare(
+                &h,
+                vec![
+                    report_collector(
+                        "tests.coverage",
+                        "coverage",
+                        "oxplow:cobertura",
+                        "coverage.xml",
+                        "test",
+                    ),
+                    report_collector(
+                        "lint.eslint",
+                        "analysis",
+                        "oxplow:eslint",
+                        "eslint.json",
+                        "analysis",
+                    ),
+                ],
+            );
             let thread = h.thread;
             let turn: i64 =
                 h.db.transaction(move |tx| {
@@ -6881,8 +6960,9 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             let h = build(None).await;
             let dir = h.tmp.path();
-            std::fs::create_dir_all(dir.join("tools")).unwrap();
-            let program = dir.join("tools/parse.sh");
+            let ext_dir = dir.join("oxplow/extensions/project");
+            std::fs::create_dir_all(ext_dir.join("tools")).unwrap();
+            let program = ext_dir.join("tools/parse.sh");
             std::fs::write(
                 &program,
                 "#!/bin/sh\ncat >/dev/null\necho '{\"suites\":[{\"name\":\"s\",\"cases\":[{\"classname\":\"c\",\"name\":\"t\",\"status\":\"passed\"}]}]}'\n",
@@ -6890,18 +6970,16 @@ mod tests {
             .unwrap();
             std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
             std::fs::write(dir.join("out.txt"), "whatever the tool wrote").unwrap();
-            let value: serde_yaml::Value = serde_yaml::from_str(
-                "- { id: tests.parse, records: tests, runtime: exec, entry: tools/parse.sh, report: { path: out.txt }, trigger: { on_run: test } }",
-            )
-            .unwrap();
-            let (specs, errors) = oxplow_config::collectors::parse_collectors(
-                oxplow_config::collectors::PROJECT,
-                None,
+            let entry = "- { id: tests.parse, records: tests, runtime: exec, entry: tools/parse.sh, report: { path: out.txt }, trigger: { on_run: test } }";
+            let value: serde_yaml::Value = serde_yaml::from_str(entry).unwrap();
+            let (mut specs, errors) = oxplow_config::collectors::parse_collectors(
+                &oxplow_config::collectors::Declarer::own("project"),
                 &value,
                 &|_| true,
             );
             assert_eq!(errors, Vec::<String>::new());
-            declare(&h, specs);
+            let spec = specs.remove(0);
+            declare(&h, vec![entry.to_string()]);
             let approvals = Arc::new(crate::exec_consent::ApprovalStore::for_tests(dir));
             let service = h.service.clone().with_approvals(approvals.clone());
             let root = h.tmp.path().to_path_buf();
@@ -6924,24 +7002,8 @@ mod tests {
             assert_eq!(status, "needs_approval");
             assert!(error.unwrap().contains("approval"));
 
-            let cfg = h.service.config.read().unwrap().clone();
-            let version = crate::exec_consent::version_of(
-                &approvals,
-                dir,
-                &cfg,
-                crate::exec_consent::ProgramKind::Collector,
-                "tests.parse",
-            );
-            crate::exec_consent::approve_program(
-                &approvals,
-                dir,
-                &cfg,
-                &[],
-                crate::exec_consent::ProgramKind::Collector,
-                "tests.parse",
-                &version,
-            )
-            .unwrap();
+            let hash = crate::collector_runner::approval_hash(&ext_dir, &spec).unwrap();
+            crate::collector_runner::approve(&approvals, "project", &spec.id, &hash).unwrap();
             let reads = read(service).await;
             let (tests, source) = reads.tests().expect("the approved program parsed");
             assert_eq!(tests.suites[0].cases.len(), 1);
@@ -6960,8 +7022,9 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             let h = build(None).await;
             let dir = h.tmp.path();
-            std::fs::create_dir_all(dir.join("tools")).unwrap();
-            let program = dir.join("tools/parse.sh");
+            let ext_dir = dir.join("oxplow/extensions/project");
+            std::fs::create_dir_all(ext_dir.join("tools")).unwrap();
+            let program = ext_dir.join("tools/parse.sh");
             let script = |extra: &str| {
                 format!(
                     "#!/bin/sh\ncat >/dev/null\n{extra}echo '{{\"suites\":[{{\"name\":\"s\",\"cases\":[{{\"classname\":\"c\",\"name\":\"t\",\"status\":\"passed\"}}]}}]}}'\n"
@@ -6970,18 +7033,16 @@ mod tests {
             std::fs::write(&program, script("")).unwrap();
             std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
             std::fs::write(dir.join("out.txt"), "whatever the tool wrote").unwrap();
-            let value: serde_yaml::Value = serde_yaml::from_str(
-                "- { id: tests.parse, records: tests, runtime: exec, entry: tools/parse.sh, report: { path: out.txt }, trigger: { on_run: test } }",
-            )
-            .unwrap();
-            let (specs, errors) = oxplow_config::collectors::parse_collectors(
-                oxplow_config::collectors::PROJECT,
-                None,
+            let entry = "- { id: tests.parse, records: tests, runtime: exec, entry: tools/parse.sh, report: { path: out.txt }, trigger: { on_run: test } }";
+            let value: serde_yaml::Value = serde_yaml::from_str(entry).unwrap();
+            let (mut specs, errors) = oxplow_config::collectors::parse_collectors(
+                &oxplow_config::collectors::Declarer::own("project"),
                 &value,
                 &|_| true,
             );
             assert_eq!(errors, Vec::<String>::new());
-            declare(&h, specs);
+            let spec = specs.remove(0);
+            declare(&h, vec![entry.to_string()]);
             let approvals = Arc::new(crate::exec_consent::ApprovalStore::for_tests(dir));
             let service = h.service.clone().with_approvals(approvals.clone());
             let sync = || {
@@ -6989,7 +7050,7 @@ mod tests {
                 let thread = h.thread;
                 async move {
                     service
-                        .sync_report_collector(&thread, "tests.parse", "agent", None)
+                        .sync_report_collector(&thread, "project", "tests.parse", "agent", None)
                         .await
                 }
             };
@@ -6997,25 +7058,9 @@ mod tests {
                 matches!(sync().await, Err(crate::collector_runner::RunCollectorError::NeedsApproval(m)) if m.contains("approval")),
                 "unapproved"
             );
-            let cfg = h.service.config.read().unwrap().clone();
             let approve = || {
-                let version = crate::exec_consent::version_of(
-                    &approvals,
-                    dir,
-                    &cfg,
-                    crate::exec_consent::ProgramKind::Collector,
-                    "tests.parse",
-                );
-                crate::exec_consent::approve_program(
-                    &approvals,
-                    dir,
-                    &cfg,
-                    &[],
-                    crate::exec_consent::ProgramKind::Collector,
-                    "tests.parse",
-                    &version,
-                )
-                .unwrap();
+                let hash = crate::collector_runner::approval_hash(&ext_dir, &spec).unwrap();
+                crate::collector_runner::approve(&approvals, "project", &spec.id, &hash).unwrap();
             };
             approve();
             assert!(
@@ -7069,7 +7114,7 @@ mod tests {
             assert!(run_reads(&h, RunKind::Test).await.tests().is_none());
             assert!(matches!(
                 h.service
-                    .sync_report_collector(&h.thread, "tests.junit", "human", None)
+                    .sync_report_collector(&h.thread, "project", "tests.junit", "human", None)
                     .await,
                 Err(crate::collector_runner::RunCollectorError::Disabled(_))
             ));
@@ -7081,7 +7126,7 @@ mod tests {
             let h = build(None).await;
             assert!(matches!(
                 h.service
-                    .sync_report_collector(&h.thread, "tests.coverage", "human", None)
+                    .sync_report_collector(&h.thread, "project", "tests.coverage", "human", None)
                     .await,
                 Err(crate::collector_runner::RunCollectorError::NotFound)
             ));
@@ -7780,7 +7825,7 @@ mod tests {
             );
             let outcome = match h
                 .service
-                .sync_report_collector(&h.thread, "lint.eslint", "human", None)
+                .sync_report_collector(&h.thread, "project", "lint.eslint", "human", None)
                 .await
                 .unwrap()
             {
@@ -7865,7 +7910,7 @@ mod tests {
             );
             let outcome = match h
                 .service
-                .sync_report_collector(&h.thread, "lint.eslint", "human", None)
+                .sync_report_collector(&h.thread, "project", "lint.eslint", "human", None)
                 .await
                 .unwrap()
             {
@@ -7971,8 +8016,10 @@ mod tests {
             )
             .unwrap();
             std::fs::write(h.tmp.path().join("reports/ok.json"), ESLINT_JSON).unwrap();
-            std::os::unix::fs::symlink(outside.path().join("p.jq"), h.tmp.path().join("p.jq"))
-                .unwrap();
+            // The parser's entry is the project extension's own file.
+            let ext_dir = h.tmp.path().join("oxplow/extensions/project");
+            std::fs::create_dir_all(&ext_dir).unwrap();
+            std::os::unix::fs::symlink(outside.path().join("p.jq"), ext_dir.join("p.jq")).unwrap();
             declare(
                 &h,
                 vec![
@@ -7983,35 +8030,32 @@ mod tests {
                         "reports/x.json",
                         "analysis",
                     ),
-                    {
-                        let value: serde_yaml::Value = serde_yaml::from_str(
-                            "- { id: lint.entry, records: analysis, runtime: jaq, entry: p.jq, \
-                             report: { path: reports/ok.json, format: json }, \
-                             trigger: { on_run: analysis } }",
-                        )
-                        .unwrap();
-                        let (mut specs, errors) = oxplow_config::collectors::parse_collectors(
-                            oxplow_config::collectors::PROJECT,
-                            None,
-                            &value,
-                            &|_| true,
-                        );
-                        assert_eq!(errors, Vec::<String>::new());
-                        specs.remove(0)
-                    },
+                    "- { id: lint.entry, records: analysis, runtime: jaq, entry: p.jq, \
+                     report: { path: reports/ok.json, format: json }, \
+                     trigger: { on_run: analysis } }"
+                        .to_string(),
                 ],
             );
-            for id in ["lint.report", "lint.entry"] {
-                let err = h
-                    .service
-                    .sync_report_collector(&h.thread, id, "human", None)
-                    .await
-                    .unwrap_err();
-                assert!(
-                    matches!(&err, crate::collector_runner::RunCollectorError::Failed(m) if m.contains("outside the checkout")),
-                    "{id}: {err:?}"
-                );
-            }
+            let err = h
+                .service
+                .sync_report_collector(&h.thread, "project", "lint.report", "human", None)
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(&err, crate::collector_runner::RunCollectorError::Failed(m) if m.contains("outside the checkout")),
+                "{err:?}"
+            );
+            // A parser entry that a symlink takes outside the extension isn't
+            // loaded at all: there is no such collector to run.
+            let err = h
+                .service
+                .sync_report_collector(&h.thread, "project", "lint.entry", "human", None)
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, crate::collector_runner::RunCollectorError::NotFound),
+                "{err:?}"
+            );
         }
 
         /// tsk863: a by-hand run of a collector whose report isn't there
@@ -8031,7 +8075,7 @@ mod tests {
             );
             let err = h
                 .service
-                .sync_report_collector(&h.thread, "lint.eslint", "human", None)
+                .sync_report_collector(&h.thread, "project", "lint.eslint", "human", None)
                 .await
                 .unwrap_err();
             assert!(

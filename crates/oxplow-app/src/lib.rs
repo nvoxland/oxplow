@@ -148,7 +148,6 @@ pub mod pacing;
 pub mod page_ref_backfill;
 pub mod page_ref_consumers;
 pub mod post_tool_reactors;
-pub mod project_collectors;
 pub mod prompt_catalog;
 pub mod providers;
 pub mod reasoning;
@@ -1611,6 +1610,7 @@ impl Services {
             metric_engine.clone(),
         )
         .with_approvals(approvals.clone())
+        .with_extensions(extension_catalog.clone())
         .with_marks(snapshots.clone())
         .with_vocabulary(vocabulary.clone())
         .with_run_log(collector_runner::RunLog {
@@ -2174,15 +2174,16 @@ mod tests {
         let project = tempdir().unwrap();
         init_git(project.path());
         let services = Services::in_memory(project.path()).await.unwrap();
-        // Boot config reads no reports.
+        // Boot config has no test command.
         assert!(config_service::read_config(&services.config)
-            .collectors
-            .is_empty());
+            .testing
+            .command
+            .is_none());
 
         // Simulate `/oxplow:configure` writing the file out-of-band.
         std::fs::write(
             oxplow_config::config_path(project.path()),
-            "collectors:\n  - { id: tests.coverage, records: coverage, entry: \"oxplow:lcov\", report: { path: target/coverage/lcov.info }, trigger: { on_run: test } }\n",
+            "testing:\n  command: cargo test\n",
         )
         .unwrap();
 
@@ -2190,13 +2191,9 @@ mod tests {
 
         let cfg = config_service::read_config(&services.config);
         assert_eq!(
-            cfg.collectors.len(),
-            1,
+            cfg.testing.command.as_deref(),
+            Some("cargo test"),
             "in-memory config should reflect the on-disk edit after reload"
-        );
-        assert_eq!(
-            cfg.collectors[0].report.as_ref().unwrap().path,
-            "target/coverage/lcov.info"
         );
     }
 

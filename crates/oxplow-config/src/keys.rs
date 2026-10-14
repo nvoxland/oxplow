@@ -14,7 +14,7 @@ use crate::{
 };
 
 /// Keys only a person may set. Each either runs a program (`lsp`,
-/// `acpAgents`, `extensionInstances`, `agents`, `collectors`), chooses the model that
+/// `acpAgents`, `extensionInstances`, `agents`), chooses the model that
 /// reads the project (`ai`, `agentConfig`), enables code (`extensions`),
 /// chooses where the project's work goes and how it is tracked
 /// (`activeProviders`: an agent moving filing to another tracker, or
@@ -43,7 +43,6 @@ pub const HUMAN_ONLY_KEYS: &[&str] = &[
     "lsp",
     "testing",
     "extensions",
-    "collectors",
     "agentPromptAppend",
 ];
 
@@ -232,7 +231,6 @@ mod tests {
                 );
             }
         }
-        assert!(config_key("collectors").unwrap().human_only);
         assert!(config_key("agentPromptAppend").unwrap().human_only);
     }
 

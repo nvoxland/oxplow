@@ -104,14 +104,17 @@ mod tests {
         let fx = services_with_effort().await;
         // Coverage is recorded while a metric consumes it.
         std::fs::write(fx._dir.path().join("coverage.xml"), COBERTURA).unwrap();
-        fx.svc.config.write().unwrap().collectors =
-            vec![crate::collection::test_support::report_collector(
+        crate::collection::test_support::write_project_extension(
+            fx._dir.path(),
+            &[crate::collection::test_support::report_collector(
                 "tests.coverage",
                 "coverage",
                 "oxplow:cobertura",
                 "coverage.xml",
                 "test",
-            )];
+            )],
+        );
+        crate::test_fixtures::activate(&fx.svc).await;
         let agent = Actor::Agent {
             session_id: None,
             thread_id: Some(fx.thread),

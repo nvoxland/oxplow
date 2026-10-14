@@ -1055,7 +1055,8 @@ mod tests {
     /// garbled, the script must still emit one report with no facts.
     #[test]
     fn jaq_type_coverage_script_tolerates_a_missing_report() {
-        let program = include_str!("../../../oxplow/collectors/type_coverage.jq");
+        let program =
+            include_str!("../../../oxplow/extensions/project/collectors/type_coverage.jq");
         for input in [
             json!({}),
             json!({ "report": null }),

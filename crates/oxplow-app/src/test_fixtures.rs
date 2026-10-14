@@ -432,12 +432,12 @@ pub(crate) fn foundation_declarations() -> (
     };
     let metrics = oxplow_config::validate_metrics(
         Some(serde_yaml::from_value(block("metrics")).expect("metrics parse")),
-        Some(oxplow_config::OXPLOW_NAMESPACE),
+        oxplow_config::CatalogLayer::Extension(oxplow_config::OXPLOW_NAMESPACE),
     )
     .expect("the foundation's metrics validate");
     let dimensions = oxplow_config::validate_dimensions(
         Some(serde_yaml::from_value(block("dimensions")).expect("dimensions parse")),
-        Some(oxplow_config::OXPLOW_NAMESPACE),
+        oxplow_config::CatalogLayer::Extension(oxplow_config::OXPLOW_NAMESPACE),
     )
     .expect("the foundation's dimensions validate");
     (metrics, dimensions)

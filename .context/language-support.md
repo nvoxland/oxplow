@@ -72,7 +72,8 @@ language.
 Users extend oxplow **without recompiling** along two axes that are *not*
 new languages:
 
-- **Metrics** — `.oxplow/project.yaml` `metrics:` + a Starlark/jaq script over the
+- **Metrics** — an extension's `metrics:` + collectors (the project's own:
+  `oxplow/extensions/project/`) + a Starlark/jaq script over the
   `files()`/`ast_query()`/`code_metrics()`/`source_files()`/`markers()`
   host builtins (see `.context/metrics.md`).
 - **LSP servers** — `.oxplow/project.yaml` `lsp.servers[]` (any `languageId`), or
