@@ -382,6 +382,13 @@ impl RunContext {
         self
     }
 
+    /// This run without the host generation pin it carried: work that must
+    /// not hold a generation while it runs.
+    pub fn without_host_generation(mut self) -> Self {
+        self.host_generation = None;
+        self
+    }
+
     /// Read a host-owned generation pin of `T`. The caller must validate
     /// that the pin belongs to its own host boundary; this is not authority.
     pub fn host_generation<T: Any + Send + Sync>(&self) -> Option<&T> {

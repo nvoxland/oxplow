@@ -108,7 +108,7 @@ pub struct Collectors<'a> {
     /// What a derived collector's `input` is read through.
     pub layer: crate::sql_gateway::SqlGateway,
     /// The loaded-extensions cache (`Services.extension_catalog`).
-    pub catalog: &'a crate::extension_catalog::ExtensionCatalog,
+    pub catalog: &'a Arc<crate::extension_catalog::ExtensionCatalog>,
     /// What a derived collector's `ai_*` builtins ask (recorded computations).
     pub ai: std::sync::Arc<crate::ai_compute::AiCompute>,
     /// Where a script that reads the tree (`tree.read`) reads it; `None`
@@ -303,14 +303,9 @@ fn last_run_ms(l: &CollectorListing) -> Option<i64> {
 /// command refuses them. Returns what it ran; a failed run
 /// is logged and the rest still run.
 pub async fn run_due_collectors(state: &crate::Services) -> Vec<(String, String)> {
-    state
-        .sql
-        .read_generation(run_due_collectors_unpinned(state))
-        .await
-        .unwrap_or_default()
-}
+    // No pin: each run is a command, and holds a generation only for what
+    // it reads.
 
-async fn run_due_collectors_unpinned(state: &crate::Services) -> Vec<(String, String)> {
     let root = state.worktrees.resolve(None).await.into_local_path();
     let Ok(listings) = list_collectors(&Collectors::of(state, &root)).await else {
         return vec![];
@@ -720,11 +715,8 @@ pub async fn derive_collector(
     rows: Option<Vec<serde_json::Value>>,
     run: &RunContext,
 ) -> Result<ScriptOutput, String> {
-    let run = layer
-        .pin_run(run)
-        .await
-        .map_err(|error| error.to_string())?;
     run.check_authority()?;
+    let run = run.clone();
     let read = match (rows, &spec.input) {
         (Some(rows), _) => InputRows {
             rows,
@@ -1072,11 +1064,6 @@ pub async fn run_collector(
     id: &str,
     trigger: RunTrigger,
 ) -> Result<CollectorRunReport, RunCollectorError> {
-    let parent = ctx
-        .layer
-        .pin_run(parent)
-        .await
-        .map_err(RunCollectorError::Storage)?;
     let health =
         crate::contribution_health::ContributionHealth::new(ctx.db.clone(), ctx.vocabulary.clone());
     let key = contribution_key(owner, id);
@@ -1090,7 +1077,7 @@ pub async fn run_collector(
              (`oxplow.contribution.enable`, Settings → Extensions)."
         )));
     }
-    let run = collector_context(ctx, &parent, owner, id)?;
+    let run = collector_context(ctx, parent, owner, id)?;
     let started = std::time::Instant::now();
     let result = run_collector_once(ctx, &run, owner, id, trigger).await;
     let recorded = match &result {
@@ -1124,23 +1111,27 @@ fn collector_context(
         .then(|| crate::extensions::read_extension_file(ctx.root, &ext.name, entry_of(&spec)))
         .flatten();
     let needs = crate::services::collector_needs(&spec, script.as_deref());
+    // It holds no catalog generation while it runs (it can take minutes): it
+    // belongs to its extension's version, rechecked at each host call and at
+    // publication.
+    let owner_ref = crate::run_context::unpinned_contribution(
+        &ext,
+        oxplow_domain::contribution::ContributionKind::Collector,
+        id,
+    );
     let mut run = parent
-        .child(
-            Some(crate::run_context::contribution(
-                ctx.catalog,
-                ctx.root,
-                &ext,
-                oxplow_domain::contribution::ContributionKind::Collector,
-                id,
-            )),
-            Mode::External,
-        )
+        .child(Some(owner_ref.clone()), Mode::External)
         .authorized(crate::grants::authority(
             ctx.approvals,
             &format!("{owner}/{id}"),
             approved,
             crate::grants::collector_request(&spec, &needs),
         ));
+    run = run.guarded(crate::run_context::live_owner(
+        ctx.catalog.clone(),
+        ctx.root,
+        owner_ref,
+    ));
     if consented {
         let directory = ctx.root.join(&ext.path);
         let spec = spec.clone();
@@ -1225,9 +1216,11 @@ async fn run_collector_once(
             let event = event.clone();
             let elapsed = elapsed_ms(started);
             let this_run = run.clone();
+            // Pinned for the commit alone: no activation lands between the
+            // check of the collector's own extension and the rows.
             let committed = ctx
-                .db
-                .transaction(move |tx| {
+                .layer
+                .read_generation(ctx.db.transaction(move |tx| {
                     this_run.check_authority().map_err(DomainError::Invalid)?;
                     let counts: BTreeMap<String, i64> = names
                         .iter()
@@ -1259,8 +1252,9 @@ async fn run_collector_once(
                         )?;
                     }
                     Ok(counts)
-                })
-                .await;
+                }))
+                .await
+                .and_then(|committed| committed);
             match committed {
                 Ok(row_counts) => {
                     return Ok(CollectorRunReport {
@@ -1723,11 +1717,6 @@ pub async fn preview_collector(
         .transpose()
         .map_err(|e| RunCollectorError::Failed(format!("its event: {}", e.message())))?;
     let parent = RunContext::core(oxplow_domain::Actor::System, Mode::External);
-    let parent = ctx
-        .layer
-        .pin_run(&parent)
-        .await
-        .map_err(RunCollectorError::Storage)?;
     let run = collector_context(ctx, &parent, owner, id)?;
     let (spec, output) = produce(ctx, &run, owner, id, view.as_ref(), rows).await?;
     let mut output = output.map_err(RunCollectorError::Failed)?;
@@ -2751,7 +2740,7 @@ pub(crate) mod tests {
             db: db.clone(),
             vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
-            catalog: &crate::extension_catalog::ExtensionCatalog::new(),
+            catalog: &Arc::new(crate::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
         };
@@ -2947,7 +2936,7 @@ pub(crate) mod tests {
             db: db.clone(),
             vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
-            catalog: &crate::extension_catalog::ExtensionCatalog::new(),
+            catalog: &Arc::new(crate::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
         };
@@ -2978,7 +2967,7 @@ pub(crate) mod tests {
             db: db.clone(),
             vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
-            catalog: &crate::extension_catalog::ExtensionCatalog::new(),
+            catalog: &Arc::new(crate::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
         };
@@ -3377,7 +3366,7 @@ pub(crate) mod tests {
             db: db.clone(),
             vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
-            catalog: &crate::extension_catalog::ExtensionCatalog::new(),
+            catalog: &Arc::new(crate::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
         };
@@ -3505,7 +3494,7 @@ pub(crate) mod tests {
             db: db.clone(),
             vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()).with_activation(activation),
-            catalog: &crate::extension_catalog::ExtensionCatalog::new(),
+            catalog: &Arc::new(crate::extension_catalog::ExtensionCatalog::new()),
             ai: std::sync::Arc::new(crate::ai_compute::AiCompute::new(
                 ai,
                 oxplow_db::SqliteAiResultStore::new(db.clone()),
@@ -3591,7 +3580,7 @@ pub(crate) mod tests {
             db: db.clone(),
             vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
-            catalog: &crate::extension_catalog::ExtensionCatalog::new(),
+            catalog: &Arc::new(crate::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
         };
@@ -3654,7 +3643,7 @@ pub(crate) mod tests {
             db: db.clone(),
             vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
-            catalog: &crate::extension_catalog::ExtensionCatalog::new(),
+            catalog: &Arc::new(crate::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
         };
@@ -3786,7 +3775,7 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
             db: db.clone(),
             vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
-            catalog: &crate::extension_catalog::ExtensionCatalog::new(),
+            catalog: &Arc::new(crate::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
         };
@@ -3889,7 +3878,7 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
             db: db.clone(),
             vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
-            catalog: &crate::extension_catalog::ExtensionCatalog::new(),
+            catalog: &Arc::new(crate::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
         };

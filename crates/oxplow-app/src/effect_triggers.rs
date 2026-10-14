@@ -218,18 +218,14 @@ impl AsyncEventConsumer for EffectTriggers {
         let Some(svc) = self.services.upgrade() else {
             return Err(DomainError::Busy("services are shutting down".into()));
         };
-        svc.sql
-            .read_generation(async { self.handle_pinned_impl(&svc, event).await })
-            .await?
+        self.react(&svc, event).await
     }
 }
 
 impl EffectTriggers {
-    async fn handle_pinned_impl(
-        &self,
-        svc: &Arc<Services>,
-        event: &StoredEvent,
-    ) -> Result<(), DomainError> {
+    /// Every effect that reacts to `event`. The generation isn't held: a
+    /// script can run for minutes, so each step pins for itself.
+    async fn react(&self, svc: &Arc<Services>, event: &StoredEvent) -> Result<(), DomainError> {
         let health = crate::contribution_health::ContributionHealth::new(
             svc.db.clone(),
             svc.vocabulary.clone(),
@@ -801,15 +797,6 @@ pub async fn auto_retry_due(
     svc: &Arc<Services>,
     now: oxplow_domain::Timestamp,
 ) -> Result<usize, DomainError> {
-    svc.sql
-        .read_generation(async { auto_retry_due_pinned_impl(svc, now).await })
-        .await?
-}
-
-async fn auto_retry_due_pinned_impl(
-    svc: &Arc<Services>,
-    now: oxplow_domain::Timestamp,
-) -> Result<usize, DomainError> {
     let now_ms = now.unix_ms();
     let now = now.to_string();
     let due = svc
@@ -1015,7 +1002,6 @@ pub(crate) async fn run_script(
         .map_err(|e| format!("its event: {e}"))?
         .to_json();
     let (script, needs, layer) = (decl.script.clone(), decl.needs.clone(), svc.sql.clone());
-    let run = svc.sql.pin_run(run).await.map_err(|e| e.to_string())?;
     // The script is the run's pure part: what it calls is counted apart,
     // then added to the run it composes.
     let composing = run.child(None, Mode::Pure);

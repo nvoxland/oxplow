@@ -29,6 +29,58 @@ pub fn contribution(
     }
 }
 
+/// `ext`'s contribution `kind`/`local`, at its version, for a run that
+/// holds no catalog generation while it goes on (a collector's, an effect's):
+/// it belongs to its extension's version, which [`live_owner`] rechecks.
+pub fn unpinned_contribution(
+    ext: &Extension,
+    kind: ContributionKind,
+    local: &str,
+) -> ContributionRef {
+    ContributionRef {
+        id: ContributionId::new(&ext.name, kind, local),
+        version: ext.version.clone(),
+        generation: None,
+    }
+}
+
+/// The live check of a run that holds no generation: its own extension is
+/// still enabled, still at the version the run started with, and still
+/// declares the contribution. Run at each host call and at publication.
+pub fn live_owner(
+    catalog: std::sync::Arc<ExtensionCatalog>,
+    root: &Path,
+    owner: ContributionRef,
+) -> std::sync::Arc<dyn Fn() -> Result<(), String> + Send + Sync> {
+    let root = root.to_path_buf();
+    std::sync::Arc::new(move || {
+        let snapshot = catalog.live_snapshot(&root);
+        let current = snapshot
+            .extensions()
+            .iter()
+            .find(|ext| ext.name == owner.id.extension && ext.origin == "bundled")
+            .or_else(|| {
+                snapshot
+                    .extensions()
+                    .iter()
+                    .find(|ext| ext.name == owner.id.extension)
+            });
+        match current {
+            Some(ext)
+                if ext.enabled
+                    && ext.version == owner.version
+                    && ext.contributions.iter().any(|item| item.id == owner.id) =>
+            {
+                Ok(())
+            }
+            _ => Err(format!(
+                "`{}`'s extension changed or was revoked during its run",
+                owner.id
+            )),
+        }
+    })
+}
+
 /// The catalog generation `root` is served at now: what a run checks it
 /// was built against.
 pub fn current_generation(catalog: &ExtensionCatalog, root: &Path) -> String {
@@ -47,7 +99,7 @@ fn reacting(run: RunContext, event: &StoredEvent) -> RunContext {
 /// An effect's reaction to `event`: as the effect, for the event's thread
 /// and stream (`Actor::Effect`).
 pub fn for_effect(
-    catalog: &ExtensionCatalog,
+    catalog: &std::sync::Arc<ExtensionCatalog>,
     root: &Path,
     ext: &Extension,
     decl: &crate::effects::EffectDecl,
@@ -59,12 +111,16 @@ pub fn for_effect(
         thread_id: anchors.thread_id,
         stream_id: anchors.stream_id,
     };
+    // It holds no catalog generation while it runs (a script may take
+    // minutes): it belongs to its extension's version, rechecked at each
+    // host call and when its commands land.
+    let owner = unpinned_contribution(ext, ContributionKind::Effect, &decl.id);
     reacting(
-        RunContext::contribution(
-            contribution(catalog, root, ext, ContributionKind::Effect, &decl.id),
-            actor,
-            Mode::External,
-        ),
+        RunContext::contribution(owner.clone(), actor, Mode::External).guarded(live_owner(
+            catalog.clone(),
+            root,
+            owner,
+        )),
         event,
     )
 }

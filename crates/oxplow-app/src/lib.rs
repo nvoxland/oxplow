@@ -108,6 +108,8 @@ pub mod extension_models;
 #[cfg(test)]
 mod extension_private_state_tests;
 pub mod extension_ref_kinds;
+#[cfg(test)]
+mod extension_run_pin_tests;
 pub mod extension_runtime_adapters;
 pub mod extension_secrets;
 pub mod extension_state;

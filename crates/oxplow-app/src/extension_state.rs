@@ -202,7 +202,14 @@ impl StateHost {
             return Err(StateHostError::Denied("live run authority refused access"));
         }
         let snapshot = self.catalog.live_snapshot(&self.project);
-        if owner.generation.as_deref() != Some(snapshot.generation()) {
+        // A run that holds no generation (a collector's, an effect's, a
+        // job's) is decided by the checks below: its extension's version,
+        // enabled state and declaration.
+        if owner
+            .generation
+            .as_deref()
+            .is_some_and(|generation| generation != snapshot.generation())
+        {
             return Err(StateHostError::Denied(
                 "the owning catalog generation is not current",
             ));
