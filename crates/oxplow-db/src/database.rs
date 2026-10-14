@@ -2113,6 +2113,46 @@ mod tests {
         assert_eq!(payload("j")["attempt"], 1);
     }
 
+    /// V71: a snapshot op backfilled before the op log existed reads as a
+    /// manual take, and `legacy` is no trigger any more.
+    #[test]
+    fn v71_relabels_backfilled_snapshot_ops_as_manual() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::models::drop_all(&conn).unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(70))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source,
+                                  worktree_path, created_at, updated_at)
+               VALUES (1, 'primary', 's', 'main', 'refs/heads/main', 'local', '/w', 't', 't');
+             INSERT INTO snapshot (id, stream_id, created_at) VALUES (1, 1, 't'), (2, 1, 't');
+             INSERT INTO snapshot_op (stream_id, snapshot_id, trigger, at, elapsed_ms, file_count)
+               VALUES (1, 1, 'legacy', 't', 0, 1), (1, 2, 'quiet', 't', 0, 1);",
+        )
+        .unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(71))
+            .run(&mut conn)
+            .unwrap();
+        let triggers: Vec<(i64, String)> = conn
+            .prepare("SELECT seq, trigger FROM snapshot_op ORDER BY seq")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(triggers, vec![(1, "manual".into()), (2, "quiet".into())]);
+        assert!(conn
+            .execute(
+                "INSERT INTO snapshot_op (stream_id, snapshot_id, trigger, at, elapsed_ms, file_count)
+                   VALUES (1, 1, 'legacy', 't', 0, 1)",
+                [],
+            )
+            .is_err());
+    }
+
     /// V36: the health table, the enable command, the contribution events,
     /// the repair consumer, `extension:` refs and the `exec:` trust tag
     /// carry their new names.

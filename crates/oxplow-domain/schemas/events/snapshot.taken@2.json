@@ -47,11 +47,6 @@
           "const": "run_measured",
           "description": "A run's reports were recorded (coverage, analysis): the code it\nmeasured, which their captures are pinned to (tsk883).",
           "type": "string"
-        },
-        {
-          "const": "legacy",
-          "description": "Backfilled for a snapshot taken before the operation log existed.",
-          "type": "string"
         }
       ]
     }

@@ -6104,9 +6104,7 @@ export type SnapshotTrigger =
  *  A run's reports were recorded (coverage, analysis): the code it
  *  measured, which their captures are pinned to (tsk883).
  */
-"run_measured" | 
-// Backfilled for a snapshot taken before the operation log existed.
-"legacy";
+"run_measured";
 
 // How one collector feeding a model a query read stands.
 export type SourceCoverage = {

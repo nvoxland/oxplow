@@ -831,7 +831,6 @@ const TRIGGER_LABEL: Record<SnapshotTrigger, string> = {
   git_refs: "git",
   head_moved: "HEAD moved",
   run_measured: "test or lint run",
-  legacy: "",
 };
 const errorBanner: React.CSSProperties = {
   padding: 8,

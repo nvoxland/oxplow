@@ -991,9 +991,9 @@ seeders for tests.
   snapshot row is written. Rows whose tree equals the parent's
   `tree_hash` are dropped in the same transaction (unchanged).
 - `trigger` ∈ `turn_end, quiet, effort_start, effort_end, startup,
-  manual, git_refs, head_moved, run_measured, legacy` (`oxplow_domain::snapshot::
-  SnapshotTrigger`). V97 backfilled one `legacy` op per existing
-  snapshot, parent = the previous snapshot of the same stream. `run_measured`
+  manual, git_refs, head_moved, run_measured` (`oxplow_domain::snapshot::
+  SnapshotTrigger`). The ops backfilled for snapshots taken before the op
+  log existed read `manual` (V71). `run_measured`
   (V161, `snapshot.taken@2`) is the take that pins a run's coverage and
   analysis to the code it measured (see [collection.md](./collection.md)).
 - **HEAD moved on a clean tree** is its own op: `record_head_moved`

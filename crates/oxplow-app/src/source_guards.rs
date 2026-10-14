@@ -480,18 +480,7 @@ const LEGACY_MARKERS: &[&str] = &[
 
 /// Lines that carry a marker and stay, each with why: `(file, a piece of
 /// the line, reason)`. A row that no longer matches is stale.
-const LEGACY_KEPT: &[(&str, &str, &str)] = &[
-    (
-        "crates/oxplow-domain/src/snapshot.rs",
-        "Legacy",
-        "the `legacy` trigger V97 gave the snapshots taken before the op log: rows already in the database",
-    ),
-    (
-        "apps/desktop/src/pages/LocalHistoryDashboardPage.tsx",
-        "legacy: \"\"",
-        "the label of that trigger",
-    ),
-];
+const LEGACY_KEPT: &[(&str, &str, &str)] = &[];
 
 /// The desktop's own TypeScript, tests and generated bindings aside.
 fn desktop_sources() -> Vec<(String, String)> {
