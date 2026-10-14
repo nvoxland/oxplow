@@ -1016,6 +1016,15 @@
           "format": "double",
           "default": null
         },
+        "maxValue": {
+          "description": "Keep facts with `value <= maxValue` (`0`: the untested files).",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double",
+          "default": null
+        },
         "severity": {
           "description": "Keep facts whose reported severity equals this (e.g. `error`).",
           "type": [

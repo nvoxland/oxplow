@@ -3424,6 +3424,8 @@ export type FileStatus = "added" | "modified" | "deleted" | "renamed" | "untrack
 export type FilterConfig = {
 	// Keep facts with `value >= minValue`.
 	minValue?: number | null,
+	// Keep facts with `value <= maxValue` (`0`: the untested files).
+	maxValue?: number | null,
 	// Keep facts whose reported severity equals this (e.g. `error`).
 	severity?: string | null,
 	// Keep facts whose dimension `[key]` equals `[value]` — a 2-element list.

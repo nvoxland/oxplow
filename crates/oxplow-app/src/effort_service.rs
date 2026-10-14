@@ -1001,7 +1001,7 @@ mod tests {
         let fact_store = Arc::new(oxplow_db::SqliteFactStore::new(db.clone()));
         // Seed the producer specs as boot does — the lifecycle producer gates on
         // `measure_has_active_spec` (tsk31).
-        for spec in crate::producer_metrics::builtin_producer_specs() {
+        for spec in crate::test_fixtures::foundation_producer_specs() {
             fact_store.upsert_spec(spec).await.unwrap();
         }
         let marks = crate::snapshots::registry_over(

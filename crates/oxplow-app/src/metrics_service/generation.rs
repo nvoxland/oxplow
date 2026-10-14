@@ -76,7 +76,6 @@ impl MetricsService {
                         .as_ref()
                         .map(|entity| serde_json::to_string(entity).expect("entity serializes")),
                 })
-                .chain(builtin_entity_dimensions())
                 .collect();
         let config_state = |key: &str| {
             config
@@ -96,8 +95,6 @@ impl MetricsService {
         for spec in builtin_metric_specs()
             .into_iter()
             .chain(builtin_ast_specs())
-            .chain(crate::producer_metrics::builtin_producer_specs())
-            .chain(builtin_entity_specs())
         {
             let enabled = config_state(&spec.key) != Some(false)
                 && (!builtin_metrics()

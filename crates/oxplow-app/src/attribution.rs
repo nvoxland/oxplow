@@ -42,7 +42,7 @@ pub enum EffortAttributionFamily {
 /// 3. operational `agent.*`/`effort.*`/`task.*` keys →
 ///    [`Window`](EffortAttributionFamily::Window) — thread+time facts on
 ///    effort-stamped captures, never per-file even when gauge-display;
-/// 4. any other built-in PRODUCER metric (the `oxplow.analysis.*` pair) →
+/// 4. the `oxplow.analysis.*` pair (the foundation's analysis producers) →
 ///    [`Run`](EffortAttributionFamily::Run): its facts arrive per run-ingest
 ///    on effort-stamped captures, and analysis must never fall to the per-file
 ///    branch even though its facts are path-grained;
@@ -62,7 +62,7 @@ pub fn classify_effort_attribution(spec: &MetricSpec) -> EffortAttributionFamily
         EffortAttributionFamily::Run
     } else if is_operational_metric_key(&spec.key) {
         EffortAttributionFamily::Window
-    } else if crate::producer_metrics::is_producer_metric_key(&spec.key) {
+    } else if spec.key.starts_with("oxplow.analysis.") {
         EffortAttributionFamily::Run
     } else if matches!(spec.display_kind.as_str(), "gauge" | "findings")
         && spec.source_measure.is_some()

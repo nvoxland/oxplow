@@ -2266,7 +2266,9 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         }) {
             Ok(v) => {
                 for d in v {
-                    if d.promote {
+                    // Only oxplow's own namespace promotes: the foundation's
+                    // dimensions are the cube's grain from the first boot.
+                    if d.promote && ext.namespace != oxplow_config::OXPLOW_NAMESPACE {
                         ext.errors.push(err_at(
                             "dimensions",
                             format!(

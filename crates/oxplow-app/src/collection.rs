@@ -314,13 +314,6 @@ pub struct ShellRun<'a> {
     pub exit_code: Option<i64>,
 }
 
-/// Diff-coverage thresholds (tsk220), stored as the `oxplow.coverage.diff_pct`
-/// definition's `target`/`fail_at` so the renderer colors from DATA rather than
-/// a hardcoded 50/80 ramp. oxplow-bundled's `coverage-target` advisory
-/// uses the same 80%.
-pub const COVERAGE_TARGET_PCT: f64 = 80.0;
-pub const COVERAGE_FAIL_PCT: f64 = 50.0;
-
 /// What recording a coverage report came to, so a caller can say why
 /// nothing landed.
 #[derive(Debug, Clone, PartialEq)]
@@ -4433,7 +4426,7 @@ mod tests {
             // producers gate their collection on `measure_has_active_spec` (tsk31),
             // so without an active spec over each measure the gate stays closed.
             let facts = Arc::new(oxplow_db::SqliteFactStore::new(db.clone()));
-            for spec in crate::producer_metrics::builtin_producer_specs() {
+            for spec in crate::test_fixtures::foundation_producer_specs() {
                 facts.upsert_spec(spec).await.unwrap();
             }
             let marks_captures = captures.clone();
@@ -5656,7 +5649,7 @@ mod tests {
             // Keystone (T-B): the producer test specs re-aggregate these facts to
             // the baked counts through the engine — Count(oxplow.test_case) sliced
             // by status. The read-flip (tsk26) then serves them from the engine.
-            for spec in crate::producer_metrics::builtin_producer_specs() {
+            for spec in crate::test_fixtures::foundation_producer_specs() {
                 facts.upsert_spec(spec).await.unwrap();
             }
             let engine = crate::metric_engine::MetricEngine::new(facts.clone());
@@ -5725,7 +5718,7 @@ mod tests {
             }
 
             let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
-            for spec in crate::producer_metrics::builtin_producer_specs() {
+            for spec in crate::test_fixtures::foundation_producer_specs() {
                 facts.upsert_spec(spec).await.unwrap();
             }
             let engine = crate::metric_engine::MetricEngine::new(facts.clone());
@@ -6555,7 +6548,7 @@ mod tests {
             // opened) — the `oxplow.nudge` fact still belongs to it.
             let h = build(None).await;
             let eid = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
-            for spec in crate::producer_metrics::builtin_producer_specs() {
+            for spec in crate::test_fixtures::foundation_producer_specs() {
                 oxplow_db::SqliteFactStore::new(h.db.clone())
                     .upsert_spec(spec)
                     .await
@@ -7215,7 +7208,7 @@ mod tests {
             sync_coverage(&h).await;
             // The policy rides the producer SPEC (T-E2: the legacy definition
             // write is gone) — seeded by seed_catalog.
-            for spec in crate::producer_metrics::builtin_producer_specs() {
+            for spec in crate::test_fixtures::foundation_producer_specs() {
                 oxplow_db::SqliteFactStore::new(h.db.clone())
                     .upsert_spec(spec)
                     .await

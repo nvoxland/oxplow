@@ -412,3 +412,51 @@ pub async fn deliver(svc: &Arc<crate::Services>, event: &oxplow_domain::StoredEv
         .await
         .unwrap();
 }
+
+/// The foundation's declared `metrics:` and `dimensions:`, parsed from the
+/// bundled manifest — for a test that seeds the specs the way an activation
+/// would, without a whole `Services`.
+pub(crate) fn foundation_declarations() -> (
+    Vec<oxplow_config::MetricEntry>,
+    Vec<oxplow_config::DimensionEntry>,
+) {
+    let manifest: serde_yaml::Value = serde_yaml::from_str(include_str!(
+        "../../../extensions/oxplow-foundation/extension.yaml"
+    ))
+    .expect("the foundation manifest parses");
+    let block = |key: &str| {
+        manifest
+            .get(key)
+            .cloned()
+            .expect("the foundation declares it")
+    };
+    let metrics = oxplow_config::validate_metrics(
+        Some(serde_yaml::from_value(block("metrics")).expect("metrics parse")),
+        Some(oxplow_config::OXPLOW_NAMESPACE),
+    )
+    .expect("the foundation's metrics validate");
+    let dimensions = oxplow_config::validate_dimensions(
+        Some(serde_yaml::from_value(block("dimensions")).expect("dimensions parse")),
+        Some(oxplow_config::OXPLOW_NAMESPACE),
+    )
+    .expect("the foundation's dimensions validate");
+    (metrics, dimensions)
+}
+
+/// The specs the foundation's metrics resolve to, as an activation seeds them.
+pub(crate) fn foundation_specs() -> Vec<oxplow_db::NewMetricSpec> {
+    let (metrics, _) = foundation_declarations();
+    oxplow_config::resolve_metrics(&[], &[], &[("oxplow-foundation".into(), metrics)], &[])
+        .iter()
+        .map(crate::metrics_service::spec_to_new_spec)
+        .collect()
+}
+
+/// Only the specs over a measure's facts (what the producers feed), not the
+/// entity metrics — the lifecycle and collection tests seed these.
+pub(crate) fn foundation_producer_specs() -> Vec<oxplow_db::NewMetricSpec> {
+    foundation_specs()
+        .into_iter()
+        .filter(|spec| spec.entity_json.is_none())
+        .collect()
+}

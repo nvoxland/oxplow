@@ -187,6 +187,9 @@ pub struct FilterConfig {
     /// Keep facts with `value >= minValue`.
     #[serde(rename = "minValue", default)]
     pub min_value: Option<f64>,
+    /// Keep facts with `value <= maxValue` (`0`: the untested files).
+    #[serde(rename = "maxValue", default)]
+    pub max_value: Option<f64>,
     /// Keep facts whose reported severity equals this (e.g. `error`).
     #[serde(default)]
     pub severity: Option<String>,
@@ -2739,6 +2742,7 @@ fn validate_filter(i: usize, f: FilterConfig) -> Result<FilterConfig, ConfigErro
     };
     Ok(FilterConfig {
         min_value: f.min_value,
+        max_value: f.max_value,
         severity: f
             .severity
             .map(|s| s.trim().to_string())

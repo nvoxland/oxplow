@@ -43,7 +43,6 @@ use oxplow_script::{builtin_metrics, BuiltinMetric, CollectedFact};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use crate::producer_metrics::builtin_producer_metrics;
 use crate::snapshot_content::SnapshotContent;
 
 const DEFAULT_MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
@@ -852,43 +851,6 @@ impl MetricsService {
                     trigger: "auto".to_string(),
                     toggleable: true,
                     category: m.category.clone().or_else(|| Some("custom".to_string())),
-                });
-            }
-        }
-        // Built-in producer metrics — listed even with zero recorded data, so the
-        // registry is complete the moment a project opens (tsk286). Default-ON and
-        // now toggleable (tsk31): a disable marker in config turns one off.
-        for p in builtin_producer_metrics() {
-            if seen.insert(p.key.to_string()) {
-                out.push(MetricCatalogEntry {
-                    key: p.key.to_string(),
-                    title: p.title.to_string(),
-                    kind: p.kind.to_string(),
-                    language: None,
-                    scope: "built-in".to_string(),
-                    enabled: config_state(p.key) != Some(false),
-                    target: None,
-                    trigger: "auto".to_string(),
-                    toggleable: true,
-                    category: Some(p.category.to_string()),
-                });
-            }
-        }
-        // Built-in entity metrics (tsk322): default-ON like the producers, and
-        // listed from code so a disabled one (its spec pruned) can come back.
-        for e in builtin_entity_specs() {
-            if seen.insert(e.key.clone()) {
-                out.push(MetricCatalogEntry {
-                    enabled: config_state(&e.key) != Some(false),
-                    key: e.key,
-                    title: e.title,
-                    kind: e.display_kind,
-                    language: None,
-                    scope: "built-in".to_string(),
-                    target: e.target,
-                    trigger: "auto".to_string(),
-                    toggleable: true,
-                    category: e.category,
                 });
             }
         }
@@ -2725,7 +2687,7 @@ impl MetricsService {
 
 /// Map a resolved `ResolvedSpec` to a `metric_spec` write (for config-declared
 /// metrics). A formula metric has no `source_measure`.
-fn spec_to_new_spec(s: &ResolvedSpec) -> NewMetricSpec {
+pub(crate) fn spec_to_new_spec(s: &ResolvedSpec) -> NewMetricSpec {
     let spec = NewMetricSpec {
         key: s.key.clone(),
         title: s.title.clone(),
@@ -2796,58 +2758,15 @@ async fn primary_stream(layer: &crate::sql_gateway::SqlGateway) -> Option<i64> {
     }
 }
 
-/// Built-in entity dimensions (tsk322).
-fn builtin_entity_dimensions() -> Vec<NewDimension> {
-    let mut priority = NewDimension::categorical("work.priority", "Priority");
-    // A field a work list declares (`native`); null for a list without it.
-    priority.entity_json =
-        Some(r#"{"view":"v_work_item","expr":"json_extract(e.native, '$.priority')"}"#.into());
-    vec![priority]
-}
-
-/// Built-in entity metrics over core views (tsk322).
-fn builtin_entity_specs() -> Vec<NewMetricSpec> {
-    let make = |key: &str, title: &str, description: &str, entity: oxplow_config::EntitySpec| {
-        let mut s = NewMetricSpec::base(key, title, key, "sum");
-        s.unit = Some("tasks".into());
-        s.description = Some(description.into());
-        s.category = Some("operational".into());
-        as_entity_spec(s, &entity)
-    };
-    vec![
-        make(
-            "work.tasks_completed",
-            "Tasks completed",
-            "Work items done, by the day they were closed.",
-            oxplow_config::EntitySpec {
-                view: "v_work_item".into(),
-                where_: Some("state = 'done'".into()),
-                time: Some("closed_at".into()),
-                value: None,
-                aggregation: "count".into(),
-            },
-        ),
-        make(
-            "work.open_tasks",
-            "Open tasks",
-            "Work items ready, in progress or blocked, captured over time.",
-            oxplow_config::EntitySpec {
-                view: "v_work_item".into(),
-                where_: Some("state IN ('todo', 'in_progress', 'blocked')".into()),
-                time: None,
-                value: None,
-                aggregation: "count".into(),
-            },
-        ),
-    ]
-}
-
 /// Serialize a config `FilterConfig` to the engine's `filter_json` shape
 /// (`FactFilter`: `min_value` / `severity` / `dim_eq`).
 fn filter_to_json(f: &oxplow_config::FilterConfig) -> String {
     let mut m = serde_json::Map::new();
     if let Some(v) = f.min_value {
         m.insert("min_value".into(), serde_json::json!(v));
+    }
+    if let Some(v) = f.max_value {
+        m.insert("max_value".into(), serde_json::json!(v));
     }
     if let Some(s) = &f.severity {
         m.insert("severity".into(), serde_json::json!(s));
@@ -2916,32 +2835,6 @@ fn builtin_spec_entries() -> Vec<MetricEntry> {
                 ..Default::default()
             }
         })
-        // The always-on producer metrics are built-ins too: a `use:` of one
-        // carries the project's thresholds onto its spec (tsk1071).
-        .chain(
-            crate::producer_metrics::builtin_producer_specs()
-                .into_iter()
-                .map(|s| MetricEntry {
-                    key: Some(s.key),
-                    title: Some(s.title),
-                    filter: filter_from_json(s.filter_json.as_deref()),
-                    source_measure: s.source_measure,
-                    aggregation: Some(s.aggregation),
-                    unit: s.unit,
-                    direction: Some(s.direction),
-                    display_kind: Some(s.display_kind),
-                    category: s.category,
-                    description: s.description,
-                    sliceable_dims: s
-                        .sliceable_dims_json
-                        .and_then(|j| serde_json::from_str(&j).ok())
-                        .unwrap_or_default(),
-                    target: s.target,
-                    warn_at: s.warn_at,
-                    fail_at: s.fail_at,
-                    ..Default::default()
-                }),
-        )
         .collect()
 }
 
@@ -2951,6 +2844,7 @@ fn filter_from_json(json: Option<&str>) -> Option<oxplow_config::FilterConfig> {
     let engine_filter = crate::metric_engine::FactFilter::from_json(json?).ok()?;
     Some(oxplow_config::FilterConfig {
         min_value: engine_filter.min_value,
+        max_value: engine_filter.max_value,
         severity: engine_filter.severity,
         dim_eq: engine_filter.dim_eq.map(|(k, v)| vec![k, v]),
     })
@@ -3386,7 +3280,10 @@ mod tests {
     #[tokio::test]
     async fn builtin_entity_metrics_read_only_views() {
         let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
-        for spec in builtin_entity_specs() {
+        for spec in crate::test_fixtures::foundation_specs()
+            .into_iter()
+            .filter(|spec| spec.entity_json.is_some())
+        {
             let entity: oxplow_config::EntitySpec =
                 serde_json::from_str(spec.entity_json.as_deref().unwrap()).unwrap();
             let reads = crate::entity_metrics::check(&layer, &entity, None)
@@ -3395,9 +3292,16 @@ mod tests {
             assert!(reads.tables.is_empty(), "{}: {:?}", spec.key, reads.tables);
             assert!(!reads.models.is_empty(), "{}", spec.key);
         }
-        for dim in builtin_entity_dimensions() {
-            let d: oxplow_config::EntityDimensionSpec =
-                serde_json::from_str(dim.entity_json.as_deref().unwrap()).unwrap();
+        for dim in crate::test_fixtures::foundation_declarations()
+            .1
+            .into_iter()
+            .filter(|dim| dim.entity.is_some())
+        {
+            let d = oxplow_config::EntityDimensionSpec {
+                view: dim.entity.clone().unwrap(),
+                expr: dim.expr.clone().unwrap(),
+                join: dim.join.clone(),
+            };
             let probe = oxplow_config::EntitySpec {
                 view: d.view.clone(),
                 where_: None,
@@ -3408,7 +3312,7 @@ mod tests {
             let reads = crate::entity_metrics::check(&layer, &probe, Some(&d))
                 .await
                 .unwrap();
-            assert!(reads.tables.is_empty(), "{}: {:?}", dim.key, reads.tables);
+            assert!(reads.tables.is_empty(), "{:?}: {:?}", dim.key, reads.tables);
         }
     }
     use super::*;
@@ -5613,7 +5517,7 @@ def transform(input):
             .iter()
             .find(|s| s.key == "oxplow.tests.failed")
             .expect("the use: resolves");
-        assert_eq!(failed.scope, "built-in");
+        assert_eq!(failed.scope, "extension:oxplow-foundation");
         let spec = svc
             .fact_store
             .get_spec("oxplow.tests.failed")
@@ -6056,6 +5960,43 @@ def transform(input):
         assert_eq!(count, 0, "empty snapshot → no facts, runs without error");
     }
 
+    /// oxplow's own measures, dimensions and metrics are the foundation's,
+    /// declared in its manifest: a fresh project's catalog attributes them to
+    /// it, and none is a `built-in`.
+    #[tokio::test]
+    async fn oxplows_own_measures_and_metrics_are_the_foundations() {
+        let (svc, _dir) = fixture().await;
+        for key in ["oxplow.tokens", "oxplow.complexity"] {
+            let measure = svc.fact_store.get_measure(key).await.unwrap().unwrap();
+            assert_eq!(measure.scope, "extension:oxplow-foundation", "{key}");
+        }
+        let measures = svc.fact_store.list_measures().await.unwrap();
+        assert!(
+            measures.iter().all(|m| m.scope != "built-in"),
+            "{measures:?}"
+        );
+        let dimensions = svc.fact_store.list_dimensions().await.unwrap();
+        assert!(
+            dimensions.iter().all(|d| d.scope != "built-in"),
+            "{dimensions:?}"
+        );
+        // Promoted dimensions stay the cube's grain.
+        let status = dimensions
+            .iter()
+            .find(|d| d.key == "oxplow.status")
+            .unwrap();
+        assert!(status.promoted);
+        let total = svc
+            .metrics
+            .catalog()
+            .await
+            .into_iter()
+            .find(|e| e.key == "agent.tokens.total")
+            .unwrap();
+        assert_eq!(total.scope, "extension:oxplow-foundation");
+        assert!(total.enabled && total.toggleable);
+    }
+
     /// Every `use:` in this repo's own `.oxplow/project.yaml` names a metric
     /// the catalog has — a producer's included, whose target the `use:`
     /// sets — so loading it warns about none.
@@ -6063,10 +6004,14 @@ def transform(input):
     fn this_repos_config_uses_only_metrics_the_catalog_has() {
         let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let config = oxplow_config::load_project_config(&repo).expect("the repo's config loads");
+        let foundation = [(
+            "oxplow-foundation".to_string(),
+            crate::test_fixtures::foundation_declarations().0,
+        )];
         let unknown =
-            oxplow_config::unknown_uses(&builtin_spec_entries(), &[], &[], &config.metrics);
+            oxplow_config::unknown_uses(&builtin_spec_entries(), &[], &foundation, &config.metrics);
         assert_eq!(unknown, Vec::<String>::new());
-        let resolved = resolve_metrics(&builtin_spec_entries(), &[], &[], &config.metrics);
+        let resolved = resolve_metrics(&builtin_spec_entries(), &[], &foundation, &config.metrics);
         let failed = resolved
             .iter()
             .find(|s| s.key == "oxplow.tests.failed")
