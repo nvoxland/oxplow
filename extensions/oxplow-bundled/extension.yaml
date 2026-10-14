@@ -101,6 +101,9 @@ ui:
   # and opens commits, so it isn't a program to approve.
   replacements:
     - { target: vcs.history.graph, lens: history-graph }
+    # The effort's verdict on its page (`effort.verdict`): core has none;
+    # this is oxplow's default review policy's, and another may replace it.
+    - { target: effort.verdict, lens: effort-verdict, version: 1 }
   # The verdict where the effort is shown: it shows; it never acts.
   decorators:
     - { model: verdict, kind: effort, placement: ref-chip, label: label, color: color }
@@ -253,6 +256,15 @@ models:
       - { name: effort_id, type: INTEGER, doc: "The effort (v_effort.id)." }
       - { name: path, type: TEXT, doc: "Repo-relative file path." }
       - { name: change_kind, type: TEXT, doc: "`created`, `updated` or `deleted`." }
+  - name: claim_status
+    version: 1
+    key: [ref]
+    description: "Whether each of the agent's claims is backed, by this review policy's rule: it cites evidence (`v_claim.evidence_ref` — a run, a test, a file, or `reviewer` when a person verified it), or it is `tests_pass` and its effort's latest test run (`v_test_run`) passed with at least one test."
+    columns:
+      - { name: ref, type: TEXT, doc: "The claim (`v_claim.ref`)." }
+      - { name: effort_id, type: INTEGER, doc: "Its effort (v_effort.id), if one was open." }
+      - { name: verified, type: INT, doc: "1 when something backs it, else 0." }
+      - { name: backed_by, type: TEXT, doc: "`evidence` (it cites some) or `latest run` (a passing latest test run backs `tests pass`); NULL when nothing does." }
   - name: verdicts
     version: 1
     key: [seq]

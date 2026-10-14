@@ -211,33 +211,6 @@ mod tests {
         )
     }
 
-    /// A test run (a `tests` capture with its `test-detail` payload) on
-    /// `effort`, at `at`, with `failed` of `total` cases failing. Returns
-    /// the run's id.
-    async fn test_run(
-        db: &Database,
-        effort: Option<i64>,
-        failed: i64,
-        total: i64,
-        at: &str,
-    ) -> i64 {
-        let at = at.to_string();
-        db.call(move |c| {
-            let detail = format!(
-                "{{\"kind\":\"test-detail\",\"payload\":{{\"passed\":{},\"failed\":{failed},\"total\":{total}}}}}",
-                total - failed
-            );
-            c.execute(
-                "INSERT INTO metric_capture (stream_id, thread_id, effort_id, producer, status, provenance, source, captured_at, detail_json)
-                 VALUES (1, 1, ?1, 'tests', 'done', 'observed', 'junit', ?2, ?3)",
-                rusqlite::params![effort, at, detail],
-            )?;
-            Ok(c.last_insert_rowid())
-        })
-        .await
-        .unwrap()
-    }
-
     #[tokio::test]
     async fn decisions_round_trip_through_the_view() {
         let (_db, store, sl) = seeded().await;
@@ -349,62 +322,6 @@ mod tests {
         assert_eq!(
             serde_json::to_value(rows).unwrap(),
             json!([[1, 10], [2, 11]])
-        );
-    }
-
-    /// `tests_pass` is verified by the effort's LATEST run (its own or one
-    /// claimed through attribution) passing with at least one test (tsk366).
-    #[tokio::test]
-    async fn claims_are_verified_by_evidence_or_the_latest_clean_run() {
-        let (db, store, sl) = seeded().await;
-        db.call(|c| {
-            c.execute_batch(
-                "INSERT INTO effort (id, work_item, thread_id, started_at, ended_at) VALUES (3, 'work_item:oxplow:tsk1', 1, '2026-01-03T00:00:00Z', '2026-01-03T00:00:00Z');
-                 INSERT INTO effort (id, work_item, thread_id, started_at, ended_at) VALUES (4, 'work_item:oxplow:tsk1', 1, '2026-01-04', '2026-01-04');",
-            )
-        })
-        .await
-        .unwrap();
-        let claim = |effort: i64, kind: &str, evidence: Option<&str>| NewClaim {
-            thread_id: 1,
-            work_item: Some("work_item:oxplow:tsk1".into()),
-            effort_id: Some(effort),
-            statement: format!("{kind} on effort {effort}"),
-            kind: kind.into(),
-            evidence_ref: evidence.map(str::to_string),
-            agent_session_id: None,
-        };
-        // Effort 1: passed, then a later failure → not verified.
-        test_run(&db, Some(1), 0, 5, "2026-01-01T00:00:00Z").await;
-        test_run(&db, Some(1), 1, 5, "2026-01-01T01:00:00Z").await;
-        // Effort 2: failed, then fixed → verified.
-        test_run(&db, Some(2), 2, 5, "2026-01-02T00:00:00Z").await;
-        test_run(&db, Some(2), 0, 5, "2026-01-02T01:00:00Z").await;
-        // Effort 3: a clean run → verified.
-        test_run(&db, Some(3), 0, 5, "2026-01-03T00:00:00Z").await;
-        // Effort 4: a run with no tests → not verified.
-        test_run(&db, Some(4), 0, 0, "2026-01-04T00:00:00Z").await;
-        for effort in 1..=4 {
-            store
-                .record_claim(claim(effort, "tests_pass", None))
-                .await
-                .unwrap();
-        }
-        store
-            .record_claim(claim(2, "handles_case", Some("test:empty_input")))
-            .await
-            .unwrap(); // evidence
-        store
-            .record_claim(claim(1, "no_behavior_change", None))
-            .await
-            .unwrap(); // unbacked
-        let out = sl
-            .query_sql("SELECT verified FROM v_claim ORDER BY id", vec![], None)
-            .await
-            .unwrap();
-        assert_eq!(
-            serde_json::to_value(&out.rows).unwrap(),
-            json!([[0], [1], [1], [0], [1], [0]])
         );
     }
 

@@ -345,17 +345,14 @@ mod tests {
         (fx, claim, decision)
     }
 
-    async fn claim_view(
-        fx: &crate::test_fixtures::EffortFixture,
-        id: i64,
-    ) -> (Option<String>, i64) {
+    async fn claim_view(fx: &crate::test_fixtures::EffortFixture, id: i64) -> Option<String> {
         fx.svc
             .db
             .read(move |tx| {
                 tx.query_row(
-                    "SELECT evidence_ref, verified FROM v_claim WHERE id = ?1",
+                    "SELECT evidence_ref FROM v_claim WHERE id = ?1",
                     [id],
-                    |r| Ok((r.get(0)?, r.get(1)?)),
+                    |r| r.get(0),
                 )
                 .map_err(oxplow_db::map_sql_err)
             })
@@ -370,14 +367,14 @@ mod tests {
     async fn verifying_a_claim_makes_it_verified_and_undo_takes_it_back() {
         let (fx, claim, _) = fixture().await;
         let r = claim_ref(claim);
-        assert_eq!(claim_view(&fx, claim).await, (None, 0));
+        assert_eq!(claim_view(&fx, claim).await, None);
         let out = fx
             .svc
             .commands
             .run(&Actor::Human, VERIFY_CLAIM, json!({ "claim": r }), false)
             .await
             .unwrap();
-        assert_eq!(claim_view(&fx, claim).await, (Some("reviewer".into()), 1));
+        assert_eq!(claim_view(&fx, claim).await, Some("reviewer".into()));
         let events = fx.svc.event_log_store.read_after(0, 500).await.unwrap();
         let logged = events
             .iter()
@@ -407,7 +404,7 @@ mod tests {
             .undo(&Actor::Human, out.audit_id.unwrap(), false)
             .await
             .unwrap();
-        assert_eq!(claim_view(&fx, claim).await, (None, 0));
+        assert_eq!(claim_view(&fx, claim).await, None);
         // A claim named by a ref that doesn't exist is refused at /claim.
         let err = fx
             .svc
@@ -460,7 +457,7 @@ mod tests {
                 );
             }
         }
-        assert_eq!(claim_view(&fx, claim).await, (None, 0));
+        assert_eq!(claim_view(&fx, claim).await, None);
     }
 
     async fn provenance(fx: &crate::test_fixtures::EffortFixture, id: i64) -> String {

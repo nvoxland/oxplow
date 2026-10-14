@@ -6554,6 +6554,7 @@ commands:
             [
                 "change_co_change",
                 "change_interest",
+                "claim_status",
                 "co_change_pair",
                 "deviation",
                 "finished_cleared",

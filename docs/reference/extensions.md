@@ -502,6 +502,7 @@ The same table is the `v_replaceable` model.
 | `work_item.detail` | detail editor | no | 1 | `ref` |
 | `work_item.detail.state` | state control | yes | 1 | `ref` |
 | `vcs.history.graph` | history graph | no | 1 | `head_sha`, `reveal_sha`, `limit` |
+| `effort.verdict` | effort verdict | no | 1 | `effort_id` |
 <!-- replaceables:end -->
 
 A view of work items reads `v_work_item` and changes items only through

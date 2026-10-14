@@ -357,8 +357,8 @@ mod tests {
         let through = lineage.affected(&["metric_capture".to_string()]);
         assert!(through.contains(&"v_test_run".to_string()));
         assert!(
-            through.contains(&"v_claim".to_string()),
-            "v_claim reads v_test_run"
+            through.contains(&"v_oxplow_bundled_claim_status".to_string()),
+            "oxplow-bundled's claim status reads v_test_run"
         );
 
         // End to end: a task edit is announced for v_work_item, with a watermark.

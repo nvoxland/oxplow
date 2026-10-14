@@ -319,3 +319,39 @@ test("an unbound target shows its one replacement, or the person's choice among 
   emit({ kind: "configChanged" });
   await waitFor(() => expect(several.getByTestId("core-list")).toBeTruthy());
 });
+
+// An effort's verdict is a review policy's: oxplow has none of its own, so
+// the page shows nothing until an extension brings one — then its lens,
+// given the effort's `effort_id`; "oxplow" chosen shows none again.
+test("an effort's verdict is only ever an extension's", async () => {
+  const judging = (name: string) => ({
+    name,
+    enabled: true,
+    ui: {
+      slots: [],
+      commands: [],
+      decorators: [],
+      replacements: [
+        { id: `${name}/effort.verdict`, extension: name, target: "effort.verdict", capability: "effort_policy", boundToProvider: false, lensId: `${name}/effort-verdict`, label: "effort verdict", version: 1 },
+      ],
+    },
+    lenses: [{ id: `${name}/effort-verdict`, params: [{ name: "effort_id", label: null, default: null }] }],
+  });
+  const verdict = () => <Replaceable target="effort.verdict" props={{ effort_id: 7 }} streamId="str1" fallback={null} />;
+  const none = render(verdict());
+  await waitFor(() => expect(none.container.innerHTML).toBe(""));
+  expect(lensRuns).toEqual([]);
+  cleanup();
+
+  extensions = [judging("oxplow-bundled")];
+  const one = render(verdict());
+  const shown = await waitFor(() => one.getByTestId("replacement-effort.verdict"));
+  expect(shown.textContent).toContain("oxplow-bundled/effort-verdict row");
+  expect(lensRuns[0]).toEqual(["oxplow-bundled/effort-verdict", { effort_id: 7 }]);
+  cleanup();
+
+  chosen = { "effort.verdict": "oxplow" };
+  const off = render(verdict());
+  await waitFor(() => expect(off.container.querySelector('[data-testid^="replacement-"]')).toBeNull());
+  expect(off.container.innerHTML).toBe("");
+});

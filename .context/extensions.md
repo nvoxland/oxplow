@@ -889,16 +889,24 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   fold into one closing line, "Nothing found: Duplication, Co-change
   Surprises, …", each a link to its lens (`lensModel::foldEmpty`). A
   section's Copy / Add to Agent Context show on hover or focus (the
-  `.lens-section` rule in `index.html`). The effort page opens with a core
-  verdict strip above the slots (`pages/effortVerdict.ts`, core models
-  only: the last test run, diff coverage, unverified claims, decisions to
-  confirm), and the task page links to it as **Review**: on each effort's
-  activity card, and in the details rail for the newest effort.
+  `.lens-section` rule in `index.html`). The effort page opens with its
+  **verdict** above the slots: the `effort.verdict` replacement target
+  ("Replacements"), which core leaves empty — what counts as tested,
+  covered or backed is a review policy's. oxplow-bundled's
+  `effort-verdict` lens is the default (the last test run, diff coverage
+  against the `oxplow.coverage.abs_pct` metric's `warnAt`, unverified
+  claims, decisions to confirm); another extension may bring its own and
+  the person chooses. The task page links to the effort page as
+  **Review**: on each effort's activity card, and in the details rail for
+  the newest effort.
 - **The review packet** (in `oxplow-bundled`). Its lenses, mounted in
   `effort.review.details`:
   - Decisions Made (`v_decision`, `provenance = 'recorded'`)
   - Decisions Oxplow Noticed (`v_decision`, `provenance = 'inferred'`)
-  - Unverified Claims (`v_claim` where `verified = 0`), each row with
+  - Unverified Claims (`v_claim` whose `v_oxplow_bundled_claim_status`
+    says `verified = 0`: it cites nothing, and for a `tests_pass` claim
+    its effort's latest test run didn't pass with at least one test —
+    the bundled policy's rule; core keeps only what a claim cites), each row with
     **Mark Verified** (`oxplow.effort.verify_claim`)
   - Decisions Oxplow Noticed's rows carry **Confirm** / **Dismiss**
     (`oxplow.effort.confirm_decision` / `oxplow.effort.dismiss_decision`)
@@ -935,7 +943,8 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   spliced in through `md_text` (one inert line: an agent's claim can't
   add headings, links or items to the reviewer's comment); the note is
   the reviewer's own markdown. Both read one `input` query
-  (`v_effort` + `json_group_array`s over `v_claim`, `v_decision`,
+  (`v_effort` + `json_group_array`s over `v_claim` and its
+  `v_oxplow_bundled_claim_status`, `v_decision`,
   `v_oxplow_bundled_deviation`), compose `oxplow.work_item.comment` and
   `oxplow.work_item.transition` — as steps, every list's verbs running
   outside the transaction (not undoable; [commands.md](./commands.md) →
@@ -1682,6 +1691,7 @@ it props it doesn't know.
 | `work_item.list` | the Tasks page's list (`TasksList`, `TasksPage`): the scope picker, detail pane and backlog drawer stay oxplow's; the lens's `stream_id` is the scope's stream | `work_items` | no | `scope` (`thread` / `stream` / `all`), `thread_id` (the thread when `scope` is `thread`, else null) |
 | `work_item.detail` | a work item's editor, its title and body (`TaskDetail`, `WorkItemPage`): the rail (state pill, Move To, fields, Delete), Comment / Link, slots and activity stay oxplow's | `work_items` | no | `ref` (the item) |
 | `work_item.detail.state` | a work item's State (`WorkItemPage`'s rail; P10) — never its Move To, which stays oxplow's canonical states, so a replacement can't strand an item (tsk919) | `work_items` | yes | `ref` (the item) |
+| `effort.verdict` | an effort's verdict, the first line of its page (`DiffViewPage`). Core has **none of its own**: with no replacement, or `oxplow` chosen, the page shows nothing. oxplow-bundled's `effort-verdict` is the default | `effort_policy` | no | `effort_id` (the effort's row id) |
 | `vcs.history.graph` | Git History's commits (`HistoryPanel`): oxplow's own is a plain list (`CommitList`) | `vcs` | no | `head_sha` (the stream's head), `reveal_sha` (a commit to scroll to and mark, or null), `limit` |
 
 **Bound or not.** A bound target shows one provider's own thing — the

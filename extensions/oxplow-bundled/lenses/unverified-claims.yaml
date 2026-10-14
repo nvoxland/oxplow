@@ -4,10 +4,10 @@ hidden: true    # needs a slot param (effort_id / change_id); shown on the diff
 params:
   - { name: effort_id, label: Effort }
 query: |
-  SELECT statement, kind, ref AS claim
-  FROM v_claim
-  WHERE effort_id = :effort_id AND verified = 0
-  ORDER BY created_at
+  SELECT c.statement, c.kind, c.ref AS claim
+  FROM v_claim c JOIN v_oxplow_bundled_claim_status s ON s.ref = c.ref
+  WHERE c.effort_id = :effort_id AND s.verified = 0
+  ORDER BY c.created_at
 viz: list
 columns:
   - { key: statement, label: Claim }

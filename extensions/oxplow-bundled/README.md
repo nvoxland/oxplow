@@ -14,9 +14,10 @@ The rest of this page is about the review packet.
 
 ## What it reads
 
-- `v_claim` — what the agent said about its work. `verified = 0` means
-  nothing backs it: no `evidence_ref`, and for a `tests_pass` claim no
-  passing test run in the effort.
+- `v_claim` — what the agent said about its work, and what it cites.
+  `v_oxplow_bundled_claim_status` (this extension's model) says whether
+  something backs it: `verified = 0` means no `evidence_ref`, and for a
+  `tests_pass` claim no passing latest test run in the effort.
 - `v_decision` — the forks the agent resolved. `provenance = 'inferred'`
   rows are a model's guesses from the conversation, until a person
   confirms or dismisses them (below, "Decisions Oxplow Noticed").

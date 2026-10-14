@@ -50,7 +50,7 @@ import { MarkdownView } from "../components/Wiki/MarkdownView.js";
 import { LensSlots } from "../lens/LensSlots.js";
 import { useChange } from "../lens/useChange.js";
 import { effortRowId } from "../lens/lensModel.js";
-import { EffortVerdict } from "./EffortVerdictStrip.js";
+import { Replaceable } from "../components/Replaceable.js";
 import { EndpointPicker, type EndpointSnapshotOption } from "../components/Diff/EndpointPicker.js";
 import { formatFullDateTime, formatTimeOnly } from "../components/format.js";
 import { workItemLabel } from "../workItemRef.js";
@@ -694,8 +694,16 @@ function ResolvedEndpointDiff({
         </div>
       ) : null}
 
+      {/* The verdict is a review policy's (`effort.verdict`): oxplow has
+          none of its own, so with no extension bringing one, nothing. */}
       {primaryEffortId && effortRowId(primaryEffortId) !== null ? (
-        <EffortVerdict effortRow={effortRowId(primaryEffortId)!} />
+        <Replaceable
+          target="effort.verdict"
+          props={{ effort_id: effortRowId(primaryEffortId) }}
+          streamId={stream?.id ?? null}
+          onOpenPage={(ref) => onOpenPage(ref)}
+          fallback={null}
+        />
       ) : null}
 
       {primaryEffortId ? (

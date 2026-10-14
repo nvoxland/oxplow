@@ -148,6 +148,7 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-bundled", "lenses/effort-test-runs.yaml"),
             ext_file!("oxplow-bundled", "lenses/effort-tests.yaml"),
             ext_file!("oxplow-bundled", "lenses/effort-untested-files.yaml"),
+            ext_file!("oxplow-bundled", "lenses/effort-verdict.yaml"),
             ext_file!("oxplow-bundled", "lenses/file-co-change.yaml"),
             ext_file!("oxplow-bundled", "lenses/findings.yaml"),
             ext_file!("oxplow-bundled", "lenses/go-to-bookmarks.yaml"),
@@ -192,6 +193,7 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-bundled", "lenses/work.yaml"),
             ext_file!("oxplow-bundled", "models/change_co_change.sql"),
             ext_file!("oxplow-bundled", "models/change_interest.sql"),
+            ext_file!("oxplow-bundled", "models/claim_status.sql"),
             ext_file!("oxplow-bundled", "models/co_change_pair.sql"),
             ext_file!("oxplow-bundled", "models/deviation.sql"),
             ext_file!("oxplow-bundled", "models/finished_cleared.sql"),
@@ -347,6 +349,215 @@ mod tests {
         );
         let runs = lens("effort-test-runs").await;
         assert_eq!(runs.as_array().unwrap().len(), 2);
+    }
+
+    /// A test run on `effort` at `at` (a `tests` capture with its
+    /// `test-detail` payload, what `v_test_run` reads): `failed` of
+    /// `total` cases failing.
+    async fn record_test_run(
+        f: &crate::test_fixtures::EffortFixture,
+        effort: i64,
+        failed: i64,
+        total: i64,
+        at: &str,
+    ) {
+        let (thread, at) = (f.thread.value(), at.to_string());
+        f.svc
+            .db
+            .transaction(move |c| {
+                let detail = format!(
+                    "{{\"kind\":\"test-detail\",\"payload\":{{\"passed\":{},\"failed\":{failed},\"total\":{total}}}}}",
+                    total - failed
+                );
+                c.execute(
+                    "INSERT INTO metric_capture (stream_id, thread_id, effort_id, producer, status, provenance, source, captured_at, detail_json)
+                     SELECT stream_id, id, ?2, 'tests', 'done', 'observed', 'junit', ?3, ?4 FROM threads WHERE id = ?1",
+                    rusqlite::params![thread, effort, at, detail],
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+
+    /// Another closed effort on the fixture's thread; its id.
+    async fn another_effort(f: &crate::test_fixtures::EffortFixture, day: &str) -> i64 {
+        let (thread, day) = (f.thread.value(), day.to_string());
+        f.svc
+            .db
+            .transaction(move |c| {
+                c.execute(
+                    "INSERT INTO effort (thread_id, started_at, ended_at) VALUES (?1, ?2, ?2)",
+                    rusqlite::params![thread, day],
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                Ok(c.last_insert_rowid())
+            })
+            .await
+            .unwrap()
+    }
+
+    /// A claim on `effort`, citing `evidence`.
+    async fn record_claim(
+        f: &crate::test_fixtures::EffortFixture,
+        effort: i64,
+        kind: &str,
+        evidence: Option<&str>,
+    ) {
+        let claim = oxplow_db::NewClaim {
+            thread_id: f.thread.value(),
+            work_item: None,
+            effort_id: Some(effort),
+            statement: format!("{kind} on effort {effort}"),
+            kind: kind.into(),
+            evidence_ref: evidence.map(str::to_string),
+            agent_session_id: None,
+        };
+        f.svc
+            .db
+            .transaction(move |tx| oxplow_db::record_claim_tx(tx, &claim))
+            .await
+            .unwrap();
+    }
+
+    /// oxplow-bundled's rule for a backed claim: it cites evidence, or it
+    /// says the tests pass and its effort's LATEST run passed with at
+    /// least one test (its own or one claimed through attribution).
+    #[tokio::test]
+    async fn a_claim_is_backed_by_evidence_or_its_efforts_latest_clean_run() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let fixed = f.effort.value();
+        let broke = another_effort(&f, "2026-01-01T00:00:00Z").await;
+        let empty = another_effort(&f, "2026-01-02T00:00:00Z").await;
+        // Passed, then a later failure: not backed.
+        record_test_run(&f, broke, 0, 5, "2026-01-01T00:00:00Z").await;
+        record_test_run(&f, broke, 1, 5, "2026-01-01T01:00:00Z").await;
+        // Failed, then fixed: backed.
+        record_test_run(&f, fixed, 2, 5, "2026-01-02T00:00:00Z").await;
+        record_test_run(&f, fixed, 0, 5, "2026-01-02T01:00:00Z").await;
+        // A run with no tests: not backed.
+        record_test_run(&f, empty, 0, 0, "2026-01-03T00:00:00Z").await;
+        for effort in [broke, fixed, empty] {
+            record_claim(&f, effort, "tests_pass", None).await;
+        }
+        record_claim(&f, broke, "handles_case", Some("test:empty_input")).await;
+        record_claim(&f, fixed, "no_behavior_change", None).await;
+        let out = f
+            .svc
+            .sql
+            .query_sql(
+                "SELECT c.kind, c.effort_id, s.verified, s.backed_by
+                 FROM v_claim c JOIN v_oxplow_bundled_claim_status s ON s.ref = c.ref
+                 ORDER BY c.id",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&out.rows).unwrap(),
+            serde_json::json!([
+                ["tests_pass", broke, 0, null],
+                ["tests_pass", fixed, 1, "latest run"],
+                ["tests_pass", empty, 0, null],
+                ["handles_case", broke, 1, "evidence"],
+                ["no_behavior_change", fixed, 0, null],
+            ])
+        );
+    }
+
+    /// oxplow-bundled's verdict, the first line of an effort's page: did it
+    /// test, how much of the change ran (judged against the coverage
+    /// metric's `warnAt`), and what's left to check.
+    #[tokio::test]
+    async fn the_effort_verdict_says_what_a_reviewer_needs_first() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let effort = f.effort.value();
+        let verdict = || run_analytics_lens(&f, "effort-verdict", "effort_id", effort);
+        assert_eq!(
+            verdict().await,
+            serde_json::json!([
+                ["Tests: none ran", "warning"],
+                ["Diff coverage: not measured", null],
+                ["Every claim is backed", "success"],
+                ["0 decisions made", null],
+            ])
+        );
+        let obs = |kind: &str, value: Option<f64>, payload: serde_json::Value| {
+            oxplow_db::EffortObservation {
+                kind: kind.into(),
+                provenance: "observed".into(),
+                source: "post-tool-bash".into(),
+                metric_value: value,
+                payload_json: Some(payload.to_string()),
+                local_snapshot_id: None,
+                created_at: oxplow_domain::Timestamp::now(),
+            }
+        };
+        let evidence = |runs: Vec<(i64, i64)>, coverage: f64| {
+            let mut rows: Vec<oxplow_db::EffortObservation> = runs
+                .into_iter()
+                .map(|(passed, failed)| {
+                    obs(
+                        "test-run",
+                        None,
+                        serde_json::json!({ "passed": passed, "failed": failed }),
+                    )
+                })
+                .collect();
+            rows.push(obs(
+                "diff-coverage",
+                Some(coverage),
+                serde_json::json!({ "summaryPct": coverage }),
+            ));
+            rows
+        };
+        let replace = |rows: Vec<oxplow_db::EffortObservation>| {
+            f.svc
+                .effort_evidence_store
+                .replace(effort, Vec::new(), rows, String::new())
+        };
+        // The last run failed, and coverage is under the threshold (80).
+        replace(evidence(vec![(4, 0), (3, 1)], 79.6)).await.unwrap();
+        record_claim(&f, effort, "tests_pass", None).await;
+        f.svc
+            .reasoning_store
+            .replace_inferred(
+                effort,
+                vec![oxplow_db::NewDecision {
+                    thread_id: f.thread.value(),
+                    work_item: None,
+                    effort_id: Some(effort),
+                    question: "q".into(),
+                    choice: "c".into(),
+                    alternatives: vec![],
+                    confidence: "medium".into(),
+                    why: "w".into(),
+                }],
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            verdict().await,
+            serde_json::json!([
+                ["Tests: the last run failed (1 of 4)", "warning"],
+                ["Diff coverage: 80%", "warning"],
+                ["1 unverified claim", "warning"],
+                ["1 decision to confirm", "warning"],
+            ])
+        );
+        // Green, and exactly at the threshold: a threshold is crossed only past it.
+        replace(evidence(vec![(3, 1), (4, 0)], 80.0)).await.unwrap();
+        assert_eq!(
+            verdict().await,
+            serde_json::json!([
+                ["Tests: the last of 2 runs passed (4)", "success"],
+                ["Diff coverage: 80%", "success"],
+                ["1 unverified claim", "warning"],
+                ["1 decision to confirm", "warning"],
+            ])
+        );
     }
 
     /// P4.1 (tsk486): every query a bundled extension ships — lens,

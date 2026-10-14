@@ -25,6 +25,6 @@ test("an accepted effort's page carries the review's verdict chip", async ({ pag
   // The task's effort, its Review: the effort's own page.
   await page.locator('[data-testid^="tasks-show-in-history-"]').first().click();
   await expect(page.getByTestId("page-chips")).toContainText("Accepted");
-  // It leads with the verdict (tsk1036): no tests ran in this effort.
-  await expect(page.getByTestId("effort-verdict-tests")).toContainText("Tests: none ran");
+  // It leads with oxplow-bundled's verdict: no tests ran in this effort.
+  await expect(page.getByTestId("replacement-effort.verdict")).toContainText("Tests: none ran");
 });

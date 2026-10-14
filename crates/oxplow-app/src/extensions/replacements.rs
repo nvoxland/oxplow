@@ -213,6 +213,11 @@ mod tests {
             "oxplow/extensions/tracker/lenses/graph.yaml",
             "title: Graph\nparams: [{ name: head_sha }, { name: reveal_sha }, { name: limit }]\nquery: SELECT :head_sha AS sha\n",
         );
+        write(
+            d.path(),
+            "oxplow/extensions/tracker/lenses/verdict.yaml",
+            "title: Verdict\nparams: [{ name: effort_id }]\nquery: SELECT :effort_id AS effort_id\n",
+        );
         load_extensions(d.path())
             .into_iter()
             .find(|e| e.name == "tracker")
@@ -256,7 +261,7 @@ mod tests {
         for (entry, says) in [
             (
                 "{ target: vcs.conflict.resolver, lens: board }",
-                "isn't a replaceable component (work_item.board, work_item.list, work_item.detail, work_item.detail.state, vcs.history.graph)",
+                "isn't a replaceable component (work_item.board, work_item.list, work_item.detail, work_item.detail.state, vcs.history.graph, effort.verdict)",
             ),
             (
                 "{ target: work_item.board, lens: board, version: 2 }",
@@ -309,6 +314,40 @@ mod tests {
             "    - { target: work_item.detail.state, lens: board }\n",
         );
         assert!(said(&ext).contains("must declare `ref`"), "{}", said(&ext));
+    }
+
+    /// An effort's verdict is a review policy's: any extension may bring
+    /// one, with no provider, and its lens takes the effort's `effort_id`.
+    #[test]
+    fn an_effort_verdict_replacement_takes_effort_id_and_needs_no_provider() {
+        let ext = load(
+            "shared",
+            "",
+            "    - { target: effort.verdict, lens: verdict }\n",
+        );
+        assert_eq!(said(&ext), "");
+        assert_eq!(
+            ext.ui
+                .replacements
+                .iter()
+                .map(|r| (
+                    r.target.as_str(),
+                    r.capability.as_str(),
+                    r.bound_to_provider
+                ))
+                .collect::<Vec<_>>(),
+            vec![("effort.verdict", "effort_policy", false)]
+        );
+        let ext = load(
+            "shared",
+            "",
+            "    - { target: effort.verdict, lens: state }\n",
+        );
+        assert!(
+            said(&ext).contains("must declare `effort_id`"),
+            "{}",
+            said(&ext)
+        );
     }
 
     /// Every replaceable target has a name a person reads (Settings →

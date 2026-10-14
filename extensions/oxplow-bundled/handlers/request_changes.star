@@ -10,7 +10,8 @@
 _REVIEW = """
 SELECT e.work_item,
        (SELECT json_group_array(json_object('claim', c.ref, 'statement', c.statement))
-          FROM v_claim c WHERE c.effort_id = e.id AND c.verified = 0) AS unverified,
+          FROM v_claim c JOIN v_oxplow_bundled_claim_status s ON s.ref = c.ref
+         WHERE c.effort_id = e.id AND s.verified = 0) AS unverified,
        (SELECT json_group_array(json_object('decision', d.ref, 'question', d.question, 'choice', d.choice))
           FROM v_decision d WHERE d.effort_id = e.id AND d.provenance = 'inferred') AS inferred,
        (SELECT json_group_array(v.path)

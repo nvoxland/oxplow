@@ -14,7 +14,8 @@
 _ACCEPTED = """
 SELECT (SELECT json_group_array(json_object('claim', s.value, 'statement', c.statement))
           FROM json_each(:subject) s JOIN v_claim c ON s.value = c.ref
-         WHERE c.verified = 0) AS claims,
+          JOIN v_oxplow_bundled_claim_status cs ON cs.ref = c.ref
+         WHERE cs.verified = 0) AS claims,
        (SELECT json_group_array(json_object('decision', s.value, 'question', d.question, 'choice', d.choice))
           FROM json_each(:subject) s JOIN v_decision d ON s.value = d.ref
          WHERE d.provenance = 'inferred') AS decisions

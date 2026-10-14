@@ -97,6 +97,19 @@ pub const REPLACEABLE: &[Replaceable] = &[
         props: &["head_sha", "reveal_sha", "limit"],
         label: "history graph",
     },
+    // An effort's verdict, the first line of its review page
+    // (`DiffViewPage`): `effort_id` is the effort's row id. Core has no
+    // verdict of its own: what counts as tested, covered or backed is a
+    // review policy's, so with no replacement (or `oxplow` chosen) the
+    // page shows none. oxplow-bundled's is the default.
+    Replaceable {
+        target: "effort.verdict",
+        capability: "effort_policy",
+        bound_to_provider: false,
+        version: 1,
+        props: &["effort_id"],
+        label: "effort verdict",
+    },
 ];
 
 /// The `replacements:` value that keeps oxplow's own component.
@@ -136,13 +149,11 @@ mod tests {
             assert!(r.version >= 1, "{}", r.target);
             assert!(!r.props.is_empty(), "{}", r.target);
             assert!(!r.props.contains(&"stream_id"), "{}", r.target);
-            assert!(
-                r.target
-                    .starts_with(&format!("{}.", r.capability.trim_end_matches('s')))
-                    || r.capability == "vcs",
-                "{}",
-                r.target
-            );
+            // A target is named for what its capability is about:
+            // `work_item.*` for `work_items`, `effort.*` for
+            // `effort_policy`, `vcs.*` for `vcs`.
+            let noun = r.target.split('.').next().unwrap_or_default();
+            assert!(r.capability.starts_with(noun), "{}", r.target);
         }
         assert_eq!(
             replaceable("work_item.board").map(|r| r.bound_to_provider),
@@ -151,6 +162,10 @@ mod tests {
         assert_eq!(
             replaceable("work_item.detail.state").map(|r| r.bound_to_provider),
             Some(true)
+        );
+        assert_eq!(
+            replaceable("effort.verdict").map(|r| (r.bound_to_provider, r.props)),
+            Some((false, &["effort_id"][..]))
         );
         assert!(replaceable("vcs.conflict.resolver").is_none());
     }

@@ -878,6 +878,12 @@ ui:
   `ordering` — and `move`), so the view works with whichever list is
   active. A component declares the commands it runs (`commands:`), and a
   person approves it before it can run them.
+- **An effort's verdict** (`effort.verdict`, props `effort_id`) is the
+  first line of an effort's review page, and core has none of its own:
+  when a person wants their own review rules ("block on a dropped table",
+  "coverage of 90"), replace it with a lens that judges the effort from
+  `v_test_run`, `v_effort_observation`, `v_change_function` and your own
+  facts. A `tone` column (`success`, `warning`, `danger`) colors a line.
 - The person picks whose view shows: Settings → Integrations, or
   `replacements: { <target>: <extension> | oxplow }` in the project
   config (a person-only key: tell them, don't set it). One extension

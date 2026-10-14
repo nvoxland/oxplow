@@ -256,8 +256,8 @@
     - { name: "skips_before", type: "INTEGER", doc: "Skip markers on the base side." }
     - { name: "skips_after", type: "INTEGER", doc: "Skip markers on the head side." }
 - name: claim
-  version: 5
-  description: "Claims the agent made about its work (\"tests pass\", \"no behavior change\"), and whether anything backs them."
+  version: 6
+  description: "Claims the agent made about its work (\"tests pass\", \"no behavior change\"), and what each cites."
   columns:
     - { name: "id", type: "INTEGER", doc: "Claim id." }
     - { name: "thread_id", type: "INTEGER", doc: "Thread it was made in." }
@@ -267,8 +267,7 @@
     - { name: "agent_session_id", type: "INTEGER", doc: "The agent session that made it (v_agent_session.id); NULL when not recorded. (v4)" }
     - { name: "statement", type: "TEXT", doc: "The claim in words." }
     - { name: "kind", type: "TEXT", doc: "`tests_pass`, `no_behavior_change`, `handles_case` or `other`." }
-    - { name: "evidence_ref", type: "TEXT", doc: "What backs it (`run:<id>`, a test, a file, or `reviewer` when a person verified it with `oxplow.effort.verify_claim`); NULL if nothing was cited." }
-    - { name: "verified", type: "", doc: "1 if it cites evidence, or is `tests_pass` and its effort's latest test run (in `v_test_run`) passed with at least one test; else 0." }
+    - { name: "evidence_ref", type: "TEXT", doc: "What it cites (`run:<id>`, a test, a file, or `reviewer` when a person verified it with `oxplow.effort.verify_claim`); NULL if nothing was cited. Whether anything else backs it is a review policy's call (oxplow-bundled's `v_oxplow_bundled_claim_status`). (v6)" }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "ref", type: "TEXT", doc: "`claim:<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v5)" }
 - name: code_quality_finding
