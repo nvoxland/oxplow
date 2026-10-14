@@ -23,10 +23,10 @@
 //! counts ride the event instead ([`TokenUsageService::record_turn`]).
 //! Provenance is `observed`.
 //!
-//! **A model fact's `subject_ref` is `ai_model:<name>`** (`ai_model:claude-opus-4-8`,
+//! **A model fact's `subject` is `ai_model:<name>`** (`ai_model:claude-opus-4-8`,
 //! `build::ai_model_ref`): the model's name as its harness reports it. It is
 //! not the `model` ref kind, which names a published view
-//! (`model:v_work_item`). `subject_kind` is `model`.
+//! (`model:v_work_item`). `subject_kind` is `ai_model`.
 //!
 //! Each harness reads its own transcript (`AgentHarness::turns`): Claude's
 //! is read; Codex's and opencode's formats aren't yet. We track
@@ -464,8 +464,7 @@ impl TokenUsageService {
             for (model, agg) in by_model {
                 if agg.turns > 0 {
                     facts.push(NewFact {
-                        subject_kind: Some("model".into()),
-                        subject_ref: Some(oxplow_domain::refs::build::ai_model_ref(model)),
+                        subject: Some(oxplow_domain::refs::build::ai_model_ref(model)),
                         // json! (not format!) — the model id comes verbatim from
                         // external session JSONL; a quote/backslash in it must
                         // not poison the dims JSON (tsk46).
@@ -536,8 +535,7 @@ impl TokenUsageService {
             };
             let Some(m) = measure else { continue };
             facts.push(NewFact {
-                subject_kind: Some("model".into()),
-                subject_ref: Some(oxplow_domain::refs::build::ai_model_ref(&c.model)),
+                subject: Some(oxplow_domain::refs::build::ai_model_ref(&c.model)),
                 dims_json: Some(kind_dims(&c.model, c.kind.as_str())),
                 ..NewFact::new(m.id, c.value as f64)
             });
@@ -565,8 +563,7 @@ impl TokenUsageService {
                     continue;
                 }
                 facts.push(NewFact {
-                    subject_kind: Some("model".into()),
-                    subject_ref: Some(oxplow_domain::refs::build::ai_model_ref(model)),
+                    subject: Some(oxplow_domain::refs::build::ai_model_ref(model)),
                     numerator: Some(cache_read),
                     denominator: Some(den),
                     dims_json: Some(serde_json::json!({ "oxplow.model": model }).to_string()),
@@ -1151,10 +1148,7 @@ mod tests {
             })
             .expect("input-kind fact");
         assert_eq!(input.value, 100.0);
-        assert_eq!(
-            input.subject_ref.as_deref(),
-            Some("ai_model:claude-opus-4-8")
-        );
+        assert_eq!(input.subject.as_deref(), Some("ai_model:claude-opus-4-8"));
 
         // Re-ingesting the identical export must not double-count (idempotency).
         assert!(!report(&svc, thread, &body).await);
@@ -1331,7 +1325,7 @@ mod tests {
         assert_eq!(turn_facts[0].value, 1.0, "one turn");
         assert_eq!(turn_facts[0].thread_id, Some(thread.value()));
         assert_eq!(
-            turn_facts[0].subject_ref.as_deref(),
+            turn_facts[0].subject.as_deref(),
             Some("ai_model:claude-opus-4-8")
         );
 

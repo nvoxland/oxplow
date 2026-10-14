@@ -42,7 +42,7 @@ fn invalid(msg: impl Into<String>) -> DomainError {
 /// The table's columns, in order.
 const COLUMNS: &[&str] = &[
     "subject_kind",
-    "subject_ref",
+    "subject",
     "path",
     "line",
     "value",
@@ -112,7 +112,7 @@ impl FindingsPlan {
             .map(|f| {
                 vec![
                     text(f.subject_kind),
-                    text(f.subject_ref),
+                    text(f.subject),
                     text(f.path),
                     f.line.map_or(SqlCell::Null(()), SqlCell::Int),
                     SqlCell::Real(f.value),
@@ -175,7 +175,7 @@ mod tests {
         spec.filter_json = Some(r#"{"min_value":5.0}"#.into());
         facts.upsert_spec(spec).await.unwrap();
         let fact = |path: &str, value: f64| NewFact {
-            subject_ref: Some(path.into()),
+            subject: Some(format!("file:{path}")),
             path: Some(path.into()),
             line: Some(3),
             ..NewFact::new(measure, value)
@@ -254,7 +254,7 @@ mod tests {
         // It checks like any query.
         assert!(svc
             .sql
-            .check("SELECT path, line, value, rule, message, subject_ref, captured_at FROM metric_findings('acme.complex')")
+            .check("SELECT path, line, value, rule, message, subject, captured_at FROM metric_findings('acme.complex')")
             .await
             .is_ok());
     }

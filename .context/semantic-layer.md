@@ -454,7 +454,7 @@ so the query quotes it.)
   `:stream_id`.
 - **`metric_findings('<key>'[, <capture id>])`** (P4.8,
   `crates/oxplow-app/src/metric_findings.rs`) is the same mechanism for the
-  located items behind a metric: a table of `subject_kind, subject_ref,
+  located items behind a metric: a table of `subject_kind, subject,
   path, line, value, severity, rule, message, branch, captured_at`, one row
   per fact the metric's filter keeps. Without a capture it is the metric's
   **current** state (`MetricEngine::current_facts`: the tree fold for a

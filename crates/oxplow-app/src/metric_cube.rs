@@ -1154,7 +1154,7 @@ mod tests {
 
     fn case(measure: i64, subject: &str, value: f64) -> NewFact {
         NewFact {
-            subject_ref: Some(subject.into()),
+            subject: Some(format!("test:{subject}")),
             ..NewFact::new(measure, value)
         }
     }
@@ -2304,9 +2304,9 @@ mod tests {
 
     #[tokio::test]
     async fn a_fact_carrying_both_identities_still_evicts_by_its_scopes_key() {
-        // tsk109. A per-subject fact may legally carry BOTH `subject_ref` and
+        // tsk109. A per-subject fact may legally carry BOTH `subject` and
         // `path` (MCP-asserted facts; a test with a file location). Eviction
-        // keys on the scope's identity (`subject_ref`), so insertion must too —
+        // keys on the scope's identity (`subject`), so insertion must too —
         // the old path-first insert key filed the fact where no per-subject
         // eviction could ever find it, and re-runs accumulated forever:
         // [1, 3] instead of [1, 2], on both paths, silently.

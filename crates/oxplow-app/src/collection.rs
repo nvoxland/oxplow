@@ -1264,7 +1264,6 @@ impl CollectionService {
                         for (status, n) in [("passed", p), ("failed", f), ("skipped", s)] {
                             for _ in 0..n {
                                 facts.push(NewFact {
-                                    subject_kind: Some("test".into()),
                                     dims_json: serde_json::to_string(&json!({
                                         "oxplow.status": status,
                                     }))
@@ -1694,8 +1693,7 @@ impl CollectionService {
                     Note => "note",
                 };
                 facts.push(NewFact {
-                    subject_kind: Some("file".into()),
-                    subject_ref: Some(oxplow_domain::refs::build::file_ref(&f.path)),
+                    subject: Some(oxplow_domain::refs::build::file_ref(&f.path)),
                     path: Some(f.path.clone()),
                     line: f.line.map(|l| l as i64),
                     severity: Some(severity.into()),
@@ -1844,8 +1842,7 @@ impl CollectionService {
                     let ratio_fact = |measure_id: i64, hit: u32, found: u32| NewFact {
                         numerator: Some(hit as f64),
                         denominator: Some(found as f64),
-                        subject_kind: Some("file".into()),
-                        subject_ref: Some(oxplow_domain::refs::build::file_ref(path)),
+                        subject: Some(oxplow_domain::refs::build::file_ref(path)),
                         path: Some(path.clone()),
                         ..NewFact::new(measure_id, hit as f64 / found as f64 * 100.0)
                     };
@@ -1868,8 +1865,7 @@ impl CollectionService {
                     facts.push(NewFact {
                         numerator: Some(covered as f64),
                         denominator: Some(instr as f64),
-                        subject_kind: Some("file".into()),
-                        subject_ref: Some(oxplow_domain::refs::build::file_ref(path)),
+                        subject: Some(oxplow_domain::refs::build::file_ref(path)),
                         path: Some(path.clone()),
                         ..NewFact::new(measure.id, pct)
                     });
@@ -2256,13 +2252,13 @@ impl CollectionService {
             let [owner] = owners.as_slice() else {
                 continue; // 0 or ambiguous → no attribution
             };
-            let owner_ref = owner.id.to_string();
+            let owner_ref = oxplow_domain::refs::build::effort_ref(owner.id);
             let spend: f64 = self
                 .facts
                 .facts_for_measure_in_stream(effort_tokens_measure.id, stream_val)
                 .await?
                 .iter()
-                .filter(|f| f.subject_ref.as_deref() == Some(owner_ref.as_str()))
+                .filter(|f| f.subject.as_deref() == Some(owner_ref.as_str()))
                 .map(|f| f.value)
                 .sum();
             if spend <= 0.0 {
@@ -2274,8 +2270,7 @@ impl CollectionService {
             capture.basis_ref = Some(head_sha.clone());
             capture.idempotency_key = Some(format!("token-waste:{}", owner.id.value()));
             let fact = NewFact {
-                subject_kind: Some("effort".into()),
-                subject_ref: Some(owner_ref),
+                subject: Some(owner_ref),
                 numerator: Some(spend),
                 denominator: Some(0.0),
                 ..NewFact::new(waste_measure.id, spend)
@@ -2545,8 +2540,7 @@ impl CollectionService {
             // kind as subject so Sum() reconstructs the fired count (epic tsk12).
             if let Some(measure) = self.facts.get_measure("oxplow.nudge").await? {
                 let fact = NewFact {
-                    subject_kind: Some("nudge".into()),
-                    subject_ref: Some(kind.to_string()),
+                    subject: Some(oxplow_domain::refs::build::of("nudge", kind)),
                     ..NewFact::new(measure.id, 1.0)
                 };
                 // The nudge's effort, else the one its run was anchored to;
@@ -4825,7 +4819,7 @@ mod tests {
                 .await
                 .unwrap()
                 .into_iter()
-                .map(|f| f.subject_ref)
+                .map(|f| f.subject)
                 .collect();
             assert_eq!(refs, vec![Some("file:src/foo.rs".to_string())]);
         }
@@ -4871,9 +4865,9 @@ mod tests {
             assert_eq!(cov[0].denominator, Some(3.0));
             assert_eq!(cov[0].subject_kind.as_deref(), Some("file"));
             assert!(
-                cov[0].subject_ref.as_deref().unwrap().starts_with("file:"),
-                "subject_ref is file:<path>, got {:?}",
-                cov[0].subject_ref
+                cov[0].subject.as_deref().unwrap().starts_with("file:"),
+                "subject is file:<path>, got {:?}",
+                cov[0].subject
             );
             assert!(cov[0].branch.is_some(), "fact inherits the capture branch");
             assert_eq!(cov[0].provenance, "observed");
@@ -5090,8 +5084,7 @@ mod tests {
                 .record_facts(
                     cap,
                     vec![oxplow_db::NewFact {
-                        subject_kind: Some("effort".into()),
-                        subject_ref: Some(effort.id.to_string()),
+                        subject: Some(oxplow_domain::refs::build::effort_ref(effort.id)),
                         ..oxplow_db::NewFact::new(etm.id, 5000.0)
                     }],
                 )
@@ -5132,8 +5125,8 @@ mod tests {
             assert_eq!(waste[0].numerator, Some(5000.0));
             assert_eq!(waste[0].denominator, Some(0.0), "numerator-only ratio row");
             assert_eq!(
-                waste[0].subject_ref.as_deref(),
-                Some(effort.id.to_string().as_str())
+                waste[0].subject.as_deref(),
+                Some(oxplow_domain::refs::build::effort_ref(effort.id).as_str())
             );
 
             // Re-firing (same revert seen again) is idempotent per effort.
@@ -5650,7 +5643,7 @@ mod tests {
             let status_of = |sref: &str| -> String {
                 cases
                     .iter()
-                    .find(|f| f.subject_ref.as_deref() == Some(sref))
+                    .find(|f| f.subject.as_deref() == Some(sref))
                     .and_then(|f| f.dims_json.as_deref())
                     .and_then(|j| serde_json::from_str::<serde_json::Value>(j).ok())
                     .and_then(|v| v["oxplow.status"].as_str().map(String::from))
@@ -5977,8 +5970,7 @@ mod tests {
             let rows: Vec<oxplow_db::NewFact> = per_file
                 .iter()
                 .map(|(path, v)| oxplow_db::NewFact {
-                    subject_kind: Some("file".into()),
-                    subject_ref: Some(format!("file:{path}")),
+                    subject: Some(format!("file:{path}")),
                     path: Some((*path).into()),
                     ..oxplow_db::NewFact::new(measure_id, *v)
                 })
@@ -7208,7 +7200,7 @@ mod tests {
             assert_eq!(fired.len(), 1, "one nudge fact per fired nudge");
             assert_eq!(fired[0].value, 1.0);
             assert_eq!(fired[0].subject_kind.as_deref(), Some("nudge"));
-            assert_eq!(fired[0].subject_ref.as_deref(), Some("report-less-run"));
+            assert_eq!(fired[0].subject.as_deref(), Some("nudge:report-less-run"));
         }
 
         #[tokio::test]
@@ -7479,8 +7471,8 @@ mod tests {
             assert_eq!(nudge_facts.len(), 1, "one nudge fact");
             assert_eq!(nudge_facts[0].value, 1.0);
             assert_eq!(
-                nudge_facts[0].subject_ref.as_deref(),
-                Some("report-less-run")
+                nudge_facts[0].subject.as_deref(),
+                Some("nudge:report-less-run")
             );
 
             // Second run is deduped (returns None) and stores nothing more.
@@ -7706,7 +7698,7 @@ mod tests {
             assert_eq!(details.get(&err_hit.id).map(String::as_str), Some("boom"));
             assert_eq!(err_hit.path.as_deref(), Some("src/a.rs"));
             assert_eq!(err_hit.line, Some(10));
-            assert_eq!(err_hit.subject_ref.as_deref(), Some("file:src/a.rs"));
+            assert_eq!(err_hit.subject.as_deref(), Some("file:src/a.rs"));
         }
 
         #[tokio::test]

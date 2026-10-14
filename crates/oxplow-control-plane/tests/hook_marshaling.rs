@@ -985,7 +985,7 @@ async fn otlp_metrics_ingests_codex_histogram_facts() {
     assert_eq!(facts.iter().map(|f| f.value).sum::<f64>(), 150.0);
     assert!(facts
         .iter()
-        .all(|f| f.subject_ref.as_deref() == Some("ai_model:gpt-5-codex")));
+        .all(|f| f.subject.as_deref() == Some("ai_model:gpt-5-codex")));
 }
 
 #[tokio::test]
@@ -1014,5 +1014,5 @@ async fn otlp_logs_body_at_metrics_endpoint_ingests_codex_token_facts() {
     assert_eq!(facts.iter().map(|f| f.value).sum::<f64>(), 4250.0);
     assert!(facts
         .iter()
-        .all(|f| f.subject_ref.as_deref() == Some("ai_model:gpt-5.5")));
+        .all(|f| f.subject.as_deref() == Some("ai_model:gpt-5.5")));
 }

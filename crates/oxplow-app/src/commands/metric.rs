@@ -61,7 +61,7 @@ pub struct RecordInput {
     pub key: String,
     /// The asserted value.
     pub value: f64,
-    /// What it's about, as `kind:ref` (`file:src/a.rs`, `model:opus`).
+    /// What it's about, as a ref (`file:src/a.rs`, `ai_model:opus`).
     #[serde(default)]
     pub subject: Option<String>,
     /// Extra dimensions, recorded on the fact.
@@ -157,6 +157,14 @@ fn record_tx(
             "a formula metric has no source measure to assert a fact on",
         )
     })?;
+    if let Some(subject) = input.subject.as_deref() {
+        if oxplow_domain::refs::build::kind_of(subject).is_none() {
+            return Err(invalid(
+                "/subject",
+                format!("`{subject}` isn't a ref (`<kind>:<id>`, like `file:src/a.rs`)"),
+            ));
+        }
+    }
     let measure = get_measure_tx(ctx.conn, measure_key)
         .map_err(sql)?
         .ok_or_else(|| {
@@ -197,11 +205,6 @@ fn record_tx(
         "ratio" => (Some(input.value), Some(1.0)),
         _ => (None, None),
     };
-    let (subject_kind, subject_ref) = match input.subject.as_deref().and_then(|s| s.split_once(':'))
-    {
-        Some((k, r)) => (Some(k.to_string()), Some(r.to_string())),
-        None => (None, input.subject.clone()),
-    };
     let mut capture = NewMetricCapture::done(stream.value(), input.key.clone(), "agent-reported");
     capture.provenance = "asserted".into();
     // The assertion restates only what it emits, but it is anchored to
@@ -225,8 +228,7 @@ fn record_tx(
             .map(|t| t.value());
     }
     let fact = NewFact {
-        subject_kind,
-        subject_ref,
+        subject: input.subject.clone(),
         dims_json: (!dims.is_empty())
             .then(|| serde_json::to_string(&dims).ok())
             .flatten(),
@@ -429,7 +431,7 @@ mod tests {
         assert_eq!(facts[0].provenance, "asserted");
         assert_eq!(facts[0].source, "agent-reported");
         assert_eq!(facts[0].subject_kind.as_deref(), Some("suite"));
-        assert_eq!(facts[0].subject_ref.as_deref(), Some("unit"));
+        assert_eq!(facts[0].subject.as_deref(), Some("suite:unit"));
         let audited: i64 = svc
             .db
             .read(|tx| {

@@ -16,7 +16,7 @@ def transform(input):
             facts.append({
                 "measure": "oxplow.duplicate_lines",
                 "value": b["line_count"],
-                "subject": "block:%s:%d-%d" % (path, start, end),
+                "subject": ref.build("block", "%s:%d-%d" % (path, start, end)),
                 "path": path,
                 "line": start,
             })

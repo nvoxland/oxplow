@@ -756,6 +756,7 @@ pub fn record_facts_tx(
         }
     }
     for f in facts {
+        check_subject(f)?;
         check_dims_tx(conn, f.dims_json.as_deref())?;
     }
     let capture_id = insert_capture(conn, capture).map_err(map_sql_err)?;
@@ -902,8 +903,10 @@ pub struct NewFact {
     pub value: f64,
     pub numerator: Option<f64>,
     pub denominator: Option<f64>,
-    pub subject_kind: Option<String>,
-    pub subject_ref: Option<String>,
+    /// What the fact is about, as one ref (`file:src/a.rs`,
+    /// `symbol:src/a.rs/f`); a string that isn't a ref is refused at the
+    /// write. The store derives the kind from it.
+    pub subject: Option<String>,
     pub path: Option<String>,
     pub line: Option<i64>,
     pub severity: Option<String>,
@@ -921,8 +924,7 @@ impl NewFact {
             value,
             numerator: None,
             denominator: None,
-            subject_kind: None,
-            subject_ref: None,
+            subject: None,
             path: None,
             line: None,
             severity: None,
@@ -1051,8 +1053,10 @@ pub struct FactRow {
     pub value: f64,
     pub numerator: Option<f64>,
     pub denominator: Option<f64>,
+    /// What the fact is about, as one ref.
+    pub subject: Option<String>,
+    /// The subject ref's kind (`file`, `symbol`): a filter convenience.
     pub subject_kind: Option<String>,
-    pub subject_ref: Option<String>,
     pub path: Option<String>,
     pub line: Option<i64>,
     pub severity: Option<String>,
@@ -1180,7 +1184,7 @@ fn row_to_fact_row_with(
     captured_at: Timestamp,
     text: &mut FactText<'_>,
 ) -> rusqlite::Result<FactRow> {
-    let (subject_kind, subject_ref) = text.subject(row.get(6)?)?;
+    let (subject_kind, subject) = text.subject(row.get(6)?)?;
     Ok(FactRow {
         id: row.get(0)?,
         capture_id: row.get(1)?,
@@ -1188,8 +1192,8 @@ fn row_to_fact_row_with(
         value: row.get(3)?,
         numerator: row.get(4)?,
         denominator: row.get(5)?,
+        subject,
         subject_kind,
-        subject_ref,
         path: text.path(row.get(7)?)?,
         line: row.get(8)?,
         severity: row.get(9)?,
@@ -1244,7 +1248,7 @@ impl<'c> FactText<'c> {
         let found: (Option<String>, Option<String>) = self
             .conn
             .prepare_cached("SELECT kind, ref FROM fact_subject WHERE id = ?1")?
-            .query_row([id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            .query_row([id], |r| Ok((Some(r.get(0)?), Some(r.get(1)?))))?;
         self.subjects.insert(id, found.clone());
         Ok(found)
     }
@@ -1290,7 +1294,7 @@ pub(crate) fn insert_fact(
     f: &NewFact,
     capture_id: i64,
 ) -> rusqlite::Result<i64> {
-    let subject = subject_id(conn, f.subject_kind.as_deref(), f.subject_ref.as_deref())?;
+    let subject = subject_id(conn, f.subject.as_deref())?;
     let path = interned(conn, "fact_path", "path", f.path.as_deref())?;
     let dims = interned(conn, "fact_dims", "json", f.dims_json.as_deref())?;
     conn.prepare_cached(
@@ -1316,26 +1320,41 @@ pub(crate) fn insert_fact(
     Ok(conn.last_insert_rowid())
 }
 
-/// The `fact_subject` id of `(kind, ref)`, added when new; `None` when the
-/// fact names no subject.
-fn subject_id(
-    conn: &rusqlite::Connection,
-    kind: Option<&str>,
-    subject: Option<&str>,
-) -> rusqlite::Result<Option<i64>> {
-    if kind.is_none() && subject.is_none() {
+/// The `fact_subject` id of the subject ref, added when new (its kind
+/// derived from the ref); `None` when the fact names no subject. A subject
+/// that isn't a ref is refused ([`check_subject`] says so first, with the
+/// fact's measure; this is the backstop for any other writer).
+fn subject_id(conn: &rusqlite::Connection, subject: Option<&str>) -> rusqlite::Result<Option<i64>> {
+    let Some(subject) = subject else {
         return Ok(None);
-    }
+    };
     let found = conn
-        .prepare_cached("SELECT id FROM fact_subject WHERE kind IS ?1 AND ref IS ?2")?
-        .query_row(params![kind, subject], |r| r.get(0))
+        .prepare_cached("SELECT id FROM fact_subject WHERE ref = ?1")?
+        .query_row(params![subject], |r| r.get(0))
         .optional()?;
     if found.is_some() {
         return Ok(found);
     }
-    conn.prepare_cached("INSERT INTO fact_subject (kind, ref) VALUES (?1, ?2)")?
-        .execute(params![kind, subject])?;
+    let kind = oxplow_domain::refs::build::kind_of(subject).ok_or_else(|| {
+        rusqlite::Error::ToSqlConversionFailure(
+            format!("a fact's subject must be a ref (`<kind>:<id>`), not `{subject}`").into(),
+        )
+    })?;
+    conn.prepare_cached("INSERT INTO fact_subject (ref, kind) VALUES (?1, ?2)")?
+        .execute(params![subject, kind])?;
     Ok(Some(conn.last_insert_rowid()))
+}
+
+/// Refuse a fact whose subject isn't a ref, naming the subject.
+fn check_subject(f: &NewFact) -> Result<(), DomainError> {
+    match f.subject.as_deref() {
+        Some(s) if oxplow_domain::refs::build::kind_of(s).is_none() => {
+            Err(DomainError::Invalid(format!(
+                "a fact's subject must be a ref (`<kind>:<id>`, like `file:src/a.rs`), not `{s}`"
+            )))
+        }
+        _ => Ok(()),
+    }
 }
 
 /// The id of `value` in the one-column dictionary `table`, added when new.
@@ -1654,16 +1673,14 @@ impl SqliteFactStore {
                     let (status, duration) = test_case_writes(prev.get(&case.subject), case);
                     if status {
                         facts.push(NewFact {
-                            subject_kind: Some("test".into()),
-                            subject_ref: Some(case.subject.clone()),
+                            subject: Some(case.subject.clone()),
                             dims_json: case.dims_json.clone(),
                             ..NewFact::new(case_measure, 1.0)
                         });
                     }
                     if let (true, Some(measure), Some(ms)) = (duration, duration_measure, case.time_ms) {
                         facts.push(NewFact {
-                            subject_kind: Some("test".into()),
-                            subject_ref: Some(case.subject.clone()),
+                            subject: Some(case.subject.clone()),
                             dims_json: case.dims_json.clone(),
                             ..NewFact::new(measure, ms)
                         });
@@ -3802,8 +3819,7 @@ mod tests {
     /// One scanned block: subject `id`, at `id.rs:1`, valued `value`.
     fn block(m: i64, id: &str, value: f64) -> NewFact {
         NewFact {
-            subject_kind: Some("block".into()),
-            subject_ref: Some(id.into()),
+            subject: Some(oxplow_domain::refs::build::of("block", id)),
             path: Some(format!("{id}.rs")),
             line: Some(1),
             ..NewFact::new(m, value)
@@ -3822,7 +3838,7 @@ mod tests {
         let mut out: Vec<(String, f64)> = rows
             .iter()
             .filter(|r| r.capture_id == capture)
-            .map(|r| (r.subject_ref.clone().unwrap_or_default(), r.value))
+            .map(|r| (r.subject.clone().unwrap_or_default(), r.value))
             .collect();
         out.sort_by(|a, b| a.0.cmp(&b.0));
         out
@@ -3866,11 +3882,12 @@ mod tests {
         assert_eq!(stored(&store, c3).await, 1, "one changed");
         assert_eq!(stored(&store, c4).await, 0, "one removed");
 
-        let mut expected: Vec<(String, f64)> = many.iter().map(|k| (k.clone(), 1.0)).collect();
+        let mut expected: Vec<(String, f64)> =
+            many.iter().map(|k| (format!("block:{k}"), 1.0)).collect();
         expected.sort_by(|a, b| a.0.cmp(&b.0));
         let with = |x: f64| {
             let mut v = expected.clone();
-            v.push(("new".into(), x));
+            v.push(("block:new".into(), x));
             v.sort_by(|a, b| a.0.cmp(&b.0));
             v
         };
@@ -3903,8 +3920,8 @@ mod tests {
             .db
             .call(|conn| {
                 let mut st = conn.prepare(
-                    "SELECT capture_id, subject_ref, value FROM v_fact
-                      WHERE measure_key = 'acme.dup' ORDER BY capture_id, subject_ref",
+                    "SELECT capture_id, subject, value FROM v_fact
+                      WHERE measure_key = 'acme.dup' ORDER BY capture_id, subject",
                 )?;
                 let rows = st
                     .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
@@ -3915,13 +3932,7 @@ mod tests {
             .unwrap();
         let mut engine: Vec<(i64, String, f64)> = all
             .iter()
-            .map(|r| {
-                (
-                    r.capture_id,
-                    r.subject_ref.clone().unwrap_or_default(),
-                    r.value,
-                )
-            })
+            .map(|r| (r.capture_id, r.subject.clone().unwrap_or_default(), r.value))
             .collect();
         engine.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
         assert_eq!(model, engine);
@@ -4088,8 +4099,7 @@ mod tests {
         let rows: Vec<NewFact> = facts
             .iter()
             .map(|(path, value)| NewFact {
-                subject_kind: Some("file".into()),
-                subject_ref: Some((*path).to_string()),
+                subject: Some(oxplow_domain::refs::build::of("file", path)),
                 path: Some((*path).to_string()),
                 ..NewFact::new(measure_id, *value)
             })
@@ -4157,8 +4167,10 @@ mod tests {
             let facts: Vec<NewFact> = fns
                 .iter()
                 .map(|(path, name, v)| NewFact {
-                    subject_kind: Some("symbol".into()),
-                    subject_ref: Some(format!("{path}/{name}")),
+                    subject: Some(oxplow_domain::refs::build::of(
+                        "symbol",
+                        &format!("{path}/{name}"),
+                    )),
                     path: Some((*path).to_string()),
                     line: Some(3),
                     dims_json: Some(r#"{"oxplow.language":"rust"}"#.into()),
@@ -4355,8 +4367,7 @@ mod tests {
         let rows: Vec<NewFact> = facts
             .iter()
             .map(|(path, value)| NewFact {
-                subject_kind: Some("file".into()),
-                subject_ref: Some((*path).to_string()),
+                subject: Some(oxplow_domain::refs::build::of("file", path)),
                 path: Some((*path).to_string()),
                 ..NewFact::new(measure_id, *value)
             })
@@ -4393,8 +4404,7 @@ mod tests {
         let rows: Vec<NewFact> = fns
             .iter()
             .map(|(path, name, value, line)| NewFact {
-                subject_kind: Some("symbol".into()),
-                subject_ref: Some(format!("symbol:{path}::{name}")),
+                subject: Some(format!("symbol:{path}::{name}")),
                 path: Some((*path).to_string()),
                 line: Some(*line),
                 ..NewFact::new(m, *value)
@@ -4408,7 +4418,7 @@ mod tests {
         let mut out: Vec<(String, f64, Option<i64>)> = rows
             .iter()
             .filter(|r| r.capture_id == capture)
-            .map(|r| (r.subject_ref.clone().unwrap_or_default(), r.value, r.line))
+            .map(|r| (r.subject.clone().unwrap_or_default(), r.value, r.line))
             .collect();
         out.sort_by(|a, b| a.0.cmp(&b.0));
         out
@@ -4418,7 +4428,7 @@ mod tests {
     fn tree_shape(facts: &[FactRow]) -> Vec<(String, f64, Option<i64>)> {
         let mut out: Vec<(String, f64, Option<i64>)> = facts
             .iter()
-            .map(|r| (r.subject_ref.clone().unwrap_or_default(), r.value, r.line))
+            .map(|r| (r.subject.clone().unwrap_or_default(), r.value, r.line))
             .collect();
         out.sort_by(|a, b| a.0.cmp(&b.0));
         out
@@ -4431,8 +4441,8 @@ mod tests {
             .db
             .call(|conn| {
                 let mut st = conn.prepare(
-                    "SELECT subject_ref, value, line FROM v_tree_fact
-                      WHERE measure_key = 'acme.complexity' AND stream_id = 1 ORDER BY subject_ref",
+                    "SELECT subject, value, line FROM v_tree_fact
+                      WHERE measure_key = 'acme.complexity' AND stream_id = 1 ORDER BY subject",
                 )?;
                 let rows = st
                     .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
@@ -4448,7 +4458,7 @@ mod tests {
             .map(|r| {
                 (
                     r.capture_id,
-                    r.subject_ref.clone().unwrap_or_default(),
+                    r.subject.clone().unwrap_or_default(),
                     r.value,
                     r.line,
                 )
@@ -4459,8 +4469,8 @@ mod tests {
             .db
             .call(|conn| {
                 let mut st = conn.prepare(
-                    "SELECT capture_id, subject_ref, value, line FROM v_fact
-                      WHERE measure_key = 'acme.complexity' ORDER BY capture_id, subject_ref",
+                    "SELECT capture_id, subject, value, line FROM v_fact
+                      WHERE measure_key = 'acme.complexity' ORDER BY capture_id, subject",
                 )?;
                 let rows = st
                     .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
@@ -4835,8 +4845,7 @@ mod tests {
         capture.captured_at = Some(at("2026-06-30T11:00:00.000000Z"));
         capture.scan_kind = "asserted".into();
         let rows = vec![NewFact {
-            subject_kind: Some("file".into()),
-            subject_ref: Some("a.rs".into()),
+            subject: Some(oxplow_domain::refs::build::of("file", "a.rs")),
             path: Some("a.rs".into()),
             ..NewFact::new(m, 7.0)
         }];
@@ -5203,7 +5212,7 @@ mod tests {
             .await
             .unwrap();
         let subject = |s: &str, v: f64| NewFact {
-            subject_ref: Some(s.into()),
+            subject: Some(format!("test:{s}")),
             ..NewFact::new(m, v)
         };
         let at = |t: &str| at(t);
@@ -5275,10 +5284,10 @@ mod tests {
             .unwrap();
         seed.sort();
         let mut want = vec![
-            ("other".to_string(), "A".to_string(), id_of(&f3, 9.0)),
-            ("tests".to_string(), "A".to_string(), id_of(&f2, 2.0)),
-            ("tests".to_string(), "A".to_string(), id_of(&f2, 2.5)),
-            ("tests".to_string(), "B".to_string(), id_of(&f1, 1.5)),
+            ("other".to_string(), "test:A".to_string(), id_of(&f3, 9.0)),
+            ("tests".to_string(), "test:A".to_string(), id_of(&f2, 2.0)),
+            ("tests".to_string(), "test:A".to_string(), id_of(&f2, 2.5)),
+            ("tests".to_string(), "test:B".to_string(), id_of(&f1, 1.5)),
             ("tests".to_string(), "src/p.rs".to_string(), id_of(&f1, 3.0)),
             (
                 "tests".to_string(),
@@ -5332,7 +5341,7 @@ mod tests {
                     .await
                     .unwrap()
                     .into_iter()
-                    .map(|f| f.subject_ref.unwrap())
+                    .map(|f| f.subject.unwrap())
                     .collect();
                 status.sort();
                 let mut timed: Vec<String> = store
@@ -5340,7 +5349,7 @@ mod tests {
                     .await
                     .unwrap()
                     .into_iter()
-                    .map(|f| f.subject_ref.unwrap())
+                    .map(|f| f.subject.unwrap())
                     .collect();
                 timed.sort();
                 (status, timed)
@@ -5658,7 +5667,7 @@ mod tests {
             ..NewMetricCapture::done(1, "tests", "builtin")
         };
         let subject = |s: &str, v: f64| NewFact {
-            subject_ref: Some(s.into()),
+            subject: Some(format!("test:{s}")),
             ..NewFact::new(m, v)
         };
         // c1 OLD: A=1, later superseded → the one deletable capture.
@@ -5784,7 +5793,7 @@ mod tests {
                     ..NewMetricCapture::done(1, "tests", "builtin")
                 },
                 vec![NewFact {
-                    subject_ref: Some("T".into()),
+                    subject: Some("test:T".into()),
                     ..NewFact::new(m, 1.0)
                 }],
             )
@@ -6651,7 +6660,7 @@ mod tests {
         );
     }
 
-    /// A test-run capture: one fact per case, `subject_ref = test:<name>`, value 1,
+    /// A test-run capture: one fact per case, `subject = test:<name>`, value 1,
     /// status on the dims (what `record_test_run` writes).
     async fn test_run(
         store: &SqliteFactStore,
@@ -6664,8 +6673,7 @@ mod tests {
         let rows: Vec<NewFact> = cases
             .iter()
             .map(|(name, status)| NewFact {
-                subject_kind: Some("test".into()),
-                subject_ref: Some(format!("test:{name}")),
+                subject: Some(format!("test:{name}")),
                 dims_json: Some(format!("{{\"oxplow.status\":\"{status}\"}}")),
                 ..NewFact::new(measure_id, 1.0)
             })
@@ -6772,8 +6780,7 @@ mod tests {
             let rows: Vec<NewFact> = ms
                 .iter()
                 .map(|(name, v)| NewFact {
-                    subject_kind: Some("test".into()),
-                    subject_ref: Some(format!("test:{name}")),
+                    subject: Some(format!("test:{name}")),
                     ..NewFact::new(m, *v)
                 })
                 .collect();
@@ -7000,6 +7007,107 @@ mod tests {
             .unwrap());
     }
 
+    /// A subject is one ref: it reads back whole with the kind derived from
+    /// it, and a string that isn't a ref is refused at the write.
+    #[tokio::test]
+    async fn a_facts_subject_is_one_ref_with_its_kind_derived() {
+        let store = fixture().await;
+        let m = measure(&store, "oxplow.complexity").await;
+        let capture = store
+            .record_facts(
+                NewMetricCapture::done(1, "t", "builtin"),
+                vec![NewFact {
+                    subject: Some("symbol:a.rs/f".into()),
+                    ..NewFact::new(m, 1.0)
+                }],
+            )
+            .await
+            .unwrap();
+        let rows = store.facts_for_captures(m, vec![capture]).await.unwrap();
+        assert_eq!(rows[0].subject.as_deref(), Some("symbol:a.rs/f"));
+        assert_eq!(rows[0].subject_kind.as_deref(), Some("symbol"));
+        let err = store
+            .record_facts(
+                NewMetricCapture::done(1, "t", "builtin"),
+                vec![NewFact {
+                    subject: Some("a.rs".into()),
+                    ..NewFact::new(m, 1.0)
+                }],
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, DomainError::Invalid(m) if m.contains("must be a ref") && m.contains("a.rs")),
+            "{err:?}"
+        );
+    }
+
+    /// The migration rewrites `(kind, ref)` rows to one ref: ids with their
+    /// kind put back, a ref already carrying its kind kept as it is, a model
+    /// name made an `ai_model` ref, two rows
+    /// naming one ref collapsed, and rows that were never refs dropped.
+    #[test]
+    fn the_subject_migration_rewrites_rows_to_whole_refs() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE fact_subject (id INTEGER PRIMARY KEY, kind TEXT, ref TEXT, UNIQUE (kind, ref));
+             CREATE TABLE fact (id INTEGER PRIMARY KEY, subject_id INTEGER);
+             CREATE TABLE metric_live_fact (x);
+             CREATE TABLE metric_cube (x);
+             CREATE TABLE metric_cube_state (x);
+             CREATE TABLE metric_cube_epoch (epoch INTEGER);
+             INSERT INTO metric_cube_epoch VALUES (0);
+             INSERT INTO fact_subject VALUES
+               (1, 'symbol', 'a.rs/f'), (2, 'file', 'file:b.rs'), (3, 'file', 'b.rs'),
+               (4, NULL, 'bare'), (5, 'test', 'test:x'), (6, 'model', 'opus'),
+               (7, 'model', 'ai_model:opus');
+             INSERT INTO fact VALUES (1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, NULL), (7, 6), (8, 7);",
+        )
+        .unwrap();
+        conn.execute_batch(include_str!(
+            "../migrations/V64__fact_subject_is_one_ref.sql"
+        ))
+        .unwrap();
+        let refs: Vec<(i64, String, String)> = conn
+            .prepare("SELECT id, ref, kind FROM fact_subject ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            refs,
+            vec![
+                (1, "symbol:a.rs/f".into(), "symbol".into()),
+                (2, "file:b.rs".into(), "file".into()),
+                (5, "test:x".into(), "test".into()),
+                (6, "ai_model:opus".into(), "ai_model".into()),
+            ]
+        );
+        let facts: Vec<Option<i64>> = conn
+            .prepare("SELECT subject_id FROM fact ORDER BY id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        // `file:b.rs` (old rows 2 and 3) is one subject, as is `ai_model:opus`
+        // (bare and already-prefixed model names); the bare subject has none.
+        assert_eq!(
+            facts,
+            vec![
+                Some(1),
+                Some(2),
+                Some(2),
+                None,
+                Some(5),
+                None,
+                Some(6),
+                Some(6)
+            ]
+        );
+    }
+
     #[tokio::test]
     async fn record_facts_writes_atomically_and_backfills_capture_id() {
         let store = fixture().await;
@@ -7007,15 +7115,13 @@ mod tests {
         // Facts carry no capture_id — record_facts must backfill it.
         let facts = vec![
             NewFact {
-                subject_kind: Some("symbol".into()),
-                subject_ref: Some("src/a.rs::foo".into()),
+                subject: Some(oxplow_domain::refs::build::of("symbol", "src/a.rs::foo")),
                 path: Some("src/a.rs".into()),
                 line: Some(10),
                 ..NewFact::new(m, 14.0)
             },
             NewFact {
-                subject_kind: Some("symbol".into()),
-                subject_ref: Some("src/a.rs::bar".into()),
+                subject: Some(oxplow_domain::refs::build::of("symbol", "src/a.rs::bar")),
                 path: Some("src/a.rs".into()),
                 line: Some(40),
                 ..NewFact::new(m, 3.0)
@@ -7042,7 +7148,7 @@ mod tests {
             .iter()
             .all(|f| f.closest_vcs_rev.as_deref() == Some("abc1234")));
         // Oldest-first within the capture is by fact id (insertion order).
-        assert_eq!(rows[0].subject_ref.as_deref(), Some("src/a.rs::foo"));
+        assert_eq!(rows[0].subject.as_deref(), Some("symbol:src/a.rs::foo"));
         assert_eq!(rows[0].value, 14.0);
         assert_eq!(rows[1].value, 3.0);
     }

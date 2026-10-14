@@ -181,7 +181,8 @@ shape** — one atomic fact per subject, NOT a pre-aggregated total:
   (`oxplow.language`), one of your own `<namespace>.<name>`. A bare key
   (`language`) is refused, and the error names the conformed one.
 - `value` is the atomic number for this subject.
-- `subject` is a `"kind:ref"` string (`file:src/a.rs`, `symbol:src/a.rs/foo`).
+- `subject` is one ref, built with `ref.build` (`file:src/a.rs`, `symbol:src/a.rs/foo`). A
+  subject that is not a ref is refused (the run fails, naming the measure and the string).
 - `rule` is a conformed slice value read as the `oxplow.rule` dimension (so a spec
   can `filter: { dimEq: [oxplow.rule, …] }` or slice by it).
 - `num`/`den` (optional) are ratio components — supply them when the measure is a

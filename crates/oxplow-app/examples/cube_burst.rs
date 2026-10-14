@@ -65,8 +65,7 @@ async fn main() {
     for m in facts.list_measures().await.unwrap() {
         for f in facts.facts_for_captures(m.id, vec![latest]).await.unwrap() {
             copied.push(NewFact {
-                subject_kind: f.subject_kind.clone(),
-                subject_ref: f.subject_ref.clone(),
+                subject: f.subject.clone(),
                 path: f.path.clone(),
                 dims_json: f.dims_json.clone(),
                 ..NewFact::new(m.id, f.value)

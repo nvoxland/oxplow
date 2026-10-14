@@ -184,7 +184,7 @@ over the visible captures (`live_seed_per_subject`: the latest capture per
 `(producer, subject)`), equivalent to the replay and pinned against the
 fact fold, instead of loading every fact into memory; that took the seed
 from 25.3 s to 20.0 s. The query alone is 17.8 s on 5 M facts, and a
-covering index `fact(measure_id, capture_id, subject_ref, path)` only
+covering index `fact(measure_id, capture_id, subject, path)` only
 brought it to 8.2 s for a large index — **the lever is the volume of
 per-case facts** (tsk514), not the fold.
 
@@ -333,7 +333,7 @@ asserted confidently (by me) *before* measuring, and was wrong.
 - **`SELECT DISTINCT producer, rule, severity, dims_json` is not a drop-in for
   `representative_facts_by_slice`.** tsk239 proposed it as "semantically
   equivalent for the caller" at 4.5×. It isn't: `FactFilter::matches` also reads
-  `value` and — through `dim_value` — `path`, `subject_ref`, `subject_kind` and
+  `value` and — through `dim_value` — `path`, `subject`, `subject_kind` and
   `branch`, none of which are in the slice tuple. It's a valid path only when
   the filter provably stays inside the slice key, which is what
   `slice_key_only` checks. The measured win on that guarded path is ~2×, not
