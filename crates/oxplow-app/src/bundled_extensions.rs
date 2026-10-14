@@ -44,6 +44,7 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-foundation", "README.md"),
             ext_file!("oxplow-foundation", "collectors/clojure/defn_count.star"),
             ext_file!("oxplow-foundation", "collectors/code/doc_coverage.star"),
+            ext_file!("oxplow-foundation", "collectors/effort/test_outcome.star"),
             ext_file!("oxplow-foundation", "collectors/code/duplicate_lines.star"),
             ext_file!("oxplow-foundation", "collectors/code/fn_count.star"),
             ext_file!(
@@ -198,8 +199,8 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-bundled", "models/co_change_pair.sql"),
             ext_file!("oxplow-bundled", "models/deviation.sql"),
             ext_file!("oxplow-bundled", "models/finished_cleared.sql"),
-            ext_file!("oxplow-bundled", "models/thread_work.sql"),
             ext_file!("oxplow-bundled", "models/struggle.sql"),
+            ext_file!("oxplow-bundled", "models/thread_work.sql"),
             ext_file!("oxplow-bundled", "models/verdict.sql"),
             ext_file!("oxplow-bundled", "models/verdicts.sql"),
             ext_file!("oxplow-bundled", "questions.yaml"),
@@ -423,7 +424,6 @@ mod tests {
             .unwrap();
     }
 
-    /// oxplow-bundled's rule for a backed claim: it cites evidence, or it
     /// oxplow-bundled's struggle rule: a file edited five times, or three
     /// failed shell commands, in an effort. Four edits and two failures
     /// are not struggle; a shell call with no known outcome is no failure.
@@ -515,6 +515,7 @@ mod tests {
         );
     }
 
+    /// oxplow-bundled's rule for a backed claim: it cites evidence, or it
     /// says the tests pass and its effort's LATEST run passed with at
     /// least one test (its own or one claimed through attribution).
     #[tokio::test]
@@ -3139,6 +3140,47 @@ mod tests {
             serde_json::to_value(&rows.rows).unwrap(),
             serde_json::json!([[20.0]])
         );
+    }
+
+    /// oxplow-foundation's `oxplow.effort_test_outcome` collector writes, when
+    /// an effort finishes, the very facts core's lifecycle producer wrote
+    /// (pinned as values in `the_producer_writes_these_outcome_facts_for_seeded_runs`
+    /// when that producer existed): same measures, subject, dims and values,
+    /// a record-only run ignored, asserted counts anonymous. Its capture is the
+    /// effort's and carries the branch, so `oxplow.tests.*` slice by it.
+    #[tokio::test]
+    async fn the_test_outcome_collector_writes_what_the_producer_did() {
+        use crate::foundation_collectors_tests::{
+            asserted_runs, expected_outcome, outcome_facts, red_then_green_runs, seed_test_runs,
+        };
+        for (runs, stats, ttg) in [
+            (red_then_green_runs(), [0, 2, 2, 2], Some(60_250)),
+            (asserted_runs(), [0, 3, 3, 1], Some(4_000)),
+        ] {
+            let f = crate::test_fixtures::services_with_effort().await;
+            let facts = &f.svc.fact_store;
+            seed_test_runs(facts, 1, f.thread.value(), f.effort.value(), "main", &runs).await;
+            f.svc
+                .metrics
+                .run_effort_collectors(&f.thread, &f.effort, None, &|c| {
+                    c.key == "oxplow.effort_test_outcome"
+                })
+                .await;
+            assert_eq!(
+                outcome_facts(facts).await,
+                expected_outcome(
+                    &oxplow_domain::refs::build::effort_ref(f.effort),
+                    stats,
+                    ttg
+                )
+            );
+            let captures = facts.captures_for_effort(f.effort.value()).await.unwrap();
+            let ours = captures
+                .iter()
+                .find(|c| c.producer == "oxplow.effort_test_outcome")
+                .expect("the collector's capture is the effort's");
+            assert!(ours.branch.is_some(), "it carries the branch: {ours:?}");
+        }
     }
 
     /// P9.D6: a verdict is a typed event, not only a comment's text. Each
