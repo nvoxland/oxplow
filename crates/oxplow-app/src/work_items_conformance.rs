@@ -682,7 +682,7 @@ impl WorkItemsProbe for ServicesProbe<'_> {
         let svc = self.0;
         let instance = svc
             .extension_catalog
-            .get(&svc.layout.project_dir)
+            .unpinned(&svc.layout.project_dir, "a probe reads declarations")
             .iter()
             .filter(|e| e.enabled)
             .find_map(|e| {

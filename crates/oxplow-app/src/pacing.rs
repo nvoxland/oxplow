@@ -156,7 +156,10 @@ fn find(svc: &crate::Services, owner: &str, id: &str) -> Option<Paced> {
         return Some(Paced::Fact(c));
     }
     svc.extension_catalog
-        .get(&svc.layout.project_dir)
+        .unpinned(
+            &svc.layout.project_dir,
+            "a collector is found on its declaration; its run pins",
+        )
         .iter()
         .filter(|e| e.name == owner)
         .flat_map(|e| e.collectors.iter())

@@ -138,7 +138,10 @@ impl CollectorTriggers {
     /// worktree's). Fact collectors come from the fact engine.
     fn entity_collectors(svc: &Services) -> Vec<(String, CollectorSpec)> {
         svc.extension_catalog
-            .get(&svc.layout.project_dir)
+            .unpinned(
+                &svc.layout.project_dir,
+                "a trigger is read from declarations; the run it starts pins",
+            )
             .iter()
             .flat_map(|ext| {
                 ext.collectors
@@ -152,7 +155,10 @@ impl CollectorTriggers {
     /// Every `on:` collector's trigger, level and what it waits on, fact
     /// and entity alike, by `(owner, id)`.
     fn triggers(svc: &Services) -> Vec<Triggered> {
-        let load = svc.extension_catalog.get(&svc.layout.project_dir);
+        let load = svc.extension_catalog.unpinned(
+            &svc.layout.project_dir,
+            "a trigger is read from declarations; the run it starts pins",
+        );
         let place = |owner: &str, id: &str| {
             load.iter()
                 .find(|e| e.name == owner)

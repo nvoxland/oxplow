@@ -292,7 +292,9 @@ async fn the_documented_examples_activate() {
         .await
         .expect("activates");
     assert_eq!(problems(&svc), "{}");
-    let active = svc.extension_catalog.get(dir.path());
+    let active = svc
+        .extension_catalog
+        .unpinned(dir.path(), "a test reads declarations");
     for name in ["github", "triage", "prompt-efforts"] {
         assert!(
             active.iter().any(|e| e.name == name && e.enabled),
@@ -326,4 +328,169 @@ async fn shutdown_stops_the_background_loops() {
     let after = ticks.load(std::sync::atomic::Ordering::SeqCst);
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert_eq!(ticks.load(std::sync::atomic::Ordering::SeqCst), after);
+}
+
+/// Two activations at once are serialized: the second waits for the first
+/// and both leave one generation, the latest edit's.
+#[tokio::test(flavor = "multi_thread")]
+async fn concurrent_activations_serialize_into_one_generation() {
+    let (dir, svc) = project().await;
+    write_ext(dir.path(), "alpha", 2, "");
+    let (a, b) = {
+        let (s1, s2) = (svc.clone(), svc.clone());
+        (
+            tokio::spawn(async move { s1.extension_activation.activate(s1.clone()).await }),
+            tokio::spawn(async move { s2.extension_activation.activate(s2.clone()).await }),
+        )
+    };
+    let (a, b) = (a.await.unwrap().unwrap(), b.await.unwrap().unwrap());
+    assert_eq!(a.generation(), b.generation(), "one coherent generation");
+    let pin = svc.extension_activation.pin().await.unwrap();
+    assert_eq!(pin.generation(), Some(b.generation()));
+    drop(pin);
+    assert_eq!(answer(&svc, "alpha").await, Ok(json!(2)));
+}
+
+/// An edit that lands while a candidate is staged (here: waiting on a
+/// reader) rejects that publication, and the next one carries the edit.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_edit_during_activation_rejects_it_and_the_next_carries_the_edit() {
+    let (dir, svc) = project().await;
+    let pin = svc.extension_activation.pin().await.unwrap();
+    write_ext(dir.path(), "alpha", 2, "");
+    let activating = {
+        let svc = svc.clone();
+        tokio::spawn(async move { svc.extension_activation.activate(svc.clone()).await })
+    };
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!activating.is_finished());
+    write_ext(dir.path(), "alpha", 3, "");
+    drop(pin);
+    let outcome = tokio::time::timeout(Duration::from_secs(10), activating)
+        .await
+        .expect("the staged candidate ends")
+        .unwrap();
+    assert!(outcome.is_err(), "the stale candidate is rejected");
+    assert_eq!(
+        answer(&svc, "alpha").await,
+        Ok(json!(1)),
+        "nothing half-published"
+    );
+
+    svc.extension_activation
+        .activate(svc.clone())
+        .await
+        .expect("the next activation carries the edit");
+    assert_eq!(answer(&svc, "alpha").await, Ok(json!(3)));
+}
+
+/// A panic on the staging again too has no third try: the activation fails
+/// naming the host, the boundary refuses readers rather than serve maps it
+/// can't vouch for, and the next activation brings it back.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_panic_on_the_restage_too_leaves_the_boundary_unavailable() {
+    use crate::extension_activation::PanicPoint;
+    let (dir, svc) = project().await;
+    write_ext(dir.path(), "alpha", 2, "");
+    svc.extension_activation
+        .panic_at(PanicPoint::AfterCommit, 2);
+    let Err(error) = svc.extension_activation.activate(svc.clone()).await else {
+        panic!("two panics are not recovered");
+    };
+    let text = format!("{error:?}");
+    assert!(
+        text.contains("<host>") && text.contains("staging it again failed"),
+        "{text}"
+    );
+    let refused = svc
+        .extension_activation
+        .pin()
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(refused.contains("unavailable"), "{refused}");
+
+    svc.extension_activation
+        .activate(svc.clone())
+        .await
+        .expect("the next activation recovers");
+    assert_eq!(answer(&svc, "alpha").await, Ok(json!(2)));
+}
+
+/// A panic once the maps are published, before the boundary shows the
+/// generation, is recovered the same way.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_panic_after_the_maps_are_published_recovers_the_generation() {
+    use crate::extension_activation::PanicPoint;
+    let (dir, svc) = project().await;
+    write_ext(dir.path(), "alpha", 2, "");
+    svc.extension_activation
+        .panic_at(PanicPoint::BeforeBoundary, 1);
+    svc.extension_activation
+        .activate(svc.clone())
+        .await
+        .expect("the activation recovers");
+    assert_eq!(answer(&svc, "alpha").await, Ok(json!(2)));
+    assert_eq!(problems(&svc), "{}");
+}
+
+/// Reading the activated generation's declarations takes a pin: a reader
+/// outside one is a bug the suite fails on, while a pinned read, a pin
+/// carried into the blocking pool and the explicit unpinned and live
+/// reads are not.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_generation_read_needs_a_pin_or_says_it_has_none() {
+    let (dir, svc) = project().await;
+    let root = svc.layout.project_dir.clone();
+    let _ = &dir;
+
+    let unpinned = {
+        let (svc, root) = (svc.clone(), root.clone());
+        tokio::spawn(async move {
+            svc.extension_catalog
+                .runtime_snapshot(&root)
+                .generation()
+                .len()
+        })
+        .await
+    };
+    assert!(
+        unpinned.is_err_and(|e| e.is_panic()),
+        "an unpinned runtime read fails the suite"
+    );
+
+    let pinned = svc
+        .extension_activation
+        .read(async {
+            svc.extension_catalog
+                .runtime_snapshot(&root)
+                .generation()
+                .len()
+        })
+        .await
+        .unwrap();
+    assert!(pinned > 0);
+
+    let catalog = svc.extension_catalog.clone();
+    let blocking = svc
+        .extension_activation
+        .read({
+            let root = root.clone();
+            async move {
+                crate::extension_activation::ExtensionActivation::spawn_blocking(move || {
+                    catalog.runtime_snapshot(&root).generation().len()
+                })
+                .await
+            }
+        })
+        .await
+        .unwrap();
+    assert_eq!(blocking.unwrap(), pinned, "the blocking pool keeps the pin");
+
+    assert!(!svc.extension_catalog.unpinned(&root, "a test").is_empty());
+    assert!(!svc
+        .extension_catalog
+        .live_snapshot(&root)
+        .generation()
+        .is_empty());
 }

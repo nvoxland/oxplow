@@ -1066,7 +1066,10 @@ actions:
             &fx.svc.approvals,
             root,
             &config,
-            fx.svc.extension_catalog.get(root).as_ref(),
+            fx.svc
+                .extension_catalog
+                .unpinned(root, "a test reads declarations")
+                .as_ref(),
         )
     }
 

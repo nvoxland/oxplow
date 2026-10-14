@@ -200,7 +200,7 @@ async fn a_fact_collector_reads_the_layer_it_declares() {
     crate::test_fixtures::activate(svc).await;
     let ext = svc
         .extension_catalog
-        .get(&root)
+        .unpinned(&root, "a test reads declarations")
         .iter()
         .find(|e| e.name == "acme")
         .cloned()

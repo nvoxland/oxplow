@@ -879,7 +879,10 @@ impl Services {
         {
             Ok(loaded) => loaded,
             Err(_) => {
-                let mut unavailable = self.extension_catalog.get(root).to_vec();
+                let mut unavailable = self
+                    .extension_catalog
+                    .unpinned(root, "no generation is available to pin")
+                    .to_vec();
                 for extension in &mut unavailable {
                     extension.enabled = false;
                     extensions::clear_contributions(extension);
@@ -1275,7 +1278,11 @@ impl Services {
         ai.set_profiles({
             let catalog = extension_catalog.clone();
             let root = layout.project_dir.clone();
-            Arc::new(move || extensions::ai_profiles::profiles_of(&catalog.get(&root)))
+            Arc::new(move || {
+                extensions::ai_profiles::profiles_of(
+                    &catalog.unpinned(&root, "profiles are read from declarations"),
+                )
+            })
         });
         let extension_secrets = Arc::new(extension_secrets::ExtensionSecrets::new(
             extension_catalog.clone(),

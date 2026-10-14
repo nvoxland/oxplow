@@ -291,7 +291,7 @@ async fn a_run_records_what_its_grant_decided() {
     let collectors = Collectors::of(svc, &root);
     let (ext, spec) = svc
         .extension_catalog
-        .get(&root)
+        .unpinned(&root, "a test reads declarations")
         .iter()
         .find(|e| e.name == "acme")
         .map(|e| (e.clone(), e.collectors[0].clone()))

@@ -148,7 +148,10 @@ def transform(x):
     fn approve(fx: &EffortFixture) {
         let project = fx.svc.layout.project_dir.clone();
         let config = fx.svc.config.read().unwrap().clone();
-        let extensions = fx.svc.extension_catalog.get(&project);
+        let extensions = fx
+            .svc
+            .extension_catalog
+            .unpinned(&project, "a test reads declarations");
         let program = list(&fx.svc.approvals, &project, &config, &extensions)
             .into_iter()
             .find(|p| p.kind == ProgramKind::EffortPolicy)

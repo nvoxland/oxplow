@@ -1877,7 +1877,9 @@ mod tests {
         assert!(seen.lock().unwrap().is_empty(), "nothing was sent");
 
         let config = svc.config.read().unwrap().clone();
-        let extensions = svc.extension_catalog.get(dir.path());
+        let extensions = svc
+            .extension_catalog
+            .unpinned(dir.path(), "a test reads declarations");
         let listed = crate::exec_consent::list(&svc.approvals, dir.path(), &config, &extensions)
             .into_iter()
             .find(|p| p.kind == crate::exec_consent::ProgramKind::AiProvider)

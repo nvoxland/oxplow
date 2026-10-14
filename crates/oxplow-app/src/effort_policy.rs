@@ -517,31 +517,44 @@ impl AsyncEventConsumer for EffortPolicyConsumer {
         // The policy's run: as its effect actor, for the event's thread and
         // stream, caused by the event. An event its own runs led to, or one
         // a chain of reactions at the limit led to, isn't reacted to.
-        let owner = self
-            .capabilities
-            .get(CAPABILITY, &id)
-            .and_then(|i| i.extension)
-            .and_then(|name| {
-                self.catalog
-                    .get(&self.root)
-                    .iter()
-                    .find(|e| e.name == name)
-                    .cloned()
-            });
-        // A script policy may call the scopes it declares.
-        let declared = match self.capabilities.get(CAPABILITY, &id).map(|i| i.source) {
-            Some(crate::capabilities::Source::Script { needs, .. }) => {
-                crate::grants::script_request(&needs)
-            }
-            _ => oxplow_domain::grant::GrantRequest::default(),
-        };
-        let run =
-            crate::run_context::for_policy(&self.catalog, &self.root, &id, owner.as_ref(), event)
+        // The implementing extension, its declared needs and the run's
+        // generation stamp are read from one generation.
+        let run = self
+            .sql
+            .read_generation(async {
+                let owner = self
+                    .capabilities
+                    .get(CAPABILITY, &id)
+                    .and_then(|i| i.extension)
+                    .and_then(|name| {
+                        self.catalog
+                            .get(&self.root)
+                            .iter()
+                            .find(|e| e.name == name)
+                            .cloned()
+                    });
+                // A script policy may call the scopes it declares.
+                let declared = match self.capabilities.get(CAPABILITY, &id).map(|i| i.source) {
+                    Some(crate::capabilities::Source::Script { needs, .. }) => {
+                        crate::grants::script_request(&needs)
+                    }
+                    _ => oxplow_domain::grant::GrantRequest::default(),
+                };
+                let run = crate::run_context::for_policy(
+                    &self.catalog,
+                    &self.root,
+                    &id,
+                    owner.as_ref(),
+                    event,
+                )
                 .authorized(oxplow_domain::run::Authority {
                     declared,
                     grant: None,
                     enforcement: crate::grants::enforcement(),
                 });
+                run
+            })
+            .await?;
         let lineage = crate::event_lineage::lineage(
             &self.db,
             event,

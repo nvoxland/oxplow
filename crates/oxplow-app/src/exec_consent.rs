@@ -1126,7 +1126,9 @@ pub fn approve_every(svc: &crate::Services, kind: ProgramKind) -> Result<Vec<Str
         .read()
         .map_err(|_| "the configuration is unavailable".to_string())?
         .clone();
-    let extensions = svc.extension_catalog.get(&project);
+    let extensions = svc
+        .extension_catalog
+        .unpinned(&project, "approval reads the declared programs");
     let mut approved = Vec::new();
     for p in list(&svc.approvals, &project, &config, &extensions)
         .into_iter()

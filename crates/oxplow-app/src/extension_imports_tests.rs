@@ -20,6 +20,35 @@ struct Ext<'a> {
     /// `(producer, version, optional)` read as `import_ref('dep')`.
     import: Option<(&'a str, u32, bool)>,
     shared: bool,
+    /// Other contributions it declares, one of each kind asked for.
+    declares: Vec<Kind>,
+    /// `(kind, visibility)` exports of those, at contract version 1.
+    kind_exports: Vec<(Kind, &'a str)>,
+    /// `(binding, producer, kind, version, optional)` imports of another
+    /// extension's contribution of that kind. A `guarded` command of its
+    /// own is withheld with any of them.
+    kind_imports: Vec<(&'a str, &'a str, Kind, u32, bool)>,
+    /// Mount the `seen` lens in a slot (only when it imports a model).
+    mounted: bool,
+}
+
+/// The contribution kinds a producer can declare, each named `thing`.
+#[derive(Clone, Copy, PartialEq)]
+enum Kind {
+    Collector,
+    EventType,
+    Command,
+}
+
+impl Kind {
+    /// How `owner` declares and exports its `thing` of this kind.
+    fn reference(self, owner: &str) -> String {
+        match self {
+            Kind::Collector => format!("collector:{owner}/thing"),
+            Kind::EventType => format!("event_type:{}.thing", owner.replace('-', "_")),
+            Kind::Command => format!("command:{owner}.thing.get"),
+        }
+    }
 }
 
 impl<'a> Ext<'a> {
@@ -30,7 +59,39 @@ impl<'a> Ext<'a> {
             export: None,
             import: None,
             shared: false,
+            declares: Vec::new(),
+            kind_exports: Vec::new(),
+            kind_imports: Vec::new(),
+            mounted: false,
         }
+    }
+    /// Declare a `thing` of `kind`.
+    fn declares(mut self, kind: Kind) -> Self {
+        self.declares.push(kind);
+        self
+    }
+    /// Export its `thing` of `kind`.
+    fn exports_kind(mut self, kind: Kind, visibility: &'a str) -> Self {
+        self.kind_exports.push((kind, visibility));
+        self
+    }
+    /// Import `producer`'s `thing` of `kind` as `binding`.
+    fn imports_kind(
+        mut self,
+        binding: &'a str,
+        producer: &'a str,
+        kind: Kind,
+        version: u32,
+        optional: bool,
+    ) -> Self {
+        self.kind_imports
+            .push((binding, producer, kind, version, optional));
+        self
+    }
+    /// Mount its `seen` lens in a slot.
+    fn mounted(mut self) -> Self {
+        self.mounted = true;
+        self
     }
     /// Export `items` at its own model version.
     fn exports(mut self, visibility: &'a str) -> Self {
@@ -71,26 +132,92 @@ fn put_in(dir: &Path, e: &Ext) {
     manifest += &format!(
         "intent:\n  purpose: p\nmodels:\n  - name: items\n    version: {version}\n    description: Items.\n    columns:\n      - {{ name: ref, type: TEXT, doc: Work item ref. }}\n  - name: plain\n    version: 1\n    description: Plain.\n    columns:\n      - {{ name: ref, type: TEXT, doc: Work item ref. }}\n"
     );
+    let mut exports = String::new();
     if let Some((visibility, version)) = e.export {
-        manifest += &format!(
-            "exports:\n  - {{ contribution: model:{name}/items, version: {version}, visibility: {visibility} }}\n"
+        exports += &format!(
+            "  - {{ contribution: model:{name}/items, version: {version}, visibility: {visibility} }}\n"
         );
     }
+    for (kind, visibility) in &e.kind_exports {
+        exports += &format!(
+            "  - {{ contribution: {}, version: 1, visibility: {visibility} }}\n",
+            kind.reference(name)
+        );
+    }
+    if !exports.is_empty() {
+        manifest += &format!("exports:\n{exports}");
+    }
+    let mut commands = String::new();
+    for kind in &e.declares {
+        match kind {
+            Kind::Collector => {
+                manifest += "collectors:\n  - id: thing\n    runtime: starlark\n    entry: collectors/thing.star\n    trigger: { on: [snapshot.taken] }\n    facts: [x.y]\n";
+                write(
+                    dir,
+                    "collectors/thing.star",
+                    "def transform(x):\n    return {\"facts\": []}\n",
+                );
+            }
+            Kind::EventType => {
+                let ns = name.replace('-', "_");
+                manifest += &format!("event_types:\n  types:\n    - {{ type: {ns}.thing, v: 1, schema: thing.json, summary: A thing. }}\n");
+                write(dir, "thing.json", "{\"type\":\"object\"}");
+            }
+            Kind::Command => commands += &command("thing.get"),
+        }
+    }
+    let mut imports = String::new();
     let mut sql = "SELECT ref FROM ref('work_item')";
     if let Some((target, version, optional)) = e.import {
-        manifest += &format!(
-            "imports:\n  - {{ id: dep, contribution: model:{target}/items, version: {version}, optional: {optional} }}\n"
+        imports += &format!(
+            "  - {{ id: dep, contribution: model:{target}/items, version: {version}, optional: {optional} }}\n"
         );
         sql = "SELECT ref FROM import_ref('dep')";
+        let params = if e.mounted {
+            "params: [{ name: ref }]\n"
+        } else {
+            ""
+        };
         write(
             dir,
             "lenses/seen.yaml",
-            "title: Seen\nquery: SELECT ref FROM import_ref('dep')\n",
+            &format!("title: Seen\n{params}query: SELECT ref FROM import_ref('dep')\n"),
+        );
+        if e.mounted {
+            manifest += "ui:\n  slots:\n    - { slot: work_item.detail.body, lens: seen }\n";
+        }
+    }
+    for (binding, producer, kind, version, optional) in &e.kind_imports {
+        imports += &format!(
+            "  - {{ id: {binding}, contribution: {}, version: {version}, optional: {optional} }}\n",
+            kind.reference(producer)
         );
     }
+    if !imports.is_empty() {
+        manifest += &format!("imports:\n{imports}");
+    }
+    if !e.kind_imports.is_empty() {
+        // A command of its own that depends on every kind import.
+        commands += &command("own.act");
+        let bindings: Vec<_> = e.kind_imports.iter().map(|i| i.0).collect();
+        manifest += &format!(
+            "import_guards:\n  - {{ contribution: command:{name}.own.act, imports: [{}] }}\n",
+            bindings.join(", ")
+        );
+    }
+    if !commands.is_empty() {
+        manifest = manifest.replace("models:\n", &format!("commands:\n{commands}models:\n"));
+    }
     write(dir, "extension.yaml", &manifest);
+    write(dir, "handlers/get.star", HANDLER);
     write(dir, "models/items.sql", sql);
     write(dir, "models/plain.sql", "SELECT ref FROM ref('work_item')");
+}
+
+const HANDLER: &str = "def transform(x):\n    return {\"commands\": [], \"result\": {}}\n";
+
+fn command(local: &str) -> String {
+    format!("  - name: {local}\n    summary: A command.\n    input_schema: {{ type: object }}\n    entry: handlers/get.star\n    invokers: {{ human: true, agent: true, lens: true }}\n    access: read\n")
 }
 
 async fn project(exts: &[Ext<'_>]) -> (tempfile::TempDir, Arc<crate::Services>) {
@@ -347,6 +474,415 @@ async fn disabling_the_producer_withdraws_a_required_consumer_and_degrades_an_op
     assert!(!readable(&svc, "v_may_items").await);
     assert!(readable(&svc, "v_may_plain").await);
     assert!(problem(&svc, "may").is_empty());
+}
+
+/// The extension as the catalog lists it.
+async fn listed(svc: &crate::Services, name: &str) -> crate::extensions::Extension {
+    svc.listed_extensions(&svc.layout.project_dir)
+        .await
+        .into_iter()
+        .find(|e| e.name == name)
+        .unwrap_or_else(|| panic!("{name} is listed"))
+}
+
+async fn binding_available(svc: &crate::Services, extension: &str, id: &str) -> bool {
+    listed(svc, extension)
+        .await
+        .public_contracts
+        .bindings
+        .iter()
+        .find(|b| b.id == id)
+        .unwrap_or_else(|| panic!("{extension} has no binding {id}"))
+        .available
+}
+
+/// Whether the extension still has its guarded `act` command.
+async fn has_act(svc: &crate::Services, extension: &str) -> bool {
+    let act = format!("{extension}.own.act");
+    listed(svc, extension)
+        .await
+        .commands
+        .iter()
+        .any(|c| c.name == act || c.name == "own.act")
+}
+
+const ALL_KINDS: [Kind; 3] = [Kind::Collector, Kind::EventType, Kind::Command];
+
+/// A stable collector, event type or command is importable as well as a
+/// model; the consumer's guarded command stays.
+#[tokio::test]
+async fn a_stable_contribution_of_every_kind_is_importable() {
+    for kind in ALL_KINDS {
+        let (_dir, svc) = project(&[
+            Ext::new("prod").declares(kind).exports_kind(kind, "stable"),
+            Ext::new("cons").imports_kind("dep", "prod", kind, 1, false),
+        ])
+        .await;
+        activate(&svc).await;
+        assert!(
+            svc.extension_activation.problems().is_empty(),
+            "{}",
+            problem(&svc, "cons")
+        );
+        assert!(binding_available(&svc, "cons", "dep").await);
+        assert!(has_act(&svc, "cons").await);
+    }
+}
+
+/// A required import of a missing or unexported contribution of any kind
+/// blocks the consumer alone.
+#[tokio::test]
+async fn a_missing_or_unexported_contribution_of_every_kind_blocks_the_consumer() {
+    for kind in ALL_KINDS {
+        let (_dir, svc) = project(&[
+            Ext::new("prod").declares(kind),
+            Ext::new("cons").imports_kind("dep", "prod", kind, 1, false),
+            Ext::new("lost").imports_kind("dep", "gone", kind, 1, false),
+            Ext::new("other"),
+        ])
+        .await;
+        activate(&svc).await;
+        assert!(
+            problem(&svc, "cons").contains("`dep`"),
+            "{}",
+            problem(&svc, "cons")
+        );
+        assert!(
+            problem(&svc, "lost").contains("`dep`"),
+            "{}",
+            problem(&svc, "lost")
+        );
+        assert!(!readable(&svc, "v_cons_plain").await);
+        assert!(readable(&svc, "v_other_items").await);
+        assert!(readable(&svc, "v_prod_items").await);
+    }
+}
+
+/// An optional import of a contribution that isn't there withholds what is
+/// guarded by it and nothing else, whatever the kind.
+#[tokio::test]
+async fn an_optional_import_of_every_kind_withholds_only_what_it_guards() {
+    for kind in ALL_KINDS {
+        let (_dir, svc) =
+            project(&[Ext::new("cons").imports_kind("dep", "gone", kind, 1, true)]).await;
+        activate(&svc).await;
+        assert!(
+            svc.extension_activation.problems().is_empty(),
+            "{:?}",
+            svc.extension_activation.problems()
+        );
+        assert!(!binding_available(&svc, "cons", "dep").await);
+        assert!(!has_act(&svc, "cons").await, "the guarded command goes");
+        assert!(readable(&svc, "v_cons_plain").await);
+        let withheld = listed(&svc, "cons").await.public_contracts.withheld;
+        assert!(
+            withheld
+                .iter()
+                .any(|w| w.contribution.to_string().contains("own.act") && w.imports == ["dep"]),
+            "{withheld:?}"
+        );
+    }
+}
+
+/// A contract version other than the one exported blocks, whatever the kind.
+#[tokio::test]
+async fn a_version_mismatch_of_every_kind_blocks_the_consumer() {
+    for kind in ALL_KINDS {
+        let (_dir, svc) = project(&[
+            Ext::new("prod").declares(kind).exports_kind(kind, "stable"),
+            Ext::new("cons").imports_kind("dep", "prod", kind, 2, false),
+        ])
+        .await;
+        activate(&svc).await;
+        assert!(
+            problem(&svc, "cons").contains("`dep`"),
+            "{}",
+            problem(&svc, "cons")
+        );
+    }
+}
+
+/// Two consumers of one producer, and a consumer of both: all activate, the
+/// producer first.
+#[tokio::test]
+async fn a_diamond_of_imports_activates_dependencies_first() {
+    let (_dir, svc) = project(&[
+        Ext::new("bottom")
+            .exports("stable")
+            .declares(Kind::Command)
+            .exports_kind(Kind::Command, "stable"),
+        Ext::new("left")
+            .imports("bottom", 1, false)
+            .declares(Kind::Command)
+            .exports_kind(Kind::Command, "stable"),
+        Ext::new("right")
+            .imports("bottom", 1, false)
+            .declares(Kind::Collector)
+            .exports_kind(Kind::Collector, "stable"),
+        Ext::new("top")
+            .imports_kind("l", "left", Kind::Command, 1, false)
+            .imports_kind("r", "right", Kind::Collector, 1, false),
+    ])
+    .await;
+    activate(&svc).await;
+    assert!(
+        svc.extension_activation.problems().is_empty(),
+        "{:?}",
+        svc.extension_activation.problems()
+    );
+    let mut order = Vec::new();
+    for name in ["bottom", "left", "right", "top"] {
+        order.push(
+            listed(&svc, name)
+                .await
+                .public_contracts
+                .activation_index
+                .expect("ordered"),
+        );
+    }
+    let (b, l, r, t) = (order[0], order[1], order[2], order[3]);
+    assert!(b < l && b < r && l < t && r < t, "{b} {l} {r} {t}");
+    assert!(readable(&svc, "v_left_items").await);
+    assert!(binding_available(&svc, "top", "l").await);
+    assert!(binding_available(&svc, "top", "r").await);
+}
+
+/// A diamond whose shared base fails blocks both sides and the top, and
+/// nothing else.
+#[tokio::test]
+async fn a_failed_base_of_a_diamond_blocks_everything_above_it() {
+    let (_dir, svc) = project(&[
+        Ext::new("bottom")
+            .imports("gone", 1, false)
+            .exports("stable"),
+        Ext::new("left")
+            .imports("bottom", 1, false)
+            .declares(Kind::Command)
+            .exports_kind(Kind::Command, "stable"),
+        Ext::new("right")
+            .imports("bottom", 1, false)
+            .declares(Kind::Collector)
+            .exports_kind(Kind::Collector, "stable"),
+        Ext::new("top")
+            .imports_kind("l", "left", Kind::Command, 1, false)
+            .imports_kind("r", "right", Kind::Collector, 1, false),
+        Ext::new("other"),
+    ])
+    .await;
+    activate(&svc).await;
+    for name in ["bottom", "left", "right", "top"] {
+        assert!(!problem(&svc, name).is_empty(), "{name}");
+    }
+    assert!(problem(&svc, "other").is_empty());
+    assert!(readable(&svc, "v_other_items").await);
+}
+
+/// A cycle through three extensions blocks every one of them, with the same
+/// path at each, and not an extension beside it.
+#[tokio::test]
+async fn a_three_way_cycle_blocks_all_three() {
+    let (_dir, svc) = project(&[
+        Ext::new("a").exports("stable").imports("b", 1, false),
+        Ext::new("b").exports("stable").imports("c", 1, false),
+        Ext::new("c").exports("stable").imports("a", 1, false),
+        Ext::new("d").imports("a", 1, false),
+        Ext::new("other"),
+    ])
+    .await;
+    activate(&svc).await;
+    for (name, path) in [
+        ("a", "a -> b -> c -> a"),
+        ("b", "b -> c -> a -> b"),
+        ("c", "c -> a -> b -> c"),
+    ] {
+        let why = problem(&svc, name);
+        assert!(why.contains(path), "{name}: {why}");
+        assert!(!readable(&svc, &format!("v_{name}_plain")).await);
+    }
+    assert!(
+        !problem(&svc, "d").is_empty(),
+        "a consumer of a cycle is blocked"
+    );
+    assert!(problem(&svc, "other").is_empty());
+    assert!(readable(&svc, "v_other_items").await);
+}
+
+/// An extension importing its own export is an error for it alone.
+#[tokio::test]
+async fn a_self_import_blocks_only_itself() {
+    let (_dir, svc) = project(&[
+        Ext::new("me").exports("stable").imports("me", 1, false),
+        Ext::new("other"),
+    ])
+    .await;
+    activate(&svc).await;
+    assert!(!problem(&svc, "me").is_empty());
+    assert!(!readable(&svc, "v_me_plain").await);
+    assert!(problem(&svc, "other").is_empty());
+    assert!(readable(&svc, "v_other_items").await);
+}
+
+/// An optional edge that is available counts toward a cycle; one nothing
+/// serves doesn't make one.
+#[tokio::test]
+async fn an_available_optional_edge_still_closes_a_cycle() {
+    let (_dir, svc) = project(&[
+        Ext::new("a").exports("stable").imports("b", 1, false),
+        Ext::new("b").exports("stable").imports("a", 1, true),
+        Ext::new("other"),
+    ])
+    .await;
+    activate(&svc).await;
+    assert!(
+        problem(&svc, "a").contains("a -> b -> a"),
+        "{}",
+        problem(&svc, "a")
+    );
+    assert!(
+        problem(&svc, "b").contains("b -> a -> b"),
+        "{}",
+        problem(&svc, "b")
+    );
+    assert!(readable(&svc, "v_other_items").await);
+}
+
+/// What an experimental export reaches, by who exports and who imports.
+#[tokio::test]
+async fn shared_and_experimental_combinations() {
+    // A shared producer can't expose an experimental contract.
+    let (_dir, svc) = project(&[
+        Ext::new("sprod").exports("experimental").shared(),
+        Ext::new("pcons").imports("sprod", 1, false),
+        Ext::new("other"),
+    ])
+    .await;
+    activate(&svc).await;
+    assert!(
+        problem(&svc, "sprod").contains("experimental"),
+        "{}",
+        problem(&svc, "sprod")
+    );
+    assert!(
+        !problem(&svc, "pcons").is_empty(),
+        "its consumer goes with it"
+    );
+    assert!(readable(&svc, "v_other_items").await);
+
+    // Shared to shared and private to shared are fine when stable.
+    let (_dir, svc) = project(&[
+        Ext::new("sprod").exports("stable").shared(),
+        Ext::new("pprod").exports("stable"),
+        Ext::new("sa").imports("sprod", 1, false).shared(),
+        Ext::new("sb").imports("pprod", 1, false).shared(),
+    ])
+    .await;
+    activate(&svc).await;
+    assert!(
+        svc.extension_activation.problems().is_empty(),
+        "{:?}",
+        svc.extension_activation.problems()
+    );
+    assert!(readable(&svc, "v_sa_items").await && readable(&svc, "v_sb_items").await);
+
+    // An experimental export serves a private consumer, and a shared one
+    // of a different producer is unaffected.
+    let (_dir, svc) = project(&[
+        Ext::new("exp").exports("experimental"),
+        Ext::new("pcons").imports("exp", 1, false),
+        Ext::new("scons").imports("exp", 1, false).shared(),
+        Ext::new("stable").exports("stable"),
+        Ext::new("sok").imports("stable", 1, false).shared(),
+    ])
+    .await;
+    activate(&svc).await;
+    assert!(problem(&svc, "pcons").is_empty());
+    assert!(problem(&svc, "scons").contains("experimental"));
+    assert!(problem(&svc, "sok").is_empty());
+}
+
+/// Repairing a producer that was held back lets its consumer, held
+/// because of it, activate at the next activation, with no edit of its own.
+#[tokio::test]
+async fn a_repaired_producer_brings_back_its_consumer() {
+    let (dir, svc) = project(&[
+        Ext::new("prod").exports("stable").imports("base", 1, false),
+        Ext::new("cons").imports("prod", 1, false),
+        Ext::new("other"),
+    ])
+    .await;
+    activate(&svc).await;
+    assert!(!problem(&svc, "prod").is_empty());
+    assert!(!problem(&svc, "cons").is_empty());
+    assert!(!readable(&svc, "v_cons_plain").await);
+
+    // The base arrives: the producer, and with it the consumer, recover.
+    put(dir.path(), &Ext::new("base").exports("stable"));
+    activate(&svc).await;
+    assert!(
+        svc.extension_activation.problems().is_empty(),
+        "{:?}",
+        svc.extension_activation.problems()
+    );
+    for view in ["v_base_items", "v_prod_items", "v_cons_items"] {
+        assert!(readable(&svc, view).await, "{view}");
+    }
+    lens(&svc, "cons/seen")
+        .await
+        .expect("the lens reads the import");
+
+    // And withdrawn again when the base goes.
+    std::fs::remove_dir_all(dir.path().join("oxplow/extensions/base")).unwrap();
+    activate(&svc).await;
+    assert!(!readable(&svc, "v_cons_plain").await);
+    assert!(readable(&svc, "v_other_items").await);
+}
+
+/// A producer's version fixed to the consumer's lets the consumer in.
+#[tokio::test]
+async fn a_producer_at_the_right_version_after_a_mismatch_recovers_its_consumer() {
+    let (dir, svc) = project(&[
+        Ext::new("prod").at_version(2).exports("stable"),
+        Ext::new("cons").imports("prod", 1, false),
+    ])
+    .await;
+    activate(&svc).await;
+    assert!(!problem(&svc, "cons").is_empty());
+    put(dir.path(), &Ext::new("prod").exports("stable"));
+    activate(&svc).await;
+    assert!(svc.extension_activation.problems().is_empty());
+    assert!(readable(&svc, "v_cons_items").await);
+}
+
+/// A lens withheld by an unavailable optional import takes the slot mount
+/// that shows it; an available import keeps both.
+#[tokio::test]
+async fn a_guarded_lens_prunes_its_slot_mounts() {
+    let (dir, svc) = project(&[Ext::new("cons").imports("prod", 1, true).mounted()]).await;
+    activate(&svc).await;
+    let cons = listed(&svc, "cons").await;
+    assert!(cons.ui.slots.is_empty(), "{:?}", cons.ui.slots);
+    assert!(cons.lenses.iter().all(|l| l.slug != "seen"));
+    assert!(
+        cons.public_contracts
+            .withheld
+            .iter()
+            .any(|w| w.contribution.to_string().contains("seen")),
+        "{:?}",
+        cons.public_contracts.withheld
+    );
+
+    put(dir.path(), &Ext::new("prod").exports("stable"));
+    activate(&svc).await;
+    let cons = listed(&svc, "cons").await;
+    assert_eq!(
+        cons.ui.slots.len(),
+        1,
+        "{:?} {:?}",
+        cons.errors,
+        cons.ui.slots
+    );
+    assert!(cons.lenses.iter().any(|l| l.slug == "seen"));
+    assert!(cons.public_contracts.withheld.is_empty());
 }
 
 fn git(dir: &Path, args: &[&str]) -> String {

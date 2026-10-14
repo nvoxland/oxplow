@@ -694,7 +694,7 @@ impl CollectionService {
     /// own extensions in checkout `root` declare, as they are now.
     fn report_collectors(&self, root: &std::path::Path) -> Vec<ReportCollector> {
         self.extensions
-            .get(root)
+            .unpinned(root, "report collectors are read from declarations")
             .iter()
             .filter(|e| e.enabled && e.is_own())
             .flat_map(|e| {

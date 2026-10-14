@@ -32,10 +32,10 @@ impl MetricsService {
         if core_only {
             frozen.global_catalog = Arc::new(std::sync::Mutex::new(Some(GlobalCatalog::default())));
         }
-        frozen.extensions_cache = Arc::new(
-            crate::extension_catalog::ExtensionCatalog::for_project(&self.project_dir),
-        );
-        frozen.extensions_cache.publish_active(snapshot.clone());
+        frozen.extensions_cache = Arc::new(crate::extension_catalog::ExtensionCatalog::staged(
+            &self.project_dir,
+            snapshot.clone(),
+        ));
         let ext = frozen.extension_catalog();
         let (global_measures, global_dims) = frozen
             .with_global_catalog(|global| (global.measures.clone(), global.dimensions.clone()));

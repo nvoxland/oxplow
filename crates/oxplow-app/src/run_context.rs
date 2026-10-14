@@ -25,14 +25,14 @@ pub fn contribution(
     ContributionRef {
         id: ContributionId::new(&ext.name, kind, local),
         version: ext.version.clone(),
-        generation: Some(catalog.runtime_snapshot(root).generation().to_string()),
+        generation: Some(catalog.live_snapshot(root).generation().to_string()),
     }
 }
 
 /// The catalog generation `root` is served at now: what a run checks it
 /// was built against.
 pub fn current_generation(catalog: &ExtensionCatalog, root: &Path) -> String {
-    catalog.runtime_snapshot(root).generation().to_string()
+    catalog.live_snapshot(root).generation().to_string()
 }
 
 /// A run reacting to `event`: caused by it, anchored where it happened,

@@ -3213,7 +3213,10 @@ async fn disabled_sources(
     models: &[String],
 ) -> Vec<String> {
     let mut out = Vec::new();
-    for ext in catalog.get(root).iter() {
+    for ext in catalog
+        .unpinned(root, "collectors are matched on their declarations")
+        .iter()
+    {
         for c in &ext.collectors {
             let Some(view) = c
                 .entities
@@ -3260,7 +3263,10 @@ fn explain_unsynced(
         .chars()
         .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
         .collect();
-    for ext in catalog.get(root).iter() {
+    for ext in catalog
+        .unpinned(root, "collectors are matched on their declarations")
+        .iter()
+    {
         for collector in &ext.collectors {
             if collector.entities.iter().any(|e| e.view == view) {
                 let lens = message.split(':').next().unwrap_or("lens");
@@ -4126,9 +4132,12 @@ fn install_from_git(
 ) -> Result<Extension, DomainError> {
     let invalid = |m: String| DomainError::Invalid(m);
     let fetched = fetch(root, git_url, git_ref, replacing)?;
-    // Serialize candidate checks and publication by this process. Otherwise
-    // two concurrent installs could each validate against the old catalog.
-    let _publication = candidates::INSTALL_LOCK.lock();
+    // Serialize candidate checks and publication across threads and
+    // processes. Otherwise two concurrent installs could each validate
+    // against the old catalog. The clone above is unique to this attempt
+    // (its own temp dir), so only the decision and publication wait.
+    let _publication = candidates::InstallLock::acquire(root)
+        .map_err(|e| DomainError::Storage(format!("extension install: {e}")))?;
     let name = fetched.name.clone();
     if fetched.sha != reviewed_sha {
         return Err(invalid(format!(
@@ -5551,6 +5560,51 @@ empty: No items.
         // The temporary clone is gone.
         let tmp = project.path().join(".oxplow/tmp");
         assert!(!tmp.exists() || std::fs::read_dir(&tmp).unwrap().next().is_none());
+    }
+
+    /// The install lock is a file in the project, so another holder of it
+    /// (another thread, or another oxplow process on the same project)
+    /// makes an install wait rather than race it; it goes ahead on release.
+    #[test]
+    fn an_install_waits_for_another_holder_of_the_install_lock() {
+        let project = tempfile::tempdir().unwrap();
+        let repo = published_repo("Count");
+        let url = repo.path().to_string_lossy().to_string();
+        let sha = head(repo.path());
+        let held = candidates::InstallLock::acquire(project.path()).unwrap();
+
+        let installing = {
+            let root = project.path().to_path_buf();
+            std::thread::spawn(move || install_extension(&root, &root, &url, None, &sha))
+        };
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        assert!(!installing.is_finished(), "the install waits for the lock");
+        assert!(!project.path().join("oxplow/extensions/shared").exists());
+
+        drop(held);
+        let ext = installing.join().unwrap().unwrap();
+        assert_eq!(ext.name, "shared");
+        assert!(project.path().join("oxplow/extensions/shared").is_dir());
+        // The lock is not an extension, nor a stage recovery acts on.
+        assert_eq!(project_extensions(project.path()).len(), 1);
+        let report = candidates::recover_installations(project.path()).unwrap();
+        assert_eq!(report, candidates::InstallRecoveryReport::default());
+    }
+
+    /// Startup recovery takes the same lock, so it never reads a stage an
+    /// install is still publishing.
+    #[test]
+    fn recovery_waits_for_an_install_in_flight() {
+        let project = tempfile::tempdir().unwrap();
+        let held = candidates::InstallLock::acquire(project.path()).unwrap();
+        let recovering = {
+            let root = project.path().to_path_buf();
+            std::thread::spawn(move || candidates::recover_installations(&root))
+        };
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(!recovering.is_finished(), "recovery waits for the lock");
+        drop(held);
+        recovering.join().unwrap().unwrap();
     }
 
     #[test]
