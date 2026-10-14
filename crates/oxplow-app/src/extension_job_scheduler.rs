@@ -58,9 +58,8 @@ impl ExtensionJobScheduler {
             tokio::select! {
                 _ = tick.tick() => {
                     if self.backoff_until.is_none_or(|until| Instant::now() >= until) {
-                        // A generation writer may wait behind running job
-                        // readers. Keep shutdown responsive while this scan
-                        // waits to acquire its own reader.
+                        // A scan's reader may wait behind an activation.
+                        // Keep shutdown responsive meanwhile.
                         let shutdown = self.shutdown.clone();
                         let failed = tokio::select! {
                             result = self.scan() => result.is_err(),

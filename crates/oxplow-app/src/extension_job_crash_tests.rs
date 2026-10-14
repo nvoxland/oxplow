@@ -233,10 +233,10 @@ async fn the_queue_is_bounded_across_the_project_and_a_changed_duplicate_conflic
             let mut insert = tx
                 .prepare(
                     "INSERT INTO extension_job (
-                        id, contribution_id, generation, operation, invoker, run_id,
+                        id, contribution_id, operation, invoker, run_id,
                         intent_key, replay_policy, state, attempt, fence,
                         created_at_ms, updated_at_ms, revision, request_json)
-                     VALUES (?1, 'job:other/backlog', 'g', 'ai.complete_typed', 'human',
+                     VALUES (?1, 'job:other/backlog', 'ai.complete_typed', 'human',
                         ?1, ?2, 'never', 'queued', 0, 0, 1000, 1000, 1, '{}')",
                 )
                 .map_err(oxplow_db::map_sql_err)?;

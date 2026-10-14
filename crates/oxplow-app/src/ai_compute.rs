@@ -173,23 +173,21 @@ impl AiCompute {
             return Err(refused());
         }
         let name = run.actor().source();
-        self.ai
-            .read_run(run, async {
-                run.check_authority().map_err(|_| refused())?;
-                run.used_ai();
-                self.stream_typed(
-                    Caller {
-                        name: &name,
-                        run: Some(run.run().as_str()),
-                    },
-                    role,
-                    request,
-                    run.cancel(),
-                    on_delta,
-                )
-                .await
-            })
-            .await?
+        // Not under the job run's own pin: a job holds no generation, and
+        // the model's binding is resolved under one of its own.
+        run.check_authority().map_err(|_| refused())?;
+        run.used_ai();
+        self.stream_typed(
+            Caller {
+                name: &name,
+                run: Some(run.run().as_str()),
+            },
+            role,
+            request,
+            run.cancel(),
+            on_delta,
+        )
+        .await
     }
 
     /// Read `op`'s recorded result, or run `compute` (given the input
@@ -201,25 +199,13 @@ impl AiCompute {
     ) -> Result<Recorded<T>, AiComputeError>
     where
         T: Serialize + DeserializeOwned,
-        F: FnOnce(String) -> Fut,
+        F: FnOnce(String, crate::ai_service::Bound) -> Fut,
         Fut: std::future::Future<Output = Result<(T, i64, i64, Option<i64>), AiComputeError>>,
     {
-        self.ai
-            .read_generation(self.recorded_unpinned(op, compute))
-            .await?
-    }
-
-    async fn recorded_unpinned<T, F, Fut>(
-        &self,
-        op: Op<'_>,
-        compute: F,
-    ) -> Result<Recorded<T>, AiComputeError>
-    where
-        T: Serialize + DeserializeOwned,
-        F: FnOnce(String) -> Fut,
-        Fut: std::future::Future<Output = Result<(T, i64, i64, Option<i64>), AiComputeError>>,
-    {
-        let binding = self.ai.binding_for(op.role)?;
+        // Bound once: the result is keyed by, and computed on, the same
+        // provider and model, though no generation is held across the call.
+        let bound = self.ai.bind(op.role).await?;
+        let binding = bound.binding().clone();
         let hash = input_hash(op.name, &op.args);
         let request_hash = op.request.hash();
         let storage = |e: oxplow_domain::DomainError| AiComputeError::Storage(e.to_string());
@@ -238,7 +224,7 @@ impl AiCompute {
                 output_tokens: hit.output_tokens,
             });
         }
-        let (value, input_tokens, output_tokens, ai_call_id) = compute(hash.clone()).await?;
+        let (value, input_tokens, output_tokens, ai_call_id) = compute(hash.clone(), bound).await?;
         // A concurrent computation of the same thing may have recorded
         // first: what's recorded is the answer, so that one is returned.
         let kept = self
@@ -287,10 +273,10 @@ impl AiCompute {
             args: serde_json::to_value(request).expect("request serializes"),
             request: ModelRequest::Typed(request),
         };
-        self.recorded(op, |hash| async move {
+        self.recorded(op, |hash, bound| async move {
             let (response, call) = self
                 .ai
-                .complete_typed_as(role, site(caller, &hash), request)
+                .complete_typed_on(&bound, site(caller, &hash), request)
                 .await?;
             let (input, output) = crate::ai_service::observed_counts(&response);
             Ok((response, input, output, call))
@@ -326,11 +312,11 @@ impl AiCompute {
         let mut streamed = false;
         let recorded = {
             let (sink, streamed) = (&mut on_delta, &mut streamed);
-            self.recorded(op, |hash| async move {
+            self.recorded(op, |hash, bound| async move {
                 *streamed = true;
                 let (response, call) = self
                     .ai
-                    .stream_typed_as(role, site(caller, &hash), request, cancel, &mut **sink)
+                    .stream_typed_on(&bound, site(caller, &hash), request, cancel, &mut **sink)
                     .await?;
                 let (input, output) = crate::ai_service::observed_counts(&response);
                 Ok((response, input, output, call))
@@ -373,10 +359,10 @@ impl AiCompute {
             },
         };
         let questions = &questions;
-        self.recorded(op, |hash| async move {
+        self.recorded(op, |hash, bound| async move {
             let (decision, call) = self
                 .ai
-                .decide_as(role, site(caller, &hash), text, questions)
+                .decide_on(&bound, site(caller, &hash), text, questions)
                 .await?;
             match decision.answers.get("label") {
                 Some(Answer::Choice {
@@ -426,10 +412,10 @@ impl AiCompute {
             },
         };
         let questions = &questions;
-        self.recorded(op, |hash| async move {
+        self.recorded(op, |hash, bound| async move {
             let (decision, call) = self
                 .ai
-                .decide_as(role, site(caller, &hash), text, questions)
+                .decide_on(&bound, site(caller, &hash), text, questions)
                 .await?;
             match decision.answers.get("score") {
                 Some(Answer::Score {
@@ -472,10 +458,10 @@ impl AiCompute {
             args: json!({ "state": state, "questions": questions }),
             request: ModelRequest::Decide { state, questions },
         };
-        self.recorded(op, |hash| async move {
+        self.recorded(op, |hash, bound| async move {
             let (decision, call) = self
                 .ai
-                .decide_as(role, site(caller, &hash), state, questions)
+                .decide_on(&bound, site(caller, &hash), state, questions)
                 .await?;
             if let Some(missing) = questions
                 .keys()
@@ -517,10 +503,10 @@ impl AiCompute {
             },
         };
         let system = &system;
-        self.recorded(op, |hash| async move {
+        self.recorded(op, |hash, bound| async move {
             let (c, call) = self
                 .ai
-                .complete_as(role, site(caller, &hash), Some(system), text, false)
+                .complete_on(&bound, site(caller, &hash), Some(system), text, false)
                 .await?;
             Ok((
                 c.text.trim().to_string(),
@@ -558,13 +544,13 @@ impl AiCompute {
             },
         };
         let system = &system;
-        self.recorded(op, |hash| async move {
+        self.recorded(op, |hash, bound| async move {
             let validator = oxplow_domain::InputValidator::compile(schema).map_err(|e| {
                 AiComputeError::BadOutput(format!("the schema doesn't compile: {e}"))
             })?;
             let (c, call) = self
                 .ai
-                .complete_as(role, site(caller, &hash), Some(system), text, true)
+                .complete_on(&bound, site(caller, &hash), Some(system), text, true)
                 .await?;
             let value = parse_json_reply(&c.text)?;
             if let Err(oxplow_domain::CommandError::Invalid { field, message }) =

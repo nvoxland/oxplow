@@ -397,22 +397,20 @@ pub fn enqueue_tx(conn: &Connection, new_job: &NewExtensionJob) -> StoreResult<E
 
     let request_json = canonical_json(&new_job.request)?;
     let job = &new_job.job;
-    let (contribution_id, package_version, generation, contract_version) =
-        owner_columns(&job.owner);
+    let (contribution_id, package_version, contract_version) = owner_columns(&job.owner);
     let savepoint = Savepoint::new(conn)?;
     let insert = conn.execute(
         "INSERT INTO extension_job (
-            id, contribution_id, package_version, generation, contract_version,
+            id, contribution_id, package_version, contract_version,
             operation, invoker, run_id, intent_key, replay_policy, state, attempt,
             fence, lease_until_ms, cancellation_requested_at_ms, created_at_ms,
             updated_at_ms, revision, request_json
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                   ?13, ?14, ?15, ?16, ?17, 1, ?18)",
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+                   ?12, ?13, ?14, ?15, ?16, 1, ?17)",
         params![
             job.id.as_str(),
             contribution_id,
             package_version,
-            generation,
             contract_version,
             new_job.operation,
             new_job.invoker,
@@ -468,7 +466,7 @@ pub fn get_tx(conn: &Connection, id: &JobId) -> StoreResult<Option<StoredExtensi
     validate_uuid_v7(id.as_str())?;
     let raw = conn
         .query_row(
-            "SELECT id, contribution_id, package_version, generation, contract_version,
+            "SELECT id, contribution_id, package_version, contract_version,
                     operation, invoker, run_id, intent_key, replay_policy, state, attempt,
                     fence, lease_until_ms, cancellation_requested_at_ms, created_at_ms,
                     updated_at_ms, revision, request_json
@@ -486,7 +484,7 @@ pub fn metadata_tx(conn: &Connection, id: &JobId) -> StoreResult<Option<Recovery
     validate_uuid_v7(id.as_str())?;
     let raw = conn
         .query_row(
-            "SELECT j.id, j.contribution_id, j.package_version, j.generation, j.contract_version,
+            "SELECT j.id, j.contribution_id, j.package_version, j.contract_version,
                     j.run_id, j.intent_key, j.replay_policy, j.state, j.attempt, j.fence,
                     j.lease_until_ms, j.cancellation_requested_at_ms, j.created_at_ms,
                     j.updated_at_ms, j.operation, j.invoker, j.revision
@@ -906,7 +904,7 @@ fn candidates_tx(
         "((j.state='running' AND j.lease_until_ms<=?1) OR j.state='interrupted')"
     };
     let sql = format!(
-        "SELECT j.id, j.contribution_id, j.package_version, j.generation, j.contract_version,
+        "SELECT j.id, j.contribution_id, j.package_version, j.contract_version,
                 j.run_id, j.intent_key, j.replay_policy, j.state, j.attempt, j.fence,
                 j.lease_until_ms, j.cancellation_requested_at_ms, j.created_at_ms,
                 j.updated_at_ms, j.operation, j.invoker, j.revision
@@ -954,7 +952,6 @@ struct RawStoredJob {
     id: String,
     contribution_id: String,
     package_version: Option<String>,
-    generation: String,
     contract_version: Option<i64>,
     operation: String,
     invoker: String,
@@ -1012,22 +1009,21 @@ fn decode_stored_job(row: &Row<'_>) -> rusqlite::Result<RawStoredJob> {
         id: read_text(row, 0, 36)?,
         contribution_id: read_text(row, 1, 512)?,
         package_version: read_optional_text(row, 2, 256)?,
-        generation: read_text(row, 3, 256)?,
-        contract_version: row.get(4)?,
-        operation: read_text(row, 5, 256)?,
-        invoker: read_text(row, 6, 256)?,
-        run_id: read_text(row, 7, 36)?,
-        intent_key: read_text(row, 8, 128)?,
-        replay_policy: read_text(row, 9, 10)?,
-        state: read_text(row, 10, 11)?,
-        attempt: row.get(11)?,
-        fence: row.get(12)?,
-        lease_until_ms: row.get(13)?,
-        cancellation_requested_at_ms: row.get(14)?,
-        created_at_ms: row.get(15)?,
-        updated_at_ms: row.get(16)?,
-        revision: row.get(17)?,
-        request_json: read_text(row, 18, 1048576)?,
+        contract_version: row.get(3)?,
+        operation: read_text(row, 4, 256)?,
+        invoker: read_text(row, 5, 256)?,
+        run_id: read_text(row, 6, 36)?,
+        intent_key: read_text(row, 7, 128)?,
+        replay_policy: read_text(row, 8, 10)?,
+        state: read_text(row, 9, 11)?,
+        attempt: row.get(10)?,
+        fence: row.get(11)?,
+        lease_until_ms: row.get(12)?,
+        cancellation_requested_at_ms: row.get(13)?,
+        created_at_ms: row.get(14)?,
+        updated_at_ms: row.get(15)?,
+        revision: row.get(16)?,
+        request_json: read_text(row, 17, 1048576)?,
     })
 }
 
@@ -1036,7 +1032,6 @@ fn decode_stored_job_data(raw: RawStoredJob) -> StoreResult<StoredExtensionJob> 
         id: raw.id,
         contribution_id: raw.contribution_id,
         package_version: raw.package_version,
-        generation: raw.generation,
         contract_version: raw.contract_version,
         run_id: raw.run_id,
         intent_key: raw.intent_key,
@@ -1069,7 +1064,6 @@ struct JobColumns {
     id: String,
     contribution_id: String,
     package_version: Option<String>,
-    generation: String,
     contract_version: Option<i64>,
     run_id: String,
     intent_key: String,
@@ -1088,7 +1082,6 @@ fn decode_job(columns: JobColumns) -> StoreResult<ExtensionJob> {
         id,
         contribution_id,
         package_version,
-        generation,
         contract_version,
         run_id,
         intent_key,
@@ -1110,7 +1103,6 @@ fn decode_job(columns: JobColumns) -> StoreResult<ExtensionJob> {
     let owner = JobOwner {
         contribution,
         package_version,
-        generation,
         contract_version: contract_version
             .map(|v| u32::try_from(v).map_err(|_| ExtensionJobStoreError::InvalidData))
             .transpose()?,
@@ -1326,7 +1318,6 @@ type RawRecovery = (
     String,
     String,
     Option<String>,
-    String,
     Option<i64>,
     String,
     String,
@@ -1348,21 +1339,20 @@ fn read_recovery_candidate(row: &Row<'_>) -> rusqlite::Result<RawRecovery> {
         read_text(row, 0, 36)?,
         read_text(row, 1, 512)?,
         read_optional_text(row, 2, 256)?,
-        read_text(row, 3, 256)?,
-        row.get(4)?,
-        read_text(row, 5, 36)?,
-        read_text(row, 6, 128)?,
-        read_text(row, 7, 10)?,
-        read_text(row, 8, 11)?,
+        row.get(3)?,
+        read_text(row, 4, 36)?,
+        read_text(row, 5, 128)?,
+        read_text(row, 6, 10)?,
+        read_text(row, 7, 11)?,
+        row.get(8)?,
         row.get(9)?,
         row.get(10)?,
         row.get(11)?,
         row.get(12)?,
         row.get(13)?,
-        row.get(14)?,
+        read_text(row, 14, 256)?,
         read_text(row, 15, 256)?,
-        read_text(row, 16, 256)?,
-        row.get(17)?,
+        row.get(16)?,
     ))
 }
 
@@ -1371,7 +1361,6 @@ fn decode_recovery_candidate(raw: RawRecovery) -> StoreResult<RecoveryCandidate>
         id,
         contribution,
         version,
-        generation,
         contract,
         run,
         intent,
@@ -1391,7 +1380,6 @@ fn decode_recovery_candidate(raw: RawRecovery) -> StoreResult<RecoveryCandidate>
         id,
         contribution_id: contribution,
         package_version: version,
-        generation,
         contract_version: contract,
         run_id: run,
         intent_key: intent,
@@ -1675,11 +1663,10 @@ fn get_by_intent_tx(
     .transpose()
 }
 
-fn owner_columns(owner: &JobOwner) -> (String, Option<String>, String, Option<i64>) {
+fn owner_columns(owner: &JobOwner) -> (String, Option<String>, Option<i64>) {
     (
         owner.contribution.to_string(),
         owner.package_version.clone(),
-        owner.generation.clone(),
         owner.contract_version.map(i64::from),
     )
 }

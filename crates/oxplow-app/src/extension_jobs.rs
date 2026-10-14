@@ -120,7 +120,6 @@ impl ExtensionJobs {
                         &job.id,
                     ),
                     package_version: extension.version.clone(),
-                    generation: snapshot.generation().into(),
                     contract_version: Some(job.version),
                 };
                 let key = JobOperationKey::new(owner, job.operation.as_str().into())
@@ -183,11 +182,6 @@ impl ExtensionJobs {
                                     &job.id,
                                 ),
                                 package_version: extension.version.clone(),
-                                generation: ctx
-                                    .run
-                                    .contribution_ref()
-                                    .and_then(|owner| owner.generation.clone())
-                                    .expect("validated runtime owner"),
                                 contract_version: Some(job.version),
                             },
                             job.operation.as_str().to_owned(),

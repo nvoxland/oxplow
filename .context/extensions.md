@@ -4289,9 +4289,25 @@ commands:
   effect in flight. A queued job survives a restart and runs after it;
   one that was running is fenced once its lease is out, then replayed or
   ended as above. A running job whose
-  declaration changes (a new generation) or whose approval is revoked
-  is cancelled with what it had, never completed under the new
-  generation. An extension has at most 256 queued or running jobs (a
+  declaration changes or whose approval is revoked is cancelled with
+  what it had, never completed under the new declaration.
+- **A job belongs to its extension's version, not to a catalog
+  generation.** Its owner is the extension, its package version and the
+  job's contract `version`; nothing records the generation it was queued
+  under, so another extension's change neither strands a queued job nor
+  stops a running one. A job holds no generation pin while it runs (it
+  can run for minutes, and an activation would wait on it): authorizing
+  its claim, each tool call (the bus pins per command) and its
+  publication each pin briefly, and each checks through the job's `live`
+  gate that its own extension is still that version, enabled and
+  approved. Its run's `ContributionRef.generation` is `None`. The model
+  call holds none either: `AiService::bind` resolves the role under a
+  pin and returns a `Bound` (provider, model, the declaring profile), the
+  `*_on` calls stream on it unpinned, and a recorded computation is keyed
+  by and computed on that one binding. Pinned by
+  `a_queued_job_runs_after_another_extension_changes` and
+  `an_activation_does_not_wait_for_a_running_job`.
+- An extension has at most 256 queued or running jobs (a
   repeat of an intent it already has is not a new one). No database
   transaction is held while a model streams (`Database::write_transactions_open`
   is zero where a model is streaming, asserted in the tests). These are

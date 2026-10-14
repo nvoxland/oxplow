@@ -79,8 +79,6 @@ pub struct JobOwner {
     /// Exact optional package identity from `ContributionRef::version`.
     /// A private unversioned extension does not get an invented package version.
     pub package_version: Option<String>,
-    /// Exact catalog snapshot identity.
-    pub generation: String,
     /// Optional public operation contract version, independent of package
     /// version and engine compatibility.
     pub contract_version: Option<u32>,
@@ -95,7 +93,6 @@ impl JobOwner {
                 .package_version
                 .as_deref()
                 .is_some_and(|version| !valid_owner_identity(version))
-            || !valid_owner_identity(&self.generation)
             || self.contract_version == Some(0)
         {
             return Err(TransitionError::InvalidOwner);
@@ -605,7 +602,6 @@ mod tests {
             JobOwner {
                 contribution: ContributionId::new("acme", ContributionKind::Job, "review"),
                 package_version: None,
-                generation: "g1".into(),
                 contract_version: Some(1),
             },
             RunId::generate(),

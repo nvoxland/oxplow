@@ -183,14 +183,12 @@ impl ExtensionJobDispatcher {
 
     /// Claim and run at most one queued job. No scheduler or automatic retry
     /// is implied by this entry point.
+    ///
+    /// The job holds no catalog generation while it runs: an activation
+    /// never waits for it. Authorizing, each tool call and the publication
+    /// pin the generation for themselves, and each checks the job's own
+    /// extension is still the version that queued it.
     pub async fn run_one(&self, id: JobId) -> Result<DispatchOutcome, DispatchError> {
-        // Fresh host readiness precedes operation lookup/claim. The retained
-        // reader covers execution and publication; spawned workers receive it
-        // through their host-derived RunContext, never persisted provenance.
-        self.host.read_generation(self.run_one_unpinned(id)).await?
-    }
-
-    async fn run_one_unpinned(&self, id: JobId) -> Result<DispatchOutcome, DispatchError> {
         let stored = self.store.get(id.clone()).await?;
         if stored.job.state != JobState::Queued || stored.job.cancellation_requested_at_ms.is_some()
         {
@@ -415,8 +413,11 @@ impl ExtensionJobDispatcher {
             let vocabulary = self.vocabulary.clone();
             #[cfg(test)]
             let crash = self.crash.clone();
-            let published = db
-                .transaction_or(move |tx| {
+            // Pinned so no activation lands between the publication's check
+            // of the job's extension and its commit.
+            let published = self
+                .host
+                .read_generation(db.transaction_or(move |tx| {
                     tx.execute_batch("SAVEPOINT extension_job_publication")
                         .map_err(|error| TxError::Storage(map_sql_err(error)))?;
                     let publish_result = (|| {
@@ -478,8 +479,8 @@ impl ExtensionJobDispatcher {
                             }
                         }
                     }
-                })
-                .await;
+                }))
+                .await?;
             match published {
                 Ok(()) => return Ok(DispatchOutcome::Completed),
                 Err(TxError::Aborted(PublishAbort::Revoked)) => {

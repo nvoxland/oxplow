@@ -284,7 +284,6 @@ fn validate_owner(owner: &JobOwner) -> Result<(), JobOperationError> {
             .package_version
             .as_deref()
             .is_some_and(|value| !valid_graphic(value, MAX_OWNER_FIELD_BYTES))
-        || !valid_graphic(&owner.generation, MAX_OWNER_FIELD_BYTES)
         || owner.contract_version == Some(0)
     {
         return Err(JobOperationError::InvalidData);
@@ -311,7 +310,6 @@ fn validate_run_owner(run: &RunContext, owner: &JobOwner) -> Result<(), JobOpera
         || !run.contribution_ref().is_some_and(|reference| {
             reference.id == owner.contribution
                 && reference.version.as_deref() == owner.package_version.as_deref()
-                && reference.generation.as_deref() == Some(owner.generation.as_str())
         })
     {
         return Err(JobOperationError::InvalidData);

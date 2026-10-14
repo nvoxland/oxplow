@@ -540,39 +540,34 @@ impl AiService {
         prompt: &str,
         json: bool,
     ) -> Result<Completion, AiServiceError> {
-        self.complete_as(role, CallSite::new(caller), system, prompt, json)
+        let bound = self.bind(role).await?;
+        self.complete_on(&bound, CallSite::new(caller), system, prompt, json)
             .await
             .map(|(c, _)| c)
     }
 
-    /// [`Self::complete`], recorded against `site`; the call's `ai_call`
-    /// row id comes back with it.
-    pub async fn complete_as(
+    /// [`Self::complete`] on a role already bound, recorded against
+    /// `site`; the call's `ai_call` row id comes back with it.
+    pub async fn complete_on(
         &self,
-        role: &Role,
+        bound: &Bound,
         site: CallSite<'_>,
         system: Option<&str>,
         prompt: &str,
         json: bool,
     ) -> Result<(Completion, Option<i64>), AiServiceError> {
-        self.read_generation(self.complete_as_unpinned(role, site, system, prompt, json))
-            .await?
-    }
-
-    async fn complete_as_unpinned(
-        &self,
-        role: &Role,
-        site: CallSite<'_>,
-        system: Option<&str>,
-        prompt: &str,
-        json: bool,
-    ) -> Result<(Completion, Option<i64>), AiServiceError> {
-        let (provider, binding, key) = self.prepare(role)?;
-        let model_provider = self.provider_of(&provider)?;
+        let Bound {
+            role,
+            provider,
+            binding,
+            model_provider,
+            ..
+        } = bound;
+        let key = self.key(provider)?;
         let started = Instant::now();
         let result = model_provider
             .complete(
-                &instance(&provider, key.as_deref()),
+                &instance(provider, key.as_deref()),
                 &CompleteRequest {
                     model: &binding.model,
                     system,
@@ -596,8 +591,8 @@ impl AiService {
         let attempt = Attempt {
             role,
             site,
-            provider: &provider,
-            binding: &binding,
+            provider,
+            binding,
             started,
             request: &request,
         };
@@ -613,66 +608,65 @@ impl AiService {
         site: CallSite<'_>,
         request: &TypedRequestV1,
     ) -> Result<(TypedResponseV1, Option<i64>), AiServiceError> {
-        self.read_generation(self.complete_typed_as_unpinned(role, site, request))
-            .await?
+        let bound = self.bind(role).await?;
+        self.complete_typed_on(&bound, site, request).await
     }
 
-    async fn complete_typed_as_unpinned(
+    /// [`Self::complete_typed_as`] on a role already bound.
+    pub async fn complete_typed_on(
         &self,
-        role: &Role,
+        bound: &Bound,
         site: CallSite<'_>,
         request: &TypedRequestV1,
     ) -> Result<(TypedResponseV1, Option<i64>), AiServiceError> {
-        let typed = self.prepare_typed(role, request).await?;
+        self.prepare_typed(bound, request).await?;
+        let key = self.key(&bound.provider)?;
         let started = Instant::now();
-        let result = typed
+        let result = bound
             .model_provider
-            .complete_typed(&instance(&typed.provider, typed.key.as_deref()), request)
+            .complete_typed(&instance(&bound.provider, key.as_deref()), request)
             .await;
-        self.finish_typed(role, site, request, &typed, started, result)
+        self.finish_typed(bound, site, request, started, result)
             .await
     }
 
-    /// [`Self::complete_typed_as`], the reply handed to `on_delta` as it
+    /// [`Self::complete_typed_on`], the reply handed to `on_delta` as it
     /// arrives, until `cancel` is asked. Every exit is recorded: a
     /// cancelled call's row keeps what had arrived (`error: cancelled`).
-    pub async fn stream_typed_as(
+    pub async fn stream_typed_on(
         &self,
-        role: &Role,
+        bound: &Bound,
         site: CallSite<'_>,
         request: &TypedRequestV1,
         cancel: &oxplow_ai::client::Cancel,
         on_delta: oxplow_ai::client::OnDelta<'_>,
     ) -> Result<(TypedResponseV1, Option<i64>), AiServiceError> {
-        self.read_generation(async {
-            let typed = self.prepare_typed(role, request).await?;
-            let started = Instant::now();
-            let result = typed
-                .model_provider
-                .stream_typed(
-                    &instance(&typed.provider, typed.key.as_deref()),
-                    request,
-                    cancel,
-                    on_delta,
-                )
-                .await;
-            self.finish_typed(role, site, request, &typed, started, result)
-                .await
-        })
-        .await?
+        self.prepare_typed(bound, request).await?;
+        let key = self.key(&bound.provider)?;
+        let started = Instant::now();
+        let result = bound
+            .model_provider
+            .stream_typed(
+                &instance(&bound.provider, key.as_deref()),
+                request,
+                cancel,
+                on_delta,
+            )
+            .await;
+        self.finish_typed(bound, site, request, started, result)
+            .await
     }
 
     /// A typed call's reply checked and recorded.
     async fn finish_typed(
         &self,
-        role: &Role,
+        bound: &Bound,
         site: CallSite<'_>,
         request: &TypedRequestV1,
-        typed: &TypedCall,
         started: Instant,
         result: Result<TypedResponseV1, AiError>,
     ) -> Result<(TypedResponseV1, Option<i64>), AiServiceError> {
-        let provider = &typed.provider;
+        let provider = &bound.provider;
         let result = result.and_then(|response| {
             response.validate_version()?;
             if response
@@ -702,10 +696,10 @@ impl AiService {
         let call_id = self
             .record(
                 Attempt {
-                    role,
+                    role: &bound.role,
                     site,
                     provider,
-                    binding: &typed.binding,
+                    binding: &bound.binding,
                     started,
                     request: &stored_request,
                 },
@@ -715,16 +709,21 @@ impl AiService {
         Ok((result?, call_id))
     }
 
-    /// What a typed call needs once it is allowed: the role's provider,
-    /// binding and key, after the request's model, parts and the model's
-    /// declared features were checked.
+    /// Whether a typed call on `bound` is allowed: the request's model,
+    /// parts and the model's declared features checked.
     async fn prepare_typed(
         &self,
-        role: &Role,
+        bound: &Bound,
         request: &TypedRequestV1,
-    ) -> Result<TypedCall, AiServiceError> {
+    ) -> Result<(), AiServiceError> {
         request.validate_version().map_err(AiError::from)?;
-        let (provider, binding) = self.resolve(role)?;
+        let Bound {
+            provider,
+            binding,
+            model_provider,
+            profile,
+            ..
+        } = bound;
         if request.model != binding.model {
             return Err(AiServiceError::Config(
                 "typed request must use the role's configured model".into(),
@@ -745,9 +744,8 @@ impl AiService {
             }
             .into());
         }
-        let model_provider = self.provider_of(&provider)?;
         let metadata = model_provider
-            .discover(&instance(&provider, None), &binding.model)
+            .discover(&instance(provider, None), &binding.model)
             .await?;
         metadata.validate_version().map_err(AiError::from)?;
         if metadata.model.as_deref() != Some(&binding.model) {
@@ -785,19 +783,13 @@ impl AiService {
                 .into());
             }
         }
-        if let Some(problem) = self
-            .declared(role, &self.profiles())?
+        if let Some(problem) = profile
+            .as_ref()
             .and_then(|profile| missing_feature(profile, &metadata))
         {
             return Err(AiServiceError::Config(problem));
         }
-        let key = self.key(&provider)?;
-        Ok(TypedCall {
-            provider,
-            binding,
-            model_provider,
-            key,
-        })
+        Ok(())
     }
 
     /// Answer typed questions about `state` with the model `role` is bound to.
@@ -808,37 +800,33 @@ impl AiService {
         state: &str,
         questions: &BTreeMap<String, Question>,
     ) -> Result<Decision, AiServiceError> {
-        self.decide_as(role, CallSite::new(caller), state, questions)
+        let bound = self.bind(role).await?;
+        self.decide_on(&bound, CallSite::new(caller), state, questions)
             .await
             .map(|(d, _)| d)
     }
 
-    /// [`Self::decide`], recorded against `site`; the call's `ai_call` row
-    /// id comes back with it.
-    pub async fn decide_as(
+    /// [`Self::decide`] on a role already bound, recorded against `site`;
+    /// the call's `ai_call` row id comes back with it.
+    pub async fn decide_on(
         &self,
-        role: &Role,
+        bound: &Bound,
         site: CallSite<'_>,
         state: &str,
         questions: &BTreeMap<String, Question>,
     ) -> Result<(Decision, Option<i64>), AiServiceError> {
-        self.read_generation(self.decide_as_unpinned(role, site, state, questions))
-            .await?
-    }
-
-    async fn decide_as_unpinned(
-        &self,
-        role: &Role,
-        site: CallSite<'_>,
-        state: &str,
-        questions: &BTreeMap<String, Question>,
-    ) -> Result<(Decision, Option<i64>), AiServiceError> {
-        let (provider, binding, key) = self.prepare(role)?;
-        let model_provider = self.provider_of(&provider)?;
+        let Bound {
+            role,
+            provider,
+            binding,
+            model_provider,
+            ..
+        } = bound;
+        let key = self.key(provider)?;
         let started = Instant::now();
         let result = model_provider
             .decide(
-                &instance(&provider, key.as_deref()),
+                &instance(provider, key.as_deref()),
                 &DecideRequest {
                     model: &binding.model,
                     state,
@@ -857,8 +845,8 @@ impl AiService {
         let attempt = Attempt {
             role,
             site,
-            provider: &provider,
-            binding: &binding,
+            provider,
+            binding,
             started,
             request: &request,
         };
@@ -948,13 +936,23 @@ impl AiService {
     /// Resolve `role` and fetch its provider's key.
     /// Keys are stored under the provider id; a provider without one (a
     /// local server) is called without auth.
-    fn prepare(
-        &self,
-        role: &Role,
-    ) -> Result<(ProviderConfig, RoleBinding, Option<String>), AiServiceError> {
-        let (provider, binding) = self.resolve(role)?;
-        let key = self.key(&provider)?;
-        Ok((provider, binding, key))
+    /// What a call on `role` goes to, resolved under the catalog
+    /// generation (a profile is an active extension's). The call made with
+    /// it, and its record, hold none: an activation never waits on a model.
+    pub async fn bind(&self, role: &Role) -> Result<Bound, AiServiceError> {
+        self.read_generation(async {
+            let (provider, binding) = self.resolve(role)?;
+            let model_provider = self.provider_of(&provider)?;
+            let profile = self.declared(role, &self.profiles())?.cloned();
+            Ok(Bound {
+                role: role.clone(),
+                provider,
+                binding,
+                model_provider,
+                profile,
+            })
+        })
+        .await?
     }
 
     /// The stored key entry, whatever URL it's bound to.
@@ -1101,11 +1099,23 @@ fn missing_feature(profile: &AiProfile, snapshot: &CapabilitySnapshotV1) -> Opti
 }
 
 /// A typed call ready to send: see [`AiService::prepare_typed`].
-struct TypedCall {
+/// A role bound to what a call on it goes to ([`AiService::bind`]): its
+/// provider and model, and the profile that declares it. The key is read
+/// only once a call is allowed.
+#[derive(Clone)]
+pub struct Bound {
+    role: Role,
     provider: ProviderConfig,
     binding: RoleBinding,
     model_provider: Arc<dyn oxplow_ai::client::ModelProvider>,
-    key: Option<String>,
+    profile: Option<AiProfile>,
+}
+
+impl Bound {
+    /// The provider and model it goes to: what a recorded result is keyed by.
+    pub fn binding(&self) -> &RoleBinding {
+        &self.binding
+    }
 }
 
 /// Typed payloads retain optional counts and provenance. The numeric

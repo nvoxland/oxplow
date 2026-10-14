@@ -235,8 +235,8 @@ an id, a description, a required `fallback` built-in role and optional
   The transport is `Http::post_stream` → `SseStream` (server-sent events,
   `Accept: text/event-stream`; the status is read first and mapped as
   `post`'s; no total timeout, the idle one instead; events that arrive
-  within 50 ms are one batch). `AiService::stream_typed_as` is
-  `complete_typed_as` streamed, and records **every** exit — a cancelled
+  within 50 ms are one batch). `AiService::stream_typed_on` is
+  `complete_typed_on` streamed, and records **every** exit — a cancelled
   call's `ai_call` row is `ok: false`, `error: cancelled`, its response
   the partial reply. `AiCompute::stream_typed` is the recorded
   computation: a recorded answer is handed over at once, whole, with no
@@ -438,11 +438,15 @@ system text (`summarize_system`, a job's system message) — so editing any of i
 `request_hash`, and the next ask computes afresh while the old results
 stay under theirs. (A provider adapter's own wording isn't in the
 request, so changing `decide_via_chat` doesn't.) The model is the
-role's provider and model *now* (`AiService::binding_for`), so
+role's provider and model *now*: the computation binds the role once
+(`AiService::bind`, under a catalog generation pin, since a profile is
+an active extension's) and both keys the result by and calls on that
+`Bound`, holding no pin across the model's reply — an activation never
+waits on a model. So
 reassigning a role computes afresh — to another model, or to another
 provider serving the same model name (a local and a hosted `llama3.1`
-are two computations, tsk560). `AiService::complete_as` / `decide_as` take a
-`CallSite { caller, input_hash }`, so the computing call's `ai_call` row
+are two computations, tsk560). `AiService::complete_on` / `decide_on` / `complete_typed_on` /
+`stream_typed_on` take the `Bound` and a `CallSite { caller, input_hash }`, so the computing call's `ai_call` row
 carries the hash, and return its row id; plain `complete` / `decide`
 record `input_hash` NULL.
 

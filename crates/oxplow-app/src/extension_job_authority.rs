@@ -98,9 +98,6 @@ impl JobGrantResolver for DeclaredJobGrants {
             return Err(JobAuthorityError::Denied);
         }
         let snapshot = self.catalog.runtime_snapshot(&self.project);
-        if snapshot.generation() != owner.generation {
-            return Err(JobAuthorityError::Unavailable);
-        }
         let extension = snapshot
             .extensions()
             .iter()
@@ -341,7 +338,9 @@ impl JobAuthorityHost {
             ContributionRef {
                 id: job.job.owner.contribution.clone(),
                 version: job.job.owner.package_version.clone(),
-                generation: Some(job.job.owner.generation.clone()),
+                // A job belongs to its extension's version, not to one
+                // catalog generation: `live` checks that version is current.
+                generation: None,
             },
             identity,
             provenance,
@@ -354,13 +353,9 @@ impl JobAuthorityHost {
         .within(Budget::default().with_ceiling(Duration::from_secs(
             u64::from(crate::extensions::jobs::MAX_TIMEOUT_SECS) + 60,
         )));
-        let run = match &self.activation {
-            Some(activation) => activation
-                .pin_run(&run)
-                .await
-                .map_err(|_| JobAuthorityError::Unavailable)?,
-            None => run,
-        };
+        // No generation pin: a job runs for minutes and an activation must
+        // not wait for it. Each tool call and the publication pin for
+        // themselves, and `live` checks the job's own extension then.
         Ok(JobExecution { run, live, writer })
     }
 }
@@ -373,9 +368,6 @@ fn current_descriptor(
     JobOperationKey::new(owner.clone(), "authority".into())
         .map_err(|_| JobAuthorityError::Denied)?;
     let snapshot = catalog.runtime_snapshot(project);
-    if snapshot.generation() != owner.generation {
-        return Err(JobAuthorityError::Unavailable);
-    }
     let extension = snapshot
         .extensions()
         .iter()

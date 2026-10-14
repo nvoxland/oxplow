@@ -143,11 +143,61 @@ async fn revoking_the_approval_stops_a_streaming_job() {
     assert_eq!(completions(&fx, &id).await, ["cancelled"]);
 }
 
+/// Add an extension of no concern to the job and activate the catalog
+/// with it.
+async fn change_another_extension(fx: &Fixture) {
+    let other = fx._dir.path().join("oxplow/extensions/other");
+    std::fs::create_dir_all(&other).unwrap();
+    std::fs::write(
+        other.join("extension.yaml"),
+        "manifest: 2\nname: other\nintent:\n  purpose: p\n",
+    )
+    .unwrap();
+    fx.svc
+        .extension_activation
+        .activate(fx.svc.clone())
+        .await
+        .expect("the catalog activates with the other extension");
+}
+
+/// A job belongs to its extension's version, not to the whole catalog: one
+/// queued before another extension changed still runs.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_queued_job_runs_after_another_extension_changes() {
+    let fx = fixture_idle(MANIFEST, vec![reply("still mine")]).await;
+    let id = ask(&fx, "unrelated").await;
+    change_another_extension(&fx).await;
+
+    fx.svc
+        .jobs
+        .spawn(fx.svc.extension_activation.clone(), fx.svc.commands.clone());
+    let done = until(&fx, &id, |s| s["state"] == json!("succeeded")).await;
+    assert_eq!(done["text"], json!("still mine"), "{done}");
+    assert_eq!(completions(&fx, &id).await, ["succeeded"]);
+}
+
+/// A running job holds no catalog: another extension's change activates
+/// while it streams, and the job goes on to succeed.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_activation_does_not_wait_for_a_running_job() {
+    let fx = fixture(MANIFEST, vec![slow(&words(60), 50)]).await;
+    let id = ask(&fx, "unrelated").await;
+    streaming(&fx, &id).await;
+
+    tokio::time::timeout(Duration::from_secs(2), change_another_extension(&fx))
+        .await
+        .expect("the activation doesn't wait for the job");
+    assert_eq!(state(&fx, &id).await["state"], json!("running"));
+    let done = until(&fx, &id, |s| s["state"] != json!("running")).await;
+    assert_eq!(done["state"], json!("succeeded"), "{done}");
+    assert_eq!(done["text"], json!(words(60)), "{done}");
+}
+
 /// A declaration changed (and re-approved) while the job streams: the
 /// activation stops it, and what it had is not published as the old
 /// declaration's success.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_job_does_not_succeed_across_a_generation_change() {
+async fn a_job_does_not_succeed_across_a_change_to_its_declaration() {
     let fx = fixture(MANIFEST, vec![slow(&words(40), 50)]).await;
     let id = ask(&fx, "generation").await;
     streaming(&fx, &id).await;
