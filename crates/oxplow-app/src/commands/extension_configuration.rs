@@ -102,6 +102,10 @@ fn command_error(error: ConfigurationError) -> CommandError {
             field: Some("/expected".into()),
             message: "configuration changed; inspect the current stamps before retrying".into(),
         },
+        ConfigurationError::VersionMismatch => CommandError::Invalid {
+            field: Some("/schema_version".into()),
+            message: "stored configuration is at another schema version; it needs migration (inspect reports needs_migration)".into(),
+        },
         _ => CommandError::Invalid {
             field: None,
             message: "invalid extension configuration request".into(),

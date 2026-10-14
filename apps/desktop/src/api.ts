@@ -1,6 +1,7 @@
 import { commands } from "./tauri-bridge/generated/bindings.js";
 import type {
   BackgroundTask,
+  SecretRef,
   BegunSignIn,
   ChangeScopes,
   ExtensionChange,
@@ -755,6 +756,22 @@ export async function ensureChange(target: ChangeTarget): Promise<ChangeRow> {
 /// returned.
 export async function setCredential(extension: string, name: string, value: string | null): Promise<void> {
   unwrap(await commands.setCredential(extension, name, value));
+}
+
+/// Save (or rotate) the value of a host secret reference an extension
+/// declares. The value goes to the OS keychain and is never returned.
+export async function saveExtensionSecret(extension: string, reference: SecretRef, value: string): Promise<void> {
+  unwrap(await commands.saveExtensionSecret(extension, reference, value));
+}
+
+/// Whether the keychain holds a value for the reference (never the value).
+export async function extensionSecretIsSet(extension: string, reference: SecretRef): Promise<boolean> {
+  return unwrap(await commands.extensionSecretIsSet(extension, reference));
+}
+
+/// Delete the keychain value for the reference.
+export async function revokeExtensionSecret(extension: string, reference: SecretRef): Promise<void> {
+  unwrap(await commands.revokeExtensionSecret(extension, reference));
 }
 
 /// Settings → AI: providers (whether each has a key, never the key) and

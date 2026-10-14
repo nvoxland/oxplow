@@ -282,17 +282,43 @@ Both layers can be replaced atomically for an explicit schema migration. An
 untouched layer must already use the current manifest version; reads of old
 versions fail closed. `inspect` supplies the old stamps needed for migration.
 Version decrease is refused. Failure rolls back both layers; storage errors
-abort the outer audited command transaction. No migration script or external
-wait executes inside that transaction. Writes return stamps and omit both
-layer inputs from audit; private compositions/proposals follow the state rules.
+abort the outer audited command transaction. The write runs no script and waits
+on nothing external. Writes return stamps and omit both layer inputs from audit;
+private compositions/proposals follow the state rules. `inspect` and `snapshot`
+(and the stamps a write returns) carry `needs_migration: { project, personal }`:
+whether a stored layer is at a schema version other than the declared one.
+Reading such a layer fails closed with a `/schema_version` error, distinct
+from a stale-stamp conflict (`/expected`).
+
+**Schema migrations.** `configuration.migrations` lists steps
+`{ from, to, entry }`, each a pure Starlark `transform(values) -> values` in
+the extension folder (the sandbox of every other script: no I/O, no services).
+At load the steps must each go forward, start at distinct versions, chain end to
+start with no gap or overlap, and the last must arrive at `version`; each entry
+must exist and parse (a violation is a load error, `migration_not_forward` /
+`migration_duplicate` / `migration_chain` / `migration_target`). The runner
+(`extension_config_migration.rs`) runs at activation inside the generation's
+database transaction, for each enabled extension and each stored layer
+(project, personal) behind the declared version: it chains the steps from the
+stored version, checks that each returned an object, resolves the carried
+layers (with the neighbouring layer) against the declared schema, and writes
+each with a compare-and-swap at the new version. The schema describes only the
+declared version, so it is checked once on the result, not between steps. Any
+failure (a step that errors or returns a non-object, settings the schema refuses,
+a stored version no step starts from or newer than declared) names the
+extension and the step and rolls the whole candidate back: every layer stays at
+its old version and the extension is held back exactly like one whose model does
+not compile (`Failed::hold`: its last working version keeps serving, on the
+settings that version reads; a first-time extension stays out), the problem
+shown in Settings → Extensions. Fixing the step and activating again migrates.
 
 Reset uses an empty override object at a newer revision, retaining stale-token
 rejection. Disable/uninstall retain local rows for explicit recovery/reinstall;
 access is refused while the owner is disabled, missing, stale or revoked.
 Both scopes live in the local project's database, with no global identity lookup.
-Raw secrets do not belong in defaults, schema or overrides. Host-owned secret
-slots/references are still pending; this service resolves non-secret settings
-only.
+Raw secrets do not belong in defaults, schema or overrides. Secrets are host-owned
+references ("Host-owned secret references"); this service resolves non-secret
+settings only.
 
 ## Private state host boundary
 
@@ -351,8 +377,8 @@ new revision; it does not delete/recreate the namespace. No inverse stores old
 private values. Nested compositions inherit private-input recording and child
 metadata is redacted. Calls that require confirmation cannot retain these inputs
 in a public proposal; a person must invoke them directly with confirmation.
-Migrations, lifecycle cleanup and host secret services remain unfinished. Raw
-secrets do not belong in state payloads.
+State has no migration runner (configuration's is above), and lifecycle cleanup
+beyond retaining rows is unbuilt. Raw secrets do not belong in state payloads.
 
 Current-generation checks use the filesystem catalog, including its stat walk;
 they are conservative on any catalog change. This does not pin DB/runtime
@@ -4344,7 +4370,14 @@ reference, inspection returns presence, revocation returns no value. The RPC
 methods are `save_extension_secret`, `extension_secret_is_set` and
 `revoke_extension_secret`; no native command, script service or MCP route exists.
 Secret bytes and keychain error details are never returned or audited. Values
-are bounded to 16 KiB. This backend ingress has no new settings form yet.
+are bounded to 16 KiB. The three RPCs are desktop IPC entries (classified `ui`
+in the surface-parity manifest: an agent has no route to a secret). Settings →
+Extensions shows one `SecretRow` per credential an extension's provider
+declares with a `secretRef` (`secretCredentials`): "Set" / "Not set" from
+`extension_secret_is_set`, Set/Rotate as a masked `InlineEdit` (Enter commits,
+Escape cancels) that saves under the declared reference, and Revoke behind an
+`InlineConfirm`. Failures go to the op-errors list; the row re-checks presence
+on `extensionsChanged`. The value is never read back to the page.
 
 The first trusted consumer is a remote MCP HTTP provider using the shipped
 adapter. Its bearer credential must be named `OXPLOW_MCP_BEARER` and carry

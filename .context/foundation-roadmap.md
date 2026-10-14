@@ -436,12 +436,16 @@ outside DB transactions. Native state CAS writes now return only a stamp and
 withhold private values from audit/proposal/child metadata. Private configuration
 override storage and authorized effective host services are integrated. Metadata
 inspection and an atomic two-layer CAS support explicit schema migration; reset
-retains revisions and disable/uninstall retain inaccessible rows. Automatic
-migration execution remains unfinished. Host-owned versioned secret references
+retains revisions and disable/uninstall retain inaccessible rows. Declared
+`migrations:` steps run at activation in the generation's transaction (a failing
+step holds the extension back with its layers untouched), layers report
+`needs_migration`, and a stale layer's read error is distinct from a stamp
+conflict. Host-owned versioned secret references
 now have human keychain ingress and a trusted remote MCP transport consumer;
 references convey identity only and imported configuration cannot approve them.
-Generation reader coordination is integrated. Migration/restart/isolation and
-secret-revocation runtime validation remain pending.
+Generation reader coordination is integrated. Configuration migration, restart,
+isolation, race and host-denial behaviour is covered by `extension_config_tests.rs`;
+state schema migration and secret-revocation runtime validation remain pending.
 
 Scope: Add host-managed durable workflow state and typed extension configuration with migrations and personal/project scope. Distinguish mutable state, shared domain entities, rebuildable caches and preferences. Provide atomic updates, namespacing, access controls and host-owned secret references.
 

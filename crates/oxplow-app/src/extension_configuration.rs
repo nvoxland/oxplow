@@ -46,6 +46,33 @@ pub struct Stamps {
     pub schema_version: u32,
     pub project: Option<Stamp>,
     pub personal: Option<Stamp>,
+    /// Which stored layers are at a schema version other than the declared
+    /// one: reads of them fail closed until activation migrates them (or an
+    /// explicit write replaces them).
+    pub needs_migration: NeedsMigration,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct NeedsMigration {
+    pub project: bool,
+    pub personal: bool,
+}
+
+impl Stamps {
+    fn of(schema_version: u32, project: Option<Stamp>, personal: Option<Stamp>) -> Self {
+        let behind = |stamp: &Option<Stamp>| {
+            stamp.is_some_and(|stamp| stamp.schema_version != schema_version)
+        };
+        Self {
+            schema_version,
+            needs_migration: NeedsMigration {
+                project: behind(&project),
+                personal: behind(&personal),
+            },
+            project,
+            personal,
+        }
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -158,11 +185,7 @@ impl ConfigurationHost {
         self.declaration(run, "extension_config.read")?;
         run.trace().count("extension_config.read");
         run.used_scope("extension_config.read");
-        Ok(Stamps {
-            schema_version: declaration.version,
-            project,
-            personal,
-        })
+        Ok(Stamps::of(declaration.version, project, personal))
     }
 
     /// Validate the complete candidate before mutating either layer. Both CAS
@@ -316,11 +339,11 @@ fn stamps(
     project: &Option<ConfigSnapshot>,
     personal: &Option<ConfigSnapshot>,
 ) -> Stamps {
-    Stamps {
+    Stamps::of(
         schema_version,
-        project: project.as_ref().map(ConfigSnapshot::stamp),
-        personal: personal.as_ref().map(ConfigSnapshot::stamp),
-    }
+        project.as_ref().map(ConfigSnapshot::stamp),
+        personal.as_ref().map(ConfigSnapshot::stamp),
+    )
 }
 
 fn storage(error: rusqlite::Error) -> ConfigurationError {

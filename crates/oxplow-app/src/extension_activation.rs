@@ -377,6 +377,14 @@ impl ExtensionActivation {
                     {
                         return Err(rejected("catalog changed while activation was staged"));
                     }
+                    // Stored settings behind an extension's declared schema
+                    // are carried forward in this transaction: a step that
+                    // fails rolls everything back and holds that extension.
+                    crate::extension_config_migration::migrate_all_tx(
+                        publication.transaction()?,
+                        published.extensions().iter(),
+                    )
+                    .map_err(TxError::Aborted)?;
                     let vocabulary =
                         database.replace_tx(publication.transaction()?, Timestamp::now())?;
                     metrics.replace_tx(publication.transaction()?)?;

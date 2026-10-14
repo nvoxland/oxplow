@@ -34,6 +34,7 @@ export function InlineEdit({
   renderDisplay,
   startEditing = false,
   onCancel,
+  masked = false,
 }: {
   value: string;
   onCommit(next: string): void;
@@ -49,6 +50,8 @@ export function InlineEdit({
   startEditing?: boolean;
   /** Called when the user explicitly cancels via Escape; useful for `startEditing` mode to dismiss the row. */
   onCancel?(): void;
+  /** A secret: the field is a password input and the display never shows `value`. */
+  masked?: boolean;
 }) {
   const [editing, setEditing] = useState(startEditing);
   const [draft, setDraft] = useState(value);
@@ -145,7 +148,8 @@ export function InlineEdit({
   return (
     <input
       ref={(el) => { inputRef.current = el; }}
-      type="text"
+      type={masked ? "password" : "text"}
+      autoComplete={masked ? "off" : undefined}
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
       onKeyDown={(e) => {

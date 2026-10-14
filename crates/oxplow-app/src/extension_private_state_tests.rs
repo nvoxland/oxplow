@@ -10,17 +10,17 @@ use serde_json::{json, Value};
 
 use crate::test_fixtures::{services_with_effort, EffortFixture};
 
-fn write(root: &Path, rel: &str, body: &str) {
+pub(crate) fn write(root: &Path, rel: &str, body: &str) {
     let path = root.join(rel);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, body).unwrap();
 }
 
-const HUMAN_ONLY: &str = "invokers: { human: true, agent: false, lens: false }";
+pub(crate) const HUMAN_ONLY: &str = "invokers: { human: true, agent: false, lens: false }";
 
 /// An extension whose commands read and write its own private state and
 /// configuration, plus a script that reads the state back.
-fn declare(root: &Path, name: &str, configuration: &str) {
+pub(crate) fn declare(root: &Path, name: &str, configuration: &str) {
     let manifest = format!(
         "manifest: 2\nname: {name}\nintent:\n  purpose: p\n{configuration}commands:
   - name: state.write
@@ -38,6 +38,12 @@ fn declare(root: &Path, name: &str, configuration: &str) {
     input_schema: {{ type: object }}
     entry: handlers/peek.star
     needs: [state.read]
+    {HUMAN_ONLY}
+  - name: config.peek
+    summary: Read the configuration from a script.
+    input_schema: {{ type: object }}
+    entry: handlers/config_peek.star
+    needs: [extension_config.read]
     {HUMAN_ONLY}
   - name: config.read
     summary: The effective configuration.
@@ -63,12 +69,17 @@ fn declare(root: &Path, name: &str, configuration: &str) {
     );
     write(
         root,
+        &format!("oxplow/extensions/{name}/handlers/config_peek.star"),
+        "def transform(x):\n    return {\"commands\": [], \"result\": scope(\"extension_config.read\", {})}\n",
+    );
+    write(
+        root,
         &format!("oxplow/extensions/{name}/handlers/peek.star"),
         "def transform(x):\n    return {\"commands\": [], \"result\": scope(\"state.read\", {\"scope\": \"project\", \"area\": \"state\"})}\n",
     );
 }
 
-const CONFIGURATION: &str = "configuration:
+pub(crate) const CONFIGURATION: &str = "configuration:
   version: 1
   schema:
     type: object
@@ -88,7 +99,11 @@ const CONFIGURATION: &str = "configuration:
     nested: { a: 1, b: 1 }
 ";
 
-async fn run(fx: &EffortFixture, name: &str, input: Value) -> Result<Value, CommandError> {
+pub(crate) async fn run(
+    fx: &EffortFixture,
+    name: &str,
+    input: Value,
+) -> Result<Value, CommandError> {
     fx.svc
         .commands
         .run(&Actor::Human, name, input, false)
@@ -96,11 +111,11 @@ async fn run(fx: &EffortFixture, name: &str, input: Value) -> Result<Value, Comm
         .map(|outcome| outcome.result)
 }
 
-async fn reconcile(fx: &EffortFixture) {
+pub(crate) async fn reconcile(fx: &EffortFixture) {
     crate::test_fixtures::activate(&fx.svc).await;
 }
 
-fn write_state(scope: &str, expected: Value, values: Value) -> Value {
+pub(crate) fn write_state(scope: &str, expected: Value, values: Value) -> Value {
     json!({ "scope": scope, "area": "state", "expected": expected,
             "schema_version": 1, "values": values })
 }

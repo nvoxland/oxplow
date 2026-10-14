@@ -78,6 +78,9 @@ pub mod extension_activation;
 mod extension_activation_tests;
 pub mod extension_catalog;
 pub mod extension_commands;
+pub mod extension_config_migration;
+#[cfg(test)]
+mod extension_config_tests;
 pub mod extension_configuration;
 pub mod extension_event_types;
 pub mod extension_generation;

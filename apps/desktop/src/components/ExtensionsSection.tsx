@@ -26,6 +26,9 @@ import {
   reviewExtension,
   setExtensionEnabled,
   setCredential,
+  saveExtensionSecret,
+  extensionSecretIsSet,
+  revokeExtensionSecret,
   subscribeOxplowEvents,
   updateExtension,
   validateExtension,
@@ -39,12 +42,13 @@ import {
 import { NEW_LENS_COMMAND } from "../lens/lensModel.js";
 import { useCommandDraft } from "../commandDraft.js";
 import { disabledCount, enableAgain, enableAllAgain, healthLine, healthOf, repairWithAgent, useContributionHealth, type ContributionHealth } from "../contributionHealth.js";
-import { collectorRan, extensionCredentials, extensionRowModel, LATEST_RUNS_SQL, lastRuns, type LastRun, type RunRow, reviewModel, serviceLines } from "./extensionRowModel.js";
+import { collectorRan, extensionCredentials, extensionRowModel, LATEST_RUNS_SQL, lastRuns, type LastRun, type RunRow, reviewModel, secretCredentials, secretRowModel, serviceLines, type SecretCredential } from "./extensionRowModel.js";
 import { extensionsChanged } from "../lens/lensRerun.js";
 import { ImpactReportView } from "./ImpactReportView.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
 import type { Reads } from "../tauri-bridge/generated/bindings.js";
 import { InlineConfirm } from "./InlineConfirm.js";
+import { InlineEdit } from "./InlineEdit.js";
 import { recordOpError } from "./opErrorsStore.js";
 import { showToast } from "./toastStore.js";
 import { EmptyState } from "./Prompts/EmptyState.js";
@@ -263,6 +267,13 @@ export function ExtensionsSection() {
                 ) : null}
                 {healthOf(health, m.name).map((h) => (
                   <HealthRow key={`${h.kind}:${h.contribution}`} health={h} />
+                ))}
+                {secretCredentials(ext).map((c) => (
+                  <SecretRow
+                    key={`${c.provider}/${c.name}`}
+                    extension={m.name}
+                    credential={c}
+                  />
                 ))}
                 {extensionCredentials(collectors, m.name).map((c) => (
                   <CredentialRow
@@ -529,6 +540,89 @@ export function CredentialRow({
         />
       ) : null}
     </form>
+  );
+}
+
+/// One credential an extension's provider declares with a host secret
+/// reference: presence, Set/Rotate as a masked inline field (Enter
+/// commits, Escape cancels) and Revoke behind a confirm. The value goes to
+/// the keychain and never comes back to the page.
+export function SecretRow({
+  extension,
+  credential,
+}: {
+  extension: string;
+  credential: SecretCredential;
+}) {
+  const [isSet, setIsSet] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  const id = `${extension}-${credential.provider}-${credential.name}`;
+
+  const check = useCallback(async () => {
+    try {
+      setIsSet(await extensionSecretIsSet(extension, credential.reference));
+    } catch (e) {
+      recordOpError({ label: `Read secret ${credential.name}`, message: String(e) });
+    }
+  }, [extension, credential.reference, credential.name]);
+
+  useEffect(() => {
+    void check();
+    return subscribeOxplowEvents((event) => {
+      if (extensionsChanged(event)) void check();
+    });
+  }, [check]);
+
+  async function run(label: string, op: () => Promise<void>) {
+    setBusy(true);
+    try {
+      await op();
+      showToast({ message: label });
+      await check();
+    } catch (e) {
+      recordOpError({ label: `Secret ${credential.name}`, message: String(e) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const m = secretRowModel(isSet);
+  return (
+    <div
+      data-testid={`secret-${id}`}
+      style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}
+    >
+      <code>{credential.name}</code>
+      <span style={mutedStyle}>{credential.provider}</span>
+      <span data-testid={`secret-status-${id}`} style={mutedStyle}>
+        {m.status}
+      </span>
+      <InlineEdit
+        masked
+        value=""
+        placeholder={`${m.setLabel}…`}
+        testId={`secret-set-${id}`}
+        ariaLabel={`${m.setLabel} ${credential.name}`}
+        onCommit={(v) =>
+          void run(`Saved ${credential.name} to your keychain.`, () =>
+            saveExtensionSecret(extension, credential.reference, v),
+          )
+        }
+      />
+      {m.canRevoke ? (
+        <InlineConfirm
+          triggerLabel="Revoke"
+          confirmLabel="Revoke"
+          testIdPrefix={`secret-revoke-${id}`}
+          disabled={busy}
+          onConfirm={() =>
+            void run(`Revoked ${credential.name}.`, () =>
+              revokeExtensionSecret(extension, credential.reference),
+            )
+          }
+        />
+      ) : null}
+    </div>
   );
 }
 

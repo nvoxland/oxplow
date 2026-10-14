@@ -1,6 +1,6 @@
 /** Pure row presentation for the Settings → Extensions list. */
 import { contributionOf } from "../refs/ref.js";
-import type { CollectorListing, Extension, ExtensionReview, ScriptServices, ServiceListing, Trigger } from "../tauri-bridge/generated/bindings.js";
+import type { CollectorListing, Extension, SecretRef, ExtensionReview, ScriptServices, ServiceListing, Trigger } from "../tauri-bridge/generated/bindings.js";
 import { readsChanged } from "../lens/lensRerun.js";
 
 export interface ExtensionRowModel {
@@ -155,6 +155,38 @@ export function extensionCredentials(
     for (const c of l.credentials) out.set(c.name, (out.get(c.name) ?? false) || c.set);
   }
   return [...out].map(([name, set]) => ({ name, set })).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/// A credential an extension's provider declares with a host secret
+/// reference: the settings form sets, rotates and revokes its value (it
+/// goes to the keychain and never comes back).
+export interface SecretCredential {
+  provider: string;
+  name: string;
+  reference: SecretRef;
+}
+
+/// The credentials of an extension's providers that carry a `secretRef`.
+export function secretCredentials(extension: Extension): SecretCredential[] {
+  const out: SecretCredential[] = [];
+  for (const p of extension.providers ?? []) {
+    for (const c of p.credentials) {
+      if (c.secretRef) out.push({ provider: p.id, name: c.name, reference: c.secretRef });
+    }
+  }
+  return out;
+}
+
+/// What a secret row shows: `isSet` is null until the host has answered.
+export function secretRowModel(isSet: boolean | null): {
+  status: string;
+  setLabel: string;
+  canRevoke: boolean;
+} {
+  if (isSet === null) return { status: "Checking…", setLabel: "Set", canRevoke: false };
+  return isSet
+    ? { status: "Set", setLabel: "Rotate", canRevoke: true }
+    : { status: "Not set", setLabel: "Set", canRevoke: false };
 }
 
 /** What installing or updating an extension would bring in, as lines a

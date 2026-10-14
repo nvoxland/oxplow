@@ -234,6 +234,9 @@ pub struct Hooks {
     /// answers what it read beside its result (`read`): its own command's
     /// read, and a capability verb's.
     pub host_read: bool,
+    /// `config-read`: as `host-read`, but the read is of the provider's own
+    /// extension configuration (`host/call` `extension_config.read`).
+    pub config_read: bool,
     /// `shutdown-file:<path>`: a `shutdown` writes `<path>` before it
     /// answers — a graceful stop, which a kill never is.
     pub shutdown_file: Option<String>,
@@ -294,6 +297,7 @@ impl Hooks {
                 None if part == "stale-read" => self.stale_read = true,
                 None if part == "stuck-cursor" => self.stuck_cursor = true,
                 None if part == "host-read" => self.host_read = true,
+                None if part == "config-read" => self.config_read = true,
                 None if part == "ignore-shutdown" => self.ignore_shutdown = true,
                 None if part == "checkpoint-at-end" => self.checkpoint_at_end = true,
                 None if part == "bogus-react" => self.bogus_react = true,
@@ -857,15 +861,18 @@ async fn handle(
                     });
                 }
             }
-            let read = if hooks.host_read && matches!(p.command.as_str(), "estimate" | "update") {
+            let read = if (hooks.host_read || hooks.config_read)
+                && matches!(p.command.as_str(), "estimate" | "update")
+            {
+                let (scope, args) = if hooks.config_read {
+                    ("extension_config.read", json!({}))
+                } else {
+                    ("sql.read", json!({ "sql": "SELECT 7 AS n" }))
+                };
                 Some(
                     peer.request(
                         method::HOST_CALL,
-                        json!({
-                            "key": sent_key,
-                            "scope": "sql.read",
-                            "args": { "sql": "SELECT 7 AS n" },
-                        }),
+                        json!({ "key": sent_key, "scope": scope, "args": args }),
                     )
                     .await?,
                 )

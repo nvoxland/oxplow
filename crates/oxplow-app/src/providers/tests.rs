@@ -1018,6 +1018,81 @@ async fn a_provider_reads_the_host_through_what_it_needs() {
     }
 }
 
+/// A provider reads its own extension's configuration over `host/call`
+/// (`extension_config.read`): the effective values and origins, with its
+/// project layer applied. One that doesn't list the scope in `needs` is
+/// refused at load, so it can't ask.
+#[tokio::test]
+async fn a_provider_reads_its_extensions_configuration_through_host_call() {
+    let fx = services_with_effort().await;
+    let root = fx.svc.layout.project_dir.clone();
+    write_extension(&root, "config-read");
+    let manifest = root.join("oxplow/extensions/tracker/extension.yaml");
+    let text = std::fs::read_to_string(&manifest).unwrap();
+    let text = text.replace(
+        "sharing: private\n",
+        "sharing: private\nconfiguration:\n  version: 1\n  schema:\n    type: object\n    additionalProperties: false\n    properties:\n      limit: { type: integer }\n  defaults: { limit: 4 }\n",
+    );
+    std::fs::write(
+        &manifest,
+        format!("{text}    needs: [extension_config.read]\n"),
+    )
+    .unwrap();
+    let ext = extension(&root);
+    assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+    approve(&fx, &ext).await;
+    make_active(&fx, "fake").await;
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
+    crate::test_fixtures::activate(&fx.svc).await;
+    let namespace = oxplow_db::extension_config_store::ConfigNamespace::new(
+        "tracker".into(),
+        oxplow_domain::extension_state::Scope::Project,
+    )
+    .unwrap();
+    oxplow_db::extension_config_store::SqliteExtensionConfigStore::new(fx.svc.db.clone())
+        .compare_exchange(namespace, None, 1, json!({ "limit": 9 }))
+        .await
+        .unwrap();
+    let item = fx
+        .svc
+        .work_items_client()
+        .create(
+            &Actor::Human,
+            crate::work_items::NewItem {
+                title: "theirs".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    let out = fx
+        .svc
+        .commands
+        .run(
+            &Actor::Human,
+            "tracker.item.estimate",
+            json!({ "ref": item, "points": 2 }),
+            false,
+        )
+        .await
+        .unwrap();
+    assert_eq!(out.result["read"]["values"], json!({ "limit": 9 }));
+    assert_eq!(out.result["read"]["origins"]["/limit"], json!("project"));
+    let audit = fx
+        .svc
+        .commands
+        .audit_store()
+        .get(out.audit_id.unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        audit.scopes,
+        [("extension_config.read".to_string(), 1)].into()
+    );
+}
+
 /// A capability verb's `host/call`s are recorded with the
 /// `work_item.<verb>` run that called it, as a provider's own command's
 /// are with its run.

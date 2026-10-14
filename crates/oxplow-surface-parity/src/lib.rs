@@ -277,6 +277,18 @@ pub const MANIFEST: &[Capability] = &[
         "secrets are a person's to set; an agent only sees whether one is set",
     ),
     ui(
+        "save_extension_secret",
+        "a host secret reference's value is a person's to set; no agent route reads or writes one",
+    ),
+    ui(
+        "extension_secret_is_set",
+        "presence of a host secret, for the settings row; an agent never needs it",
+    ),
+    ui(
+        "revoke_extension_secret",
+        "a person takes a host secret back, as they gave it",
+    ),
+    ui(
         "list_project_programs",
         "the programs waiting on a person's consent (tsk331); an agent learns of an unapproved one from the run's error",
     ),

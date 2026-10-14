@@ -85,7 +85,8 @@ use their current connection, while external hosts use StateSource for a
 separate owned read per call. Provider namespace ownership is captured from
 its active provider declaration, independently of the invoking command.
 Public write commands still require private audit/proposal input handling.
-Migration execution and configuration services still need integration. The
+Configuration schema migrations run at activation (`extension_config_migration.rs`);
+state has no migration runner. The
 lower-level store APIs grant no authority themselves. Configuration continues to
 use the project/personal file layers. A file edit and a SQLite
 reset cannot be represented as one atomic DB transaction.
@@ -2451,8 +2452,8 @@ storage failure. The configuration host now resolves and authorizes reads and
 native audited writes. An explicit migration can CAS both layers together;
 metadata inspection supplies old stamps without invalid effective values.
 Disable/uninstall retain rows while ownership guards deny access; reset uses an
-empty object. Automatic migrations and host secret references remain pending.
-The draft migration has not been executed.
+empty object. Declared migration steps carry old layers forward at activation, in
+the generation's transaction, writing each layer by compare-and-swap.
 
 ## Dedicated job actor audit compatibility
 

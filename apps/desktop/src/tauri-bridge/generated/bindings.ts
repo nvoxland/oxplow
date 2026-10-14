@@ -284,6 +284,24 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	saveExtensionSecret: (extension: string, reference: {
+	schemaVersion: number,
+	id: string,
+} | null, value: string) => typedError<SecretRef, IpcError>(__TAURI_INVOKE("save_extension_secret", { extension, reference, value })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	extensionSecretIsSet: (extension: string, reference: SecretRef) => typedError<boolean, IpcError>(__TAURI_INVOKE("extension_secret_is_set", { extension, reference })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	revokeExtensionSecret: (extension: string, reference: SecretRef) => typedError<null, IpcError>(__TAURI_INVOKE("revoke_extension_secret", { extension, reference })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listProjectPrograms: () => typedError<ProjectProgram[], IpcError>(__TAURI_INVOKE("list_project_programs")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -2260,6 +2278,17 @@ export type Composes = {
 	error: string | null,
 };
 
+/**
+ *  One step of a configuration schema migration: a pure Starlark
+ *  `transform(values) -> values` (the extension's `entry`, relative to its
+ *  folder) from stored schema version `from` to `to`.
+ */
+export type ConfigMigration = {
+	from: number,
+	to: number,
+	entry: string,
+};
+
 // Where a setting's value comes from.
 export type ConfigOrigin = "default" | "global" | "project" | 
 // A person's own layer (`.oxplow/personal.yaml`).
@@ -2280,6 +2309,11 @@ export type ConfigurationFile = {
 	version: number,
 	schema: unknown,
 	defaults?: unknown,
+	/**
+	 *  How a layer stored at an older `version` becomes the declared one:
+	 *  steps that chain without gaps up to `version`.
+	 */
+	migrations?: ConfigMigration[],
 };
 
 /**
@@ -3213,6 +3247,11 @@ export type Extension_Deserialize = {
 	contributions: Descriptor[],
 	// Validated non-secret settings declaration, not resolved values or grants.
 	configuration?: ConfigurationFile | null,
+	/**
+	 *  The sources of its configuration migration steps, by `entry`: read
+	 *  and parsed at load so activation runs them without touching files.
+	 */
+	configScripts?: { [key in string]: string },
 	publicContracts?: PublicContracts,
 };
 
