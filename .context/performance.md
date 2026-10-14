@@ -686,6 +686,36 @@ needs 527 MB; this repo needs 67. A heavily copy-pasted repo can hit the
 cap, and `duplicate_lines` then fails with "ran out of memory" rather
 than taking the app's memory with it.
 
+## Serving a tree on demand isn't worth it (measured 2026-10-14)
+
+A collector that declares `tree.read` gets the snapshot's whole file map,
+read once on the host (`MetricsService::build_full_file_map`, cached for
+the last snapshot) and shipped to each worker as one JSON line. Whether
+to serve it lazily instead (a worker asking for files as it needs them)
+was measured first: `worker_cost.rs` `tree_cost` (ignored; `bun run
+test:fast -p oxplow-script [--cargo-profile release] --run-ignored only
+--no-capture -E 'test(/tree_cost/)'`) runs the 16 oxplow-foundation
+code-metric scripts over this repo's text files, once and six times over:
+
+| Tree | Build | Host read | Ship + parse, 16 runs | The metrics' own work |
+|---|---|---|---|---|
+| repo, 2,067 files / 20 MB | debug | 0.3 s | 8.2 s | 157 s wall, 148 s CPU |
+| repo, 2,067 files / 20 MB | release | 0.4 s | 1.5 s | 75 s wall, 41 s CPU |
+| repo ×6, 12,402 files / 122 MB | release | 0.6 s | 9.5 s | 210 s wall, 168 s CPU |
+
+(The ×6 tree in a debug build runs past the 120 s default timeout per
+script.) Shipping and parsing the tree is 2–5% of a sweep and reading it
+on the host under 1%, so neither a lazy protocol nor a bigger host cache
+pays for itself. **Decided: the tree stays shipped whole.** The cost is
+the scripts: each of the 16 walks every file it globs and parses it
+again (`ast_query`, `code_metrics`, `markers` per file per script), so
+a file is parsed by tree-sitter once per script that reads its
+language. That is the lever if sweeps need to get faster: parse results
+shared across a sweep's scripts, keyed by content hash. In release the
+wall time is well above the worker CPU (75 s vs 41 s); that gap is
+unexplained (output serialization and fact transfer are the suspects)
+and should be profiled before anything is built for it.
+
 ## Duplicate detection on clone-dense trees (measured 2026-10-09)
 
 The detector once paired every member of a clone family with every other,

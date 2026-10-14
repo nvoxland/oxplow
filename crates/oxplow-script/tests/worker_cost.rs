@@ -214,3 +214,120 @@ fn duplicate_lines_on_this_repo() {
         ran.value["facts"].as_array().map_or(0, Vec::len)
     );
 }
+
+/// This repository's text files as a tree, `copies` times over (each copy
+/// under its own `copyN/` prefix), and how long reading them took.
+fn repo_tree(copies: usize) -> (std::collections::HashMap<String, String>, Duration) {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let listed = std::process::Command::new("git")
+        .args(["ls-files", "-z"])
+        .current_dir(&root)
+        .output()
+        .expect("git lists the repository");
+    let paths: Vec<String> = listed
+        .stdout
+        .split(|b| *b == 0)
+        .filter(|p| !p.is_empty())
+        .map(|p| String::from_utf8_lossy(p).into_owned())
+        .collect();
+    let started = Instant::now();
+    let mut files = std::collections::HashMap::new();
+    for copy in 0..copies {
+        for path in &paths {
+            let Ok(bytes) = std::fs::read(root.join(path)) else {
+                continue;
+            };
+            if bytes.contains(&0) || bytes.len() > 1024 * 1024 {
+                continue;
+            }
+            let key = if copies == 1 {
+                path.clone()
+            } else {
+                format!("copy{copy}/{path}")
+            };
+            files.insert(key, String::from_utf8_lossy(&bytes).into_owned());
+        }
+    }
+    (files, started.elapsed())
+}
+
+/// Where a tree-reading run's time goes, by tree size: the host reading
+/// the files, spawning a worker, shipping and parsing the tree in it, and
+/// the built-in metrics' own work. What decides whether a tree should be
+/// served lazily.
+#[test]
+#[ignore = "a measurement: run it on demand"]
+fn tree_cost() {
+    let w = workers();
+    // Room for the largest tree in a debug build: this measures, it doesn't cap.
+    let budget = Budget {
+        timeout: Duration::from_secs(1800),
+        ceiling: Duration::from_secs(1800),
+    };
+    const TRIVIAL: &str = "def transform(input):\n    return {}\n";
+    let median = |mut v: Vec<f64>| {
+        v.sort_by(f64::total_cmp);
+        v[v.len() / 2]
+    };
+    let spawn = median(
+        (0..9)
+            .map(|_| {
+                let started = Instant::now();
+                w.run(&budget, ScriptRun::starlark(TRIVIAL, json!({})), None)
+                    .unwrap();
+                ms(started.elapsed())
+            })
+            .collect(),
+    );
+    eprintln!("spawn + trivial run: {spawn:.1} ms");
+    let fixture = (
+        fixtures::tree::corpus(fixtures::tree::DEFAULT_FILES),
+        Duration::ZERO,
+    );
+    for (name, (tree, load)) in [
+        ("fixture", fixture),
+        ("repo", repo_tree(1)),
+        ("repo x6", repo_tree(6)),
+    ] {
+        let bytes: usize = tree.iter().map(|(k, v)| k.len() + v.len()).sum();
+        let tree = Arc::new(tree);
+        let shipped = median(
+            (0..5)
+                .map(|_| {
+                    let started = Instant::now();
+                    w.run(
+                        &budget,
+                        ScriptRun::starlark(TRIVIAL, json!({})).with_tree(tree.clone()),
+                        None,
+                    )
+                    .unwrap();
+                    ms(started.elapsed())
+                })
+                .collect(),
+        );
+        let (mut wall, mut cpu) = (0.0, 0);
+        for (key, script) in foundation_scripts() {
+            let started = Instant::now();
+            let ran = w
+                .run(
+                    &budget,
+                    ScriptRun::starlark(&script, json!({})).with_tree(tree.clone()),
+                    None,
+                )
+                .unwrap_or_else(|e| panic!("{name} {key}: {e}"));
+            wall += ms(started.elapsed());
+            cpu += ran.cpu_ms;
+        }
+        let runs = foundation_scripts().len() as f64;
+        eprintln!(
+            "{name}: {} files, {} MB; host read {:.0} ms; ship + parse {:.0} ms per run \
+             ({:.0} ms x {runs} runs); metrics {:.0} ms wall, {cpu} ms worker cpu",
+            tree.len(),
+            bytes / (1024 * 1024),
+            ms(load),
+            shipped - spawn,
+            (shipped - spawn) * runs,
+            wall,
+        );
+    }
+}
