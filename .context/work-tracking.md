@@ -208,6 +208,56 @@ models, a trigger, pacing, and an audience.
   landed while its item still says in progress), never on tracker usage
   ("fewer tasks filed"), which invites filing to satisfy a number.
 
+## Review: evidence in core, policy in extensions
+
+Core collects and analyzes; whether the result is good enough is a
+review policy's, and a policy is an extension. Core owns the evidence
+(test runs and cases with their provenance, coverage and diff coverage,
+the change analysis, metric facts, claims and what they cite), its
+attribution to efforts, its freshness, schema validation and the safe
+operations that write it. A policy reads that evidence through the `v_*`
+models, adds facts of its own (collectors, measures, dimensions), and
+says what it concluded through public contributions: a model, a lens, a
+decorator, the `effort.verdict` replacement, commands.
+
+oxplow-bundled and oxplow-foundation are the default policy. Another
+replaces them piece by piece: `examples/extensions/schema-review` is a
+whole alternative review built that way.
+
+| Judgement | Where it lives | Knob |
+|---|---|---|
+| An effort's verdict (tests, diff coverage, claims, decisions) | oxplow-bundled `effort-verdict`, the `effort.verdict` replacement; core shows none | `oxplow.coverage.abs_pct` `warnAt`; replace the target |
+| A claim is backed (evidence, or a latest green run for `tests pass`) | oxplow-bundled `claim_status`; core `v_claim` keeps only what it cites | fork the model |
+| Struggle (a file edited 5+ times, 3+ failed shell commands) | oxplow-bundled `struggle` | fork the model |
+| Per-effort test outcome and time to green | oxplow-foundation collector `oxplow.effort_test_outcome` | metric specs over its facts |
+| Look here first, co-change surprise, deviation, tests weakened | oxplow-bundled models and lenses | fork |
+| Metric thresholds (coverage 80/50, complexity > 10, length > 60) | oxplow-foundation metric specs | `metrics: [{ use: …, target, warnAt, failAt }]` |
+| Advisories (15-file uncommitted, threshold crossed, landed in progress) | oxplow-bundled advisories | fork |
+| Accept / request changes and their verdict events | oxplow-bundled commands | another extension's commands |
+
+**What stays in core, and why.** These are collection's own mechanics
+or operational limits, not a view of what good work is:
+
+- Which shell commands are test or analysis runs (built-in patterns plus
+  `testing.runPatterns`), and the report freshness window.
+- The report-less-run nudge: collection telling the agent its run wrote
+  no report it could read.
+- Which paths and functions are tests (`change_analysis::is_test_path`,
+  `is_test_function`) and the assertion and skip counting
+  (`test_signals`): conventions the change analysis records as columns.
+- Function metrics, clone detection and its `min_lines` / `min_nodes`
+  floors, diff-coverage math, zone matching, `threshold_state`.
+- Advisory muting after three deliveries, stall detection (15 / 5
+  minutes), contribution disabling after three failures, steering and
+  token-waste attribution.
+
+**Gaps.** A bundled model or advisory can't read extension
+configuration, so its constants (`change_interest`'s weights, the
+co-change windows, the 15-file advisory, the complexity and length
+cut-offs) are changed by forking the extension, not by setting a key.
+Only a metric's `target` / `warnAt` / `failAt` are tunable from
+`project.yaml`.
+
 ## Capabilities
 
 The direction for most of oxplow: a base interface in core, a standard

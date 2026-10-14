@@ -662,7 +662,16 @@ Prerequisites: Use one versioned event envelope across runtime and authoring; Co
 
 #### Separate reusable analysis evidence from default review policy
 
-Status: planned.
+Status: done. Core keeps evidence; the judgements it still made moved to
+the default extensions: an effort's verdict is the `effort.verdict`
+replacement (oxplow-bundled's lens; core shows none), claim backing is
+oxplow-bundled's `claim_status`, struggle its `struggle`, and per-effort
+test outcome an oxplow-foundation collector. A value at a metric
+threshold hasn't crossed it, on the server and the Metrics page alike.
+`examples/extensions/schema-review` is the alternative review. The
+inventory, what stays in core and why, and the gaps are in
+[work-tracking.md](./work-tracking.md) "Review: evidence in core, policy
+in extensions".
 
 Scope: Inventory core test/risk/review heuristics and distinguish common collection/AST/metrics/change-analysis mechanisms from optional interpretation and workflow policy. Extract the highest-value hard-coded policies through public contracts; publish the remaining boundaries and rationale rather than attempting a wholesale analysis rewrite.
 
