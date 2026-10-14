@@ -707,7 +707,7 @@
   tests:
     - { not_null: effect }
 - name: extension_run
-  version: 1
+  version: 2
   key: [run_id]
   description: "Each finished run of extension code, one row each: which contribution at which version and catalog generation, who ran it and on whose behalf, what caused it and where it sat, how it ended, what it cost and which scopes it called. What an extension actually did, never what it read or wrote: no input, result, credential value or prompt is kept. Kept 90 days, like a collector's events."
   columns:
@@ -717,7 +717,7 @@
     - { name: "contribution", type: "TEXT", doc: "The contribution's ref (`v_contribution.ref`): `command:oxplow.review.accept`, `job:effort-review/review`." }
     - { name: "kind", type: "TEXT", doc: "`collector`, `effect`, `command`, `implementation`, …" }
     - { name: "version", type: "TEXT", doc: "The extension's declared `version:` when it ran; NULL when it declares none." }
-    - { name: "generation", type: "TEXT", doc: "The extension catalog's generation it ran against (`v_*` query results name theirs the same way)" }
+    - { name: "generation", type: "TEXT", doc: "The extension catalog's generation it ran against (`v_*` query results name theirs the same way); NULL for a run that holds none — a collector's, an effect's or a job's belongs to its extension's version. (v2)" }
     - { name: "actor_kind", type: "TEXT", doc: "`human`, `agent`, `lens`, `system` or `effect`." }
     - { name: "actor", type: "TEXT", doc: "Who, as an event source: `human`, `agent:thr3`, `system`, `effect:<ext>/<id>`, `effect:effort_policy:<id>`." }
     - { name: "stream_id", type: "INTEGER", doc: "The stream it ran for; NULL when none." }
@@ -847,7 +847,7 @@
   tests:
     - { not_null: kind }
 - name: contribution_health
-  version: 2
+  version: 3
   description: "Each extension contribution's health on this machine: a provider instance, a collector or an effect, under one failure policy — three failures in a row disable it until a person runs `oxplow.contribution.enable`."
   columns:
     - { name: "ref", type: "TEXT", doc: "The contribution's ref (`effect:tracker/fake`): the same as its `v_contribution.ref`." }
@@ -863,7 +863,7 @@
     - { name: "next_due_at", type: "TEXT", doc: "When it should next run (a schedule's next slot), if it runs on one." }
     - { name: "updated_at", type: "TEXT", doc: "When this row last changed." }
     - { name: "dead_letters", type: "", doc: "Events it couldn't handle and that wait for a person: dead letters of its consumer (its `ref`) or of events whose subject names it (its `ref`)." }
-    - { name: "fresh", type: "", doc: "1 unless a scheduled run is overdue (`next_due_at` has passed)" }
+    - { name: "fresh", type: "", doc: "1 unless a scheduled run is overdue (`next_due_at` has passed) or a collector's last run failed (`state` isn't `ok`): its data is then the last good run's, not current. (v3)" }
     - { name: "repair_item", type: "TEXT", doc: "The open repair work item for it — the one whose title starts `Repair <extension> <contribution>:`, filed by the bundled repair effect; NULL when none is open." }
   tests:
     - { not_null: extension }

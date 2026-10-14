@@ -2416,6 +2416,9 @@ impl MetricsService {
                     )
                     .await
             }
+            // Stopped (cancelled, or its extension changed or was revoked): the
+            // run says nothing of the collector's health.
+            Some(_) if this_run.cancel().is_cancelled() => Ok(()),
             Some(e) => health.failed(&key, e).await.map(|_| ()),
         };
         if let Err(e) = counted {
@@ -2634,14 +2637,14 @@ impl MetricsService {
             // detectable and can re-baseline instead of silently no-opping (tsk45).
             producer_version: collector_fingerprint(collector, &self.project_dir),
             scan_kind: ctx.scan_kind.into(),
-            ..oxplow_db::NewMetricCapture::done(
-                ctx.stream_val,
-                collector.key.clone(),
             excluded: ctx
                 .excluded
                 .iter()
                 .map(|e| (e.path.clone(), e.reason.as_str().to_string()))
                 .collect(),
+            ..oxplow_db::NewMetricCapture::done(
+                ctx.stream_val,
+                collector.key.clone(),
                 source.to_string(),
             )
         };
@@ -2651,9 +2654,6 @@ impl MetricsService {
 
 /// Map a resolved `ResolvedSpec` to a `metric_spec` write (for config-declared
 /// metrics). A formula metric has no `source_measure`.
-pub(crate) fn spec_to_new_spec(s: &ResolvedSpec) -> NewMetricSpec {
-    let spec = NewMetricSpec {
-        key: s.key.clone(),
 /// The metrics `extension` declares, as stored specs would read: the
 /// extension's own layer alone, with the defaults applied. What a check
 /// resolves them to before the app has loaded the extension.
@@ -2671,6 +2671,9 @@ pub fn declared_metric_specs(
     .collect()
 }
 
+pub(crate) fn spec_to_new_spec(s: &ResolvedSpec) -> NewMetricSpec {
+    let spec = NewMetricSpec {
+        key: s.key.clone(),
         title: s.title.clone(),
         unit: s.unit.clone(),
         source_measure: s.source_measure.clone(),
@@ -3906,10 +3909,10 @@ def transform(input):
         files.insert("src/b.rs".to_string(), "fn c() {}".to_string());
 
         let ctx = CollectorRunContext {
+            excluded: Arc::default(),
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
-            excluded: Arc::default(),
             snapshot_id: Some(42),
             closest_vcs_rev: Some("abc1234".into()),
             vcs_rev_exact: true,
@@ -3962,10 +3965,10 @@ def transform(input):
         seed_with_every_builtin_on(&svc).await;
         let collector = builtin_collector_fixture("oxplow.rust.unsafe_blocks");
         let ctx = |snapshot_id: i64| CollectorRunContext {
+            excluded: Arc::default(),
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
-            excluded: Arc::default(),
             snapshot_id: Some(snapshot_id),
             closest_vcs_rev: None,
             vcs_rev_exact: false,
@@ -4024,10 +4027,10 @@ def transform(input):
 
     fn sweep_ctx() -> CollectorRunContext {
         CollectorRunContext {
+            excluded: Arc::default(),
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
-            excluded: Arc::default(),
             snapshot_id: None,
             closest_vcs_rev: None,
             vcs_rev_exact: false,
@@ -4181,10 +4184,10 @@ def transform(input):
         )
         .await;
         let ctx = |snapshot_id: i64| CollectorRunContext {
+            excluded: Arc::default(),
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
-            excluded: Arc::default(),
             snapshot_id: Some(snapshot_id),
             closest_vcs_rev: None,
             vcs_rev_exact: false,
@@ -4388,10 +4391,10 @@ def transform(input):
 
         let snap = snapshot_with_files(&svc, &[("a.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
         let ctx = CollectorRunContext {
+            excluded: Arc::default(),
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
-            excluded: Arc::default(),
             snapshot_id: Some(snap),
             closest_vcs_rev: None,
             vcs_rev_exact: false,
@@ -4437,10 +4440,10 @@ def transform(input):
         seed_with_every_builtin_on(&svc).await;
         let collector = builtin_collector_fixture("oxplow.rust.unsafe_blocks");
         let ctx = |snapshot_id: i64| CollectorRunContext {
+            excluded: Arc::default(),
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
-            excluded: Arc::default(),
             snapshot_id: Some(snapshot_id),
             closest_vcs_rev: None,
             vcs_rev_exact: false,
@@ -4514,10 +4517,10 @@ def transform(input):
         seed_with_every_builtin_on(&svc).await;
         let collector = builtin_collector_fixture("oxplow.rust.unsafe_blocks");
         let ctx = |snapshot_id: i64| CollectorRunContext {
+            excluded: Arc::default(),
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
-            excluded: Arc::default(),
             snapshot_id: Some(snapshot_id),
             closest_vcs_rev: None,
             vcs_rev_exact: false,
@@ -4612,10 +4615,10 @@ def transform(input):
             vec!["oxplow.ast_hit".into()],
         );
         let ctx = CollectorRunContext {
+            excluded: Arc::default(),
             stream_val: 1,
             thread_id: Some(1),
             trigger: "on-effort-complete",
-            excluded: Arc::default(),
             snapshot_id: None,
             closest_vcs_rev: None,
             vcs_rev_exact: false,
@@ -4734,10 +4737,10 @@ def transform(input):
             "fn big() {\n    let x = 1;\n    let y = 2;\n}\n".to_string(),
         );
         let ctx = CollectorRunContext {
+            excluded: Arc::default(),
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
-            excluded: Arc::default(),
             snapshot_id: None,
             closest_vcs_rev: None,
             vcs_rev_exact: false,
@@ -4834,10 +4837,10 @@ def transform(input):
 
         let files = Arc::new(equivalence_corpus());
         let ctx = CollectorRunContext {
+            excluded: Arc::default(),
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
-            excluded: Arc::default(),
             snapshot_id: Some(7),
             closest_vcs_rev: Some("abc1234".into()),
             vcs_rev_exact: true,
@@ -4903,10 +4906,10 @@ def transform(input):
             vec!["oxplow.complexity".into(), "acme.undefined".into()],
         );
         let ctx = CollectorRunContext {
+            excluded: Arc::default(),
             stream_val: 1,
             thread_id: None,
             trigger: "manual",
-            excluded: Arc::default(),
             snapshot_id: None,
             closest_vcs_rev: None,
             vcs_rev_exact: false,
@@ -4967,10 +4970,10 @@ def transform(input):
             vec!["oxplow.complexity".into()],
         );
         let ctx = CollectorRunContext {
+            excluded: Arc::default(),
             stream_val: 1,
             thread_id: None,
             trigger: "manual",
-            excluded: Arc::default(),
             snapshot_id: None,
             closest_vcs_rev: None,
             vcs_rev_exact: false,
@@ -5039,10 +5042,10 @@ def transform(input):
             vec!["oxplow.complexity".into()],
         );
         let ctx = CollectorRunContext {
+            excluded: Arc::default(),
             stream_val: 1,
             thread_id: None,
             trigger: "manual",
-            excluded: Arc::default(),
             snapshot_id: None,
             closest_vcs_rev: None,
             vcs_rev_exact: false,
@@ -5108,10 +5111,10 @@ def transform(input):
         );
         let files = Arc::new(corpus);
         let ctx = CollectorRunContext {
+            excluded: Arc::default(),
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
-            excluded: Arc::default(),
             snapshot_id: Some(9),
             closest_vcs_rev: Some("def5678".into()),
             vcs_rev_exact: true,
@@ -5179,10 +5182,10 @@ def transform(input):
         let snap =
             snapshot_with_files(&svc, &[("src/lib.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
         let ctx = CollectorRunContext {
+            excluded: Arc::default(),
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
-            excluded: Arc::default(),
             snapshot_id: Some(snap),
             closest_vcs_rev: None,
             vcs_rev_exact: false,

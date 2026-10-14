@@ -633,6 +633,9 @@ pub fn exec_collector(
     let stderr = String::from_utf8_lossy(&err_thread.join().map_err(|_| "error drain panicked")??)
         .trim()
         .to_string();
+    // A failure's reason is kept on the run: a program that echoes a
+    // credential it was given doesn't leave it there.
+    let stderr = redacted(stderr, credentials);
     if !status.success() {
         return Err(format!(
             "collector `{}` failed ({status}, exit code {:?}): {stderr}",
@@ -653,6 +656,17 @@ pub fn exec_collector(
         )
     })?;
     ScriptOutput::parse(spec, value)
+}
+
+/// `text` with each credential's value replaced, so a program's output
+/// can be recorded without the secrets it was handed.
+fn redacted(text: String, credentials: &BTreeMap<String, String>) -> String {
+    credentials
+        .values()
+        .filter(|value| !value.is_empty())
+        .fold(text, |text, value| {
+            text.replace(value.as_str(), "[redacted]")
+        })
 }
 
 /// What a review's dry run of a collector gave (P8.C4).
@@ -1082,6 +1096,9 @@ pub async fn run_collector(
     let result = run_collector_once(ctx, &run, owner, id, trigger).await;
     let recorded = match &result {
         Ok(_) => health.succeeded(&key, Some(started.elapsed())).await,
+        // Stopped (a person's cancel, its extension changed or revoked): the
+        // run is recorded `cancelled`, and says nothing of the collector's health.
+        Err(RunCollectorError::Failed(_)) if run.cancel().is_cancelled() => Ok(()),
         Err(RunCollectorError::Failed(error)) => health.failed(&key, error).await.map(|_| ()),
         Err(_) => Ok(()),
     };

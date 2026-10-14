@@ -393,6 +393,56 @@ mod tests {
         assert_eq!(left, ["ok", "error", "invalid"]);
     }
 
+    /// Extension runs are kept for [`EXTENSION_RUN_DAYS`]: a sweep drops the
+    /// older ones and leaves the rest, and a second finds nothing more.
+    #[tokio::test]
+    async fn extension_runs_past_their_window_are_swept() {
+        let db = Database::in_memory();
+        let now = oxplow_domain::Timestamp::from_unix_ms(400 * DAY_MS);
+        let at = |days: i64| {
+            crate::database::ts_to_string(oxplow_domain::Timestamp::from_unix_ms(
+                now.unix_ms() - days * DAY_MS,
+            ))
+        };
+        let (old, kept) = (at(EXTENSION_RUN_DAYS + 1), at(EXTENSION_RUN_DAYS - 1));
+        db.transaction(move |tx| {
+            for (id, started) in [("old", &old), ("kept", &kept)] {
+                tx.execute(
+                    "INSERT INTO extension_run
+                       (run_id, extension, contribution, kind, actor_kind, actor, mode,
+                        started_at, finished_at, outcome, wall_ms, cpu_ms, peak_bytes,
+                        ai_calls, scopes_json, decisions_json)
+                     VALUES (?1, 'acme', 'collector:acme/pull', 'collector', 'system', 'system',
+                        'external', ?2, ?2, 'ok', 1, 0, 0, 0, '{}', '[]')",
+                    rusqlite::params![id, started],
+                )
+                .map_err(crate::map_sql_err)?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let first = sweep(&db, now, &BTreeMap::new()).await.unwrap();
+        assert_eq!(first.extension_runs_deleted, 1);
+        let left: Vec<String> = db
+            .read(|c| {
+                let mut st = c
+                    .prepare("SELECT run_id FROM extension_run ORDER BY run_id")
+                    .map_err(crate::map_sql_err)?;
+                let rows = st
+                    .query_map([], |r| r.get(0))
+                    .map_err(crate::map_sql_err)?
+                    .collect::<Result<_, _>>()
+                    .map_err(crate::map_sql_err)?;
+                Ok(rows)
+            })
+            .await
+            .unwrap();
+        assert_eq!(left, ["kept"]);
+        let second = sweep(&db, now, &BTreeMap::new()).await.unwrap();
+        assert_eq!(second.extension_runs_deleted, 0);
+    }
+
     #[tokio::test]
     async fn a_backlog_is_swept_in_batches() {
         let db = Database::in_memory();

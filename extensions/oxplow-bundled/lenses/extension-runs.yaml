@@ -1,0 +1,36 @@
+title: Extension Run Detail
+description: One extension's runs in the last 7 days, newest first — which contribution, at which version and catalog generation (blank for a run that holds none), who ran it, what caused it, how it ended and why, and what it cost. The detail behind a row of Extension runs.
+params: [{ name: extension }]
+query: |
+  SELECT contribution,
+         kind,
+         version,
+         generation,
+         actor,
+         cause_event_id,
+         outcome,
+         error,
+         started_at,
+         wall_ms,
+         cpu_ms,
+         ai_calls
+  FROM v_extension_run
+  WHERE extension = :extension
+    AND started_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-7 days')
+  ORDER BY started_at DESC, run_id
+viz: table
+columns:
+  - { key: contribution, label: Contribution }
+  - { key: kind, label: Kind }
+  - { key: version, label: Version }
+  - { key: generation, label: Generation }
+  - { key: actor, label: By }
+  - { key: cause_event_id, label: Caused by }
+  - { key: outcome, label: Outcome }
+  - { key: error, label: Error }
+  - { key: started_at, label: Started }
+  - { key: wall_ms, label: Wall (ms) }
+  - { key: cpu_ms, label: CPU (ms) }
+  - { key: ai_calls, label: Model calls }
+empty: This extension hasn't run in the last 7 days.
+hidden: true
