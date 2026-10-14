@@ -118,10 +118,7 @@ impl Host {
                 .ai
                 .set_role(
                     &role.into(),
-                    Some(RoleBinding {
-                        provider: FIXTURE_INSTANCE.into(),
-                        model: FIXTURE_INSTANCE.into(),
-                    }),
+                    Some(RoleBinding::new(FIXTURE_INSTANCE, FIXTURE_INSTANCE)),
                 )
                 .map_err(|e| e.to_string())?;
         }

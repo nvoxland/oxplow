@@ -21,12 +21,16 @@ import {
 } from "../api.js";
 import {
   emptyProviderForm,
+  ALLOWED,
+  allowedOf,
   kindLabel,
   providerFormError,
+  restrictionsOf,
   roleRows,
   testModelFor,
   usageRows,
   USAGE_SQL,
+  type Allowed,
   type ProviderForm,
   type UsageRow,
 } from "./aiSettingsModel.js";
@@ -292,23 +296,30 @@ function ProviderEditor({ settings, onSaved }: { settings: AiSettings; onSaved(s
 function RoleRowEditor({ settings, role, onSaved }: { settings: AiSettings; role: string; onSaved(s: AiSettings): void }) {
   const row = roleRows(settings).find((r) => r.role === role)!;
   const binding = settings.roles.find((r) => r.role === role)?.binding ?? null;
+  const savedRestrict = (binding?.restrict ?? []).join(",");
   const [provider, setProvider] = useState(binding?.provider ?? "");
   const [model, setModel] = useState(binding?.model ?? "");
+  const [allowed, setAllowed] = useState<Allowed>(allowedOf(binding?.restrict ?? []));
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
+  const revert = () => {
     setProvider(binding?.provider ?? "");
     setModel(binding?.model ?? "");
-  }, [binding?.provider, binding?.model]);
+    setAllowed(allowedOf(binding?.restrict ?? []));
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(revert, [binding?.provider, binding?.model, savedRestrict]);
 
-  const dirty = provider !== (binding?.provider ?? "") || model !== (binding?.model ?? "");
+  const restrict = restrictionsOf(allowed);
+  const dirty =
+    provider !== (binding?.provider ?? "") || model !== (binding?.model ?? "") || restrict.join(",") !== savedRestrict;
   const valid = provider === "" || model.trim() !== "";
 
   async function save() {
     if (!dirty || !valid || saving) return;
     setSaving(true);
     try {
-      onSaved(await setAiRole(role, provider ? { provider, model: model.trim() } : null));
+      onSaved(await setAiRole(role, provider ? { provider, model: model.trim(), restrict } : null));
     } catch (e) {
       recordOpError({ label: `Assign the ${role} role`, message: String(e) });
     } finally {
@@ -325,10 +336,7 @@ function RoleRowEditor({ settings, role, onSaved }: { settings: AiSettings; role
           void save();
         }}
         onKeyDown={(e) => {
-          if (e.key === "Escape") {
-            setProvider(binding?.provider ?? "");
-            setModel(binding?.model ?? "");
-          }
+          if (e.key === "Escape") revert();
         }}
       >
         <strong style={{ minWidth: 90 }} title={row.extension ? `Declared by the ${row.extension} extension` : undefined}>
@@ -362,10 +370,32 @@ function RoleRowEditor({ settings, role, onSaved }: { settings: AiSettings; role
           onChange={(e) => setModel(e.target.value)}
           style={{ width: 220 }}
         />
+        {provider ? (
+          <span style={{ ...mutedStyle, display: "inline-flex", gap: 8 }} title="What a call on this binding may use. An extension can't allow what you turn off here.">
+            Allows
+            {ALLOWED.map((a) => (
+              <label key={a.restriction} style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+                <input
+                  type="checkbox"
+                  data-testid={`ai-role-allow-${role}-${a.restriction}`}
+                  checked={allowed[a.restriction]}
+                  disabled={!row.editable}
+                  onChange={(e) => setAllowed({ ...allowed, [a.restriction]: e.target.checked })}
+                />
+                {a.label}
+              </label>
+            ))}
+          </span>
+        ) : null}
         <button type="submit" data-testid={`ai-role-save-${role}`} disabled={!row.editable || !dirty || !valid || saving}>
           {saving ? "Saving…" : "Save"}
         </button>
       </form>
+      {row.restricted && !dirty ? (
+        <div style={mutedStyle} data-testid={`ai-role-restricted-${role}`}>
+          {row.restricted}
+        </div>
+      ) : null}
       {row.problem ? <div style={errorStyle}>{row.problem}</div> : null}
     </li>
   );

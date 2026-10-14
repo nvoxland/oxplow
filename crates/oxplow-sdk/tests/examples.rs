@@ -415,10 +415,7 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
     svc.ai
         .set_role(
             &Role::parse("triage/sort").expect("a profile role"),
-            Some(RoleBinding {
-                provider: "m".into(),
-                model: "x".into(),
-            }),
+            Some(RoleBinding::new("m", "x")),
         )
         .unwrap();
     // The provider kind is itself a script a person approves.
@@ -652,10 +649,7 @@ async fn the_effort_review_example_reviews_evidence_and_can_be_cancelled() {
     svc.ai
         .set_role(
             &Role::parse("effort-review/review").expect("a profile role"),
-            Some(RoleBinding {
-                provider: "fixture".into(),
-                model: "fixture".into(),
-            }),
+            Some(RoleBinding::new("fixture", "fixture")),
         )
         .unwrap();
     // A person approves the job and the two effects.
@@ -876,10 +870,7 @@ async fn inferred_decisions_run(
         svc.ai
             .set_role(
                 &Role::parse("oxplow-bundled/decisions").expect("a profile role"),
-                Some(RoleBinding {
-                    provider: "fixture".into(),
-                    model: "fixture".into(),
-                }),
+                Some(RoleBinding::new("fixture", "fixture")),
             )
             .unwrap();
     }
@@ -1206,10 +1197,7 @@ async fn a_review_effort_review_wrote_shows_in_review_badges() {
     svc.ai
         .set_role(
             &Role::SUMMARIZE,
-            Some(RoleBinding {
-                provider: "fixture".into(),
-                model: "fixture".into(),
-            }),
+            Some(RoleBinding::new("fixture", "fixture")),
         )
         .unwrap();
     approve_every(&svc, ProgramKind::Job).unwrap();

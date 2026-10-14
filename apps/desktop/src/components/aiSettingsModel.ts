@@ -1,7 +1,7 @@
 /// Pure view-model for the Settings → AI section (`AiSection.tsx`).
 /// See `.context/ai-providers.md`.
 
-import type { AiSettings, ProviderKindInfo, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
+import type { AiRestriction, AiSettings, ProviderKindInfo, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 
 /// `kind` is a registered provider kind (`AiSettings.kinds`).
 export type ProviderForm = { id: string; kind: string; baseUrl: string; key: string; editing: boolean };
@@ -37,6 +37,9 @@ export type RoleRow = {
   /// `provider · model`, or null when unassigned.
   assigned: string | null;
   problem: string | null;
+  /// What the person forbids its binding ("Restricted: no tools, no SQL"),
+  /// or null when nothing.
+  restricted: string | null;
   note: string | null;
   /// False when the project sets this role: editing the global value here
   /// wouldn't change what's used.
@@ -55,6 +58,7 @@ export function roleRows(settings: AiSettings): RoleRow[] {
     assigned: r.binding ? shown(r.binding) : null,
     problem:
       r.binding && !ids.has(r.binding.provider) ? `AI provider ${r.binding.provider} isn't set up.` : r.problem,
+    restricted: restrictedText(r.binding?.restrict ?? []),
     note: r.overridden
       ? "Set by this project"
       : !r.binding && r.fallback
@@ -63,6 +67,32 @@ export function roleRows(settings: AiSettings): RoleRow[] {
     editable: !r.overridden,
     lockedReason: r.overridden ? "This project sets this role in .oxplow/project.yaml (ai.roles); change it there." : null,
   }));
+}
+
+/// What a binding may be restricted from, in the editor's order, with the
+/// box's label (checked = allowed) and how a restriction reads.
+export const ALLOWED: { restriction: AiRestriction; label: string; forbids: string }[] = [
+  { restriction: "tools", label: "Tools", forbids: "tools" },
+  { restriction: "sql", label: "SQL", forbids: "SQL" },
+  { restriction: "streaming", label: "Streaming", forbids: "streaming" },
+  { restriction: "images", label: "Images", forbids: "image input" },
+];
+
+export type Allowed = Record<AiRestriction, boolean>;
+
+/// The editor's boxes for a binding's restrictions.
+export function allowedOf(restrict: AiRestriction[]): Allowed {
+  return Object.fromEntries(ALLOWED.map((a) => [a.restriction, !restrict.includes(a.restriction)])) as Allowed;
+}
+
+/// The restrictions the editor's boxes say: each unchecked one.
+export function restrictionsOf(allowed: Allowed): AiRestriction[] {
+  return ALLOWED.filter((a) => !allowed[a.restriction]).map((a) => a.restriction);
+}
+
+function restrictedText(restrict: AiRestriction[]): string | null {
+  const forbidden = ALLOWED.filter((a) => restrict.includes(a.restriction)).map((a) => `no ${a.forbids}`);
+  return forbidden.length === 0 ? null : `Restricted: ${forbidden.join(", ")}`;
 }
 
 /// A model to test a provider with: one a role already uses on it, else "".

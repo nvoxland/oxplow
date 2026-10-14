@@ -15,6 +15,7 @@ ai_profiles:
   - { id: sort, description: Sorts items., fallback: summarize }
 jobs:
   - { id: summarize, description: Summarize an item., version: 1, operation: ai.complete_typed, needs: [ai.compute] }
+  - { id: lookup, description: Look an item up in oxplow., version: 1, operation: ai.complete_typed, needs: [ai.compute, sql.read] }
 commands:
   - { name: summary.ask, summary: Ask for a summary., scope: jobs.write, op: enqueue, invokers: { human: true, agent: true, lens: true } }
   - { name: summary.cancel, summary: Stop asking., scope: jobs.write, op: cancel, invokers: { human: true, agent: true, lens: true } }
@@ -82,13 +83,7 @@ fn configure(svc: &crate::Services, base: String) {
         )
         .unwrap();
     svc.ai
-        .set_role(
-            &Role::SUMMARIZE,
-            Some(RoleBinding {
-                provider: "a".into(),
-                model: "m".into(),
-            }),
-        )
+        .set_role(&Role::SUMMARIZE, Some(RoleBinding::new("a", "m")))
         .unwrap();
     crate::test_fixtures::approve_ai_providers(svc);
 }
@@ -204,6 +199,44 @@ async fn an_approved_job_runs_and_its_result_is_read_back() {
         .await
         .unwrap();
     assert_eq!(completed, 1, "its completion is an event");
+}
+
+/// A person's restriction on a binding holds whichever job runs on it: a
+/// job offered `query_sql` fails on a binding restricted from SQL, naming
+/// the binding and the restriction, before any model call; a job asking
+/// nothing it forbids runs on the same binding.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_restricted_binding_fails_a_job_needing_what_it_forbids() {
+    let fx = fixture(true).await;
+    fx.svc
+        .ai
+        .set_role(
+            &Role::SUMMARIZE,
+            Some(RoleBinding {
+                restrict: [oxplow_domain::ai::AiRestriction::Sql].into(),
+                ..RoleBinding::new("a", "m")
+            }),
+        )
+        .unwrap();
+    let job_run = |v: Value| {
+        oxplow_domain::refs::build::id_of(v["jobRun"].as_str().unwrap(), "job_run")
+            .unwrap()
+            .to_owned()
+    };
+    let mut lookup = ask("item-sql");
+    lookup["job"] = json!("lookup");
+    let id = job_run(run(&fx, "triage.summary.ask", lookup).await);
+    let failed = until(&fx, &id, |s| s["state"] == json!("failed")).await;
+    assert!(
+        failed
+            .to_string()
+            .contains("the `summarize` role's binding `a · m` is restricted: no SQL"),
+        "{failed}"
+    );
+    assert!(fx.seen.lock().unwrap().is_empty(), "no model call");
+
+    let id = job_run(run(&fx, "triage.summary.ask", ask("item-plain")).await);
+    until(&fx, &id, |s| s["state"] == json!("succeeded")).await;
 }
 
 /// A job names one of its extension's AI profiles by its bare id: it runs

@@ -427,6 +427,12 @@ export const commands = {
 	// A provider `id`.
 	provider: string,
 	model: string,
+	/**
+	 *  What a person forbids this binding (`restrict: [tools, sql]`): a
+	 *  typed request needing it is refused, whichever profile or job
+	 *  chose the binding. Empty: nothing forbidden.
+	 */
+	restrict?: AiRestriction[],
 } | null) => typedError<AiSettings, IpcError>(__TAURI_INVOKE("set_ai_role", { role, binding })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -1437,10 +1443,26 @@ export type AiProfileDecl = {
 	features: ModelFeature[],
 };
 
+// One thing a binding may be restricted from.
+export type AiRestriction = 
+// Any tool: a request offering the model tools to call.
+"tools" | 
+// The `query_sql` tool: reading oxplow's models through SQL.
+"sql" | 
+// A streamed reply.
+"streaming" | 
+// Image input.
+"images";
+
 // One `ai.roles` entry.
 export type AiRoleOverride = {
 	provider: string,
 	model: string,
+	/**
+	 *  What the project forbids this binding (`restrict: [tools, sql]`);
+	 *  absent, nothing.
+	 */
+	restrict?: AiRestriction[],
 };
 
 export type AiSettings = {
@@ -5761,6 +5783,12 @@ export type RoleBinding = {
 	// A provider `id`.
 	provider: string,
 	model: string,
+	/**
+	 *  What a person forbids this binding (`restrict: [tools, sql]`): a
+	 *  typed request needing it is refused, whichever profile or job
+	 *  chose the binding. Empty: nothing forbidden.
+	 */
+	restrict?: AiRestriction[],
 };
 
 export type RoleStatus = {

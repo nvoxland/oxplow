@@ -73,10 +73,7 @@ pub(super) async fn prepare(
     svc.ai
         .set_role(
             &Role::SUMMARIZE,
-            Some(RoleBinding {
-                provider: "fixture".into(),
-                model: "fixture".into(),
-            }),
+            Some(RoleBinding::new("fixture", "fixture")),
         )
         .unwrap();
     crate::exec_consent::approve_every(svc, crate::exec_consent::ProgramKind::Job).unwrap();

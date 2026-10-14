@@ -143,6 +143,28 @@ an id, a description, a required `fallback` built-in role and optional
   the bus); a profile only picks the model. Rebinding one never changes
   what a job may do or re-asks its approval. Declaring a profile
   authorizes nothing: it's reached only through the person's own provider.
+- **A restriction is the person's side of that line.** A binding (global,
+  project or a profile's own) may carry `restrict:` — a set of `tools`
+  (any tool), `sql` (the `query_sql` tool), `streaming` (a streamed
+  reply) and `images` (image input) it is forbidden
+  (`oxplow_domain::ai::AiRestriction`, `RoleBinding.restrict`,
+  `AiRoleOverride.restrict`):
+
+  ```yaml
+  ai:
+    roles:
+      summarize: { provider: openrouter, model: openai/gpt-5-mini, restrict: [tools, sql] }
+  ```
+
+  `prepare_typed` refuses a typed request needing what its binding
+  forbids, before anything is sent and before the model's features are
+  checked: "the `summarize` role's binding `or · m` is restricted: no
+  tools" (`forbidden_by`). A job running on it fails with that error. An
+  extension can't lift a restriction: profiles and jobs only choose the
+  binding. A profile whose declared `features` its binding forbids shows
+  the `problem` "AI profile `x/y` needs tool calling, which its binding
+  `p · m` forbids" (`forbidden_feature`), and `extension check` warns the
+  same. The files write `restrict` only when it isn't empty.
 - **The cache needs nothing new.** A recorded computation is keyed by
   provider and model, the role is an attribute, so rebinding a profile
   computes afresh and old rows keep their provenance.
@@ -583,7 +605,11 @@ one signal), `test_ai_provider`.
   `fallback`, `effective`, `problem`), then bindings for profiles nothing
   declares (a problem, so they can be cleared). Pick a provider and model
   per role; "Not assigned" clears it, and an unbound profile shows "Falls
-  back to summarize (provider · model)".
+  back to summarize (provider · model)". With a provider chosen,
+  **Allows** Tools / SQL / Streaming / Images checkboxes (all on by
+  default) set the binding's `restrict` with the same Save, Escape putting
+  them back; a restricted row says "Restricted: no tools, no SQL"
+  (`aiSettingsModel.ts` `ALLOWED`, `allowedOf`, `restrictionsOf`).
 - Recent Calls: the last 7 days of `v_ai_call` by role and caller, read
   with `query_sql`, the same path lenses use.
 

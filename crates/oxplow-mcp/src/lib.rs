@@ -5147,13 +5147,7 @@ mod tests {
         let role: Role = serde_json::from_value(serde_json::json!(role)).unwrap();
         services
             .ai
-            .set_role(
-                &role,
-                Some(RoleBinding {
-                    provider: "mock".into(),
-                    model: "m".into(),
-                }),
-            )
+            .set_role(&role, Some(RoleBinding::new("mock", "m")))
             .unwrap();
     }
 

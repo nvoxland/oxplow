@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import type { AiSettings } from "../tauri-bridge/generated/bindings.js";
 import {
+  ALLOWED,
   emptyProviderForm,
+  restrictionsOf,
   kindLabel,
   providerFormError,
   roleRows,
@@ -26,8 +28,8 @@ const settings: AiSettings = {
       description: "Summaries of sessions",
       extension: null,
       fallback: null,
-      binding: { provider: "or", model: "openai/gpt-5-mini" },
-      effective: { provider: "or", model: "openai/gpt-5-mini" },
+      binding: { provider: "or", model: "openai/gpt-5-mini", restrict: ["tools", "sql"] },
+      effective: { provider: "or", model: "openai/gpt-5-mini", restrict: ["tools", "sql"] },
       overridden: false,
       problem: null,
     },
@@ -106,6 +108,12 @@ describe("roleRows", () => {
     expect(review.editable).toBe(true);
   });
 
+  test("a restricted binding says what it forbids", () => {
+    const rows = roleRows(settings);
+    expect(rows.find((r) => r.role === "summarize")!.restricted).toBe("Restricted: no tools, no SQL");
+    expect(rows.find((r) => r.role === "main")!.restricted).toBeNull();
+  });
+
   test("a binding to a missing provider is flagged, and project overrides are noted", () => {
     const decide = roleRows(settings).find((r) => r.role === "decide")!;
     expect(decide.problem).toBe("AI provider gone isn't set up.");
@@ -114,6 +122,12 @@ describe("roleRows", () => {
     expect(decide.lockedReason).toContain(".oxplow/project.yaml");
     expect(roleRows(settings).find((r) => r.role === "summarize")!.editable).toBe(true);
   });
+});
+
+test("the editor's allowed boxes are the restrictions inverted", () => {
+  expect(ALLOWED.map((a) => a.restriction)).toEqual(["tools", "sql", "streaming", "images"]);
+  expect(restrictionsOf({ tools: true, sql: false, streaming: true, images: false })).toEqual(["sql", "images"]);
+  expect(restrictionsOf({ tools: true, sql: true, streaming: true, images: true })).toEqual([]);
 });
 
 test("testModelFor uses a model a role already assigns on that provider", () => {

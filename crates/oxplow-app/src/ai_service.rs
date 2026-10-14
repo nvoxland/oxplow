@@ -374,12 +374,19 @@ impl AiService {
         declared.sort_by_key(|p| p.role());
         for profile in declared {
             let mut row = status(profile.role(), profile.description.clone(), Some(profile));
-            if row.effective.is_some() && !profile.features.is_empty() {
-                row.problem = self
-                    .capabilities_unpinned(&row.role)
-                    .await
-                    .ok()
-                    .and_then(|snapshot| missing_feature(profile, &snapshot));
+            if let Some(binding) = row
+                .effective
+                .clone()
+                .filter(|_| !profile.features.is_empty())
+            {
+                row.problem = match forbidden_feature(profile, &binding) {
+                    Some(forbidden) => Some(forbidden),
+                    None => self
+                        .capabilities_unpinned(&row.role)
+                        .await
+                        .ok()
+                        .and_then(|snapshot| missing_feature(profile, &snapshot)),
+                };
             }
             roles.push(row);
         }
@@ -619,7 +626,7 @@ impl AiService {
         site: CallSite<'_>,
         request: &TypedRequestV1,
     ) -> Result<(TypedResponseV1, Option<i64>), AiServiceError> {
-        self.prepare_typed(bound, request).await?;
+        self.prepare_typed(bound, request, false).await?;
         let key = self.key(&bound.provider)?;
         let started = Instant::now();
         let result = bound
@@ -641,7 +648,7 @@ impl AiService {
         cancel: &oxplow_ai::client::Cancel,
         on_delta: oxplow_ai::client::OnDelta<'_>,
     ) -> Result<(TypedResponseV1, Option<i64>), AiServiceError> {
-        self.prepare_typed(bound, request).await?;
+        self.prepare_typed(bound, request, true).await?;
         let key = self.key(&bound.provider)?;
         let started = Instant::now();
         let result = bound
@@ -710,24 +717,33 @@ impl AiService {
     }
 
     /// Whether a typed call on `bound` is allowed: the request's model,
-    /// parts and the model's declared features checked.
+    /// what the person forbids the binding, its parts and the model's
+    /// declared features checked. `streaming`: the reply is streamed.
     async fn prepare_typed(
         &self,
         bound: &Bound,
         request: &TypedRequestV1,
+        streaming: bool,
     ) -> Result<(), AiServiceError> {
         request.validate_version().map_err(AiError::from)?;
         let Bound {
+            role,
             provider,
             binding,
             model_provider,
             profile,
-            ..
         } = bound;
         if request.model != binding.model {
             return Err(AiServiceError::Config(
                 "typed request must use the role's configured model".into(),
             ));
+        }
+        if let Some(r) = forbidden_by(binding, request, streaming) {
+            return Err(AiServiceError::Config(format!(
+                "the `{role}` role's binding `{}` is restricted: no {}",
+                binding.label(),
+                r.forbids()
+            )));
         }
         // Opaque assets need an authorized host resolver before transport.
         // Never reinterpret them as paths, URLs or inline bytes here.
@@ -1098,6 +1114,61 @@ fn missing_feature(profile: &AiProfile, snapshot: &CapabilitySnapshotV1) -> Opti
     })
 }
 
+/// The first thing `binding` forbids that `request` needs, when it does:
+/// any tool (`tools`), the `query_sql` tool (`sql`), a streamed reply
+/// (`streaming`) or an image part (`images`).
+fn forbidden_by(
+    binding: &RoleBinding,
+    request: &TypedRequestV1,
+    streaming: bool,
+) -> Option<oxplow_domain::ai::AiRestriction> {
+    use oxplow_domain::ai::AiRestriction;
+    let parts = || request.messages.iter().flat_map(|m| &m.parts);
+    let uses_tools = !request.tools.is_empty()
+        || parts().any(|p| matches!(p, PartV1::ToolCall { .. } | PartV1::ToolResult { .. }))
+        || request
+            .messages
+            .iter()
+            .any(|m| m.role == oxplow_ai::parts::MessageRoleV1::Tool);
+    let needs = |r: AiRestriction| match r {
+        AiRestriction::Tools => uses_tools,
+        AiRestriction::Sql => request
+            .tools
+            .iter()
+            .any(|t| t.name == crate::extensions::jobs::QUERY_SQL_TOOL),
+        AiRestriction::Streaming => streaming,
+        AiRestriction::Images => parts().any(|p| matches!(p, PartV1::Image { .. })),
+    };
+    binding.restrict.iter().copied().find(|r| needs(*r))
+}
+
+/// What `profile` declares it needs that its `binding` forbids, as a
+/// person reads it: the person's restriction, not the model, refuses it.
+pub fn forbidden_feature(profile: &AiProfile, binding: &RoleBinding) -> Option<String> {
+    use oxplow_ai::capabilities::ModelFeature;
+    use oxplow_domain::ai::AiRestriction;
+    let forbidden: Vec<&str> = profile
+        .features
+        .iter()
+        .filter_map(|f| match f {
+            ModelFeature::ToolCalling => Some((AiRestriction::Tools, "tool calling")),
+            ModelFeature::Streaming => Some((AiRestriction::Streaming, "streaming")),
+            ModelFeature::Image => Some((AiRestriction::Images, "images")),
+            ModelFeature::Text => None,
+        })
+        .filter(|(r, _)| binding.forbids(*r))
+        .map(|(_, name)| name)
+        .collect();
+    (!forbidden.is_empty()).then(|| {
+        format!(
+            "AI profile `{}` needs {}, which its binding `{}` forbids",
+            profile.role(),
+            forbidden.join(" and "),
+            binding.label()
+        )
+    })
+}
+
 /// A typed call ready to send: see [`AiService::prepare_typed`].
 /// A role bound to what a call on it goes to ([`AiService::bind`]): its
 /// provider and model, and the profile that declares it. The key is read
@@ -1144,8 +1215,8 @@ pub fn project_overrides(
             Some((
                 role,
                 RoleBinding {
-                    provider: o.provider.clone(),
-                    model: o.model.clone(),
+                    restrict: o.restrict.clone(),
+                    ..RoleBinding::new(o.provider.clone(), o.model.clone())
                 },
             ))
         })
@@ -1339,13 +1410,7 @@ mod tests {
                 kind: "openrouter".into(),
                 base_url: Some(base.into()),
             }],
-            roles: BTreeMap::from([(
-                Role::SUMMARIZE,
-                RoleBinding {
-                    provider: "or".into(),
-                    model: "m".into(),
-                },
-            )]),
+            roles: BTreeMap::from([(Role::SUMMARIZE, RoleBinding::new("or", "m"))]),
         };
         cfg.save(dir.path()).unwrap();
         let secrets = Arc::new(MemorySecrets::default());
@@ -1406,10 +1471,7 @@ mod tests {
         svc.complete(&role, "t", None, "hi", false).await.unwrap();
         let model = |i: usize| seen.lock().unwrap()[i].2["model"].clone();
         assert_eq!(model(0), "m", "the summarize role's model");
-        let bind = |model: &str| RoleBinding {
-            provider: "or".into(),
-            model: model.into(),
-        };
+        let bind = |model: &str| RoleBinding::new("or", model);
         svc.set_role(&role, Some(bind("big"))).unwrap();
         svc.complete(&role, "t", None, "hi", false).await.unwrap();
         assert_eq!(model(1), "big");
@@ -1456,10 +1518,7 @@ mod tests {
         svc.set_profiles(Arc::new(|| vec![review(vec![])]));
         svc.set_role(
             &Role::parse("gone/old").unwrap(),
-            Some(RoleBinding {
-                provider: "or".into(),
-                model: "x".into(),
-            }),
+            Some(RoleBinding::new("or", "x")),
         )
         .unwrap();
         let st = svc.settings().await.unwrap();
@@ -1577,13 +1636,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (svc, _) = service(&base, &dir);
         let svc = svc.with_project_overrides(Arc::new(|| {
-            BTreeMap::from([(
-                Role::MAIN,
-                RoleBinding {
-                    provider: "or".into(),
-                    model: "big".into(),
-                },
-            )])
+            BTreeMap::from([(Role::MAIN, RoleBinding::new("or", "big"))])
         }));
         svc.complete(&Role::MAIN, "core", None, "hi", false)
             .await
@@ -1661,14 +1714,8 @@ mod tests {
             Some("tk-9".into()),
         )
         .unwrap();
-        svc.set_role(
-            &Role::DECIDE,
-            Some(RoleBinding {
-                provider: "ts".into(),
-                model: "jev".into(),
-            }),
-        )
-        .unwrap();
+        svc.set_role(&Role::DECIDE, Some(RoleBinding::new("ts", "jev")))
+            .unwrap();
         let yaml = std::fs::read_to_string(dir.path().join("ai.yaml")).unwrap();
         assert!(yaml.contains("jev") && !yaml.contains("tk-9"), "{yaml}");
         assert_eq!(
@@ -1706,13 +1753,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (svc, _) = service("http://x", &dir);
         let err = svc
-            .set_role(
-                &Role::MAIN,
-                Some(RoleBinding {
-                    provider: "nope".into(),
-                    model: "m".into(),
-                }),
-            )
+            .set_role(&Role::MAIN, Some(RoleBinding::new("nope", "m")))
             .unwrap_err();
         assert!(matches!(err, AiServiceError::Config(_)), "{err:?}");
         assert!(svc
@@ -1743,13 +1784,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (svc, _) = service("http://x", &dir);
         let svc = svc.with_project_overrides(Arc::new(|| {
-            BTreeMap::from([(
-                Role::SUMMARIZE,
-                RoleBinding {
-                    provider: "or".into(),
-                    model: "small".into(),
-                },
-            )])
+            BTreeMap::from([(Role::SUMMARIZE, RoleBinding::new("or", "small"))])
         }));
         let st = svc.settings().await.unwrap();
         let summarize = st.roles.iter().find(|r| r.role == Role::SUMMARIZE).unwrap();
@@ -1781,13 +1816,7 @@ mod tests {
             )
             .unwrap();
         svc.ai
-            .set_role(
-                &Role::SUMMARIZE,
-                Some(RoleBinding {
-                    provider: "fixture".into(),
-                    model: "m".into(),
-                }),
-            )
+            .set_role(&Role::SUMMARIZE, Some(RoleBinding::new("fixture", "m")))
             .unwrap();
         svc.extension_activation
             .activate(svc.clone())
@@ -1863,13 +1892,7 @@ mod tests {
             )
             .unwrap();
         svc.ai
-            .set_role(
-                &Role::SUMMARIZE,
-                Some(RoleBinding {
-                    provider: "a".into(),
-                    model: "m".into(),
-                }),
-            )
+            .set_role(&Role::SUMMARIZE, Some(RoleBinding::new("a", "m")))
             .unwrap();
         let call = || svc.ai.complete(&Role::SUMMARIZE, "t", None, "hi", false);
         let err = call().await.unwrap_err().to_string();
@@ -2343,13 +2366,7 @@ def response(x):
                 kind: kind.into(),
                 base_url: Some(base.clone()),
             }],
-            roles: BTreeMap::from([(
-                Role::SUMMARIZE,
-                RoleBinding {
-                    provider: "p".into(),
-                    model: "m".into(),
-                },
-            )]),
+            roles: BTreeMap::from([(Role::SUMMARIZE, RoleBinding::new("p", "m"))]),
         }
         .save(dir.path())
         .unwrap();
@@ -2643,6 +2660,122 @@ def response(x):
             .complete_typed_as(&Role::SUMMARIZE, CallSite::new("test"), &text_request("hi"))
             .await
             .unwrap();
+    }
+
+    /// `summarize`'s binding (`p · m`) restricted from `restrict`.
+    fn restrict(fx: &Fixture, restrict: &[oxplow_domain::ai::AiRestriction]) {
+        fx.svc
+            .set_role(
+                &Role::SUMMARIZE,
+                Some(RoleBinding {
+                    restrict: restrict.iter().copied().collect(),
+                    ..RoleBinding::new("p", "m")
+                }),
+            )
+            .unwrap();
+    }
+
+    /// A person's restriction on a binding refuses a typed request needing
+    /// what it forbids, naming the binding and the restriction, before
+    /// anything is sent; a request needing nothing it forbids goes through.
+    #[tokio::test]
+    async fn a_restricted_binding_refuses_what_it_forbids() {
+        use oxplow_domain::ai::AiRestriction;
+        let fx = fixture("fake", None, typed_reply("observed")).await;
+        restrict(&fx, &[AiRestriction::Tools]);
+        let err = fx
+            .svc
+            .complete_typed_as(&Role::SUMMARIZE, CallSite::new("t"), &mixed_request())
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("the `summarize` role's binding `p · m` is restricted: no tools"),
+            "{err}"
+        );
+        assert!(fx.seen.lock().unwrap().is_empty(), "nothing was sent");
+        fx.svc
+            .complete_typed_as(&Role::SUMMARIZE, CallSite::new("t"), &text_request("hi"))
+            .await
+            .expect("a request with no tools runs on it");
+
+        // `sql` forbids only the `query_sql` tool.
+        restrict(&fx, &[AiRestriction::Sql]);
+        fx.svc
+            .complete_typed_as(&Role::SUMMARIZE, CallSite::new("t"), &mixed_request())
+            .await
+            .expect("another tool is allowed");
+        let mut sql = mixed_request();
+        sql.tools[0].name = crate::extensions::jobs::QUERY_SQL_TOOL.into();
+        let err = fx
+            .svc
+            .complete_typed_as(&Role::SUMMARIZE, CallSite::new("t"), &sql)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("is restricted: no SQL"), "{err}");
+
+        // Image input, refused for the restriction before anything else.
+        restrict(&fx, &[AiRestriction::Images]);
+        let err = fx
+            .svc
+            .complete_typed_as(&Role::SUMMARIZE, CallSite::new("t"), &image_request())
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("is restricted: no image input"),
+            "{err}"
+        );
+
+        // Streaming: refused on a stream, not on a whole reply.
+        restrict(&fx, &[AiRestriction::Streaming]);
+        let bound = fx.svc.bind(&Role::SUMMARIZE).await.unwrap();
+        let err = fx
+            .svc
+            .stream_typed_on(
+                &bound,
+                CallSite::new("t"),
+                &text_request("hi"),
+                &oxplow_ai::client::Cancel::default(),
+                &mut |_| {},
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("is restricted: no streaming"),
+            "{err}"
+        );
+        fx.svc
+            .complete_typed_on(&bound, CallSite::new("t"), &text_request("hi"))
+            .await
+            .expect("a whole reply is allowed");
+    }
+
+    /// A profile whose declared features its binding forbids shows why in
+    /// Settings → AI, as one its model lacks does.
+    #[tokio::test]
+    async fn a_profile_needing_what_its_binding_forbids_shows_the_problem() {
+        use oxplow_domain::ai::AiRestriction;
+        let fx = fixture("fake", None, typed_reply("observed")).await;
+        fx.svc.set_profiles(Arc::new(|| {
+            vec![AiProfile {
+                extension: "acme".into(),
+                name: "review".into(),
+                description: String::new(),
+                fallback: BuiltinRole::Summarize,
+                features: vec![oxplow_ai::capabilities::ModelFeature::ToolCalling],
+            }]
+        }));
+        restrict(&fx, &[AiRestriction::Tools]);
+        let st = fx.svc.settings().await.unwrap();
+        let row = st
+            .roles
+            .iter()
+            .find(|r| r.role == Role::parse("acme/review").unwrap())
+            .unwrap();
+        assert_eq!(
+            row.problem.as_deref(),
+            Some("AI profile `acme/review` needs tool calling, which its binding `p · m` forbids")
+        );
     }
 
     /// A request for another model, or another schema version, is refused

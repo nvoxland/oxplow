@@ -113,13 +113,7 @@ mod tests {
             .unwrap();
         fx.svc
             .ai
-            .set_role(
-                &Role::SUMMARIZE,
-                Some(RoleBinding {
-                    provider: "m".into(),
-                    model: "x".into(),
-                }),
-            )
+            .set_role(&Role::SUMMARIZE, Some(RoleBinding::new("m", "x")))
             .unwrap();
         let mine = "thread:thr1";
         let id = fx

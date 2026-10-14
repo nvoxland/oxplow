@@ -62,6 +62,24 @@ ai:
 The provider name refers to each person's own providers, so everyone needs
 one with that name. Settings → AI marks these roles "Set by this project".
 
+### Restricting what a model may do
+
+A role's model can be kept from using tools, SQL, streaming or image
+input, whatever asks it. In Settings → AI, uncheck what the role's model
+**Allows**; in a file, list what it may not do:
+
+```yaml
+ai:
+  roles:
+    summarize: { provider: openrouter, model: openai/gpt-5-mini, restrict: [tools, sql] }
+```
+
+A request that needs something the model is restricted from fails before
+anything is sent, naming the role and the restriction. Extensions choose
+which role or profile they use, but they can't lift a restriction.
+`oxplow extension check` warns when an extension's AI profile needs
+something its model is restricted from.
+
 ## What oxplow uses them for
 
 - **Decisions Oxplow Noticed.** When an effort closes, a model reads that

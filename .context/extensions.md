@@ -4524,7 +4524,9 @@ with the run's extension by `CollectorOracle`). `ai_profiles::profiles_of`
 feeds `AiService::set_profiles` from the catalog; resolution, features
 and Settings are [ai-providers.md](./ai-providers.md) "Extension AI
 profiles". `extension check` and `extension test` print a line per
-profile (`oxplow_sdk::profile_lines`: bound, or falling back).
+profile (`oxplow_sdk::profile_lines`: bound, or falling back), and
+`check` warns when the binding serving a profile forbids a feature it
+declares (`profile_warnings`, a person's `restrict:`).
 
 ## Host-owned secret references
 

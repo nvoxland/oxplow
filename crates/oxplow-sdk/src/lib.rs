@@ -1067,7 +1067,11 @@ pub async fn check(
         name: name.to_string(),
         ok: extension.errors.is_empty(),
         errors: extension.errors.clone(),
-        warnings: extension.warnings.clone(),
+        warnings: {
+            let mut warnings = extension.warnings.clone();
+            warnings.extend(profile_warnings(&extension, &ai_bindings(root)));
+            warnings
+        },
         dry_run,
         services: oxplow_app::services::of_extension(&extension, &|file| {
             extensions::read_extension_file(root, name, file)
@@ -1202,8 +1206,6 @@ pub fn import_lines(ext: &Extension) -> Vec<String> {
         .collect()
 }
 
-/// One line per `ai_profiles:` entry: what serves it. For now every profile
-/// falls back to its built-in role's model.
 /// What serves each of `ext`'s `ai_profiles:` under `ai` (the bindings a
 /// call would use): its own binding, else its fallback role.
 pub fn profile_lines(ext: &Extension, ai: &oxplow_ai::config::AiConfig) -> Vec<String> {
@@ -1234,6 +1236,22 @@ pub fn profile_lines(ext: &Extension, ai: &oxplow_ai::config::AiConfig) -> Vec<S
                 None => format!("falls back to `{}`", p.fallback.name()),
             };
             format!("ai profile `{}` → {serves}{features}", p.id)
+        })
+        .collect()
+}
+
+/// Each of `ext`'s profiles whose binding here (its own, else its
+/// fallback's) forbids a feature it declares: the call would be refused.
+pub fn profile_warnings(ext: &Extension, ai: &oxplow_ai::config::AiConfig) -> Vec<String> {
+    ext.ai_profiles
+        .iter()
+        .filter_map(|decl| {
+            let profile = decl.profile(&ext.name);
+            let binding = ai.roles.get(&profile.role()).or_else(|| {
+                ai.roles
+                    .get(&oxplow_ai::config::Role::Builtin(profile.fallback))
+            })?;
+            oxplow_app::ai_service::forbidden_feature(&profile, binding)
         })
         .collect()
 }
@@ -1793,7 +1811,8 @@ mod tests {
         write(
             dir.path(),
             ".oxplow/project.yaml",
-            "ai:\n  roles:\n    prof/plain: { provider: p, model: big }\n",
+            "ai:\n  roles:\n    prof/plain: { provider: p, model: big }\n    \
+             summarize: { provider: p, model: small, restrict: [tools] }\n",
         );
         let report = check(
             dir.path(),
@@ -1815,6 +1834,13 @@ mod tests {
         assert!(
             text.contains("ai profile `plain` → bound to `p · big`\n"),
             "{text}"
+        );
+        // The project restricts the binding `review` falls back to.
+        assert!(
+            report.warnings.iter().any(|w| w
+                == "AI profile `prof/review` needs tool calling, which its binding `p · small` forbids"),
+            "{:?}",
+            report.warnings
         );
     }
 

@@ -122,12 +122,17 @@ pub fn effective_config(
                 key: format!("ai.roles.{role}"),
                 doc: match r.fallback {
                     Some(fallback) => format!(
-                        "The model the `{role}` AI profile uses (a provider and a model); \
-                         unset, it uses the `{}` role's.",
+                        "The model the `{role}` AI profile uses (a provider, a model and \
+                         what the binding is restricted from: `restrict: [tools, sql, \
+                         streaming, images]`); unset, it uses the `{}` role's.",
                         fallback.name()
                     ),
                     None => {
-                        format!("The model the `{role}` AI role uses (a provider and a model).")
+                        format!(
+                            "The model the `{role}` AI role uses (a provider, a model and what \
+                             the binding is restricted from: `restrict: [tools, sql, streaming, \
+                             images]`)."
+                        )
                     }
                 },
                 value: r.binding.as_ref().map(plain).unwrap_or(Value::Null),
@@ -281,14 +286,8 @@ mod tests {
                     description: String::new(),
                     extension: None,
                     fallback: None,
-                    effective: Some(RoleBinding {
-                        provider: "p".into(),
-                        model: "m".into(),
-                    }),
-                    binding: Some(RoleBinding {
-                        provider: "p".into(),
-                        model: "m".into(),
-                    }),
+                    effective: Some(RoleBinding::new("p", "m")),
+                    binding: Some(RoleBinding::new("p", "m")),
                     overridden: false,
                     problem: None,
                 },
@@ -297,14 +296,8 @@ mod tests {
                     description: String::new(),
                     extension: None,
                     fallback: None,
-                    effective: Some(RoleBinding {
-                        provider: "p".into(),
-                        model: "f".into(),
-                    }),
-                    binding: Some(RoleBinding {
-                        provider: "p".into(),
-                        model: "f".into(),
-                    }),
+                    effective: Some(RoleBinding::new("p", "f")),
+                    binding: Some(RoleBinding::new("p", "f")),
                     overridden: true,
                     problem: None,
                 },

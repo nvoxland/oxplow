@@ -809,6 +809,10 @@ const DROPPED_AI_ROLES: [&str; 3] = ["fast", "embed", "review"];
 pub struct AiRoleOverride {
     pub provider: String,
     pub model: String,
+    /// What the project forbids this binding (`restrict: [tools, sql]`);
+    /// absent, nothing.
+    #[serde(default)]
+    pub restrict: std::collections::BTreeSet<oxplow_domain::ai::AiRestriction>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -1590,7 +1594,22 @@ pub fn config_entries(config: &OxplowConfig, fallback_name: &str) -> Vec<ConfigE
     }
     {
         let mut ai = serde_yaml::Mapping::new();
-        ai.insert("roles".into(), to_yaml(&config.ai_roles));
+        // A role restricted from nothing is written without `restrict`.
+        let mut roles = to_yaml(&config.ai_roles);
+        if let serde_yaml::Value::Mapping(roles) = &mut roles {
+            for (_, role) in roles.iter_mut() {
+                if let serde_yaml::Value::Mapping(role) = role {
+                    if role
+                        .get("restrict")
+                        .and_then(serde_yaml::Value::as_sequence)
+                        .is_some_and(Vec::is_empty)
+                    {
+                        role.remove("restrict");
+                    }
+                }
+            }
+        }
+        ai.insert("roles".into(), roles);
         put(
             "ai",
             serde_yaml::Value::Mapping(ai),
@@ -4523,7 +4542,7 @@ lsp:
         std::fs::write(
             cfg_path(dir.path()),
             "ai:\n  roles:\n    summarize: { provider: openrouter, model: openai/gpt-5-mini }\n    \
-             acme/review: { provider: openrouter, model: big }\n",
+             acme/review: { provider: openrouter, model: big, restrict: [tools, streaming] }\n",
         )
         .unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
@@ -4535,10 +4554,26 @@ lsp:
             cfg.ai_roles.get("summarize"),
             Some(&AiRoleOverride {
                 provider: "openrouter".into(),
-                model: "openai/gpt-5-mini".into()
+                model: "openai/gpt-5-mini".into(),
+                restrict: Default::default(),
             })
         );
+        assert_eq!(
+            cfg.ai_roles["acme/review"].restrict,
+            [
+                oxplow_domain::ai::AiRestriction::Tools,
+                oxplow_domain::ai::AiRestriction::Streaming
+            ]
+            .into(),
+            "what the project forbids the binding"
+        );
         write_rendered(dir.path(), &cfg);
+        let written = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
+        assert_eq!(
+            written.matches("restrict").count(),
+            1,
+            "only a restricted role says so: {written}"
+        );
         let again = load_project_config(dir.path()).unwrap();
         assert_eq!(again.ai_roles, cfg.ai_roles, "written back unchanged");
 
@@ -4554,6 +4589,10 @@ lsp:
             (
                 "ai:\n  roles:\n    acme/Review: { provider: p, model: m }\n",
                 "acme/Review: unknown role",
+            ),
+            (
+                "ai:\n  roles:\n    main: { provider: p, model: m, restrict: [network] }\n",
+                "network",
             ),
             // A role nothing asked is gone: naming one says so.
             (

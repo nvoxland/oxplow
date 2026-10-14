@@ -777,13 +777,7 @@ mod tests {
             )
             .unwrap();
         svc.ai
-            .set_role(
-                &role,
-                Some(RoleBinding {
-                    provider: provider.into(),
-                    model: "x".into(),
-                }),
-            )
+            .set_role(&role, Some(RoleBinding::new(provider, "x")))
             .unwrap();
     }
 
@@ -949,13 +943,7 @@ mod tests {
         assert_eq!(hosted.value, "hosted says");
         fx.svc
             .ai
-            .set_role(
-                &Role::SUMMARIZE,
-                Some(RoleBinding {
-                    provider: "local".into(),
-                    model: "x".into(),
-                }),
-            )
+            .set_role(&Role::SUMMARIZE, Some(RoleBinding::new("local", "x")))
             .unwrap();
         let again = fx
             .svc

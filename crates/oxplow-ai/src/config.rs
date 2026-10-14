@@ -3,9 +3,10 @@
 //! override role bindings. Keys are NOT here; they live in the keychain
 //! under the provider id.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+use oxplow_domain::ai::AiRestriction;
 use serde::{Deserialize, Serialize};
 
 /// File name inside the global config dir.
@@ -219,6 +220,32 @@ pub struct RoleBinding {
     /// A provider `id`.
     pub provider: String,
     pub model: String,
+    /// What a person forbids this binding (`restrict: [tools, sql]`): a
+    /// typed request needing it is refused, whichever profile or job
+    /// chose the binding. Empty: nothing forbidden.
+    #[serde(default)]
+    pub restrict: BTreeSet<AiRestriction>,
+}
+
+impl RoleBinding {
+    /// `provider`'s `model`, unrestricted.
+    pub fn new(provider: impl Into<String>, model: impl Into<String>) -> Self {
+        Self {
+            provider: provider.into(),
+            model: model.into(),
+            restrict: BTreeSet::new(),
+        }
+    }
+
+    /// Whether it forbids `r`.
+    pub fn forbids(&self, r: AiRestriction) -> bool {
+        self.restrict.contains(&r)
+    }
+
+    /// `provider · model`, as Settings and messages show it.
+    pub fn label(&self) -> String {
+        format!("{} · {}", self.provider, self.model)
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
@@ -252,7 +279,22 @@ impl AiConfig {
     /// Validate and write to `dir/ai.yaml`.
     pub fn save(&self, dir: &Path) -> Result<(), ConfigError> {
         self.validate()?;
-        let text = serde_yaml::to_string(self).map_err(|e| ConfigError::Io(e.to_string()))?;
+        let mut value = serde_yaml::to_value(self).map_err(|e| ConfigError::Io(e.to_string()))?;
+        // A role restricted from nothing is written without `restrict`.
+        if let Some(serde_yaml::Value::Mapping(roles)) = value.get_mut("roles") {
+            for (_, role) in roles.iter_mut() {
+                if let serde_yaml::Value::Mapping(role) = role {
+                    if role
+                        .get("restrict")
+                        .and_then(serde_yaml::Value::as_sequence)
+                        .is_some_and(Vec::is_empty)
+                    {
+                        role.remove("restrict");
+                    }
+                }
+            }
+        }
+        let text = serde_yaml::to_string(&value).map_err(|e| ConfigError::Io(e.to_string()))?;
         std::fs::create_dir_all(dir).map_err(|e| ConfigError::Io(e.to_string()))?;
         std::fs::write(dir.join(AI_CONFIG_FILE), text).map_err(|e| ConfigError::Io(e.to_string()))
     }
@@ -364,6 +406,38 @@ roles:
         assert!(!err.contains("unknown variant"), "{err}");
     }
 
+    /// A person restricts a binding in `ai.yaml`: what it forbids loads,
+    /// saves back the same way, and an unknown restriction fails naming it.
+    #[test]
+    fn a_binding_carries_what_it_forbids() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(AI_CONFIG_FILE),
+            "providers: [{ id: p, kind: openai }]\nroles:\n  summarize: { provider: p, model: m, restrict: [tools, sql] }\n  main: { provider: p, model: m }\n",
+        )
+        .unwrap();
+        let loaded = AiConfig::load(dir.path()).unwrap();
+        let b = &loaded.roles[&Role::SUMMARIZE];
+        assert!(b.forbids(AiRestriction::Tools) && b.forbids(AiRestriction::Sql));
+        assert!(!b.forbids(AiRestriction::Streaming));
+        assert!(loaded.roles[&Role::MAIN].restrict.is_empty());
+        loaded.save(dir.path()).unwrap();
+        let saved = std::fs::read_to_string(dir.path().join(AI_CONFIG_FILE)).unwrap();
+        assert_eq!(
+            saved.matches("restrict").count(),
+            1,
+            "only the restricted role says so: {saved}"
+        );
+        assert_eq!(AiConfig::load(dir.path()).unwrap(), loaded);
+        std::fs::write(
+            dir.path().join(AI_CONFIG_FILE),
+            "providers: [{ id: p, kind: openai }]\nroles:\n  main: { provider: p, model: m, restrict: [network] }\n",
+        )
+        .unwrap();
+        let err = AiConfig::load(dir.path()).unwrap_err().to_string();
+        assert!(err.contains("network"), "{err}");
+    }
+
     #[test]
     fn resolves_roles_to_their_provider() {
         let c = cfg();
@@ -376,13 +450,7 @@ roles:
     #[test]
     fn project_overrides_win() {
         let mut o = BTreeMap::new();
-        o.insert(
-            Role::MAIN,
-            RoleBinding {
-                provider: "local".into(),
-                model: "llama".into(),
-            },
-        );
+        o.insert(Role::MAIN, RoleBinding::new("local", "llama"));
         let c = cfg().with_overrides(&o);
         assert_eq!(c.resolve(&Role::MAIN, &[]).unwrap().1.model, "llama");
         assert_eq!(
@@ -396,13 +464,7 @@ roles:
     fn validation_catches_unusable_config() {
         cfg().validate().unwrap();
         let mut bad = cfg();
-        bad.roles.insert(
-            Role::MAIN,
-            RoleBinding {
-                provider: "nope".into(),
-                model: "m".into(),
-            },
-        );
+        bad.roles.insert(Role::MAIN, RoleBinding::new("nope", "m"));
         assert!(
             matches!(bad.validate(), Err(ConfigError::Invalid(m)) if m.contains("uses AI provider `nope`"))
         );
@@ -443,10 +505,7 @@ roles:
         let mut bound = cfg();
         bound.roles.insert(
             role.clone(),
-            RoleBinding {
-                provider: "anthropic".into(),
-                model: "claude-opus-5-5".into(),
-            },
+            RoleBinding::new("anthropic", "claude-opus-5-5"),
         );
         assert_eq!(
             bound.resolve(&role, &[review()]).unwrap().1.model,

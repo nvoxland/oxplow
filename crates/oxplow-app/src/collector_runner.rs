@@ -3475,20 +3475,11 @@ pub(crate) mod tests {
             None,
         )
         .unwrap();
-        ai.set_role(
-            &Role::DECIDE,
-            Some(RoleBinding {
-                provider: "m".into(),
-                model: "x".into(),
-            }),
-        )
-        .unwrap();
+        ai.set_role(&Role::DECIDE, Some(RoleBinding::new("m", "x")))
+            .unwrap();
         ai.set_role(
             &Role::parse("work/sort").unwrap(),
-            Some(RoleBinding {
-                provider: "m".into(),
-                model: "y".into(),
-            }),
+            Some(RoleBinding::new("m", "y")),
         )
         .unwrap();
         ai.set_profiles(std::sync::Arc::new(|| {

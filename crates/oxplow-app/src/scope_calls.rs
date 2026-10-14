@@ -778,13 +778,8 @@ mod tests {
             kind: "openrouter".into(),
             base_url: Some("http://unused".into()),
         });
-        cfg.roles.insert(
-            Role::SUMMARIZE,
-            RoleBinding {
-                provider: "or".into(),
-                model: "m".into(),
-            },
-        );
+        cfg.roles
+            .insert(Role::SUMMARIZE, RoleBinding::new("or", "m"));
         cfg.save(dir.path()).unwrap();
         let svc = crate::ai_service::AiService::new(
             Default::default(),
