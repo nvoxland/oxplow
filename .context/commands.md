@@ -61,8 +61,13 @@ provider registry are built holding the project's activation boundary (a part
 built alone, as the CLI's checks do, has its own, which nothing has
 activated), so a pin is always available.
 `CommandBus::with_activation` sets the ingress boundary: a pin is
-attached before command lookup and retained through the entire pipeline, including
-prepared effect commands, compositions and post-commit projections. A standalone
+attached for command lookup and retained through admission, policy,
+confirmation and the run of a `Tx` handler, including prepared effect commands,
+compositions and post-commit projections. An `External` handler runs after the
+pin is released (`Flow::External` / `run_external`): it makes its own host
+calls, each pinning for itself, so an activation never waits for a long
+collector run or a provider call. Its run carries no pin
+(`RunContext::without_host_generation`). A standalone
 bus retains its previous behavior. Production Services adopt the same boundary
 as the SQL gateway and provider registry during boot.
 

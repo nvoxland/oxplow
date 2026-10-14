@@ -247,6 +247,34 @@ pub enum Handler {
     Compose(Arc<compose::Compose>),
 }
 
+/// What the bus has once a run's admission is done: the outcome, or an
+/// External handler still to run, outside the generation.
+enum Flow {
+    Done(CommandOutcome),
+    External(Box<ExternalRun>),
+}
+
+/// An admitted External run, owned so it outlives the generation pin.
+struct ExternalRun {
+    command: Arc<Command>,
+    resolved: Resolved,
+    /// The run, without the pin its admission held.
+    run: RunContext,
+    input: Value,
+    origin: RunOrigin,
+    gates: Gates,
+}
+
+/// What settling a run's outcome needs of it.
+struct Settling<'a> {
+    run: &'a RunContext,
+    command: &'a Arc<Command>,
+    resolved: &'a Resolved,
+    input: Value,
+    origin: RunOrigin,
+    gates: Gates,
+}
+
 /// A handler with its route decided: what step 5 runs.
 #[derive(Clone)]
 enum Resolved {
@@ -1139,42 +1167,30 @@ impl CommandBus {
         confirmed: bool,
         origin: RunOrigin,
     ) -> Result<CommandOutcome, CommandError> {
-        let run = self
-            .activation
-            .pin_run(run)
-            .await
-            .map_err(CommandError::from)?;
-        let pin = run
-            .host_generation::<crate::extension_activation::GenerationPin>()
-            .expect("pinned command context")
-            .clone();
-        // Boxed: a command's run is a large future, and an effect or a
-        // provider call nests runs, which overflows a debug thread's stack.
-        self.activation
-            .read_pinned(
-                &pin,
-                Box::pin(self.lookup_and_run(&run, name, input, confirmed, origin)),
-            )
-            .await
-            .map_err(CommandError::from)?
-    }
-
-    async fn lookup_and_run(
-        &self,
-        run: &RunContext,
-        name: &str,
-        input: Value,
-        confirmed: bool,
-        origin: RunOrigin,
-    ) -> Result<CommandOutcome, CommandError> {
+        // The lookup reads the published command map: it holds the
+        // generation for that alone. The run pins for itself.
         let command =
-            self.commands
-                .read()
-                .get(name)
-                .cloned()
-                .ok_or_else(|| CommandError::Unknown {
-                    name: name.to_string(),
-                })?;
+            {
+                let run = self
+                    .activation
+                    .pin_run(run)
+                    .await
+                    .map_err(CommandError::from)?;
+                let pin = run
+                    .host_generation::<crate::extension_activation::GenerationPin>()
+                    .expect("pinned command context")
+                    .clone();
+                self.activation
+                    .read_pinned(&pin, async {
+                        self.commands.read().get(name).cloned().ok_or_else(|| {
+                            CommandError::Unknown {
+                                name: name.to_string(),
+                            }
+                        })
+                    })
+                    .await
+                    .map_err(CommandError::from)??
+            };
         self.run_prepared(run, command, input, confirmed, origin)
             .await
     }
@@ -1189,22 +1205,31 @@ impl CommandBus {
         confirmed: bool,
         origin: RunOrigin,
     ) -> Result<CommandOutcome, CommandError> {
-        let run = self
-            .activation
-            .pin_run(run)
-            .await
-            .map_err(CommandError::from)?;
-        let pin = run
-            .host_generation::<crate::extension_activation::GenerationPin>()
-            .expect("pinned command context")
-            .clone();
-        self.activation
-            .read_pinned(
-                &pin,
-                self.run_pipeline(&run, command, input, confirmed, origin),
-            )
-            .await
-            .map_err(CommandError::from)?
+        // Admission, policy, confirmation and a transaction's run hold the
+        // generation. An External handler runs after it is released: it
+        // makes its own host calls, each pinning for itself.
+        let flow = {
+            let run = self
+                .activation
+                .pin_run(run)
+                .await
+                .map_err(CommandError::from)?;
+            let pin = run
+                .host_generation::<crate::extension_activation::GenerationPin>()
+                .expect("pinned command context")
+                .clone();
+            self.activation
+                .read_pinned(
+                    &pin,
+                    self.run_pipeline(&run, command, input, confirmed, origin),
+                )
+                .await
+                .map_err(CommandError::from)??
+        };
+        match flow {
+            Flow::Done(done) => Ok(done),
+            Flow::External(external) => self.run_external(*external).await,
+        }
     }
 
     async fn run_pipeline(
@@ -1214,7 +1239,7 @@ impl CommandBus {
         input: Value,
         confirmed: bool,
         origin: RunOrigin,
-    ) -> Result<CommandOutcome, CommandError> {
+    ) -> Result<Flow, CommandError> {
         let spec = &command.spec;
         let run = &match self.resolved(run).await {
             Ok(run) => run,
@@ -1367,7 +1392,7 @@ impl CommandBus {
         if spec.access.reads_only() {
             let read = self.run_read(&resolved, run, input).await;
             self.ran_unaudited(run, read.as_ref().err()).await;
-            return read;
+            return read.map(Flow::Done);
         }
         // 5'. A composite's steps run outside one transaction: each lands
         // as it runs, the run recorded once at the end (`steps.rs`). A step
@@ -1381,6 +1406,7 @@ impl CommandBus {
             return match self
                 .run_steps(run, spec, &input, plan.clone(), admitted)
                 .await
+                .map(Flow::Done)
             {
                 Err(CommandError::NeedsConfirmation { preview }) => {
                     let prepared = Prepared {
@@ -1506,7 +1532,7 @@ impl CommandBus {
                     Ok((out, recorded)) => Ok(finish(out, recorded)),
                     Err(TxError::Aborted(Abort::Unchanged(out))) => {
                         self.ran_unaudited(run, None).await;
-                        return Ok(unrecorded(*out));
+                        return Ok(Flow::Done(unrecorded(*out)));
                     }
                     Err(TxError::Aborted(Abort::Lost(e))) => return Err(e),
                     Err(TxError::Aborted(Abort::Failed(e))) => Err(e),
@@ -1514,33 +1540,105 @@ impl CommandBus {
                 }
             }
             Resolved::Steps(_) => unreachable!("composite steps ran above"),
-            Resolved::External(handler) => {
-                self.claim(&origin).await?;
-                // The command's own run: what it starts (a collector run,
-                // a provider's `host/call`s) is part of the run audited.
-                let invocation = Invocation {
-                    run: run.clone(),
-                    ..origin.invocation(run, 0, &spec.id, &input)
-                };
-                let called = invocation.run.clone();
-                match handler(invocation, input.clone()).await {
-                    Ok(out) => Ok(self
-                        .record_external(
-                            run,
-                            spec,
-                            &input,
-                            out,
-                            origin.clone(),
-                            called.trace().summary(),
-                        )
-                        .await),
-                    Err(err) => {
-                        self.release(&origin).await;
-                        Err(err)
-                    }
-                }
+            Resolved::External(_) => {
+                // Run after the generation is released (`run_external`).
+                return Ok(Flow::External(Box::new(ExternalRun {
+                    command,
+                    resolved,
+                    run: run.clone().without_host_generation(),
+                    input,
+                    origin,
+                    gates,
+                })));
             }
         };
+        self.settle(
+            outcome,
+            Settling {
+                run,
+                command: &command,
+                resolved: &resolved,
+                input,
+                origin,
+                gates,
+            },
+        )
+        .await
+        .map(Flow::Done)
+    }
+
+    /// An External handler's run: after the bus released the generation,
+    /// then audited and settled like any other.
+    async fn run_external(&self, external: ExternalRun) -> Result<CommandOutcome, CommandError> {
+        let ExternalRun {
+            command,
+            resolved,
+            run,
+            input,
+            origin,
+            gates,
+        } = external;
+        let spec = &command.spec;
+        let Resolved::External(handler) = &resolved else {
+            unreachable!("an external run holds an external handler")
+        };
+        let outcome = async {
+            self.claim(&origin).await?;
+            // The command's own run: what it starts (a collector run,
+            // a provider's `host/call`s) is part of the run audited.
+            let invocation = Invocation {
+                run: run.clone(),
+                ..origin.invocation(&run, 0, &spec.id, &input)
+            };
+            let called = invocation.run.clone();
+            match handler(invocation, input.clone()).await {
+                Ok(out) => Ok(self
+                    .record_external(
+                        &run,
+                        spec,
+                        &input,
+                        out,
+                        origin.clone(),
+                        called.trace().summary(),
+                    )
+                    .await),
+                Err(err) => {
+                    self.release(&origin).await;
+                    Err(err)
+                }
+            }
+        }
+        .await;
+        self.settle(
+            outcome,
+            Settling {
+                run: &run,
+                command: &command,
+                resolved: &resolved,
+                input,
+                origin,
+                gates,
+            },
+        )
+        .await
+    }
+
+    /// How a run ended, as the caller sees it: landed, asked, or recorded
+    /// as refused or failed.
+    async fn settle(
+        &self,
+        outcome: Result<CommandOutcome, CommandError>,
+        settling: Settling<'_>,
+    ) -> Result<CommandOutcome, CommandError> {
+        let Settling {
+            run,
+            command,
+            resolved,
+            input,
+            origin,
+            gates,
+        } = settling;
+        let spec = &command.spec;
         match outcome {
             Ok(done) => {
                 self.landed().await;
@@ -1550,10 +1648,7 @@ impl CommandBus {
             // whose child asks) is step 4's answer, late: rolled back,
             // nothing audited — a person is asked, an agent's run proposed.
             Err(CommandError::NeedsConfirmation { preview }) => {
-                let prepared = Prepared {
-                    command: &command,
-                    resolved: &resolved,
-                };
+                let prepared = Prepared { command, resolved };
                 Err(self
                     .unconfirmed(run, origin, prepared, input, *preview, gates)
                     .await)

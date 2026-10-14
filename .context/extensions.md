@@ -4358,6 +4358,24 @@ commands:
   by and computed on that one binding. Pinned by
   `a_queued_job_runs_after_another_extension_changes` and
   `an_activation_does_not_wait_for_a_running_job`.
+- **Collector and effect runs hold no generation either.** The same
+  pattern: a run's `ContributionRef.generation` is `None`
+  (`run_context::unpinned_contribution`) and `run_context::live_owner` is a
+  `guarded` check that its own extension is still enabled, at the version
+  the run started with and still declaring the contribution, run at each
+  host call and at publication (a collector's rows commit inside
+  `read_generation` after `check_authority`; a fact collector's capture
+  likewise). A change to or the revocation of the run's extension stops it
+  publishing under the old declaration; another extension's change doesn't
+  touch it. The state host decides a run with no generation by the version,
+  enabled and declaration checks. `oxplow.collector.sync` is an `External`
+  command, which the bus runs after releasing its pin (`.context/commands.md`),
+  and an effect's `handle` no longer pins the whole event: its script runs
+  unpinned and the commands it composes pin per command. Pinned by
+  `an_activation_does_not_wait_for_a_running_collector`,
+  `a_collector_does_not_publish_across_a_change_to_its_extension`,
+  `a_collector_does_not_publish_after_its_extension_is_disabled` and
+  `an_effects_run_holds_no_generation_and_ends_with_its_extension`.
 - An extension has at most 256 queued or running jobs (a
   repeat of an intent it already has is not a new one). No database
   transaction is held while a model streams (`Database::write_transactions_open`

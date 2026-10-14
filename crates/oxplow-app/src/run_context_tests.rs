@@ -103,8 +103,6 @@ async fn every_run_is_recorded_once_as_itself() {
     acme(&root, &task);
     crate::test_fixtures::activate_with_problems(svc).await;
     crate::test_fixtures::activate(svc).await;
-    let generation = svc.extension_catalog.generation(&root);
-
     let env = Envelope::new("acme.merged", 1, "test", json!({ "number": 1 }))
         .unwrap()
         .with_anchors(Anchors {
@@ -135,9 +133,10 @@ async fn every_run_is_recorded_once_as_itself() {
     .await;
     assert_eq!(
         collector,
+        // A collector's run holds no generation: it is its extension's version.
         vec![vec![
             json!("1.2.0"),
-            json!(generation),
+            Value::Null,
             json!("system"),
             json!(event_id),
             json!(fx.thread.value()),

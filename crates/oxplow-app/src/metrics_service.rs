@@ -2020,13 +2020,6 @@ impl MetricsService {
             .given(collector, &runner, &run, Arc::new(files))
             .await?;
         let layer = self.run_log.as_ref().map(|l| l.layer.clone());
-        let run = match &layer {
-            Some(layer) => layer
-                .pin_run(&run)
-                .await
-                .map_err(|error| error.to_string())?,
-            None => run,
-        };
         let facts = tokio::task::spawn_blocking(move || runner.run(&input, given, layer, &run))
             .await
             .map_err(|e| format!("task failed: {e}"))??;
@@ -2081,16 +2074,20 @@ impl MetricsService {
         let Some(ext) = extensions.iter().find(|e| e.name == collector.owner) else {
             return parent.child(None, mode);
         };
-        let run = parent.child(
-            Some(crate::run_context::contribution(
-                &self.extensions_cache,
-                root,
-                ext,
-                oxplow_domain::contribution::ContributionKind::Collector,
-                &collector.key,
-            )),
-            mode,
+        // It holds no catalog generation while it runs: it belongs to its
+        // extension's version, rechecked at each host call and at publication.
+        let owner = crate::run_context::unpinned_contribution(
+            ext,
+            oxplow_domain::contribution::ContributionKind::Collector,
+            &collector.key,
         );
+        let run = parent
+            .child(Some(owner.clone()), mode)
+            .guarded(crate::run_context::live_owner(
+                self.extensions_cache.clone(),
+                root,
+                owner,
+            ));
         let Some(spec) = ext.collectors.iter().find(|s| s.id == collector.key) else {
             return run;
         };
@@ -2207,10 +2204,7 @@ impl MetricsService {
                 Ok(given) => {
                     let run = this_run.clone();
                     let layer = self.run_log.as_ref().map(|l| l.layer.clone());
-                    let run = match &layer {
-                        Some(layer) => layer.pin_run(&run).await.map_err(|error| error.to_string()),
-                        None => Ok(run),
-                    };
+                    let run: Result<RunContext, String> = Ok(run);
                     // A tree collector scans the WHOLE tree (hundreds of files,
                     // tree-sitter each): the 5 s default sized for report parsers
                     // silently timed out the broad-query ones on every full-tree
@@ -2227,51 +2221,67 @@ impl MetricsService {
                 }
             },
         };
-        let outcome = outcome.and_then(|facts| {
-            this_run.check_authority()?;
-            Ok(facts)
-        });
-        // Facts the ingest would refuse fail the run here, with why (tsk986).
-        let outcome = match outcome {
-            Ok(collector_facts) => match self.refused_facts(collector, &collector_facts).await {
-                Some(why) => Err(why),
-                None => Ok(collector_facts),
-            },
-            failed => failed,
-        };
-        let (run, capture) = match outcome {
-            Ok(collector_facts) => {
-                tracing::debug!(
-                    key = %collector.key,
-                    elapsed_ms = started.elapsed().as_millis() as u64,
-                    "fact collector: complete",
-                );
-                match self
-                    .collector_capture(collector, ctx, &source, &collector_facts)
-                    .await
-                {
-                    Some((capture, rows)) => (FactRun::Recorded(rows.len()), Some((capture, rows))),
-                    None => (FactRun::Recorded(0), None),
+        // Publication holds the generation for its own short work: no
+        // activation lands between the check of the collector's own
+        // extension and its facts.
+        let publish = async {
+            let outcome = outcome.and_then(|facts| {
+                this_run.check_authority()?;
+                Ok(facts)
+            });
+            // Facts the ingest would refuse fail the run here, with why (tsk986).
+            let outcome = match outcome {
+                Ok(collector_facts) => {
+                    match self.refused_facts(collector, &collector_facts).await {
+                        Some(why) => Err(why),
+                        None => Ok(collector_facts),
+                    }
                 }
-            }
-            Err(e) => {
-                // NOT a silent warn: a collector that fails leaves its metric
-                // reading stale or empty, which is how two built-in metrics
-                // went unnoticed for weeks. Record the failure durably.
-                tracing::error!(
-                    key = %collector.key,
-                    error = %e,
-                    elapsed_ms = started.elapsed().as_millis() as u64,
-                    "fact collector: FAILED — its metric will read stale or empty",
-                );
-                let capture = self.failure_capture(collector, ctx, &source, &e);
-                (FactRun::Failed(e), Some((capture, Vec::new())))
-            }
+                failed => failed,
+            };
+            let (run, capture) = match outcome {
+                Ok(collector_facts) => {
+                    tracing::debug!(
+                        key = %collector.key,
+                        elapsed_ms = started.elapsed().as_millis() as u64,
+                        "fact collector: complete",
+                    );
+                    match self
+                        .collector_capture(collector, ctx, &source, &collector_facts)
+                        .await
+                    {
+                        Some((capture, rows)) => {
+                            (FactRun::Recorded(rows.len()), Some((capture, rows)))
+                        }
+                        None => (FactRun::Recorded(0), None),
+                    }
+                }
+                Err(e) => {
+                    // NOT a silent warn: a collector that fails leaves its metric
+                    // reading stale or empty, which is how two built-in metrics
+                    // went unnoticed for weeks. Record the failure durably.
+                    tracing::error!(
+                        key = %collector.key,
+                        error = %e,
+                        elapsed_ms = started.elapsed().as_millis() as u64,
+                        "fact collector: FAILED — its metric will read stale or empty",
+                    );
+                    let capture = self.failure_capture(collector, ctx, &source, &e);
+                    (FactRun::Failed(e), Some((capture, Vec::new())))
+                }
+            };
+            let elapsed = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
+            self.log_run(collector, ctx, &this_run, &run, elapsed, capture)
+                .await;
+            run
         };
-        let elapsed = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
-        self.log_run(collector, ctx, &this_run, &run, elapsed, capture)
-            .await;
-        run
+        match self.run_log.as_ref().map(|l| l.layer.clone()) {
+            Some(layer) => match layer.read_generation(publish).await {
+                Ok(run) => run,
+                Err(error) => FactRun::Failed(error.to_string()),
+            },
+            None => publish.await,
+        }
     }
 
     /// The services fact collector `collector`'s script is given on `run`
