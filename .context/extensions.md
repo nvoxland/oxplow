@@ -2582,6 +2582,17 @@ approved; a **decision** is what a run was allowed (`oxplow_domain::grant`,
   it"). Approving an edited file therefore never lets the older cached text
   run; the next catalog publication loads the new one. Pinned for effects by
   `an_effect_whose_file_changed_since_it_loaded_is_refused`.
+- **Revocation stops every kind of run, which records `cancelled`.** A
+  program's whole process group is killed (`external_process::RevocationWatch`),
+  a job's supervisor cancels its attempt, and an in-process script — a
+  Starlark or jaq collector, a fact collector, an effect, an effort-policy
+  script — runs under `run_context::watch_authority(run)`: a task checking the
+  run's guards every 100 ms until it is dropped, which sets the run's cancel
+  flag when one fails; the script worker polls that flag. Without it a script
+  computing with no host call would run on to its timeout (120 s by default)
+  and only be discarded at publication. Pinned by
+  `disabling_an_extension_stops_a_collector_script_that_is_computing` and
+  `revoking_an_effect_stops_a_script_that_is_computing`.
 - **Decisions.** `run.decide(Need)` → `Allowed`, `Denied(why)` or
   `Unenforced(why)`, recorded on the run (`v_extension_run.decisions`):
   each scope call (`Calls::serve`); a program collector's `program`,

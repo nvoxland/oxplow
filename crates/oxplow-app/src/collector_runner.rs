@@ -759,6 +759,8 @@ pub async fn derive_collector(
     let input = serde_json::Value::Object(input);
     let runtime = spec.runtime;
     let (budget, cancel, cost) = (run.budget(), run.cancel().clone(), run.clone());
+    // A revocation reaches a script that is computing (no host call to notice by).
+    let _watch = crate::run_context::watch_authority(&run);
     let (layer, needs, handle) = (
         layer.clone(),
         given.needs.clone(),

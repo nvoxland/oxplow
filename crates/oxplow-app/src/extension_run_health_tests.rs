@@ -265,3 +265,64 @@ async fn a_refused_caller_is_a_denied_run_not_a_failure() {
     assert_eq!(runs[0][1], json!("2.1.0"));
     assert_eq!(runs[0][2], json!("command"));
 }
+
+/// A revocation reaches a Starlark collector that is computing with no host
+/// call to notice it by: the run ends within a moment, recorded `cancelled`,
+/// not when its timeout does.
+#[tokio::test(flavor = "multi_thread")]
+async fn disabling_an_extension_stops_a_collector_script_that_is_computing() {
+    let fx = services_with_task_effort().await;
+    let root = fx.svc.layout.project_dir.clone();
+    write(
+        &root,
+        "extension.yaml",
+        "manifest: 2\nname: acme\nversion: 2.1.0\nintent:\n  purpose: p\ncollectors:
+  - id: spin
+    runtime: starlark
+    entry: spin.star
+    entities:
+      - { name: seen, key: k, columns: { k: text } }
+",
+    );
+    write(
+        &root,
+        "spin.star",
+        "def transform(x):\n    n = 0\n    for i in range(100000):\n        for j in range(100000):\n            n += 1\n    return {\"entities\": {\"seen\": []}}\n",
+    );
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
+    let running = {
+        let (svc, root) = (fx.svc.clone(), root.clone());
+        tokio::spawn(async move {
+            run_collector(
+                &Collectors::of(&svc, &root),
+                &person(),
+                "acme",
+                "spin",
+                RunTrigger::Manual,
+            )
+            .await
+            .map(|_| ())
+            .map_err(|e| format!("{e:?}"))
+        })
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    std::fs::write(
+        root.join(".oxplow/project.yaml"),
+        "extensions:\n  disabled: [acme]\n",
+    )
+    .unwrap();
+    fx.svc.reload_config_from_disk().unwrap();
+    let disabled = std::time::Instant::now();
+    running.await.unwrap().expect_err("it is stopped");
+    assert!(
+        disabled.elapsed() < std::time::Duration::from_secs(2),
+        "it ran on for {:?} after the extension was disabled",
+        disabled.elapsed()
+    );
+    let runs = rows(
+        &fx,
+        "SELECT outcome FROM v_extension_run WHERE contribution = 'collector:acme/spin'",
+    )
+    .await;
+    assert_eq!(runs, vec![vec![json!("cancelled")]]);
+}

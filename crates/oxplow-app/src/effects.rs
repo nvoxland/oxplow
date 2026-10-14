@@ -416,6 +416,8 @@ pub async fn run_over(
     let given = crate::services::prepare(run, script, needs, sources).await?;
     let (script, needs) = (script.to_string(), needs.to_vec());
     let (layer, answers, run) = (layer.clone(), answers.cloned(), run.clone());
+    // A revocation reaches a script that is computing (no host call to notice by).
+    let _watch = crate::run_context::watch_authority(&run);
     let runtime = tokio::runtime::Handle::current();
     tokio::task::spawn_blocking(move || {
         let read = Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(layer.run(q)));

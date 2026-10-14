@@ -1028,6 +1028,8 @@ pub(crate) async fn run_script(
         .with_tree(crate::services::Trees::From(Arc::new(svc.metrics.clone())));
     let given = crate::services::prepare(&composing, &script, &needs, &sources).await?;
     let runtime = tokio::runtime::Handle::current();
+    // A revocation reaches a script that is computing (no host call to notice by).
+    let _watch = crate::run_context::watch_authority(&composing);
     tokio::task::spawn_blocking(move || {
         let read = Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(layer.run_in(&composing, q)));
         let mut calls = crate::scope_calls::Calls::new(&composing, &needs, read)
@@ -1982,6 +1984,44 @@ mod tests {
             .await,
             json!([]),
             "a stopped run says nothing of the effect's health"
+        );
+    }
+
+    /// A revocation reaches a script that is computing, with no host call to
+    /// notice it by: the run ends at once, not when the script's timeout does.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn revoking_an_effect_stops_a_script_that_is_computing() {
+        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let svc = &fx.svc;
+        let forever = SPIN.replace("range(700)", "range(100000)");
+        extension(svc, MARK_DONE, &[("mark.star", &forever)]).await;
+        approve(svc).await;
+        let consumer = Arc::new(EffectTriggers::new(Arc::downgrade(svc)));
+        let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let running = {
+            let (consumer, ev) = (consumer.clone(), ev.clone());
+            tokio::spawn(async move { consumer.handle(&ev).await })
+        };
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let (ext, decl) = effects(svc).into_iter().next().unwrap();
+        assert!(svc
+            .approvals
+            .revoke(&effects::effect_program(&ext, &decl).key())
+            .unwrap());
+        let revoked = std::time::Instant::now();
+        running.await.unwrap().unwrap();
+        assert!(
+            revoked.elapsed() < Duration::from_secs(2),
+            "it ran on for {:?} after the revocation",
+            revoked.elapsed()
+        );
+        assert_eq!(
+            rows(
+                svc,
+                "SELECT outcome FROM v_extension_run WHERE contribution = 'effect:acme/mark-done'"
+            )
+            .await,
+            json!([["cancelled"]])
         );
     }
 

@@ -2026,6 +2026,8 @@ impl MetricsService {
             .given(collector, &runner, &run, Arc::new(files))
             .await?;
         let layer = self.run_log.as_ref().map(|l| l.layer.clone());
+        // A revocation reaches a script that is computing (no host call to notice by).
+        let _watch = crate::run_context::watch_authority(&run);
         let facts = tokio::task::spawn_blocking(move || runner.run(&input, given, layer, &run))
             .await
             .map_err(|e| format!("task failed: {e}"))??;
@@ -2217,11 +2219,15 @@ impl MetricsService {
                     // run (tsk47). They run detached under `spawn_blocking`, so a
                     // generous ceiling costs nothing and still catches a runaway.
                     match run {
-                        Ok(run) => tokio::task::spawn_blocking(move || {
-                            runner.run(&input, given, layer, &run)
-                        })
-                        .await
-                        .unwrap_or_else(|e| Err(format!("task failed: {e}"))),
+                        Ok(run) => {
+                            // A revocation reaches a script that is computing.
+                            let _watch = crate::run_context::watch_authority(&run);
+                            tokio::task::spawn_blocking(move || {
+                                runner.run(&input, given, layer, &run)
+                            })
+                            .await
+                            .unwrap_or_else(|e| Err(format!("task failed: {e}")))
+                        }
                         Err(error) => Err(error),
                     }
                 }
