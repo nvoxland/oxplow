@@ -2003,6 +2003,17 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn core_registers_only_each_types_newest_version() {
+        // A core bump rewrites the logged rows in a migration and deletes
+        // the old version; only an extension's declared types keep theirs.
+        let r = EventSchemaRegistry::core();
+        let mut types: Vec<String> = r.versions().into_iter().map(|(t, _)| t).collect();
+        let all = types.len();
+        types.dedup();
+        assert_eq!(types.len(), all, "a core type registers an old version");
+    }
+
+    #[test]
     fn core_registry_knows_every_core_type_and_version() {
         let r = EventSchemaRegistry::core();
         let all = r.versions();
