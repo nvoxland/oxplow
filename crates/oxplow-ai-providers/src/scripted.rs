@@ -359,7 +359,7 @@ fn redacted(error: AiError, key: Option<&str>) -> AiError {
         ) => AiError::Http {
             provider,
             status,
-            body: body.replace(key, "[redacted]"),
+            body: redact_text(&body, key),
         },
         (error, _) => error,
     }
@@ -379,21 +379,55 @@ fn typed_response(provider: &str, response: Value) -> Result<TypedResponseV1, Ai
     })
 }
 
+/// Whether `c` can be part of a key: a credential is a token, so it is
+/// only taken out where it stands whole.
+fn is_key_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_' || c == '-'
+}
+
+/// `text` with `key` replaced wherever the characters around it aren't key
+/// characters (the ends of the text count as boundaries). A short key
+/// doesn't mangle the words that contain it.
+fn redact_text(text: &str, key: &str) -> String {
+    if key.is_empty() {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut rest = 0;
+    while let Some(found) = text[rest..].find(key) {
+        let (start, end) = (rest + found, rest + found + key.len());
+        let before = text[..start].chars().next_back();
+        let after = text[end..].chars().next();
+        if before.is_none_or(|c| !is_key_char(c)) && after.is_none_or(|c| !is_key_char(c)) {
+            out.push_str(&text[rest..start]);
+            out.push_str("[redacted]");
+            rest = end;
+        } else {
+            // Not a whole token: keep its first character and look on.
+            let step = text[start..].chars().next().map_or(1, char::len_utf8);
+            out.push_str(&text[rest..start + step]);
+            rest = start + step;
+        }
+    }
+    out.push_str(&text[rest..]);
+    out
+}
+
 /// The host never hands an echoed credential back to a mapping script.
 fn redact_key(value: &mut Value, key: &str) {
     match value {
-        Value::String(text) => *text = text.replace(key, "[redacted]"),
+        Value::String(text) => *text = redact_text(text, key),
         Value::Array(values) => values.iter_mut().for_each(|value| redact_key(value, key)),
         Value::Object(map) => {
             *map = std::mem::take(map)
                 .into_iter()
                 .map(|(name, mut value)| {
                     redact_key(&mut value, key);
-                    (name.replace(key, "[redacted]"), value)
+                    (redact_text(&name, key), value)
                 })
                 .collect();
         }
-        Value::Number(number) if number.to_string().contains(key) => *value = Value::Null,
+        Value::Number(number) if number.to_string() == key => *value = Value::Null,
         _ => (),
     }
 }
@@ -657,6 +691,71 @@ mod tests {
     use super::*;
     use oxplow_ai::client::Answer;
     use oxplow_ai_fake::mock;
+
+    fn scrubbed(value: Value, key: &str) -> Value {
+        let mut value = value;
+        redact_key(&mut value, key);
+        value
+    }
+
+    /// The key is taken out as a whole token, wherever it is echoed.
+    #[test]
+    fn a_key_is_redacted_where_it_stands_alone() {
+        assert_eq!(scrubbed(json!("hello k1"), "k1"), json!("hello [redacted]"));
+        assert_eq!(
+            scrubbed(json!("Bearer sk-abc"), "sk-abc"),
+            json!("Bearer [redacted]")
+        );
+        assert_eq!(scrubbed(json!("sk-abc,"), "sk-abc"), json!("[redacted],"));
+        assert_eq!(
+            scrubbed(json!({"sk-abc": 1}), "sk-abc"),
+            json!({"[redacted]": 1})
+        );
+    }
+
+    /// A short key doesn't mangle the words, field names and numbers that
+    /// merely contain it.
+    #[test]
+    fn a_short_key_leaves_words_names_and_numbers_alone() {
+        assert_eq!(scrubbed(json!("banana"), "a"), json!("banana"));
+        assert_eq!(scrubbed(json!({"data": "x"}), "a"), json!({"data": "x"}));
+        assert_eq!(scrubbed(json!(10), "1"), json!(10));
+        assert_eq!(scrubbed(json!("step 12"), "1"), json!("step 12"));
+        assert_eq!(scrubbed(json!({"x1": 2}), "1"), json!({"x1": 2}));
+        assert_eq!(scrubbed(json!(1), "1"), Value::Null);
+        assert_eq!(scrubbed(json!("a"), "a"), json!("[redacted]"));
+    }
+
+    #[test]
+    fn redact_text_takes_a_key_only_at_token_boundaries() {
+        assert_eq!(redact_text("k1", "k1"), "[redacted]");
+        assert_eq!(redact_text("k1k1 k1", "k1"), "k1k1 [redacted]");
+        assert_eq!(redact_text("ak1 (k1)", "k1"), "ak1 ([redacted])");
+        assert_eq!(redact_text("é k1é", "k1"), "é [redacted]é");
+        assert_eq!(redact_text("anything", ""), "anything");
+    }
+
+    /// An HTTP error's body gets the same whole-token treatment.
+    #[test]
+    fn an_error_body_is_redacted_by_whole_token() {
+        let error = |body: &str| AiError::Http {
+            provider: "p".into(),
+            status: 401,
+            body: body.into(),
+        };
+        let body = |error: AiError| match error {
+            AiError::Http { body, .. } => body,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(
+            body(redacted(error("bad key sk-abc, retry"), Some("sk-abc"))),
+            "bad key [redacted], retry"
+        );
+        assert_eq!(
+            body(redacted(error("banana data"), Some("a"))),
+            "banana data"
+        );
+    }
 
     const CHAT: &str = r#"
 def request(x):

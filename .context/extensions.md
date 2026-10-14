@@ -2379,8 +2379,12 @@ its scope trace.
   model). What a mode may use is the services table's (`modes`), enforced
   by `RunContext::decide_service` ("Services" below): a pure run asking a
   model is refused before its script runs.
-- **Stale is checkable.** `check(current_generation)` refuses a run
-  built against a catalog generation no longer served, or cancelled.
+- **A run is checked for authority, not for staleness.** `check_authority()`
+  refuses a cancelled run or one a live guard fails (and cancels it). A
+  generation going out of date is the activation's read lock (a run that pins
+  a generation holds it; one that doesn't belongs to its extension's version,
+  `run_context::live_owner`), so a run carries no "stale" outcome: it ends
+  `cancelled`.
 - **Who carries it:** the bus (`run_in`, `TxCtx::run`, `Invocation::run`
   — an `External` call's run is a child of the command's), scope calls
   (`scope_calls::Calls::new(run, needs, read)`, counted on its trace),
@@ -2424,7 +2428,9 @@ its scope trace.
   that ends `failed` counts toward the contribution's failure policy (three in
   a row disable it; `v_contribution_health`); one that ends `cancelled` — a
   person's cancel, or its extension changing or being revoked mid-run — does
-  not. What a *refused* run is: `denied` (a caller or grant the contract
+  not (an effect's script is checked once more when it returns, so a revocation
+  during it is a `cancelled` run and a `failed` attempt that doesn't count,
+  `Reacted::Stopped`). What a *refused* run is: `denied` (a caller or grant the contract
   rejects) is never retried; a *failed* effect attempt is sent again by itself
   only when it was `Unavailable`, every step it composed goes to a provider
   keeping `idempotent_writes`, and it has retries left (otherwise a person
@@ -2571,6 +2577,26 @@ approved; a **decision** is what a run was allowed (`oxplow_domain::grant`,
   policy's script, a provider's `host/call`s — decided against the
   provider's own `needs`). Core's own work has none and is allowed what
   it does.
+- **The loaded-vs-disk gate.** Every script kind a person approves — an
+  effect, an effort policy, a model-calling collector or provider script —
+  runs under `exec_consent::loaded_script_gate`: besides the approval hash of
+  the folder as it is on disk, it refuses (at each host call and at
+  publication) when the script *as the catalog loaded it* differs from the
+  file now ("the loaded script differs from the approved version; reload
+  it"). Approving an edited file therefore never lets the older cached text
+  run; the next catalog publication loads the new one. Pinned for effects by
+  `an_effect_whose_file_changed_since_it_loaded_is_refused`.
+- **Revocation stops every kind of run, which records `cancelled`.** A
+  program's whole process group is killed (`external_process::RevocationWatch`),
+  a job's supervisor cancels its attempt, and an in-process script — a
+  Starlark or jaq collector, a fact collector, an effect, an effort-policy
+  script — runs under `run_context::watch_authority(run)`: a task checking the
+  run's guards every 100 ms until it is dropped, which sets the run's cancel
+  flag when one fails; the script worker polls that flag. Without it a script
+  computing with no host call would run on to its timeout (120 s by default)
+  and only be discarded at publication. Pinned by
+  `disabling_an_extension_stops_a_collector_script_that_is_computing` and
+  `revoking_an_effect_stops_a_script_that_is_computing`.
 - **Decisions.** `run.decide(Need)` → `Allowed`, `Denied(why)` or
   `Unenforced(why)`, recorded on the run (`v_extension_run.decisions`):
   each scope call (`Calls::serve`); a program collector's `program`,

@@ -290,6 +290,9 @@ pub(crate) enum Reacted {
     Skipped(String),
     /// A command it composed asks a person: recorded with its proposal.
     Proposed,
+    /// It was stopped (cancelled, or revoked mid-run): the attempt is
+    /// recorded, and it says nothing of the effect's health.
+    Stopped(String),
     /// It failed, and will be sent again by itself: not counted yet.
     Retrying(String),
     /// A scheduled automatic retry that wasn't sent (tsk887): the failed
@@ -314,7 +317,11 @@ pub(crate) async fn count(
         Reacted::Failed(reason) | Reacted::NotResent(reason) => {
             health.failed(&key, reason).await.map(|_| ())
         }
-        Reacted::Skipped(_) | Reacted::Proposed | Reacted::Retrying(_) | Reacted::Nothing => Ok(()),
+        Reacted::Skipped(_)
+        | Reacted::Proposed
+        | Reacted::Stopped(_)
+        | Reacted::Retrying(_)
+        | Reacted::Nothing => Ok(()),
     };
     if let Err(error) = counted {
         tracing::warn!(effect = %decl.name(), %error, "recording the effect's health failed");
@@ -571,10 +578,11 @@ pub(crate) async fn run_reaction(
             approved,
             crate::grants::script_request(&decl.needs),
         ))
-        .guarded(crate::exec_consent::script_gate(
+        .guarded(crate::exec_consent::loaded_script_gate(
             svc.approvals.clone(),
             svc.layout.project_dir.clone(),
             crate::effects::effect_program(ext, decl),
+            decl.script.clone(),
         ));
     let key = EffectRunKey {
         effect,
@@ -617,16 +625,27 @@ pub(crate) async fn run_reaction(
     // A failure counts once: not when the attempt was already recorded
     // (its run lost a race to another delivery, or finished it failed).
     let failed = |reason: String| async {
+        // Stopped (a person's cancel, or its approval or extension revoked):
+        // recorded `cancelled`, and no failure of the effect's own.
+        let stopped = run.cancel().is_cancelled();
         record_run(
             svc,
             &run,
-            oxplow_domain::run::Outcome::Failed,
+            if stopped {
+                oxplow_domain::run::Outcome::Cancelled
+            } else {
+                oxplow_domain::run::Outcome::Failed
+            },
             Some(&reason),
         )
         .await;
         Ok(
             if finish(svc, &key, ended(RunState::Failed, reason.clone())).await? {
-                Reacted::Failed(reason)
+                if stopped {
+                    Reacted::Stopped(reason)
+                } else {
+                    Reacted::Failed(reason)
+                }
             } else {
                 Reacted::Nothing
             },
@@ -1009,6 +1028,8 @@ pub(crate) async fn run_script(
         .with_tree(crate::services::Trees::From(Arc::new(svc.metrics.clone())));
     let given = crate::services::prepare(&composing, &script, &needs, &sources).await?;
     let runtime = tokio::runtime::Handle::current();
+    // A revocation reaches a script that is computing (no host call to notice by).
+    let _watch = crate::run_context::watch_authority(&composing);
     tokio::task::spawn_blocking(move || {
         let read = Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(layer.run_in(&composing, q)));
         let mut calls = crate::scope_calls::Calls::new(&composing, &needs, read)
@@ -1017,6 +1038,8 @@ pub(crate) async fn run_script(
             .with_ai_source(layer.ai_source())
             .with_configuration_source(layer.configuration_source(), &runtime);
         let reaction = effects::run_script(&script, event, given, &mut calls)?;
+        // Publication: a revocation during the script is a stopped run, not a reaction.
+        composing.check_authority()?;
         Ok((reaction, composing.trace().summary()))
     })
     .await
@@ -1877,6 +1900,128 @@ mod tests {
                 .is_some_and(|c| c.starts_with("effect:")),
             "{}",
             disabled.envelope.payload
+        );
+    }
+
+    /// An effect's file changes on disk after the catalog loaded it and the
+    /// new bytes are approved: the reaction still runs the loaded script, so
+    /// it is refused until the catalog republishes.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_effect_whose_file_changed_since_it_loaded_is_refused() {
+        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let svc = &fx.svc;
+        extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
+        let before = title(&fx).await;
+        std::fs::write(
+            svc.layout
+                .project_dir
+                .join("oxplow/extensions/acme/mark.star"),
+            format!("{MARK}# edited on disk\n"),
+        )
+        .unwrap();
+        // A person approves what is on disk now; the catalog still holds the old text.
+        approve(svc).await;
+        let consumer = EffectTriggers::new(Arc::downgrade(svc));
+        let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        consumer.handle(&ev).await.unwrap();
+        assert_eq!(title(&fx).await, before, "nothing ran");
+        let rows = rows(svc, "SELECT state, reason FROM v_effect_run").await;
+        assert_eq!(rows[0][0], json!("failed"), "{rows}");
+        assert!(
+            rows[0][1]
+                .as_str()
+                .is_some_and(|e| e.contains("loaded script differs")),
+            "{rows}"
+        );
+        // Republished, the approved text is the loaded one.
+        crate::test_fixtures::activate(svc).await;
+        let again = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        consumer.handle(&again).await.unwrap();
+        assert_eq!(title(&fx).await, format!("{before} (done)"));
+    }
+
+    /// A script that computes for a while, with no host call to notice a
+    /// revocation by.
+    const SPIN: &str = "def transform(x):\n    n = 0\n    for i in range(700):\n        for j in range(700):\n            n += 1\n    return {\"skip\": \"spun \" + str(n)}\n";
+
+    /// An approval revoked while the effect's script runs ends the run
+    /// `cancelled`, not `failed`, and it doesn't count toward disabling.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_revoked_effect_run_is_cancelled_not_failed() {
+        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let svc = &fx.svc;
+        extension(svc, MARK_DONE, &[("mark.star", SPIN)]).await;
+        approve(svc).await;
+        let consumer = Arc::new(EffectTriggers::new(Arc::downgrade(svc)));
+        let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let running = {
+            let (consumer, ev) = (consumer.clone(), ev.clone());
+            tokio::spawn(async move { consumer.handle(&ev).await })
+        };
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let (ext, decl) = effects(svc).into_iter().next().unwrap();
+        let key = effects::effect_program(&ext, &decl).key();
+        assert!(svc.approvals.revoke(&key).unwrap());
+        running.await.unwrap().unwrap();
+        assert_eq!(
+            rows(
+                svc,
+                "SELECT outcome FROM v_extension_run WHERE contribution = 'effect:acme/mark-done'"
+            )
+            .await,
+            json!([["cancelled"]])
+        );
+        assert_eq!(
+            rows(svc, "SELECT state FROM v_effect_run").await,
+            json!([["failed"]]),
+            "the attempt records why it stopped"
+        );
+        assert_eq!(
+            rows(
+                svc,
+                "SELECT consecutive_failures FROM v_contribution_health WHERE extension = 'acme'"
+            )
+            .await,
+            json!([]),
+            "a stopped run says nothing of the effect's health"
+        );
+    }
+
+    /// A revocation reaches a script that is computing, with no host call to
+    /// notice it by: the run ends at once, not when the script's timeout does.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn revoking_an_effect_stops_a_script_that_is_computing() {
+        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let svc = &fx.svc;
+        let forever = SPIN.replace("range(700)", "range(100000)");
+        extension(svc, MARK_DONE, &[("mark.star", &forever)]).await;
+        approve(svc).await;
+        let consumer = Arc::new(EffectTriggers::new(Arc::downgrade(svc)));
+        let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let running = {
+            let (consumer, ev) = (consumer.clone(), ev.clone());
+            tokio::spawn(async move { consumer.handle(&ev).await })
+        };
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let (ext, decl) = effects(svc).into_iter().next().unwrap();
+        assert!(svc
+            .approvals
+            .revoke(&effects::effect_program(&ext, &decl).key())
+            .unwrap());
+        let revoked = std::time::Instant::now();
+        running.await.unwrap().unwrap();
+        assert!(
+            revoked.elapsed() < Duration::from_secs(2),
+            "it ran on for {:?} after the revocation",
+            revoked.elapsed()
+        );
+        assert_eq!(
+            rows(
+                svc,
+                "SELECT outcome FROM v_extension_run WHERE contribution = 'effect:acme/mark-done'"
+            )
+            .await,
+            json!([["cancelled"]])
         );
     }
 

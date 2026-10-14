@@ -18,7 +18,6 @@ use crate::commands::Actor;
 use crate::contribution::ContributionId;
 use crate::events::{Anchors, EventId};
 use crate::scope::ScopeTrace;
-use crate::DomainError;
 
 /// A run's identity: a UUIDv7, so ids sort by when the run began.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -144,7 +143,6 @@ pub enum Outcome {
     Failed,
     Denied,
     Cancelled,
-    Stale,
 }
 
 impl Outcome {
@@ -155,7 +153,6 @@ impl Outcome {
             Outcome::Failed => "failed",
             Outcome::Denied => "denied",
             Outcome::Cancelled => "cancelled",
-            Outcome::Stale => "stale",
         }
     }
 }
@@ -210,37 +207,6 @@ pub struct ContributionRef {
     pub version: Option<String>,
     /// The extension catalog's generation the run was built against.
     pub generation: Option<String>,
-}
-
-/// Why a run can't go on.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RunError {
-    /// Built against a catalog generation that's no longer served: the
-    /// extension changed under it.
-    Stale {
-        run: RunId,
-        generation: String,
-    },
-    Cancelled,
-}
-
-impl std::fmt::Display for RunError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            RunError::Stale { run, generation } => write!(
-                f,
-                "run {run} was started against extension generation {generation}, which is no \
-                 longer loaded; it stops here"
-            ),
-            RunError::Cancelled => f.write_str("the run was cancelled"),
-        }
-    }
-}
-
-impl From<RunError> for DomainError {
-    fn from(e: RunError) -> Self {
-        DomainError::Invalid(e.to_string())
-    }
 }
 
 /// One run of extension (or core) code. Built by a named constructor;
@@ -678,26 +644,6 @@ impl RunContext {
         self.usage.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Refuse to go on if cancelled, or if it was built against a catalog
-    /// generation other than `current` (the one now served).
-    pub fn check(&self, current: Option<&str>) -> Result<(), RunError> {
-        if self.cancel.is_cancelled() {
-            return Err(RunError::Cancelled);
-        }
-        match (
-            self.contribution
-                .as_ref()
-                .and_then(|c| c.generation.as_deref()),
-            current,
-        ) {
-            (Some(ran), Some(now)) if ran != now => Err(RunError::Stale {
-                run: self.run.clone(),
-                generation: ran.to_string(),
-            }),
-            _ => Ok(()),
-        }
-    }
-
     /// What a record or a provider is told about it: everything but the
     /// handles, `null` where absent.
     pub fn describe(&self) -> RunDescription {
@@ -763,7 +709,8 @@ mod tests {
         assert!(child.budget().ceiling <= Duration::from_secs(5));
         assert_eq!(child.extension(), Some("acme"));
         parent.cancel().cancel();
-        assert_eq!(child.check(None), Err(RunError::Cancelled));
+        assert!(child.cancel().is_cancelled());
+        assert!(child.check_authority().is_err());
     }
 
     /// Same-contribution nested work adds to the run's usage; another
@@ -780,18 +727,6 @@ mod tests {
         assert_eq!(u.scopes.get("sql.read"), Some(&1));
         assert_eq!((u.cpu_ms, u.peak_bytes, u.ai_calls), (8, 100, 0));
         assert_eq!(other.usage().ai_calls, 1);
-    }
-
-    /// A run built against another generation than the one served stops.
-    #[test]
-    fn a_run_from_an_older_generation_is_stale() {
-        let ctx = RunContext::contribution(effect("g1"), Actor::System, Mode::Pure);
-        assert_eq!(ctx.check(Some("g1")), Ok(()));
-        assert!(matches!(ctx.check(Some("g2")), Err(RunError::Stale { .. })));
-        assert_eq!(
-            RunContext::core(Actor::System, Mode::Pure).check(Some("g2")),
-            Ok(())
-        );
     }
 
     /// A pure run may not ask a model, whatever it declares; it may read.

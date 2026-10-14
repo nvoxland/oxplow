@@ -124,6 +124,7 @@ fn outcome(effect: &str, event: &str, attempt: i64, reacted: &Reacted) -> serde_
     let (outcome, reason) = match reacted {
         Reacted::Ran => ("ok", None),
         Reacted::Failed(why) | Reacted::NotResent(why) => ("failed", Some(why.clone())),
+        Reacted::Stopped(why) => ("cancelled", Some(why.clone())),
         // Failed, and sent again by itself shortly (P10).
         Reacted::Retrying(why) => ("retrying", Some(why.clone())),
         Reacted::Skipped(why) => ("skipped", Some(why.clone())),
@@ -358,6 +359,8 @@ pub async fn backfill(
                 out.failed += 1;
                 in_a_row += 1;
             }
+            // Stopped: the attempt is recorded, but it isn't a streak of failures.
+            Reacted::Stopped(_) => out.failed += 1,
             Reacted::Proposed => out.proposed += 1,
             // Its own run's event, or one another delivery got to first.
             Reacted::Skipped(_) | Reacted::Nothing => out.skipped += 1,

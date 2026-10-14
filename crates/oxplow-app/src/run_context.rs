@@ -81,10 +81,37 @@ pub fn live_owner(
     })
 }
 
-/// The catalog generation `root` is served at now: what a run checks it
-/// was built against.
-pub fn current_generation(catalog: &ExtensionCatalog, root: &Path) -> String {
-    catalog.live_snapshot(root).generation().to_string()
+/// Dropping it stops the watch.
+pub struct AuthorityWatch(tokio::task::JoinHandle<()>);
+
+impl Drop for AuthorityWatch {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// Check `run`'s live authority every 100 ms until the returned watch is
+/// dropped: a guard that fails (an approval revoked, its extension disabled
+/// or changed) sets the run's cancel flag, which a script worker polls. A
+/// script computing with no host call would otherwise keep running until its
+/// timeout. Hold it across any hosted script run given the run's cancel flag.
+pub fn watch_authority(run: &RunContext) -> AuthorityWatch {
+    let run = run.clone();
+    AuthorityWatch(tokio::spawn(async move {
+        loop {
+            let check = run.clone();
+            // A guard can hash files; keep that off the async workers. A
+            // check that cannot run fails closed.
+            if !matches!(
+                tokio::task::spawn_blocking(move || check.check_authority()).await,
+                Ok(Ok(()))
+            ) {
+                run.cancel().cancel();
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    }))
 }
 
 /// A run reacting to `event`: caused by it, anchored where it happened,
