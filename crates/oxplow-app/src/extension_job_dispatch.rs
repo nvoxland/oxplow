@@ -66,11 +66,31 @@ pub struct JobRecoveryPage {
     pub next: Option<RecoveryCursor>,
 }
 
+/// Where a test can cut a dispatch off, as a crash would: the hook panics
+/// (or the persistence boundary it sits in is left unfinished) and the
+/// durable state is all that is left.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Stage {
+    /// The claim is durable; the worker hasn't started.
+    AfterClaim,
+    /// The worker returned; nothing is published yet.
+    BeforePublish,
+    /// Inside the publish transaction: the job's end is written, its
+    /// `contribution.job.completed` isn't yet.
+    BetweenTransitionAndAnnounce,
+}
+
+#[cfg(test)]
+pub(crate) type CrashHook = Arc<dyn Fn(Stage) + Send + Sync>;
+
 pub struct ExtensionJobDispatcher {
     db: Database,
     store: SqliteExtensionJobStore,
     host: Arc<JobAuthorityHost>,
     vocabulary: Option<oxplow_domain::vocabulary::VocabularyHandle>,
+    #[cfg(test)]
+    crash: Option<CrashHook>,
 }
 
 impl ExtensionJobDispatcher {
@@ -80,6 +100,22 @@ impl ExtensionJobDispatcher {
             db,
             host,
             vocabulary: None,
+            #[cfg(test)]
+            crash: None,
+        }
+    }
+
+    /// Call `hook` at each [`Stage`] of a dispatch: a test crashes there.
+    #[cfg(test)]
+    pub(crate) fn with_crash_hook(mut self, hook: CrashHook) -> Self {
+        self.crash = Some(hook);
+        self
+    }
+
+    #[cfg(test)]
+    fn reach(&self, stage: Stage) {
+        if let Some(hook) = &self.crash {
+            hook(stage);
         }
     }
 
@@ -226,6 +262,8 @@ impl ExtensionJobDispatcher {
         if Some(token) != prospective.token {
             return Ok(DispatchOutcome::Interrupted);
         }
+        #[cfg(test)]
+        self.reach(Stage::AfterClaim);
         let identity =
             JobExecutionIdentity::new(id.clone(), token).map_err(|_| DispatchError::InvalidData)?;
 
@@ -354,6 +392,8 @@ impl ExtensionJobDispatcher {
             self.request_cancellation(id).await?;
             return self.recover_after_lease(id, token).await;
         }
+        #[cfg(test)]
+        self.reach(Stage::BeforePublish);
         // Bounded before duplication: one copy is for the attempted atomic
         // publication, and one only for an append-only stale observation.
         let evidence = result.clone();
@@ -373,6 +413,8 @@ impl ExtensionJobDispatcher {
             let result_for_tx = result.clone();
             let savepoint_execution = execution.clone();
             let vocabulary = self.vocabulary.clone();
+            #[cfg(test)]
+            let crash = self.crash.clone();
             let published = db
                 .transaction_or(move |tx| {
                     tx.execute_batch("SAVEPOINT extension_job_publication")
@@ -393,6 +435,10 @@ impl ExtensionJobDispatcher {
                             Some(&result_for_tx),
                         )
                         .map_err(PublishFailure::Store)?;
+                        #[cfg(test)]
+                        if let Some(hook) = &crash {
+                            hook(Stage::BetweenTransitionAndAnnounce);
+                        }
                         if let Some(vocabulary) = &vocabulary {
                             crate::extension_jobs::announce_tx(
                                 tx,
@@ -437,10 +483,19 @@ impl ExtensionJobDispatcher {
             match published {
                 Ok(()) => return Ok(DispatchOutcome::Completed),
                 Err(TxError::Aborted(PublishAbort::Revoked)) => {
+                    // The worker has returned, so it is known to be stopped:
+                    // the job ends cancelled at once, never completed under
+                    // the authority that is gone, keeping what it had (its
+                    // result as a stopped one). Waiting out the lease would
+                    // end it `interrupted` for work that is not in doubt.
+                    let mut partial = result.clone();
+                    if let Some(parts) = partial.as_object_mut() {
+                        parts.insert("stopped".into(), Value::from("cancelled"));
+                    }
                     self.record_late(id, token, completion, evidence).await?;
                     self.request_cancellation(id).await?;
                     execution.run().cancel().cancel();
-                    return self.recover_after_lease(id, token).await;
+                    return self.confirm_stopped(id, token, Some(partial)).await;
                 }
                 Err(TxError::Aborted(PublishAbort::Store(ExtensionJobStoreError::Conflict))) => {
                     continue;

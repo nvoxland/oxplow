@@ -414,16 +414,12 @@ impl ExtensionJobs {
         Ok(json!({ "jobRun": job_run_ref(&job.job.id), "cancellationRequested": !ended }))
     }
 
-    /// Start the scheduler (once), as boot does after activation; tool
-    /// calls run on `commands`.
-    pub fn spawn(
-        self: &Arc<Self>,
+    /// The dispatcher a scheduler drives, over the live registry.
+    fn dispatcher(
+        &self,
         activation: Arc<crate::extension_activation::ExtensionActivation>,
         commands: Arc<crate::commands::CommandBus>,
-    ) {
-        if self.spawned.swap(true, std::sync::atomic::Ordering::AcqRel) {
-            return;
-        }
+    ) -> ExtensionJobDispatcher {
         self.tools.bind(commands);
         let grants = Arc::new(DeclaredJobGrants::new(
             self.catalog.clone(),
@@ -441,16 +437,43 @@ impl ExtensionJobs {
             .with_registry_handle(self.operations.clone())
             .with_activation(activation),
         );
-        let dispatcher = Arc::new(
-            ExtensionJobDispatcher::new(self.db.clone(), host)
-                .with_vocabulary(self.vocabulary.clone()),
-        );
+        ExtensionJobDispatcher::new(self.db.clone(), host).with_vocabulary(self.vocabulary.clone())
+    }
+
+    /// Start the scheduler (once), as boot does after activation; tool
+    /// calls run on `commands`.
+    pub fn spawn(
+        self: &Arc<Self>,
+        activation: Arc<crate::extension_activation::ExtensionActivation>,
+        commands: Arc<crate::commands::CommandBus>,
+    ) {
+        if self.spawned.swap(true, std::sync::atomic::Ordering::AcqRel) {
+            return;
+        }
+        let dispatcher = Arc::new(self.dispatcher(activation, commands));
         let scheduler = crate::extension_job_scheduler::ExtensionJobScheduler::new(
             SqliteExtensionJobStore::new(self.db.clone()),
             dispatcher,
             self.shutdown.clone(),
         );
         tokio::spawn(scheduler.run());
+    }
+
+    /// A dispatcher a test drives by hand (`run_one`, `recover_page`),
+    /// with no scheduler running; `crash` is called at each stage of a
+    /// dispatch.
+    #[cfg(test)]
+    pub(crate) fn dispatcher_for_test(
+        &self,
+        activation: Arc<crate::extension_activation::ExtensionActivation>,
+        commands: Arc<crate::commands::CommandBus>,
+        crash: Option<crate::extension_job_dispatch::CrashHook>,
+    ) -> Arc<ExtensionJobDispatcher> {
+        let dispatcher = self.dispatcher(activation, commands);
+        Arc::new(match crash {
+            Some(hook) => dispatcher.with_crash_hook(hook),
+            None => dispatcher,
+        })
     }
 
     pub fn shutdown(&self) {

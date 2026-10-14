@@ -4233,8 +4233,29 @@ commands:
   is cancelled with what it had, never completed under the new
   generation. An extension has at most 256 queued or running jobs (a
   repeat of an intent it already has is not a new one). No database
-  transaction is held while a model streams. These are pinned in
-  `extension_job_hardening_tests.rs`.
+  transaction is held while a model streams (`Database::write_transactions_open`
+  is zero where a model is streaming, asserted in the tests). These are
+  pinned in `extension_job_hardening_tests.rs` and
+  `extension_job_crash_tests.rs`.
+- **The replay decision.** An `idempotent` job cut off by a crash or a lost
+  lease runs again, up to three attempts in all; a `never` job (the default)
+  ends `interrupted` and is never run again on its own. Either way the
+  end is announced once, in the transaction that ends it. A crash at any
+  persistence boundary leaves the job `running` with its lease, and
+  recovery (after the lease) decides as above: after the claim (nothing
+  started), before the publish transaction (the worker's answer is lost,
+  and a replay reads it back from its recorded computation), and inside it
+  (the transaction rolls back whole, so the end and its event are both
+  unwritten). A worker that returns after recovery fenced its attempt
+  changes nothing: its result is kept once as an observation
+  (`v_job_run_observation`: `attempt`, `fence`, `outcome`, `evidence`).
+  Approval revoked, or the declaration changed, between the worker
+  returning and the publish transaction cancels the job at once, with the
+  result it had as a `stopped: cancelled` one and the same late
+  observation: the worker has returned, so there is no lease to wait out.
+  Two dispatchers racing for a queued job: the revision check lets one
+  claim it. A repeat of an intent is the same job; the same intent with
+  other input is refused as a conflict, even when the queue is full.
 - **Its end** is the event `contribution.job.completed@1 { job_run, job,
   version, attempt, fence, outcome: succeeded | failed | cancelled |
   interrupted }` (`job_run` and `job` refs; an effect keeps to one job with

@@ -13,7 +13,7 @@ use crate::extension_job_stream_tests::{
     slow, until, Fixture, LOOKUP, MANIFEST,
 };
 
-fn words(count: usize) -> String {
+pub(super) fn words(count: usize) -> String {
     (0..count)
         .map(|i| format!("w{i}"))
         .collect::<Vec<_>>()
@@ -21,14 +21,14 @@ fn words(count: usize) -> String {
 }
 
 /// The job is running and has streamed something.
-async fn streaming(fx: &Fixture, id: &str) -> Value {
+pub(super) async fn streaming(fx: &Fixture, id: &str) -> Value {
     until(fx, id, |s| {
         s["state"] == json!("running") && !s["text"].as_str().unwrap_or_default().is_empty()
     })
     .await
 }
 
-async fn state(fx: &Fixture, id: &str) -> Value {
+pub(super) async fn state(fx: &Fixture, id: &str) -> Value {
     run(
         fx,
         &Actor::Human,
@@ -40,7 +40,7 @@ async fn state(fx: &Fixture, id: &str) -> Value {
 
 /// Make the running attempt's lease a thing of the past, as if oxplow had
 /// been gone for longer than it lasts.
-async fn expire_lease(svc: &crate::Services, id: &str) {
+pub(super) async fn expire_lease(svc: &crate::Services, id: &str) {
     let id = id.to_owned();
     svc.db
         .transaction(move |tx| {
@@ -74,7 +74,7 @@ async fn expire_lease(svc: &crate::Services, id: &str) {
         .expect("the lease is forced");
 }
 
-async fn observations(fx: &Fixture, id: &str) -> i64 {
+pub(super) async fn observations(fx: &Fixture, id: &str) -> i64 {
     let id = id.to_owned();
     fx.svc
         .db
@@ -92,7 +92,7 @@ async fn observations(fx: &Fixture, id: &str) -> i64 {
 
 /// The key the fixture job's approval is recorded under (not a bundled
 /// extension's job).
-fn job_key(fx: &Fixture) -> String {
+pub(super) fn job_key(fx: &Fixture) -> String {
     let project = fx.svc.layout.project_dir.clone();
     let config = fx.svc.config.read().unwrap().clone();
     let extensions = fx.svc.extension_catalog.get(&project);

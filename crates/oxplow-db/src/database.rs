@@ -211,6 +211,8 @@ pub struct Database {
     /// Bounds how many DB tasks are dispatched to the blocking pool at once,
     /// sized to the connection pool (tsk131).
     gate: Arc<Semaphore>,
+    /// How many write transactions are open on this handle right now.
+    writing: Arc<std::sync::atomic::AtomicUsize>,
     /// Which tables commits touched, published after each call (P4.6).
     changes: Arc<crate::changes::Changes>,
 }
@@ -321,6 +323,7 @@ impl Database {
             pool: Arc::new(pool),
             memo: Arc::new(QueryMemo::default()),
             gate: Arc::new(Semaphore::new(permits)),
+            writing: Arc::default(),
             changes,
         })
     }
@@ -360,6 +363,7 @@ impl Database {
             pool: Arc::new(pool),
             memo: Arc::new(QueryMemo::default()),
             gate: Arc::new(Semaphore::new(permits)),
+            writing: Arc::default(),
             changes,
         })
     }
@@ -388,6 +392,7 @@ impl Database {
             pool: Arc::new(pool),
             memo: Arc::new(QueryMemo::default()),
             gate: Arc::new(Semaphore::new(permits)),
+            writing: Arc::default(),
             changes,
         }
     }
@@ -404,6 +409,15 @@ impl Database {
     /// Safe against deadlock because a permit is only held across the
     /// `spawn_blocking` itself, and the closures are synchronous — they cannot
     /// await another gated call, so permits never nest.
+    /// How many write transactions are open on this handle right now. A
+    /// transaction lives only inside the synchronous closure its caller
+    /// hands in, so this is zero at any await point of a caller that holds
+    /// none; a test samples it where a long await (a model's reply) happens
+    /// to show no transaction is held across it.
+    pub fn write_transactions_open(&self) -> usize {
+        self.writing.load(std::sync::atomic::Ordering::Acquire)
+    }
+
     async fn db_permit(&self) -> Result<OwnedSemaphorePermit, oxplow_domain::DomainError> {
         self.gate
             .clone()
@@ -657,6 +671,7 @@ impl Database {
         let db = self.clone();
         let out = tokio::task::spawn_blocking(move || {
             let _permit = permit;
+            let _writing = WritingGuard::enter(&db.writing);
             let _flush_changes = PublicationChangeFlush(db.changes.clone());
             let mut attempt: u32 = 0;
             loop {
@@ -770,6 +785,7 @@ impl Database {
         let db = self.clone();
         let out = tokio::task::spawn_blocking(move || {
             let _permit = permit;
+            let _writing = WritingGuard::enter(&db.writing);
             let mut attempt: u32 = 0;
             loop {
                 attempt += 1;
@@ -824,6 +840,22 @@ pub enum TxError<A> {
     Storage(oxplow_domain::DomainError),
     /// The caller's own reason: rolled back, never retried, handed back.
     Aborted(A),
+}
+
+/// Counts a write transaction open for as long as it is held.
+struct WritingGuard<'a>(&'a std::sync::atomic::AtomicUsize);
+
+impl<'a> WritingGuard<'a> {
+    fn enter(count: &'a std::sync::atomic::AtomicUsize) -> Self {
+        count.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        Self(count)
+    }
+}
+
+impl Drop for WritingGuard<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+    }
 }
 
 /// A database transaction whose commit is explicit so a publisher can keep
@@ -1075,6 +1107,32 @@ pub(crate) fn with_foreign_keys_off(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A write transaction counts as open exactly while its closure runs
+    /// (committed, rolled back or aborted), and not before or after.
+    #[tokio::test]
+    async fn a_write_transaction_is_counted_while_it_is_open() {
+        let db = Database::in_memory();
+        assert_eq!(db.write_transactions_open(), 0);
+        let inside = db.clone();
+        let seen = db
+            .transaction(move |_| Ok(inside.write_transactions_open()))
+            .await
+            .unwrap();
+        assert_eq!(seen, 1);
+        let inside = db.clone();
+        let aborted: Result<(), TxError<usize>> = db
+            .transaction_or(move |_| Err(TxError::Aborted(inside.write_transactions_open())))
+            .await;
+        assert!(matches!(aborted, Err(TxError::Aborted(1))));
+        let inside = db.clone();
+        let rehearsed = db
+            .rehearse(move |_| Ok(inside.write_transactions_open()))
+            .await
+            .unwrap();
+        assert_eq!(rehearsed, 1);
+        assert_eq!(db.write_transactions_open(), 0, "none left open");
+    }
 
     /// An existing database opens to write as it is — its models not
     /// rebuilt — and only at this build's schema version.

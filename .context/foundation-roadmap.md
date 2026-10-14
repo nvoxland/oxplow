@@ -402,8 +402,17 @@ are implemented; duplicate deliveries retain original scheduling provenance.
 The first public path now declares typed AI jobs, enqueues/cancels intent through
 native commands, reads owned results, publishes exact operations with the active
 generation and starts a bounded scheduler after coherent boot readiness. Fenced
-completion emits a metadata-only event. Migration execution and runtime restart,
-duplicate and cancellation validation remain pending.
+completion emits a metadata-only event. Restart, duplicate and cancellation
+behavior is pinned at each persistence boundary (`extension_job_hardening_tests.rs`,
+`extension_job_crash_tests.rs`): a crash after the claim, before the publish
+transaction and inside it; two dispatchers racing for one claim; concurrent
+duplicate intents; the per-extension and project-wide caps and a changed
+duplicate at capacity; a late result after recovery (kept once, readable in
+`v_job_run_observation`); revocation between the worker and the publish; and
+no write transaction held while a model streams. The replay policy is the
+decision: `idempotent` jobs run again up to three attempts, `never` jobs end
+`interrupted`. Status: done for the dispatcher; migrating a job's declaration
+across versions and runtime resource limits beyond the caps remain pending.
 
 Scope: Add a public asynchronous job path for AI/external computation, connected to events and commands by durable run identity. Define restart recovery, idempotency, bounded concurrency, timeouts, cancellation, result publication and generation ownership. Keep network/process work outside SQLite transaction closures.
 

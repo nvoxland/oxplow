@@ -10485,5 +10485,49 @@
       ],
       "key": []
     }
+  },
+  "job_run_observation": {
+    "1": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "The observation's id."
+        },
+        {
+          "name": "job_id",
+          "type": "TEXT",
+          "doc": "The job (`v_job_run.id`)."
+        },
+        {
+          "name": "attempt",
+          "type": "INTEGER",
+          "doc": "The attempt the worker was running."
+        },
+        {
+          "name": "fence",
+          "type": "INTEGER",
+          "doc": "That attempt's fence."
+        },
+        {
+          "name": "at",
+          "type": "TEXT",
+          "doc": "When the late result was seen (RFC 3339)."
+        },
+        {
+          "name": "outcome",
+          "type": "TEXT",
+          "doc": "`succeeded` or `failed`: how the worker ended."
+        },
+        {
+          "name": "evidence",
+          "type": "TEXT",
+          "doc": "What the worker returned, as JSON; NULL when none was kept."
+        }
+      ],
+      "key": [
+        "id"
+      ]
+    }
   }
 }

@@ -88,6 +88,8 @@ pub mod extension_impact;
 mod extension_imports_tests;
 pub mod extension_job_ai;
 pub mod extension_job_authority;
+#[cfg(test)]
+mod extension_job_crash_tests;
 pub mod extension_job_dispatch;
 #[cfg(test)]
 mod extension_job_hardening_tests;

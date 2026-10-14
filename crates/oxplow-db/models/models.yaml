@@ -784,6 +784,22 @@
   tests:
     - { not_null: job_id }
     - { relationships: { column: job_id, to: job_run, field: id } }
+- name: job_run_observation
+  version: 1
+  key: [id]
+  description: "What a job's worker said after its attempt was no longer the job's: a result that arrived once the lease had been recovered, the approval revoked or the declaration changed. It never changes the job (that ended as recovery, cancel or revocation decided); it is kept as evidence, one row per late result."
+  columns:
+    - { name: "id", type: "TEXT", doc: "The observation's id." }
+    - { name: "job_id", type: "TEXT", doc: "The job (`v_job_run.id`)." }
+    - { name: "attempt", type: "INTEGER", doc: "The attempt the worker was running." }
+    - { name: "fence", type: "INTEGER", doc: "That attempt's fence." }
+    - { name: "at", type: "TEXT", doc: "When the late result was seen (RFC 3339)." }
+    - { name: "outcome", type: "TEXT", doc: "`succeeded` or `failed`: how the worker ended." }
+    - { name: "evidence", type: "TEXT", doc: "What the worker returned, as JSON; NULL when none was kept." }
+  tests:
+    - { not_null: id }
+    - { unique: id }
+    - { relationships: { column: job_id, to: job_run, field: id } }
 - name: event_type
   version: 1
   key: [event_type, v]
