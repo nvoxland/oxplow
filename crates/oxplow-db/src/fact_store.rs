@@ -7064,16 +7064,32 @@ mod tests {
         );
     }
 
+    /// V64 as the runner applies it: in a transaction, with foreign keys
+    /// off around it and every reference checked after, so a rebuild of
+    /// `fact_subject` under the facts that reference it is held to them.
+    fn run_subject_migration(conn: &mut rusqlite::Connection) {
+        crate::database::with_foreign_keys_off(conn, |conn| {
+            conn.execute_batch(&format!(
+                "BEGIN; {} COMMIT;",
+                include_str!("../migrations/V64__fact_subject_is_one_ref.sql")
+            ))
+            .map(|()| true)
+            .map_err(|e| crate::database::DbInitError::Migration(e.to_string()))
+        })
+        .unwrap();
+    }
+
     /// The migration rewrites `(kind, ref)` rows to one ref: ids with their
     /// kind put back, a ref already carrying its kind kept as it is, a model
     /// name made an `ai_model` ref, two rows
     /// naming one ref collapsed, and rows that were never refs dropped.
     #[test]
     fn the_subject_migration_rewrites_rows_to_whole_refs() {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         conn.execute_batch(
             "CREATE TABLE fact_subject (id INTEGER PRIMARY KEY, kind TEXT, ref TEXT, UNIQUE (kind, ref));
-             CREATE TABLE fact (id INTEGER PRIMARY KEY, subject_id INTEGER);
+             CREATE TABLE fact (id INTEGER PRIMARY KEY, subject_id INTEGER REFERENCES fact_subject(id));
              CREATE TABLE metric_live_fact (x);
              CREATE TABLE metric_cube (x);
              CREATE TABLE metric_cube_state (x);
@@ -7086,10 +7102,7 @@ mod tests {
              INSERT INTO fact VALUES (1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, NULL), (7, 6), (8, 7);",
         )
         .unwrap();
-        conn.execute_batch(include_str!(
-            "../migrations/V64__fact_subject_is_one_ref.sql"
-        ))
-        .unwrap();
+        run_subject_migration(&mut conn);
         let refs: Vec<(i64, String, String)> = conn
             .prepare("SELECT id, ref, kind FROM fact_subject ORDER BY id")
             .unwrap()
@@ -7135,10 +7148,11 @@ mod tests {
     /// scan per fact never finishes before the daemon's start timeout.
     #[test]
     fn the_subject_migration_scales_with_the_facts() {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         conn.execute_batch(
             "CREATE TABLE fact_subject (id INTEGER PRIMARY KEY, kind TEXT, ref TEXT, UNIQUE (kind, ref));
-             CREATE TABLE fact (id INTEGER PRIMARY KEY, subject_id INTEGER);
+             CREATE TABLE fact (id INTEGER PRIMARY KEY, subject_id INTEGER REFERENCES fact_subject(id));
              CREATE TABLE metric_live_fact (x);
              CREATE TABLE metric_cube (x);
              CREATE TABLE metric_cube_state (x);
@@ -7150,10 +7164,7 @@ mod tests {
         )
         .unwrap();
         let started = std::time::Instant::now();
-        conn.execute_batch(include_str!(
-            "../migrations/V64__fact_subject_is_one_ref.sql"
-        ))
-        .unwrap();
+        run_subject_migration(&mut conn);
         assert!(
             started.elapsed() < std::time::Duration::from_secs(2),
             "took {:?}",

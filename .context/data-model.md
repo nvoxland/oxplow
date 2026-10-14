@@ -117,6 +117,21 @@ from opening. Rewrite what the old name left in the data with a new
 migration (`V26__command_ids.sql` is the example), and reword a model's
 docs with a version bump.
 
+**Migrations run with foreign keys off.** `migrate_and_compile` turns
+`foreign_keys` off around the runner and, when any migration applied,
+refuses to open if `PRAGMA foreign_key_check` finds a row pointing at
+nothing (naming its tables). That is SQLite's procedure for rebuilding a
+table (create `_new`, copy, drop, rename): with them on, dropping a table
+other rows reference deletes under those rows and fails, deferred or not
+(V64 rebuilds `fact_subject` under `fact.subject_id`). The pragma is a
+no-op inside a transaction and refinery wraps each migration in one, so
+it can't be set from a migration file. The flip side: an `ON DELETE
+CASCADE` doesn't fire inside a migration, so a migration that deletes
+parents deletes their children itself, or the check refuses the database.
+A migration over a large table joins through an indexed key (a temp
+table's `INTEGER PRIMARY KEY`), never a correlated scan: a real database
+holds ~1.4M facts, and a scan per row outlasts the daemon's 60s start.
+
 > ⚠️ Migrations are **embedded at compile time** (`refinery::embed_migrations!`,
 > a proc macro cargo knows nothing about). `crates/oxplow-db/build.rs` declares
 > `rerun-if-changed=migrations` so a migration-only change (pure SQL, no `.rs`
@@ -494,9 +509,9 @@ One agent slot a person opened on a thread (V32; `ses<n>`, ref
   backfilled one session per existing thread (a `chat` for an ACP thread,
   else a `terminal`; closed with the thread, or `stream_archived` with its
   archive) and anchored its turns and `agent.*` events to it.
-- **Migration:** V32 drops the thread columns with `DROP COLUMN`, never by
-  rebuilding `threads` (`foreign_keys=ON` would cascade-delete its
-  children); `migrate_and_compile` drops the model views first, so no
+- **Migration:** V32 drops the thread columns with `DROP COLUMN` (it ran
+  when migrations still had foreign keys on, where rebuilding `threads`
+  cascade-deleted its children); `migrate_and_compile` drops the model views first, so no
   `v_thread` blocks the drop. `v32_moves_agent_columns_onto_one_session_per_thread`
   checks rows, anchors, the dropped columns and the children.
 - **ACP:** the conversation itself has **no table**: it lives in memory
@@ -679,8 +694,9 @@ every older open one per thread as `system`) and dropped the
 one-open-per-work-item index. It added `title` (an override; `v_effort.title`
 is it, else the item's title, else the first line of the thread's first
 prompt in the span) and `closed_by` (`commit`, `switch`, `person`,
-`agent`, `system`). Done by column — add, copy, drop, rename — never by
-rebuilding the table, which would cascade away the child rows. In Rust
+`agent`, `system`). Done by column — add, copy, drop, rename — since
+migrations then ran with foreign keys on, where rebuilding the table
+cascaded away the child rows. In Rust
 `Effort.work_item` is `Option<String>`; `start_tx(conn, ev,
 work_item: Option<&str>, …)` and `finish_tx(conn, ev, id, &EffortEnd)`;
 the events are `effort.opened@2` / `effort.closed@2` (with `closed_by`) /
@@ -2443,7 +2459,7 @@ The draft migration has not been executed.
 Draft V54 widens command_audit actor_kind to include `job`, retaining every
 column/row, proposal audit links, the refused-audit index and AUTOINCREMENT
 high-water. The rebuild uses the migration transaction and legacy rename mode;
-foreign_keys is not disabled inside that transaction. It has not been executed.
+the runner turns foreign_keys off around migrations. It has not been executed.
 ActorKindV2 preserves both published command event schemas; current
 command.executed@3 adds job attribution with identity upcasts from v1/v2.
 command.proposed remains v2 because jobs cannot create confirmation proposals.

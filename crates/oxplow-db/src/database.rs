@@ -1021,10 +1021,55 @@ fn write_template(path: &std::path::Path) -> Result<(), DbInitError> {
 
 pub(crate) fn migrate_and_compile(conn: &mut Connection) -> Result<(), DbInitError> {
     crate::models::drop_all(conn).map_err(|e| DbInitError::Models(e.to_string()))?;
-    embedded::migrations::runner()
-        .run(conn)
-        .map_err(|e| DbInitError::Migration(e.to_string()))?;
+    with_foreign_keys_off(conn, |conn| {
+        embedded::migrations::runner()
+            .run(conn)
+            .map(|report| !report.applied_migrations().is_empty())
+            .map_err(|e| DbInitError::Migration(e.to_string()))
+    })?;
     crate::models::compile_core(conn).map_err(|e| DbInitError::Models(e.to_string()))
+}
+
+/// Run `f` (the migrations) with foreign keys off, then, if it changed
+/// anything (`f` returns whether it did), require every reference to
+/// resolve before turning them back on. SQLite's procedure for
+/// rebuilding a table (create, copy, drop, rename) needs them off: with them
+/// on, dropping a table other rows reference deletes under those rows and
+/// fails, deferred or not. The pragma is a no-op inside a transaction and
+/// refinery runs each migration in one, so it's set here, around them all.
+pub(crate) fn with_foreign_keys_off(
+    conn: &mut Connection,
+    f: impl FnOnce(&mut Connection) -> Result<bool, DbInitError>,
+) -> Result<(), DbInitError> {
+    conn.pragma_update(None, "foreign_keys", "OFF")
+        .map_err(DbInitError::Sqlite)?;
+    let ran = f(conn).and_then(|changed| {
+        if !changed {
+            return Ok(());
+        }
+        let orphaned: Vec<String> = conn
+            .prepare("SELECT DISTINCT \"table\" FROM pragma_foreign_key_check ORDER BY 1")
+            .and_then(|mut s| {
+                s.query_map([], |r| r.get(0))?
+                    .collect::<rusqlite::Result<_>>()
+            })
+            .map_err(DbInitError::Sqlite)?;
+        if orphaned.is_empty() {
+            Ok(())
+        } else {
+            Err(DbInitError::Migration(format!(
+                "migrations left rows referencing nothing in {}",
+                orphaned
+                    .iter()
+                    .map(|t| format!("`{t}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )))
+        }
+    });
+    conn.pragma_update(None, "foreign_keys", "ON")
+        .map_err(DbInitError::Sqlite)?;
+    ran
 }
 
 #[cfg(test)]
@@ -2467,6 +2512,68 @@ mod tests {
             payload,
             r#"{"key":"zones","before":null,"after":[],"layer":"project"}"#
         );
+    }
+
+    /// A migration may rebuild a table other tables reference (SQLite's
+    /// create-copy-drop-rename), as V64 does to `fact_subject` under
+    /// `fact.subject_id`: migrations run with foreign keys off, as SQLite's
+    /// procedure requires, and the result is checked before the database
+    /// opens.
+    #[test]
+    fn a_migration_rebuilds_a_table_that_rows_reference() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        crate::sql_functions::register(&conn).unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(63))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+               VALUES (1, 'primary', 'a', 'main', 'r', 'r', '/r', 't', 't');
+             INSERT INTO metric_capture (id, stream_id, producer, provenance, source, captured_at)
+               VALUES (1, 1, 'p', 'observed', 's', 't');
+             INSERT INTO measure (key, title, created_at, updated_at) VALUES ('test.m', 'm', 't', 't');
+             INSERT INTO fact_subject (kind, ref) VALUES ('file', 'a.rs');
+             INSERT INTO fact (capture_id, measure_id, value, subject_id)
+               SELECT 1, (SELECT id FROM measure WHERE key = 'test.m'), 1.0, last_insert_rowid();",
+        )
+        .unwrap();
+        migrate_and_compile(&mut conn).unwrap();
+        let subject: String = conn
+            .query_row(
+                "SELECT s.ref FROM fact JOIN fact_subject s ON s.id = fact.subject_id",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(subject, "file:a.rs");
+        let on: i64 = conn
+            .query_row("PRAGMA foreign_keys", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(on, 1, "foreign keys are back on once migrated");
+    }
+
+    /// Migrating refuses to open a database whose migrations left a row
+    /// pointing at nothing, naming the table.
+    #[test]
+    fn a_migration_that_orphans_a_row_is_refused() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        conn.execute_batch(
+            "CREATE TABLE p (id INTEGER PRIMARY KEY);
+             CREATE TABLE c (id INTEGER PRIMARY KEY, p_id INTEGER REFERENCES p(id));
+             INSERT INTO p VALUES (1);
+             INSERT INTO c VALUES (1, 1);",
+        )
+        .unwrap();
+        let err = with_foreign_keys_off(&mut conn, |conn| {
+            conn.execute_batch("DELETE FROM p;")
+                .map(|()| true)
+                .map_err(|e| DbInitError::Migration(e.to_string()))
+        })
+        .unwrap_err();
+        assert!(err.to_string().contains("`c`"), "{err}");
     }
 
     /// Regression: the first version of V18 rebuilt the `task` table
