@@ -2571,6 +2571,15 @@ approved; a **decision** is what a run was allowed (`oxplow_domain::grant`,
   policy's script, a provider's `host/call`s — decided against the
   provider's own `needs`). Core's own work has none and is allowed what
   it does.
+- **The loaded-vs-disk gate.** Every script kind a person approves — an
+  effect, an effort policy, a model-calling collector or provider script —
+  runs under `exec_consent::loaded_script_gate`: besides the approval hash of
+  the folder as it is on disk, it refuses (at each host call and at
+  publication) when the script *as the catalog loaded it* differs from the
+  file now ("the loaded script differs from the approved version; reload
+  it"). Approving an edited file therefore never lets the older cached text
+  run; the next catalog publication loads the new one. Pinned for effects by
+  `an_effect_whose_file_changed_since_it_loaded_is_refused`.
 - **Decisions.** `run.decide(Need)` → `Allowed`, `Denied(why)` or
   `Unenforced(why)`, recorded on the run (`v_extension_run.decisions`):
   each scope call (`Calls::serve`); a program collector's `program`,

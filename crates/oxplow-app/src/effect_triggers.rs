@@ -571,10 +571,11 @@ pub(crate) async fn run_reaction(
             approved,
             crate::grants::script_request(&decl.needs),
         ))
-        .guarded(crate::exec_consent::script_gate(
+        .guarded(crate::exec_consent::loaded_script_gate(
             svc.approvals.clone(),
             svc.layout.project_dir.clone(),
             crate::effects::effect_program(ext, decl),
+            decl.script.clone(),
         ));
     let key = EffectRunKey {
         effect,
@@ -1878,6 +1879,43 @@ mod tests {
             "{}",
             disabled.envelope.payload
         );
+    }
+
+    /// An effect's file changes on disk after the catalog loaded it and the
+    /// new bytes are approved: the reaction still runs the loaded script, so
+    /// it is refused until the catalog republishes.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_effect_whose_file_changed_since_it_loaded_is_refused() {
+        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let svc = &fx.svc;
+        extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
+        let before = title(&fx).await;
+        std::fs::write(
+            svc.layout
+                .project_dir
+                .join("oxplow/extensions/acme/mark.star"),
+            format!("{MARK}# edited on disk\n"),
+        )
+        .unwrap();
+        // A person approves what is on disk now; the catalog still holds the old text.
+        approve(svc).await;
+        let consumer = EffectTriggers::new(Arc::downgrade(svc));
+        let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        consumer.handle(&ev).await.unwrap();
+        assert_eq!(title(&fx).await, before, "nothing ran");
+        let rows = rows(svc, "SELECT state, reason FROM v_effect_run").await;
+        assert_eq!(rows[0][0], json!("failed"), "{rows}");
+        assert!(
+            rows[0][1]
+                .as_str()
+                .is_some_and(|e| e.contains("loaded script differs")),
+            "{rows}"
+        );
+        // Republished, the approved text is the loaded one.
+        crate::test_fixtures::activate(svc).await;
+        let again = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        consumer.handle(&again).await.unwrap();
+        assert_eq!(title(&fx).await, format!("{before} (done)"));
     }
 
     /// Skipped and proposed reactions aren't failures.
