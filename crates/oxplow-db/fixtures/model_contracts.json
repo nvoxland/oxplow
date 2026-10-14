@@ -8329,7 +8329,7 @@
         {
           "name": "subject_ref",
           "type": "TEXT",
-          "doc": "Logical id of the subject (`symbol:<path>/<id>`, `file:<path>`)."
+          "doc": "The subject's id within its kind (`src/a.rs/Parser::parse` for a symbol, `src/a.rs` for a file); its ref is `subject_kind || ':' || subject_ref`."
         },
         {
           "name": "path",

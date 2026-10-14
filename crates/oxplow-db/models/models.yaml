@@ -1458,7 +1458,7 @@
     - { name: "numerator", type: "REAL", doc: "Ratio numerator, for ratio measures." }
     - { name: "denominator", type: "REAL", doc: "Ratio denominator, for ratio measures." }
     - { name: "subject_kind", type: "TEXT", doc: "What the fact is about: `file` or `symbol`." }
-    - { name: "subject_ref", type: "TEXT", doc: "Logical id of the subject (`symbol:<path>/<id>`, `file:<path>`)." }
+    - { name: "subject_ref", type: "TEXT", doc: "The subject's id within its kind (`src/a.rs/Parser::parse` for a symbol, `src/a.rs` for a file); its ref is `subject_kind || ':' || subject_ref`." }
     - { name: "path", type: "TEXT", doc: "File path." }
     - { name: "line", type: "INTEGER", doc: "Line number, when it has one." }
     - { name: "severity", type: "TEXT", doc: "Finding severity, for lint-like facts." }

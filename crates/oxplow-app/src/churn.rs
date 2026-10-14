@@ -210,6 +210,7 @@ mod tests {
             path: "src/lib.rs".into(),
             name: name.into(),
             id: name.into(),
+            kind: oxplow_code_metrics::SymbolKind::Function,
             complexity: 1,
             length: end - start + 1,
             parameter_count: 0,

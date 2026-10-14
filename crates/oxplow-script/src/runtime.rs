@@ -227,11 +227,6 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
         let lang = oxplow_code_metrics::language_from_name(language)
             .ok_or_else(|| anyhow::anyhow!("unknown language \"{language}\""))?;
         let fns = oxplow_code_metrics::analyze_with_language(path, text, lang);
-        let kinds: std::collections::HashMap<String, &'static str> =
-            oxplow_code_metrics::extract_with_language(text, lang)
-                .into_iter()
-                .map(|d| (d.id, d.kind.as_str()))
-                .collect();
         let arr: Vec<serde_json::Value> = fns
             .into_iter()
             .map(|m| {
@@ -245,7 +240,7 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
                     "id": m.id,
                     "ref": oxplow_domain::refs::build::symbol_ref(path, &m.id),
                     "container": (!m.container_path.is_empty()).then(|| m.container_path.join("::")),
-                    "kind": kinds.get(&m.id).copied().unwrap_or("function"),
+                    "kind": m.kind.as_str(),
                     "complexity": m.complexity,
                     "length": m.length,
                     "parameter_count": m.parameter_count,

@@ -59,6 +59,8 @@ pub struct FunctionMetrics {
     /// Its symbol id within the file (`Parser::parse`, `main~2`) — the
     /// same id [`extract`] gives it.
     pub id: String,
+    /// Its symbol kind: function, method or constructor.
+    pub kind: SymbolKind,
     /// Cyclomatic complexity (decision points + 1).
     pub complexity: u32,
     /// Body line count (end_line - start_line + 1).
@@ -385,6 +387,7 @@ fn function_metrics(
         has_doc: has_doc_for(node, src, spec),
         name: def.name,
         id: def.id,
+        kind: def.kind,
         container_path: def.container,
     }
 }
