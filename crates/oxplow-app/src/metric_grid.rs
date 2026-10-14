@@ -158,12 +158,12 @@ impl GridPlan {
                 DomainError::Invalid(m) => invalid(format!("MEASURE('{key}'): {m}")),
                 other => other,
             };
-            let spec = engine.spec(key).await?.ok_or_else(|| {
-                invalid(format!(
+            let Some(spec) = engine.spec(key).await? else {
+                return Err(invalid(format!(
                     "MEASURE('{key}'): {}",
-                    crate::metric_engine::missing_metric(key)
-                ))
-            })?;
+                    engine.missing(key).await
+                )));
+            };
             let entity = crate::entity_metrics::entity_of(&spec);
             match (&spec.source_measure, &entity) {
                 (Some(m), _) => measures.push(m.clone()),
@@ -340,6 +340,18 @@ mod tests {
             })
             .await
             .unwrap();
+        // An opt-in metric the catalog lists, off: it has no spec.
+        db.transaction(|tx| {
+            tx.execute(
+                "INSERT INTO metric_catalog (key, title, kind, scope, enabled, trigger, toggleable) \
+                 VALUES ('oxplow.doc_coverage', 'Doc coverage', 'coverage', \
+                 'extension:oxplow-foundation', 0, 'on snapshot.taken', 1)",
+                [],
+            )
+            .map_err(oxplow_db::map_sql_err)
+        })
+        .await
+        .unwrap();
         let facts = SqliteFactStore::new(db.clone());
         let m = facts
             .upsert_measure(oxplow_db::NewMeasure::new("acme.size", "Size"))
@@ -513,8 +525,8 @@ mod tests {
                 .to_string();
             assert!(err.contains(says), "{sql}: {err}");
         }
-        // tsk1046: a built-in gauge that's off has no spec; it says so, and
-        // how to turn it on, instead of an empty grid.
+        // A metric the catalog lists but that's off has no spec; it says
+        // so, and how to turn it on, instead of an empty grid.
         let err = gateway
             .query_sql(
                 "SELECT MEASURE('oxplow.doc_coverage') FROM metric_grid('day')",

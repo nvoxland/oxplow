@@ -1259,20 +1259,18 @@ impl FoldMemo {
     }
 }
 
-/// Why there is no spec for metric `key`: a built-in gauge has one only
-/// while it's on, so it's "off — how to turn it on"; anything else isn't a
-/// metric (tsk1046). Every read and write of a metric by key says this.
-pub fn missing_metric(key: &str) -> String {
-    if oxplow_script::builtin_metrics::builtin_metrics()
-        .iter()
-        .any(|m| m.key == key)
-    {
-        format!(
+/// Why there is no spec for metric `key`, given whether the catalog lists
+/// it ([`oxplow_db::fact_store::catalog_enabled_tx`]): a metric has a spec
+/// only while it's on, so a listed one is "off — how to turn it on";
+/// anything else isn't a metric. Every read and write of a metric by key
+/// says this.
+pub fn missing_metric(key: &str, listed: Option<bool>) -> String {
+    match listed {
+        Some(_) => format!(
             "`{key}` is off in this project — turn it on with `oxplow.config.set` on `metrics` \
              (add `- use: {key}`)"
-        )
-    } else {
-        format!("no metric `{key}` (see v_metric_spec)")
+        ),
+        None => format!("no metric `{key}` (see v_metric_spec)"),
     }
 }
 
@@ -1766,6 +1764,11 @@ impl MetricEngine {
     /// The metric spec `key`, if there is one.
     pub async fn spec(&self, key: &str) -> Result<Option<MetricSpec>, DomainError> {
         self.facts.get_spec(key).await
+    }
+
+    /// [`missing_metric`] for `key`, read against the catalog.
+    pub async fn missing(&self, key: &str) -> String {
+        missing_metric(key, self.facts.catalog_enabled(key).await.ok().flatten())
     }
 
     pub async fn series_for_spec(

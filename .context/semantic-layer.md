@@ -71,8 +71,8 @@ A **collector** (the target design called it a *source*) records one of:
 - **records**: a test, coverage or analysis report it parses (the
   project's report collectors, tsk863).
 
-Core ships built-in collectors. Extensions and the project declare more
-with the same format. A collector runs on its `trigger`: `manual`,
+Extensions (oxplow's own code metrics are oxplow-foundation's) and the project
+declare collectors in the same format. A collector runs on its `trigger`: `manual`,
 `{ every: <dur> }`, `{ on: [<event types>] }` or, for a report collector,
 `{ on_run: test | analysis }`; its runtime is `exec`, `starlark`, `jaq` or
 `read` (`crates/oxplow-config/src/collectors.rs`; "Collectors" below).
@@ -854,10 +854,10 @@ extension's own declared event types, logged with the run (P9.D2;
   collector's (`collector_run`, `collector.synced@1`, `contribution_health`, a
   project program's approval).
 
-**Owners.** An extension (its name), `project` (`.oxplow/project.yaml`'s
-`collectors:`) or `built-in` (the bundled `oxplow.*` code metrics, run
-only when `metrics: - use: oxplow.<x>` enables them). `project` and
-`built-in` are reserved extension names. There are no global collectors.
+**Owners.** An extension (its name) or `project` (`.oxplow/project.yaml`'s
+`collectors:`). `project` is a reserved extension name. There are no global
+collectors. oxplow's `oxplow.*` code collectors are oxplow-foundation's; one
+that metrics name runs only while one of them is on.
 
 - **The project's collectors record facts** (`collectors:` in
   `.oxplow/project.yaml`; scripts under `oxplow/collectors/`); an entity
@@ -1181,7 +1181,7 @@ oxplow-bundled change cards) only read them.
   recorded as a code-quality scan (`v_code_quality_scan` /
   `v_code_quality_finding`). It writes **no** `oxplow.duplicate_lines`
   facts: only a full-tree scan may restate that metric (tsk365) — the
-  built-in collector's, on every ref move (P7.B5,
+  oxplow-foundation's collector's, on every ref move (P7.B5,
   [code-quality.md](./code-quality.md)).
   Closed efforts and turns scan their end snapshot: `Trees` reads any
   revision (P5.B2).

@@ -2041,7 +2041,7 @@ one fails and deleted in the transaction of the next success; `v_asset`
 
 V133 (P7.B3; replaced V75 `ext_source_state`, its rows copied). Each
 collector's last run: `owner` + `id` (the primary key; the owner is the
-declaring extension, `project` or `built-in`), `status` (`ok` / `error` /
+declaring extension or `project`), `status` (`ok` / `error` /
 `needs_approval` / `skipped` — the loop guard refused its run for an
 event, V154 rebuilt the table for the CHECK), `last_run_at`, `error`, `row_counts_json` (rows per
 entity after the last good run), `cursor_json` (its opaque checkpoint)

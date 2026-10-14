@@ -74,7 +74,7 @@ pub struct RunOptions {
 /// file is found), but a block is kept only when a side is in `scope`,
 /// that side is reported first, and same-file pairs — almost always
 /// shifted-by-one winnowing artifacts — are dropped. A whole-tree scan is
-/// the built-in `oxplow.duplicate_lines` collector's (`duplicate_blocks`).
+/// oxplow-foundation's `oxplow.duplicate_lines` collector's (`duplicate_blocks`).
 ///
 /// Runs on the blocking pool (tree-sitter is CPU-bound) under the
 /// `opts.timeout` budget.

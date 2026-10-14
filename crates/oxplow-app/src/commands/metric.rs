@@ -150,7 +150,15 @@ fn record_tx(
     let stream = stream_for(ctx.actor(), input.stream.as_deref(), primary)?;
     let spec = get_spec_tx(ctx.conn, &input.key)
         .map_err(sql)?
-        .ok_or_else(|| invalid("/key", crate::metric_engine::missing_metric(&input.key)))?;
+        .ok_or_else(|| {
+            let listed = oxplow_db::fact_store::catalog_enabled_tx(ctx.conn, &input.key)
+                .ok()
+                .flatten();
+            invalid(
+                "/key",
+                crate::metric_engine::missing_metric(&input.key, listed),
+            )
+        })?;
     let measure_key = spec.source_measure.as_deref().ok_or_else(|| {
         invalid(
             "/key",

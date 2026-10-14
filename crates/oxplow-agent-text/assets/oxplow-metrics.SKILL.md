@@ -27,13 +27,13 @@ has four orthogonal metric blocks, mirroring the substrate:
 A metric no longer *computes* anything — it names a `sourceMeasure` + an
 `aggregation`. The number comes from re-aggregating the facts a collector recorded.
 
-## Step 1 — is there already a built-in? (`use:`)
+## Step 1 — is there already a metric? (`use:`)
 
 **Always prefer `use:`** when a bundled metric covers the ask — list them with
 `query_sql`:
 
 ```sql
-SELECT key, title, language, enabled FROM v_metric_catalog WHERE scope = 'built-in'
+SELECT key, title, language, enabled FROM v_metric_catalog WHERE scope = 'extension:oxplow-foundation'
 ```
  Bundled Rust/TS/Clojure/C#
 metrics exist for unsafe blocks, unwrap/expect, panic macros, TODO markers,
@@ -206,7 +206,7 @@ the return (an old `samples` / `findings` shape) is refused.
   `symbol:<path>/<id>` ref: use it as a per-function fact's `subject`.
 - `duplicate_blocks(min_lines)` → every duplicated block pair among the
   snapshot files `[{a_path, a_start_line, a_end_line, b_path, b_start_line,
-  b_end_line, line_count}]` (see the built-in `oxplow.duplicate_lines`).
+  b_end_line, line_count}]` (see oxplow-foundation's `oxplow.duplicate_lines`).
 - plus `regex_find`, `parse_json`, `parse_xml`, `lines`, `lcov_records`, `xpath`.
 - A fact collector can't call the `ai_*` builtins (those are for entity
   collectors, which in turn get no `files()`).
@@ -242,7 +242,7 @@ Programs (you can't approve it; `oxplow.collector.sync` tells you when it's wait
 and any change to the program needs approving again.
 
 The bundled collector scripts in
-`crates/oxplow-script/src/metrics/<lang>/*.star` are the canonical
+`extensions/oxplow-foundation/collectors/<lang>/*.star` are the canonical
 copy-paste templates — each emits per-item facts.
 
 ## Step 4 — scope

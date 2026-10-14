@@ -1296,7 +1296,7 @@ pub const MAX_RUN_EVENTS: usize = 100;
 /// each one of its **extension's own declared types**, at that type's
 /// newest version, from `collector:<owner>/<id>` — the rule a command's
 /// or an effect's script is held to ([`own_events`]). Refused: a project
-/// or built-in collector's (it has no namespace to declare types in), a
+/// collector's (it has no namespace to declare types in), a
 /// type the collector itself runs on (its run would trigger itself), and
 /// more than [`MAX_RUN_EVENTS`].
 ///
@@ -1309,12 +1309,12 @@ fn plan_events(
     spec: &CollectorSpec,
     events: Vec<crate::extension_commands::ComposedEvent>,
 ) -> Result<Vec<Envelope>, String> {
-    use oxplow_config::collectors::{Trigger, BUILT_IN, PROJECT};
+    use oxplow_config::collectors::{Trigger, PROJECT};
     if events.is_empty() {
         return Ok(Vec::new());
     }
     let id = &spec.id;
-    if [PROJECT, BUILT_IN].contains(&owner) {
+    if owner == PROJECT {
         return Err(format!(
             "collector `{owner}/{id}` returned `events`, which only an extension's collector \
              may: event types are declared by an extension (`event_types:`)"
@@ -2016,8 +2016,8 @@ impl CollectorRunner {
         id: &str,
         trigger: RunTrigger,
     ) -> Result<CollectorRunReport, RunCollectorError> {
-        // A fact collector (the project's, a built-in or an extension's
-        // that records facts) runs in the fact engine.
+        // A fact collector (the project's or an extension's that records
+        // facts) runs in the fact engine.
         if self
             .metrics
             .fact_collectors()
@@ -3640,16 +3640,17 @@ pub(crate) mod tests {
             plan_events(&vocabulary, "my-gh", &s, Vec::new()).unwrap(),
             Vec::new()
         );
-        for owner in [
+        let refused = plan_events(
+            &vocabulary,
             oxplow_config::collectors::PROJECT,
-            oxplow_config::collectors::BUILT_IN,
-        ] {
-            let refused = plan_events(&vocabulary, owner, &s, out.events.clone()).unwrap_err();
-            assert!(
-                refused.contains("only an extension's collector may"),
-                "{owner}: {refused}"
-            );
-        }
+            &s,
+            out.events.clone(),
+        )
+        .unwrap_err();
+        assert!(
+            refused.contains("only an extension's collector may"),
+            "{refused}"
+        );
         // Its extension declares no such type.
         let refused = plan_events(&vocabulary, "my-gh", &s, out.events).unwrap_err();
         assert!(

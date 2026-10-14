@@ -39,7 +39,7 @@ use oxplow_db::{
 use oxplow_domain::run::Budget;
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::{Actor, DomainError, EffortId, StreamId, ThreadId};
-use oxplow_script::{builtin_metrics, BuiltinMetric, CollectedFact};
+use oxplow_script::CollectedFact;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
@@ -139,21 +139,19 @@ impl Corpus {
 }
 
 /// A collector that records facts, as the fact engine runs it (P7.B3): one
-/// of the project's `collectors:`, an enabled extension's, or a built-in
-/// one (`oxplow.*`) that `metrics: - use:` enabled.
+/// of the project's `collectors:` or an enabled extension's (oxplow's own
+/// code metrics are oxplow-foundation's).
 #[derive(Debug, Clone, PartialEq)]
 pub struct FactCollector {
     /// Its id — the producer name its captures carry.
     pub key: String,
-    /// `built-in`, `project` or the extension's name.
+    /// `project` or the extension's name.
     pub owner: String,
     pub trigger: Trigger,
-    /// The measures its facts may land on; empty for a built-in (the
-    /// catalog alone governs those).
+    /// The measures its facts may land on.
     pub facts: Vec<String>,
     pub runtime: CollectorRuntime,
-    /// Its script or program, relative to its owner's folder; `None` for a
-    /// built-in (the script is embedded).
+    /// Its script or program, relative to its owner's folder.
     pub entry: Option<String>,
     pub report: Option<ReportInput>,
     /// Read-only SQL handed over as `input.rows`, the trigger's anchors bound.
@@ -162,7 +160,7 @@ pub struct FactCollector {
     /// event first.
     pub after: Vec<String>,
     /// It reads the whole tree as of the snapshot on every run, so its
-    /// capture restates every file (a built-in whole-tree scan).
+    /// capture restates every file (a whole-tree scan).
     pub whole_tree: bool,
     /// The services its script may use: what it declares and what a fact
     /// collector implies (`tree.read`).
@@ -188,39 +186,6 @@ impl FactCollector {
         })
     }
 
-    /// A bundled metric's collector, on the trigger the catalog gives it.
-    fn builtin(m: &BuiltinMetric) -> Self {
-        FactCollector {
-            key: m.key.to_string(),
-            owner: oxplow_config::collectors::BUILT_IN.to_string(),
-            trigger: Trigger::On {
-                events: m.on.iter().map(|e| e.to_string()).collect(),
-                filter: m
-                    .filter
-                    .iter()
-                    .map(|(k, v)| (k.to_string(), v.to_string()))
-                    .collect(),
-                pacing: oxplow_config::collectors::Pacing {
-                    settle_secs: m.pacing.settle_secs,
-                    at_most_secs: m.pacing.at_most_secs,
-                    ..Default::default()
-                },
-            },
-            facts: Vec::new(),
-            runtime: CollectorRuntime::Starlark,
-            entry: None,
-            report: None,
-            input: None,
-            after: Vec::new(),
-            whole_tree: m.whole_tree,
-            needs: vec!["tree.read".into()],
-        }
-    }
-
-    fn is_builtin(&self) -> bool {
-        self.owner == oxplow_config::collectors::BUILT_IN
-    }
-
     /// Whether an event of `event_type` triggers it.
     pub fn runs_on(&self, event_type: &str) -> bool {
         matches!(&self.trigger, Trigger::On { events, .. } if events.iter().any(|e| e == event_type))
@@ -235,9 +200,7 @@ impl FactCollector {
     /// The scope its captures record (the metric catalog's vocabulary).
     fn scope(&self) -> String {
         match self.owner.as_str() {
-            o @ (oxplow_config::collectors::BUILT_IN | oxplow_config::collectors::PROJECT) => {
-                o.to_string()
-            }
+            o @ oxplow_config::collectors::PROJECT => o.to_string(),
             ext => oxplow_config::extension_scope(ext),
         }
     }
@@ -251,13 +214,20 @@ pub(crate) fn take_recorded(event: &oxplow_domain::StoredEvent) -> bool {
         && payload["file_count"].as_u64().unwrap_or(0) > 0
 }
 
-/// A built-in's trigger as the catalog shows it: `on snapshot.taken`,
+/// A collector's trigger as the catalog shows it: `on snapshot.taken`,
 /// with its payload filter when it has one.
-fn trigger_label(m: &BuiltinMetric) -> String {
-    let filter: Vec<String> = m.filter.iter().map(|(k, v)| format!("{k}: {v}")).collect();
-    match filter.is_empty() {
-        true => format!("on {}", m.on.join(", ")),
-        false => format!("on {} where {}", m.on.join(", "), filter.join(", ")),
+fn trigger_label(trigger: &Trigger) -> String {
+    match trigger {
+        Trigger::Manual => "manual".into(),
+        Trigger::Every { minutes } => format!("every {minutes}m"),
+        Trigger::OnRun { run } => format!("on {run:?} run").to_lowercase(),
+        Trigger::On { events, filter, .. } => {
+            let filter: Vec<String> = filter.iter().map(|(k, v)| format!("{k}: {v}")).collect();
+            match filter.is_empty() {
+                true => format!("on {}", events.join(", ")),
+                false => format!("on {} where {}", events.join(", "), filter.join(", ")),
+            }
+        }
     }
 }
 
@@ -636,33 +606,17 @@ impl MetricsService {
         out
     }
 
-    /// The active, resolved metric SPECS for this project (built-in ∪ global ∪
-    /// project, precedence project > global > built-in). Built-ins are the
-    /// bundled catalog (`oxplow_script::builtin_metrics`); a project
-    /// activates one with `metrics: - use: oxplow.<lang>.<name>` and its own
-    /// `key:` specs.
+    /// The resolved metric SPECS for this project (built-in ∪ global ∪ each
+    /// extension ∪ project; `oxplow_config::resolve_metrics`). oxplow's own
+    /// code metrics are oxplow-foundation's: an opt-in one activates with
+    /// `metrics: - use: oxplow.<lang>.<name>`.
     fn resolved_specs(&self) -> Vec<ResolvedSpec> {
         self.metric_layers().resolve()
     }
 
     /// The four scopes metric resolution reads (see [`MetricLayers`]).
     fn metric_layers(&self) -> MetricLayers {
-        let mut project = self.read_metric_config().metrics;
-        // The default-on built-ins (tsk1034) are used unless the project
-        // mentions them (its own `use:` or an `enabled: false` marker).
-        let mentioned: std::collections::HashSet<String> = project
-            .iter()
-            .filter_map(|e| e.use_key.clone().or_else(|| e.key.clone()))
-            .collect();
-        project.extend(
-            oxplow_script::builtin_metrics::DEFAULT_ON
-                .iter()
-                .filter(|k| !mentioned.contains(**k))
-                .map(|k| MetricEntry {
-                    use_key: Some((*k).to_string()),
-                    ..Default::default()
-                }),
-        );
+        let project = self.read_metric_config().metrics;
         let global = self.with_global_catalog(|g| g.metrics.clone());
         MetricLayers {
             builtin: builtin_spec_entries(),
@@ -702,18 +656,12 @@ impl MetricsService {
     }
 
     /// The fact collectors this project runs (P7.B3): the project's own
-    /// (`collectors:` with `facts:`), enabled extensions' (those metrics
-    /// name only while one of them is active), and the built-in ones whose
-    /// metric `metrics: - use:` enables (and no marker disables).
-    /// An id two owners declare runs once — the project's over an
-    /// extension's over a built-in — with a warning.
+    /// (`collectors:` with `facts:`) and enabled extensions' (oxplow's code
+    /// metrics are oxplow-foundation's), a collector metrics name only
+    /// while one of them is active. An id two owners declare runs once —
+    /// the project's over an extension's — with a warning.
     pub fn fact_collectors(&self) -> Vec<FactCollector> {
         let specs = self.resolved_specs();
-        let enabled: std::collections::HashSet<String> = specs
-            .iter()
-            .filter(|s| s.scope == "built-in" && s.enabled)
-            .map(|s| s.key.clone())
-            .collect();
         // A collector some extension metric names (`collector:`) runs only
         // while one of those metrics is active; one no metric names runs
         // whenever its extension is enabled.
@@ -729,11 +677,6 @@ impl MetricsService {
                 .copied()
                 .unwrap_or(true)
         });
-        let builtin: Vec<FactCollector> = builtin_metrics()
-            .iter()
-            .filter(|m| enabled.contains(m.key))
-            .map(FactCollector::builtin)
-            .collect();
         let project: Vec<FactCollector> = self
             .read_metric_config()
             .collectors
@@ -741,7 +684,7 @@ impl MetricsService {
             .filter_map(|spec| FactCollector::from_spec(oxplow_config::collectors::PROJECT, spec))
             .collect();
         let mut out: Vec<FactCollector> = Vec::new();
-        for c in builtin.into_iter().chain(extension).chain(project) {
+        for c in extension.chain(project) {
             match out.iter().position(|o| o.key == c.key) {
                 Some(i) => {
                     tracing::warn!(id = %c.key, kept = %c.owner, dropped = %out[i].owner,
@@ -761,20 +704,17 @@ impl MetricsService {
             .unwrap_or(DEFAULT_MAX_FILE_BYTES)
     }
 
-    /// The **available** catalog (built-in ∪ global ∪ project) with each entry's
-    /// enabled-in-this-project flag — the Catalog page's read (tsk219). A
-    /// built-in shows up even before it's `use:`d/seeded.
     /// The full metric registry for this project — **everything available**,
-    /// not just metrics with recorded data. Four sources, deduped by key:
-    /// 1. bundled code collectors (`builtin_metrics()`) — toggleable, shown even
-    ///    before they're enabled;
-    /// 2. project/global `metrics:` entries — toggleable;
-    /// 3. built-in always-on producers (`builtin_producer_metrics()`) — tokens,
+    /// not just metrics with recorded data, each with its enabled-in-this-project
+    /// flag: the Catalog page's read. Sources, deduped by key:
+    /// 1. resolved `metrics:` entries — extensions' (oxplow-foundation's code
+    ///    metrics among them, an opt-in one listed before it's `use:`d), the
+    ///    person's global ones and the project's — toggleable;
+    /// 2. built-in always-on producers (`builtin_producer_metrics()`) — tokens,
     ///    tests, coverage, analysis, lifecycle, nudges — `toggleable: false`,
     ///    listed even with zero recorded data so the user can see they exist
     ///    (tsk286);
-    /// 4. every other seeded spec — installed extension metrics not covered
-    ///    above. Also `toggleable: false`.
+    /// 3. every other seeded spec not covered above.
     pub async fn catalog(&self) -> Vec<MetricCatalogEntry> {
         match &self.run_log {
             Some(log) => log
@@ -796,11 +736,9 @@ impl MetricsService {
 
     fn catalog_with_specs(&self, specs: Vec<oxplow_db::MetricSpec>) -> Vec<MetricCatalogEntry> {
         let resolved = self.resolved_specs();
-        let by_key: std::collections::HashMap<&str, &_> =
-            resolved.iter().map(|m| (m.key.as_str(), m)).collect();
         // Per-key config enabled state (tsk31): `None` = no entry, `Some(_)` = an
-        // explicit flag. Producers/extensions are default-ON (a disable marker turns
-        // them off); built-in collectors are default-OFF (a `use:` turns them on).
+        // explicit flag. Producers and extension metrics are default-ON (a disable
+        // marker turns them off) unless an extension says `default: off`.
         let cfg_metrics = self.read_metric_config().metrics;
         let config_state = |key: &str| -> Option<bool> {
             cfg_metrics
@@ -808,37 +746,22 @@ impl MetricsService {
                 .find(|e| e.use_key.as_deref() == Some(key) || e.key.as_deref() == Some(key))
                 .map(|e| e.enabled.unwrap_or(true))
         };
+        // The trigger of the collector a metric names: when its facts arrive.
+        let triggers: HashMap<(String, String), String> = self
+            .extension_catalog()
+            .collectors
+            .iter()
+            .map(|c| ((c.owner.clone(), c.key.clone()), trigger_label(&c.trigger)))
+            .collect();
         let mut seen = std::collections::HashSet::new();
         let mut out = Vec::new();
-        for b in builtin_metrics() {
-            seen.insert(b.key.to_string());
-            // When enabled, surface the *resolved* target (so a project override
-            // shows through, tsk233); otherwise the built-in defaults. Trigger is a
-            // property of the built-in collector, not overridable. A built-in collector is
-            // enabled only when a (non-disabled) `use:` resolves it.
-            let r = by_key.get(b.key);
-            out.push(MetricCatalogEntry {
-                key: b.key.to_string(),
-                title: b.title.to_string(),
-                kind: b.kind.to_string(),
-                language: Some(b.language.to_string()),
-                scope: "built-in".to_string(),
-                enabled: r.is_some_and(|m| m.enabled),
-                target: r.map_or(b.target, |m| m.target),
-                trigger: trigger_label(&b),
-                toggleable: true,
-                // Match the seeded spec's category (builtin_metric_specs /
-                // builtin_ast_specs seed "static-quality"), letting a resolved
-                // config override win — the Catalog must agree with the spec
-                // catalog it toggles (tsk46).
-                category: r
-                    .and_then(|m| m.category.clone())
-                    .or_else(|| Some("static-quality".to_string())),
-            });
-        }
-        // Project/global-defined metric specs not already shown as a built-in.
         for m in &resolved {
             if seen.insert(m.key.clone()) {
+                let trigger = m
+                    .collector
+                    .clone()
+                    .zip(oxplow_config::scope_extension(&m.scope))
+                    .and_then(|(c, ext)| triggers.get(&(ext, c)).cloned());
                 out.push(MetricCatalogEntry {
                     key: m.key.clone(),
                     title: m.title.clone(),
@@ -847,9 +770,8 @@ impl MetricsService {
                     scope: m.scope.clone(),
                     enabled: m.enabled,
                     target: m.target,
-                    // A spec has no trigger of its own — its facts arrive on the
-                    // producing collector's cadence.
-                    trigger: "auto".to_string(),
+                    // Its facts arrive on its collector's cadence.
+                    trigger: trigger.unwrap_or_else(|| "auto".to_string()),
                     toggleable: true,
                     category: m.category.clone().or_else(|| Some("custom".to_string())),
                 });
@@ -920,15 +842,11 @@ impl MetricsService {
 
     /// Whether `key` is a default-ON metric (a producer or extension-seeded spec) —
     /// active unless a `enabled: false` marker disables it. Default-OFF metrics
-    /// (built-in code collectors, global `metrics:` definitions and an
-    /// extension's `default: off` ones) instead activate by
+    /// (global `metrics:` definitions and an extension's `default: off` ones)
+    /// instead activate by
     /// the presence of a `use:` entry. Drives the config edit shape in
     /// [`Self::apply_metric_enabled`].
     fn is_default_on(&self, key: &str) -> bool {
-        if oxplow_script::builtin_metrics::DEFAULT_ON.contains(&key) {
-            return true;
-        }
-        let is_builtin_collector_metric = builtin_metrics().iter().any(|m| m.key == key);
         let is_global =
             self.with_global_catalog(|g| g.metrics.iter().any(|e| e.key.as_deref() == Some(key)));
         let is_extension_off = self.extension_catalog().metrics.iter().any(|(_, entries)| {
@@ -937,7 +855,7 @@ impl MetricsService {
                     && e.default == Some(oxplow_config::MetricDefault::Off)
             })
         });
-        !is_builtin_collector_metric && !is_global && !is_extension_off
+        !is_global && !is_extension_off
     }
 
     /// Apply one enable/disable to a `metrics:` list in place (no I/O) — the
@@ -2232,9 +2150,7 @@ impl MetricsService {
         run: RunContext,
     ) -> RunContext {
         let loaded = match runner {
-            FactRunner::Starlark(text) | FactRunner::Jaq(text) if !collector.is_builtin() => {
-                text.clone()
-            }
+            FactRunner::Starlark(text) | FactRunner::Jaq(text) => text.clone(),
             _ => return run,
         };
         let collector = collector.clone();
@@ -2577,8 +2493,7 @@ impl MetricsService {
     /// Enforces **declare-to-collect** (decision #4): a fact is dropped (surfaced
     /// via `tracing::warn!`, never silently written) if its measure is undefined
     /// in the catalog OR not in the collector's own `emits` allow-list (a config collector
-    /// may only emit the measures it declares). A built-in collector has an empty
-    /// `emits` — the catalog check alone governs it.
+    /// may only emit the measures it declares).
     ///
     /// A ZERO-fact run still writes its (empty) capture — "this scan ran and
     /// found nothing" is the record that lets a count metric drop back to zero
@@ -2598,18 +2513,15 @@ impl MetricsService {
         collector_facts: &[CollectedFact],
     ) -> Option<String> {
         let store = self.fact_store.as_ref()?;
-        // The collector's own contract: a declared `facts:` list is all it
-        // may emit (built-ins declare none: unrestricted).
-        if !collector.facts.is_empty() {
-            if let Some(f) = collector_facts
-                .iter()
-                .find(|f| !collector.facts.contains(&f.measure))
-            {
-                return Some(format!(
-                    "a fact for `{}`, which isn't in the collector's `facts:`",
-                    f.measure
-                ));
-            }
+        // The collector's own contract: its `facts:` list is all it may emit.
+        if let Some(f) = collector_facts
+            .iter()
+            .find(|f| !collector.facts.contains(&f.measure))
+        {
+            return Some(format!(
+                "a fact for `{}`, which isn't in the collector's `facts:`",
+                f.measure
+            ));
         }
         let undefined = |known: Vec<oxplow_db::Measure>| -> Option<String> {
             let known: std::collections::HashSet<String> =
@@ -2877,66 +2789,32 @@ impl MetricLayers {
     }
 }
 
-/// The bundled built-in metric catalog as spec-shaped `MetricEntry`s, so the
-/// three-scope resolver knows them (a project `use:`s one to activate it). The
-/// structural spec fields (`source_measure`/`aggregation`/`filter`) are joined in
-/// from the hand-written built-in specs by key; the surface fields come from
-/// `builtin_metrics()`.
+/// The built-in producer metrics as spec-shaped `MetricEntry`s, so the
+/// resolver knows them: a `use:` of one carries the project's thresholds
+/// onto its spec (tsk1071).
 fn builtin_spec_entries() -> Vec<MetricEntry> {
-    let specs: HashMap<String, NewMetricSpec> = builtin_metric_specs()
+    crate::producer_metrics::builtin_producer_specs()
         .into_iter()
-        .chain(builtin_ast_specs())
-        .map(|s| (s.key.clone(), s))
-        .collect();
-    builtin_metrics()
-        .iter()
-        .map(|m| {
-            let spec = specs.get(m.key);
-            MetricEntry {
-                key: Some(m.key.to_string()),
-                title: Some(m.title.to_string()),
-                source_measure: spec.and_then(|s| s.source_measure.clone()),
-                aggregation: spec.map(|s| s.aggregation.clone()),
-                filter: spec.and_then(|s| filter_from_json(s.filter_json.as_deref())),
-                unit: Some(m.unit.to_string()),
-                direction: Some(m.direction.to_string()),
-                display_kind: Some(m.kind.to_string()),
-                category: spec.and_then(|s| s.category.clone()),
-                // Empty language = a language-agnostic metric (the unified code
-                // metrics) — no single language (NULL on the definition).
-                language: (!m.language.is_empty()).then(|| m.language.to_string()),
-                description: Some(m.description.to_string()),
-                sliceable_dims: m.dimensions.iter().map(|d| d.to_string()).collect(),
-                target: m.target,
-                ..Default::default()
-            }
+        .map(|s| MetricEntry {
+            key: Some(s.key),
+            title: Some(s.title),
+            filter: filter_from_json(s.filter_json.as_deref()),
+            source_measure: s.source_measure,
+            aggregation: Some(s.aggregation),
+            unit: s.unit,
+            direction: Some(s.direction),
+            display_kind: Some(s.display_kind),
+            category: s.category,
+            description: s.description,
+            sliceable_dims: s
+                .sliceable_dims_json
+                .and_then(|j| serde_json::from_str(&j).ok())
+                .unwrap_or_default(),
+            target: s.target,
+            warn_at: s.warn_at,
+            fail_at: s.fail_at,
+            ..Default::default()
         })
-        // The always-on producer metrics are built-ins too: a `use:` of one
-        // carries the project's thresholds onto its spec (tsk1071).
-        .chain(
-            crate::producer_metrics::builtin_producer_specs()
-                .into_iter()
-                .map(|s| MetricEntry {
-                    key: Some(s.key),
-                    title: Some(s.title),
-                    filter: filter_from_json(s.filter_json.as_deref()),
-                    source_measure: s.source_measure,
-                    aggregation: Some(s.aggregation),
-                    unit: s.unit,
-                    direction: Some(s.direction),
-                    display_kind: Some(s.display_kind),
-                    category: s.category,
-                    description: s.description,
-                    sliceable_dims: s
-                        .sliceable_dims_json
-                        .and_then(|j| serde_json::from_str(&j).ok())
-                        .unwrap_or_default(),
-                    target: s.target,
-                    warn_at: s.warn_at,
-                    fail_at: s.fail_at,
-                    ..Default::default()
-                }),
-        )
         .collect()
 }
 
@@ -2949,196 +2827,6 @@ fn filter_from_json(json: Option<&str>) -> Option<oxplow_config::FilterConfig> {
         severity: engine_filter.severity,
         dim_eq: engine_filter.dim_eq.map(|(k, v)| vec![k, v]),
     })
-}
-
-/// The built-in metric SPECS (epic tsk12) for the bundled code collectors — the
-/// count-over-facts headlines that replace the baked collector sample. Each is a
-/// `count` over a per-function / per-marker measure; the threshold metrics filter
-/// on `min_value`. Because complexity / length are integer measures, strict
-/// `> N` in the old collector equals `>= N+1` here — the equivalence test pins each
-/// spec's headline against the baked collector total so this stays faithful.
-fn builtin_metric_specs() -> Vec<NewMetricSpec> {
-    fn spec(
-        key: &str,
-        title: &str,
-        measure: &str,
-        min_value: Option<f64>,
-        direction: &str,
-        display_kind: &str,
-        description: &str,
-    ) -> NewMetricSpec {
-        let mut s = NewMetricSpec::base(key, title, measure, "count");
-        s.unit = Some("count".into());
-        s.filter_json = min_value.map(|v| format!("{{\"min_value\":{v:?}}}"));
-        s.direction = direction.into();
-        s.display_kind = display_kind.into();
-        s.category = Some("static-quality".into());
-        s.description = Some(description.into());
-        s
-    }
-    vec![
-        spec(
-            "oxplow.high_complexity_fns",
-            "high-complexity functions",
-            "oxplow.complexity",
-            Some(11.0), // strict > 10 on an integer measure
-            "lower-better",
-            "findings",
-            "Functions whose cyclomatic complexity exceeds 10 — count over oxplow.complexity facts.",
-        ),
-        spec(
-            "oxplow.long_functions",
-            "long functions (>60 lines)",
-            "oxplow.fn_length",
-            Some(61.0), // strict > 60 on an integer measure
-            "lower-better",
-            "findings",
-            "Functions longer than 60 lines — count over oxplow.fn_length facts.",
-        ),
-        spec(
-            "oxplow.fn_count",
-            "function count",
-            "oxplow.parameter_count",
-            None,
-            "neutral",
-            "gauge",
-            "Total functions / methods defined — count over oxplow.parameter_count facts.",
-        ),
-        spec(
-            "oxplow.todos",
-            "TODO / FIXME markers",
-            "oxplow.todo",
-            None,
-            "lower-better",
-            "findings",
-            "TODO/FIXME/HACK/XXX/BUG markers — count over oxplow.todo facts.",
-        ),
-        // Doc coverage (tsk125) is a RATIO over oxplow.doc_coverage (num/den =
-        // documented/public per file), not a count — so it's built inline
-        // rather than via the count-only `spec()` helper.
-        {
-            let mut s = NewMetricSpec::base(
-                "oxplow.doc_coverage",
-                "Doc coverage",
-                "oxplow.doc_coverage",
-                "ratio",
-            );
-            s.unit = Some("%".into());
-            s.direction = "higher-better".into();
-            s.display_kind = "coverage".into();
-            s.category = Some("coverage".into());
-            s.description = Some(
-                "% of public functions/methods with a doc comment — Σdocumented/Σpublic over oxplow.doc_coverage facts.".into(),
-            );
-            s
-        },
-        // Duplicated lines (tsk388): the sum over the whole-tree scan's
-        // facts, one per side of each duplicate block.
-        {
-            let mut s = NewMetricSpec::base(
-                "oxplow.duplicate_lines",
-                "Duplicated lines",
-                "oxplow.duplicate_lines",
-                "sum",
-            );
-            s.unit = Some("lines".into());
-            s.direction = "lower-better".into();
-            s.display_kind = "findings".into();
-            s.category = Some("static-quality".into());
-            s.description = Some(
-                "Lines in blocks duplicated elsewhere in the tree — sum over oxplow.duplicate_lines facts.".into(),
-            );
-            s
-        },
-    ]
-}
-
-/// Built-in metric SPECS for the per-language idiom collectors (epic tsk12, tsk30) —
-/// `oxplow.rust.unsafe_blocks` and friends. Each is a `Sum(oxplow.ast_hit)`
-/// filtered to its idiom via `dim_eq(oxplow.rule, <slug>)`; the per-file
-/// `oxplow.ast_hit` facts each collector emits (rule-tagged) sum back to the baked
-/// `tree:.` headline — pinned by the equivalence test. The `<slug>` MUST match
-/// the `rule` the collector script emits.
-fn builtin_ast_specs() -> Vec<NewMetricSpec> {
-    let collectors = builtin_metrics();
-    let ast_spec = |key: &str, title: &str, rule: &str, direction: &str| {
-        let mut s = NewMetricSpec::base(key, title, "oxplow.ast_hit", "sum");
-        s.unit = Some("count".into());
-        s.filter_json = Some(format!("{{\"dim_eq\":[\"oxplow.rule\",\"{rule}\"]}}"));
-        s.direction = direction.into();
-        s.display_kind = "findings".into();
-        s.category = Some("static-quality".into());
-        // Read the language off the COLLECTOR rather than restating it here: both
-        // metric surfaces section by language (Metric Settings off the collector's,
-        // Recorded Metrics off the spec's), so a duplicated slug is a silent
-        // drift into two different groupings of the same metric. `language: ""`
-        // (the language-agnostic code collectors) stays `None` — "" is not a
-        // language, and `groupByLanguage` reads null/"" as its "General" bucket.
-        s.language = collectors
-            .iter()
-            .find(|m| m.key == key)
-            .map(|m| m.language)
-            .filter(|l| !l.is_empty())
-            .map(Into::into);
-        s
-    };
-    vec![
-        ast_spec(
-            "oxplow.rust.unsafe_blocks",
-            "unsafe blocks",
-            "unsafe_block",
-            "lower-better",
-        ),
-        ast_spec(
-            "oxplow.rust.unwrap_expect_calls",
-            "unwrap / expect calls",
-            "unwrap_expect",
-            "lower-better",
-        ),
-        ast_spec(
-            "oxplow.rust.panic_macros",
-            "panic-family macros",
-            "panic_macro",
-            "lower-better",
-        ),
-        ast_spec(
-            "oxplow.ts.any_usage",
-            "any usage",
-            "any_usage",
-            "lower-better",
-        ),
-        ast_spec(
-            "oxplow.ts.non_null_assertions",
-            "non-null assertions",
-            "non_null_assertion",
-            "lower-better",
-        ),
-        ast_spec(
-            "oxplow.ts.console_calls",
-            "console.* calls",
-            "console_call",
-            "lower-better",
-        ),
-        ast_spec(
-            "oxplow.ts.ts_ignore",
-            "ts-ignore / ts-expect-error",
-            "ts_ignore",
-            "lower-better",
-        ),
-        ast_spec("oxplow.clojure.defn_count", "defn count", "defn", "neutral"),
-        ast_spec(
-            "oxplow.csharp.empty_catch",
-            "empty catch blocks",
-            "empty_catch",
-            "lower-better",
-        ),
-        ast_spec(
-            "oxplow.csharp.blocking_async_calls",
-            "blocking async calls (.Result / .Wait())",
-            "blocking_async",
-            "lower-better",
-        ),
-    ]
 }
 
 /// What [`MetricsService::metric_scaffold`] hands the agent to write: the
@@ -3238,16 +2926,10 @@ impl FactRunner {
     }
 }
 
-/// The script a fact collector runs — the embedded text for a built-in, its
-/// entry read through its extension, or the project's file. `None` when it
+/// The script a fact collector runs — its entry read through its extension
+/// (bundled or on disk), or the project's file. `None` when it
 /// can't be read.
 fn collector_script_text(collector: &FactCollector, root: &Path) -> Option<String> {
-    if collector.is_builtin() {
-        return builtin_metrics()
-            .iter()
-            .find(|m| m.key == collector.key)
-            .map(|m| m.script.to_string());
-    }
     let entry = collector.entry.as_deref()?;
     if collector.owner == oxplow_config::collectors::PROJECT {
         return crate::services::project_file(root, entry).ok().flatten();
@@ -3271,16 +2953,14 @@ fn collector_fingerprint(collector: &FactCollector, root: &Path) -> Option<Strin
     let script = collector_script_text(collector, root)?;
     // Everything that can change what the collector produces. `facts` matters
     // because a measure dropped from the allow-list silently stops being
-    // recorded. The `v1` material is what collectors hashed (runtime — empty for
-    // a built-in — report format, args, report path, emits, script), so a
-    // collector migrated to a collector keeps its baseline. `input` is hashed
-    // after it when set (a collector's own query).
-    let runtime = match (collector.is_builtin(), collector.runtime) {
-        (true, _) => "",
-        (false, CollectorRuntime::Starlark) => "starlark",
-        (false, CollectorRuntime::Jaq) => "jaq",
-        (false, CollectorRuntime::Exec) => "exec",
-        (false, CollectorRuntime::Read) => "read",
+    // recorded. The `v1` material is runtime, report format, args, report
+    // path, emits and script; `input` is hashed after it when set (a
+    // collector's own query).
+    let runtime = match collector.runtime {
+        CollectorRuntime::Starlark => "starlark",
+        CollectorRuntime::Jaq => "jaq",
+        CollectorRuntime::Exec => "exec",
+        CollectorRuntime::Read => "read",
     };
     let report = collector.report.as_ref();
     let mut material = format!(
@@ -4201,21 +3881,17 @@ mod tests {
         assert!(keys(&svc).iter().any(|k| k == "oxplow.fn_count"));
     }
 
-    /// Seed the catalog with every built-in collector `use:`d: a built-in's spec
-    /// is seeded only while it's on (tsk1046).
+    /// Seed the catalog with every foundation code metric `use:`d: a metric's
+    /// spec is seeded only while it's on.
     async fn seed_with_every_builtin_on(svc: &Arc<crate::Services>) {
-        svc.config.write().unwrap().metrics = builtin_metrics()
+        svc.config.write().unwrap().metrics = foundation_collectors()
             .iter()
-            .map(|m| MetricEntry {
-                use_key: Some(m.key.to_string()),
+            .map(|c| MetricEntry {
+                use_key: Some(c.key.clone()),
                 ..Default::default()
             })
             .collect();
         crate::test_fixtures::activate_with_problems(svc).await;
-    }
-
-    fn starlark_collector(key: &str, entry_file: &str) -> FactCollector {
-        starlark_collector_emits(key, entry_file, Vec::new())
     }
 
     /// A project Starlark fact collector with an explicit `facts`
@@ -4258,7 +3934,11 @@ def transform(input):
 "#,
         )
         .unwrap();
-        let metric = starlark_collector("repo.unsafe_blocks", "oxplow/metrics/unsafe.star");
+        let metric = starlark_collector_emits(
+            "repo.unsafe_blocks",
+            "oxplow/metrics/unsafe.star",
+            vec!["oxplow.ast_hit".into()],
+        );
 
         let mut files = HashMap::new();
         files.insert(
@@ -4528,8 +4208,8 @@ def transform(input):
         // ever ran on small deltas. A measure-level "is it empty" check says "done" and
         // console_calls reads empty forever. The baseline question must be per-collector.
         let (svc, _dir) = fixture().await;
-        // A built-in is only in `fact_collectors` when its metric is enabled — enable the
-        // two built-ins this test drives.
+        // An opt-in collector is only in `fact_collectors` while its metric is
+        // enabled — enable the two this test drives.
         enable(
             &svc,
             &[
@@ -4630,7 +4310,7 @@ def transform(input):
         let err = svc
             .metrics
             .run_collector_by_key(
-                "built-in",
+                "oxplow-foundation",
                 "oxplow.rust.unsafe_blocks",
                 None,
                 &RunContext::core(Actor::Human, Mode::External),
@@ -4965,7 +4645,11 @@ def transform(input):
 "#,
         )
         .unwrap();
-        let metric = starlark_collector("acme.effcollector", "oxplow/metrics/eff.star");
+        let metric = starlark_collector_emits(
+            "acme.effcollector",
+            "oxplow/metrics/eff.star",
+            vec!["oxplow.ast_hit".into()],
+        );
         let ctx = CollectorRunContext {
             stream_val: 1,
             thread_id: Some(1),
@@ -5085,7 +4769,11 @@ def transform(input):
 "#,
         )
         .unwrap();
-        let metric = starlark_collector("repo.long_fns", "oxplow/metrics/longfns.star");
+        let metric = starlark_collector_emits(
+            "repo.long_fns",
+            "oxplow/metrics/longfns.star",
+            vec!["oxplow.fn_length".into()],
+        );
 
         let mut files = HashMap::new();
         files.insert(
@@ -5125,15 +4813,41 @@ def transform(input):
         assert!(facts[0].value >= 3.0);
     }
 
-    /// A built-in fact collector — `run_one_collector` runs its embedded
-    /// script (never a project-disk file).
+    /// oxplow-foundation's collectors, as its manifest declares them.
+    fn foundation_collectors() -> Vec<FactCollector> {
+        let foundation = crate::bundled_extensions::find("oxplow-foundation").unwrap();
+        let manifest: serde_yaml::Value =
+            serde_yaml::from_str(foundation.file("extension.yaml").unwrap()).unwrap();
+        let (specs, errors) = oxplow_config::collectors::parse_collectors(
+            "oxplow-foundation",
+            Some(oxplow_config::OXPLOW_NAMESPACE),
+            &manifest["collectors"],
+            &|_| true,
+        );
+        assert_eq!(errors, Vec::<String>::new());
+        specs
+            .iter()
+            .filter_map(|s| FactCollector::from_spec("oxplow-foundation", s))
+            .collect()
+    }
+
+    /// oxplow-foundation's metrics, as its manifest declares them.
+    fn foundation_metrics() -> Vec<MetricEntry> {
+        let foundation = crate::bundled_extensions::find("oxplow-foundation").unwrap();
+        let manifest: serde_yaml::Value =
+            serde_yaml::from_str(foundation.file("extension.yaml").unwrap()).unwrap();
+        let entries = serde_yaml::from_value(manifest["metrics"].clone()).unwrap();
+        oxplow_config::validate_metrics(Some(entries), Some(oxplow_config::OXPLOW_NAMESPACE))
+            .unwrap()
+    }
+
+    /// One of oxplow-foundation's code-metric collectors — `run_one_collector`
+    /// reads its script through the bundled extension.
     fn builtin_collector_fixture(key: &str) -> FactCollector {
-        FactCollector::builtin(
-            &builtin_metrics()
-                .into_iter()
-                .find(|m| m.key == key)
-                .expect("a built-in"),
-        )
+        foundation_collectors()
+            .into_iter()
+            .find(|c| c.key == key)
+            .expect("a foundation collector")
     }
 
     /// A mixed-language corpus: a high-complexity + long Rust fn, a TS fn with a
@@ -5237,7 +4951,11 @@ def transform(input):
 "#,
         )
         .unwrap();
-        let metric = starlark_collector("acme.mixed_facts", "oxplow/metrics/mixed.star");
+        let metric = starlark_collector_emits(
+            "acme.mixed_facts",
+            "oxplow/metrics/mixed.star",
+            vec!["oxplow.complexity".into(), "acme.undefined".into()],
+        );
         let ctx = CollectorRunContext {
             stream_val: 1,
             thread_id: None,
@@ -5649,14 +5367,6 @@ def transform(input):
                 .unwrap()
                 .unwrap_or_else(|| panic!("{key} spec seeded"));
             assert_eq!(spec.language.as_deref(), Some(want), "{key} language");
-            assert_eq!(
-                spec.language.as_deref(),
-                builtin_metrics()
-                    .iter()
-                    .find(|m| m.key == key)
-                    .map(|m| m.language),
-                "{key} spec language must match its collector's",
-            );
         }
         // The language-agnostic code collectors declare `language: ""` and must stay
         // language-less (they sweep every source file) — "" is not a language.
@@ -5828,7 +5538,7 @@ def transform(input):
             .await
             .unwrap()
             .expect("seeded");
-        assert_eq!(spec.scope, "built-in");
+        assert_eq!(spec.scope, "extension:oxplow-foundation");
         assert_eq!(spec.target, Some(5.0));
         assert_eq!(spec.warn_at, Some(8.0));
         assert_eq!(spec.fail_at, Some(13.0));
@@ -6027,7 +5737,7 @@ def transform(input):
             .await
             .unwrap()
             .expect("seeded");
-        assert_eq!(spec.scope, "built-in");
+        assert_eq!(spec.scope, "extension:oxplow-foundation");
         let cat = svc.metrics.catalog().await;
         let entry = cat
             .iter()
@@ -6041,7 +5751,7 @@ def transform(input):
         let count = svc
             .metrics
             .run_collector_by_key(
-                "built-in",
+                "oxplow-foundation",
                 "oxplow.rust.unsafe_blocks",
                 None,
                 &RunContext::core(Actor::Human, Mode::External),
@@ -6058,10 +5768,11 @@ def transform(input):
     fn this_repos_config_uses_only_metrics_the_catalog_has() {
         let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let config = oxplow_config::load_project_config(&repo).expect("the repo's config loads");
+        let extensions = vec![("oxplow-foundation".to_string(), foundation_metrics())];
         let unknown =
-            oxplow_config::unknown_uses(&builtin_spec_entries(), &[], &[], &config.metrics);
+            oxplow_config::unknown_uses(&builtin_spec_entries(), &[], &extensions, &config.metrics);
         assert_eq!(unknown, Vec::<String>::new());
-        let resolved = resolve_metrics(&builtin_spec_entries(), &[], &[], &config.metrics);
+        let resolved = resolve_metrics(&builtin_spec_entries(), &[], &extensions, &config.metrics);
         let failed = resolved
             .iter()
             .find(|s| s.key == "oxplow.tests.failed")
@@ -6200,6 +5911,51 @@ def transform(input):
             .unwrap()
             .expect("the first extension's metric is still active");
         assert_eq!(spec.scope, "extension:alpha");
+    }
+
+    #[tokio::test]
+    async fn the_code_metrics_are_oxplow_foundations_and_opt_in_ones_wait_for_a_use() {
+        let (svc, dir) = fixture().await;
+        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
+        std::fs::write(
+            dir.path().join(".oxplow/project.yaml"),
+            "extensions:\n  disabled: [oxplow-bundled]\n",
+        )
+        .unwrap();
+        svc.reload_config_from_disk().unwrap();
+        crate::test_fixtures::activate(&svc).await;
+        let running = svc.metrics.fact_collectors();
+        let fn_count = running
+            .iter()
+            .find(|c| c.key == "oxplow.fn_count")
+            .expect("on by default, with oxplow-bundled off");
+        assert_eq!(fn_count.owner, "oxplow-foundation");
+        assert!(!running.iter().any(|c| c.key == "oxplow.rust.unsafe_blocks"));
+        assert!(!running.iter().any(|c| c.key == "oxplow.duplicate_lines"));
+
+        std::fs::write(
+            dir.path().join(".oxplow/project.yaml"),
+            "metrics:\n  - use: oxplow.duplicate_lines\n",
+        )
+        .unwrap();
+        svc.reload_config_from_disk().unwrap();
+        crate::test_fixtures::activate(&svc).await;
+        let dup = svc
+            .metrics
+            .fact_collectors()
+            .into_iter()
+            .find(|c| c.key == "oxplow.duplicate_lines")
+            .expect("used, so it runs");
+        assert!(dup.whole_tree, "a slice of the tree can't restate it");
+        assert!(matches!(&dup.trigger, Trigger::On { filter, .. }
+            if filter.get("trigger").map(String::as_str) == Some("git_refs")));
+        let spec = svc
+            .fact_store
+            .get_spec("oxplow.duplicate_lines")
+            .await
+            .unwrap()
+            .expect("seeded once on");
+        assert_eq!(spec.scope, "extension:oxplow-foundation");
     }
 
     #[tokio::test]
@@ -6381,7 +6137,7 @@ def transform(input):
             .iter()
             .find(|e| e.key == "oxplow.rust.unsafe_blocks")
             .expect("built-in present");
-        assert_eq!(entry.scope, "built-in");
+        assert_eq!(entry.scope, "extension:oxplow-foundation");
         assert!(!entry.enabled, "not enabled before use:");
         assert!(entry.toggleable, "code collectors are toggleable");
         // Matches the seeded spec's category (builtin_ast_specs), so the Catalog
@@ -6406,7 +6162,7 @@ def transform(input):
             .await
             .unwrap()
             .expect("spec seeded on enable (T-E2)");
-        assert_eq!(spec.scope, "built-in");
+        assert_eq!(spec.scope, "extension:oxplow-foundation");
         let yaml = std::fs::read_to_string(oxplow_config::config_path(dir.path())).unwrap();
         assert!(
             yaml.contains("oxplow.rust.unsafe_blocks"),

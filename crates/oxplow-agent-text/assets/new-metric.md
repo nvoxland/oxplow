@@ -13,10 +13,10 @@ tree? changed lines? a build artifact?), and *which direction is good*
 (`lower-better` for "fewer TODOs", `higher-better` for coverage, `neutral` for
 LOC). Ask only if genuinely ambiguous.
 
-## 2. Prefer a built-in
+## 2. Prefer an existing metric
 
 List the bundled metrics with `query_sql`:
-`SELECT key, title, language, enabled FROM v_metric_catalog WHERE scope = 'built-in'`.
+`SELECT key, title, language, enabled FROM v_metric_catalog WHERE scope = 'extension:oxplow-foundation'`.
 If one already measures it (unsafe blocks, unwrap/expect, TODO markers, function
 count, high-complexity functions, `any` usage, …), just turn it on with the
 `oxplow.metric.enable` command (`run_command`):
@@ -85,7 +85,7 @@ metrics:
 Read the `oxplow-metrics` skill for the four-block model, the full builtin
 surface (`files`/`ast_query`/`code_metrics`/`regex_find`/…) and when a
 project-level `exec` or report-derived collector is the right home instead.
-The bundled scripts in `crates/oxplow-script/src/metrics/<lang>/` are
+The scripts in `extensions/oxplow-foundation/collectors/<lang>/` are
 copy-paste templates.
 
 ## 4. Verify

@@ -1826,7 +1826,7 @@ export type CollectorOutput = {
 
 // Last run of one collector (`collector_run`).
 export type CollectorRun = {
-	// The declaring extension, `project` or `built-in`.
+	// The declaring extension, or `project`.
 	owner: string,
 	id: string,
 	// `ok`, `error`, `needs_approval` or `skipped` (the loop guard).

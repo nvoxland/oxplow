@@ -32,7 +32,6 @@ use oxplow_coverage::{AnalysisReport, CoverageReport, TestReport};
 use serde::{Deserialize, Serialize};
 
 pub mod ai;
-pub mod builtin_metrics;
 pub mod exec_io;
 pub mod helpers;
 pub mod refs;
@@ -42,7 +41,6 @@ pub mod uses;
 pub mod worker;
 pub mod workers;
 pub use ai::{AiHost, AiOracle};
-pub use builtin_metrics::{builtin_metrics, BuiltinMetric};
 pub use helpers::HelperError;
 use oxplow_domain::run::Budget;
 pub use runtime::TreeHost;

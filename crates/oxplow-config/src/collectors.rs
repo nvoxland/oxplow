@@ -436,10 +436,6 @@ pub fn entity_view_name(owner: &str, entity: &str) -> String {
 /// The owner of the collectors in `.oxplow/project.yaml`.
 pub const PROJECT: &str = "project";
 
-/// The owner of oxplow's own collectors (the bundled code metrics, run
-/// when `metrics: - use: oxplow.<x>` enables one).
-pub const BUILT_IN: &str = "built-in";
-
 /// Parse a `collectors:` list owned by `owner` (an extension's name, or
 /// [`PROJECT`]), whose namespace is `namespace` (`None` for the project; an
 /// `oxplow.*` id is the `oxplow` namespace's). `knows_event` says whether an
