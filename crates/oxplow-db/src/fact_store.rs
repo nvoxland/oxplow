@@ -7130,6 +7130,46 @@ mod tests {
         );
     }
 
+    /// Each fact finds its new subject by index, not by scanning every
+    /// subject: a real database has ~1.4M facts over ~73K subjects, and a
+    /// scan per fact never finishes before the daemon's start timeout.
+    #[test]
+    fn the_subject_migration_scales_with_the_facts() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE fact_subject (id INTEGER PRIMARY KEY, kind TEXT, ref TEXT, UNIQUE (kind, ref));
+             CREATE TABLE fact (id INTEGER PRIMARY KEY, subject_id INTEGER);
+             CREATE TABLE metric_live_fact (x);
+             CREATE TABLE metric_cube (x);
+             CREATE TABLE metric_cube_state (x);
+             CREATE TABLE metric_cube_epoch (epoch INTEGER);
+             INSERT INTO metric_cube_epoch VALUES (0);
+             WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 20000)
+             INSERT INTO fact_subject SELECT i, 'file', 'f' || i || '.rs' FROM n;
+             INSERT INTO fact SELECT id, id FROM fact_subject;",
+        )
+        .unwrap();
+        let started = std::time::Instant::now();
+        conn.execute_batch(include_str!(
+            "../migrations/V64__fact_subject_is_one_ref.sql"
+        ))
+        .unwrap();
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "took {:?}",
+            started.elapsed()
+        );
+        let mapped: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM fact JOIN fact_subject s ON s.id = fact.subject_id
+                  WHERE s.ref = 'file:f' || fact.id || '.rs'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(mapped, 20000);
+    }
+
     #[tokio::test]
     async fn record_facts_writes_atomically_and_backfills_capture_id() {
         let store = fixture().await;

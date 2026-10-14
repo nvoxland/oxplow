@@ -18,8 +18,14 @@ DELETE FROM fact_subject WHERE kind IS NULL OR ref IS NULL;
 -- Each surviving old row's whole ref. Token facts were stored under kind
 -- `model` with the model's name (once bare, later already `ai_model:<name>`);
 -- they become `ai_model:<name>` refs, which is what names a language model
--- (`model:` names a published view).
-CREATE TEMP TABLE fact_subject_map AS
+-- (`model:` names a published view). Keyed by the old id, so each fact
+-- finds its row by index rather than scanning the map.
+CREATE TEMP TABLE fact_subject_map (
+    id INTEGER PRIMARY KEY,
+    kind TEXT,
+    ref TEXT
+);
+INSERT INTO fact_subject_map (id, kind, ref)
 SELECT id,
        CASE WHEN kind = 'model' THEN 'ai_model'
             ELSE kind END AS kind,
