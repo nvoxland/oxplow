@@ -3451,11 +3451,17 @@ Every contribution that runs — an external provider instance, a collector, an 
   lists the pending dead letters (`delivery.ts`, live over
   `v_event_dead_letter`) with Retry and Discard (`InlineConfirm`); the
   rail's Alerts shows "N events couldn't be delivered" while any wait.
+  **Enable All Disabled (N)** (`EnableAllButton`, atop the Extensions list,
+  on an extension with more than one disabled, and beside Data → Collectors)
+  runs `oxplow.contribution.enable_all { extension? }` as the person: every
+  failure-disabled contribution, or one extension's, each enabled as the
+  single command does (one `contribution.enabled@1` apiece; an `External`
+  command like it, so, like it, not undoable). Human-only.
 - **For agents.** `questions/extensions.yaml` and the extension skill's
   "Health and repair" section: read `v_contribution_health`,
   `v_collector_run` and `v_event_dead_letter`, read the repair item
   first, fix, check, test, `oxplow.collector.sync` — and ask the person to
-  Enable Again (an agent can't run `oxplow.contribution.enable`).
+  Enable Again (an agent can't run `oxplow.contribution.enable` or `enable_all`).
 
 ## Implementations
 

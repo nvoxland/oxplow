@@ -929,8 +929,8 @@ in `v_contribution_health` (`extension`, `contribution`, `kind`, `state` = `ok` 
 - **Fix it, then prove it.** Change the script or declaration, run
   `oxplow extension check` and `oxplow extension test`, then `oxplow.collector.sync`
   (`run_collector`) — a refusal while it's disabled is expected.
-- **You can't enable it again.** `oxplow.contribution.enable` is the user's: tell them
-  to press **Enable Again** in Settings → Extensions once your fix is in.
+- **You can't enable it again.** `oxplow.contribution.enable` (and `enable_all`) is the user's: tell them
+  to press **Enable Again** (or **Enable All Disabled**) in Settings → Extensions once your fix is in.
 - **Undelivered events** (a consumer that failed on an event) are in
   `v_event_dead_letter` (`state = 'pending'`); the user retries or
   discards them in Settings → Data → Delivery.

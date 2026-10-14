@@ -14,7 +14,7 @@ mock.module("../api.js", () => ({
     return { result: null };
   },
 }));
-const { HealthRow } = await import("./ExtensionsSection.js");
+const { HealthRow, EnableAllButton } = await import("./ExtensionsSection.js");
 const { subscribeAgentInput } = await import("../agent-input-bus.js");
 import type { ContributionHealth } from "../contributionHealth.js";
 
@@ -68,4 +68,22 @@ test("a healthy contribution offers neither", () => {
   const view = render(<HealthRow health={{ ...disabled, state: "ok", reason: null, repairItem: null }} />);
   expect(view.queryByTestId("extension-enable-tracker-issues")).toBeNull();
   expect(view.queryByTestId("extension-repair-tracker-issues")).toBeNull();
+});
+
+test("Enable All Disabled runs oxplow.contribution.enable_all, all or one extension's", async () => {
+  const all = render(<EnableAllButton count={34} />);
+  expect(all.getByTestId("extension-enable-all-all").textContent).toBe("Enable All Disabled (34)");
+  fireEvent.click(all.getByTestId("extension-enable-all-all"));
+  await waitFor(() => expect(ran).toHaveLength(1));
+  expect(ran[0]).toEqual({ name: "oxplow.contribution.enable_all", input: {}, confirmed: false });
+  cleanup();
+  const one = render(<EnableAllButton extension="tracker" count={2} />);
+  fireEvent.click(one.getByTestId("extension-enable-all-tracker"));
+  await waitFor(() => expect(ran).toHaveLength(2));
+  expect(ran[1]).toEqual({ name: "oxplow.contribution.enable_all", input: { extension: "tracker" }, confirmed: false });
+});
+
+test("Enable All Disabled is not offered when nothing is disabled", () => {
+  const view = render(<EnableAllButton count={0} />);
+  expect(view.queryByTestId("extension-enable-all-all")).toBeNull();
 });

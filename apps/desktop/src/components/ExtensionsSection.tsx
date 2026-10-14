@@ -38,7 +38,7 @@ import {
 } from "../api.js";
 import { NEW_LENS_COMMAND } from "../lens/lensModel.js";
 import { useCommandDraft } from "../commandDraft.js";
-import { enableAgain, healthLine, healthOf, repairWithAgent, useContributionHealth, type ContributionHealth } from "../contributionHealth.js";
+import { disabledCount, enableAgain, enableAllAgain, healthLine, healthOf, repairWithAgent, useContributionHealth, type ContributionHealth } from "../contributionHealth.js";
 import { collectorRan, extensionCredentials, extensionRowModel, LATEST_RUNS_SQL, lastRuns, type LastRun, type RunRow, reviewModel, serviceLines } from "./extensionRowModel.js";
 import { extensionsChanged } from "../lens/lensRerun.js";
 import { ImpactReportView } from "./ImpactReportView.js";
@@ -195,6 +195,10 @@ export function ExtensionsSection() {
           prompts={newLensPrompt ? [newLensPrompt] : []}
         />
       ) : (
+        <>
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+          <EnableAllButton count={disabledCount(health)} />
+        </div>
         <ul style={{ listStyle: "none", margin: "0 0 12px", padding: 0 }}>
           {exts.map((ext) => {
             const m = extensionRowModel(ext, checked[ext.name]);
@@ -252,6 +256,11 @@ export function ExtensionsSection() {
                     {err}
                   </div>
                 ))}
+                {disabledCount(health, m.name) > 1 ? (
+                  <div style={{ marginTop: 4 }}>
+                    <EnableAllButton extension={m.name} count={disabledCount(health, m.name)} />
+                  </div>
+                ) : null}
                 {healthOf(health, m.name).map((h) => (
                   <HealthRow key={`${h.kind}:${h.contribution}`} health={h} />
                 ))}
@@ -269,6 +278,7 @@ export function ExtensionsSection() {
             );
           })}
         </ul>
+        </>
       )}
       <div style={{ display: "flex", gap: 8 }}>
         <input
@@ -302,6 +312,29 @@ export function ExtensionsSection() {
         />
       ) : null}
     </div>
+  );
+}
+
+/// Turn every failure-disabled contribution back on in one go: one
+/// extension's (`extension`) or all. Shown only when `count` is more than
+/// the single Enable Again would cover.
+export function EnableAllButton({ extension, count }: { extension?: string; count: number }) {
+  const [enabling, setEnabling] = useState(false);
+  if (count < 1) return null;
+  const key = extension ?? "all";
+  return (
+    <button
+      type="button"
+      data-testid={`extension-enable-all-${key}`}
+      title={extension ? `Turn ${extension}'s disabled contributions back on, on this machine` : "Turn every disabled contribution back on, on this machine"}
+      disabled={enabling}
+      onClick={() => {
+        setEnabling(true);
+        void enableAllAgain(extension).finally(() => setEnabling(false));
+      }}
+    >
+      {enabling ? "Enabling…" : `Enable All Disabled (${count})`}
+    </button>
   );
 }
 

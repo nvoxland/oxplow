@@ -121,6 +121,24 @@ export async function enableAgain(h: ContributionHealth, commands: PersonCommand
   }));
 }
 
+/** How many of `rows` stopped after repeated failures (one extension's, or all). */
+export function disabledCount(rows: readonly ContributionHealth[], extension?: string): number {
+  return rows.filter((h) => h.state === "disabled" && (extension === undefined || h.extension === extension)).length;
+}
+
+/** Enable All Disabled: `oxplow.contribution.enable_all` as the person — every
+ *  failure-disabled contribution, or one extension's. */
+export async function enableAllAgain(
+  extension?: string,
+  commands: PersonCommands = personCommands,
+): Promise<boolean> {
+  return !!(await commands.run(
+    extension ? `Enable all disabled in ${extension}` : "Enable all disabled contributions",
+    "oxplow.contribution.enable_all",
+    extension ? { extension } : {},
+  ));
+}
+
 /** Every contribution's health, and what was read. */
 export async function readContributionHealth(): Promise<{ health: ContributionHealth[]; reads: Reads }> {
   const res = await querySql(

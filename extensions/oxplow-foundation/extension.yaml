@@ -377,6 +377,12 @@ commands:
     op: enable
     invokers: { human: true, agent: false, lens: false }
     lifecycle: experimental
+  - name: contribution.enable_all
+    summary: "Enable every extension contribution that stopped after repeated failures on this machine again — one extension's (`extension`) or all — each as `oxplow.contribution.enable` does it. Returns the rows it enabled."
+    scope: extensions.enable
+    op: enable_all
+    invokers: { human: true, agent: false, lens: false }
+    lifecycle: experimental
   # extensions.install
   - name: extension.install
     summary: "Install a published extension from a git repo (its root holds `extension.yaml`) into `oxplow/extensions/<name>/` of a stream's worktree, at the commit a person reviewed (`reviewed_sha`, from `review_extension`). Always a person's decision: an agent's run becomes a proposal. Refuses to overwrite — `oxplow.extension.update` does that."

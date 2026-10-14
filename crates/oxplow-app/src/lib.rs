@@ -1589,6 +1589,12 @@ impl Services {
             ))
             .expect("contribution.enable's op registers");
         commands
+            .add_op(contribution_health::enable_all_op(
+                contribution_health.clone(),
+                Arc::downgrade(&providers),
+            ))
+            .expect("contribution.enable_all's op registers");
+        commands
             .add_op(providers::sync::sync_op(&providers))
             .expect("provider.sync's op registers");
         let extension_commands = Arc::new(extension_commands::ExtensionCommands::new(
@@ -2213,6 +2219,7 @@ mod tests {
                 "oxplow.collector.sync",
                 // A provider's process restarts (P7.C1; was provider.enable).
                 "oxplow.contribution.enable",
+                "oxplow.contribution.enable_all",
                 // The worktree and the snapshot diff a report is checked
                 // against (P8.A7).
                 "oxplow.effect.backfill",

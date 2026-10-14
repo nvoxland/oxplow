@@ -29,6 +29,8 @@ use crate::commands::{Handler, HandlerOutput, Invocation};
 pub const FAILURES_TO_DISABLE: i64 = 3;
 /// The command a person runs to enable a disabled contribution again.
 pub const ENABLE: &str = "oxplow.contribution.enable";
+/// The command a person runs to enable every disabled contribution again.
+pub const ENABLE_ALL: &str = "oxplow.contribution.enable_all";
 /// What a disable is logged as.
 const SOURCE: &str = "system:extensions";
 
@@ -140,6 +142,13 @@ impl ContributionHealth {
             .await
     }
 
+    /// Every contribution's health row.
+    pub async fn list(&self) -> Result<Vec<ContributionHealthRow>, DomainError> {
+        store::SqliteContributionHealthStore::new(self.db.clone())
+            .list()
+            .await
+    }
+
     pub async fn disable(&self, key: &ContributionKey, reason: &str) -> Result<(), DomainError> {
         let (key, reason, vocabulary) = (key.clone(), reason.to_string(), self.vocabulary.clone());
         self.db
@@ -227,6 +236,12 @@ enum Kind {
 }
 
 impl Kind {
+    fn parse(raw: &str) -> Option<Kind> {
+        [Kind::Provider, Kind::Collector, Kind::Effect]
+            .into_iter()
+            .find(|k| k.as_str() == raw)
+    }
+
     fn as_str(self) -> &'static str {
         match self {
             Kind::Provider => "provider",
@@ -245,6 +260,37 @@ struct EnableInput {
     kind: Kind,
     /// Its provider's, collector's or effect's id.
     contribution: String,
+}
+
+/// Turn one contribution back on (recorded first, so a provider's reconcile
+/// sees it cleared). Something has to be there to enable: a contribution
+/// with health (a collector has it once it failed), or a provider instance
+/// the registry knows (enabled from Settings before it ever failed).
+async fn enable_one(
+    health: &ContributionHealth,
+    providers: &crate::providers::ProviderRegistry,
+    key: ContributionKey,
+    kind: Kind,
+    source: &str,
+) -> Result<Option<ContributionHealthRow>, CommandError> {
+    let instance = format!("{}/{}", key.extension, key.contribution);
+    if health.get(&key).await?.is_none()
+        && (kind != Kind::Provider || providers.find(&instance).is_none())
+    {
+        return Err(CommandError::Invalid {
+            field: Some("/contribution".into()),
+            message: format!(
+                "no {} `{instance}` has failed or is configured; there's nothing to enable",
+                kind.as_str()
+            ),
+        });
+    }
+    health.enable(&key, source).await?;
+    if kind == Kind::Provider {
+        providers.reset(&instance).await;
+        providers.reconcile().await;
+    }
+    Ok(health.get(&key).await?)
 }
 
 /// `oxplow.contribution.enable { extension, kind, contribution }`: a person
@@ -277,37 +323,76 @@ pub fn enable_op(
                 let providers = providers.upgrade().ok_or_else(|| CommandError::Failed {
                     message: "the provider registry is gone".into(),
                 })?;
-                let instance = format!("{extension}/{contribution}");
                 let key = ContributionKey {
                     extension,
                     contribution,
                     kind: kind.as_str(),
                 };
-                // Something to enable: a contribution with health (a
-                // collector has it once it failed), or a provider instance
-                // the registry knows (enabled from Settings before it ever
-                // failed).
-                if health.get(&key).await?.is_none()
-                    && (kind != Kind::Provider || providers.find(&instance).is_none())
-                {
-                    return Err(CommandError::Invalid {
-                        field: Some("/contribution".into()),
-                        message: format!(
-                            "no {} `{instance}` has failed or is configured; there's nothing \
-                             to enable",
-                            kind.as_str()
-                        ),
-                    });
-                }
-                // Recorded first, so the reconcile below sees it cleared.
-                health.enable(&key, &actor.source()).await?;
-                if kind == Kind::Provider {
-                    providers.reset(&instance).await;
-                    providers.reconcile().await;
-                }
-                let row = health.get(&key).await?;
+                let row = enable_one(&health, &providers, key, kind, &actor.source()).await?;
                 Ok(HandlerOutput {
                     result: serde_json::to_value(row).expect("row serializes"),
+                    ..HandlerOutput::default()
+                })
+            })
+        })),
+    )
+    .open_to(Invokers::HUMAN_ONLY)
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct EnableAllInput {
+    /// Only this extension's contributions; every extension's when absent.
+    #[serde(default)]
+    extension: Option<String>,
+}
+
+/// `oxplow.contribution.enable_all { extension? }`: a person turns back on
+/// every contribution that stopped after repeated failures (one
+/// extension's, or all), each as `oxplow.contribution.enable` does it —
+/// one `contribution.enabled@1` apiece. Human only. The result lists the
+/// rows it enabled.
+pub fn enable_all_op(
+    health: ContributionHealth,
+    providers: Weak<crate::providers::ProviderRegistry>,
+) -> crate::commands::ops::Op {
+    crate::commands::ops::Op::new(
+        "extensions.enable",
+        "enable_all",
+        serde_json::to_value(schemars::schema_for!(EnableAllInput)).expect("schema serializes"),
+        false,
+        Handler::External(Arc::new(move |invocation: Invocation, input| {
+            let actor = invocation.actor().clone();
+            let (health, providers) = (health.clone(), providers.clone());
+            Box::pin(async move {
+                let EnableAllInput { extension } =
+                    serde_json::from_value(input).map_err(|e| CommandError::Invalid {
+                        field: None,
+                        message: e.to_string(),
+                    })?;
+                let providers = providers.upgrade().ok_or_else(|| CommandError::Failed {
+                    message: "the provider registry is gone".into(),
+                })?;
+                let mut enabled = Vec::new();
+                for row in health.list().await? {
+                    if row.state != "disabled"
+                        || extension.as_deref().is_some_and(|e| e != row.extension)
+                    {
+                        continue;
+                    }
+                    let Some(kind) = Kind::parse(&row.kind) else {
+                        continue;
+                    };
+                    let key = ContributionKey {
+                        extension: row.extension,
+                        contribution: row.contribution,
+                        kind: kind.as_str(),
+                    };
+                    enabled
+                        .extend(enable_one(&health, &providers, key, kind, &actor.source()).await?);
+                }
+                Ok(HandlerOutput {
+                    result: serde_json::json!({ "enabled": enabled }),
                     ..HandlerOutput::default()
                 })
             })
@@ -436,5 +521,110 @@ mod tests {
             next_due_ms(Some(now - 1_000), every, now),
             now - 1_000 + every + SCHEDULER_TICK_MS
         );
+    }
+}
+
+#[cfg(test)]
+mod enable_all_tests {
+    use super::*;
+    use oxplow_domain::Actor;
+    use serde_json::json;
+
+    fn collector(extension: &str, id: &str) -> ContributionKey {
+        ContributionKey {
+            extension: extension.into(),
+            contribution: id.into(),
+            kind: "collector",
+        }
+    }
+
+    async fn state(health: &ContributionHealth, key: &ContributionKey) -> String {
+        health.get(key).await.unwrap().unwrap().state
+    }
+
+    /// One command turns back on every contribution that stopped after
+    /// repeated failures — all extensions', or one's — and leaves the
+    /// healthy ones alone; an agent can't run it.
+    #[tokio::test]
+    async fn enable_all_turns_on_every_disabled_contribution_for_a_person() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let health = ContributionHealth::new(fx.svc.db.clone(), VocabularyHandle::core());
+        let (a, b, c, ok) = (
+            collector("one", "a"),
+            collector("one", "b"),
+            collector("two", "c"),
+            collector("two", "fine"),
+        );
+        for key in [&a, &b, &c] {
+            health.disable(key, "3 failures in a row").await.unwrap();
+        }
+        health.succeeded(&ok, None).await.unwrap();
+
+        let agent = Actor::Agent {
+            session_id: None,
+            thread_id: Some(fx.thread),
+            stream_id: None,
+        };
+        let denied = fx
+            .svc
+            .commands
+            .run(&agent, ENABLE_ALL, json!({}), false)
+            .await;
+        assert!(
+            matches!(denied, Err(CommandError::Denied { .. })),
+            "{denied:?}"
+        );
+        assert_eq!(state(&health, &a).await, "disabled");
+
+        // Scoped to one extension.
+        let out = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                ENABLE_ALL,
+                json!({ "extension": "one" }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(out.result["enabled"].as_array().unwrap().len(), 2);
+        assert_eq!(state(&health, &a).await, "ok");
+        assert_eq!(state(&health, &b).await, "ok");
+        assert_eq!(state(&health, &c).await, "disabled");
+
+        // Then the rest; the healthy one isn't touched.
+        let out = fx
+            .svc
+            .commands
+            .run(&Actor::Human, ENABLE_ALL, json!({}), false)
+            .await
+            .unwrap();
+        assert_eq!(out.result["enabled"].as_array().unwrap().len(), 1);
+        assert_eq!(state(&health, &c).await, "ok");
+        assert_eq!(state(&health, &ok).await, "ok");
+        let enabled = fx
+            .svc
+            .db
+            .read(|c| {
+                c.query_row(
+                    "SELECT count(*) FROM event_log WHERE type = 'contribution.enabled'",
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(enabled, 3);
+
+        // Nothing disabled: an empty answer, not an error.
+        let out = fx
+            .svc
+            .commands
+            .run(&Actor::Human, ENABLE_ALL, json!({}), false)
+            .await
+            .unwrap();
+        assert!(out.result["enabled"].as_array().unwrap().is_empty());
     }
 }

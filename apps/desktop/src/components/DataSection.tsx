@@ -48,6 +48,7 @@ import {
 } from "./dataSectionModel.js";
 import { collectorRan, collectorRowModel } from "./extensionRowModel.js";
 import { DeliveryList } from "./DeliveryList.js";
+import { EnableAllButton } from "./ExtensionsSection.js";
 import { recordOpError } from "./opErrorsStore.js";
 import { showToast } from "./toastStore.js";
 
@@ -250,7 +251,11 @@ export function DataSection() {
           ))}
         </tbody>
       </table>
-      <h3 style={subheadStyle}>Collectors</h3>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <h3 style={subheadStyle}>Collectors</h3>
+        <span style={{ flex: 1 }} />
+        <EnableAllButton count={collectors.filter((l) => l.disabled).length} />
+      </div>
       {collectors.length === 0 ? (
         <div style={mutedStyle} data-testid="data-collectors-empty">
           No collectors. An extension can declare one to bring in outside data.
