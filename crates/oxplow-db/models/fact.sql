@@ -6,7 +6,7 @@
 -- it, with that capture's columns. The same rule as the engine's reads
 -- (`fact_chain::held_facts_sql`).
 SELECT f.id, c.id AS capture_id, m.key AS measure_key, f.value, f.numerator,
-       f.denominator, s.kind AS subject_kind, s.ref AS subject_ref, p.path, f.line,
+       f.denominator, s.kind AS subject_kind, s.ref AS subject, p.path, f.line,
        f.severity, f.rule, f.detail, d.json AS dims_json,
        c.stream_id, c.thread_id, c.effort_id, c.captured_at, c.branch
 FROM source('fact') f
@@ -22,7 +22,7 @@ WHERE NOT EXISTS (SELECT 1 FROM source('fact_chain') x
                      AND y.path_id = f.path_id)
 UNION ALL
 SELECT f.id, c.id AS capture_id, m.key AS measure_key, f.value, f.numerator,
-       f.denominator, s.kind AS subject_kind, s.ref AS subject_ref, p.path, f.line,
+       f.denominator, s.kind AS subject_kind, s.ref AS subject, p.path, f.line,
        f.severity, f.rule, f.detail, d.json AS dims_json,
        c.stream_id, c.thread_id, c.effort_id, c.captured_at, c.branch
 FROM source('fact_chain') ch
@@ -40,7 +40,7 @@ LEFT JOIN source('fact_path') p ON p.id = f.path_id
 LEFT JOIN source('fact_dims') d ON d.id = f.dims_id
 UNION ALL
 SELECT f.id, c.id AS capture_id, m.key AS measure_key, f.value, f.numerator,
-       f.denominator, s.kind AS subject_kind, s.ref AS subject_ref, p.path,
+       f.denominator, s.kind AS subject_kind, s.ref AS subject, p.path,
        -- CAST keeps the column INTEGER across the UNION.
        CAST(coalesce((SELECT fl.line FROM source('fact_line') fl
                        WHERE fl.fact_id = f.id AND fl.capture_id <= ph.capture_id

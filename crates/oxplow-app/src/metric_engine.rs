@@ -122,7 +122,7 @@ pub enum CaptureScope {
     PerPath,
     /// A capture restates only **the subjects it emitted facts for** — for
     /// `oxplow.test_case`, the cases the run actually executed (V55, tsk43). The
-    /// value is the latest fact per `(producer, subject_ref)`, so a PARTIAL test run
+    /// value is the latest fact per `(producer, subject)`, so a PARTIAL test run
     /// updates just the tests it ran instead of making the metric report a 4-test
     /// repo. Unlike `PerPath` there's no external scanned set (a run has no snapshot
     /// file rows) — the restated set IS the capture's own facts, which is why a
@@ -348,7 +348,7 @@ pub struct SeriesRead {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct FactFinding {
     pub subject_kind: Option<String>,
-    pub subject_ref: Option<String>,
+    pub subject: Option<String>,
     pub path: Option<String>,
     pub line: Option<i64>,
     pub value: f64,
@@ -404,7 +404,7 @@ pub(crate) fn dim_value_cached(
         "oxplow.severity" => f.severity.clone(),
         "oxplow.rule" => f.rule.clone(),
         "oxplow.package" => {
-            let path = f.path.as_deref().or(f.subject_ref.as_deref())?;
+            let path = f.path.as_deref().or(f.subject.as_deref())?;
             Some(package_of(path))
         }
         // Pseudo-dimensions off the capture/fact spine (not `dims_json`), so
@@ -412,12 +412,14 @@ pub(crate) fn dim_value_cached(
         // the model (an `ai_model:<name>` subject → the bare id, else the dims_json
         // `oxplow.model`).
         "oxplow.branch" => f.branch.clone(),
-        "subject" => f.subject_ref.clone(),
-        "oxplow.model" => match &f.subject_ref {
-            Some(s) if f.subject_kind.as_deref() == Some("model") => Some(
-                oxplow_domain::refs::build::id_of(s, oxplow_domain::refs::kind::AI_MODEL)
-                    .unwrap_or_else(|_| s.clone()),
-            ),
+        "subject" => f.subject.clone(),
+        "oxplow.model" => match &f.subject {
+            Some(s) if f.subject_kind.as_deref() == Some(oxplow_domain::refs::kind::AI_MODEL) => {
+                Some(
+                    oxplow_domain::refs::build::id_of(s, oxplow_domain::refs::kind::AI_MODEL)
+                        .unwrap_or_else(|_| s.clone()),
+                )
+            }
             _ => dims.get(f).and_then(|d| dim_from_map(d, "oxplow.model")),
         },
         // The capture spine: who/where a fact was measured (tsk321).
@@ -451,7 +453,7 @@ pub(crate) fn is_spine_dim(dimension: &str) -> bool {
 /// the slice key.
 ///
 /// **Keep this in lockstep with [`dim_value_cached`]:** it is the negative image
-/// of that match. Every arm there reading `path`, `subject_ref`, `subject_kind`
+/// of that match. Every arm there reading `path`, `subject`, `subject_kind`
 /// or `branch` must be listed here, because a caller that gets `true` decides
 /// the filter from the slice alone and never loads a fact. Getting it wrong
 /// doesn't fail loudly — it silently changes which producers zero-fill. The
@@ -846,12 +848,12 @@ pub(crate) const SCALAR_SUBJECT: &str = "\u{0}repo-scalar";
 /// The path a fact is folded under, or `None` when it carries no location at all
 /// (a repo-scalar assertion).
 pub(crate) fn repo_scalar_key(f: &FactRow) -> Option<&str> {
-    f.path.as_deref().or(f.subject_ref.as_deref())
+    f.path.as_deref().or(f.subject.as_deref())
 }
 
 /// The state key a fact folds under for `scope` — and it MUST match the
 /// scope's EVICTION key (the restated set), or a fact legally carrying both
-/// identities (`subject_ref` + `path`) is inserted under one and evicted by
+/// identities (`subject` + `path`) is inserted under one and evicted by
 /// the other, accumulating forever on every path that folds it (tsk109).
 /// `None` = a repo-scalar assertion (no identity at all), same under either
 /// preference order.
@@ -859,7 +861,7 @@ pub(crate) fn fold_key(scope: CaptureScope, f: &FactRow) -> Option<&str> {
     match scope {
         // Per-subject restates the subjects it executed — the subject IS the
         // identity; a path is just its location.
-        CaptureScope::PerSubject => f.subject_ref.as_deref().or(f.path.as_deref()),
+        CaptureScope::PerSubject => f.subject.as_deref().or(f.path.as_deref()),
         // Per-path restates scanned paths. Complete never folds state, but a
         // fourth scope must decide here rather than inherit (tsk103).
         CaptureScope::PerPath | CaptureScope::Complete => repo_scalar_key(f),
@@ -1491,7 +1493,7 @@ impl MetricEngine {
                 CaptureScope::PerSubject => {
                     let mut m: HashMap<i64, Vec<String>> = HashMap::new();
                     for f in &facts {
-                        // The scope's fold key, not subject_ref alone — the
+                        // The scope's fold key, not subject alone — the
                         // eviction set must match the insertion key (tsk109).
                         if let Some(s) = fold_key(scope, f) {
                             m.entry(f.capture_id).or_default().push(s.to_string());
@@ -2082,7 +2084,7 @@ impl MetricEngine {
                 });
                 FactFinding {
                     subject_kind: f.subject_kind,
-                    subject_ref: f.subject_ref,
+                    subject: f.subject,
                     path: f.path,
                     line: f.line,
                     value: f.value,
@@ -2191,7 +2193,7 @@ mod tests {
             numerator: None,
             denominator: None,
             subject_kind: None,
-            subject_ref: None,
+            subject: None,
             path: None,
             line: None,
             severity: None,
@@ -2315,13 +2317,13 @@ mod tests {
             FactRow {
                 numerator: Some(1.0),
                 denominator: Some(1.0),
-                subject_ref: Some("a.rs".into()),
+                subject: Some("file:a.rs".into()),
                 ..fact(1, "2026-06-30T10:00:00Z", 1.0)
             },
             FactRow {
                 numerator: Some(0.0),
                 denominator: Some(3.0),
-                subject_ref: Some("b.rs".into()),
+                subject: Some("file:b.rs".into()),
                 ..fact(1, "2026-06-30T10:00:00Z", 0.0)
             },
         ];
@@ -2412,13 +2414,13 @@ mod tests {
             FactRow {
                 numerator: Some(1.0),
                 denominator: Some(2.0),
-                subject_ref: Some("a.rs".into()),
+                subject: Some("file:a.rs".into()),
                 ..fact(1, "2026-06-30T10:00:00Z", 0.5)
             },
             FactRow {
                 numerator: Some(17.0),
                 denominator: Some(20.0),
-                subject_ref: Some("a.rs".into()),
+                subject: Some("file:a.rs".into()),
                 ..fact(2, "2026-06-30T11:00:00Z", 0.85)
             },
         ];
@@ -2541,8 +2543,8 @@ mod tests {
         // than defensively over-broad, which would cost the fast path).
         let f = FactRow {
             path: Some("src/deep/mod.rs".into()),
-            subject_kind: Some("model".into()),
-            subject_ref: Some("ai_model:opus".into()),
+            subject: Some(oxplow_domain::refs::build::ai_model_ref("opus")),
+            subject_kind: Some("ai_model".into()),
             branch: Some("feature/x".into()),
             thread_id: Some(4),
             effort_id: Some(9),
@@ -3140,13 +3142,13 @@ mod tests {
                 cap_at("2026-06-30T10:00:00Z"),
                 vec![
                     NewFact {
-                        subject_ref: Some("symbol:a::f".into()),
+                        subject: Some("symbol:a::f".into()),
                         path: Some("a.rs".into()),
                         line: Some(3),
                         ..NewFact::new(complexity, 25.0)
                     },
                     NewFact {
-                        subject_ref: Some("symbol:a::g".into()),
+                        subject: Some("symbol:a::g".into()),
                         ..NewFact::new(complexity, 12.0)
                     },
                     // Below the filter — not an offender.
@@ -3168,7 +3170,7 @@ mod tests {
         let f = |sref: &str| {
             findings
                 .iter()
-                .find(|x| x.subject_ref.as_deref() == Some(sref))
+                .find(|x| x.subject.as_deref() == Some(sref))
                 .unwrap()
         };
         // 25 ≥ fail_at 20 (lower-better) → derived "fail"; 12 crosses neither.
@@ -3188,18 +3190,18 @@ mod tests {
                 cap_at("2026-06-30T10:00:00Z"),
                 vec![
                     NewFact {
-                        subject_ref: Some("a.rs".into()),
+                        subject: Some("file:a.rs".into()),
                         path: Some("a.rs".into()),
                         ..NewFact::new(complexity, 0.0)
                     },
                     NewFact {
-                        subject_ref: Some("b.rs".into()),
+                        subject: Some("file:b.rs".into()),
                         path: Some("b.rs".into()),
                         ..NewFact::new(complexity, 0.0)
                     },
                     // Covered → not untested, excluded by max_value.
                     NewFact {
-                        subject_ref: Some("c.rs".into()),
+                        subject: Some("file:c.rs".into()),
                         ..NewFact::new(complexity, 42.0)
                     },
                 ],
@@ -3215,7 +3217,7 @@ mod tests {
         assert_eq!(findings.len(), 2, "the two zero-coverage files");
         assert!(findings
             .iter()
-            .all(|x| x.subject_ref.as_deref() != Some("c.rs")));
+            .all(|x| x.subject.as_deref() != Some("c.rs")));
     }
 
     #[tokio::test]
@@ -3227,7 +3229,7 @@ mod tests {
             .record_facts(
                 cap,
                 vec![NewFact {
-                    subject_ref: Some("src/a.rs".into()),
+                    subject: Some("file:src/a.rs".into()),
                     ..NewFact::new(complexity, 5.0)
                 }],
             )
@@ -3250,7 +3252,7 @@ mod tests {
             .series_for_spec(&spec, Some("subject"))
             .await
             .unwrap();
-        assert_eq!(by_subject[0].group.as_deref(), Some("src/a.rs"));
+        assert_eq!(by_subject[0].group.as_deref(), Some("file:src/a.rs"));
     }
 
     #[tokio::test]
@@ -3261,18 +3263,18 @@ mod tests {
                 cap_at("2026-06-30T10:00:00Z"),
                 vec![
                     NewFact {
-                        subject_ref: Some("src/app/a.rs".into()),
+                        subject: Some("file:src/app/a.rs".into()),
                         path: Some("src/app/a.rs".into()),
                         ..NewFact::new(complexity, 12.0)
                     },
                     NewFact {
                         // Below the threshold — must be filtered out before rollup.
-                        subject_ref: Some("src/app/b.rs".into()),
+                        subject: Some("file:src/app/b.rs".into()),
                         path: Some("src/app/b.rs".into()),
                         ..NewFact::new(complexity, 3.0)
                     },
                     NewFact {
-                        subject_ref: Some("src/util/c.rs".into()),
+                        subject: Some("file:src/util/c.rs".into()),
                         path: Some("src/util/c.rs".into()),
                         ..NewFact::new(complexity, 20.0)
                     },
@@ -3331,8 +3333,8 @@ mod tests {
             dims_json: Some("{\"oxplow.language\":\"rust\"}".into()),
             path: Some("crates/a/src/lib.rs".into()),
             branch: Some("main".into()),
-            subject_kind: Some("model".into()),
-            subject_ref: Some("ai_model:opus".into()),
+            subject: Some(oxplow_domain::refs::build::ai_model_ref("opus")),
+            subject_kind: Some("ai_model".into()),
             ..fact(1, "2026-06-30T10:00:00Z", 1.0)
         };
         assert_eq!(dim_value(&f, "oxplow.language").as_deref(), Some("rust"));
@@ -3474,7 +3476,7 @@ mod tests {
             .await
             .unwrap();
         let case = |subject: &str, value: f64| oxplow_db::NewFact {
-            subject_ref: Some(subject.into()),
+            subject: Some(format!("test:{subject}")),
             ..oxplow_db::NewFact::new(m, value)
         };
         let on = |branch: &str, at: &str| NewMetricCapture {
@@ -3550,7 +3552,7 @@ mod tests {
             .await
             .unwrap();
         let case = |subject: &str, value: f64| oxplow_db::NewFact {
-            subject_ref: Some(subject.into()),
+            subject: Some(format!("test:{subject}")),
             ..oxplow_db::NewFact::new(test_case, value)
         };
         // Worktree 1 runs both cases; worktree 2 then re-runs only `t1`.
@@ -3657,14 +3659,14 @@ mod tests {
                         numerator: Some(17.0),
                         denominator: Some(20.0),
                         path: Some("src/a.rs".into()),
-                        subject_ref: Some("file:src/a.rs".into()),
+                        subject: Some("file:src/a.rs".into()),
                         ..NewFact::new(cov, 85.0)
                     },
                     NewFact {
                         numerator: Some(3.0),
                         denominator: Some(5.0),
                         path: Some("src/b.rs".into()),
-                        subject_ref: Some("file:src/b.rs".into()),
+                        subject: Some("file:src/b.rs".into()),
                         ..NewFact::new(cov, 60.0)
                     },
                 ],

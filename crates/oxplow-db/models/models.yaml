@@ -561,7 +561,7 @@
     - { name: "output_size", type: "INT", doc: "Length in bytes of the captured output body (`{ stderr?, stdout? }`); NULL when nothing was captured." }
     - { name: "payload_expired_at", type: "TEXT", doc: "When retention expired its details (they read NULL); NULL while kept." }
 - name: fact
-  version: 2
+  version: 3
   description: "Facts: atomic measurements (a function's complexity, a test's outcome, a token count), joined to their measure and capture context. One row per capture holding the fact: a scan that restates a whole population (duplicate blocks) holds the facts it repeats from the scan before, so an unchanged fact appears under each scan with the same id."
   columns:
     - { name: "id", type: "INTEGER", doc: "Fact id; the same across the captures that hold the fact unchanged." }
@@ -570,8 +570,8 @@
     - { name: "value", type: "REAL", doc: "The measured value." }
     - { name: "numerator", type: "REAL", doc: "Ratio numerator, for ratio measures." }
     - { name: "denominator", type: "REAL", doc: "Ratio denominator, for ratio measures." }
-    - { name: "subject_kind", type: "TEXT", doc: "What the fact is about." }
-    - { name: "subject_ref", type: "TEXT", doc: "Logical id of the subject." }
+    - { name: "subject_kind", type: "TEXT", doc: "The subject ref's kind (`file`, `symbol`, `test`, …): a filter, not an identity." }
+    - { name: "subject", type: "TEXT", doc: "What the fact is about, as one ref (`file:src/a.rs`, `symbol:src/a.rs/f`, `ai_model:claude-opus-4-8`)." }
     - { name: "path", type: "TEXT", doc: "File path, when the subject has one." }
     - { name: "line", type: "INTEGER", doc: "Line number, when it has one." }
     - { name: "severity", type: "TEXT", doc: "Finding severity, for lint-like facts." }
@@ -1448,7 +1448,7 @@
     - { not_null: key }
     - { unique: key }
 - name: tree_fact
-  version: 1
+  version: 2
   description: "The code tree's current facts: for every `per-path` measure (code gauges' per-file and per-function facts), per stream, only the facts from the latest capture that scanned each path — a fixed or removed item drops out, a deleted file's facts go. The same fold the metric engine reads. Its columns are `v_fact`'s."
   columns:
     - { name: "id", type: "INTEGER", doc: "Fact id." }
@@ -1457,8 +1457,8 @@
     - { name: "value", type: "REAL", doc: "The measured value." }
     - { name: "numerator", type: "REAL", doc: "Ratio numerator, for ratio measures." }
     - { name: "denominator", type: "REAL", doc: "Ratio denominator, for ratio measures." }
-    - { name: "subject_kind", type: "TEXT", doc: "What the fact is about: `file` or `symbol`." }
-    - { name: "subject_ref", type: "TEXT", doc: "The subject's id within its kind (`src/a.rs/Parser::parse` for a symbol, `src/a.rs` for a file); its ref is `subject_kind || ':' || subject_ref`." }
+    - { name: "subject_kind", type: "TEXT", doc: "The subject ref's kind: `file` or `symbol`." }
+    - { name: "subject", type: "TEXT", doc: "The subject as one ref (`symbol:src/a.rs/Parser::parse`, `file:src/a.rs`)." }
     - { name: "path", type: "TEXT", doc: "File path." }
     - { name: "line", type: "INTEGER", doc: "Line number, when it has one." }
     - { name: "severity", type: "TEXT", doc: "Finding severity, for lint-like facts." }

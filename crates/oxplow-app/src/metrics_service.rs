@@ -2523,6 +2523,19 @@ impl MetricsService {
                 f.measure
             ));
         }
+        // A subject is one ref (`file:src/a.rs`): the grammar is strict at
+        // writes, and a bare string would be no identity at all.
+        if let Some((f, subject)) = collector_facts.iter().find_map(|f| {
+            f.subject
+                .as_deref()
+                .filter(|s| oxplow_domain::refs::build::kind_of(s).is_none())
+                .map(|s| (f, s))
+        }) {
+            return Some(format!(
+                "a fact for `{}` whose subject `{subject}` isn't a ref (`<kind>:<id>`, like `file:src/a.rs`; build one with `ref.build`)",
+                f.measure
+            ));
+        }
         let undefined = |known: Vec<oxplow_db::Measure>| -> Option<String> {
             let known: std::collections::HashSet<String> =
                 known.into_iter().map(|m| m.key).collect();
@@ -2583,16 +2596,8 @@ impl MetricsService {
                 );
                 continue;
             };
-            let (subject_kind, subject_ref) = match &gf.subject {
-                Some(s) => match s.split_once(':') {
-                    Some((k, r)) => (Some(k.to_string()), Some(r.to_string())),
-                    None => (None, Some(s.clone())),
-                },
-                None => (None, None),
-            };
             rows.push(oxplow_db::NewFact {
-                subject_kind,
-                subject_ref,
+                subject: gf.subject.clone(),
                 path: gf.path.clone(),
                 line: gf.line,
                 // The reported rule/idiom — the engine reads this column as the
@@ -3506,7 +3511,7 @@ mod tests {
                 .await
                 .unwrap()
                 .into_iter()
-                .filter_map(|f| f.subject_ref)
+                .filter_map(|f| f.subject)
                 .collect();
             subjects.sort();
             subjects
@@ -3554,7 +3559,7 @@ mod tests {
         settle().await;
         let both = current().await;
         assert_eq!(both.len(), 2, "both sides of the copy: {both:?}");
-        assert!(both[0].starts_with("src/a.rs:") && both[1].starts_with("src/b.rs:"));
+        assert!(both[0].starts_with("block:src/a.rs:") && both[1].starts_with("block:src/b.rs:"));
 
         // The copy goes; the next ref move clears the metric.
         let third = snapshot_with_content(&svc, &[("src/b.rs", None)]).await;
@@ -3977,7 +3982,7 @@ def transform(input):
         assert_eq!(facts.len(), 1);
         assert_eq!(facts[0].value, 2.0, "two unsafe blocks in src/a.rs");
         assert_eq!(facts[0].subject_kind.as_deref(), Some("file"));
-        assert_eq!(facts[0].subject_ref.as_deref(), Some("src/a.rs"));
+        assert_eq!(facts[0].subject.as_deref(), Some("file:src/a.rs"));
         assert_eq!(facts[0].path.as_deref(), Some("src/a.rs"));
         assert_eq!(facts[0].rule.as_deref(), Some("unsafe_block"));
         // The capture spine carries the run's version + branch + source.
@@ -4809,7 +4814,7 @@ def transform(input):
         assert_eq!(facts.len(), 1, "one function → one fact");
         assert_eq!(facts[0].path.as_deref(), Some("src/a.rs"));
         assert_eq!(facts[0].subject_kind.as_deref(), Some("symbol"));
-        assert_eq!(facts[0].subject_ref.as_deref(), Some("src/a.rs/big"));
+        assert_eq!(facts[0].subject.as_deref(), Some("symbol:src/a.rs/big"));
         assert!(facts[0].value >= 3.0);
     }
 

@@ -149,7 +149,6 @@ pub(crate) fn held_facts_sql(measure: &str, holders: Holders) -> String {
 type Key = (
     Option<String>,
     Option<String>,
-    Option<String>,
     Option<i64>,
     u64,
     Option<u64>,
@@ -162,8 +161,7 @@ type Key = (
 
 fn new_key(f: &NewFact, with_line: bool) -> Key {
     (
-        f.subject_kind.clone(),
-        f.subject_ref.clone(),
+        f.subject.clone(),
         f.path.clone(),
         if with_line { f.line } else { None },
         f.value.to_bits(),
@@ -178,8 +176,7 @@ fn new_key(f: &NewFact, with_line: bool) -> Key {
 
 fn row_key(f: &FactRow, with_line: bool) -> Key {
     (
-        f.subject_kind.clone(),
-        f.subject_ref.clone(),
+        f.subject.clone(),
         f.path.clone(),
         if with_line { f.line } else { None },
         f.value.to_bits(),

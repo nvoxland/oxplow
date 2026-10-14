@@ -372,8 +372,7 @@ impl EffortService {
                 {
                     if let Some(measure) = facts.get_measure("oxplow.cycle_time").await? {
                         rows.push(NewFact {
-                            subject_kind: Some("effort".into()),
-                            subject_ref: Some(effort_id.to_string()),
+                            subject: Some(oxplow_domain::refs::build::effort_ref(*effort_id)),
                             numerator: Some(cycle_ms as f64),
                             denominator: Some(1.0),
                             ..NewFact::new(measure.id, cycle_ms as f64)
@@ -388,8 +387,7 @@ impl EffortService {
                     {
                         if let Some(measure) = facts.get_measure("oxplow.work_item_effort").await? {
                             rows.push(NewFact {
-                                subject_kind: Some("work_item".into()),
-                                subject_ref: Some(work_item.to_string()),
+                                subject: Some(work_item.to_string()),
                                 numerator: Some(efforts_so_far as f64),
                                 denominator: Some(1.0),
                                 ..NewFact::new(measure.id, efforts_so_far as f64)
@@ -441,7 +439,7 @@ impl EffortService {
                                     })
                                     .as_deref()
                                     == Some("failed");
-                                (f.capture_id, failed, f.subject_ref.clone())
+                                (f.capture_id, failed, f.subject.clone())
                             })
                             .collect();
                         if outcome_gate {
@@ -460,8 +458,9 @@ impl EffortService {
                                         ("red_runs", outcome.red_runs),
                                     ] {
                                         rows.push(NewFact {
-                                            subject_kind: Some("effort".into()),
-                                            subject_ref: Some(effort_id.to_string()),
+                                            subject: Some(oxplow_domain::refs::build::effort_ref(
+                                                *effort_id,
+                                            )),
                                             numerator: Some(value as f64),
                                             denominator: Some(1.0),
                                             dims_json: serde_json::to_string(&serde_json::json!({
@@ -495,8 +494,9 @@ impl EffortService {
                                 timed.sort_by_key(|(at, _)| *at);
                                 if let Some(ms) = crate::test_outcome::time_to_green_ms(&timed) {
                                     rows.push(NewFact {
-                                        subject_kind: Some("effort".into()),
-                                        subject_ref: Some(effort_id.to_string()),
+                                        subject: Some(oxplow_domain::refs::build::effort_ref(
+                                            *effort_id,
+                                        )),
                                         numerator: Some(ms as f64),
                                         denominator: Some(1.0),
                                         ..NewFact::new(ttg_measure.id, ms as f64)
@@ -543,8 +543,7 @@ impl EffortService {
                         }
                         if any {
                             rows.push(NewFact {
-                                subject_kind: Some("effort".into()),
-                                subject_ref: Some(effort_id.to_string()),
+                                subject: Some(oxplow_domain::refs::build::effort_ref(*effort_id)),
                                 numerator: Some(total),
                                 denominator: Some(1.0),
                                 ..NewFact::new(effort_tokens_measure.id, total)
@@ -567,8 +566,9 @@ impl EffortService {
                                     facts.get_measure("oxplow.token_waste").await?
                                 {
                                     rows.push(NewFact {
-                                        subject_kind: Some("effort".into()),
-                                        subject_ref: Some(effort_id.to_string()),
+                                        subject: Some(oxplow_domain::refs::build::effort_ref(
+                                            *effort_id,
+                                        )),
                                         numerator: Some(0.0),
                                         denominator: Some(total),
                                         ..NewFact::new(waste_measure.id, 0.0)
@@ -639,8 +639,7 @@ impl EffortService {
                             }
                         }
                         rows.push(NewFact {
-                            subject_kind: Some("effort".into()),
-                            subject_ref: Some(effort_id.to_string()),
+                            subject: Some(oxplow_domain::refs::build::effort_ref(*effort_id)),
                             numerator: Some(total),
                             denominator: Some(1.0),
                             ..NewFact::new(steering_measure.id, total)
@@ -1260,13 +1259,14 @@ mod tests {
             "capture stamped the producing effort_id (unambiguous close)"
         );
         assert_eq!(
-            cycle_facts[0].subject_ref.as_deref(),
+            cycle_facts[0].subject.as_deref(),
             Some(
-                EffortId::new(cycle_facts[0].effort_id.unwrap())
-                    .to_string()
-                    .as_str()
+                oxplow_domain::refs::build::effort_ref(EffortId::new(
+                    cycle_facts[0].effort_id.unwrap()
+                ))
+                .as_str()
             ),
-            "subject_ref is the producing effort's display id"
+            "subject is the producing effort's ref"
         );
 
         // …and the efforts-so-far count on `oxplow.work_item_effort`, subject =
@@ -1280,7 +1280,7 @@ mod tests {
         assert_eq!(effort_facts.len(), 1, "one effort fact per close");
         assert_eq!(effort_facts[0].value, 1.0, "first effort for the work item");
         assert_eq!(effort_facts[0].subject_kind.as_deref(), Some("work_item"));
-        assert_eq!(effort_facts[0].subject_ref.as_deref(), Some(item.as_str()));
+        assert_eq!(effort_facts[0].subject.as_deref(), Some(item.as_str()));
         // Ratio components: `work_item.efforts` collapses Σn/Σd across closes
         // — the mean efforts per work item, not the last-closed one's count.
         assert_eq!(effort_facts[0].numerator, Some(1.0));
@@ -1479,8 +1479,7 @@ mod tests {
                 .record_facts(
                     cap,
                     vec![oxplow_db::NewFact {
-                        subject_kind: Some("test".into()),
-                        subject_ref: Some("test:mod::case".into()),
+                        subject: Some("test:mod::case".into()),
                         dims_json: Some(format!(r#"{{"oxplow.status":"{status}"}}"#)),
                         ..oxplow_db::NewFact::new(case.id, 1.0)
                     }],

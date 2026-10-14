@@ -62,7 +62,7 @@ welded to collection.
 >   subjects it emitted facts for**. `oxplow.test_case`: a **partial** run
 >   (`bun test src/foo.test.ts`) holds just those cases, so read as `complete` the
 >   metric would report *"the repo has 4 tests"* and lose every failure elsewhere.
->   Folded to the **latest fact per `(producer, subject_ref)`**, a partial run updates
+>   Folded to the **latest fact per `(producer, subject)`**, a partial run updates
 >   only the tests it ran and the rest keep their last-known status
 >   (`latest_subject_facts`). Trade-off: a **deleted/renamed test lingers** — a run
 >   can't say "this subject is gone" the way a `storage='deleted'` file row can.
@@ -417,12 +417,14 @@ welded to collection.
   > captures" this box used to claim were verified to be zero.
 - **`fact`** — the durable atomic measurement (folds `metric_sample` +
   `metric_finding`): `capture_id` **NOT NULL** (→ all context via the capture),
-  `measure_id`, `value`, `numerator`/`denominator`; subject `subject_kind`/
-  `subject_ref`/`path`/`line` (location-at-capture); reported finding metadata
+  `measure_id`, `value`, `numerator`/`denominator`; `subject` (one ref: `file:src/a.rs`, `symbol:src/a.rs/f`,
+  `ai_model:claude-opus-4-8`; a write refuses a string that isn't a ref), `path`/`line`
+  (location-at-capture); reported finding metadata
   `severity`/`rule`/`detail` (null for pure measurements); `dims_json` (long-tail
   dims). **No when/where/who columns** — those are the capture's.
   **Stored as ids into dictionaries (V38):** `subject_id` → `fact_subject
-  (kind, ref)`, `path_id` → `fact_path`, `dims_id` → `fact_dims (json)`;
+  (ref, kind)` (the whole ref, unique; `kind` derived from it by the store at insert,
+  a filter convenience and never an identity — V64), `path_id` → `fact_path`, `dims_id` → `fact_dims (json)`;
   the one writer (`insert_fact`) interns, and `FactRow` still carries the
   text — except `detail`, which bulk reads leave out (`None`; a finding's
   message is fetched by id with `SqliteFactStore::fact_details`). A fact repeated its subject, path and dims text on every row —
@@ -433,7 +435,7 @@ welded to collection.
   SQL lookups cost a quarter more read time. A query that filters,
   groups or partitions uses the ids where they're equivalent (`path_id`,
   `dims_id`) and joins `fact_subject` where the subject ref's text is the
-  key (a kind can share a ref). `v_fact` and `v_tree_fact` join the
+  key. `v_fact` and `v_tree_fact` join the
   dictionaries, so their columns are unchanged.
   **Complete-scope scans store only what changed (V39, `fact_chain.rs`).**
   A finished capture of a complete-scope measure stores the facts that are
@@ -1466,7 +1468,7 @@ store `crates/oxplow-db/src/metric_store.rs` (`SqliteMetricStore`):
 - **`metric_sample`** — the durable scalar fact (the BI grain). `value`
   (+ `numerator`/`denominator` for ratios so roll-ups RE-AGGREGATE correctly),
   `captured_at` (the spine) + `closest_vcs_rev` + `branch`, optional
-  `subject_kind`/`subject_ref`/`path`/`line`, `dims_json`, `provenance`/`source`.
+  `subject` (a ref) / `path`/`line`, `dims_json`, `provenance`/`source`.
 - **`metric_finding`** — located detail for the `findings` kind (generalizes
   `code_quality_finding`): path/line, kind, severity, rule, message, value.
 
@@ -1581,7 +1583,7 @@ panel can reconstruct full detail via `effort_observations_from_metrics`:
 | producer | where | emits |
 |---|---|---|
 | coverage / tests / analysis | `crates/oxplow-app/src/collection.rs` (`mirror_coverage_metric` / `mirror_test_metrics` / `mirror_analysis_metrics`, called from `observe_coverage`/`record_test_run`/`record_static_analysis`) | `oxplow.coverage.abs_pct` (absolute; diff derived at read); `oxplow.tests.{passed,failed,total}`; `oxplow.analysis.{errors,warnings}` + a finding per lint hit + a `*-detail` finding carrying the verbatim payload |
-| otel-tokens | `crates/oxplow-app/src/token_usage.rs` (the `token_usage.otlp` consumer of `agent.tokens.reported`, which the control-plane OTLP receiver logs through `otlp_ingest` — tsk22, tsk860) | per-model `agent.tokens.{input,output,total}` from Claude's `claude_code.token.usage` OTEL counter. The fact's subject is the model's ref, `ai_model:<name>` (`refs::build::ai_model_ref`; `subject_kind` stays `model`), read back with `id_of(.., AI_MODEL)`. Tokens only — no derived USD cost (rates move; a stale price table is worse than none). The transcript `on_stop` path now projects only `agent.turns` + the per-turn `agent_token_usage` prompt rows |
+| otel-tokens | `crates/oxplow-app/src/token_usage.rs` (the `token_usage.otlp` consumer of `agent.tokens.reported`, which the control-plane OTLP receiver logs through `otlp_ingest` — tsk22, tsk860) | per-model `agent.tokens.{input,output,total}` from Claude's `claude_code.token.usage` OTEL counter. The fact's subject is the model's ref, `ai_model:<name>` (`refs::build::ai_model_ref`; `subject_kind` is `ai_model`), read back with `id_of(.., AI_MODEL)`. Tokens only — no derived USD cost (rates move; a stale price table is worse than none). The transcript `on_stop` path now projects only `agent.turns` + the per-turn `agent_token_usage` prompt rows |
 | effort-lifecycle | `crates/oxplow-app/src/effort_service.rs` (`project_effort_lifecycle_metrics`, run by the effort-lifecycle consumer on `effort.closed`) | derived `effort.cycle_time_ms` (close − start, subject=effort) + `work_item.efforts` (efforts-so-far on its work item, the redo-rate signal) from `effort`; branch captured when the stream has a worktree |
 | nudges | `crates/oxplow-app/src/collection.rs` (`project_nudge_metric`, called from `persist_nudge` after a fired nudge records) | `agent.nudges.fired` (event kind, run-less; value 1, subject=the nudge `kind`) — an agent-activity signal |
 | fact collectors | `crates/oxplow-app/src/metrics_service.rs` (`MetricsService`) — the fact engine. Seeds a `metric_spec` per resolved `metrics:` entry; runs each **fact collector** (`fact_collectors()` = the project's `collectors:` with `facts:` ∪ enabled extensions' (oxplow-foundation's included); an extension's collector that metrics name runs only while one of those metrics is on; an id two owners declare runs once, project > extension) on its trigger: `on:` from the `collector.triggers` pump consumer (`run_snapshot_collectors` for `snapshot.taken` that recorded files, `run_effort_collectors` over the effort's end snapshot for `effort.finished`, `run_event_collectors` over the stream's latest snapshot otherwise), `every:` from the scheduler, `manual` and any explicit run through `oxplow.collector.sync` → `run_collector_by_key(owner, id, stream, source)` | one `fact` per `CollectedFact` the script returns (bound to a defined measure in the collector's `facts`), version/branch/snapshot-stamped, under one `metric_capture` (a failed capture on error), plus a `collector_run` row and a `collector.synced@1` event carrying the `facts` count. `facts_of` refuses any output but `{"facts": [...]}` |

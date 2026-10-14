@@ -34,7 +34,7 @@ readable identity, its **ref**, `<kind>:<id>[@rev][#frag]`
 | Where | Build | Read |
 |---|---|---|
 | Rust | `oxplow_domain::refs::build::{effort_ref, file_ref, wiki_ref, …}` — one per core kind; `of(kind, id)` / `at(kind, id, rev, frag)` for a kind known only at run time; a work list builds its own items' refs (`oxplow_tasks::work_item_ref`) | `build::parse_as::<T>(r, kind)` (typed id), `id_of(r, kind)` (decoded id), `parse_kind(r, kind)` (keeps rev and frag), `kind_of(r)`; kind names are `refs::kind::{EFFORT, FILE, …}` |
-| SQL (models, lenses, scripts' queries) | the owning model's `ref` column (`oxplow_db::ref_models::REF_MODELS`: `v_effort.ref`, `v_decision.ref`, `v_thread.ref`, …) — the only SQL that spells a prefix | `SELECT ref`, `WHERE ref = :ref`, `JOIN … ON x.ref = y.subject_ref`; never `'kind:' || id`, never `substr` on a ref |
+| SQL (models, lenses, scripts' queries) | the owning model's `ref` column (`oxplow_db::ref_models::REF_MODELS`: `v_effort.ref`, `v_decision.ref`, `v_thread.ref`, …) — the only SQL that spells a prefix | `SELECT ref`, `WHERE ref = :ref`, `JOIN … ON x.ref = y.subject`; never `'kind:' || id`, never `substr` on a ref |
 | Starlark (commands, effects, collectors, policies) | `ref.build(kind, id, rev=, frag=)` (`id` a string or an int) | `ref.parse(r)` → `{kind, id, rev, frag}`, `ref.id(r, kind=)`, `ref.kind(r)`, `ref.is_ref(v)` |
 | TS (desktop) | `refs/ref.ts` builders (`effortRef`, `wikiRef`, `pageRef`, `refOf`, …) | `parseRef`, `idOf`, `isRefOfKind` |
 
