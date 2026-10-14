@@ -6558,6 +6558,7 @@ commands:
                 "co_change_pair",
                 "deviation",
                 "finished_cleared",
+                "struggle",
                 "thread_work",
                 "verdict",
                 "verdicts"

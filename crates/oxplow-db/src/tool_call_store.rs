@@ -1,6 +1,6 @@
 //! Persisted agent tool calls (`agent_tool_call`), recorded from the
-//! PostToolUse hook. Read through `v_tool_call`, `v_context_read` and
-//! `v_struggle`. See `.context/semantic-layer.md`.
+//! PostToolUse hook. Read through `v_tool_call` and `v_context_read`; the
+//! bundled review policy derives its struggle signal from them. See `.context/semantic-layer.md`.
 
 use oxplow_domain::DomainError;
 
@@ -182,7 +182,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn context_reads_and_struggle_are_derived() {
+    async fn context_reads_are_derived() {
         let (store, sl) = seeded().await;
         store
             .record(call("read", Some(".context/usability.md"), Some(true)))
@@ -192,26 +192,6 @@ mod tests {
             .record(call("read", Some("src/main.rs"), Some(true)))
             .await
             .unwrap();
-        for _ in 0..5 {
-            store
-                .record(call("edit", Some("src/hot.rs"), Some(true)))
-                .await
-                .unwrap();
-        }
-        for _ in 0..4 {
-            store
-                .record(call("edit", Some("src/calm.rs"), Some(true)))
-                .await
-                .unwrap();
-        }
-        for _ in 0..3 {
-            store
-                .record(call("shell", None, Some(false)))
-                .await
-                .unwrap();
-        }
-        store.record(call("shell", None, None)).await.unwrap(); // unknown outcome isn't a failure
-
         let rows = |sql: &'static str| {
             let sl = sl.clone();
             async move {
@@ -222,16 +202,6 @@ mod tests {
             rows("SELECT path FROM v_context_read").await,
             json!([[".context/usability.md"]])
         );
-        assert_eq!(
-            rows("SELECT kind, subject, count FROM v_struggle ORDER BY kind").await,
-            json!([
-                ["failed_commands", "shell", 3],
-                ["repeated_edits", "src/hot.rs", 5]
-            ])
-        );
-        assert_eq!(
-            rows("SELECT count(*) FROM v_tool_call").await,
-            json!([[15]])
-        );
+        assert_eq!(rows("SELECT count(*) FROM v_tool_call").await, json!([[2]]));
     }
 }

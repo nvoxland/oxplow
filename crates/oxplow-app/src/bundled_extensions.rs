@@ -44,6 +44,7 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-foundation", "README.md"),
             ext_file!("oxplow-foundation", "collectors/clojure/defn_count.star"),
             ext_file!("oxplow-foundation", "collectors/code/doc_coverage.star"),
+            ext_file!("oxplow-foundation", "collectors/effort/test_outcome.star"),
             ext_file!("oxplow-foundation", "collectors/code/duplicate_lines.star"),
             ext_file!("oxplow-foundation", "collectors/code/fn_count.star"),
             ext_file!(
@@ -198,6 +199,7 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-bundled", "models/co_change_pair.sql"),
             ext_file!("oxplow-bundled", "models/deviation.sql"),
             ext_file!("oxplow-bundled", "models/finished_cleared.sql"),
+            ext_file!("oxplow-bundled", "models/struggle.sql"),
             ext_file!("oxplow-bundled", "models/thread_work.sql"),
             ext_file!("oxplow-bundled", "models/verdict.sql"),
             ext_file!("oxplow-bundled", "models/verdicts.sql"),
@@ -420,6 +422,97 @@ mod tests {
             .transaction(move |tx| oxplow_db::record_claim_tx(tx, &claim))
             .await
             .unwrap();
+    }
+
+    /// oxplow-bundled's struggle rule: a file edited five times, or three
+    /// failed shell commands, in an effort. Four edits and two failures
+    /// are not struggle; a shell call with no known outcome is no failure.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn struggle_is_five_edits_of_a_file_or_three_failed_commands() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let call = |kind: &str, path: Option<&str>, ok: Option<bool>| oxplow_db::NewToolCall {
+            thread_id: f.thread.value(),
+            effort_id: Some(f.effort.value()),
+            tool: kind.into(),
+            kind: kind.into(),
+            path: path.map(str::to_string),
+            ok,
+            ..Default::default()
+        };
+        let store = &f.svc.tool_call_store;
+        for _ in 0..5 {
+            store
+                .record(call("edit", Some("src/hot.rs"), Some(true)))
+                .await
+                .unwrap();
+        }
+        for _ in 0..4 {
+            store
+                .record(call("edit", Some("src/calm.rs"), Some(true)))
+                .await
+                .unwrap();
+        }
+        for _ in 0..3 {
+            store
+                .record(call("shell", None, Some(false)))
+                .await
+                .unwrap();
+        }
+        store.record(call("shell", None, None)).await.unwrap();
+        let rows = |sql: String| {
+            let svc = f.svc.clone();
+            async move {
+                serde_json::to_value(svc.sql.query_sql(&sql, vec![], None).await.unwrap().rows)
+                    .unwrap()
+            }
+        };
+        assert_eq!(
+            rows("SELECT kind, subject, count FROM v_oxplow_bundled_struggle ORDER BY kind".into())
+                .await,
+            serde_json::json!([
+                ["failed_commands", "shell", 3],
+                ["repeated_edits", "src/hot.rs", 5]
+            ])
+        );
+        // One fewer of each, and nothing is struggle.
+        let g = crate::test_fixtures::services_with_effort().await;
+        let few = |kind: &str, path: Option<&str>, ok| oxplow_db::NewToolCall {
+            thread_id: g.thread.value(),
+            effort_id: Some(g.effort.value()),
+            tool: kind.into(),
+            kind: kind.into(),
+            path: path.map(str::to_string),
+            ok,
+            ..Default::default()
+        };
+        for _ in 0..4 {
+            g.svc
+                .tool_call_store
+                .record(few("edit", Some("a.rs"), Some(true)))
+                .await
+                .unwrap();
+        }
+        for _ in 0..2 {
+            g.svc
+                .tool_call_store
+                .record(few("shell", None, Some(false)))
+                .await
+                .unwrap();
+        }
+        let none = g
+            .svc
+            .sql
+            .query_sql(
+                "SELECT count(*) FROM v_oxplow_bundled_struggle",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(none.rows).unwrap(),
+            serde_json::json!([[0]])
+        );
     }
 
     /// oxplow-bundled's rule for a backed claim: it cites evidence, or it
@@ -3047,6 +3140,47 @@ mod tests {
             serde_json::to_value(&rows.rows).unwrap(),
             serde_json::json!([[20.0]])
         );
+    }
+
+    /// oxplow-foundation's `oxplow.effort_test_outcome` collector writes, when
+    /// an effort finishes, the very facts core's lifecycle producer wrote
+    /// (pinned as values in `the_producer_writes_these_outcome_facts_for_seeded_runs`
+    /// when that producer existed): same measures, subject, dims and values,
+    /// a record-only run ignored, asserted counts anonymous. Its capture is the
+    /// effort's and carries the branch, so `oxplow.tests.*` slice by it.
+    #[tokio::test]
+    async fn the_test_outcome_collector_writes_what_the_producer_did() {
+        use crate::foundation_collectors_tests::{
+            asserted_runs, expected_outcome, outcome_facts, red_then_green_runs, seed_test_runs,
+        };
+        for (runs, stats, ttg) in [
+            (red_then_green_runs(), [0, 2, 2, 2], Some(60_250)),
+            (asserted_runs(), [0, 3, 3, 1], Some(4_000)),
+        ] {
+            let f = crate::test_fixtures::services_with_effort().await;
+            let facts = &f.svc.fact_store;
+            seed_test_runs(facts, 1, f.thread.value(), f.effort.value(), "main", &runs).await;
+            f.svc
+                .metrics
+                .run_effort_collectors(&f.thread, &f.effort, None, &|c| {
+                    c.key == "oxplow.effort_test_outcome"
+                })
+                .await;
+            assert_eq!(
+                outcome_facts(facts).await,
+                expected_outcome(
+                    &oxplow_domain::refs::build::effort_ref(f.effort),
+                    stats,
+                    ttg
+                )
+            );
+            let captures = facts.captures_for_effort(f.effort.value()).await.unwrap();
+            let ours = captures
+                .iter()
+                .find(|c| c.producer == "oxplow.effort_test_outcome")
+                .expect("the collector's capture is the effort's");
+            assert!(ours.branch.is_some(), "it carries the branch: {ours:?}");
+        }
     }
 
     /// P9.D6: a verdict is a typed event, not only a comment's text. Each

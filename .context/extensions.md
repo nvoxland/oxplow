@@ -919,7 +919,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   - Tests Weakened (deleted test functions from `v_change_function`,
     fewer assertions and new skip markers from `v_change_test_file`;
     also mounted in the `vcs.commit.details` and `vcs.status.details` slots)
-  - Struggled Here (`v_struggle`)
+  - Struggled Here (`v_oxplow_bundled_struggle`, the bundled model: a file edited 5+ times or 3+ failed shell commands per effort)
   - Review Prompt (a copyable markdown prompt for reviewing the effort
     with a second harness: the task, the agent's summary, the files it
     changed, its claims and recorded decisions, and what to report; an

@@ -189,7 +189,6 @@ pub mod symbol_resolve;
 pub mod terminal_sessions;
 #[cfg(test)]
 pub(crate) mod test_fixtures;
-pub mod test_outcome;
 pub mod test_signals;
 pub mod thread_checkpoint;
 pub mod thread_runtime;
