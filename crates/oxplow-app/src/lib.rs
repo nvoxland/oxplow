@@ -35,6 +35,7 @@ pub mod change_analysis;
 pub mod change_reactor;
 pub mod churn;
 pub mod client_host;
+pub mod client_reports;
 pub mod code_analysis;
 pub mod code_intel;
 pub mod code_intel_conformance;
@@ -201,7 +202,6 @@ pub mod terminal_sessions;
 pub(crate) mod test_fixtures;
 pub mod test_signals;
 pub mod thread_checkpoint;
-pub mod thread_runtime;
 pub mod token_usage;
 pub mod tool_call_reactors;
 pub mod tool_calls;
@@ -637,11 +637,8 @@ pub struct Services {
     pub snapshot_captures: snapshot_capture_registry::SnapshotCaptureRegistry,
     pub agent_status_store: Arc<dyn AgentStatusStore>,
     pub agent_turn_store: Arc<SqliteAgentTurnStore>,
-    /// Backing in-memory state for hook events + agent status. Both
-    /// `hook_event_store` and `agent_status_store` are trait-object
-    /// views of this same registry — keep the concrete handle around
-    /// for code that wants to bypass the trait surfaces.
-    pub thread_runtime: Arc<thread_runtime::ThreadRuntimeRegistry>,
+    /// What the person's windows show: their tabs per thread (`client_reports`).
+    pub client_reports: Arc<client_reports::ClientReports>,
     pub effort_store: Arc<SqliteEffortStore>,
     /// Durable atomic fact layer (epic tsk12) — the unified metric substrate
     /// (the V38 `metric_*` cluster is retired, T-E3). Producers write facts
@@ -1070,7 +1067,7 @@ impl Services {
                 .with_content_hasher(Arc::new(move |oid: &str| content.object_content_hash(oid)))
         });
         let search_store = Arc::new(SqliteSearchStore::new(db.clone()));
-        let thread_runtime = Arc::new(thread_runtime::ThreadRuntimeRegistry::new());
+        let client_reports = Arc::new(client_reports::ClientReports::new());
         let agent_status_store: Arc<dyn AgentStatusStore> = Arc::new(
             oxplow_db::SqliteAgentStatusStore::new(db.clone(), vocabulary.clone()),
         );
@@ -1937,7 +1934,7 @@ impl Services {
             search_store,
             agent_status_store,
             agent_turn_store,
-            thread_runtime,
+            client_reports,
             effort_store,
             fact_store,
             metric_engine,
@@ -2329,6 +2326,7 @@ mod tests {
                 "oxplow.metric.rebuild",
                 // The agent's reads of live state are read-scope operations
                 // (`commands/agent_reads`): they change no record.
+                "oxplow.page.list_tabs",
                 "oxplow.page.open",
                 // The provider process's collectors (P7.A3).
                 "oxplow.provider.sync",
@@ -2456,6 +2454,7 @@ mod tests {
                 "metrics.write/enable",
                 "metrics.write/rebuild",
                 "metrics.write/record",
+                "pages.read/list_tabs",
                 "pages.read/open",
                 "providers.sync/sync",
                 "records.read/read",

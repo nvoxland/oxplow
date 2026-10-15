@@ -785,14 +785,24 @@ mod tests {
             .activate(services.clone())
             .await
             .unwrap();
-        services.thread_runtime.set_open_page(
-            &thread,
-            Some(oxplow_app::thread_runtime::OpenPage {
-                page_id: "lens:demo/kinds".into(),
-                kind: "lens".into(),
+        services.client_reports.report(
+            oxplow_app::client_reports::TabReport {
+                client: "window".into(),
+                focused: true,
+                visible: true,
+                shown_thread: Some(thread),
+                threads: vec![oxplow_app::client_reports::ThreadTabs {
+                    thread,
+                    tabs: vec![oxplow_app::client_reports::ReportedTab {
+                        id: "lens:demo/kinds".into(),
+                        kind: "lens".into(),
+                        title: "Kinds".into(),
+                    }],
+                    active: Some("lens:demo/kinds".into()),
+                }],
                 detail_json: Some(r#"{"lensId":"demo/kinds","params":{"kind":"primary"}}"#.into()),
-                reported_at: oxplow_domain::Timestamp::now(),
-            }),
+            },
+            oxplow_domain::Timestamp::now(),
         );
         let open: serde_json::Value = serde_json::from_str(&text_payload(
             call(

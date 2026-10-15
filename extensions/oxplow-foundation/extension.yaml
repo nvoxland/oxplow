@@ -742,12 +742,19 @@ commands:
     example: {"key": "complex_fns.count", "value": 12, "subject": "file:src/auth.rs"}
   # pages.read
   - name: page.open
-    summary: "What the human is looking at right now in a thread. The open page's id (`task:42`, `file:src/a.rs`, `lens:review/waiting`, …), its kind and page detail. When it's a lens, `lens` is that lens re-run with the human's current params, as text: exactly what is on their screen. Use it when the user says \"this\", \"what I'm looking at\" or \"this lens\". `open` is null when nothing has been reported."
+    summary: "What the person is looking at in a thread. It is the page the thread has open in the window they were in last (`pageId` such as `work_item:oxplow:tsk42`, `file:src/a.rs`, `lens:review/waiting`; its kind; the detail the page publishes; which window, whether it's on screen, how fresh), and `others`, the page each other window has open there. When it's a lens, `lens` is that lens re-run with the person's params, as text: what is on their screen. `tab` reads one of the thread's tabs instead (an id `oxplow_list_tabs` listed). Use it when the person says \"this\", \"what I'm looking at\" or \"this lens\". `open` is null when no window reported one."
     scope: pages.read
     op: open
     invokers: { human: true, agent: true, lens: true }
     tool: get_open_page
     example: {"thread_id": "thr3"}
+  - name: page.list_tabs
+    summary: "The tabs the person's windows show. Each tab's id (a ref you can read or open), kind, title, thread, stream, agent session when it is one, whether it is selected in its thread and on screen, which window, and whether the report is stale. `scope` is `thread` (default: yours, or `thread`), `stream` (every thread in that thread's stream) or `project`. `unreported` lists threads in scope no window reported. Use it to resolve \"the other tab\" or \"the session in the other thread\". Read-only: it opens nothing."
+    scope: pages.read
+    op: list_tabs
+    invokers: { human: true, agent: true, lens: true }
+    tool: list_tabs
+    example: {"scope": "stream"}
   # projects.write — the app shell's; a person's.
   - name: project.create
     summary: "Pick a folder and create a project in it, opened in a new window. A folder that already is a project is refused."

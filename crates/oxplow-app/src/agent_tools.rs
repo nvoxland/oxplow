@@ -210,6 +210,7 @@ mod tests {
                 "oxplow_get_open_page",
                 "oxplow_get_skill",
                 "oxplow_list_comments",
+                "oxplow_list_tabs",
                 "oxplow_navigate",
                 "oxplow_preview_collector",
                 "oxplow_preview_extension",

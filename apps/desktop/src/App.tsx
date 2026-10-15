@@ -163,6 +163,7 @@ import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
 import { computePagesDirectory } from "./components/RailHud/sections.js";
 import { NON_TRACKED_KINDS } from "./components/RailHud/history.js";
 import { resolveActiveTabRef } from "./tabs/resolveActiveTabRef.js";
+import { buildTabReport } from "./tabs/tabReport.js";
 import { useThreadPageTabs } from "./tabs/useThreadPageTabs.js";
 import { dropFromMru, MAX_PAGE_TABS, selectLruEvictions, touchMru } from "./tabs/tabLru.js";
 import {
@@ -171,7 +172,7 @@ import {
   writePersistedCenterActive,
   writePersistedFileSessionPaths,
 } from "./tabs/pageTabsPersistence.js";
-import { forgetPage, generatedPaths, recordPageVisit, recordUserInterrupt, reportOpenPage, resolveSymbol } from "./api.js";
+import { forgetPage, generatedPaths, recordPageVisit, recordUserInterrupt, reportTabs, resolveSymbol } from "./api.js";
 import { openProject, createProject, listRecentProjects, shellAvailable } from "./api.js";
 import { onRemoteReconnect, triggerRemoteResync } from "./api.js";
 import type { CommandOutcome, RecentProjectView } from "./tauri-bridge/generated/bindings.js";
@@ -187,7 +188,7 @@ import { streamOfThread, withTab, withoutTab } from "./tabs/threadTabOps.js";
 import { planNavigation } from "./tabs/navigation.js";
 import { usePersonCommands } from "./personCommandsStore.js";
 import { personCommands } from "./personCommands.js";
-import { logUi, setUiLogContext } from "./logger.js";
+import { getUiClientId, logUi, setUiLogContext } from "./logger.js";
 import { streamRef } from "./refs/ref.js";
 
 // Cap on concurrent file tabs in the center. Intellij uses ~10 by default;
@@ -1515,23 +1516,48 @@ export function App() {
     return () => clearTimeout(timer);
   }, [effectiveCenterActive, selectedThreadId]);
 
-  // Report the page the human has open (plus its published detail, e.g. a
-  // lens's params) so an agent's `get_open_page` sees what they see.
-  // Best-effort and debounced; see tabs/openPageDetail.ts.
+  // Report what this window shows — every thread's tabs and the one
+  // selected in each, the thread it shows, its focus and visibility, and
+  // the shown page's published detail (a lens's params) — so an agent's
+  // `list_tabs` / `get_open_page` see what the person sees. Best-effort
+  // and debounced; see tabs/tabReport.ts and tabs/openPageDetail.ts.
   const [pageDetailTick, setPageDetailTick] = useState(0);
   useEffect(() => getPageDetailStore().subscribe(() => setPageDetailTick((t) => t + 1)), []);
+  const [windowFocused, setWindowFocused] = useState(() => document.hasFocus());
+  const [windowVisible, setWindowVisible] = useState(() => document.visibilityState === "visible");
   useEffect(() => {
-    if (!selectedThreadId) return;
+    const focus = () => setWindowFocused(true);
+    const blur = () => setWindowFocused(false);
+    const visibility = () => setWindowVisible(document.visibilityState === "visible");
+    window.addEventListener("focus", focus);
+    window.addEventListener("blur", blur);
+    document.addEventListener("visibilitychange", visibility);
+    return () => {
+      window.removeEventListener("focus", focus);
+      window.removeEventListener("blur", blur);
+      document.removeEventListener("visibilitychange", visibility);
+    };
+  }, []);
+  useEffect(() => {
     const timer = setTimeout(() => {
       const ctx = visitContextRef.current;
-      const ref = resolveActiveTabRef(effectiveCenterActive, ctx.pageTabs, ctx.openOrder);
-      const pageId = ref?.id ?? effectiveCenterActive;
-      const kind = ref?.kind ?? effectiveCenterActive;
-      const detail = getPageDetailStore().get(pageId);
-      void reportOpenPage(selectedThreadId, pageId, kind, detail ? JSON.stringify(detail) : null).catch(() => {});
+      const shown = resolveActiveTabRef(effectiveCenterActive, ctx.pageTabs, ctx.openOrder);
+      const activeByThread: Record<string, string | undefined> = { ...threadCenterActive };
+      if (selectedThreadId) activeByThread[selectedThreadId] = shown?.id;
+      const report = buildTabReport({
+        client: getUiClientId(),
+        focused: windowFocused,
+        visible: windowVisible,
+        shownThread: selectedThreadId ?? null,
+        threadPageTabs,
+        activeByThread,
+        titleOf: (tab) => tabLabelByIdRef.current[tab.id] ?? pageTitles[tab.id],
+        detail: shown ? getPageDetailStore().get(shown.id) : null,
+      });
+      void reportTabs(report).catch(() => {});
     }, 300);
     return () => clearTimeout(timer);
-  }, [effectiveCenterActive, selectedThreadId, pageDetailTick]);
+  }, [effectiveCenterActive, selectedThreadId, threadPageTabs, threadCenterActive, pageTitles, pageDetailTick, windowFocused, windowVisible]);
 
   const handleOpenDiff = (request: DiffSpec) => {
     const id = computeDiffId(request);

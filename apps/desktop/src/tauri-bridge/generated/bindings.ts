@@ -254,7 +254,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	reportOpenPage: (threadId: string, pageId: string | null, kind: string | null, detailJson: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("report_open_page", { threadId, pageId, kind, detailJson })),
+	reportTabs: (report: TabReport) => typedError<null, IpcError>(__TAURI_INVOKE("report_tabs", { report })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -5761,6 +5761,19 @@ export type ReportInput = {
 	format?: string,
 };
 
+/**  One tab, as its window shows it. */
+export type ReportedTab = {
+	/**
+	 *  Its tab id: a canonical ref (`work_item:oxplow:tsk3`,
+	 *  `page:settings`, `agent_session:ses2`).
+	 */
+	id: string,
+	/**  Its page kind (`work_item`, `lens`, `agent_session`). */
+	kind: string,
+	/**  The title on the tab. */
+	title: string,
+};
+
 /**  How long a namespace's event payloads and large content are kept. */
 export type RetentionWindow = {
 	/**  Days an event's payload is kept; after it, `{}`. */
@@ -6280,6 +6293,22 @@ export type SymbolLocation = {
 	versionGone: boolean,
 };
 
+/**  What one window shows, as its renderer reports it. */
+export type TabReport = {
+	/**  The window's renderer, for as long as it lives. */
+	client: string,
+	focused: boolean,
+	visible: boolean,
+	/**  The thread the window shows. */
+	shown_thread: ThreadId | null,
+	threads: ThreadTabs[],
+	/**
+	 *  The detail the shown thread's active page publishes (JSON text: a
+	 *  lens's `{lensId, params}`, an editor's `{path, revision, selection}`).
+	 */
+	detail_json: string | null,
+};
+
 /**
  *  One declared test, written as a one-key map: `{ not_null: id }`,
  *  `{ unique: id }`, `{ accepted_values: { column, values } }`,
@@ -6412,6 +6441,14 @@ export type ThreadState = {
  *  terminated; closed threads are excluded from the rail.
  */
 export type ThreadStatus = "active" | "queued" | "closed";
+
+/**  A thread's tabs in one window. */
+export type ThreadTabs = {
+	thread: ThreadId,
+	tabs: ReportedTab[],
+	/**  The tab selected in the thread (its id); none when none is. */
+	active: string | null,
+};
 
 /**  Wall-clock UTC timestamp serialized as a fixed-width RFC 3339 string. */
 export type Timestamp = string;

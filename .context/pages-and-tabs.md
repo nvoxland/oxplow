@@ -559,6 +559,33 @@ migrate to `useRouteDispatch` directly (preferred) or use the
 adapter-component pattern from `CommitGraphTable`'s
 `CommitRowDispatcher`.
 
+## What agents see of the tabs
+
+Each window reports what it shows (`report_tabs`, debounced 300 ms from
+`App.tsx`, built by the pure `tabs/tabReport.ts`): every thread's tabs
+with their shown titles (the tab strip's label, else a page's own title,
+else its kind's label) and the one selected in each, the thread it shows,
+whether it is focused and visible, and the detail the shown page
+publishes through `tabs/openPageDetail.ts` (a lens's `{lensId, params}`,
+an editor's `{path, caret, selection}`). A window is its renderer's
+`getUiClientId()`. The backend keeps the reports in memory
+(`oxplow_app::client_reports`): a window not heard from for 5 minutes is
+forgotten, a report older than a minute is listed as stale.
+
+- `oxplow_list_tabs { scope?, thread? }` lists the tabs of a thread
+  (default the caller's), its stream's threads or every thread, in every
+  window: id (a ref), kind, title, thread, stream, agent session for a
+  session tab, `selected` (in its thread, in that window), `visible`
+  (selected, in the thread its window shows, in a visible window),
+  window and staleness; `unreported` names the threads no window reported.
+- `oxplow_get_open_page { thread_id, tab? }` is the page selected in the
+  thread in the window the person was in last (most recently focused),
+  with `others` (each other window's), or the listed `tab`; detail comes
+  only from a window showing that thread's page. Two windows never
+  collapse into one "open page".
+
+Both are read-only: nothing an agent reads activates a tab or a window.
+
 ## Linking between tabs — single chokepoint rule
 
 **What a ref opens is the registry's; how is the click's.** A kind's

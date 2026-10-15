@@ -20,6 +20,8 @@ import { gitRevision } from "../revision.js";
 import { askAboutSelection } from "../agent-context-ref.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
 import { MonacoCommentLayer, type MonacoCommentHandle } from "./Comments/MonacoCommentLayer.js";
+import { getPageDetailStore } from "../tabs/openPageDetail.js";
+import { fileRef } from "../tabs/pageRefs.js";
 
 interface Props {
   stream: Stream;
@@ -36,6 +38,9 @@ interface Props {
   onRevealCommit?(sha: string): void;
   onCompareWithClipboard?(selection: string, path: string): void;
 }
+
+/** The most of a selection's text an editor publishes as its page detail. */
+const PUBLISHED_SELECTION = 4_000;
 
 export function EditorPane({
   stream,
@@ -280,6 +285,18 @@ export function EditorPane({
       selection,
       openFiles: openFilesPayload,
     });
+    // What an agent's `get_open_page` reads of this file's tab: the caret
+    // or the selection (its text cut short).
+    if (currentPath) {
+      getPageDetailStore().publish(fileRef(currentPath).id, {
+        path: currentPath,
+        caret,
+        selection: selection && {
+          ...selection,
+          text: selection.text.length > PUBLISHED_SELECTION ? `${selection.text.slice(0, PUBLISHED_SELECTION)}…` : selection.text,
+        },
+      });
+    }
   }
 
   useEffect(() => {

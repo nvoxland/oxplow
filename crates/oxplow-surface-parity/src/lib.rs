@@ -255,8 +255,8 @@ pub const MANIFEST: &[Capability] = &[
     both_named("validate_extension", "validate_extension", "oxplow_validate_extension"),
     both_named("review_extension", "review_extension", "oxplow_review_extension"),
     ui(
-        "report_open_page",
-        "the person's open page, which an agent reads with `get_open_page`",
+        "report_tabs",
+        "the tabs a window shows, which an agent reads with `list_tabs` and `get_open_page`",
     ),
     ui(
         "set_extension_enabled",
@@ -387,6 +387,7 @@ pub const MANIFEST: &[Capability] = &[
     agent("oxplow_ai_decide"),
     agent("oxplow_ai_summarize"),
     agent("oxplow_get_open_page"),
+    agent("oxplow_list_tabs"),
     // ---- both (names diverge across surfaces) ----
     model("list_threads", &["v_thread"]),
     both_named("comment.list", "list_comments_for_stream", "oxplow_list_comments"),
