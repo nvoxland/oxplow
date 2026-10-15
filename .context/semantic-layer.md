@@ -831,6 +831,10 @@ The result keeps the two apart.
 - MCP and RPC `query_sql` and lens runs return the whole result; the
   row-only script reads carry the row guarantees but not coverage.
 - `freshness` is separate: model changes observed since startup.
+- What an agent should do with all of this when it reports numbers is the
+  `oxplow-extension` skill's `reading-data` reference (aggregate before
+  the cap, metric folds over naive sums, unavailable vs empty, scope), whose
+  example queries `reading_data_tests` runs over a seeded project.
 
 ## Collectors (P7.B3)
 

@@ -166,7 +166,8 @@ const OXPLOW_SKILLS: &[SkillFiles] = &[
             "testing",
             "providers",
             "lenses-in-use",
-            "repair-and-sharing"
+            "repair-and-sharing",
+            "reading-data"
         ]
     ),
     skill!("oxplow-codebase", ["code", "history"]),

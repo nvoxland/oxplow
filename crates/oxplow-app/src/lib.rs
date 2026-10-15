@@ -166,6 +166,8 @@ pub mod page_ref_consumers;
 pub mod post_tool_reactors;
 pub mod prompt_catalog;
 pub mod providers;
+#[cfg(test)]
+mod reading_data_tests;
 pub mod reasoning;
 pub mod recovery;
 pub mod ref_moves;

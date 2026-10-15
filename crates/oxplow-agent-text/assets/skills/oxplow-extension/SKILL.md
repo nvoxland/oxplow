@@ -40,6 +40,7 @@ with `name: oxplow-extension` and `reference: <name>`):
 - `references/providers.md`: external providers: testing, credentials, MCP adapters.
 - `references/lenses-in-use.md`: `oxplow_show_lens` details, changing "this lens", handing over.
 - `references/repair-and-sharing.md`: disabled contributions and repair, install, share.
+- `references/reading-data.md`: before you report numbers: `truncated`, `coverage`, metric folds, scope, example queries.
 
 Rules that live in other skills: wikilinks and refs in prose, see
 `oxplow-wiki-capture`; waiting on the person, `oxplow-runtime`; test
