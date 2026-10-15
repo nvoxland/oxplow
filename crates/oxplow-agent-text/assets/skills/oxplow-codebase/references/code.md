@@ -22,6 +22,6 @@
   relying on a language's `code_*` tools, and after `oxplow.lsp.install_server`.
 - **Live questions** go to the language server itself through the MCP
   tools: `code_definition`, `code_references`, `code_hover`,
-  `code_symbols` (a file), `code_workspace_symbols`,
   `code_call_hierarchy` (who calls / what it calls). Use them for "what calls X" and anything the
-  stored snapshot view can't know.
+  stored snapshot view can't know. A file's or the workspace's symbols are `v_symbol` (a
+  file never captured, such as one not yet committed, is not in it).

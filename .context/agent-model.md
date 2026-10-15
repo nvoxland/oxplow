@@ -1239,7 +1239,7 @@ What an agent reads, and how. Almost every read is a published model through
 `v_dashboard_item`), duplicate-block findings (`v_code_quality_finding`),
 dead letters (`v_event_dead_letter`) and language-server diagnostics
 (`v_diagnostic`). The tools that stay are the ones a model can't be: **file
-and revision content** (`read` for a file at a revision, `diff`, `vcs_blame`, `git_status`;
+and revision content** (`read` for a file at a revision, `diff`; blame and status are the agent's own `git blame` / `git status` in its worktree;
 revisions are `working`, `snap:<id>` or `git:<rev>`; `stream_id` optional;
 mutations stay on Bash), **captured content** (a captured file row's path
 and snapshot come from `query_sql` over `v_snapshot_file`, then `read`
@@ -1411,8 +1411,7 @@ is `{ to: done|canceled, native_state: archived }`.
     `resolve_ref(...).title`.
 
 **Code tools** (`crates/oxplow-mcp/src/lib.rs`): `code_definition`,
-`code_references`, `code_hover`, `code_symbols`,
-`code_workspace_symbols`, `code_call_hierarchy` —
+`code_references`, `code_hover`, `code_call_hierarchy` —
 typed answers from code intelligence, over the same
 shared language-server sessions the editor uses (`.context/lsp.md`). When no
 server is configured for a language, the error is self-describing — it

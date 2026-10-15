@@ -139,7 +139,6 @@ pub const MANIFEST: &[Capability] = &[
     // Architectural zones (tsk251) — agent-only: the agent reads the table
     // here and writes it with `oxplow.config.set` (tsk411); the renderer only reads
     // it (it rides on `get_config`), so there is no IPC counterpart.
-    agent("list_zones"),
     // The plan pane's in-memory reminders; an agent files a work item or
     // a thread note instead.
     ui(
@@ -281,7 +280,6 @@ pub const MANIFEST: &[Capability] = &[
     ),
     // The `oxplow.collector.sync` command: the UI runs it through `run_command`,
     // an agent through this tool (as itself, so it never approves).
-    agent("run_collector"),
     ui(
         "approve_collector",
         "consent to run a collector's program is a person's",
@@ -410,20 +408,23 @@ pub const MANIFEST: &[Capability] = &[
     agent("code_definition"),
     agent("code_hover"),
     agent("code_references"),
-    agent("code_symbols"),
-    agent("code_workspace_symbols"),
     agent("code_call_hierarchy"),
-    // ---- code analysis: generic per-language unit listing (tree-sitter) ----
-    agent("list_code_units"),
     // ---- git ----
-    both_named("git.status", "git_change_scopes", "git_status"),
+    Capability {
+        capability: "git.status",
+        exposure: UiOnly {
+            why: "the UI's working-tree status; an agent runs `git status` in its worktree",
+        },
+        ipc: Some("git_change_scopes"),
+        mcp: None,
+    },
     both("diff"),
     ui(
         "changed_paths",
         "an agent reads the same paths, with line counts, through `diff`",
     ),
     model("vcs_log", &["v_commit", "v_commit_file"]),
-    both("vcs_blame"),
+    ui("vcs_blame", "the editor's blame gutter; an agent runs `git blame` in its worktree"),
     ui("read_at", "the editor's file at a revision; an agent reads a file ref at that revision with `read`"),
     ui(
         "resolve_symbol",
@@ -611,11 +612,11 @@ pub const MANIFEST: &[Capability] = &[
     ),
     ui(
         "vcs_head",
-        "the UI's live VCS state; an agent has `git_status`",
+        "the UI's live VCS state; an agent runs `git status` in its worktree",
     ),
     ui(
         "vcs_status",
-        "the UI's live VCS state; an agent has `git_status`",
+        "the UI's live VCS state; an agent runs `git status` in its worktree",
     ),
     ui(
         "vcs_revision",

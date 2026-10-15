@@ -33,7 +33,7 @@ Changing history (commit, merge, rebase, push, checkout) is the
 `oxplow.vcs.*` commands (`list_commands` shows them) or `git` in your
 terminal.
 
-## Code (`v_symbol`, `v_diagnostic`, `v_lsp_server`, the `code_*` tools)
+## Code (`v_symbol`, `v_diagnostic`, `v_lsp_server`, the `code_*` navigation tools)
 
 `references/code.md` (get_skill reference `code`) has the columns, symbol
 kinds, example queries and the live-server tools. In short: `v_symbol` is

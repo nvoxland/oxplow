@@ -661,7 +661,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       which the scheduler uses too). It **never approves**: approving is
       `collector_runner::approve_reviewed` behind the UI-only
       `approve_collector` RPC (Settings → Data's Approve & Run approves,
-      then runs the command). MCP `run_collector` runs the command as the
+      then runs the command). An agent's `run_command oxplow.collector.sync` runs it as the
       agent.
     - UI: `LensToolbar` and the row menu in `LensResultView.tsx`; logic in
       `lens/lensActions.ts` (`performLensAction`, `copyLens`,
@@ -4009,7 +4009,7 @@ tool list stable no matter how many extensions are installed.
 - `validate_extension(name)` returns load errors, schema errors and a dry
   run of every lens query, so the agent can check its work without the UI.
 - `v_extension`, `v_collector_state` (approval), `v_collector_credential`
-  (set or not, never the value), `run_collector(owner, id)` (never approves).
+  (set or not, never the value), the `oxplow.collector.sync` command (never approves).
 - **Worktree streams: preview, don't run (tsk377).** Collected data is
   project-wide (one `ext__<ext>__<entity>` table), so a run (the
   `oxplow.collector.sync` command over `CollectorRunner::sync`, from any caller)

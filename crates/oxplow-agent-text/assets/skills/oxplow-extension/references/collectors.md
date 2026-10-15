@@ -33,18 +33,18 @@ Rules:
   pick it up from `HTTPS_PROXY`). A missing host shows up as a `403` from
   the proxy or a connection failure.
 - **You can't approve a collector.** Tell the user to approve it in
-  Settings → Data → Approve & Run. After that, `run_collector`
-  (MCP) re-runs it.
+  Settings → Data → Approve & Run. After that, `run_command`
+  `oxplow.collector.sync { collector: "collector:<extension>/<id>" }` re-runs it.
 - `v_collector_run` shows each collector's last run and error, and
   `v_collector_state` whether this machine approved it (`approved`; 0 means
-  `run_collector` is refused until a person approves it) and why it is
+  `oxplow.collector.sync` is refused until a person approves it) and why it is
   disabled, if it is.
 - **Check a collector before it's merged** with
   `preview_collector(owner, id, stream_id)`: it runs your worktree's
   version and returns the rows it would store, storing nothing. For a
   fact collector (`facts:`) it returns the facts it would record
   (`{ owner, id, facts }`), computed over the stream's latest snapshot.
-  `run_collector` always runs the primary's copy (collected data is
+  `oxplow.collector.sync` always runs the primary's copy (collected data is
   shared by the whole project), so in a worktree stream it won't see your
   changes. An exec collector still needs a person's approval for the
   preview.
@@ -64,7 +64,7 @@ to a read-only SQL query:
   matches nothing all give it none; with `sync: replace` an entity it
   leaves out is emptied.
 - **Approval.** It runs sandboxed (no network, files, env or credentials),
-  so it needs no approval and you can `run_collector` it yourself —
+  so it needs no approval and you can run `oxplow.collector.sync` on it yourself —
   unless it calls a model (`ai_*`, "Asking a model" below): that spends the user's key on
   every run, so the user approves it first (Settings → Data → Approve &
   Run), and each changed version again. Until then a run or a preview is

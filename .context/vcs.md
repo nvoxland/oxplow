@@ -158,7 +158,7 @@ only), and, for an agent, MCP `read` of `file:<path>@<revision>`. A view that do
 result in the UI doesn't cancel the work), so a view that refreshes on
 workspace events routes those refreshes through `coalescedRefresh`
 (debounced, single-flight) rather than starting a diff per event. The MCP VCS
-reads (`diff`, `vcs_blame`, `git_status`, and `read` of a file at a revision) default
+reads (`diff` and `read` of a file at a revision) default
 a missing `stream_id` to the caller's own stream — its header, else its
 thread's — and to the primary only for an anonymous caller (tsk555; the
 extension, lens and change tools do the same, tsk574); they replaced
@@ -176,7 +176,7 @@ in P5.C3: a link names a file; its version is the edge's pin —
 `merge_base(a, b)` — each routed by stream and naming versions as
 `Revision`s (a snapshot answers with the revision its tree equals). RPCs
 `vcs_head`, `vcs_status`, `vcs_blame`, `vcs_revision`, `vcs_merge_base`
-(UI; `vcs_blame` also on MCP) replaced `get_repo_conflict_state`,
+(UI only; an agent runs `git blame` and `git status` in its worktree) replaced `get_repo_conflict_state`,
 `get_workspace_status_summary`, `git_blame`, `local_blame`,
 `get_commit_detail` and `get_branch_changes`; MCP `git_diff` became
 `diff { from?, to, since_fork }`. On the desktop: the changed-files lists
@@ -320,7 +320,7 @@ isolated workspaces sharing history.
 **Names never become options** (tsk550): `Revision::from_str` refuses
 a revision starting with `-`, and the git provider refuses any rev,
 branch or remote name starting with `-` (`not_an_option`) before it
-reaches git's command line — `vcs_blame { rev: "git:--contents=…" }`
+reaches git's command line — a blame of `rev: "git:--contents=…"`
 or a remote `--upload-pack=…` are errors, not flags.
 
 **`only_the_git_provider_touches_git`** (`vcs/mod.rs`) scans the

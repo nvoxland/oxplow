@@ -291,23 +291,6 @@ pub struct CodeReferencesParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct CodeFileParams {
-    pub stream_id: String,
-    /// Workspace-relative path.
-    pub path: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct CodeWorkspaceSymbolsParams {
-    pub stream_id: String,
-    /// The language server to ask (`rust`, `typescript`, `python`, …).
-    pub language: String,
-    /// Symbol name query (fuzzy, server-defined); empty lists what the
-    /// server returns.
-    pub query: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct CodeCallHierarchyParams {
     pub stream_id: String,
     pub path: String,
@@ -317,21 +300,9 @@ pub struct CodeCallHierarchyParams {
     pub direction: oxplow_domain::code_intel::CallDirection,
 }
 
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ListCodeUnitsParams {
-    pub stream_id: String,
-    /// Repo-relative path of the file to list units for.
-    pub path: String,
-}
-
 /// Optional stream selector shared by the stream-scoped VCS read tools.
 /// Omit `stream_id` to read the caller's own stream (the primary only for
 /// a caller with no thread identity).
-#[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
-pub struct GitStreamParams {
-    pub stream_id: Option<String>,
-}
-
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DiffParams {
     /// The stream whose workspace to diff; the caller's when absent.
@@ -345,17 +316,6 @@ pub struct DiffParams {
     /// against `from` itself — a branch's own changes against `git:main`.
     #[serde(default)]
     pub since_fork: bool,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct BlameParams {
-    /// The stream whose workspace to blame in; the caller's when absent.
-    pub stream_id: Option<String>,
-    /// Workspace-relative file path.
-    pub path: String,
-    /// Which version: `working` (default; uncommitted lines name no
-    /// revision) or `git:<rev>`.
-    pub revision: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -456,13 +416,6 @@ pub struct ReadAiCallParams {
     pub id: i64,
     /// Which body: `request` or `response`.
     pub body: oxplow_app::ai_calls::AiCallBody,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct RunCollectorParams {
-    /// The collector's ref: `collector:<extension>/<id>` (the extension's
-    /// folder under `oxplow/extensions/`, the `id` in its `collectors:`).
-    pub collector: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -661,41 +614,13 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Run an approved extension collector now (`collector`: its ref, `collector:<extension>/<id>`), refreshing its entities \
-                       (`v_<extension>_<entity>`). You cannot approve a collector: running code \
-                       the human hasn't approved fails, so ask them to use Settings → Data → \
-                       Approve & Run. Returns row counts per entity."
-    )]
-    async fn run_collector(
-        &self,
-        extensions: rmcp::model::Extensions,
-        params: Parameters<RunCollectorParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        // The `oxplow.collector.sync` command, as the caller: it never approves.
-        let actor = self.verified_actor(&caller_of(&extensions)).await?;
-        let out = self
-            .services
-            .commands
-            .run(
-                &actor,
-                oxplow_app::collector_runner::SYNC,
-                serde_json::json!({ "collector": p.collector }),
-                false,
-            )
-            .await
-            .map_err(command_error)?;
-        json_result(&out.result)
-    }
-
-    #[tool(
         description = "Dry-run a collector from a stream's worktree and return what it would \
                        store, storing nothing: an entity collector's rows (first 50 per entity, \
                        coerced to the declared columns), or a fact collector's (`facts:`) facts \
                        as `{ owner, id, facts: [{ measure, value, subject, … }] }`, computed over \
                        the stream's latest snapshot (a collector that reads `input` rows is \
                        previewed through an example: `oxplow extension test`). Use it to check a collector you're writing, especially in a \
-                       worktree stream: run_collector always runs the primary's copy, and \
+                       worktree stream: oxplow.collector.sync always runs the primary's copy, and \
                        collected data is project-wide. Pass `event` (`{ type, payload, anchors? }`) \
                        to preview an `on:` collector on the event it reacts to. An exec \
                        collector still needs a person's approval of that exact version; \
@@ -1253,57 +1178,6 @@ impl OxplowMcp {
     // (`run_command`), not tools.
 
     #[tool(
-        description = "Git working-tree status: per-file change scopes for the \
-                          worktree (omit stream_id for the current worktree)."
-    )]
-    async fn git_status(
-        &self,
-        extensions: rmcp::model::Extensions,
-        params: Parameters<GitStreamParams>,
-    ) -> Result<CallToolResult, McpError> {
-        check_optional_stream("git_status", params.0.stream_id.as_deref())?;
-        let sid = self
-            .stream_or_callers(&caller_of(&extensions), params.0.stream_id)
-            .await;
-        let ws = self
-            .services
-            .worktrees
-            .resolve(sid.as_deref())
-            .await
-            .into_local_path();
-        let scopes = self
-            .services
-            .git
-            .change_scopes(&ws)
-            .await
-            .map_err(|e| domain_err(e.into()))?;
-        json_result(&scopes)
-    }
-
-    #[tool(
-        description = "Blame a file: the revision, author and time that last changed each \
-                          line, at `revision` (default `working`; an uncommitted line names no \
-                          revision)."
-    )]
-    async fn vcs_blame(
-        &self,
-        extensions: rmcp::model::Extensions,
-        params: Parameters<BlameParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        check_optional_stream("vcs_blame", p.stream_id.as_deref())?;
-        let sid = self
-            .stream_or_callers(&caller_of(&extensions), p.stream_id)
-            .await;
-        let revision = parse_revision(p.revision.as_deref().unwrap_or("working"))?;
-        let lines =
-            oxplow_app::vcs::reads::blame(&self.services, sid.as_deref(), &p.path, &revision)
-                .await
-                .map_err(domain_err)?;
-        json_result(&lines)
-    }
-
-    #[tool(
         description = "What changed between two versions of the tree, per file with line \
                           counts. Versions are `working`, `snap:<id>` or `git:<rev>`; `from` \
                           absent diffs against the empty tree. `since_fork: true` compares `to` \
@@ -1332,23 +1206,6 @@ impl OxplowMcp {
     // are the `work_item.*` commands, through `run_command`.
 
     // ---------- collection (test runs + diff coverage) ----------
-
-    #[tool(
-        description = "List the project's architectural ZONE table (the `zones:` block in \
-            .oxplow/project.yaml) plus what it actually matches: a file count per zone across \
-            the worktree, and a sample of paths that fell through to `other`. Zones are how \
-            Change-analysis groups churn and flags cross-boundary imports. Oxplow ships NO \
-            built-in table — an empty `rules` means this project hasn't declared its zones yet \
-            and every file reads as `other`. A large `other` count or an unmatched sample full \
-            of real source is the signal the table has gone stale as the repo grew. To change \
-            the table, set the `zones` key with the `oxplow.config.set` command (`run_command`)."
-    )]
-    async fn list_zones(&self) -> Result<CallToolResult, McpError> {
-        let report = oxplow_app::zones_service::zone_report(&self.services)
-            .await
-            .map_err(internal)?;
-        json_result(&report)
-    }
 
     // ---------- comments ----------
 
@@ -1598,48 +1455,6 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "The symbols a file declares (functions, classes, methods, modules, …) \
-                       via its language server — each `{ name, kind, container, location }`, \
-                       nested ones naming their container. Covers any configured LSP \
-                       language; `list_code_units` is the offline tree-sitter counterpart."
-    )]
-    async fn code_symbols(
-        &self,
-        params: Parameters<CodeFileParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let stream = code_stream(&params.0.stream_id)?;
-        json_result(
-            &self
-                .services
-                .code_intel
-                .document_symbols(stream, &params.0.path)
-                .await
-                .map_err(code_err)?,
-        )
-    }
-
-    #[tool(
-        description = "Find symbols across the workspace by name (fuzzy, server-defined) from \
-                       one language's server — typed symbols with their locations. Use to find \
-                       a definition by name without a file/position."
-    )]
-    async fn code_workspace_symbols(
-        &self,
-        params: Parameters<CodeWorkspaceSymbolsParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        let stream = code_stream(&p.stream_id)?;
-        json_result(
-            &self
-                .services
-                .code_intel
-                .workspace_symbols(stream, &p.language, &p.query)
-                .await
-                .map_err(code_err)?,
-        )
-    }
-
-    #[tool(
         description = "The symbol at a position's callers (`direction: incoming`) or callees \
                        (`outgoing`): each `{ symbol, at }` — the caller/callee and where the \
                        calls are. [] when the position has no call-hierarchy item."
@@ -1658,41 +1473,6 @@ impl OxplowMcp {
                 .await
                 .map_err(code_err)?,
         )
-    }
-
-    #[tool(
-        description = "List the code units in a file — functions, classes, modules, and (for \
-                       languages that have them, e.g. Go/Java) the package — via oxplow's \
-                       built-in tree-sitter analysis. Deterministic and offline; works for the \
-                       bundled languages (Rust, TS/TSX, JS, Python, Go, Java, C, C++, Clojure, \
-                       C#). Complements code_symbols (which covers any LSP language). \
-                       Each unit: kind, name, containerPath, startLine, endLine. Empty for \
-                       unsupported / unparseable files."
-    )]
-    async fn list_code_units(
-        &self,
-        params: Parameters<ListCodeUnitsParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        let file = self
-            .services
-            .workspace_files
-            .read(Some(p.stream_id.as_str()), p.path.clone())
-            .await
-            .map_err(|e| internal(e.to_string()))?;
-        let units: Vec<serde_json::Value> = oxplow_code_metrics::list_units(&p.path, &file.content)
-            .iter()
-            .map(|u| {
-                serde_json::json!({
-                    "kind": u.kind.as_str(),
-                    "name": u.name,
-                    "containerPath": u.container_path,
-                    "startLine": u.start_line,
-                    "endLine": u.end_line,
-                })
-            })
-            .collect();
-        json_result(&units)
     }
 }
 
@@ -1747,11 +1527,8 @@ const READ_ONLY_TOOLS: &[&str] = &[
     "preview_extension",
     "query_sql",
     "search",
-    "git_status",
-    "vcs_blame",
     "diff",
     "read",
-    "list_zones",
     "list_comments",
     "wiki_ref_drift",
     "list_commands",
@@ -1759,9 +1536,6 @@ const READ_ONLY_TOOLS: &[&str] = &[
     "code_definition",
     "code_hover",
     "code_references",
-    "code_symbols",
-    "code_workspace_symbols",
-    "list_code_units",
     "code_call_hierarchy",
 ];
 
@@ -1780,7 +1554,6 @@ const WRITE_TOOLS: &[&str] = &[
     // The `oxplow.lens.show` command (records the answer in the caller's thread).
     "show_lens",
     // The `oxplow.collector.sync` command.
-    "run_collector",
     // A derived cache: the change's analysis, recomputed from the VCS on
     // demand (ipc-and-stores.md, "what stays off the bus").
     "ensure_change",
@@ -2495,43 +2268,6 @@ mod tests {
             open["lens"]
         );
         assert!(open["lens"].get("result").is_none());
-    }
-
-    #[tokio::test]
-    async fn source_tools_never_approve_and_schema_lists_extension_entities() {
-        use std::os::unix::fs::PermissionsExt;
-        let (proj, services, server) = boot().await;
-        let ext = proj.path().join("oxplow/extensions/my-gh");
-        std::fs::create_dir_all(&ext).unwrap();
-        std::fs::write(
-            ext.join("extension.yaml"),
-            "manifest: 2\nname: my-gh\nintent:\n  purpose: test\ncollectors:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int } }\n",
-        )
-        .unwrap();
-        let script = ext.join("sync.sh");
-        std::fs::write(
-            &script,
-            "#!/bin/sh\necho '{\"entities\":{\"pr\":[{\"number\":1}]}}'\n",
-        )
-        .unwrap();
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-        services
-            .extension_activation
-            .activate(services.clone())
-            .await
-            .unwrap();
-
-        // An agent can't consent on the human's behalf.
-        let err = server
-            .run_collector(
-                as_writer(&services).await,
-                Parameters(RunCollectorParams {
-                    collector: "collector:my-gh/gh".into(),
-                }),
-            )
-            .await
-            .unwrap_err();
-        assert!(err.message.contains("approval"), "{err:?}");
     }
 
     #[tokio::test]

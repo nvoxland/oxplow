@@ -218,7 +218,6 @@ pub mod work_items_conformance;
 pub mod workspace_files;
 pub mod workspace_watch;
 pub mod worktrees;
-pub mod zones_service;
 
 pub use agent_prompt::{
     build_session_context_block, build_session_context_block_with_role, role_change_banner,

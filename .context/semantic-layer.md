@@ -1066,7 +1066,7 @@ entities from data already in the semantic layer:
 | Entity tables + views, run state (V133 `collector_run`) | `crates/oxplow-db/src/collector_store.rs` |
 | Settings → Data read model (`data_entities`) | `crates/oxplow-app/src/semantic_catalog.rs` |
 | IPC `list_collectors` / `approve_collector` / `set_credential` (UI only); running is `run_command oxplow.collector.sync` | `crates/oxplow-rpc/src/commands/collectors.rs` |
-| MCP `run_collector` / `preview_collector`; approval and credentials read `v_collector_state` / `v_collector_credential` (the `oxplow.collector.sync` command as the agent; never approves) | `crates/oxplow-mcp/src/lib.rs` |
+| MCP `preview_collector`; an agent syncs with `run_command oxplow.collector.sync`; approval and credentials read `v_collector_state` / `v_collector_credential` (the `oxplow.collector.sync` command as the agent; never approves) | `crates/oxplow-mcp/src/lib.rs` |
 | UI: Settings → Data (entities + counts, collector rows, Run) | `apps/desktop/src/components/DataSection.tsx` |
 | UI: credentials per extension | `apps/desktop/src/components/ExtensionsSection.tsx` |
 | IPC `list_data_entities` (models + counts, unsynced entities) | `crates/oxplow-rpc/src/commands/semantic.rs` |
@@ -1098,7 +1098,7 @@ entities from data already in the semantic layer:
   - Approving is its own UI-only step (`approve_collector`, the version
     the person reviewed); running is the `oxplow.collector.sync { collector }`
     command, which never approves — from the UI, a lens action, the
-    scheduler or MCP `run_collector` alike — so an agent can't consent on
+    scheduler or the `oxplow.collector.sync` command alike — so an agent can't consent on
     a person's behalf. The approval key stays `<owner>/<id>`.
 - **Environment.** The entry gets `PATH`, `HOME`, its declared `env`
   names, its declared `credentials`, `OXPLOW_EXTENSION_DIR` and

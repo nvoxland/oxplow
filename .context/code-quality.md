@@ -336,17 +336,16 @@ rule is visible rather than silently never matching.
 This repo's own table lives in its `.oxplow/project.yaml` and is the
 worked example.
 
-### MCP: `list_zones`; writing the table is `oxplow.config.set`
+### Reading and writing the table
 
-The agent owns this table. `list_zones` returns the rules plus what they
-actually match — a file count per zone over the worktree and a sample of
-paths that fell through to `other`, which is the signal that the table
-has gone stale as the repo grew. Writing it is the `oxplow.config.set { key:
+The agent owns this table. It reads the rules with `oxplow.config.get
+{ key: "zones" }` and a changed file's zone from `v_change_file.zone` (a
+large `other` share is the signal that the table has gone stale as the repo
+grew). Writing it is the `oxplow.config.set { key:
 "zones", value: [rules] }` command ([commands.md](./commands.md)) — the
 WHOLE ordered table, validated by the loader's rules (reserved labels,
 glob shapes), written to `.oxplow/project.yaml` (committed, so a team
-shares one vocabulary), logged as `config.changed`, undoable. Read side:
-`crates/oxplow-app/src/zones_service.rs`.
+shares one vocabulary), logged as `config.changed`, undoable.
 
 No IPC of its own — `zones` rides on `get_config`, and the config
 watcher hot-reloads file edits, so a write repaints an open
