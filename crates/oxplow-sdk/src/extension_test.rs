@@ -1841,6 +1841,23 @@ async fn questions(host: &Host, ext: &Extension, report: &mut TestReport) {
             .map(|(_, s)| s.clone())
             .or_else(|| host.svc.commands.spec(name).map(|s| s.input_schema))
     };
+    let tools: std::collections::BTreeMap<String, Value> = oxplow_app::agent_tools::offered(
+        &host.svc,
+        &oxplow_domain::Actor::Agent {
+            session_id: None,
+            thread_id: None,
+            stream_id: None,
+        },
+    )
+    .await
+    .map(|tools| {
+        tools
+            .into_iter()
+            .map(|t| (t.name, t.input_schema))
+            .collect()
+    })
+    .unwrap_or_default();
+    let tool_schema = |name: &str| tools.get(name).cloned();
     let checked = crate::answerability::check(
         &file,
         &questions,
@@ -1848,6 +1865,7 @@ async fn questions(host: &Host, ext: &Extension, report: &mut TestReport) {
             skill_text: &skill_text,
             sql: Some(&host.svc.sql),
             command_schema: &command_schema,
+            tool_schema: &tool_schema,
         },
     )
     .await;

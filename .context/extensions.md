@@ -1442,7 +1442,7 @@ The `oxplow-extension` skill requires `check` after every edit.
 `crates/oxplow-sdk/src/answerability.rs` checks that an agent
 reading the right skill can answer the questions an area of oxplow, or
 an extension, exists for. A questions file is a list of `{ question, skill, reaches: { sql } |
-{ command, input }, shape: { columns } }`:
+{ command, input } | { tool, input }, shape: { columns } }`:
 
 - **Core's areas**: `crates/oxplow-agent-text/assets/questions/<area>.yaml`
   (`vcs`, `work_items`, `knowledge`, `code_intel`, `extensions` — areas
@@ -1453,19 +1453,20 @@ an extension, exists for. A questions file is a list of `{ question, skill, reac
   (`every_answerability_question_reaches_what_its_skill_names`) runs them
   against a throwaway `Services::in_memory` (async, activated as boot does).
 - **Per question**: the skill's text names every model the SQL reads
-  and the command it runs — as a whole word, in any case
+  and the command or tool it runs — as a whole word, in any case
   (`answerability::names`: `v_commit_file` doesn't name `v_commit`); a
   model is a table the query reads (`models_in`: after `FROM`, `JOIN` or
   a comma in a `FROM` list), never a `v_*` word in a string, a comment
   or an alias (tsk570); the SQL runs through the gateway and
-  returns exactly `shape.columns`; a command's input validates against
-  its schema. A question whose skill doesn't lead there is a finding,
+  returns exactly `shape.columns`; a command's or tool's input validates against
+  its schema (a `tool` is an offered agent tool by its `oxplow_<name>`; the check lists
+  them with `agent_tools::offered`). A question whose skill doesn't lead there is a finding,
   which is the point: when a capability grows, its questions say which
   skill must learn about it.
 - **Live** (`OXPLOW_LIVE_ANSWERABILITY=1`): `answerability::live` asks
   this machine's `decide` model (`AiService::for_this_machine`: the
   global `ai.yaml`, keychain read only), given only the skill text and
-  the catalog (every `v_model` view and every command an agent may run),
+  the catalog (every `v_model` view, every command an agent may run and every tool it is offered),
   what it would reach for first; it must pick the same model or command.
 - **An extension's own** `questions.yaml` runs in `oxplow extension test`:
   `skill` is a markdown file in the extension, SQL runs on the test's
@@ -3943,6 +3944,18 @@ tool: open_work              # offered as <namespace>_open_work
 - A name is `[a-z][a-z0-9_]*`, at most 48 characters; two entries offering
   one name — in one extension, or two under one namespace (oxplow's own
   share `oxplow`) — are refused at load, on each.
+- **Typed lens tools.** `oxplow-foundation/lenses/` holds the lenses an
+  agent asks for most, each `hidden: true` with a `tool:`: `thread_work
+  { thread }` (the thread's items by state, with their efforts), `work_next
+  { thread }` (what to pick up next; the bundled `/work-next` command calls
+  it), `effort_files { effort }`, `effort_summary { effort }` (title and
+  summary, item, files, test runs, claims, decisions as sections),
+  `file_history { path, limit }` and `recent_commits { limit }` (the indexed
+  log; `oxplow_vcs_log` goes past it), `snapshots { stream?, limit }` (with
+  parent, trigger and whether it ran over budget) and `thread_notes
+  { thread }`. Params take refs (`thread:thr3`, `effort:eff9`,
+  `stream:str1`). Each reads published `v_*` models only, so it works with
+  the bundled extension off.
 - Every agent-invokable command stays reachable through `run_command`
   whether or not it's a tool: a tool is a named entry for the ones an
   agent reaches for often, kept few so the list stays readable for weaker

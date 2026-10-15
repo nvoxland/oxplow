@@ -169,7 +169,7 @@ const OXPLOW_SKILLS: &[SkillFiles] = &[
             "repair-and-sharing"
         ]
     ),
-    skill!("oxplow-codebase", ["code"]),
+    skill!("oxplow-codebase", ["code", "history"]),
 ];
 
 /// The most a `SKILL.md` may be, in bytes.

@@ -1069,11 +1069,11 @@ no dispatch protocol or subagent skill. A subagent can leave a finding in
 a thread note (`oxplow.knowledge.add_note`, read back from
 `v_thread_note`).
 
-**What to pick up next** is the bundled lens `oxplow-bundled/work-next`
-(`oxplow_run_lens` with `thread: "thread:thr3"`) over `v_work_item`, whichever
+**What to pick up next** is the foundation lens `oxplow-foundation/work-next`
+(the tool `oxplow_work_next` with `thread: "thread:thr3"`) over `v_work_item`, whichever
 list is active: an epic with its ready descendants, or every ready
 non-epic item, open `blocks` links holding an item back; empty with
-nothing ready or no list. The bundled `work-next` command runs it and
+nothing ready or no list. The bundled `work-next` command calls that tool and
 moves the item it picks to `in_progress`, so the effort links to it.
 Claude Code's `TaskCreate` is a within-turn planner and never mirrors
 oxplow's items.

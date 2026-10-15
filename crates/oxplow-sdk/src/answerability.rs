@@ -8,13 +8,15 @@
 //! ```yaml
 //! - question: Which commits touched src/lib.rs?
 //!   skill: oxplow-codebase            # what should lead the agent there
-//!   reaches: { sql: "SELECT … FROM v_commit …" }   # or { command, input }
+//!   reaches: { sql: "SELECT … FROM v_commit …" }   # or { command, input } or { tool, input }
 //!   shape: { columns: [sha, subject] }             # for sql
 //! ```
 //!
 //! For each: the skill's text names every model (`v_*`) the SQL reads and
-//! the command it runs; the SQL runs through the gateway and returns
-//! exactly `shape.columns`; a command's input validates against its spec.
+//! the command or tool it runs; the SQL runs through the gateway and
+//! returns exactly `shape.columns`; a command's or tool's input validates
+//! against its spec (a tool must be one foundation, or the extension,
+//! declares).
 //! With `OXPLOW_LIVE_ANSWERABILITY=1`, [`live`] also asks the `decide`
 //! model, given only the skill text and the catalog, what it would reach
 //! for — it must pick the same model or command.
@@ -44,7 +46,7 @@ pub struct Question {
     pub about: Option<String>,
 }
 
-/// What answers it: a query, or a command with its input.
+/// What answers it: a query, or a command or tool with its input.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Reaches {
@@ -52,6 +54,9 @@ pub struct Reaches {
     pub sql: Option<String>,
     #[serde(default)]
     pub command: Option<String>,
+    /// An agent tool by its offered name (`oxplow_effort_files`).
+    #[serde(default)]
+    pub tool: Option<String>,
     #[serde(default)]
     pub input: Option<Value>,
 }
@@ -211,6 +216,8 @@ pub struct Checker<'a> {
     pub sql: Option<&'a SqlGateway>,
     /// A command's input schema by name.
     pub command_schema: &'a (dyn Fn(&str) -> Option<Value> + Sync),
+    /// An offered agent tool's input schema by name.
+    pub tool_schema: &'a (dyn Fn(&str) -> Option<Value> + Sync),
 }
 
 /// What checking a file found: `<file>: question N (…): what — fix`
@@ -241,8 +248,8 @@ pub async fn check(file: &str, questions: &[Question], c: &Checker<'_>) -> Check
             ));
             continue;
         };
-        match (&q.reaches.sql, &q.reaches.command) {
-            (Some(sql), None) => {
+        match (&q.reaches.sql, &q.reaches.command, &q.reaches.tool) {
+            (Some(sql), None, None) => {
                 for model in models_in(sql) {
                     if !names(&text, &model) {
                         out.errors.push(format!(
@@ -274,37 +281,53 @@ pub async fn check(file: &str, questions: &[Question], c: &Checker<'_>) -> Check
                     },
                 }
             }
-            (None, Some(name)) => {
-                if !names(&text, name) {
-                    out.errors.push(format!(
-                        "{at}: skill `{}` never names `{name}` — fix: say in the skill when to \
-                         run it",
-                        q.skill
-                    ));
-                }
-                match (c.command_schema)(name) {
-                    None => out.errors.push(format!(
-                        "{at}: no command `{name}` — fix: name a registered one"
-                    )),
-                    Some(schema) => {
-                        let input = q.reaches.input.clone().unwrap_or(Value::Null);
-                        let valid = InputValidator::compile(&schema)
-                            .map_err(|e| e.to_string())
-                            .and_then(|v| v.check(&input).map_err(|e| e.to_string()));
-                        if let Err(e) = valid {
-                            out.errors.push(format!(
-                                "{at}: the input doesn't fit `{name}`: {e} — fix: the input"
-                            ));
-                        }
-                    }
-                }
+            (None, Some(name), None) => {
+                reach(&mut out, &at, q, &text, "command", name, c.command_schema);
+            }
+            (None, None, Some(name)) => {
+                reach(&mut out, &at, q, &text, "tool", name, c.tool_schema);
             }
             _ => out.errors.push(format!(
-                "{at}: `reaches` is `{{ sql }}` or `{{ command, input }}` — fix: pick one"
+                "{at}: `reaches` is `{{ sql }}`, `{{ command, input }}` or `{{ tool, input }}` — fix: pick one"
             )),
         }
     }
     out
+}
+
+/// A command or tool question: the skill names it, it exists, and the
+/// input fits its schema.
+fn reach(
+    out: &mut Checked,
+    at: &str,
+    q: &Question,
+    text: &str,
+    what: &str,
+    name: &str,
+    schema_of: &(dyn Fn(&str) -> Option<Value> + Sync),
+) {
+    if !names(text, name) {
+        out.errors.push(format!(
+            "{at}: skill `{}` never names `{name}` — fix: say in the skill when to use it",
+            q.skill
+        ));
+    }
+    match schema_of(name) {
+        None => out.errors.push(format!(
+            "{at}: no {what} `{name}` — fix: name a registered one"
+        )),
+        Some(schema) => {
+            let input = q.reaches.input.clone().unwrap_or(Value::Null);
+            let valid = InputValidator::compile(&schema)
+                .map_err(|e| e.to_string())
+                .and_then(|v| v.check(&input).map_err(|e| e.to_string()));
+            if let Err(e) = valid {
+                out.errors.push(format!(
+                    "{at}: the input doesn't fit `{name}`: {e} — fix: the input"
+                ));
+            }
+        }
+    }
 }
 
 /// The live half (`OXPLOW_LIVE_ANSWERABILITY=1`): the `decide` model,
@@ -319,9 +342,10 @@ pub async fn live(
 ) -> Vec<String> {
     let mut out = Vec::new();
     for (i, q) in questions.iter().enumerate() {
-        let want = match (&q.reaches.sql, &q.reaches.command) {
-            (Some(sql), _) => models_in(sql).into_iter().next(),
-            (_, Some(command)) => Some(command.clone()),
+        let want = match (&q.reaches.sql, &q.reaches.command, &q.reaches.tool) {
+            (Some(sql), _, _) => models_in(sql).into_iter().next(),
+            (_, Some(command), _) => Some(command.clone()),
+            (_, _, Some(tool)) => Some(tool.clone()),
             _ => None,
         };
         let (Some(want), Some(text)) = (want, skill_text(&q.skill)) else {
@@ -335,7 +359,8 @@ pub async fn live(
         let questions = BTreeMap::from([(
             "reach".to_string(),
             Ask::Choice {
-                instructions: "Which model or command would you use first to answer it?".into(),
+                instructions: "Which model, command or tool would you use first to answer it?"
+                    .into(),
                 options: catalog.to_vec(),
             },
         )]);
@@ -430,10 +455,13 @@ mod tests {
         let text = oxplow_app::capabilities::agent_text(&svc);
         let skill = |name: &str| text.skill_full_text(name);
         let command = |name: &str| svc.commands.spec(name).map(|s| s.input_schema);
+        let tools = tool_schemas(&svc).await;
+        let tool = |name: &str| tools.get(name).cloned();
         let checker = Checker {
             skill_text: &skill,
             sql: Some(&svc.sql),
             command_schema: &command,
+            tool_schema: &tool,
         };
         let mut errors = Vec::new();
         let mut asked = 0;
@@ -472,6 +500,8 @@ mod tests {
             .unwrap();
         let svc = oxplow_app::Services::in_memory(tmp.path()).await.unwrap();
         let command = |name: &str| svc.commands.spec(name).map(|s| s.input_schema);
+        let tools = tool_schemas(&svc).await;
+        let tool = |name: &str| tools.get(name).cloned();
         let mut asked = 0;
         for b in oxplow_app::bundled_extensions::BUNDLED {
             let file_of = |name: &str| b.file(name).map(str::to_string);
@@ -488,6 +518,7 @@ mod tests {
                     skill_text: &file_of,
                     sql: Some(&svc.sql),
                     command_schema: &command,
+                    tool_schema: &tool,
                 },
             )
             .await;
@@ -495,6 +526,82 @@ mod tests {
             assert_eq!(checked.warnings, Vec::<String>::new());
         }
         assert!(asked >= 3, "{asked}");
+    }
+
+    /// The tools an agent is offered, by name, with their input schemas.
+    async fn tool_schemas(svc: &oxplow_app::Services) -> BTreeMap<String, Value> {
+        oxplow_app::agent_tools::offered(svc, &agent())
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|t| (t.name, t.input_schema))
+            .collect()
+    }
+
+    fn agent() -> oxplow_domain::Actor {
+        oxplow_domain::Actor::Agent {
+            session_id: None,
+            thread_id: None,
+            stream_id: None,
+        }
+    }
+
+    /// A question may reach a tool: the skill names it, it is offered, and
+    /// the input fits its schema.
+    #[tokio::test]
+    async fn a_question_can_reach_a_tool() {
+        let skill = |_: &str| Some("Use oxplow_effort_files for an effort's files.".to_string());
+        let command = |_: &str| None;
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": { "effort": { "type": "string" } },
+            "additionalProperties": false
+        });
+        let tool = |name: &str| (name == "oxplow_effort_files").then(|| schema.clone());
+        let checker = Checker {
+            skill_text: &skill,
+            sql: None,
+            command_schema: &command,
+            tool_schema: &tool,
+        };
+        let ask = |tool: &str, input: &str| {
+            parse(&format!(
+                "- question: Which files did this effort touch?\n  skill: s\n  reaches: {{ tool: {tool}, input: {input} }}\n"
+            ))
+            .unwrap()
+        };
+        let ok = check(
+            "q.yaml",
+            &ask("oxplow_effort_files", "{ effort: 'effort:eff1' }"),
+            &checker,
+        )
+        .await;
+        assert_eq!(ok.errors, Vec::<String>::new());
+        let unknown = check("q.yaml", &ask("oxplow_nope", "{}"), &checker).await;
+        assert!(
+            unknown
+                .errors
+                .iter()
+                .any(|e| e.contains("no tool `oxplow_nope`")),
+            "{:?}",
+            unknown.errors
+        );
+        assert!(
+            unknown.errors.iter().any(|e| e.contains("never names")),
+            "{:?}",
+            unknown.errors
+        );
+        let bad = check(
+            "q.yaml",
+            &ask("oxplow_effort_files", "{ nope: 1 }"),
+            &checker,
+        )
+        .await;
+        assert!(
+            bad.errors.iter().any(|e| e.contains("doesn't fit")),
+            "{:?}",
+            bad.errors
+        );
     }
 
     /// Every model and every command an agent may run: what the live check
@@ -523,6 +630,7 @@ mod tests {
                 .into_iter()
                 .map(|s| s.id),
         );
+        out.extend(tool_schemas(svc).await.into_keys());
         out
     }
 }

@@ -26,4 +26,6 @@ file is the project's shared config.
 
 Efforts are `v_effort` (`id`, `work_item`, `thread_id`, `title`,
 `started_at`, `ended_at`, `closed_by`, `summary`), their files
-`v_effort_file`.
+`v_effort_file`. For one effort, `oxplow_effort_files { effort }` lists its
+files and `oxplow_effort_summary { effort }` gives its title, item, files,
+runs, claims and decisions in one call.

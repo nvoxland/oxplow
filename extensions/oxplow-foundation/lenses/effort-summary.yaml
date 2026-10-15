@@ -1,0 +1,31 @@
+title: Effort summary
+description: One effort at a glance — its title and summary, its work item, the files it changed, the test runs, the claims and the decisions recorded in it.
+params:
+  - { name: effort, label: Effort (`effort:eff9`) }
+query: |
+  WITH e AS (SELECT * FROM v_effort WHERE ref = :effort)
+  SELECT 0 AS ord, 'effort' AS section, coalesce(title, '') AS text, coalesce(summary, '') AS detail FROM e
+  UNION ALL
+  SELECT 1, 'item', w.title, w.state || ' ' || w.ref
+  FROM e JOIN v_work_item w ON w.ref = e.work_item
+  UNION ALL
+  SELECT 2, 'file', f.path, f.change_kind
+  FROM v_effort_file f WHERE f.effort_id = (SELECT id FROM e)
+  UNION ALL
+  SELECT 3, 'run', coalesce(json_extract(o.payload_json, '$.command'), ''),
+         json_extract(o.payload_json, '$.passed') || ' passed, ' || json_extract(o.payload_json, '$.failed') || ' failed'
+  FROM v_effort_observation o WHERE o.effort_id = (SELECT id FROM e) AND o.kind = 'test-run'
+  UNION ALL
+  SELECT 4, 'claim', c.statement, c.kind || ' ' || coalesce(c.review, 'unreviewed')
+  FROM v_claim c WHERE c.effort_id = (SELECT id FROM e)
+  UNION ALL
+  SELECT 5, 'decision', d.question, d.choice
+  FROM v_decision d WHERE d.effort_id = (SELECT id FROM e)
+  ORDER BY 1
+columns:
+  - { key: section, label: Part }
+  - { key: text, label: What }
+  - { key: detail, label: Detail }
+empty: No such effort.
+hidden: true
+tool: effort_summary

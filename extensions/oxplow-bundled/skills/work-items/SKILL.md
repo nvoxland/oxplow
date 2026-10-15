@@ -72,9 +72,10 @@ Link types:
 ## Reading items
 
 - `oxplow_read { ref }` — one item: its row, its links and its comments.
-- `oxplow_run_lens { id: "oxplow-bundled/work-next", params: { thread:
-  "thread:thr3" } }` — what to pick up next on a thread's list (an epic
-  with its ready descendants, or the ready items).
+- `oxplow_work_next { thread: "thread:thr3" }` — what to pick up next on a
+  thread's list (an epic with its ready descendants, or the ready items).
+- `oxplow_thread_work { thread }` — a thread's items by state, with their
+  efforts; `oxplow_thread_notes { thread }` — the notes recorded on it.
 - `oxplow_query_sql` over `v_work_item` (`ref`, `title`, `body`, `state`,
   `native_state`, `native`, `parent_ref`, `thread_id` — NULL on the
   backlog — `rank`, `closed_at`), `v_work_item_link` and

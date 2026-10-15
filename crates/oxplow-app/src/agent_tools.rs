@@ -194,7 +194,10 @@ mod tests {
                 "oxplow_code_symbols",
                 "oxplow_code_workspace_symbols",
                 "oxplow_diff",
+                "oxplow_effort_files",
+                "oxplow_effort_summary",
                 "oxplow_ensure_change",
+                "oxplow_file_history",
                 "oxplow_get_open_page",
                 "oxplow_get_skill",
                 "oxplow_list_comments",
@@ -203,17 +206,22 @@ mod tests {
                 "oxplow_preview_extension",
                 "oxplow_query_sql",
                 "oxplow_read",
+                "oxplow_recent_commits",
                 "oxplow_review_extension",
                 "oxplow_run_lens",
                 "oxplow_run_lens_action",
                 "oxplow_search",
                 "oxplow_show_lens",
+                "oxplow_snapshots",
+                "oxplow_thread_notes",
+                "oxplow_thread_work",
                 "oxplow_validate_extension",
                 "oxplow_vcs_blame",
                 "oxplow_vcs_branches",
                 "oxplow_vcs_log",
                 "oxplow_vcs_status",
                 "oxplow_wiki_ref_drift",
+                "oxplow_work_next",
             ]
         );
         let query = tools.iter().find(|t| t.name == "oxplow_query_sql").unwrap();
@@ -221,6 +229,18 @@ mod tests {
         assert!(query.read_only);
         assert!(query.input_schema["properties"]["sql"].is_object());
         assert!(query.input_schema["examples"].is_array(), "its example");
+        // A lens tool's params are its input's properties.
+        let history = tools
+            .iter()
+            .find(|t| t.name == "oxplow_file_history")
+            .unwrap();
+        assert_eq!(
+            history.target,
+            ToolTarget::Lens("oxplow-foundation/file-history".into())
+        );
+        assert!(history.read_only);
+        assert!(history.input_schema["properties"]["path"].is_object());
+        assert!(history.input_schema["properties"]["limit"].is_object());
         let show = tools.iter().find(|t| t.name == "oxplow_show_lens").unwrap();
         assert!(!show.read_only, "it records the answer in the thread");
     }

@@ -32,3 +32,19 @@
   reaches:
     sql: SELECT path, status, additions, deletions FROM v_commit_file WHERE sha = 'abc123'
   shape: { columns: [path, status, additions, deletions] }
+- question: What is the recent history of this file?
+  about: file
+  skill: oxplow-codebase
+  reaches:
+    tool: oxplow_file_history
+    input: { path: src/lib.rs, limit: 10 }
+- question: What were the latest commits on this stream?
+  skill: oxplow-codebase
+  reaches:
+    tool: oxplow_recent_commits
+    input: { limit: 10 }
+- question: What snapshots has this stream taken lately?
+  skill: oxplow-codebase
+  reaches:
+    tool: oxplow_snapshots
+    input: { limit: 10 }

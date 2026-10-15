@@ -1,0 +1,19 @@
+title: Thread work
+description: The thread's work items, in progress first, then ready and blocked, then the finished ones newest first, with the efforts that worked on each.
+params:
+  - { name: thread, label: Thread (`thread:thr3`) }
+query: |
+  SELECT w.ref, w.title, w.state,
+         coalesce((SELECT group_concat(e.ref, ' ') FROM v_effort e WHERE e.work_item = w.ref), '') AS efforts
+  FROM v_work_item w
+  WHERE w.thread_id = (SELECT id FROM v_thread WHERE ref = :thread)
+  ORDER BY CASE w.state WHEN 'in_progress' THEN 0 WHEN 'todo' THEN 1 WHEN 'blocked' THEN 2 WHEN 'done' THEN 3 ELSE 4 END,
+           CASE WHEN w.state IN ('done', 'canceled') THEN -coalesce(w.closed_at, 0) ELSE coalesce(w.rank, 1e18) END,
+           w.created_at
+columns:
+  - { key: title, label: Item, link: { kind: page, from: ref } }
+  - { key: state, label: State }
+  - { key: efforts, label: Efforts }
+empty: The thread has no work items.
+hidden: true
+tool: thread_work

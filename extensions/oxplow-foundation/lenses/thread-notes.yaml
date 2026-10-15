@@ -1,0 +1,16 @@
+title: Thread notes
+description: The notes left on a thread, newest first.
+params:
+  - { name: thread, label: Thread (`thread:thr3`) }
+query: |
+  SELECT n.ref, n.created_at, n.author, n.body
+  FROM v_thread_note n
+  WHERE n.thread_id = (SELECT id FROM v_thread WHERE ref = :thread)
+  ORDER BY n.created_at DESC, n.id DESC
+columns:
+  - { key: created_at, label: When }
+  - { key: author, label: By }
+  - { key: body, label: Note }
+empty: The thread has no notes.
+hidden: true
+tool: thread_notes
