@@ -6,6 +6,7 @@ import {
   onRemoteReconnect,
   resolveBase,
   resolveToken,
+  handleSocketOpen,
   parseRemoteInput,
   triggerRemoteResync,
 } from "./transport";
@@ -117,6 +118,19 @@ test("triggerRemoteResync fires every registered reconnect handler", () => {
 
   offA();
   offB();
+});
+
+// A host mounted before the socket opened ran against a snapshot that may
+// predate events the socket was not yet there to hear (a write made while
+// the window loaded), so the first open re-hydrates it as a reconnect does.
+test("the first open of the socket fires the reconnect handlers, as a reconnect does", () => {
+  let count = 0;
+  const off = onRemoteReconnect(() => (count += 1));
+  handleSocketOpen();
+  expect(count).toBe(1);
+  handleSocketOpen();
+  expect(count).toBe(2);
+  off();
 });
 
 test("an unsubscribed handler no longer fires", () => {

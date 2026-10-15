@@ -516,7 +516,10 @@ What a query read is what it subscribes to.
   its own measures moved (tsk198).
 - **Assets:** the same loop tells the asset runner which tables changed
   (see "Assets").
-- **The UI** (`src/lens/lensRerun.ts`): every lens host — the lens page,
+- **The UI** (`src/lens/lensRerun.ts`; a change announced while a run was
+  in flight, before it said what it read, is remembered and re-runs the host
+  once the run's `reads` match it — a write made while the window loaded
+  would otherwise never show): every lens host — the lens page,
   slots, dashboard lens tiles, the rail's alerts and the explorer — keeps
   its last run's `reads` and re-runs through `useRerunOnChange` when
   `modelsChanged` names a model it read, `metricSamplesChanged` names one

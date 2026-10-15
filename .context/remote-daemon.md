@@ -108,10 +108,10 @@ developer-facing mechanics.
   frontend running in a plain browser for Playwright-driven testing or
   a served `dist/`. The backoff loop keeps the registered channel
   handlers across a drop, so it auto-re-subscribes
-  on reconnect. A reconnect *after* a drop (not the first connect) also
+  on reconnect. Every open of the socket — the first connect included —
   fires the `onRemoteReconnect` handlers, so consumers re-hydrate the
   snapshot they hold and catch up on events missed while the socket was
-  down. `triggerRemoteResync()` fires the same handlers manually (used by
+  down or not yet open (a write made while the window loaded). `triggerRemoteResync()` fires the same handlers manually (used by
   the daemon health-probe recovery path in `App.tsx`). The backoff loop
   is the WS-transport half; the in-place store recovery it drives is the
   next bullet.

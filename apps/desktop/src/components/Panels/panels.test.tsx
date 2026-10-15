@@ -1,17 +1,23 @@
 import { expect, mock, test } from "bun:test";
-import { renderHook, waitFor } from "@testing-library/react";
+import { cleanup, renderHook, waitFor } from "@testing-library/react";
 
+import { triggerRemoteResync } from "../../api.js";
 import type { ExtensionPanel, LensRun, SqlCell } from "../../tauri-bridge/generated/bindings.js";
 
 // Bun's `mock.module` is process-wide: everything not faked here delegates
 // to the real module so other test files keep working.
 const realApi = await import("../../api.js");
 const runs: { id: string; params: Record<string, SqlCell>; streamId: string | null }[] = [];
+// How long each coming run takes (ms), first first; a run past the list is instant.
+const delays: number[] = [];
 mock.module("../../api.js", () => ({
   ...realApi,
   runLens: async (id: string, params: Record<string, SqlCell>, streamId: string | null): Promise<LensRun> => {
     runs.push({ id, params, streamId });
-    return { lens: { id } as LensRun["lens"], params, result: { columns: [], rows: [], truncated: false }, alert: null };
+    const nth = runs.length;
+    const delay = delays.shift();
+    if (delay) await new Promise((r) => setTimeout(r, delay));
+    return { lens: { id, title: `run ${nth}` } as LensRun["lens"], params, result: { columns: [], rows: [], truncated: false }, alert: null };
   },
 }));
 const { badgeCount, panelAlerts, panelChoices, panelCount, panelParams, useExtensionPanelRuns } = await import("./usePanelRuns.js");
@@ -55,6 +61,24 @@ test("the rail runs each panel's body and badge once; a thread-scoped panel re-r
   view.rerender({ threadId: "thr2" });
   await waitFor(() => expect(runs.filter((r) => r.id === "x/body").length).toBe(2));
   expect(runs.filter((r) => r.id === "x/body")[1]?.params).toEqual({ thread_id: 2 });
+});
+
+// A change made while a run is in flight re-runs the panel, and the older
+// run finishing after the newer one doesn't put its stale result back.
+test("a slow earlier run doesn't overwrite the run a change caused", async () => {
+  // Earlier tests' hosts are still mounted and would answer the same trigger.
+  cleanup();
+  runs.length = 0;
+  delays.length = 0;
+  delays.push(400);
+  const panels = [panel("project")];
+  const view = renderHook(() => useExtensionPanelRuns(panels, "str2", null));
+  await waitFor(() => expect(runs.length).toBe(1));
+  // A change the host hears (a reconnect re-runs it the same way an event does).
+  triggerRemoteResync();
+  await waitFor(() => expect(view.result.current["x/p"]?.body?.lens.title).toBe("run 2"));
+  await new Promise((r) => setTimeout(r, 600));
+  expect(view.result.current["x/p"]?.body?.lens.title).toBe("run 2");
 });
 
 test("the alerts are the badges that fire, from the same runs", () => {

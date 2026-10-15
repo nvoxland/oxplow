@@ -87,19 +87,41 @@ export function coalesce(run: () => void): { schedule(): void; cancel(): void } 
   };
 }
 
+/** How long a change that matched nothing yet is remembered, waiting for the
+ *  run in flight to say what it read. */
+const MISSED_MS = 30_000;
+
 /** Re-run `refresh` when an event changes what the last run read, a lens
  *  definition changed, or the daemon is reached again — the events sent
  *  while it was unreachable never arrive (tsk1050). `reads` and `refresh`
- *  may change every render. */
+ *  may change every render.
+ *
+ *  A run in flight hasn't said what it read, and a change announced meanwhile
+ *  may be one it read the old state of (a write made while the window was
+ *  loading). Such events are remembered; when new `reads` arrive and any
+ *  remembered event since the last re-run matches them, the host runs once
+ *  more. A re-run forgets the events before it started: it read them. */
 export function useRerunOnChange(reads: Reads, refresh: () => void): void {
   const readsRef = useRef(reads);
   readsRef.current = reads;
   const refreshRef = useRef(refresh);
   refreshRef.current = refresh;
+  const seen = useRef<{ event: Record<string, unknown>; at: number }[]>([]);
+  const schedule = useRef<() => void>(() => {});
   useEffect(() => {
-    const rerun = coalesce(() => refreshRef.current());
+    const rerun = coalesce(() => {
+      const startedAt = Date.now();
+      seen.current = seen.current.filter((s) => s.at >= startedAt);
+      refreshRef.current();
+    });
+    schedule.current = rerun.schedule;
     const off = subscribeOxplowEvents((event) => {
-      if (lensDefinitionChanged(event) || readsChanged(event, readsRef.current)) rerun.schedule();
+      if (lensDefinitionChanged(event) || readsChanged(event, readsRef.current)) {
+        rerun.schedule();
+        return;
+      }
+      const now = Date.now();
+      seen.current = [...seen.current.filter((s) => now - s.at < MISSED_MS), { event, at: now }];
     });
     const offReconnect = onRemoteReconnect(rerun.schedule);
     return () => {
@@ -108,4 +130,7 @@ export function useRerunOnChange(reads: Reads, refresh: () => void): void {
       offReconnect();
     };
   }, []);
+  useEffect(() => {
+    if (seen.current.some((s) => readsChanged(s.event, reads))) schedule.current();
+  }, [reads]);
 }

@@ -7,7 +7,7 @@
 /// Live: re-run when what they read changes, and when the stream or
 /// thread the rail shows changes. The nav states each scope's binding
 /// (`panelParams`) rather than leaving the backend to infer the thread.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { runLens, type LensRun } from "../../api.js";
 import { NO_READS, unionReads, useRerunOnChange } from "../../lens/lensRerun.js";
@@ -113,9 +113,14 @@ export function useExtensionPanelRuns(
 ): Record<string, PanelRuns> {
   const [runs, setRuns] = useState<Record<string, PanelRuns>>({});
   const [reads, setReads] = useState<Reads>(NO_READS);
+  // Refreshes can overlap (a change arrives while one is in flight); only
+  // the latest one started may set the state, or a slow older run that
+  // began before the change would put its stale rows back.
+  const latest = useRef(0);
   // `panels` is the rail's loaded list (state), so its identity changes
   // only when the panels do.
   const refresh = useCallback(async () => {
+    const mine = ++latest.current;
     const entries = await Promise.all(
       panels.map(async (p) => {
         const params = panelParams(p.scope, streamId, threadId);
@@ -134,6 +139,7 @@ export function useExtensionPanelRuns(
         return [p.id, runs, [...ran.values()]] as const;
       }),
     );
+    if (mine !== latest.current) return;
     setRuns(Object.fromEntries(entries.map(([id, r]) => [id, r])));
     setReads(unionReads(entries.flatMap(([, , ran]) => ran.map((r) => r?.result.reads))));
   }, [panels, streamId, threadId, choices]);

@@ -340,8 +340,8 @@ function notifyConnectionState(state: RemoteConnectionState): void {
   for (const h of connectionStateHandlers) h(state);
 }
 
-/// Reconnect/resync handlers. Fired when the WS comes back *after* a
-/// drop (not on the initial connect). Consumers re-hydrate the stores
+/// Reconnect/resync handlers. Fired whenever the WS opens — the first
+/// connect too, for hosts that loaded before it was there to hear events. Consumers re-hydrate the stores
 /// they hold here so state goes live again with no manual page reload —
 /// the WS itself auto-re-subscribes (channelHandlers persist across the
 /// drop), this covers the events missed while it was down. Local mode
@@ -362,9 +362,16 @@ export function triggerRemoteResync(): void {
   for (const h of reconnectHandlers) h();
 }
 
-/// True once the socket has dropped; reset after the next open fires the
-/// reconnect handlers. Distinguishes a reconnect from the first connect.
-let wasDown = false;
+/// The socket opened. Every open re-hydrates the hosts that registered
+/// (`onRemoteReconnect`) — after a drop, for the events missed while it was
+/// down, and on the first connect too: a host mounted before the socket was
+/// open loaded a snapshot that may predate a write the socket wasn't yet
+/// there to announce. Exported for tests.
+export function handleSocketOpen(): void {
+  reconnectDelayMs = 500;
+  notifyConnectionState("up");
+  for (const h of reconnectHandlers) h();
+}
 
 function ensureSocket(): void {
   if (remoteBase === null || socket !== null || tokenRefused) return;
@@ -386,22 +393,11 @@ function ensureSocket(): void {
     if (!handlers) return;
     for (const h of handlers) h({ payload: frame.payload });
   };
-  ws.onopen = () => {
-    reconnectDelayMs = 500;
-    notifyConnectionState("up");
-    // A reconnect after a drop — re-hydrate the stores to catch up on
-    // events missed while the socket was down. Not fired on the first
-    // connect (App's mount loader already does the initial hydration).
-    if (wasDown) {
-      wasDown = false;
-      for (const h of reconnectHandlers) h();
-    }
-  };
+  ws.onopen = handleSocketOpen;
   ws.onclose = () => {
     socket = null;
     // A refused token isn't a drop: nothing to wait out or retry.
     if (tokenRefused) return;
-    wasDown = true;
     notifyConnectionState("down");
     // Backoff reconnect; the RemoteConnectionBanner drives the
     // user-facing state off the notifications above.
