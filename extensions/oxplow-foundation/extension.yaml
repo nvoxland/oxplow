@@ -1040,6 +1040,7 @@ commands:
     op: navigate
     invokers: { human: true, agent: true, lens: true }
     example: {"ref": "file:src/auth.rs"}
+    tool: navigate
   # work_items.write
   - name: work_item.comment
     summary: "Comment on a work item (oxplow: a note shown with the task)."

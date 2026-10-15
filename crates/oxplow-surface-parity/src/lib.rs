@@ -401,6 +401,7 @@ pub const MANIFEST: &[Capability] = &[
     agent("oxplow_code_symbols"),
     agent("oxplow_code_workspace_symbols"),
     agent("oxplow_code_call_hierarchy"),
+    agent("oxplow_navigate"),
     // ---- git ----
     both_named("git.status", "git_change_scopes", "oxplow_vcs_status"),
     both_named("diff", "diff", "oxplow_diff"),
