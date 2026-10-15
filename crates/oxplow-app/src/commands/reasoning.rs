@@ -1,18 +1,20 @@
-//! The agent's reasoning as records (P8.A7): `oxplow.effort.record_decision` (a
-//! fork it took without asking) and `oxplow.effort.record_claim` (what it says
-//! about its work — "tests pass"). `Tx` over `oxplow_db::reasoning_store::
-//! {record_decision_tx, record_claim_tx}`; they land in `v_decision` /
-//! `v_claim` for the review. Both are `Record` and never ask. An agent's
-//! go on its own thread whatever thread it names; the effort is the one
-//! open for `work_item` (which must be its stream's work), else its
-//! thread's open effort.
+//! The agent's reasoning as records (P8.A7). `oxplow.effort.record_decision`:
+//! a fork the agent took without asking, which it records. Claims ("tests
+//! pass", "no behavior change") it doesn't record: a model reads them in an
+//! effort's answers, and `oxplow.effort.replace_inferred_claims` is their
+//! only writer, as `oxplow.effort.replace_inferred_decisions` is for the
+//! decisions it proposes. They land in `v_decision` / `v_claim` for the
+//! review. All are `Record` and never ask. An agent's decision goes on its
+//! own thread whatever thread it names; the effort is the one open for
+//! `work_item` (which must be its stream's work), else its thread's open
+//! effort.
 
 use crate::commands::ops::Op;
 use std::sync::Arc;
 
 use oxplow_db::effort_store::find_open_for_work_item_tx;
 use oxplow_db::reasoning_store::{
-    record_claim_tx, record_decision_tx, replace_inferred_tx, NewClaim, NewDecision,
+    record_decision_tx, replace_inferred_claims_tx, replace_inferred_tx, NewClaim, NewDecision,
 };
 use oxplow_db::thread_store::get_tx as thread_tx;
 use oxplow_domain::events::schema::{EffortDecisionsInferred, EffortDecisionsInferredV1};
@@ -28,7 +30,7 @@ use super::util::{invalid, parse, ref_id, schema, sql};
 use super::{Handler, HandlerOutput, TxCtx};
 
 pub const RECORD_DECISION: &str = "oxplow.effort.record_decision";
-pub const RECORD_CLAIM: &str = "oxplow.effort.record_claim";
+pub const REPLACE_INFERRED_CLAIMS: &str = "oxplow.effort.replace_inferred_claims";
 pub const REPLACE_INFERRED_DECISIONS: &str = "oxplow.effort.replace_inferred_decisions";
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -55,22 +57,55 @@ pub struct DecisionInput {
     pub why: String,
 }
 
+/// `effort.replace_inferred_claims`'s input: the claims a model read in one
+/// effort's answers.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct ClaimInput {
-    /// The thread (`thread:thr3`); an agent's is always its own.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub thread: Option<String>,
-    /// The work item it's about (`work_item:oxplow:tsk42`); absent, the
-    /// thread's open effort's.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub work_item: Option<String>,
+pub struct InferredClaimsInput {
+    /// The effort (`effort:eff12`).
+    pub effort: String,
+    /// What it holds after: every claim no reviewer acted on is replaced.
+    #[schemars(length(max = 8))]
+    pub claims: Vec<InferredClaim>,
+}
+
+/// One claim the agent made about its work, in its own words.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InferredClaim {
+    /// The claim, as the agent put it ("the parser tests pass").
+    #[schemars(length(min = 1, max = 1000))]
     pub statement: String,
-    /// `tests_pass`, `no_behavior_change`, `handles_case` or `other`.
-    pub kind: String,
-    /// What backs it (`run:<id>`, a test name, a file); absent, unbacked.
+    pub kind: ClaimKind,
+    /// What the agent cited for it (`run:<id>`, a test name, a file), if
+    /// anything.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(length(min = 1, max = 400))]
     pub evidence_ref: Option<String>,
+}
+
+/// What a claim is about.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ClaimKind {
+    /// The tests pass.
+    TestsPass,
+    /// Behavior is unchanged (a refactor, a rename).
+    NoBehaviorChange,
+    /// A case is handled (empty input, a timeout).
+    HandlesCase,
+    Other,
+}
+
+impl ClaimKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            ClaimKind::TestsPass => "tests_pass",
+            ClaimKind::NoBehaviorChange => "no_behavior_change",
+            ClaimKind::HandlesCase => "handles_case",
+            ClaimKind::Other => "other",
+        }
+    }
 }
 
 /// `effort.replace_inferred_decisions`'s input: a model's proposals for one
@@ -226,37 +261,6 @@ pub fn record_decision_op() -> Op {
     )
 }
 
-/// `effort.record_claim { thread?, work_item?, statement, kind, evidence_ref? }`.
-pub fn record_claim_op() -> Op {
-    Op::new(
-        "efforts.write",
-        "record_claim",
-        schema::<ClaimInput>(),
-        false,
-        Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
-            let input: ClaimInput = parse(input)?;
-            let at = place(ctx, input.thread.as_deref(), input.work_item.as_deref())?;
-            let id = record_claim_tx(
-                ctx.conn,
-                &NewClaim {
-                    thread_id: at.thread.value(),
-                    work_item: at.work_item.clone(),
-                    effort_id: at.effort,
-                    statement: input.statement,
-                    kind: input.kind,
-                    evidence_ref: input.evidence_ref,
-                    agent_session_id: ctx.actor().session_id().map(|s| s.value()),
-                },
-            )
-            .map_err(CommandError::from)?;
-            Ok(HandlerOutput {
-                result: json!({ "id": id, "effort": at.effort }),
-                ..HandlerOutput::default()
-            })
-        })),
-    )
-}
-
 /// `effort.replace_inferred_decisions { effort, decisions }`: the only
 /// writer of provenance `inferred` — what a model proposed the agent
 /// decided without recording it. Replaces the effort's inferred
@@ -272,16 +276,7 @@ pub fn replace_inferred_decisions_op() -> Op {
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: InferredDecisionsInput = parse(input)?;
             let effort: oxplow_domain::EffortId = ref_id(&input.effort, "effort", "/effort")?;
-            let (thread_id, work_item): (i64, Option<String>) = ctx
-                .conn
-                .query_row(
-                    "SELECT thread_id, work_item FROM effort WHERE id = ?1",
-                    [effort.value()],
-                    |r| Ok((r.get(0)?, r.get(1)?)),
-                )
-                .optional()
-                .map_err(sql)?
-                .ok_or_else(|| invalid("/effort", format!("no effort `{}`", input.effort)))?;
+            let (thread_id, work_item) = effort_place(ctx, effort, &input.effort)?;
             let decisions: Vec<NewDecision> = input
                 .decisions
                 .into_iter()
@@ -316,86 +311,79 @@ pub fn replace_inferred_decisions_op() -> Op {
     )
 }
 
+/// `effort.replace_inferred_claims { effort, claims }`: the only writer of
+/// claims — what a model read the agent claim in an effort's answers
+/// ("tests pass", "no behavior change"). Replaces the effort's claims a
+/// reviewer hasn't acted on; dismissed and reviewer-verified ones stay. The
+/// thread and work item are the effort's. Whether each is backed is a
+/// review policy's call (oxplow-bundled's `claim_status`).
+pub fn replace_inferred_claims_op() -> Op {
+    Op::new(
+        "efforts.write",
+        "replace_inferred_claims",
+        schema::<InferredClaimsInput>(),
+        false,
+        Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
+            let input: InferredClaimsInput = parse(input)?;
+            let effort: oxplow_domain::EffortId = ref_id(&input.effort, "effort", "/effort")?;
+            let (thread_id, work_item) = effort_place(ctx, effort, &input.effort)?;
+            let claims: Vec<NewClaim> = input
+                .claims
+                .into_iter()
+                .map(|c| NewClaim {
+                    thread_id,
+                    work_item: work_item.clone(),
+                    effort_id: Some(effort.value()),
+                    statement: c.statement,
+                    kind: c.kind.as_str().into(),
+                    evidence_ref: c.evidence_ref,
+                    agent_session_id: None,
+                })
+                .collect();
+            let count = replace_inferred_claims_tx(ctx.conn, effort.value(), &claims)
+                .map_err(CommandError::from)?;
+            Ok(HandlerOutput {
+                result: json!({
+                    "effort": oxplow_domain::refs::build::effort_ref(effort),
+                    "count": count,
+                }),
+                ..HandlerOutput::default()
+            })
+        })),
+    )
+}
+
+/// An effort's thread and work item, or `Invalid` at `/effort`.
+fn effort_place(
+    ctx: &TxCtx<'_>,
+    effort: oxplow_domain::EffortId,
+    raw: &str,
+) -> Result<(i64, Option<String>), CommandError> {
+    ctx.conn
+        .query_row(
+            "SELECT thread_id, work_item FROM effort WHERE id = ?1",
+            [effort.value()],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .map_err(sql)?
+        .ok_or_else(|| invalid("/effort", format!("no effort `{raw}`")))
+}
+
 /// The reasoning commands, for the bus.
 pub fn ops() -> Vec<Op> {
     vec![
         record_decision_op(),
-        record_claim_op(),
         replace_inferred_decisions_op(),
+        replace_inferred_claims_op(),
     ]
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_fixtures::{new_thread, services_with_effort};
-    use oxplow_domain::refs::build::thread_ref;
-    use oxplow_domain::{Actor, StreamId};
+    use oxplow_domain::Actor;
     use oxplow_tasks::work_item_ref;
-
-    async fn claims(svc: &crate::Services) -> Vec<(i64, Option<i64>, String)> {
-        svc.db
-            .read(|c| {
-                let mut s = c
-                    .prepare("SELECT thread_id, effort_id, statement FROM claim ORDER BY id")
-                    .map_err(oxplow_db::map_sql_err)?;
-                let rows = s
-                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-                    .map_err(oxplow_db::map_sql_err)?
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(oxplow_db::map_sql_err)?;
-                Ok(rows)
-            })
-            .await
-            .unwrap()
-    }
-
-    /// A claim lands on the agent's own thread and its open effort; naming
-    /// another thread is refused, and nothing lands.
-    #[tokio::test]
-    async fn a_claim_lands_on_the_agents_own_thread() {
-        let fx = services_with_effort().await;
-        let agent = Actor::Agent {
-            session_id: None,
-            thread_id: Some(fx.thread),
-            stream_id: None,
-        };
-        let out = fx
-            .svc
-            .commands
-            .run(
-                &agent,
-                RECORD_CLAIM,
-                json!({ "statement": "tests pass", "kind": "tests_pass", "evidence_ref": "run:7" }),
-                false,
-            )
-            .await
-            .unwrap();
-        assert_eq!(out.result["effort"], json!(fx.effort.value()));
-        assert!(out.audit_id.is_some(), "the claim is audited");
-
-        let other = new_thread(&fx.svc, StreamId::new(1), "other").await;
-        let err = fx
-            .svc
-            .commands
-            .run(
-                &agent,
-                RECORD_CLAIM,
-                json!({ "thread": thread_ref(other.id), "statement": "x", "kind": "other" }),
-                false,
-            )
-            .await
-            .unwrap_err();
-        assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
-        assert_eq!(
-            claims(&fx.svc).await,
-            vec![(
-                fx.thread.value(),
-                Some(fx.effort.value()),
-                "tests pass".into()
-            )]
-        );
-    }
 
     /// A decision names its work item; a bad confidence is the caller's
     /// error, and a person must name the thread.
@@ -482,7 +470,7 @@ mod tests {
             .unwrap();
 
         let effect = Actor::Effect {
-            effect: "oxplow-bundled/store-decisions".into(),
+            effect: "oxplow-bundled/store-reasoning".into(),
             thread_id: Some(fx.thread),
             stream_id: None,
         };
@@ -580,6 +568,137 @@ mod tests {
 
     /// An unknown effort, a ninth proposal and an unknown confidence are
     /// the caller's errors, and nothing changes.
+    /// A model's reading of the claims an effort's answers made replaces
+    /// the effort's unreviewed claims; verified and dismissed ones stay.
+    /// Thread and work item are the effort's.
+    #[tokio::test]
+    async fn inferred_claims_replace_the_efforts_unreviewed_ones() {
+        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let effort = fx.effort.value();
+        let item = Some(work_item_ref(fx.task));
+        let seed = |statement: &'static str, review: Option<&'static str>| {
+            let svc = fx.svc.clone();
+            let claim = NewClaim {
+                thread_id: fx.thread.value(),
+                work_item: item.clone(),
+                effort_id: Some(effort),
+                statement: statement.into(),
+                kind: "other".into(),
+                evidence_ref: None,
+                agent_session_id: None,
+            };
+            async move {
+                svc.db
+                    .transaction(move |tx| {
+                        let id = oxplow_db::insert_claim_tx(tx, &claim)?;
+                        tx.execute(
+                            "UPDATE claim SET review = ?2 WHERE id = ?1",
+                            rusqlite::params![id, review],
+                        )
+                        .map_err(oxplow_db::map_sql_err)?;
+                        Ok(id)
+                    })
+                    .await
+                    .unwrap()
+            }
+        };
+        seed("dismissed", Some("dismissed")).await;
+        seed("verified", Some("verified")).await;
+        seed("stale", None).await;
+
+        let effect = Actor::Effect {
+            effect: "oxplow-bundled/store-reasoning".into(),
+            thread_id: Some(fx.thread),
+            stream_id: None,
+        };
+        let out = fx
+            .svc
+            .commands
+            .run(
+                &effect,
+                REPLACE_INFERRED_CLAIMS,
+                json!({
+                    "effort": oxplow_domain::refs::build::effort_ref(fx.effort),
+                    "claims": [
+                        { "statement": "The parser tests pass.", "kind": "tests_pass" },
+                    ],
+                }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(out.result["count"], json!(1));
+        let rows = fx
+            .svc
+            .db
+            .read(move |c| {
+                let mut s = c
+                    .prepare(
+                        "SELECT statement, kind, thread_id, work_item, review
+                         FROM claim WHERE effort_id = ?1 ORDER BY id",
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = s
+                    .query_map([effort], |r| {
+                        Ok((
+                            r.get::<_, String>(0)?,
+                            r.get::<_, String>(1)?,
+                            r.get::<_, i64>(2)?,
+                            r.get::<_, Option<String>>(3)?,
+                            r.get::<_, Option<String>>(4)?,
+                        ))
+                    })
+                    .map_err(oxplow_db::map_sql_err)?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(oxplow_db::map_sql_err)?;
+                Ok(rows)
+            })
+            .await
+            .unwrap();
+        let t = fx.thread.value();
+        assert_eq!(
+            rows,
+            vec![
+                (
+                    "dismissed".into(),
+                    "other".into(),
+                    t,
+                    item.clone(),
+                    Some("dismissed".into())
+                ),
+                (
+                    "verified".into(),
+                    "other".into(),
+                    t,
+                    item.clone(),
+                    Some("verified".into())
+                ),
+                (
+                    "The parser tests pass.".into(),
+                    "tests_pass".into(),
+                    t,
+                    item.clone(),
+                    None
+                ),
+            ]
+        );
+        let bad = fx
+            .svc
+            .commands
+            .run(
+                &effect,
+                REPLACE_INFERRED_CLAIMS,
+                json!({
+                    "effort": oxplow_domain::refs::build::effort_ref(fx.effort),
+                    "claims": [{ "statement": "x", "kind": "vibes" }],
+                }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(bad.to_string().contains("/claims/0/kind"), "{bad}");
+    }
+
     #[tokio::test]
     async fn inferred_decisions_are_checked() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
@@ -605,46 +724,5 @@ mod tests {
                 "{input}: {err:?}"
             );
         }
-    }
-
-    /// A claim about another stream's work item is refused.
-    #[tokio::test]
-    async fn a_claim_on_another_streams_work_is_refused() {
-        use oxplow_domain::stores::StreamStore as _;
-        use oxplow_tasks::TaskStore as _;
-        let fx = crate::test_fixtures::services_with_task_effort().await;
-        let mut other = fx.svc.stream_store.list().await.unwrap().pop().unwrap();
-        other.id = StreamId::placeholder();
-        other.title = "other".into();
-        other.branch = "other".into();
-        other.kind = oxplow_domain::StreamKind::Worktree;
-        other.worktree_path = "/elsewhere".into();
-        let other = fx.svc.stream_store.upsert(&other).await.unwrap();
-        let there = new_thread(&fx.svc, other, "t").await;
-        let mut task = fx.svc.task_store.get(fx.task).await.unwrap().unwrap();
-        task.id = oxplow_tasks::TaskId::placeholder();
-        task.thread_id = Some(there.id);
-        task.status = oxplow_tasks::TaskStatus::Ready;
-        let foreign = fx.svc.task_store.insert(&task).await.unwrap();
-        crate::test_fixtures::restate_task(&fx.svc, foreign).await;
-        let err = fx
-            .svc
-            .commands
-            .run(
-                &Actor::Agent {
-                    session_id: None,
-                    thread_id: Some(fx.thread),
-                    stream_id: None,
-                },
-                RECORD_CLAIM,
-                json!({ "work_item": work_item_ref(foreign), "statement": "x", "kind": "other" }),
-                false,
-            )
-            .await
-            .unwrap_err();
-        assert!(
-            matches!(&err, CommandError::Denied { reason } if reason.contains("another stream")),
-            "{err:?}"
-        );
     }
 }

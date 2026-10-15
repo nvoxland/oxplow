@@ -1,15 +1,17 @@
-# oxplow-bundled/effort.infer_decisions: ask a model which decisions the
-# agent made during one effort without recording them. The one place the
-# prompt lives (the `infer-decisions` effect and a person's Infer Again
-# both come here). It reads what the agent did — the conversation in the
-# effort's window, its tool calls, the decisions it did record — into one
-# digest, newest kept when it's long, and asks the `decisions` job. The
-# intent key names the effort (`decisions:<effort ref>`), so asking twice
-# returns the same job; `again` asks a new one (`…@<n>`), which a changed
-# binding or new activity answers afresh. The `store-decisions` effect
-# stores what comes back.
+# oxplow-bundled/effort.infer_reasoning: ask a model what the agent decided
+# and claimed during one effort. The one place the prompt lives (the
+# `infer-reasoning` effect and a person's Infer Again both come here). It
+# reads what the agent did — the conversation in the effort's window (each
+# turn's prompt and final answer), its tool calls, the decisions it did
+# record — into one digest, newest kept when it's long, and asks the
+# `reasoning` job for both lists in one call: the forks the agent resolved
+# without recording them, and the claims its answers made about its work.
+# The intent key names the effort (`reasoning:<effort ref>`), so asking
+# twice returns the same job; `again` asks a new one (`…@<n>`), which a
+# changed binding or new activity answers afresh. The `store-reasoning`
+# effect stores what comes back.
 
-# Longest digest, longest kept prompt or answer, longest tool detail, and
+# Longest digest, longest kept prompt or answer (an answer keeps its end), longest tool detail, and
 # the share of the digest tool calls may take — in characters.
 MAX_DIGEST = 40000
 MAX_TURN = 2000
@@ -17,14 +19,23 @@ MAX_DETAIL = 200
 MAX_TOOLS = MAX_DIGEST // 4
 ROWS = 1000
 
-SYSTEM = """You review a coding agent's work session. Find the decisions it made without asking: forks where it picked one approach over another (where to put code, which library, what to change or leave, how to handle a case). Only real forks with a plausible alternative; skip routine steps. Don't repeat decisions it already recorded. For each: `question` is what had to be decided, `choice` what it chose, `alternatives` the options not taken, `why` its reasoning if visible, and `confidence` (low, medium or high) how sure you are it was a real decision. At most 8; an empty list is fine.
+SYSTEM = """You review a coding agent's work session and report two things.
+
+Decisions: find the decisions it made without asking: forks where it picked one approach over another (where to put code, which library, what to change or leave, how to handle a case). Only real forks with a plausible alternative; skip routine steps. Don't repeat decisions it already recorded. For each: `question` is what had to be decided, `choice` what it chose, `alternatives` the options not taken, `why` its reasoning if visible, and `confidence` (low, medium or high) how sure you are it was a real decision. At most 8; an empty list is fine.
+
+Claims: find what the agent's answers (the "Agent:" lines) state about the outcome of its work: that tests pass, that behavior is unchanged, that a case is handled. Only claims the agent actually made; never infer one it didn't make. For each: `statement` is the claim in the agent's own words, `kind` is one of tests_pass, no_behavior_change, handles_case or other, and `evidence_ref` is a run id (like run:12) or test name the answer itself named for it, left out when it named none. At most 8; an empty list is fine.
 
 Reply with JSON only, no prose and no code fence:
-{"decisions": [{"question": "...", "choice": "...", "alternatives": ["..."], "why": "...", "confidence": "low"}]}"""
+{"decisions": [{"question": "...", "choice": "...", "alternatives": ["..."], "why": "...", "confidence": "low"}], "claims": [{"statement": "...", "kind": "tests_pass", "evidence_ref": "run:12"}]}"""
 
 def clip(text, most):
     text = text or ""
     return text if len(text) <= most else text[:most] + "…"
+
+def clip_tail(text, most):
+    """The last `most` characters: an answer states its outcome at the end."""
+    text = text or ""
+    return text if len(text) <= most else "…" + text[len(text) - most:]
 
 def newest_that_fit(items, budget):
     """The most recent of `items` (oldest first) whose total fits `budget`, oldest first."""
@@ -88,7 +99,7 @@ def transform(x):
         tool_lines.append(line)
     tool_lines = newest_that_fit(tool_lines, MAX_TOOLS)
     blocks = [
-        "Human: " + clip(t["prompt"], MAX_TURN) + "\nAgent: " + clip(t["answer"], MAX_TURN) + "\n"
+        "Human: " + clip(t["prompt"], MAX_TURN) + "\nAgent: " + clip_tail(t["answer"], MAX_TURN) + "\n"
         for t in reversed(turns)
     ]
     room = MAX_DIGEST - len(head)
@@ -98,7 +109,7 @@ def transform(x):
     digest = (head + "\nConversation (oldest first):\n" + "\n".join(blocks)
               + "\nTool calls (oldest first):\n" + "\n".join(tool_lines))
 
-    key = "decisions:" + effort
+    key = "reasoning:" + effort
     if x["input"].get("again"):
         asked = scope("sql.read", {
                 "sql": "SELECT count(*) AS n FROM v_job_run WHERE intent_key = :key OR intent_key LIKE :key || '@%'",
@@ -106,13 +117,13 @@ def transform(x):
             })
         key += "@" + str(asked[0]["n"] + 1)
     return {"commands": [{
-        "name": "oxplow.decisions.ask",
+        "name": "oxplow.reasoning.ask",
         "input": {
-            "job": "decisions",
+            "job": "reasoning",
             "intentKey": key,
             "request": {
                 "schemaVersion": 1,
-                "role": "decisions",
+                "role": "reasoning",
                 "messages": [
                     {"role": "system", "parts": [{"type": "text", "text": SYSTEM}]},
                     {"role": "user", "parts": [{"type": "text", "text": digest}]},

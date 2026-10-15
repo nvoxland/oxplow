@@ -1,0 +1,18 @@
+# A reasoning job succeeded: its proposals (inside a code fence, which is
+# dropped) replace the effort's inferred decisions and its unreviewed
+# claims. A malformed entry is dropped; an unknown claim kind becomes
+# `other`.
+input:
+  effect: store-reasoning
+  event:
+    type: contribution.job.completed
+    payload: { job_run: "job_run:01990000-0000-7000-8000-000000000000", job: "job:oxplow-bundled/reasoning", version: 1, attempt: 1, fence: 1, outcome: succeeded }
+  answers:
+    jobs.read:
+      - intentKey: "reasoning:effort:eff3"
+        result:
+          parts:
+            - type: text
+              text: "```json\n{\"decisions\": [{\"question\": \"Which CSV library?\", \"choice\": \"csv crate\", \"alternatives\": [\"hand-rolled\"], \"confidence\": \"High\"}, {\"question\": \"\", \"choice\": \"x\"}], \"claims\": [{\"statement\": \"The export tests pass.\", \"kind\": \"tests_pass\", \"evidence_ref\": \"run:12\"}, {\"statement\": \"Empty input is handled.\", \"kind\": \"mystery\"}, {\"kind\": \"tests_pass\"}]}\n```"
+expect:
+  commands: [oxplow.effort.replace_inferred_decisions, oxplow.effort.replace_inferred_claims]

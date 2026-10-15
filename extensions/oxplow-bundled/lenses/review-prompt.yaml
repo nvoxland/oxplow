@@ -37,7 +37,7 @@ query: |
     || '## Files it changed' || char(10) || char(10)
     || coalesce(files.list, 'No files were recorded.') || char(10) || char(10)
     || '## Claims to check' || char(10) || char(10)
-    || coalesce(claims.list, 'No claims were recorded.') || char(10) || char(10)
+    || coalesce(claims.list, 'No claims were found.') || char(10) || char(10)
     || '## Decisions it made on its own' || char(10) || char(10)
     || coalesce(decisions.list, 'No decisions were recorded.') || char(10) || char(10)
     || '## What to report' || char(10) || char(10)

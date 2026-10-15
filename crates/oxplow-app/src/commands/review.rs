@@ -1,9 +1,10 @@
 //! A reviewer's verdicts on an effort's reasoning (P7.C4,
-//! `.context/commands.md`): verifying a claim the agent made, and
-//! confirming or dismissing a decision oxplow inferred. Each is a `Tx`
-//! command a person (or a lens acting for one) runs — an agent checking
-//! its own claims isn't a review, so an agent-driven run is refused — and
-//! each is undone by its pair: `verify_claim` ↔ `unverify_claim`,
+//! `.context/commands.md`): verifying or dismissing a claim oxplow read in
+//! the agent's answers, and confirming or dismissing a decision oxplow
+//! inferred. Each is a `Tx` command a person (or a lens acting for one)
+//! runs — an agent checking its own claims isn't a review, so an
+//! agent-driven run is refused — and each is undone by its pair:
+//! `verify_claim` ↔ `unverify_claim`, `dismiss_claim` ↔ `reopen_claim`,
 //! `confirm_decision` / `dismiss_decision` ↔ `reopen_decision`. Every run
 //! logs what it decided, caused by the run.
 //!
@@ -14,7 +15,8 @@ use crate::commands::ops::Op;
 use std::sync::Arc;
 
 use oxplow_domain::events::schema::{
-    EffortClaimVerified, EffortClaimVerifiedV1, EffortDecisionReviewed, EffortDecisionReviewedV1,
+    EffortClaimDismissed, EffortClaimDismissedV1, EffortClaimVerified, EffortClaimVerifiedV1,
+    EffortDecisionReviewed, EffortDecisionReviewedV1,
 };
 use oxplow_domain::refs::build::{claim_ref, decision_ref, effort_ref};
 use oxplow_domain::{CommandCall, CommandError, Invokers};
@@ -28,6 +30,8 @@ use super::{Handler, HandlerOutput, TxCtx};
 
 pub const VERIFY_CLAIM: &str = "oxplow.effort.verify_claim";
 pub const UNVERIFY_CLAIM: &str = "oxplow.effort.unverify_claim";
+pub const DISMISS_CLAIM: &str = "oxplow.effort.dismiss_claim";
+pub const REOPEN_CLAIM: &str = "oxplow.effort.reopen_claim";
 pub const CONFIRM_DECISION: &str = "oxplow.effort.confirm_decision";
 pub const DISMISS_DECISION: &str = "oxplow.effort.dismiss_decision";
 pub const REOPEN_DECISION: &str = "oxplow.effort.reopen_decision";
@@ -40,8 +44,19 @@ pub const REVIEWER: &str = "reviewer";
 pub struct VerifyClaimInput {
     /// The claim (`claim:7`).
     pub claim: String,
-    /// What backs it (`run:12`, a test, a file); `reviewer` when absent —
-    /// the person checked it themselves.
+    /// What backs it (`run:12`, a test, a file). Absent: what it already
+    /// cites, else `reviewer` — the person checked it themselves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UnverifyClaimInput {
+    /// The claim (`claim:7`).
+    pub claim: String,
+    /// What it cites after (what it cited before it was verified); absent,
+    /// nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evidence: Option<String>,
 }
@@ -64,59 +79,79 @@ fn effort_ref_of(effort: Option<i64>) -> Option<String> {
     effort.map(|e| effort_ref(oxplow_domain::EffortId::new(e)))
 }
 
-/// A claim's effort and current evidence, or `Invalid` naming it.
-fn claim_row(
-    ctx: &TxCtx<'_>,
+/// A claim as a review reads it.
+struct ClaimRow {
     id: i64,
-    claim: &str,
-) -> Result<(Option<i64>, Option<String>), CommandError> {
+    effort: Option<i64>,
+    evidence: Option<String>,
+    review: Option<String>,
+}
+
+/// The claim `claim` names, or `Invalid` naming it.
+fn claim_row(ctx: &TxCtx<'_>, claim: &str) -> Result<ClaimRow, CommandError> {
+    let id = ref_id::<i64>(claim, "claim", "/claim")?;
     ctx.conn
         .query_row(
-            "SELECT effort_id, evidence_ref FROM claim WHERE id = ?1",
+            "SELECT effort_id, evidence_ref, review FROM claim WHERE id = ?1",
             [id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| {
+                Ok(ClaimRow {
+                    id,
+                    effort: r.get(0)?,
+                    evidence: r.get(1)?,
+                    review: r.get(2)?,
+                })
+            },
         )
         .optional()
         .map_err(|e| CommandError::from(oxplow_db::map_sql_err(e)))?
         .ok_or_else(|| invalid("/claim", format!("no claim `{claim}`")))
 }
 
-/// Set a claim's evidence, log it, and say how to put it back.
-fn set_evidence(
+/// Refused unless the claim's review is `want` (`None`: unreviewed).
+fn expect_review(row: &ClaimRow, want: Option<&str>) -> Result<(), CommandError> {
+    if row.review.as_deref() == want {
+        return Ok(());
+    }
+    Err(invalid(
+        "/claim",
+        match (&row.review, want) {
+            (Some(was), _) => format!("`{}` is already {was}", claim_ref(row.id)),
+            (None, Some(want)) => format!("`{}` isn't {want}", claim_ref(row.id)),
+            (None, None) => unreachable!("matched above"),
+        },
+    ))
+}
+
+/// Set a claim's review and evidence, log it as `event`, and say how to
+/// put it back.
+fn set_review(
     ctx: &TxCtx<'_>,
-    claim: &str,
-    effort: Option<i64>,
+    row: &ClaimRow,
+    review: Option<&str>,
     evidence: Option<String>,
+    event: oxplow_domain::events::Envelope,
     inverse: CommandCall,
 ) -> Result<HandlerOutput, CommandError> {
-    let id = ref_id::<i64>(claim, "claim", "/claim")?;
     ctx.conn
         .execute(
-            "UPDATE claim SET evidence_ref = ?2 WHERE id = ?1",
-            rusqlite::params![id, evidence],
+            "UPDATE claim SET review = ?2, evidence_ref = ?3 WHERE id = ?1",
+            rusqlite::params![row.id, review, evidence],
         )
         .map_err(|e| CommandError::from(oxplow_db::map_sql_err(e)))?;
-    let effort = effort_ref_of(effort);
-    let mut subject = vec![claim_ref(id)];
-    subject.extend(effort.clone());
-    let event = ctx
-        .events
-        .typed::<EffortClaimVerified>(&EffortClaimVerifiedV1 {
-            claim: claim_ref(id),
-            effort,
-            evidence: evidence.clone(),
-        })
-        .with_subject(subject);
+    let mut subject = vec![claim_ref(row.id)];
+    subject.extend(effort_ref_of(row.effort));
     Ok(HandlerOutput {
-        result: json!({ "claim": claim_ref(id), "evidence": evidence }),
+        result: json!({ "claim": claim_ref(row.id), "review": review, "evidence": evidence }),
         inverse: Some(inverse),
-        events: vec![event],
+        events: vec![event.with_subject(subject)],
         after_commit: None,
         unchanged: false,
     })
 }
 
-/// `effort.verify_claim { claim, evidence? }`.
+/// `effort.verify_claim { claim, evidence? }`: an unreviewed claim is
+/// backed, by what it names, what it cites, or the reviewer's own check.
 pub fn verify_claim_op() -> Op {
     Op::new(
         "efforts.write",
@@ -125,56 +160,98 @@ pub fn verify_claim_op() -> Op {
         true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: VerifyClaimInput = parse(input)?;
-            let id = ref_id::<i64>(&input.claim, "claim", "/claim")?;
-            let (effort, evidence) = claim_row(ctx, id, &input.claim)?;
-            if let Some(cited) = evidence {
-                return Err(invalid(
-                    "/claim",
-                    format!("`{}` already cites `{cited}`", input.claim),
-                ));
-            }
-            let backed_by = input.evidence.unwrap_or_else(|| REVIEWER.into());
-            set_evidence(
-                ctx,
-                &input.claim,
-                effort,
-                Some(backed_by),
-                CommandCall {
-                    name: UNVERIFY_CLAIM.into(),
-                    input: json!({ "claim": claim_ref(id) }),
-                },
-            )
+            let row = claim_row(ctx, &input.claim)?;
+            expect_review(&row, None)?;
+            let backed_by = input
+                .evidence
+                .or_else(|| row.evidence.clone())
+                .unwrap_or_else(|| REVIEWER.into());
+            let event = ctx
+                .events
+                .typed::<EffortClaimVerified>(&EffortClaimVerifiedV1 {
+                    claim: claim_ref(row.id),
+                    effort: effort_ref_of(row.effort),
+                    evidence: Some(backed_by.clone()),
+                });
+            let inverse = CommandCall {
+                name: UNVERIFY_CLAIM.into(),
+                input: json!({ "claim": claim_ref(row.id), "evidence": row.evidence }),
+            };
+            set_review(ctx, &row, Some("verified"), Some(backed_by), event, inverse)
         })),
     )
     .open_to(Invokers::NO_AGENT)
 }
 
-/// `effort.unverify_claim { claim }`: take a verification back.
+/// `effort.unverify_claim { claim, evidence? }`: take a verification back;
+/// it cites `evidence` (what it did before) after.
 pub fn unverify_claim_op() -> Op {
     Op::new(
         "efforts.write",
         "unverify_claim",
-        schema::<ClaimInput>(),
+        schema::<UnverifyClaimInput>(),
         true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
-            let input: ClaimInput = parse(input)?;
-            let id = ref_id::<i64>(&input.claim, "claim", "/claim")?;
-            let (effort, evidence) = claim_row(ctx, id, &input.claim)?;
-            let Some(cited) = evidence else {
-                return Err(invalid(
-                    "/claim",
-                    format!("`{}` cites nothing", input.claim),
-                ));
+            let input: UnverifyClaimInput = parse(input)?;
+            let row = claim_row(ctx, &input.claim)?;
+            expect_review(&row, Some("verified"))?;
+            let event = ctx
+                .events
+                .typed::<EffortClaimVerified>(&EffortClaimVerifiedV1 {
+                    claim: claim_ref(row.id),
+                    effort: effort_ref_of(row.effort),
+                    evidence: None,
+                });
+            let inverse = CommandCall {
+                name: VERIFY_CLAIM.into(),
+                input: json!({ "claim": claim_ref(row.id), "evidence": row.evidence }),
             };
-            set_evidence(
+            set_review(ctx, &row, None, input.evidence, event, inverse)
+        })),
+    )
+    .open_to(Invokers::NO_AGENT)
+}
+
+/// `effort.dismiss_claim { claim }`: the agent didn't claim it, or didn't
+/// mean it. It stays dismissed when the effort is read again.
+pub fn dismiss_claim_op() -> Op {
+    claim_dismissal_op("dismiss_claim", true)
+}
+
+/// `effort.reopen_claim { claim }`: take a dismissal back.
+pub fn reopen_claim_op() -> Op {
+    claim_dismissal_op("reopen_claim", false)
+}
+
+fn claim_dismissal_op(op: &'static str, dismiss: bool) -> Op {
+    Op::new(
+        "efforts.write",
+        op,
+        schema::<ClaimInput>(),
+        true,
+        Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
+            let input: ClaimInput = parse(input)?;
+            let row = claim_row(ctx, &input.claim)?;
+            expect_review(&row, (!dismiss).then_some("dismissed"))?;
+            let event = ctx
+                .events
+                .typed::<EffortClaimDismissed>(&EffortClaimDismissedV1 {
+                    claim: claim_ref(row.id),
+                    effort: effort_ref_of(row.effort),
+                    dismissed: dismiss,
+                });
+            let inverse = CommandCall {
+                name: if dismiss { REOPEN_CLAIM } else { DISMISS_CLAIM }.into(),
+                input: json!({ "claim": claim_ref(row.id) }),
+            };
+            let evidence = row.evidence.clone();
+            set_review(
                 ctx,
-                &input.claim,
-                effort,
-                None,
-                CommandCall {
-                    name: VERIFY_CLAIM.into(),
-                    input: json!({ "claim": claim_ref(id), "evidence": cited }),
-                },
+                &row,
+                dismiss.then_some("dismissed"),
+                evidence,
+                event,
+                inverse,
             )
         })),
     )
@@ -281,6 +358,8 @@ pub fn ops() -> Vec<Op> {
     vec![
         verify_claim_op(),
         unverify_claim_op(),
+        dismiss_claim_op(),
+        reopen_claim_op(),
         confirm_decision_op(),
         dismiss_decision_op(),
         reopen_decision_op(),
@@ -301,7 +380,7 @@ mod tests {
             .svc
             .db
             .transaction(move |tx| {
-                oxplow_db::record_claim_tx(
+                oxplow_db::insert_claim_tx(
                     tx,
                     &NewClaim {
                         thread_id: thread.value(),
@@ -346,13 +425,21 @@ mod tests {
     }
 
     async fn claim_view(fx: &crate::test_fixtures::EffortFixture, id: i64) -> Option<String> {
+        claim_review(fx, id).await.1
+    }
+
+    /// A claim's review and what it cites, as `v_claim` shows them.
+    async fn claim_review(
+        fx: &crate::test_fixtures::EffortFixture,
+        id: i64,
+    ) -> (Option<String>, Option<String>) {
         fx.svc
             .db
             .read(move |tx| {
                 tx.query_row(
-                    "SELECT evidence_ref FROM v_claim WHERE id = ?1",
+                    "SELECT review, evidence_ref FROM v_claim WHERE id = ?1",
                     [id],
-                    |r| r.get(0),
+                    |r| Ok((r.get(0)?, r.get(1)?)),
                 )
                 .map_err(oxplow_db::map_sql_err)
             })
@@ -361,8 +448,8 @@ mod tests {
     }
 
     /// P7.C4: a person verifies a claim — it reads verified, citing
-    /// `reviewer` — logged and undoable back to citing nothing; a claim
-    /// already backed can't be verified over its evidence.
+    /// `reviewer` — logged and undoable back to unreviewed, citing nothing;
+    /// a reviewed claim can't be verified again.
     #[tokio::test]
     async fn verifying_a_claim_makes_it_verified_and_undo_takes_it_back() {
         let (fx, claim, _) = fixture().await;
@@ -394,10 +481,7 @@ mod tests {
             )
             .await
             .unwrap_err();
-        assert!(
-            err.to_string().contains("already cites `reviewer`"),
-            "{err}"
-        );
+        assert!(err.to_string().contains("is already verified"), "{err}");
 
         fx.svc
             .commands
@@ -421,6 +505,101 @@ mod tests {
             matches!(&err, CommandError::Invalid { field: Some(f), .. } if f == "/claim"),
             "{err:?}"
         );
+    }
+
+    /// A claim that already cites something (what the agent said backed
+    /// it) keeps it when verified, and gets it back when the verification
+    /// is undone.
+    #[tokio::test]
+    async fn verifying_keeps_what_a_claim_cites_and_undo_restores_it() {
+        let (fx, claim, _) = fixture().await;
+        fx.svc
+            .db
+            .transaction(move |tx| {
+                tx.execute(
+                    "UPDATE claim SET evidence_ref = 'run:42' WHERE id = ?1",
+                    [claim],
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let r = claim_ref(claim);
+        let out = fx
+            .svc
+            .commands
+            .run(&Actor::Human, VERIFY_CLAIM, json!({ "claim": r }), false)
+            .await
+            .unwrap();
+        assert_eq!(
+            claim_review(&fx, claim).await,
+            (Some("verified".into()), Some("run:42".into()))
+        );
+        fx.svc
+            .commands
+            .undo(&Actor::Human, out.audit_id.unwrap(), false)
+            .await
+            .unwrap();
+        assert_eq!(
+            claim_review(&fx, claim).await,
+            (None, Some("run:42".into()))
+        );
+    }
+
+    /// A person dismisses a claim the agent didn't make; it's logged,
+    /// can't then be verified, and reopening (or undo) makes it unreviewed.
+    #[tokio::test]
+    async fn a_dismissed_claim_is_reopened_by_undo() {
+        let (fx, claim, _) = fixture().await;
+        let r = claim_ref(claim);
+        let out = fx
+            .svc
+            .commands
+            .run(&Actor::Human, DISMISS_CLAIM, json!({ "claim": r }), false)
+            .await
+            .unwrap();
+        assert_eq!(claim_review(&fx, claim).await.0, Some("dismissed".into()));
+        let events = fx.svc.event_log_store.read_after(0, 500).await.unwrap();
+        let logged = events
+            .iter()
+            .find(|e| {
+                e.envelope.cause == out.event_id
+                    && e.envelope.event_type == "effort.claim_dismissed"
+            })
+            .expect("logged, caused by the run");
+        assert!(logged.envelope.subject.contains(&r));
+        let err = fx
+            .svc
+            .commands
+            .run(&Actor::Human, VERIFY_CLAIM, json!({ "claim": r }), false)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("is already dismissed"), "{err}");
+        let err = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                REOPEN_CLAIM,
+                json!({ "claim": claim_ref(9999) }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("no claim"), "{err}");
+        fx.svc
+            .commands
+            .undo(&Actor::Human, out.audit_id.unwrap(), false)
+            .await
+            .unwrap();
+        assert_eq!(claim_review(&fx, claim).await.0, None);
+        let err = fx
+            .svc
+            .commands
+            .run(&Actor::Human, REOPEN_CLAIM, json!({ "claim": r }), false)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("isn't dismissed"), "{err}");
     }
 
     /// P7.C4: an agent can't review its own work — not directly, and not

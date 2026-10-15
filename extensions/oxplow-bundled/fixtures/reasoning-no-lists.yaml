@@ -1,0 +1,13 @@
+# JSON, but neither list: nothing is stored, and the skip says so.
+input:
+  effect: store-reasoning
+  event:
+    type: contribution.job.completed
+    payload: { job_run: "job_run:01990000-0000-7000-8000-000000000000", job: "job:oxplow-bundled/reasoning", version: 1, attempt: 1, fence: 1, outcome: succeeded }
+  answers:
+    jobs.read:
+      - intentKey: "reasoning:effort:eff3"
+        result:
+          parts: [{ type: text, text: '{"summary": "nothing to report"}' }]
+expect:
+  skip: wasn't the JSON asked for

@@ -3684,7 +3684,7 @@ mod tests {
             serde_json::from_str(&text_payload(server.list_ai_roles().await.unwrap())).unwrap();
         // The three built-ins, then oxplow-bundled's `decisions` profile.
         assert_eq!(roles["roles"].as_array().unwrap().len(), 4);
-        assert_eq!(roles["roles"][3]["role"], "oxplow-bundled/decisions");
+        assert_eq!(roles["roles"][3]["role"], "oxplow-bundled/reasoning");
         assert_eq!(roles["roles"][0]["binding"], serde_json::Value::Null);
     }
 

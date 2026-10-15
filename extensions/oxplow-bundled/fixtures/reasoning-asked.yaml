@@ -1,0 +1,15 @@
+# The model answers with the JSON it was asked for (decisions and claims);
+# that is the job's answer, for `store-reasoning` to store.
+input:
+  job: reasoning
+  intentKey: "reasoning:effort:eff3"
+  request:
+    schemaVersion: 1
+    role: reasoning
+    messages:
+      - { role: user, parts: [{ type: text, text: "Work item: Add CSV export" }] }
+  model:
+    replies: ['{"decisions": [{"question": "Which CSV library?", "choice": "csv crate", "confidence": "medium"}], "claims": [{"statement": "The export tests pass.", "kind": "tests_pass", "evidence_ref": "run:12"}]}']
+expect:
+  state: succeeded
+  text: '{"decisions": [{"question": "Which CSV library?", "choice": "csv crate", "confidence": "medium"}], "claims": [{"statement": "The export tests pass.", "kind": "tests_pass", "evidence_ref": "run:12"}]}'

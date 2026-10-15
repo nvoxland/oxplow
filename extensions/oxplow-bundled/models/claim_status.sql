@@ -1,13 +1,14 @@
 -- Whether each claim is backed, by this review policy's rule: it cites
 -- evidence (a run, a test, a file, or a person who looked), or it says
 -- the tests pass and its effort's latest test run passed with at least
--- one test.
+-- one test. A claim a reviewer dismissed (the agent didn't make it, or
+-- didn't mean it) isn't here at all: it is neither backed nor unbacked.
 SELECT ref, effort_id, CAST(backed_by IS NOT NULL AS INTEGER) AS verified, backed_by
 FROM (
 SELECT c.ref,
        c.effort_id,
        CAST(CASE
-         WHEN c.evidence_ref IS NOT NULL THEN 'evidence'
+         WHEN c.evidence_ref IS NOT NULL OR c.review = 'verified' THEN 'evidence'
          WHEN c.kind = 'tests_pass' AND c.effort_id IS NOT NULL AND EXISTS (
            SELECT 1 FROM (
              SELECT r.failed, r.total FROM ref('test_run') r
@@ -19,4 +20,5 @@ SELECT c.ref,
          ) THEN 'latest run'
        END AS TEXT) AS backed_by
 FROM ref('claim') c
+WHERE c.review IS NOT 'dismissed'
 )

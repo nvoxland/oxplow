@@ -271,9 +271,9 @@ mod tests {
             vec![
                 "oxplow-bundled/verify-unchecked",
                 "oxplow-bundled/repair-disabled",
-                "oxplow-bundled/infer-decisions",
-                "oxplow-bundled/store-decisions",
-                "oxplow-bundled/decisions",
+                "oxplow-bundled/infer-reasoning",
+                "oxplow-bundled/store-reasoning",
+                "oxplow-bundled/reasoning",
                 "oxplow-foundation/anthropic",
                 "oxplow-foundation/openai",
                 "oxplow-foundation/openai_compatible",

@@ -524,60 +524,81 @@ connection with no thread identity is refused. Agents can't change
 providers, roles or keys: those IPC commands are UI-only in the
 surface-parity manifest.
 
-## Inferred decisions (current)
+## Inferred reasoning: decisions and claims (current)
 
-When an effort finishes, a model proposes the decisions the agent made
-without recording them. The policy — when to ask, the prompt, which
-model, how the reply is read — is oxplow-bundled's, built only from what
-any extension has; core keeps the storage and the review.
+When an effort finishes, one model call reads what the agent did and
+proposes both the decisions it made without recording them and the claims
+its answers made about its work. The policy — when to ask, the prompt,
+which model, how the reply is read — is oxplow-bundled's, built only from
+what any extension has; core keeps the storage and the review. Agents
+record neither: there is no `record_claim`, and decisions they do record
+(`effort.record_decision`) are only the ones they chose to.
 
-- **oxplow-bundled** declares the AI profile `decisions` (fallback
-  `main`), the job `decisions` (`ai.complete_typed`, `needs: [ai.compute]`,
+- **oxplow-bundled** declares the AI profile `reasoning` (fallback
+  `main`), the job `reasoning` (`ai.complete_typed`, `needs: [ai.compute]`,
   no tools: the model reads only what the prompt gives it), the command
-  `oxplow.effort.infer_decisions { effort, again? }`
-  (`handlers/infer_decisions.star`) and two effects.
-- **`infer-decisions`** (on `effort.finished`) asks
-  `scope("ai.discover", { role: "decisions" })`; with no model bound to
+  `oxplow.effort.infer_reasoning { effort, again? }`
+  (`handlers/infer_reasoning.star`) and two effects.
+- **`infer-reasoning`** (on `effort.finished`) asks
+  `scope("ai.discover", { role: "reasoning" })`; with no model bound to
   the profile or to Main it *skips*, saying to bind one in Settings → AI —
   in Delivery, counted against no health, nothing queued to fail.
-  Otherwise it composes `oxplow.effort.infer_decisions`.
-- **The command** digests the effort as the core reactor did: the work
-  item's title; the thread's turns overlapping the effort's window
-  (`v_agent_turn` has no `effort_id`); its tool calls; the decisions it
-  recorded, so they aren't repeated. Each prompt and answer is clipped to
-  2,000 characters, a tool's detail to 200, tool calls take at most a
-  quarter of the 40,000-character digest, and the newest are kept. Nothing
-  to read asks nothing. It enqueues the job with intent key
-  `decisions:<effort ref>` (a redelivery is the same job); `again: true`
+  Otherwise it composes `oxplow.effort.infer_reasoning`.
+- **The command** digests the effort: the work item's title; the
+  thread's turns overlapping the effort's window (`v_agent_turn` has no
+  `effort_id`), each as the human prompt and the agent's final answer
+  (`v_agent_turn.answer`); its tool calls; the decisions it recorded, so
+  they aren't repeated. A prompt is clipped to its first 2,000
+  characters, an answer to its last 2,000 (an answer states its outcome at
+  the end), a tool's detail to 200, tool calls take at most a quarter of
+  the 40,000-character digest, and the newest are kept. Nothing to read
+  asks nothing. It enqueues the job with intent key
+  `reasoning:<effort ref>` (a redelivery is the same job); `again: true`
   (the lens's **Infer Again**) keys a new one, `…@<n>`. The system
-  message asks for JSON only (`{"decisions": [...]}`): a typed request has
-  no JSON mode.
+  message asks for JSON only
+  (`{"decisions": [...], "claims": [...]}`): a typed request has no JSON
+  mode. A claim is what an answer states about the outcome of the work —
+  tests pass, behavior unchanged, a case handled — in the agent's words,
+  with an `evidence_ref` only when the answer itself named a run or test;
+  the model is told to report only claims actually made, never to infer
+  one.
 - The job's model call is a recorded computation keyed by its request,
   so asking again about unchanged activity on the same binding reads the
   recorded answer; rebinding the profile asks the new model.
-- **`store-decisions`** (on `contribution.job.completed`, `where: {
-  contribution: job:oxplow-bundled/decisions }`) reads the job, drops a
+- **`store-reasoning`** (on `contribution.job.completed`, `where: {
+  contribution: job:oxplow-bundled/reasoning }`) reads the job, drops a
   code fence, and skips — saying so — a reply that isn't a JSON object
-  with a `decisions` list (Starlark's `json.decode` has no fallback, so
-  the check is the object's braces; malformed JSON inside them fails the
-  run). Entries without a question or choice are dropped, strings are
-  clipped to the command's bounds, an unknown confidence is left out (it
-  becomes `low`), and at most 8 are kept. It calls core's
-  `oxplow.effort.replace_inferred_decisions`, even with none (clearing
-  stale ones).
+  with a `decisions` or a `claims` list (Starlark's `json.decode` has no
+  fallback, so the check is the object's braces; malformed JSON inside
+  them fails the run). Entries without a question and choice (decisions)
+  or a statement (claims) are dropped, strings are clipped to the
+  commands' bounds, an unknown decision confidence is left out (it
+  becomes `low`), an unknown claim `kind` becomes `other`, and at most 8
+  of each are kept. It calls core's `oxplow.effort.replace_inferred_decisions`
+  and `oxplow.effort.replace_inferred_claims`, both every time, even with
+  an empty or missing list (clearing stale ones).
 - **Core** keeps `oxplow.effort.replace_inferred_decisions`
   (`commands/reasoning.rs`, the only writer of provenance `inferred`;
   thread and work item are the effort's; recorded, confirmed and
   dismissed rows stay; logs `effort.decisions_inferred@1 { effort,
-  work_item?, count }`), the review commands (confirm, dismiss, reopen:
-  a person's), and the rule that inferred rows are **never fed back to
-  the agent** (the decisions block and the missing-decisions hint read
-  `provenance = 'recorded'` only).
-- Calls record role `oxplow-bundled/decisions` in
-  `v_ai_call`. The review packet shows the rows as "Decisions Oxplow
-  Noticed", separate from "Decisions Made".
+  work_item?, count }`) and `oxplow.effort.replace_inferred_claims` (the
+  only writer of claims; it replaces the effort's claims whose `review`
+  is NULL, so a verified or dismissed claim stays), the review commands
+  (decisions: confirm, dismiss, reopen; claims: `verify_claim`,
+  `dismiss_claim`, `reopen_claim`, all a person's), and the rule that
+  inferred rows are **never fed back to the agent** (the decisions block
+  and the missing-decisions hint read `provenance = 'recorded'` only).
+- A claim's `review` (`v_claim.review`) is NULL (unreviewed), `verified`
+  or `dismissed`. oxplow-bundled's `claim_status` counts a verified claim
+  as backed and leaves a dismissed one out entirely (neither backed nor
+  unbacked), so the verdict, `review.accept`, `review.request_changes`
+  and the verify-unchecked effect ignore it.
+- Calls record role `oxplow-bundled/reasoning` in
+  `v_ai_call`. The review packet shows the decision rows as "Decisions
+  Oxplow Noticed", separate from "Decisions Made", and the claim rows in
+  "Unverified Claims" with their review state.
 - Disabling oxplow-bundled, revoking its programs or replacing them with
-  another extension's (an effect that calls the same command) needs no
+  another extension's (an effect that calls the same commands) needs no
   core change. Pinned end to end in `oxplow-sdk/tests/examples.rs`.
 
 ## Settings → AI (current)

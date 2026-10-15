@@ -2389,8 +2389,8 @@ mod tests {
                 "efforts.write/close",
                 "efforts.write/link",
                 "efforts.write/open",
-                "efforts.write/record_claim",
                 "efforts.write/record_decision",
+                "efforts.write/replace_inferred_claims",
                 "efforts.write/replace_inferred_decisions",
                 "efforts.write/report",
                 "efforts.write/update",
@@ -2462,7 +2462,7 @@ mod tests {
                 "oxplow.command.sequence",
                 // The bundled extension's script commands compose their
                 // calls per input.
-                "oxplow.effort.infer_decisions",
+                "oxplow.effort.infer_reasoning",
                 "oxplow.review.accept",
                 "oxplow.review.request_changes",
                 "oxplow.work.clear_finished",
