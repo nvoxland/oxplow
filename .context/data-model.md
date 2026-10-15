@@ -735,7 +735,10 @@ linked to a deleted item survives as history — readers LEFT JOIN
 `v_work_item`. Claims and decisions name the item they were made on the
 same way (`claim.work_item`, `decision.work_item`, V22, which rebuilt
 both tables from their old `task_id` foreign keys); so do metric facts'
-spine dimension `oxplow.work_item`.
+spine dimension `oxplow.work_item`. A claim carries a reviewer's verdict
+in `claim.review` (`verified` or `dismissed`, NULL while unreviewed; V75):
+claims are read from the agent's answers, and reading an effort again
+replaces only its unreviewed ones.
 
 In Rust the row is `Effort { work_item, … }`; `EffortStore` (was `TaskEffortStore`)
 is keyed by the ref — `start(work_item, …)` refuses anything that isn't

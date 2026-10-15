@@ -1,6 +1,6 @@
 # An effort with no turns and no tool calls asks nothing.
 input:
-  command: oxplow.effort.infer_decisions
+  command: oxplow.effort.infer_reasoning
   input: { effort: "effort:eff7" }
   answers:
     sql.read:

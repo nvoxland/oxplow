@@ -170,6 +170,8 @@ impl EventSchemaRegistry {
         r.register::<EffortClosed>().expect("core type registers");
         r.register::<EffortLinked>().expect("core type registers");
         r.register::<EffortRetitled>().expect("core type registers");
+        r.register::<EffortClaimDismissed>()
+            .expect("core type registers");
         r.register::<EffortClaimVerified>()
             .expect("core type registers");
         r.register::<EffortDecisionReviewed>()
@@ -1312,6 +1314,29 @@ impl EventType for EffortClaimVerified {
     type Payload = EffortClaimVerifiedV1;
 }
 
+/// `effort.claim_dismissed@1`: a reviewer dismissed one of an effort's
+/// claims (`oxplow.effort.dismiss_claim`: the agent didn't claim it, or
+/// didn't mean it) — or took that back (`oxplow.effort.reopen_claim`,
+/// `dismissed: false`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EffortClaimDismissedV1 {
+    /// `claim:<id>`.
+    pub claim: String,
+    /// `effort:<id>`, when the claim was made in one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    /// Dismissed now; `false` once reopened.
+    pub dismissed: bool,
+}
+
+pub struct EffortClaimDismissed;
+impl EventType for EffortClaimDismissed {
+    const TYPE: &'static str = "effort.claim_dismissed";
+    const V: u32 = 1;
+    type Payload = EffortClaimDismissedV1;
+}
+
 /// `effort.decision_reviewed@1` (P7.C4): a reviewer confirmed or
 /// dismissed an inferred decision, or reopened one they had reviewed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -2044,6 +2069,7 @@ mod tests {
                 ("contribution.enabled", 1),
                 ("contribution.job.completed", 1),
                 ("effect.result", 4),
+                ("effort.claim_dismissed", 1),
                 ("effort.claim_verified", 1),
                 ("effort.closed", 2),
                 ("effort.decision_reviewed", 1),

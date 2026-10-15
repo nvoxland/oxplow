@@ -66,9 +66,8 @@ reacted to the turn's `thread.checkpoint`; a file two threads changed at
 once and neither claimed is observed by both, and changes between turns
 (the person's own) belong to no effort. Runs go to the effort of the tool
 call that caused them (`metric_capture.effort_id`). Nothing is declared or
-reconciled at close. A claimed file, a tool call and a reasoning claim
-carry the agent session that made them (`agent_session_id`; a claim lands
-on that session's own open turn), so two sessions on one thread are told
+reconciled at close. A claimed file and a tool call
+carry the agent session that made them (`agent_session_id`), so two sessions on one thread are told
 apart past the door. An observed file
 carries the session when exactly one session had a turn running in the
 turn's window, and is `shared` (no session) when more than one did or a
@@ -227,7 +226,7 @@ whole alternative review built that way.
 | Judgement | Where it lives | Knob |
 |---|---|---|
 | An effort's verdict (tests, diff coverage, claims, decisions) | oxplow-bundled `effort-verdict`, the `effort.verdict` replacement; core shows none | `oxplow.coverage.abs_pct` `warnAt`; replace the target |
-| A claim is backed (evidence, or a latest green run for `tests pass`) | oxplow-bundled `claim_status`; core `v_claim` keeps only what it cites | fork the model |
+| A claim is backed (a person verified it, it cites evidence, or a latest green run backs `tests pass`); a dismissed claim counts for nothing | oxplow-bundled `claim_status`; core `v_claim` keeps only what it cites and its `review` (NULL, `verified`, `dismissed`) | fork the model |
 | Struggle (a file edited 5+ times, 3+ failed shell commands) | oxplow-bundled `struggle` | `struggle.repeatedEdits`, `struggle.failedCommands` |
 | Per-effort test outcome and time to green | oxplow-foundation collector `oxplow.effort_test_outcome` | metric specs over its facts |
 | Look here first, co-change surprise, deviation, tests weakened | oxplow-bundled models and lenses | `changeInterest.*`, `coChange.*`; the rest fork |

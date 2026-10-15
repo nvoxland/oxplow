@@ -49,7 +49,7 @@ async fn ai_roles_and_providers_are_read_live_and_never_show_a_key() {
         )
         .await,
         vec![vec![
-            json!("oxplow-bundled/decisions"),
+            json!("oxplow-bundled/reasoning"),
             json!("oxplow-bundled"),
             json!("main")
         ]]

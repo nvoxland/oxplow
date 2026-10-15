@@ -831,15 +831,20 @@ async fn the_effort_review_example_reviews_evidence_and_can_be_cancelled() {
     .await;
 }
 
-/// oxplow-bundled's inferred decisions over a real oxplow: when an effort
-/// finishes, `infer-decisions` asks the `decisions` job on the person's
-/// `oxplow-bundled/decisions` binding, and `store-decisions` stores the
-/// model's proposals as the effort's inferred decisions, through core's
-/// command. With no model bound to the profile or to Main, nothing is
-/// asked and the effect's skip says where to bind one.
-async fn inferred_decisions_run(
+/// oxplow-bundled's inferred reasoning over a real oxplow: when an effort
+/// finishes, `infer-reasoning` asks the `reasoning` job on the person's
+/// `oxplow-bundled/reasoning` binding, and `store-reasoning` stores the
+/// model's proposals as the effort's inferred decisions and claims,
+/// through core's commands. With no model bound to the profile or to
+/// Main, nothing is asked and the effect's skip says where to bind one.
+/// Also returns the model, to read the requests it was asked.
+async fn inferred_reasoning_run(
     bound: bool,
-) -> (std::sync::Arc<oxplow_app::Services>, tempfile::TempDir) {
+) -> (
+    std::sync::Arc<oxplow_app::Services>,
+    tempfile::TempDir,
+    std::sync::Arc<oxplow_ai::fixture::FixtureModel>,
+) {
     use oxplow_app::ai_service::{ProviderConfig, Role, RoleBinding};
     use oxplow_app::exec_consent::{approve_every, ProgramKind};
     use serde_json::json;
@@ -851,12 +856,14 @@ async fn inferred_decisions_run(
         .await
         .unwrap();
     let svc = oxplow_app::Services::in_memory(root).await.unwrap();
+    let model = std::sync::Arc::new(oxplow_ai::fixture::FixtureModel::new(
+        serde_json::from_value::<Vec<oxplow_ai::fixture::FixtureReply>>(serde_json::json!([
+            "```json\n{\"decisions\": [{\"question\": \"Which CSV library?\", \"choice\": \"csv crate\", \"alternatives\": [\"hand-rolled\"], \"confidence\": \"medium\"}], \"claims\": [{\"statement\": \"The export tests pass.\", \"kind\": \"tests_pass\", \"evidence_ref\": \"run:12\"}]}\n```"
+        ]))
+        .unwrap(),
+    ));
     if bound {
-        let reply = "```json\n{\"decisions\": [{\"question\": \"Which CSV library?\", \"choice\": \"csv crate\", \"alternatives\": [\"hand-rolled\"], \"confidence\": \"medium\"}]}\n```";
-        let replies: Vec<oxplow_ai::fixture::FixtureReply> =
-            serde_json::from_value(json!([reply])).unwrap();
-        let model = std::sync::Arc::new(oxplow_ai::fixture::FixtureModel::new(replies));
-        svc.ai.providers().register_host(model);
+        svc.ai.providers().register_host(model.clone());
         svc.ai
             .save_provider(
                 ProviderConfig {
@@ -869,7 +876,7 @@ async fn inferred_decisions_run(
             .unwrap();
         svc.ai
             .set_role(
-                &Role::parse("oxplow-bundled/decisions").expect("a profile role"),
+                &Role::parse("oxplow-bundled/reasoning").expect("a profile role"),
                 Some(RoleBinding::new("fixture", "fixture")),
             )
             .unwrap();
@@ -922,19 +929,33 @@ async fn inferred_decisions_run(
         })
         .await
         .unwrap();
+    // …and said how it went in its turn's final answer.
+    svc.db
+        .transaction(|tx| {
+            tx.execute(
+                "INSERT INTO agent_turn (thread_id, prompt, answer, started_at, ended_at) \
+                 VALUES (1, 'Add CSV export', 'Added the export. The export tests pass (run:12).', \
+                         '2000-01-01T00:00:00Z', '2100-01-01T00:00:00Z')",
+                (),
+            )
+            .map_err(oxplow_db::map_sql_err)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
     as_person(
         &svc,
         "oxplow.effort.close",
         json!({ "effort": "effort:eff1" }),
     )
     .await;
-    (svc, dir)
+    (svc, dir, model)
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_bundled_extension_infers_an_efforts_decisions_on_its_profile() {
+async fn the_bundled_extension_infers_an_efforts_decisions_and_claims_on_its_profile() {
     use serde_json::json;
-    let (svc, _dir) = inferred_decisions_run(true).await;
+    let (svc, _dir, model) = inferred_reasoning_run(true).await;
     let stored = until_row(
         &svc,
         "SELECT question, choice, alternatives, confidence FROM v_decision \
@@ -950,12 +971,34 @@ async fn the_bundled_extension_infers_an_efforts_decisions_on_its_profile() {
             json!("medium")
         ]
     );
-    // The prompt carried what the agent did; the call was on the profile.
+    // The claims its answers made are stored as unreviewed ones, citing
+    // what the answer named.
+    let claim = until_row(
+        &svc,
+        "SELECT statement, kind, evidence_ref, review FROM v_claim WHERE effort_id = 1",
+    )
+    .await;
+    assert_eq!(
+        claim,
+        [
+            json!("The export tests pass."),
+            json!("tests_pass"),
+            json!("run:12"),
+            json!(null)
+        ]
+    );
+    // The prompt carried what the agent did, its final answer included;
+    // the call was on the profile.
     let calls = until_row(&svc, "SELECT role, count(*) FROM v_ai_call GROUP BY role").await;
-    assert_eq!(calls, [json!("oxplow-bundled/decisions"), json!(1)]);
+    assert_eq!(calls, [json!("oxplow-bundled/reasoning"), json!(1)]);
+    let asked = serde_json::to_string(&model.asked_typed()).unwrap();
+    assert!(
+        asked.contains("Agent: Added the export. The export tests pass (run:12)."),
+        "{asked}"
+    );
     let jobs = until_row(
         &svc,
-        "SELECT count(*) FROM v_job_run WHERE intent_key = 'decisions:effort:eff1'",
+        "SELECT count(*) FROM v_job_run WHERE intent_key = 'reasoning:effort:eff1'",
     )
     .await;
     assert_eq!(jobs, [json!(1)]);
@@ -963,13 +1006,13 @@ async fn the_bundled_extension_infers_an_efforts_decisions_on_its_profile() {
     // its unchanged request reads the recorded answer.
     as_person(
         &svc,
-        "oxplow.effort.infer_decisions",
+        "oxplow.effort.infer_reasoning",
         json!({ "effort": "effort:eff1", "again": true }),
     )
     .await;
     until_row(
         &svc,
-        "SELECT 1 FROM v_job_run WHERE intent_key = 'decisions:effort:eff1@2' AND state = 'succeeded'",
+        "SELECT 1 FROM v_job_run WHERE intent_key = 'reasoning:effort:eff1@2' AND state = 'succeeded'",
     )
     .await;
     let calls = until_row(&svc, "SELECT count(*) FROM v_ai_call").await;
@@ -977,17 +1020,17 @@ async fn the_bundled_extension_infers_an_efforts_decisions_on_its_profile() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn without_a_model_inferring_decisions_skips_and_says_where_to_bind_one() {
-    let (svc, _dir) = inferred_decisions_run(false).await;
+async fn without_a_model_inferring_reasoning_skips_and_says_where_to_bind_one() {
+    let (svc, _dir, _model) = inferred_reasoning_run(false).await;
     let skipped = until_row(
         &svc,
         "SELECT reason FROM v_effect_run \
-          WHERE effect = 'oxplow-bundled/infer-decisions' AND state = 'skipped'",
+          WHERE effect = 'oxplow-bundled/infer-reasoning' AND state = 'skipped'",
     )
     .await;
     let reason = skipped[0].as_str().unwrap();
     assert!(
-        reason.contains("oxplow-bundled/decisions") && reason.contains("Settings → AI"),
+        reason.contains("oxplow-bundled/reasoning") && reason.contains("Settings → AI"),
         "{reason}"
     );
     let jobs = svc

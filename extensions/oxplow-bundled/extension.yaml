@@ -39,27 +39,33 @@ intent:
     - name: repair-skips-without-a-work-list
       input: { effect: repair-disabled, event: { type: contribution.disabled } }
       expect: nothing filed when no work list is running
-    - name: infer-decisions-asks
-      input: { effect: infer-decisions, event: { type: effort.finished } }
-      expect: a finished effort's decisions are asked about when a model serves the decisions profile
-    - name: infer-decisions-skips-unbound
-      input: { effect: infer-decisions, event: { type: effort.finished } }
+    - name: infer-reasoning-asks
+      input: { effect: infer-reasoning, event: { type: effort.finished } }
+      expect: a finished effort's decisions and claims are asked about when a model serves the reasoning profile
+    - name: infer-reasoning-skips-unbound
+      input: { effect: infer-reasoning, event: { type: effort.finished } }
       expect: no model bound, nothing is asked and the skip says where to bind one
-    - name: infer-decisions-request
-      input: { command: oxplow.effort.infer_decisions }
-      expect: the effort's conversation, tool calls and recorded decisions become one decisions job keyed by the effort
-    - name: infer-decisions-nothing-to-read
-      input: { command: oxplow.effort.infer_decisions }
+    - name: infer-reasoning-request
+      input: { command: oxplow.effort.infer_reasoning }
+      expect: the effort's conversation (each turn's final answer included), tool calls and recorded decisions become one reasoning job keyed by the effort
+    - name: infer-reasoning-nothing-to-read
+      input: { command: oxplow.effort.infer_reasoning }
       expect: an effort with no turns or tool calls asks nothing
-    - name: decisions-asked
-      input: { job: decisions }
-      expect: the model's JSON proposals are the job's answer
-    - name: decisions-stored
-      input: { effect: store-decisions, event: { type: contribution.job.completed } }
-      expect: the job's proposals replace the effort's inferred decisions
-    - name: decisions-not-json
-      input: { effect: store-decisions, event: { type: contribution.job.completed } }
+    - name: reasoning-asked
+      input: { job: reasoning }
+      expect: the model's JSON proposals (decisions and claims) are the job's answer
+    - name: reasoning-stored
+      input: { effect: store-reasoning, event: { type: contribution.job.completed } }
+      expect: the job's proposals replace the effort's inferred decisions and its unreviewed claims
+    - name: reasoning-not-json
+      input: { effect: store-reasoning, event: { type: contribution.job.completed } }
       expect: a reply in prose is skipped, saying so
+    - name: reasoning-only-claims
+      input: { effect: store-reasoning, event: { type: contribution.job.completed } }
+      expect: a reply with one list still runs both writers, clearing the other's stale proposals
+    - name: reasoning-no-lists
+      input: { effect: store-reasoning, event: { type: contribution.job.completed } }
+      expect: a JSON object with neither list is skipped, saying so
 # oxplow's default work list and effort policy: built-ins of core's,
 # declared here so they are an extension's like any other. Disabled, both
 # fall to none. Snapshots can't be none: their default is core's own (it
@@ -325,9 +331,9 @@ models:
       - { name: subject, type: TEXT, doc: "The file path, or `shell` (failed shell commands, whatever the harness)." }
       - { name: count, type: "", doc: "How many edits / failures." }
   - name: claim_status
-    version: 1
+    version: 2
     key: [ref]
-    description: "Whether each of the agent's claims is backed, by this review policy's rule: it cites evidence (`v_claim.evidence_ref` — a run, a test, a file, or `reviewer` when a person verified it), or it is `tests_pass` and its effort's latest test run (`v_test_run`) passed with at least one test."
+    description: "Whether each of the agent's claims is backed, by this review policy's rule: it cites evidence (`v_claim.evidence_ref` — a run, a test, a file, or `reviewer` when a person verified it) or a person verified it (`v_claim.review`), or it is `tests_pass` and its effort's latest test run (`v_test_run`) passed with at least one test. A claim a person dismissed has no row: it counts neither as backed nor as unbacked."
     columns:
       - { name: ref, type: TEXT, doc: "The claim (`v_claim.ref`)." }
       - { name: effort_id, type: INTEGER, doc: "Its effort (v_effort.id), if one was open." }
@@ -385,19 +391,21 @@ event_types:
       v: 1
       schema: event_types/finished_cleared.v1.json
       summary: A person cleared a thread's Finished list in the Work panel. Subject — the thread.
-# Inferred decisions: when an effort finishes, a model reads what the agent
-# did and proposes the forks it resolved without recording them. They land
-# as the effort's inferred decisions (core's
-# `oxplow.effort.replace_inferred_decisions`), for a person to confirm or
-# dismiss on the review page; the agent never sees them. The model is the
-# person's `oxplow-bundled/decisions` binding, else their Main model.
+# Inferred reasoning: when an effort finishes, a model reads what the agent
+# did, in one call, and proposes the forks it resolved without recording
+# them and the claims its answers made about its work. They land as the
+# effort's inferred decisions and claims (core's
+# `oxplow.effort.replace_inferred_decisions` and `…replace_inferred_claims`),
+# for a person to confirm, verify or dismiss on the review page; the agent
+# never sees them. The model is the person's `oxplow-bundled/reasoning`
+# binding, else their Main model.
 ai_profiles:
-  - id: decisions
-    description: Finds the forks a coding agent resolved during an effort without recording them.
+  - id: reasoning
+    description: Finds the forks a coding agent resolved without recording them and the claims its answers made about its work.
     fallback: main
 jobs:
-  - id: decisions
-    description: Read what the agent did during one effort and propose the decisions it made without recording them.
+  - id: reasoning
+    description: Read what the agent did during one effort and propose the decisions it made without recording them and the claims its answers made.
     version: 1
     operation: ai.complete_typed
     needs: [ai.compute]
@@ -416,16 +424,16 @@ effects:
     on: [contribution.disabled]
     entry: effects/repair_disabled.star
     needs: [sql.read]
-  - id: infer-decisions
-    summary: When an effort finishes, ask a model which decisions the agent made without recording them (skipped while no model serves the decisions profile).
+  - id: infer-reasoning
+    summary: When an effort finishes, ask a model which decisions the agent made without recording them and which claims its answers made (skipped while no model serves the reasoning profile).
     on: [effort.finished]
-    entry: effects/infer_decisions.star
+    entry: effects/infer_reasoning.star
     needs: [ai.discover]
-  - id: store-decisions
-    summary: When a decisions job ends, its proposals replace the effort's inferred decisions.
+  - id: store-reasoning
+    summary: When a reasoning job ends, its proposals replace the effort's inferred decisions and its unreviewed claims.
     on: [contribution.job.completed]
-    where: { job: "job:oxplow-bundled/decisions" }
-    entry: effects/store_decisions.star
+    where: { job: "job:oxplow-bundled/reasoning" }
+    entry: effects/store_reasoning.star
     needs: [jobs.read]
 commands:
   # This extension's review-policy settings (`configuration:` above), through
@@ -442,28 +450,28 @@ commands:
     scope: extension_config.write
     op: compare_exchange
     invokers: { human: true, agent: false, lens: true }
-  # The decisions job's lifecycle, through the host's jobs scope.
-  - name: decisions.ask
-    summary: Ask a model for one effort's unrecorded decisions; returns the job. The intent key `decisions:<effort ref>` makes it one job per effort.
+  # The reasoning job's lifecycle, through the host's jobs scope.
+  - name: reasoning.ask
+    summary: Ask a model for one effort's unrecorded decisions and the claims its answers made; returns the job. The intent key `reasoning:<effort ref>` makes it one job per effort.
     scope: jobs.write
     op: enqueue
     invokers: { human: true, agent: true, lens: true }
-    example: {"job": "decisions", "intentKey": "decisions:effort:eff3", "request": {"schemaVersion": 1, "role": "decisions", "messages": [{"role": "user", "parts": [{"type": "text", "text": "Work item: Add CSV export"}]}]}}
-  - name: decisions.status
-    summary: A decisions job's state and, once it ends, its answer.
+    example: {"job": "reasoning", "intentKey": "reasoning:effort:eff3", "request": {"schemaVersion": 1, "role": "reasoning", "messages": [{"role": "user", "parts": [{"type": "text", "text": "Work item: Add CSV export"}]}]}}
+  - name: reasoning.status
+    summary: A reasoning job's state and, once it ends, its answer.
     scope: jobs.read
     op: snapshot
     invokers: { human: true, agent: true, lens: true }
     example: {"job_run": "job_run:12"}
-  - name: decisions.cancel
-    summary: Stop a decisions job.
+  - name: reasoning.cancel
+    summary: Stop a reasoning job.
     scope: jobs.write
     op: cancel
     invokers: { human: true, agent: true, lens: true }
     example: {"job_run": "job_run:12"}
-  - name: effort.infer_decisions
-    summary: Ask a model which decisions the agent made during one effort without recording them; they appear under Decisions Oxplow Noticed for review. One job per effort, unless `again`.
-    entry: handlers/infer_decisions.star
+  - name: effort.infer_reasoning
+    summary: Ask a model which decisions the agent made during one effort without recording them, and which claims its answers made about its work; they appear under Decisions Oxplow Noticed and the effort's claims for review. One job per effort, unless `again`.
+    entry: handlers/infer_reasoning.star
     needs: [sql.read]
     access: record
     input_schema:
@@ -476,7 +484,7 @@ commands:
     invokers: { human: true, agent: true, lens: true }
     example: {"effort": "effort:eff3"}
   - name: review.accept
-    summary: Accept an effort's work — comment the review on its work item and mark it done. Refuses while a claim is unverified or an inferred decision unreviewed, unless forced.
+    summary: Accept an effort's work — comment the review on its work item and mark it done. Refuses while a claim is unverified (a dismissed one doesn't count) or an inferred decision unreviewed, unless forced.
     input_schema:
       type: object
       required: [ref]

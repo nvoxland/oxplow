@@ -1,12 +1,12 @@
 # No model is bound to the profile or to Main: nothing is asked, and the
 # skip says where to bind one.
 input:
-  effect: infer-decisions
+  effect: infer-reasoning
   event:
     type: effort.finished
     payload: { effort: "effort:eff7", end_snapshot: "snapshot:3" }
   answers:
     ai.discover:
-      - { role: oxplow-bundled/decisions, model: null, problem: "no model is assigned to the `main` role" }
+      - { role: oxplow-bundled/reasoning, model: null, problem: "no model is assigned to the `main` role" }
 expect:
   skip: Settings → AI

@@ -6683,10 +6683,10 @@ commands:
             [
                 "oxplow.review_policy.read",
                 "oxplow.review_policy.write",
-                "oxplow.decisions.ask",
-                "oxplow.decisions.status",
-                "oxplow.decisions.cancel",
-                "oxplow.effort.infer_decisions",
+                "oxplow.reasoning.ask",
+                "oxplow.reasoning.status",
+                "oxplow.reasoning.cancel",
+                "oxplow.effort.infer_reasoning",
                 "oxplow.review.accept",
                 "oxplow.review.request_changes",
                 "oxplow.work.clear_finished"
@@ -6726,8 +6726,8 @@ commands:
             [
                 "verify-unchecked",
                 "repair-disabled",
-                "infer-decisions",
-                "store-decisions"
+                "infer-reasoning",
+                "store-reasoning"
             ]
         );
         assert!(b

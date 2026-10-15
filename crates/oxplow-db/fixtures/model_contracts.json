@@ -1798,6 +1798,71 @@
         }
       ],
       "key": []
+    },
+    "7": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Claim id."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread it was made in."
+        },
+        {
+          "name": "work_item",
+          "type": "TEXT",
+          "doc": "The work item it was made on (`work_item:<provider>:<id>`), if any."
+        },
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "Effort, if one was open."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "Turn it happened in (v_agent_turn.id), when known."
+        },
+        {
+          "name": "agent_session_id",
+          "type": "INTEGER",
+          "doc": "The agent session that made it (v_agent_session.id); NULL when not recorded. (v4)"
+        },
+        {
+          "name": "statement",
+          "type": "TEXT",
+          "doc": "The claim in words."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`tests_pass`, `no_behavior_change`, `handles_case` or `other`."
+        },
+        {
+          "name": "evidence_ref",
+          "type": "TEXT",
+          "doc": "What it cites (`run:<id>`, a test, a file, or `reviewer` when a person verified it with `oxplow.effort.verify_claim`); NULL if nothing was cited. Whether anything else backs it is a review policy's call (oxplow-bundled's `v_oxplow_bundled_claim_status`). (v6)"
+        },
+        {
+          "name": "review",
+          "type": "TEXT",
+          "doc": "A reviewer's verdict: `verified` (`oxplow.effort.verify_claim`, with what backs it in `evidence_ref`) or `dismissed` (the agent didn't claim it, or didn't mean it: `oxplow.effort.dismiss_claim`); NULL while unreviewed. Reading the effort again replaces only unreviewed claims. (v7)"
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`claim:<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v5)"
+        }
+      ],
+      "key": []
     }
   },
   "code_quality_finding": {

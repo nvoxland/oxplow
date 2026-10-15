@@ -82,16 +82,19 @@ something its model is restricted from.
 
 ## What oxplow uses them for
 
-- **Decisions Oxplow Noticed.** When an effort closes, a model reads that
-  effort's conversation and tool calls and lists decisions the agent made
-  without recording them. They show on the effort's review, next to the
-  decisions the agent did record. They're guesses, and your agent never
-  sees them. The model is the one you bind to `oxplow-bundled/decisions`
-  in Settings → AI, or your `main` model until you do. Nothing runs until
-  one of them has a model, and you approve its programs first (Settings →
-  Data → Programs: the `decisions` job and the `infer-decisions` and
-  `store-decisions` effects). **Infer Again** on the list asks once more,
-  say after you bind another model.
+- **Decisions and claims Oxplow noticed.** When an effort closes, a model
+  reads that effort's conversation, final answers and tool calls. It lists
+  decisions the agent made without recording them, and the claims its
+  answers made about its work ("the tests pass", "no behavior change").
+  They show on the effort's review, next to the decisions the agent did
+  record; you confirm or dismiss a decision, and verify or dismiss a
+  claim. They're guesses, and your agent never sees them. The model is the
+  one you bind to `oxplow-bundled/reasoning` in Settings → AI, or your
+  `main` model until you do. Nothing runs until one of them has a model,
+  and you approve its programs first (Settings → Data → Programs: the
+  `reasoning` job and the `infer-reasoning` and `store-reasoning`
+  effects). **Infer Again** on the list asks once more, say after you bind
+  another model.
 
 ## What your agent can do
 

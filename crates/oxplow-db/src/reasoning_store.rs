@@ -137,9 +137,9 @@ pub fn record_decision_tx(
     Ok(conn.last_insert_rowid())
 }
 
-/// Record a claim about the agent's work, in the caller's transaction (the
-/// `oxplow.effort.record_claim` command).
-pub fn record_claim_tx(conn: &rusqlite::Connection, c: &NewClaim) -> Result<i64, DomainError> {
+/// Insert a claim about the agent's work, in the caller's transaction: what
+/// a model read in an effort's answers (`replace_inferred_claims_tx`).
+pub fn insert_claim_tx(conn: &rusqlite::Connection, c: &NewClaim) -> Result<i64, DomainError> {
     if !["tests_pass", "no_behavior_change", "handles_case", "other"].contains(&c.kind.as_str()) {
         return Err(DomainError::Invalid(format!(
             "claim kind `{}` must be tests_pass, no_behavior_change, handles_case or other",
@@ -150,14 +150,31 @@ pub fn record_claim_tx(conn: &rusqlite::Connection, c: &NewClaim) -> Result<i64,
         return Err(DomainError::Invalid("a claim needs a statement".into()));
     }
     conn.execute(
-        "INSERT INTO claim (thread_id, work_item, effort_id, statement, kind, evidence_ref, created_at, agent_session_id, turn_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, (SELECT id FROM agent_turn
-            WHERE thread_id = ?1 AND ended_at IS NULL AND agent_session_id IS ?8
-            ORDER BY started_at DESC, id DESC LIMIT 1))",
+        "INSERT INTO claim (thread_id, work_item, effort_id, statement, kind, evidence_ref, created_at, agent_session_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         rusqlite::params![c.thread_id, c.work_item, c.effort_id, c.statement, c.kind, c.evidence_ref, now_string(), c.agent_session_id],
     )
     .map_err(map_sql_err)?;
     Ok(conn.last_insert_rowid())
+}
+
+/// Replace effort `effort`'s claims with `claims`, in the caller's
+/// transaction: the ones a reviewer verified or dismissed (`review`) stay.
+/// Returns how many it stored.
+pub fn replace_inferred_claims_tx(
+    conn: &rusqlite::Connection,
+    effort: i64,
+    claims: &[NewClaim],
+) -> Result<usize, DomainError> {
+    conn.execute(
+        "DELETE FROM claim WHERE effort_id = ?1 AND review IS NULL",
+        [effort],
+    )
+    .map_err(map_sql_err)?;
+    for claim in claims {
+        insert_claim_tx(conn, claim)?;
+    }
+    Ok(claims.len())
 }
 
 /// The cores, run on the store's own database — for this module's tests.
@@ -169,8 +186,8 @@ impl SqliteReasoningStore {
             .await
     }
 
-    async fn record_claim(&self, c: NewClaim) -> Result<i64, DomainError> {
-        self.db.transaction(move |tx| record_claim_tx(tx, &c)).await
+    async fn insert_claim(&self, c: NewClaim) -> Result<i64, DomainError> {
+        self.db.transaction(move |tx| insert_claim_tx(tx, &c)).await
     }
 }
 
@@ -268,7 +285,7 @@ mod tests {
             "{err:?}"
         );
         let err = store
-            .record_claim(NewClaim {
+            .insert_claim(NewClaim {
                 thread_id: 1,
                 work_item: None,
                 effort_id: None,
@@ -282,46 +299,6 @@ mod tests {
         assert!(
             matches!(err, DomainError::Invalid(ref m) if m.contains("kind")),
             "{err:?}"
-        );
-    }
-
-    /// Two sessions on one thread, each with an open turn: a claim lands on
-    /// the acting session's turn and carries the session, not the thread's
-    /// newest turn.
-    #[tokio::test]
-    async fn a_claim_lands_on_the_acting_sessions_turn() {
-        let (db, store, sl) = seeded().await;
-        db.call(|c| {
-            c.execute_batch(
-                "INSERT INTO agent_session (id, thread_id, kind, harness, opened_at, updated_at) VALUES (1, 1, 'terminal', 'claude', '2026-01-03T00:00:00Z', '2026-01-03T00:00:00Z'), (2, 1, 'terminal', 'claude', '2026-01-03T00:00:00Z', '2026-01-03T00:00:00Z');
-                 INSERT INTO agent_turn (id, thread_id, agent_session_id, prompt, started_at) VALUES (10, 1, 1, 'a', '2026-01-03T00:00:01Z'), (11, 1, 2, 'b', '2026-01-03T00:00:02Z');",
-            )
-        })
-        .await
-        .unwrap();
-        let claim = |session| NewClaim {
-            thread_id: 1,
-            work_item: None,
-            effort_id: Some(2),
-            statement: "s".into(),
-            kind: "other".into(),
-            evidence_ref: None,
-            agent_session_id: Some(session),
-        };
-        store.record_claim(claim(1)).await.unwrap();
-        store.record_claim(claim(2)).await.unwrap();
-        let rows = sl
-            .query_sql(
-                "SELECT agent_session_id, turn_id FROM v_claim ORDER BY id",
-                vec![],
-                None,
-            )
-            .await
-            .unwrap()
-            .rows;
-        assert_eq!(
-            serde_json::to_value(rows).unwrap(),
-            json!([[1, 10], [2, 11]])
         );
     }
 

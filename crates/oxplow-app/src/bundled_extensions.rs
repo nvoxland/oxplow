@@ -91,8 +91,8 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-bundled", "commands/work-next.md"),
             ext_file!("oxplow-bundled", "effects/verify_unchecked.star"),
             ext_file!("oxplow-bundled", "effects/repair_disabled.star"),
-            ext_file!("oxplow-bundled", "effects/infer_decisions.star"),
-            ext_file!("oxplow-bundled", "effects/store_decisions.star"),
+            ext_file!("oxplow-bundled", "effects/infer_reasoning.star"),
+            ext_file!("oxplow-bundled", "effects/store_reasoning.star"),
             ext_file!("oxplow-bundled", "event_types/accepted.v1.json"),
             ext_file!("oxplow-bundled", "event_types/changes_requested.v1.json"),
             ext_file!("oxplow-bundled", "event_types/finished_cleared.v1.json"),
@@ -101,18 +101,20 @@ pub const BUNDLED: &[BundledExtension] = &[
                 "oxplow-bundled",
                 "fixtures/extension runs over the last week.yaml"
             ),
-            ext_file!("oxplow-bundled", "fixtures/decisions-asked.yaml"),
-            ext_file!("oxplow-bundled", "fixtures/decisions-not-json.yaml"),
-            ext_file!("oxplow-bundled", "fixtures/decisions-stored.yaml"),
-            ext_file!("oxplow-bundled", "fixtures/infer-decisions-asks.yaml"),
+            ext_file!("oxplow-bundled", "fixtures/reasoning-asked.yaml"),
+            ext_file!("oxplow-bundled", "fixtures/reasoning-no-lists.yaml"),
+            ext_file!("oxplow-bundled", "fixtures/reasoning-not-json.yaml"),
+            ext_file!("oxplow-bundled", "fixtures/reasoning-only-claims.yaml"),
+            ext_file!("oxplow-bundled", "fixtures/reasoning-stored.yaml"),
+            ext_file!("oxplow-bundled", "fixtures/infer-reasoning-asks.yaml"),
             ext_file!(
                 "oxplow-bundled",
-                "fixtures/infer-decisions-nothing-to-read.yaml"
+                "fixtures/infer-reasoning-nothing-to-read.yaml"
             ),
-            ext_file!("oxplow-bundled", "fixtures/infer-decisions-request.yaml"),
+            ext_file!("oxplow-bundled", "fixtures/infer-reasoning-request.yaml"),
             ext_file!(
                 "oxplow-bundled",
-                "fixtures/infer-decisions-skips-unbound.yaml"
+                "fixtures/infer-reasoning-skips-unbound.yaml"
             ),
             ext_file!("oxplow-bundled", "fixtures/repair-files-an-item.yaml"),
             ext_file!(
@@ -125,7 +127,7 @@ pub const BUNDLED: &[BundledExtension] = &[
             ),
             ext_file!("oxplow-bundled", "handlers/accept.star"),
             ext_file!("oxplow-bundled", "handlers/clear_finished.star"),
-            ext_file!("oxplow-bundled", "handlers/infer_decisions.star"),
+            ext_file!("oxplow-bundled", "handlers/infer_reasoning.star"),
             ext_file!("oxplow-bundled", "handlers/request_changes.star"),
             ext_file!("oxplow-bundled", "lenses/agent-interface.yaml"),
             ext_file!("oxplow-bundled", "lenses/backlog-tasks.yaml"),
@@ -425,7 +427,7 @@ mod tests {
         };
         f.svc
             .db
-            .transaction(move |tx| oxplow_db::record_claim_tx(tx, &claim))
+            .transaction(move |tx| oxplow_db::insert_claim_tx(tx, &claim))
             .await
             .unwrap();
     }
@@ -564,6 +566,59 @@ mod tests {
                 ["handles_case", broke, 1, "evidence"],
                 ["no_behavior_change", fixed, 0, null],
             ])
+        );
+    }
+
+    /// A reviewer's verdict on a claim moves it in the review policy: a
+    /// verified one is backed (even one that cites nothing), and a
+    /// dismissed one counts for nothing: neither unbacked nor backed, so it
+    /// is not in `claim_status` at all.
+    #[tokio::test]
+    async fn claim_status_counts_verified_claims_and_leaves_out_dismissed_ones() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let effort = f.effort.value();
+        for kind in ["handles_case", "no_behavior_change", "other"] {
+            record_claim(&f, effort, kind, None).await;
+        }
+        // The first is verified (no evidence cited), the second dismissed.
+        f.svc
+            .db
+            .transaction(|c| {
+                c.execute(
+                    "UPDATE claim SET review = CASE kind WHEN 'handles_case' THEN 'verified' \
+                     WHEN 'no_behavior_change' THEN 'dismissed' END",
+                    (),
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let out = f
+            .svc
+            .sql
+            .query_sql(
+                "SELECT c.kind, s.verified, s.backed_by
+                 FROM v_claim c LEFT JOIN v_oxplow_bundled_claim_status s ON s.ref = c.ref
+                 ORDER BY c.id",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&out.rows).unwrap(),
+            serde_json::json!([
+                ["handles_case", 1, "evidence"],
+                ["no_behavior_change", null, null],
+                ["other", 0, null],
+            ])
+        );
+        // The verdict counts only the one still unverified.
+        let verdict = run_analytics_lens(&f, "effort-verdict", "effort_id", effort).await;
+        assert!(
+            verdict.to_string().contains("1 unverified claim"),
+            "{verdict}"
         );
     }
 
@@ -1354,7 +1409,7 @@ mod tests {
             "Fix the hover state",
             "Buttons flicker on hover.",
             "- `src/ui/button.ts` (updated)",
-            "No claims were recorded.",
+            "No claims were found.",
             "No decisions were recorded.",
         ] {
             assert!(
@@ -1420,7 +1475,7 @@ mod tests {
         for (statement, evidence) in [("tests pass", None), ("handles empty", Some("test:empty"))] {
             store
                 .transaction(move |tx| {
-                    oxplow_db::record_claim_tx(
+                    oxplow_db::insert_claim_tx(
                         tx,
                         &oxplow_db::NewClaim {
                             thread_id: thread,
@@ -2261,7 +2316,7 @@ mod tests {
         f.svc
             .db
             .transaction(move |tx| {
-                oxplow_db::record_claim_tx(
+                oxplow_db::insert_claim_tx(
                     tx,
                     &oxplow_db::NewClaim {
                         thread_id: thread.value(),
@@ -2497,6 +2552,56 @@ mod tests {
             task_notes(&f).await,
             vec![format!("Review accepted ({}).", effort_ref(&f))]
         );
+    }
+
+    /// A dismissed claim doesn't count: with it dismissed and the decision
+    /// confirmed, accept needs no force, and reopening it brings the
+    /// refusal back.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_dismissed_claim_does_not_hold_up_accept_until_reopened() {
+        let f = review_fixture().await;
+        let human = oxplow_domain::Actor::Human;
+        let ids: (i64, i64) = f
+            .svc
+            .db
+            .read(|c| {
+                c.query_row(
+                    "SELECT (SELECT max(id) FROM claim), (SELECT max(id) FROM decision)",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let claim = serde_json::json!({ "claim": format!("claim:{}", ids.0) });
+        review(
+            &f,
+            &human,
+            "oxplow.effort.confirm_decision",
+            serde_json::json!({ "decision": format!("decision:{}", ids.1) }),
+        )
+        .await
+        .unwrap();
+        review(&f, &human, "oxplow.effort.dismiss_claim", claim.clone())
+            .await
+            .unwrap();
+        // Reopened, it is unverified again.
+        review(&f, &human, "oxplow.effort.reopen_claim", claim.clone())
+            .await
+            .unwrap();
+        let accept = serde_json::json!({ "ref": effort_ref(&f) });
+        let err = review(&f, &human, "oxplow.review.accept", accept.clone())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("1 unverified claim"), "{err}");
+        review(&f, &human, "oxplow.effort.dismiss_claim", claim)
+            .await
+            .unwrap();
+        review(&f, &human, "oxplow.review.accept", accept)
+            .await
+            .unwrap();
+        assert_eq!(task_status(&f).await, "done");
     }
 
     /// A shipped effect or collector that reacts to a type with more than
@@ -3031,7 +3136,7 @@ mod tests {
         f.svc
             .db
             .transaction(move |tx| {
-                oxplow_db::record_claim_tx(
+                oxplow_db::insert_claim_tx(
                     tx,
                     &oxplow_db::NewClaim {
                         thread_id: thread.value(),
@@ -3168,7 +3273,7 @@ mod tests {
             f.svc
                 .db
                 .transaction(move |tx| {
-                    oxplow_db::record_claim_tx(
+                    oxplow_db::insert_claim_tx(
                         tx,
                         &oxplow_db::NewClaim {
                             thread_id: thread.value(),
@@ -3207,7 +3312,8 @@ mod tests {
     }
 
     /// The packet's rows carry their reviews: Mark Verified on an
-    /// unverified claim; Confirm and Dismiss on an inferred decision.
+    /// unverified claim, with Dismiss and Reopen beside it; Confirm and
+    /// Dismiss on an inferred decision.
     #[test]
     fn the_review_lenses_declare_their_row_actions() {
         let exts = crate::extensions::load_extensions(std::path::Path::new("/nonexistent"));
@@ -3225,10 +3331,20 @@ mod tests {
         };
         assert_eq!(
             actions("unverified-claims"),
-            vec![(
-                "Mark Verified".to_string(),
-                "oxplow.effort.verify_claim".to_string()
-            )]
+            vec![
+                (
+                    "Mark Verified".to_string(),
+                    "oxplow.effort.verify_claim".to_string()
+                ),
+                (
+                    "Dismiss".to_string(),
+                    "oxplow.effort.dismiss_claim".to_string()
+                ),
+                (
+                    "Reopen".to_string(),
+                    "oxplow.effort.reopen_claim".to_string()
+                ),
+            ]
         );
         assert_eq!(
             actions("inferred-decisions"),

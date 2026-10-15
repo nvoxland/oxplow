@@ -1,0 +1,14 @@
+# A reply with only the claims list still runs both writers: the missing
+# decisions list clears the stale inferred decisions.
+input:
+  effect: store-reasoning
+  event:
+    type: contribution.job.completed
+    payload: { job_run: "job_run:01990000-0000-7000-8000-000000000000", job: "job:oxplow-bundled/reasoning", version: 1, attempt: 1, fence: 1, outcome: succeeded }
+  answers:
+    jobs.read:
+      - intentKey: "reasoning:effort:eff3@2"
+        result:
+          parts: [{ type: text, text: '{"claims": []}' }]
+expect:
+  commands: [oxplow.effort.replace_inferred_decisions, oxplow.effort.replace_inferred_claims]

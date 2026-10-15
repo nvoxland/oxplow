@@ -94,8 +94,8 @@ fn the_core_kinds_are_registered_and_validate_ids() {
     // or ref kind.
     for ok in [
         "job:effort-review/review",
-        "effect:oxplow-bundled/store-decisions",
-        "ai_profile:oxplow-bundled/decisions",
+        "effect:oxplow-bundled/store-reasoning",
+        "ai_profile:oxplow-bundled/reasoning",
         "collector:triage/todos",
         "collector:project/repo.scan_clone",
         "lens:acme/blocked?stream_id=2",

@@ -34,10 +34,13 @@ materialized ones refilled), and the advisory reads it on its next run.
 
 ## What it reads
 
-- `v_claim` — what the agent said about its work, and what it cites.
+- `v_claim` — what the agent's answers said about its work, as a model
+  read them when the effort finished (nothing the agent records), what
+  each cites, and a reviewer's `review` (`verified`, `dismissed`, or NULL).
   `v_oxplow_bundled_claim_status` (this extension's model) says whether
-  something backs it: `verified = 0` means no `evidence_ref`, and for a
-  `tests_pass` claim no passing latest test run in the effort.
+  something backs it: `verified = 0` means no `evidence_ref`, no person's
+  verification, and for a `tests_pass` claim no passing latest test run in
+  the effort. A dismissed claim has no row there: it counts for nothing.
 - `v_decision` — the forks the agent resolved. `provenance = 'inferred'`
   rows are a model's guesses from the conversation, until a person
   confirms or dismisses them (below, "Decisions Oxplow Noticed").
@@ -53,7 +56,8 @@ On an effort's page, **Commands**:
 
 - **Accept Review** (`oxplow.review.accept { ref, force? }`) comments the
   review on the effort's work item and marks it done. It refuses while a
-  claim is unverified or an inferred decision unreviewed; `force` accepts
+  claim is unverified (a dismissed one doesn't count) or an inferred
+  decision unreviewed; `force` accepts
   anyway and lists them in the comment.
 - **Request Changes** (`oxplow.review.request_changes { ref, note? }`)
   comments a checklist — each unverified claim, each inferred decision,
@@ -78,7 +82,9 @@ stays — and can't be undone from oxplow. An effort with no work item is
 refused.
 
 On the packet's rows: **Mark Verified** on an unverified claim
-(`oxplow.effort.verify_claim`), **Confirm** / **Dismiss** on an inferred
+(`oxplow.effort.verify_claim`), **Dismiss** for a claim the agent didn't
+make or didn't mean (`oxplow.effort.dismiss_claim`; it stops counting) and
+**Reopen** to take that back (`oxplow.effort.reopen_claim`), **Confirm** / **Dismiss** on an inferred
 decision (`oxplow.effort.confirm_decision`, `oxplow.effort.dismiss_decision`), and the
 Verify a Claim With Evidence form for citing a test run or a file.
 
@@ -88,19 +94,23 @@ decisions. Ask the person to.
 
 ## Decisions Oxplow Noticed
 
-When an effort finishes, the `infer-decisions` effect asks a model which
-decisions the agent made without recording them. `effort.infer_decisions`
-digests the effort — its conversation, tool calls and the decisions it
-did record — into one prompt for the `decisions` job, and the
-`store-decisions` effect stores the reply as the effort's inferred
-decisions through oxplow's `oxplow.effort.replace_inferred_decisions`.
+When an effort finishes, the `infer-reasoning` effect asks a model which
+decisions the agent made without recording them and which claims its
+answers made about its work. `effort.infer_reasoning` digests the effort
+— its conversation (each turn's prompt and final answer), tool calls and
+the decisions it did record — into one prompt for the `reasoning` job,
+and the `store-reasoning` effect stores the reply as the effort's
+inferred decisions and claims through oxplow's
+`oxplow.effort.replace_inferred_decisions` and
+`oxplow.effort.replace_inferred_claims` (the latter replaces only claims
+no reviewer has acted on).
 
-- **The model** is the person's binding of `oxplow-bundled/decisions` in
+- **The model** is the person's binding of `oxplow-bundled/reasoning` in
   Settings → AI, else their Main model. With neither, nothing is asked:
   the effect skips and says where to bind one.
-- **Approve** the job `decisions` and the effects `infer-decisions` and
-  `store-decisions` (Settings → Data → Programs) before anything runs.
-- **Infer Again** on the list (`effort.infer_decisions { again: true }`)
+- **Approve** the job `reasoning` and the effects `infer-reasoning` and
+  `store-reasoning` (Settings → Data → Programs) before anything runs.
+- **Infer Again** on the list (`effort.infer_reasoning { again: true }`)
   asks once more, e.g. after binding another model; an unchanged prompt
   on the same model reads the answer it already has.
 - A reply that isn't the JSON asked for is skipped, saying so.

@@ -952,10 +952,16 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   - Decisions Made (`v_decision`, `provenance = 'recorded'`)
   - Decisions Oxplow Noticed (`v_decision`, `provenance = 'inferred'`)
   - Unverified Claims (`v_claim` whose `v_oxplow_bundled_claim_status`
-    says `verified = 0`: it cites nothing, and for a `tests_pass` claim
-    its effort's latest test run didn't pass with at least one test —
-    the bundled policy's rule; core keeps only what a claim cites), each row with
-    **Mark Verified** (`oxplow.effort.verify_claim`)
+    says `verified = 0`: it cites nothing and no person verified it, and
+    for a `tests_pass` claim its effort's latest test run didn't pass
+    with at least one test — the bundled policy's rule; core keeps only
+    what a claim cites and its `review`; a model reads the claims from
+    the agent's answers, nothing records them), plus the dismissed ones
+    (which count for nothing, shown so they can be reopened), each row
+    with its review state and **Mark Verified**
+    (`oxplow.effort.verify_claim`), **Dismiss**
+    (`oxplow.effort.dismiss_claim`) and **Reopen**
+    (`oxplow.effort.reopen_claim`)
   - Decisions Oxplow Noticed's rows carry **Confirm** / **Dismiss**
     (`oxplow.effort.confirm_decision` / `oxplow.effort.dismiss_decision`)
   - What Deviated (its own model `v_oxplow_bundled_deviation`: each
@@ -983,7 +989,8 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   effort's page under **Commands** (their `ui.about: effort`):
   `oxplow.review.accept { ref, force? }` comments the review on the
   effort's work item then transitions it to `done`, refusing (`{ refuse }`)
-  while a claim is unverified or an inferred decision unreviewed unless
+  while a claim is unverified (a dismissed one doesn't count) or an
+  inferred decision unreviewed unless
   `force` (then it lists them in the comment);
   `oxplow.review.request_changes { ref, note? }` comments a checklist —
   each unverified claim, inferred decision, file outside the area, and
@@ -4076,7 +4083,7 @@ What moves out of core, and what it becomes:
 | Local history dashboard | stays core (snapshots are substrate); the `recent-snapshots` lens in `review` covers the at-a-glance view |
 | Effort metrics block, effort coverage page, tests-run and nudge blocks | **done:** `effort.review.details` slot lenses `effort-tests` (grid: coverage, untested files, test runs, failed tests, analysis findings), `effort-metric-deltas`, `effort-nudges` |
 | Rail panels: Comments, Work, Uncommitted, Go To | **done:** Go To (`go-to`, the thread's bookmarks then its recent or most visited pages through the `mode` choice param, `go-to-bookmarks` collapsed — needing bookmarks as project data (`v_bookmark`), lens param `options` and page-kind icons; the rail has no core panels left); Comments (`comments`, a panel `open`ing the inbox) and Work (`work` grouped over the `thread_work` model, which also lists the thread's unlinked efforts — open under In progress, closed under Finished, whose header opens the `thread-activity` lens of the thread's turns by effort — `work-line` collapsed, `work-count`, the `clear_finished` command + `finished_cleared` model); and Uncommitted (`uncommitted`, a tree over the working change's stage-one file list, which change analysis now keeps current on every move). Only the UI moves: stores, commands and views stay core. What Work needed and lenses lacked became general features, listed under "Added for extraction" — the pattern for any panel an extension builds |
-| The effort-close inference of unrecorded decisions (the `effort.decisions` reactor) | **done:** the AI profile `decisions` (fallback `main`), the job `decisions`, the command `oxplow.effort.infer_decisions` and the effects `infer-decisions` / `store-decisions`, writing through core's `oxplow.effort.replace_inferred_decisions`; review and storage stay core ([ai-providers.md](./ai-providers.md) "Inferred decisions") |
+| The effort-close inference of unrecorded decisions and of the claims an agent's answers made (the `effort.decisions` reactor) | **done:** the AI profile `reasoning` (fallback `main`), the job `reasoning`, the command `oxplow.effort.infer_reasoning` and the effects `infer-reasoning` / `store-reasoning`, writing through core's `oxplow.effort.replace_inferred_decisions` and `oxplow.effort.replace_inferred_claims`; review and storage stay core ([ai-providers.md](./ai-providers.md) "Inferred reasoning") |
 
 **Owns what reads tables (P7.B5).** Derived data computed only from
 core's rows is the extension's, as SQL: the "look here first" score is
