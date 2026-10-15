@@ -531,6 +531,10 @@ pub struct SiteSearchParams {
 pub struct GetSkillParams {
     /// Skill name, e.g. `oxplow-extension`.
     pub name: String,
+    /// One of its reference files, by name (the skill names them as
+    /// `references/<name>.md`); absent, the skill's `SKILL.md`.
+    #[serde(default)]
+    pub reference: Option<String>,
 }
 
 #[tool_router]
@@ -544,20 +548,36 @@ impl OxplowMcp {
 
     #[tool(
         description = "Read one of oxplow's skills (its SKILL.md): how to do a kind of oxplow \
-                       work, e.g. `oxplow-extension` for building lenses. For agents that don't \
-                       load skill files themselves; your instructions list the names."
+                       work, e.g. `oxplow-extension` for building lenses. A skill sends you to \
+                       `references/<name>.md` for detail: pass that `<name>` as `reference`. For \
+                       agents that don't load skill files themselves; your instructions list the \
+                       names."
     )]
     async fn get_skill(
         &self,
         params: Parameters<GetSkillParams>,
     ) -> Result<CallToolResult, McpError> {
-        let name = params.0.name;
+        let GetSkillParams { name, reference } = params.0;
         // What's offered now: core's and the active implementations'.
         let text = oxplow_app::capabilities::agent_text(&self.services);
-        match text.skill_body(&name) {
+        let found = match &reference {
+            None => text.skill_body(&name),
+            Some(reference) => text.skill_reference(&name, reference),
+        };
+        match found {
             Some(body) => Ok(CallToolResult::success(vec![ContentBlock::text(
                 body.to_string(),
             )])),
+            None if text.skill_body(&name).is_some() => {
+                let reference = reference.unwrap_or_default();
+                Err(McpError::invalid_params(
+                    format!(
+                        "skill `{name}` has no reference `{reference}` (references: {})",
+                        text.skill_reference_names(&name).join(", ")
+                    ),
+                    None,
+                ))
+            }
             None => {
                 let names: Vec<&str> = text.skill_index().into_iter().map(|(n, _)| n).collect();
                 Err(McpError::invalid_params(
@@ -2794,6 +2814,7 @@ mod tests {
         let r = server
             .get_skill(Parameters(GetSkillParams {
                 name: "oxplow-extension".into(),
+                reference: None,
             }))
             .await
             .unwrap();
@@ -2801,10 +2822,35 @@ mod tests {
         let err = server
             .get_skill(Parameters(GetSkillParams {
                 name: "nope".into(),
+                reference: None,
             }))
             .await
             .unwrap_err();
         assert!(err.message.contains("oxplow-extension"), "{err:?}");
+        // A skill's reference files are read by name too.
+        let core = oxplow_app::capabilities::agent_text(&_svc);
+        let skill = core
+            .skills
+            .iter()
+            .find(|s| !s.references.is_empty())
+            .expect("a skill with reference files");
+        let reference = &skill.references[0];
+        let r = server
+            .get_skill(Parameters(GetSkillParams {
+                name: skill.name.clone(),
+                reference: Some(reference.name.clone()),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(text_payload(r), reference.body);
+        let err = server
+            .get_skill(Parameters(GetSkillParams {
+                name: skill.name.clone(),
+                reference: Some("nope".into()),
+            }))
+            .await
+            .unwrap_err();
+        assert!(err.message.contains(&reference.name), "{err:?}");
         assert!(READ_ONLY_TOOLS.contains(&"get_skill"));
     }
 

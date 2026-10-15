@@ -261,7 +261,8 @@ pub fn runtime(e: io::Error) -> HarnessError {
 /// from a person's when one is no longer offered.
 const SKILL_MARKER: &str = ".oxplow";
 
-/// Write each of `skills` as `<skills_dir>/<name>/SKILL.md`, and remove
+/// Write each of `skills` as `<skills_dir>/<name>/SKILL.md` (its reference
+/// files in `references/`), and remove
 /// any other skill folder oxplow wrote there (one it no longer ships, or
 /// an extension's no longer offered); a person's own stay.
 pub fn write_skills(skills_dir: &Path, skills: &[Text]) -> io::Result<()> {
@@ -277,6 +278,19 @@ pub fn write_skills(skills_dir: &Path, skills: &[Text]) -> io::Result<()> {
         let dir = skills_dir.join(&skill.name);
         fs::create_dir_all(&dir)?;
         fs::write(dir.join("SKILL.md"), &skill.body)?;
+        let references = dir.join("references");
+        if references.exists() {
+            fs::remove_dir_all(&references)?;
+        }
+        if !skill.references.is_empty() {
+            fs::create_dir_all(&references)?;
+            for reference in &skill.references {
+                fs::write(
+                    references.join(format!("{}.md", reference.name)),
+                    &reference.body,
+                )?;
+            }
+        }
         fs::write(dir.join(SKILL_MARKER), "")?;
     }
     Ok(())

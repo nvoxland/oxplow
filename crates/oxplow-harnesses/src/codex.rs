@@ -117,6 +117,7 @@ fn skills_and_commands(text: &AgentText) -> Vec<Text> {
                 )
             ),
             name,
+            references: Vec::new(),
         }
     }));
     all

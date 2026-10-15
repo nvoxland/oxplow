@@ -869,7 +869,7 @@ vocabulary (`tool_use`), as any harness's names do:
 - **MCP:** oxplow's MCP rides `session/new|load` as an HTTP MCP entry. An agent without HTTP MCP support is refused with a clear error.
 - **Resume:** the agent session's `resume_session_id` is `session/load`ed when the agent supports it. The replay rebuilds the transcript and records nothing: no hooks, no tool rows, no bypass checks, and fs writes are refused.
 - **System prompt:** it goes in `_meta.systemPrompt.append` when `system_prompt_via_meta` (the Claude adapter). Otherwise it is a block ahead of the first prompt of a new session.
-- **Skills (tsk376):** an ACP agent discovers no skill files, so its system prompt ends with an `# oxplow skills` index (`AgentText::skill_index` of what's offered now, `capabilities::agent_text`: name + frontmatter description) and it reads a body with the read-only, agent-only MCP tool `get_skill(name)`. Terminal runtimes still ship the files; boot (`boot.rs`, once services are up), an extension change and a `capability.switched` call `capabilities::refresh_agent_text` to rewrite the skills and commands of runtimes already on disk (never creating one), so an agent outliving an upgrade or a switch reads the current ones.
+- **Skills (tsk376):** an ACP agent discovers no skill files, so its system prompt ends with an `# oxplow skills` index (`AgentText::skill_index` of what's offered now, `capabilities::agent_text`: name + frontmatter description) and it reads a body with the read-only, agent-only MCP tool `get_skill(name)` (`get_skill(name, reference?)`). **Skills are short:** a core `SKILL.md` is at most `SKILL_BODY_LIMIT` (4 KB, a test), because loading one costs the whole file; detail lives in `assets/skills/<name>/references/<ref>.md`, which `SKILL.md` routes to (what each holds, when to open it) as `references/<ref>.md` or `get_skill` with `reference`. Terminal runtimes get the reference files written beside `SKILL.md` (`shared::write_skills`). Each rule has one home skill (wikilinks: oxplow-wiki-capture; waiting on the person: oxplow-runtime; foreground tests: oxplow-collection; `v_model`/`query_sql`: oxplow-extension); the others point to it by name. No task ids in skill text (a test). Terminal runtimes still ship the files; boot (`boot.rs`, once services are up), an extension change and a `capability.switched` call `capabilities::refresh_agent_text` to rewrite the skills and commands of runtimes already on disk (never creating one), so an agent outliving an upgrade or a switch reads the current ones.
 
 **Prompts (the no-automation rule).**
 - `acp/human_prompt.rs` `compose` is the only way to make a `HumanPrompt`, and `wire::AgentConn::prompt` accepts nothing else.
@@ -1540,7 +1540,7 @@ reports at stable paths, then records the `testing:` block in
 `.oxplow/project.yaml` and writes one report collector per report
 (`collectors:` with `records:`) into the project's extension
 (`oxplow/extensions/project/extension.yaml`). The standing `oxplow-collection` skill
-(`crates/oxplow-agent-text/assets/oxplow-collection.SKILL.md`) loads when a task
+(`crates/oxplow-agent-text/assets/skills/oxplow-collection/SKILL.md`) loads when a task
 closes and on `/oxplow:configure`; it tells the agent to run the tests
 before completing (so a report exists) and — critically — to **never parse
 or report coverage numbers itself**, because oxplow parses the report

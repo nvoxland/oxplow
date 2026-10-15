@@ -33,33 +33,16 @@ Changing history (commit, merge, rebase, push, checkout) is the
 `oxplow.vcs.*` commands (`list_commands` shows them) or `git` in your
 terminal.
 
-## Code (`v_symbol`, `v_diagnostic`, the `code_*` tools)
+## Code (`v_symbol`, `v_diagnostic`, `v_lsp_server`, the `code_*` tools)
 
-- **`v_symbol`** — what each stream's files define, as oxplow's own
-  tree-sitter parsing reads them, in every supported language (`ref`, `path`,
-  `name`, `kind`, `container`, `signature`, `line`, `col`), restated at each
-  snapshot. `kind` is one of function, method, constructor, class, struct,
-  enum, enum_member, interface, trait, type, field, constant, variable,
-  module, namespace, macro. `signature` holds the parameter types in
-  languages that overload by them (Java, C#, C++), else NULL. Where
-  something is defined: `SELECT path, line, kind, container FROM
-  v_symbol WHERE name = 'main'`; what a file declares: `WHERE path = …
-  ORDER BY line`. `ref` is `symbol:<path>/<id>` (no revision); no language
-  server is needed. `v_symbol_capture` says what each snapshot's collection
-  covered (`files_collected`, `files_failed`).
-- **`v_diagnostic`** — what the language servers report now (`path`,
-  `severity`, `message`, `line`). Which files are broken:
-  `SELECT path, count(*) FROM v_diagnostic WHERE severity = 'error'
-  GROUP BY path`.
-- **`v_lsp_server`** — which language servers exist (`language_id`, `command`,
-  `source`: `yaml` or `installed`), whether the binary is on this machine
-  (`binary_exists`) and how many streams run it (`running`). Read it before
-  relying on a language's `code_*` tools, and after `oxplow.lsp.install_server`.
-- **Live questions** go to the language server itself through the MCP
-  tools: `code_definition`, `code_references`, `code_hover`,
-  `code_symbols` (a file), `code_workspace_symbols`,
-  `code_call_hierarchy` (who calls / what it calls). Use them for "what calls X" and anything the
-  stored snapshot view can't know.
+`references/code.md` (get_skill reference `code`) has the columns, symbol
+kinds, example queries and the live-server tools. In short: `v_symbol` is
+where something is defined and what a file declares (from oxplow's own
+parsing, no language server needed); `v_diagnostic` is what the language
+servers report now (`SELECT path, count(*) FROM v_diagnostic WHERE
+severity = 'error' GROUP BY path`); `v_lsp_server` says which servers exist
+and run; "what calls X" and anything the stored view can't know go to the
+`code_*` MCP tools.
 
 ## Errors the person saw (`v_op_error`)
 
@@ -81,4 +64,3 @@ without a screenshot:
   with the details NULL.
 - Failed *commands you ran* come back to you as the command's own error
   (`run_command`); this is the person's side.
-

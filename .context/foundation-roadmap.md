@@ -793,6 +793,6 @@ Acceptance: All trials validate and preview through the SDK, have documented req
 
 Validation: Run SDK/conformance and focused application tests for end-to-end trials, plus UI verification for the triage view. Review API discovery, ordinary agent authoring steps, failure repair and public-contract compatibility.
 
-Starting points: `examples/extensions`, `crates/oxplow-sdk/src/conformance.rs`, `crates/oxplow-agent-text/assets/oxplow-extension.SKILL.md`, `docs/reference/extensions.md`.
+Starting points: `examples/extensions`, `crates/oxplow-sdk/src/conformance.rs`, `crates/oxplow-agent-text/assets/skills/oxplow-extension/SKILL.md`, `docs/reference/extensions.md`.
 
 Prerequisites: Give bundled and project custom components the same public runtime; Provide provider-independent custom views, forms and workflow UI; Preview all contribution kinds in a consistent development host; Expose cancellable AI streams and tool lifecycles through jobs; Extract inferred-decision policy into a bundled extension; Declare versioned public imports and cross-extension contracts; Test agent-authored collection, metrics and dimensions end to end.

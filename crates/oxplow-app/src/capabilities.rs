@@ -1330,6 +1330,7 @@ pub fn offered_text(
             let item = oxplow_domain::agent::text::Text {
                 name: skill.name.clone(),
                 body,
+                references: Vec::new(),
             };
             match skill.kind {
                 SkillKind::Skill => text.skills.push(item),

@@ -1,41 +1,4 @@
----
-name: oxplow-mermaid
-description: Authoring mermaid diagrams (```mermaid fences) inside wiki pages or any markdown the agent writes. Loads whenever you're about to emit a ```mermaid block — flowchart, sequenceDiagram, classDiagram, stateDiagram, erDiagram, gantt, etc. Mermaid v11's renderer is fragile on unquoted shape labels and surfaces the failure as the unhelpful `TypeError: null is not an object (evaluating 'element.firstChild')` rather than a real parse error, so the failure mode looks like a runtime bug instead of a syntax issue. The rules in this skill prevent the most common author-time mistakes.
----
-
-# Authoring mermaid diagrams
-
-Oxplow renders ```mermaid fences in wiki pages and other markdown
-through the in-app `MarkdownView`. Renderer is mermaid v11. There is
-**no post-write validator** on the user's machine — neither a bun
-script nor a Rust parser exists in the runtime — so an invalid
-diagram lands silently and only surfaces when the page is opened.
-The on-page error is `Mermaid parse error: TypeError: null is not
-an object (evaluating 'element.firstChild')`, which is mermaid's
-downstream symptom, not a meaningful parser message. **Get it right
-at author time.**
-
-## The one rule that prevents 90% of failures
-
-**Quote every shape label.** Inside `[...]`, `{...}`, `(...)`,
-`[(...)]`, `[[...]]`, etc., wrap the body in double quotes:
-
-```mermaid
-flowchart LR
-  A["worktree edit"] --> B["FsWatcher<br/>250ms debounce"]
-  B --> C{"should_ignore?"}
-```
-
-NOT:
-
-```mermaid
-flowchart LR
-  A[worktree edit] --> B[FsWatcher<br/>250ms debounce]
-  B --> C{should_ignore?}
-```
-
-Bare labels work *sometimes*. Quoted labels work *always*. There is
-no downside to quoting, so quote unconditionally.
+# Mermaid syntax details
 
 ## Characters that break unquoted labels
 
@@ -115,10 +78,3 @@ flowchart LR
   fs_watcher["FsWatcher<br/>250ms debounce"]
   fs_watcher --> capture_path
 ```
-
-## When in doubt: quote it
-
-Quoting is free. If you find yourself wondering "does this label
-need quotes" — it does. Quote everything inside `[...]` / `{...}` /
-`(...)` and HTML-escape any `>` / `<` inside the quoted body. That
-alone eliminates the `firstChild` failure mode.

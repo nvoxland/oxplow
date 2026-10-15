@@ -73,17 +73,30 @@ pub fn answerability_prompts() -> Vec<AnswerabilityPrompt> {
 
 /// Core's own skills and commands.
 pub fn core_text() -> AgentText {
-    let text = |list: &[(&str, &str)]| {
-        list.iter()
+    AgentText {
+        skills: OXPLOW_SKILLS
+            .iter()
+            .map(|(name, body, references)| Text {
+                name: (*name).into(),
+                body: (*body).into(),
+                references: references
+                    .iter()
+                    .map(|(reference, body)| Text {
+                        name: (*reference).into(),
+                        body: (*body).into(),
+                        references: Vec::new(),
+                    })
+                    .collect(),
+            })
+            .collect(),
+        commands: CORE_COMMANDS
+            .iter()
             .map(|(name, body)| Text {
                 name: (*name).into(),
                 body: (*body).into(),
+                references: Vec::new(),
             })
-            .collect()
-    };
-    AgentText {
-        skills: text(OXPLOW_SKILLS),
-        commands: text(CORE_COMMANDS),
+            .collect(),
     }
 }
 
@@ -97,39 +110,70 @@ const CORE_COMMANDS: &[(&str, &str)] = &[
     ("new-metric", include_str!("../assets/new-metric.md")),
 ];
 
-/// The oxplow skills every agent runtime ships, as `(dir_name, SKILL.md body)`
-/// pairs. The dir name must match the frontmatter `name:` — both Claude and
-/// opencode key discovery on it.
-const OXPLOW_SKILLS: &[(&str, &str)] = &[
-    (
-        "oxplow-runtime",
-        include_str!("../assets/oxplow-runtime.SKILL.md"),
-    ),
-    (
-        "oxplow-wiki-capture",
-        include_str!("../assets/oxplow-wiki-capture.SKILL.md"),
-    ),
-    (
-        "oxplow-mermaid",
-        include_str!("../assets/oxplow-mermaid.SKILL.md"),
-    ),
-    (
-        "oxplow-collection",
-        include_str!("../assets/oxplow-collection.SKILL.md"),
-    ),
-    (
+/// One skill: its `SKILL.md` and the reference files beside it
+/// (`assets/skills/<name>/references/<reference>.md`).
+/// `(dir_name, SKILL.md body, references)`.
+type SkillFiles = (
+    &'static str,
+    &'static str,
+    &'static [(&'static str, &'static str)],
+);
+
+macro_rules! skill {
+    ($name:literal, [$($reference:literal),* $(,)?]) => {
+        (
+            $name,
+            include_str!(concat!("../assets/skills/", $name, "/SKILL.md")),
+            &[$((
+                $reference,
+                include_str!(concat!("../assets/skills/", $name, "/references/", $reference, ".md")),
+            )),*] as &[(&str, &str)],
+        )
+    };
+}
+
+/// The oxplow skills every agent runtime ships, as `(dir_name, SKILL.md
+/// body, references)`. The dir name must match the frontmatter `name:` —
+/// both Claude and opencode key discovery on it. A `SKILL.md` stays short
+/// (`SKILL_BODY_LIMIT`): loading one costs the whole file, so the detail
+/// lives in references the agent opens when it needs them.
+const OXPLOW_SKILLS: &[SkillFiles] = &[
+    skill!("oxplow-runtime", ["efforts", "commands"]),
+    skill!("oxplow-wiki-capture", ["search-existing", "write-page"]),
+    skill!("oxplow-mermaid", ["syntax"]),
+    skill!("oxplow-collection", ["custom-parsers"]),
+    skill!(
         "oxplow-metrics",
-        include_str!("../assets/oxplow-metrics.SKILL.md"),
+        [
+            "declaring",
+            "collector-scripts",
+            "verify-and-read",
+            "entity-metrics"
+        ]
     ),
-    (
+    skill!(
         "oxplow-extension",
-        include_str!("../assets/oxplow-extension.SKILL.md"),
+        [
+            "scaffolding",
+            "semantic-layer",
+            "lens-format",
+            "ui-contributions",
+            "commands-and-forms",
+            "collectors",
+            "metrics",
+            "jobs-and-ai",
+            "check",
+            "testing",
+            "providers",
+            "lenses-in-use",
+            "repair-and-sharing"
+        ]
     ),
-    (
-        "oxplow-codebase",
-        include_str!("../assets/oxplow-codebase.SKILL.md"),
-    ),
+    skill!("oxplow-codebase", ["code"]),
 ];
+
+/// The most a `SKILL.md` may be, in bytes.
+pub const SKILL_BODY_LIMIT: usize = 4096;
 
 #[cfg(test)]
 mod tests {
@@ -173,11 +217,9 @@ mod tests {
             .iter()
             .find(|s| s.name == "oxplow-codebase")
             .expect("the codebase skill");
+        let all = text.skill_full_text("oxplow-codebase").unwrap();
         for needle in ["v_op_error", "`read`", "output_size", "red"] {
-            assert!(
-                skill.body.contains(needle),
-                "the skill never says `{needle}`"
-            );
+            assert!(all.contains(needle), "the skill never says `{needle}`");
         }
         let description = skill.body.lines().nth(2).unwrap_or_default();
         assert!(description.contains("v_op_error"), "{description}");
@@ -207,13 +249,56 @@ mod tests {
         assert_eq!(text.skill_body("nope"), None);
     }
 
+    /// Whether `text` has a `tsk<digits>` word in it.
+    fn names_a_task(text: &str) -> bool {
+        text.match_indices("tsk").any(|(at, _)| {
+            let before = text[..at].chars().next_back();
+            let digits = text[at + 3..]
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .count();
+            digits > 0 && !before.is_some_and(char::is_alphanumeric)
+        })
+    }
+
+    /// Loading a skill costs its whole file: each `SKILL.md` stays short
+    /// and sends the agent to its references for detail, every reference
+    /// a skill names exists, and a skill's text carries no task id (they're
+    /// local to one project's tracker).
+    #[test]
+    fn skills_are_short_and_send_the_agent_to_references_that_exist() {
+        for skill in core_text().skills {
+            assert!(
+                skill.body.len() <= SKILL_BODY_LIMIT,
+                "{} is {} bytes (limit {SKILL_BODY_LIMIT}); move detail into references/",
+                skill.name,
+                skill.body.len()
+            );
+            for t in std::iter::once(&skill).chain(&skill.references) {
+                assert!(!names_a_task(&t.body), "{} names a task id", t.name);
+            }
+            for reference in &skill.references {
+                assert!(
+                    skill
+                        .body
+                        .contains(&format!("references/{}.md", reference.name)),
+                    "{} never sends the agent to `references/{}.md`",
+                    skill.name,
+                    reference.name
+                );
+            }
+        }
+    }
+
     /// `.context/` is this repo's own docs convention: it must never leak
     /// into the text oxplow writes into a person's project.
     #[test]
     fn the_agent_text_never_mentions_dot_context() {
         let text = core_text();
         for t in text.skills.iter().chain(&text.commands) {
-            assert!(!t.body.contains(".context"), "{} mentions .context", t.name);
+            for t in std::iter::once(t).chain(&t.references) {
+                assert!(!t.body.contains(".context"), "{} mentions .context", t.name);
+            }
         }
     }
 }

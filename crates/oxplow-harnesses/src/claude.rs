@@ -832,10 +832,12 @@ mod tests {
         text.skills.push(Text {
             name: "work-items".into(),
             body: "---\nname: work-items\ndescription: d\n---\n".into(),
+            ..Default::default()
         });
         text.commands.push(Text {
             name: "work-next".into(),
             body: "next".into(),
+            ..Default::default()
         });
         let dir = plugin(tmp.path(), &text);
         let skills = dir.join("skills");
