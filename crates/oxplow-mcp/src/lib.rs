@@ -356,6 +356,9 @@ fn mcp_tool(tool: &AgentTool) -> Tool {
     if tool.read_only {
         listed.annotations = Some(ToolAnnotations::default().read_only(true));
     }
+    if let Some(serde_json::Value::Object(output)) = &tool.output_schema {
+        listed.output_schema = Some(Arc::new(output.clone()));
+    }
     listed
 }
 
@@ -509,6 +512,13 @@ impl OxplowMcp {
         match outcome.result {
             serde_json::Value::String(text) => {
                 Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+            }
+            // A command that declares its result's schema answers with it
+            // as structured content too, for a client that reads it typed.
+            other if tool.output_schema.is_some() => {
+                let mut result = json_result(&other)?;
+                result.structured_content = Some(other);
+                Ok(result)
             }
             other => json_result(&other),
         }
@@ -960,6 +970,19 @@ mod tests {
         .unwrap();
         assert_eq!(out["columns"], serde_json::json!(["kind"]));
         assert_eq!(out["rows"], serde_json::json!([["primary"]]));
+        // The same result arrives as structured content.
+        let structured = call(
+            &server,
+            &rmcp::model::Extensions::default(),
+            "oxplow_query_sql",
+            serde_json::json!({ "sql": "SELECT kind FROM v_stream WHERE kind = ?1", "params": ["primary"] }),
+        )
+        .await
+        .unwrap()
+        .structured_content
+        .expect("structured content");
+        assert_eq!(structured["rows"], serde_json::json!([["primary"]]));
+        assert_eq!(structured["truncated"], false);
 
         let err = call(
             &server,
@@ -2172,7 +2195,12 @@ mod tests {
             Some(true)
         );
         assert!(listed.input_schema["properties"]["sql"].is_object());
+        // Its result is typed: the schema of what it returns is listed.
+        let output = listed.output_schema.expect("query_sql declares its output");
+        assert!(output["properties"]["columns"].is_object(), "{output:?}");
+        assert!(output["properties"]["coverage"].is_object(), "{output:?}");
         assert!(mcp_tool(show).annotations.is_none());
+        assert!(mcp_tool(show).output_schema.is_none());
 
         let mut core = core_tool_names();
         core.sort();

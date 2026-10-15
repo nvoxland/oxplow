@@ -2100,6 +2100,11 @@ export type CommandSpec = {
 	summary: string,
 	/**  JSON Schema for the input. */
 	input_schema: unknown,
+	/**
+	 *  JSON Schema of its result, when its operation declares one: what an
+	 *  MCP client gets as structured content beside the text.
+	 */
+	output_schema?: unknown | null,
 	invokers: Invokers,
 	confirm: Confirm,
 	/**  The handler returns an inverse, so `commands.undo` can apply it. */

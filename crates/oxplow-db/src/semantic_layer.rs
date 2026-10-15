@@ -20,7 +20,9 @@ pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Result of a read-only SQL query. `rows` are positional, aligned with
 /// `columns`. `truncated` is true when more rows existed than the cap.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
 #[serde(rename_all = "camelCase")]
 pub struct SqlQueryResult {
     pub columns: Vec<String>,
@@ -45,7 +47,9 @@ pub struct SqlQueryResult {
 }
 
 /// How one collector feeding a model a query read stands.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceCoverage {
     /// The model it feeds (`v_acme_pull_request`).
@@ -62,7 +66,9 @@ pub struct SourceCoverage {
 }
 
 /// When one model last changed.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelFreshness {
     pub model: String,
@@ -72,7 +78,9 @@ pub struct ModelFreshness {
 
 /// What a query read, as SQLite's authorizer reported it while preparing
 /// it (P4.1).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
 #[serde(rename_all = "camelCase")]
 pub struct Reads {
     /// Views read, directly or through another view; sorted, distinct.

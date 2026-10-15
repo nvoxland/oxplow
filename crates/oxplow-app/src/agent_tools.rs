@@ -37,6 +37,9 @@ pub struct AgentTool {
     pub description: String,
     /// A JSON Schema object.
     pub input_schema: Value,
+    /// Its result's JSON Schema, when its command declares one: the
+    /// result then goes to the client as structured content too.
+    pub output_schema: Option<Value>,
     /// It changes nothing the person keeps (a read, or only what they see).
     pub read_only: bool,
     pub target: ToolTarget,
@@ -98,6 +101,7 @@ pub fn tools_of(
                 name: name.clone(),
                 description: spec.summary.clone(),
                 input_schema: spec.input_schema.clone(),
+                output_schema: spec.output_schema.clone(),
                 read_only: spec.access.reads_only() && !spends(&spec),
                 target: ToolTarget::Command(spec.id.clone()),
             });
@@ -108,6 +112,8 @@ pub fn tools_of(
                     name: name.clone(),
                     description: lens_description(lens),
                     input_schema: lens_schema(lens),
+                    // What a lens tool returns depends on its `format`.
+                    output_schema: None,
                     read_only: true,
                     target: ToolTarget::Lens(lens.id.clone()),
                 });
@@ -196,6 +202,7 @@ mod tests {
             [
                 "oxplow_ai_decide",
                 "oxplow_ai_summarize",
+                "oxplow_catalog",
                 "oxplow_code_call_hierarchy",
                 "oxplow_code_definition",
                 "oxplow_code_hover",

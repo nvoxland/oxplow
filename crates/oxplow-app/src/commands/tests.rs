@@ -102,6 +102,7 @@ async fn a_busy_tx_handler_is_retried_then_reported_as_busy() {
 
 fn kv_spec(name: &str, invokers: Invokers, confirm: Confirm) -> CommandSpec {
     CommandSpec {
+        output_schema: None,
         id: name.into(),
         summary: "Set a key in the test table.".into(),
         input_schema: json!({
@@ -1719,6 +1720,7 @@ async fn a_composites_own_events_land_with_its_steps_only_when_all_landed() {
     use super::compose::{Compose, Composer, Composition};
     let (db, bus) = composing_bus();
     let spec = CommandSpec {
+        output_schema: None,
         id: "oxplow.kv.announce".into(),
         summary: "Set over an external step and announce it.".into(),
         input_schema: json!({ "type": "object" }),

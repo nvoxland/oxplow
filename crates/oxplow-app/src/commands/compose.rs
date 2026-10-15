@@ -121,6 +121,7 @@ fn sequence_schema() -> Value {
 /// audited as (`effect_triggers`).
 pub fn sequence_spec() -> CommandSpec {
     CommandSpec {
+        output_schema: None,
         id: SEQUENCE.into(),
         summary: "Run several commands as one, each one's own policy and confirmation \
                   checked before any runs; the run has one audit row. In oxplow's own \

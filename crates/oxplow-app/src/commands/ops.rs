@@ -28,6 +28,8 @@ pub struct Op {
     pub name: String,
     /// The input its handler reads.
     pub input_schema: Value,
+    /// The result it returns, when it declares one (`Op::returns`).
+    pub output_schema: Option<Value>,
     /// It returns the call that undoes it.
     pub undoable: bool,
     pub handler: Handler,
@@ -57,6 +59,7 @@ impl Op {
             scope: scope.into(),
             name: name.into(),
             input_schema,
+            output_schema: None,
             undoable,
             handler,
             confirm_for: None,
@@ -65,6 +68,13 @@ impl Op {
             open_to: Invokers::ALL,
             confirm_at_least: Confirm::Never,
         }
+    }
+
+    /// It returns a `T`: its commands declare `T`'s schema as their output,
+    /// so an MCP client gets the result as structured content.
+    pub fn returns<T: schemars::JsonSchema>(mut self) -> Self {
+        self.output_schema = Some(super::util::schema::<T>());
+        self
     }
 
     /// Who may run a command over it, at most (`Invokers::HUMAN_ONLY`: a
@@ -161,6 +171,7 @@ impl Op {
         if let (Some(example), Some(schema)) = (example, spec.input_schema.as_object_mut()) {
             schema.insert("examples".into(), example);
         }
+        spec.output_schema = self.output_schema.clone();
         spec.undoable = self.undoable;
         spec.atomicity = match self.handler {
             Handler::Tx(_) => Atomicity::Tx,
@@ -253,6 +264,7 @@ mod tests {
 
     fn spec(invokers: Invokers, confirm: Confirm) -> CommandSpec {
         CommandSpec {
+            output_schema: None,
             id: "acme.lsp.install".into(),
             summary: "Install.".into(),
             input_schema: json!({}),

@@ -3933,6 +3933,14 @@ commands:
 tool: open_work              # offered as <namespace>_open_work
 ```
 
+- **Typed results.** An operation that declares its result
+  (`Op::returns::<T>()`, `T: JsonSchema`) gives its commands an
+  `output_schema` (`CommandSpec.output_schema`); its tool lists that as
+  MCP `outputSchema` and answers with the result as `structuredContent`
+  beside the JSON text, so a client reads it typed. `sql.query` declares
+  `SqlQueryResult` (columns, rows, `truncated`, `reads`, `freshness`,
+  `generation`, `coverage`). A lens tool declares none: what it returns
+  depends on its `format`.
 - oxplow's own tools are `oxplow-foundation`'s declarations over core's
   read operations (`oxplow_read`, `oxplow_query_sql`, `oxplow_show_lens`,
   `oxplow_vcs_log`, …); no tool is special to core.

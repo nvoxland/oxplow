@@ -42,6 +42,7 @@ pub const BUNDLED: &[BundledExtension] = &[
         name: "oxplow-foundation",
         files: &[
             ext_file!("oxplow-foundation", "README.md"),
+            ext_file!("oxplow-foundation", "lenses/catalog.yaml"),
             ext_file!("oxplow-foundation", "lenses/effort-files.yaml"),
             ext_file!("oxplow-foundation", "lenses/effort-summary.yaml"),
             ext_file!("oxplow-foundation", "lenses/file-history.yaml"),
@@ -2188,6 +2189,52 @@ mod tests {
             )
         );
         assert_eq!(rows[1][1], oxplow_db::SqlCell::Null(()));
+    }
+
+    /// The data catalog lists every model with its owner, what it holds
+    /// and its columns; naming one gives its columns' docs and key.
+    #[tokio::test]
+    async fn the_catalog_lists_models_and_one_models_columns() {
+        use oxplow_db::SqlCell::Text;
+        let f = crate::test_fixtures::services_with_effort().await;
+        let col = |rows: &serde_json::Value, i: usize| -> Vec<String> {
+            rows.as_array()
+                .unwrap()
+                .iter()
+                .map(|r| {
+                    r[i].as_str()
+                        .map(str::to_string)
+                        .unwrap_or_else(|| r[i].to_string())
+                })
+                .collect()
+        };
+        let rows = run_bundled_lens_with(
+            &f,
+            "oxplow-foundation/catalog",
+            &[("model", Text(String::new()))],
+        )
+        .await;
+        let views = col(&rows, 0);
+        assert!(
+            views.iter().any(|v| v == "v_effort") && views.iter().any(|v| v == "v_model"),
+            "{views:?}"
+        );
+        let rows = run_bundled_lens_with(
+            &f,
+            "oxplow-foundation/catalog",
+            &[("model", Text("effort".into()))],
+        )
+        .await;
+        assert_eq!(col(&rows, 0), ["v_effort"]);
+        let columns = &col(&rows, 3)[0];
+        assert!(
+            columns.lines().any(|l| l.starts_with("ref TEXT — ")),
+            "{columns}"
+        );
+        assert!(
+            columns.lines().next().unwrap().starts_with("id INTEGER"),
+            "{columns}"
+        );
     }
 
     /// Finished items come newest first by when they closed, even within
