@@ -237,7 +237,10 @@ Every tool foundation declares is named below
 
 A tool's `read_only_hint` (so a client can auto-approve) is its
 command's access: `View` and `Read` commands are hinted, `oxplow_show_lens`
-(it records the answer) and `oxplow_run_lens_action` are not. Each tool
+(it records the answer) and `oxplow_run_lens_action` are not, and nor are
+`oxplow_ai_decide` and `oxplow_ai_summarize`: they change no record but spend
+the person's provider key (a scope with `spends`), so the client asks before
+they run. Each tool
 but `list_commands` and `run_command` is a foundation command over a read
 scope (`oxplow.records.read`, `oxplow.sql.query`, …; [commands.md](./commands.md)
 "Scopes"), so an agent reaches it through `run_command` too; `v_scope`

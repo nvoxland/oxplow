@@ -307,3 +307,16 @@ async fn scopes_list_what_a_command_may_need() {
         ]
     );
 }
+
+/// A scope that spends the person's money says so: a model call is the
+/// only one.
+#[tokio::test]
+async fn the_scope_that_spends_the_persons_key_says_so() {
+    let fx = services_with_effort().await;
+    let got = rows(
+        &fx,
+        "SELECT id, spends FROM v_scope WHERE spends = 1 ORDER BY id",
+    )
+    .await;
+    assert_eq!(got, [vec![json!("ai.compute"), json!(1)]]);
+}

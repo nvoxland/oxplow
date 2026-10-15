@@ -3937,7 +3937,10 @@ tool: open_work              # offered as <namespace>_open_work
   proposals, audit). It's offered while its extension is enabled and the
   command is offered to the caller (`invokers.agent`, `needs`), so the
   list follows the active implementations as commands do. Its read-only
-  hint is its command's access (`View`/`Read`).
+  hint is its command's access (`View`/`Read`), unless the command
+  needs a scope that spends the person's money (`Scope::spends`; today
+  `ai.compute`, a model call on their key) or is an operation of one: it
+  changes no record but isn't hinted, so the client asks before it runs.
 - A **lens tool**'s input is one property per param (its label, choices
   and default) plus `format`; a call runs `oxplow.lens.run` and returns the
   lens's text rendering (`format: "json"`: its rows). Always read-only.

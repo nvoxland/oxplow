@@ -11940,6 +11940,36 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "`<resource>.<action>` (`records.read`, `work_items.write`)."
+        },
+        {
+          "name": "access",
+          "type": "TEXT",
+          "doc": "`view`, `read`, `record` or `write`: what a run over the scope may change."
+        },
+        {
+          "name": "host",
+          "type": "TEXT",
+          "doc": "Where its handler lives: `daemon`, `window` or `shell`."
+        },
+        {
+          "name": "spends",
+          "type": "INT",
+          "doc": "1 when a run over it spends the person's money (a model call on their provider key), so a tool over it asks before it runs; 0 otherwise. (v2)"
+        },
+        {
+          "name": "summary",
+          "type": "TEXT",
+          "doc": "What it lets a handler do."
+        }
+      ],
+      "key": []
     }
   }
 }

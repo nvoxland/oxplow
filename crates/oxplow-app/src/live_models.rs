@@ -77,7 +77,7 @@ pub fn columns(name: &str) -> &'static [&'static str] {
         "collector_credential" => &["collector", "name", "is_set"],
         "zone" => &["position", "zone", "patterns", "color", "files"],
         "zone_unmatched" => &["path"],
-        "scope" => &["id", "access", "host", "summary"],
+        "scope" => &["id", "access", "host", "spends", "summary"],
         _ => &[],
     }
 }
@@ -227,6 +227,7 @@ fn scopes() -> Vec<Vec<SqlCell>> {
                 text(s.id),
                 text(name(&s.access)),
                 text(name(&s.host)),
+                SqlCell::Int(i64::from(s.spends)),
                 text(s.summary),
             ]
         })

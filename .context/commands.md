@@ -202,6 +202,11 @@ with an **access** (`oxplow_domain::scope`: `SCOPES`;
 `oxplow_domain::Access`), and listed in the command's `needs`. (Not a
 *capability*: that word is a swappable slot — `work_items`,
 `snapshots` — a project picks an implementation of.)
+A scope also says whether it **spends** the person's money (`Scope::spends`,
+`v_scope.spends`): a model call on their provider key. Access stays about what
+a run changes in oxplow's records, so `ai.compute` is `Read`; a tool over a
+spending scope (the command needs it, or is its operation) just isn't hinted
+read-only (`agent_tools::spends`), so the client asks first.
 Every command — core's and any extension's — reaches them the same way,
 so oxplow's own commands can do nothing an extension's can't.
 

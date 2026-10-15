@@ -98,7 +98,7 @@ pub fn tools_of(
                 name: name.clone(),
                 description: spec.summary.clone(),
                 input_schema: spec.input_schema.clone(),
-                read_only: spec.access.reads_only(),
+                read_only: spec.access.reads_only() && !spends(&spec),
                 target: ToolTarget::Command(spec.id.clone()),
             });
         }
@@ -116,6 +116,17 @@ pub fn tools_of(
     }
     tools.sort_by(|a, b| a.name.cmp(&b.name));
     tools
+}
+
+/// Whether a run of `spec` spends the person's money: it needs a scope
+/// that does, or is an operation of one. Such a tool asks before it runs,
+/// though it changes no record.
+fn spends(spec: &oxplow_domain::CommandSpec) -> bool {
+    spec.needs
+        .iter()
+        .map(String::as_str)
+        .chain(spec.op.as_ref().map(|op| op.scope.as_str()))
+        .any(|id| oxplow_domain::scope::scope(id).is_some_and(|scope| scope.spends))
 }
 
 fn lens_description(lens: &Lens) -> String {
@@ -243,6 +254,51 @@ mod tests {
         assert!(history.input_schema["properties"]["limit"].is_object());
         let show = tools.iter().find(|t| t.name == "oxplow_show_lens").unwrap();
         assert!(!show.read_only, "it records the answer in the thread");
+    }
+
+    /// A tool that spends the person's money asks before it runs: a model
+    /// call changes no record, but its hint isn't read-only. The reads that
+    /// cost nothing keep theirs.
+    #[tokio::test]
+    async fn a_tool_over_a_spending_scope_is_not_hinted_read_only() {
+        let fx = services_with_task_effort().await;
+        let tools = offered(&fx.svc, &agent(&fx)).await.unwrap();
+        let hinted = |name: &str| tools.iter().find(|t| t.name == name).unwrap().read_only;
+        for spends in ["oxplow_ai_decide", "oxplow_ai_summarize"] {
+            assert!(!hinted(spends), "{spends} spends the person's key");
+        }
+        for free in [
+            "oxplow_query_sql",
+            "oxplow_ensure_change",
+            "oxplow_preview_collector",
+            "oxplow_review_extension",
+        ] {
+            assert!(hinted(free), "{free} costs nothing");
+        }
+    }
+
+    /// An extension's command over a spending scope's operation is a spending
+    /// tool too (a script can't need such a scope).
+    #[tokio::test]
+    async fn an_extension_command_over_ai_compute_is_not_hinted_read_only() {
+        let fx = services_with_task_effort().await;
+        let root = fx._dir.path().join("oxplow/extensions/acme");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("extension.yaml"),
+            "manifest: 2\nname: acme\nintent:\n  purpose: p\ncommands:\n\
+             \x20 - name: ask.model\n    summary: Ask the model.\n    scope: ai.compute\n    op: summarize\n\
+             \x20   invokers: { human: true, agent: true, lens: true }\n    tool: ask_model\n\
+             \x20 - name: work.count\n    summary: Count.\n    scope: sql.read\n    op: query\n\
+             \x20   invokers: { human: true, agent: true, lens: true }\n    tool: count\n",
+        )
+        .unwrap();
+        let problems = activate_with_problems(&fx.svc).await;
+        assert!(problems.is_empty(), "{problems:?}");
+        let tools = offered(&fx.svc, &agent(&fx)).await.unwrap();
+        let hinted = |name: &str| tools.iter().find(|t| t.name == name).map(|t| t.read_only);
+        assert_eq!(hinted("acme_ask_model"), Some(false));
+        assert_eq!(hinted("acme_count"), Some(true));
     }
 
     /// Any extension declares tools the same way: a command offered to
