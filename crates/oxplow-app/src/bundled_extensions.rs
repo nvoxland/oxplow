@@ -427,7 +427,9 @@ mod tests {
         };
         f.svc
             .db
-            .transaction(move |tx| oxplow_db::insert_claim_tx(tx, &claim))
+            .transaction(move |tx| {
+                oxplow_db::insert_claim_tx(tx, oxplow_db::ClaimProvenance::Inferred, &claim)
+            })
             .await
             .unwrap();
     }
@@ -1477,6 +1479,7 @@ mod tests {
                 .transaction(move |tx| {
                     oxplow_db::insert_claim_tx(
                         tx,
+                        oxplow_db::ClaimProvenance::Inferred,
                         &oxplow_db::NewClaim {
                             thread_id: thread,
                             work_item: Some(oxplow_tasks::work_item_ref(task)),
@@ -2318,6 +2321,7 @@ mod tests {
             .transaction(move |tx| {
                 oxplow_db::insert_claim_tx(
                     tx,
+                    oxplow_db::ClaimProvenance::Inferred,
                     &oxplow_db::NewClaim {
                         thread_id: thread.value(),
                         work_item: Some(oxplow_tasks::work_item_ref(task)),
@@ -3138,6 +3142,7 @@ mod tests {
             .transaction(move |tx| {
                 oxplow_db::insert_claim_tx(
                     tx,
+                    oxplow_db::ClaimProvenance::Inferred,
                     &oxplow_db::NewClaim {
                         thread_id: thread.value(),
                         work_item: Some(oxplow_tasks::work_item_ref(task)),
@@ -3275,6 +3280,7 @@ mod tests {
                 .transaction(move |tx| {
                     oxplow_db::insert_claim_tx(
                         tx,
+                        oxplow_db::ClaimProvenance::Inferred,
                         &oxplow_db::NewClaim {
                             thread_id: thread.value(),
                             work_item: Some(oxplow_tasks::work_item_ref(task)),

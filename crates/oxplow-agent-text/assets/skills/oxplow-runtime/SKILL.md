@@ -1,6 +1,6 @@
 ---
 name: oxplow-runtime
-description: Oxplow efforts, all optional — how oxplow tracks your work on its own, when reporting is worth it, the effort.* commands, decisions, how claims are read, and the command bus. Loads on the oxplow `run_command` tool with effort.* or oxplow.knowledge.add_note, and on v_effort.
+description: Oxplow efforts, all optional — how oxplow tracks your work on its own, when reporting is worth it, the effort.* commands, decisions, stating and reading claims, and the command bus. Loads on the oxplow `run_command` tool with effort.* or oxplow.knowledge.add_note, and on v_effort.
 ---
 
 # Your work in oxplow
@@ -36,10 +36,11 @@ The person reviewing your work checks these first.
   confidence?, why? }` when you resolve a real fork without asking (where
   something lives, which approach, what you left out). Record it when you
   make it.
-- Claims ("tests pass", "no behavior change") aren't recorded: oxplow reads
-  them in your answers when the effort finishes, and checks each against
-  what it observed (a green test run). Say them plainly, and name what
-  backs one when you can (the run, the test).
+- Claims ("tests pass", "no behavior change"): state the ones you can back
+  in `oxplow.effort.report`'s `claims` (`{ statement, kind, evidence_ref? }`,
+  citing the run or test). oxplow reads the rest in your answers when the
+  effort finishes, and checks each against what it observed (a green test
+  run). Say them plainly either way.
 
 ## Writing about work
 

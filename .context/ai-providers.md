@@ -538,9 +538,12 @@ When an effort finishes, one model call reads what the agent did and
 proposes both the decisions it made without recording them and the claims
 its answers made about its work. The policy — when to ask, the prompt,
 which model, how the reply is read — is oxplow-bundled's, built only from
-what any extension has; core keeps the storage and the review. Agents
-record neither: there is no `record_claim`, and decisions they do record
-(`effort.record_decision`) are only the ones they chose to.
+what any extension has; core keeps the storage and the review. What an
+agent records itself is the other source: decisions with
+`effort.record_decision`, claims it can back in `effort.report`'s
+`claims`. Both land in the same tables, told apart by `provenance`
+(`recorded` | `inferred`), and the review treats a claim alike whatever
+its source; with no model bound, the recorded ones are all there is.
 
 - **oxplow-bundled** declares the AI profile `reasoning` (fallback
   `main`), the job `reasoning` (`ai.complete_typed`, `needs: [ai.compute]`,
@@ -555,8 +558,8 @@ record neither: there is no `record_claim`, and decisions they do record
 - **The command** digests the effort: the work item's title; the
   thread's turns overlapping the effort's window (`v_agent_turn` has no
   `effort_id`), each as the human prompt and the agent's final answer
-  (`v_agent_turn.answer`); its tool calls; the decisions it recorded, so
-  they aren't repeated. A prompt is clipped to its first 2,000
+  (`v_agent_turn.answer`); its tool calls; the decisions it recorded and the
+  claims it stated, so they aren't repeated. A prompt is clipped to its first 2,000
   characters, an answer to its last 2,000 (an answer states its outcome at
   the end), a tool's detail to 200, tool calls take at most a quarter of
   the 40,000-character digest, and the newest are kept. Nothing to read
@@ -590,8 +593,9 @@ record neither: there is no `record_claim`, and decisions they do record
   thread and work item are the effort's; recorded, confirmed and
   dismissed rows stay; logs `effort.decisions_inferred@1 { effort,
   work_item?, count }`) and `oxplow.effort.replace_inferred_claims` (the
-  only writer of claims; it replaces the effort's claims whose `review`
-  is NULL, so a verified or dismissed claim stays), the review commands
+  only writer of `inferred` claims; it replaces the effort's inferred
+  claims whose `review` is NULL, so a verified or dismissed claim and the
+  agent's `recorded` ones stay), the review commands
   (decisions: confirm, dismiss, reopen; claims: `verify_claim`,
   `dismiss_claim`, `reopen_claim`, all a person's), and the rule that
   inferred rows are **never fed back to the agent** (the decisions block
@@ -604,7 +608,7 @@ record neither: there is no `record_claim`, and decisions they do record
 - Calls record role `oxplow-bundled/reasoning` in
   `v_ai_call`. The review packet shows the decision rows as "Decisions
   Oxplow Noticed", separate from "Decisions Made", and the claim rows in
-  "Unverified Claims" with their review state.
+  "Unverified Claims" with their source (stated or read) and review state.
 - Disabling oxplow-bundled, revoking its programs or replacing them with
   another extension's (an effect that calls the same commands) needs no
   core change. Pinned end to end in `oxplow-sdk/tests/examples.rs`.

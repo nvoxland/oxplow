@@ -417,11 +417,11 @@ commands:
     invokers: { human: true, agent: true, lens: true }
     example: {"effort": "effort:eff12", "claims": [{"statement": "The parser tests pass.", "kind": "tests_pass", "evidence_ref": "run:42"}]}
   - name: effort.report
-    summary: "Optional: describe the thread's current (else latest) effort — a `summary` of what shipped, and any `impacts` beyond the edits (a wiki page, a work item, a commit, a finding). Without one, the summary is your last turn's final message; files and test runs are observed. Returns `{ effort, link_warnings }`."
+    summary: "Optional: describe the thread's current (else latest) effort — a `summary` of what shipped, any `impacts` beyond the edits (a wiki page, a work item, a commit, a finding), and the `claims` you can back (each `{ statement, kind, evidence_ref? }`; they replace the ones an earlier report stated that nobody reviewed). Without one, the summary is your last turn's final message; files and test runs are observed. Returns `{ effort, link_warnings }`."
     scope: efforts.write
     op: report
     invokers: { human: true, agent: true, lens: true }
-    example: {"summary": "Fixed the login redirect loop: the callback kept the stale `next` parameter.", "impacts": [{"kind": "file", "id": "src/auth.rs", "action": "updated"}, {"kind": "work_item", "id": "work_item:oxplow:tsk42", "action": "completed"}]}
+    example: {"summary": "Fixed the login redirect loop: the callback kept the stale `next` parameter.", "impacts": [{"kind": "file", "id": "src/auth.rs", "action": "updated"}, {"kind": "work_item", "id": "work_item:oxplow:tsk42", "action": "completed"}], "claims": [{"statement": "the auth tests pass", "kind": "tests_pass", "evidence_ref": "run:12"}]}
   - name: effort.unverify_claim
     summary: "Take back a claim's verification (`claim:<id>`): it's unreviewed again, citing `evidence` (what it cited before) or nothing."
     scope: efforts.write

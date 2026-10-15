@@ -1,10 +1,11 @@
 title: Unverified Claims
-description: Things the agent said about its work that nothing backs up, as a model read them from its answers. Mark one verified once you've checked it, dismiss one the agent didn't make or didn't mean (it stops counting), or reopen a dismissed one.
+description: Things the agent said about its work that nothing backs up — the ones it stated in its report and the ones a model read in its answers. Mark one verified once you've checked it, dismiss one the agent didn't make or didn't mean (it stops counting), or reopen a dismissed one.
 hidden: true    # needs a slot param (effort_id / change_id); shown on the diff
 params:
   - { name: effort_id, label: Effort }
 query: |
   SELECT c.statement, c.kind,
+         CASE WHEN c.provenance = 'recorded' THEN 'Stated' ELSE 'Read' END AS source,
          CASE WHEN c.review = 'dismissed' THEN 'Dismissed' ELSE 'Unverified' END AS state,
          c.evidence_ref, c.ref AS claim
   FROM v_claim c LEFT JOIN v_oxplow_bundled_claim_status s ON s.ref = c.ref
@@ -14,6 +15,7 @@ viz: list
 columns:
   - { key: statement, label: Claim }
   - { key: kind, label: Kind }
+  - { key: source, label: Source }
   - { key: state, label: Review }
   - { key: evidence_ref, label: Cites }
 actions:

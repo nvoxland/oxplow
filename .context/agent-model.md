@@ -1230,11 +1230,13 @@ recorded as the work happens, never declared.
 
 Claims and observations carry the agent session where one is known
 ([work-tracking.md](./work-tracking.md) "Efforts"). Claims an agent makes
-in its answers are a different thing: the bundled `infer-reasoning`
-effect asks a model, when an effort finishes, for the decisions the agent
-made without recording them and the claims its answers made (the
-`reasoning` job; skipped while no model serves the `reasoning` profile).
-Decisions an agent records itself are `oxplow.effort.record_decision`.
+about its work are a different thing: it states the ones it can back in
+`oxplow.effort.report`'s `claims` (`v_claim.provenance = 'recorded'`),
+and the bundled `infer-reasoning` effect asks a model, when an effort
+finishes, for the decisions the agent made without recording them and the
+claims its answers made (`inferred`; the `reasoning` job, skipped while no
+model serves the `reasoning` profile). Decisions an agent records itself
+are `oxplow.effort.record_decision`.
 
 ### Token usage capture
 
