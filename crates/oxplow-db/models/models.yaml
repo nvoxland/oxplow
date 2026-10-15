@@ -368,7 +368,7 @@
     - { not_null: id }
     - { unique: id }
 - name: dashboard
-  version: 1
+  version: 2
   description: "User-created dashboards."
   columns:
     - { name: "id", type: "INTEGER", doc: "Dashboard id." }
@@ -376,6 +376,7 @@
     - { name: "sort_index", type: "INTEGER", doc: "Order in the dashboards list." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "ref", type: "TEXT", doc: "`dashboard:dsh<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)" }
   tests:
     - { not_null: id }
     - { unique: id }
@@ -633,30 +634,126 @@
     - { not_null: id }
     - { unique: id }
 - name: search_comment
-  version: 1
+  version: 2
   description: "What site search indexes for each comment (tsk864): the `comment` kind's index is restated from these rows when they change."
   columns:
     - { name: "ref", type: "TEXT", doc: "The comment's canonical ref (`comment:cmt<n>`): what a hit opens." }
     - { name: "title", type: "TEXT", doc: "The quote it's anchored to." }
     - { name: "body", type: "TEXT", doc: "The quote, then every message, a line each." }
     - { name: "stream_id", type: "TEXT", doc: "Its stream (`str1`)." }
+    - { name: "version", type: "TEXT", doc: "Changes whenever the row's text does; a recompute reads the text of rows whose version moved only. (v2: the newer of the comment's change and its last message)" }
+  tests:
+    - { not_null: ref }
+    - { unique: ref }
+- name: search_agent_session
+  version: 1
+  description: "What site search indexes for each agent session: the `agent_session` kind's index is restated from these rows when they change. Closed sessions and sessions on archived threads are included."
+  columns:
+    - { name: "ref", type: "TEXT", doc: "`agent_session:ses<n>`: what a hit opens." }
+    - { name: "title", type: "TEXT", doc: "`v_agent_session.display_name`." }
+    - { name: "body", type: "TEXT", doc: "The harness, the titles of its thread's efforts that overlapped it, and what it touched: the distinct paths of its tool calls and the commands of its shell calls (up to 300 of each)." }
+    - { name: "stream_id", type: "TEXT", doc: "Its thread's stream (`str1`)." }
+    - { name: "version", type: "TEXT", doc: "The newer of the session's change and its last tool call." }
+  tests:
+    - { not_null: ref }
+    - { unique: ref }
+- name: search_commit
+  version: 1
+  description: "What site search indexes for each commit `v_commit` holds (the last 500 reachable from every stream's head): the `commit` kind's index is restated from these rows when they change."
+  columns:
+    - { name: "ref", type: "TEXT", doc: "`commit:<sha>`: what a hit opens." }
+    - { name: "title", type: "TEXT", doc: "The subject." }
+    - { name: "body", type: "TEXT", doc: "The message body, the author, and the paths it changed (up to 300)." }
+    - { name: "stream_id", type: "TEXT", doc: "Always NULL: commits belong to the project." }
+    - { name: "version", type: "TEXT", doc: "The sha: a commit never changes." }
+  tests:
+    - { not_null: ref }
+    - { unique: ref }
+- name: search_dashboard
+  version: 1
+  description: "What site search indexes for each dashboard: the `dashboard` kind's index is restated from these rows when they change."
+  columns:
+    - { name: "ref", type: "TEXT", doc: "`dashboard:dsh<n>`: what a hit opens." }
+    - { name: "title", type: "TEXT", doc: "The dashboard's title." }
+    - { name: "body", type: "TEXT", doc: "The text of its text tiles and the titles of its query tiles, a line each, in order." }
+    - { name: "stream_id", type: "TEXT", doc: "Always NULL: dashboards belong to the project." }
+    - { name: "version", type: "TEXT", doc: "The newer of the dashboard's change and its tiles'." }
+  tests:
+    - { not_null: ref }
+    - { unique: ref }
+- name: search_decision
+  version: 1
+  description: "What site search indexes for each decision: the `decision` kind's index is restated from these rows when they change. Decisions on archived threads are included."
+  columns:
+    - { name: "ref", type: "TEXT", doc: "`decision:<n>`: what a hit opens." }
+    - { name: "title", type: "TEXT", doc: "The question." }
+    - { name: "body", type: "TEXT", doc: "The choice, why, and the alternatives, a line each." }
+    - { name: "stream_id", type: "TEXT", doc: "Its thread's stream (`str1`)." }
+    - { name: "version", type: "TEXT", doc: "When it was made: a decision never changes." }
+  tests:
+    - { not_null: ref }
+    - { unique: ref }
+- name: search_effort
+  version: 1
+  description: "What site search indexes for each effort: the `effort` kind's index is restated from these rows when they change. Efforts on archived threads are included. Unversioned: an open effort's summary follows its turns, so its text is compared."
+  columns:
+    - { name: "ref", type: "TEXT", doc: "`effort:eff<n>`: what a hit opens." }
+    - { name: "title", type: "TEXT", doc: "The effort's title." }
+    - { name: "body", type: "TEXT", doc: "Its summary, then the work item it was on (the ref, so its id finds it)." }
+    - { name: "stream_id", type: "TEXT", doc: "Its thread's stream (`str1`)." }
+  tests:
+    - { not_null: ref }
+    - { unique: ref }
+- name: search_lens
+  version: 1
+  description: "What site search indexes for each lens: the `lens` kind's index is restated from these rows when they change. Hidden lenses (the agent's typed tools) are included."
+  columns:
+    - { name: "ref", type: "TEXT", doc: "`lens:<extension>/<slug>`: what a hit opens." }
+    - { name: "title", type: "TEXT", doc: "The lens's title." }
+    - { name: "body", type: "TEXT", doc: "Its description." }
+    - { name: "stream_id", type: "TEXT", doc: "Always NULL: lenses belong to the project." }
+  tests:
+    - { not_null: ref }
+    - { unique: ref }
+- name: search_thread
+  version: 1
+  description: "What site search indexes for each thread: the `thread` kind's index is restated from these rows when they change. Closed and archived threads are included."
+  columns:
+    - { name: "ref", type: "TEXT", doc: "`thread:thr<n>`: what a hit opens." }
+    - { name: "title", type: "TEXT", doc: "The thread's title." }
+    - { name: "body", type: "TEXT", doc: "Its efforts' titles and summaries, then its sessions' names." }
+    - { name: "stream_id", type: "TEXT", doc: "Its stream (`str1`)." }
+    - { name: "version", type: "TEXT", doc: "The newest of the thread's change, its efforts' starts and ends, its sessions' changes and its last turn." }
+  tests:
+    - { not_null: ref }
+    - { unique: ref }
+- name: search_turn
+  version: 1
+  description: "What site search indexes for each agent turn: the `turn` kind's index is restated from these rows when they change. Turns on archived threads are included."
+  columns:
+    - { name: "ref", type: "TEXT", doc: "`turn:trn<n>`: what a hit opens." }
+    - { name: "title", type: "TEXT", doc: "The session's name and when the turn started." }
+    - { name: "body", type: "TEXT", doc: "The prompt, then the answer." }
+    - { name: "stream_id", type: "TEXT", doc: "Its thread's stream (`str1`)." }
+    - { name: "version", type: "TEXT", doc: "When the turn ended, else when it started." }
   tests:
     - { not_null: ref }
     - { unique: ref }
 - name: search_thread_note
-  version: 3
+  version: 4
   description: "What site search indexes for each thread note: the `thread_note` kind's index is restated from these rows when they change."
   columns:
     - { name: "ref", type: "TEXT", doc: "The note's canonical ref (`thread_note:not<n>`): what a hit opens." }
     - { name: "title", type: "TEXT", doc: "Empty: a note has no title." }
     - { name: "body", type: "TEXT", doc: "The note's markdown." }
     - { name: "stream_id", type: "TEXT", doc: "Its thread's stream (`str1`)." }
+    - { name: "version", type: "TEXT", doc: "Changes whenever the row's text does; a recompute reads the text of rows whose version moved only. (v4: when it was written; a note is not edited)" }
   tests:
     - { not_null: ref }
     - { unique: ref }
 - name: search_work_item
-  version: 1
-  description: "What site search indexes for each of the active work list's items (the `work_item` kind's index is restated from these rows when they change), through the work-item interface. Deleted items, and items on archived threads or streams, aren't in it."
+  version: 2
+  description: "What site search indexes for each of the active work list's items (the `work_item` kind's index is restated from these rows when they change), through the work-item interface. Deleted items, and items on archived threads or streams, aren't in it. v2: each item's comments follow its body."
   columns:
     - { name: "ref", type: "TEXT", doc: "The item's canonical ref (`work_item:<provider>:<id>`): what a hit opens." }
     - { name: "title", type: "TEXT", doc: "The item's title." }
@@ -666,13 +763,14 @@
     - { not_null: ref }
     - { unique: ref }
 - name: search_wiki
-  version: 1
+  version: 2
   description: "What site search indexes for each wiki page (tsk864): the `wiki` kind's index is restated from these rows when they change."
   columns:
     - { name: "ref", type: "TEXT", doc: "`wiki:<slug>`." }
     - { name: "title", type: "TEXT", doc: "The page's title." }
     - { name: "body", type: "TEXT", doc: "The page's full markdown." }
     - { name: "stream_id", type: "TEXT", doc: "Always NULL: wiki pages are project-global." }
+    - { name: "version", type: "TEXT", doc: "Changes whenever the row's text does; a recompute reads the text of rows whose version moved only. (v2: the page's `updated_at`)" }
   tests:
     - { not_null: ref }
     - { unique: ref }
@@ -1029,7 +1127,7 @@
     - { not_null: id }
     - { unique: id }
 - name: agent_session
-  version: 4
+  version: 5
   description: "Agent sessions: the agent slots a person opened on a thread — a terminal agent, an ACP chat, or a one-shot action. The row is the slot, not the process: a harness process ending leaves it open; closing the session, its thread or its stream's archive closes it."
   columns:
     - { name: "id", type: "INTEGER", doc: "Session id (its ref is `agent_session:ses<id>`)." }
@@ -1048,6 +1146,7 @@
     - { name: "last_seen_at", type: "TEXT", doc: "The newest hook seen from it, to the 30 s (RFC 3339); NULL before the first. A live agent has a recent one and a pid that exists. (v2)" }
     - { name: "stopped_by_user_at", type: "TEXT", doc: "When the person deliberately stopped it; NULL once started again, and after a crash or backend restart (which resume when the tab is shown). A stopped session is not spawned until a person starts it. (v3)" }
     - { name: "ref", type: "TEXT", doc: "`agent_session:ses<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v4)" }
+    - { name: "display_name", type: "TEXT", doc: "What a person calls it: `title`, else the harness and the day it was opened (`claude 2026-10-09`). Where a session needs a name, read this. (v5)" }
   tests:
     - { not_null: id }
     - { unique: id }

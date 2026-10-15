@@ -1320,4 +1320,310 @@ mod core_tests {
         })
         .await;
     }
+
+    /// Setup the commands don't offer: one batch of SQL, committed.
+    async fn exec(svc: &Services, sql: &'static str) {
+        svc.db
+            .transaction(move |tx| {
+                tx.execute_batch(sql).map_err(oxplow_db::map_sql_err)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+
+    /// An effort's title is in its thread's text, so the thread is found by
+    /// a word only an effort says — and still found closed, then archived.
+    #[tokio::test]
+    async fn a_thread_is_found_by_its_efforts_even_closed_and_archived() {
+        let (svc, _dir) = services().await;
+        let stream = svc.streams.ensure_primary().await.unwrap();
+        let thread = crate::test_fixtures::new_thread(&svc, stream.id, "Plain title").await;
+        change_loop(&svc);
+        run(
+            &svc,
+            crate::commands::effort::OPEN,
+            serde_json::json!({
+                "thread": oxplow_domain::refs::build::thread_ref(thread.id),
+                "title": "Recalibrate the flux capacitor",
+            }),
+        )
+        .await;
+        eventually("found by the effort's words", || {
+            found(&svc, "capacitor", Some(stream.id), "thread")
+        })
+        .await;
+        assert!(
+            found(&svc, "plain", Some(stream.id), "thread").await,
+            "by its title"
+        );
+        run(
+            &svc,
+            crate::commands::thread::CLOSE,
+            serde_json::json!({ "thread": oxplow_domain::refs::build::thread_ref(thread.id) }),
+        )
+        .await;
+        oxplow_domain::stores::ThreadStore::archive(&*svc.thread_store, &thread.id)
+            .await
+            .unwrap();
+        // The archive restates the thread's index; give it the time the
+        // other kinds' leave-tests take, then it must still be there.
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert!(
+            found(&svc, "capacitor", Some(stream.id), "thread").await,
+            "closed and archived threads stay"
+        );
+    }
+
+    /// A session is found by a file its tool calls touched or a command it
+    /// ran, and by its name when it has none (harness and day); a closed
+    /// session on an archived thread stays.
+    #[tokio::test]
+    async fn an_agent_session_is_found_by_what_it_touched() {
+        let (svc, _dir) = services().await;
+        let stream = svc.streams.ensure_primary().await.unwrap();
+        let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
+        change_loop(&svc);
+        let session = crate::test_fixtures::open_session(&svc, thread.id).await;
+        exec(&svc, "").await;
+        let id = session.value();
+        svc.db
+            .transaction(move |tx| {
+                for (kind, path, detail) in [
+                    ("edit", Some("src/zebra_module.rs"), None),
+                    ("shell", None, Some("cargo nextest run --quokka")),
+                ] {
+                    tx.execute(
+                        "INSERT INTO agent_tool_call (thread_id, tool, kind, path, detail, at, agent_session_id)
+                         VALUES (?1, 'T', ?2, ?3, ?4, '2026-10-01T00:00:00.000000Z', ?5)",
+                        rusqlite::params![thread.id.value(), kind, path, detail, id],
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+        eventually("found by a touched path", || {
+            found(&svc, "zebra_module", Some(stream.id), "agent_session")
+        })
+        .await;
+        eventually("found by a shell command", || {
+            found(&svc, "quokka", Some(stream.id), "agent_session")
+        })
+        .await;
+        assert!(
+            found(&svc, "claude", Some(stream.id), "agent_session").await,
+            "by its harness when it has no title"
+        );
+        exec(
+            &svc,
+            "UPDATE agent_session SET closed_at = '2026-10-02T00:00:00.000000Z', closed_reason = 'closed'",
+        )
+        .await;
+        oxplow_domain::stores::ThreadStore::archive(&*svc.thread_store, &thread.id)
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert!(found(&svc, "zebra_module", Some(stream.id), "agent_session").await);
+    }
+
+    /// A turn is found by what was asked and by what was answered.
+    #[tokio::test]
+    async fn a_turn_is_found_by_its_prompt_and_its_answer() {
+        let (svc, _dir) = services().await;
+        let stream = svc.streams.ensure_primary().await.unwrap();
+        let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
+        change_loop(&svc);
+        let t = thread.id.value();
+        svc.db
+            .transaction(move |tx| {
+                tx.execute(
+                    "INSERT INTO agent_turn (thread_id, prompt, answer, started_at, ended_at)
+                     VALUES (?1, 'why does the wombat stall', 'the gnu was holding the lock',
+                             '2026-10-01T00:00:00.000000Z', '2026-10-01T00:05:00.000000Z')",
+                    [t],
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        eventually("found by the prompt", || {
+            found(&svc, "wombat", Some(stream.id), "turn")
+        })
+        .await;
+        assert!(
+            found(&svc, "gnu", Some(stream.id), "turn").await,
+            "by the answer"
+        );
+    }
+
+    /// An effort is found by its title and by the item it was on.
+    #[tokio::test]
+    async fn an_effort_is_found_by_its_title_and_its_work_item() {
+        let (svc, _dir) = services().await;
+        let stream = svc.streams.ensure_primary().await.unwrap();
+        let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
+        change_loop(&svc);
+        let item = task(&svc, thread.id, "Unrelated words").await;
+        run(
+            &svc,
+            crate::commands::effort::OPEN,
+            serde_json::json!({
+                "thread": oxplow_domain::refs::build::thread_ref(thread.id),
+                "title": "Reticulate splines",
+                "work_item": item,
+            }),
+        )
+        .await;
+        eventually("found by its title", || {
+            found(&svc, "reticulate", Some(stream.id), "effort")
+        })
+        .await;
+        let native = item.rsplit(':').next().unwrap().to_string();
+        assert!(
+            found(&svc, &native, Some(stream.id), "effort").await,
+            "by its work item's id"
+        );
+    }
+
+    /// A decision is found by its question and by the choice, why or
+    /// alternatives it holds.
+    #[tokio::test]
+    async fn a_decision_is_found_by_what_it_decided() {
+        let (svc, _dir) = services().await;
+        let stream = svc.streams.ensure_primary().await.unwrap();
+        let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
+        change_loop(&svc);
+        let t = thread.id.value();
+        svc.db
+            .transaction(move |tx| {
+                tx.execute(
+                    "INSERT INTO decision (thread_id, question, choice, alternatives_json, confidence, why, created_at)
+                     VALUES (?1, 'Which cache eviction', 'use the clock sweep', '[\"lru\",\"fifo\"]', 'high',
+                             'because of the pangolin workload', '2026-10-01T00:00:00.000000Z')",
+                    [t],
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        eventually("found by the question", || {
+            found(&svc, "eviction", Some(stream.id), "decision")
+        })
+        .await;
+        for word in ["pangolin", "sweep", "fifo"] {
+            assert!(
+                found(&svc, word, Some(stream.id), "decision").await,
+                "{word}"
+            );
+        }
+    }
+
+    /// A commit is found by its subject, its message, its author and a
+    /// path it changed; it belongs to no stream.
+    #[tokio::test]
+    async fn a_commit_is_found_by_its_message_author_and_files() {
+        let (svc, _dir) = services().await;
+        svc.streams.ensure_primary().await.unwrap();
+        change_loop(&svc);
+        exec(
+            &svc,
+            "INSERT INTO git_commit (sha, author, email, committed_at, subject, body)
+               VALUES ('abc123def', 'Marmaduke Quill', 'q@x', '2026-10-01T00:00:00.000000Z',
+                       'Tighten the gasket', 'The narwhal leak is fixed.');
+             INSERT INTO git_commit_file (sha, path, status) VALUES ('abc123def', 'src/okapi.rs', 'M');",
+        )
+        .await;
+        eventually("found by its subject", || {
+            found(&svc, "gasket", None, "commit")
+        })
+        .await;
+        for word in ["narwhal", "marmaduke", "okapi"] {
+            assert!(found(&svc, word, None, "commit").await, "{word}");
+        }
+    }
+
+    /// A lens is found by its description.
+    #[tokio::test]
+    async fn a_lens_is_found_by_its_description() {
+        let (svc, _dir) = services().await;
+        svc.streams.ensure_primary().await.unwrap();
+        change_loop(&svc);
+        exec(
+            &svc,
+            "INSERT INTO lens (id, extension, slug, title, description, viz, params_json, hidden, needs_json, path)
+               VALUES ('acme/leaks', 'acme', 'leaks', 'Leak finder', 'Lists the platypus leaks', 'table',
+                       '[]', 0, '[]', 'lenses/leaks.yaml');",
+        )
+        .await;
+        eventually("found by its title", || found(&svc, "finder", None, "lens")).await;
+        assert!(
+            found(&svc, "platypus", None, "lens").await,
+            "by its description"
+        );
+    }
+
+    /// A dashboard is found by its title, its text tiles and its query
+    /// tiles' titles; its ref opens the dashboard.
+    #[tokio::test]
+    async fn a_dashboard_is_found_by_its_title_and_its_tiles() {
+        let (svc, _dir) = services().await;
+        svc.streams.ensure_primary().await.unwrap();
+        change_loop(&svc);
+        let made = run(
+            &svc,
+            crate::commands::dashboard::CREATE,
+            serde_json::json!({ "title": "Release health" }),
+        )
+        .await;
+        let id = made["id"].as_str().unwrap().to_string();
+        run(
+            &svc,
+            crate::commands::dashboard::ADD_ITEM,
+            serde_json::json!({ "dashboard": id, "kind": "text", "options_json": "{\"text\":\"Capybara section\"}" }),
+        )
+        .await;
+        run(
+            &svc,
+            crate::commands::dashboard::ADD_ITEM,
+            serde_json::json!({ "dashboard": id, "kind": "query", "sql": "SELECT 1", "display": "table",
+                                "options_json": "{\"title\":\"Axolotl count\"}" }),
+        )
+        .await;
+        eventually("found by its title", || {
+            found(&svc, "health", None, "dashboard")
+        })
+        .await;
+        eventually("found by a text tile", || {
+            found(&svc, "capybara", None, "dashboard")
+        })
+        .await;
+        assert!(
+            found(&svc, "axolotl", None, "dashboard").await,
+            "by a query tile's title"
+        );
+    }
+
+    /// A work item's comments are in its text.
+    #[tokio::test]
+    async fn a_work_item_is_found_by_its_comments() {
+        let (svc, _dir) = services().await;
+        let stream = svc.streams.ensure_primary().await.unwrap();
+        let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
+        change_loop(&svc);
+        let item = task(&svc, thread.id, "Plain item").await;
+        run(
+            &svc,
+            crate::commands::work_item::COMMENT,
+            serde_json::json!({ "ref": item, "body": "the ocelot repro is attached" }),
+        )
+        .await;
+        eventually("found by a comment", || {
+            found(&svc, "ocelot", Some(stream.id), "work_item")
+        })
+        .await;
+    }
 }

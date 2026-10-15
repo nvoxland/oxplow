@@ -410,7 +410,11 @@ The launcher does everything in one box:
   Commands are the bus's offers (`commandOffers`, passed in as `offers`)
   that can run now (`searchableCommands`); the same offers feed the menu
   bar (`menuBar.ts`). Body hits come from `searchSite` (BM25 over every
-  searchable kind and file contents); a hit is a ref, opened through the
+  searchable kind and file contents: work items with their comments,
+  wiki pages, comments, thread notes, threads, agent sessions, turns,
+  efforts, decisions, commits, lenses, dashboards; the thread-shaped kinds
+  include archived work); each row shows its kind's icon and name
+  (`pageKindIconComponent` / `pageKindLabel`); a hit is a ref, opened through the
   ref opener (`openSearchHit` → `planNavigation` → `tabs/refOpener.ts`),
   which may select a thread or switch stream. The ordering is a pure helper —
   `buildQuickOpenResults` in `components/quickOpenResults.ts` — so it's

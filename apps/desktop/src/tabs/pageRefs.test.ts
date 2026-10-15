@@ -45,6 +45,10 @@ describe("pageRefs", () => {
     expect(refFromTabId("page:agent")).toBeNull();
   });
 
+  test("a dashboard's ref opens its dashboard page", () => {
+    expect(refFromTabId("dashboard:dsh3")).toEqual(customDashboardRef("dsh3"));
+  });
+
   test("fileRef encodes the path with a default disk version", () => {
     expect(fileRef("src/a.ts")).toEqual({
       id: "file:src/a.ts",

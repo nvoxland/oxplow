@@ -93,11 +93,23 @@ impl CoreKind {
 /// Every core kind core declares anything of.
 pub const CORE_KINDS: &[CoreKind] = &[
     kind(k::STREAM).owned("v_stream", "title").opens(),
-    kind(k::THREAD).owned("v_thread", "title").opens(),
-    kind(k::EFFORT).owned("v_effort", "title").opens(),
-    kind(k::TURN).owned("v_agent_turn", "prompt").opens(),
+    kind(k::THREAD)
+        .owned("v_thread", "title")
+        .opens()
+        .searched("v_search_thread"),
+    kind(k::EFFORT)
+        .owned("v_effort", "title")
+        .opens()
+        .searched("v_search_effort"),
+    kind(k::TURN)
+        .owned("v_agent_turn", "prompt")
+        .opens()
+        .searched("v_search_turn"),
     kind(k::SNAPSHOT).owned("v_snapshot", "created_at").opens(),
-    kind(k::COMMIT).owned("v_commit", "subject").opens(),
+    kind(k::COMMIT)
+        .owned("v_commit", "subject")
+        .opens()
+        .searched("v_search_commit"),
     kind(k::SYMBOL).owned("v_symbol", "name").opens(),
     kind(k::WORK_ITEM)
         .owned("v_work_item", "title")
@@ -120,18 +132,27 @@ pub const CORE_KINDS: &[CoreKind] = &[
         .page(Page::Column(&["thread_ref"]))
         .searched("v_search_thread_note"),
     kind(k::AGENT_SESSION)
-        .owned("v_agent_session", "title")
-        .opens(),
+        .owned("v_agent_session", "display_name")
+        .opens()
+        .searched("v_search_agent_session"),
     kind(k::PROPOSAL).owned("v_command_proposal", "command"),
     kind(k::CLAIM).owned("v_claim", "statement"),
     // A decision is reviewed with its effort, else in its thread.
     kind(k::DECISION)
         .owned("v_decision", "question")
-        .page(Page::Column(&["effort_ref", "thread_ref"])),
+        .page(Page::Column(&["effort_ref", "thread_ref"]))
+        .searched("v_search_decision"),
     kind(k::COLLECTOR).owned("v_collector_run", "id"),
     kind(k::JOB_RUN).owned("v_job_run", "intent_key"),
     kind(k::AI_CALL).owned("v_ai_call", "role"),
-    kind(k::LENS).owned("v_lens", "title").opens(),
+    kind(k::DASHBOARD)
+        .owned("v_dashboard", "title")
+        .opens()
+        .searched("v_search_dashboard"),
+    kind(k::LENS)
+        .owned("v_lens", "title")
+        .opens()
+        .searched("v_search_lens"),
     kind(k::EXTENSION).owned("v_extension", "name"),
     kind(k::FILE).opens(),
     kind(k::DIR).opens(),

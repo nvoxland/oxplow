@@ -101,3 +101,26 @@ describe("pageKindLabel", () => {
     expect(pageKindLabel("custom-thing")).toBe("custom-thing");
   });
 });
+
+describe("core kinds a search hit can be", () => {
+  test("each draws an icon and has a person's word", () => {
+    const words: Record<string, string> = {
+      thread: "thread",
+      agent_session: "agent session",
+      turn: "turn",
+      effort: "effort",
+      decision: "decision",
+      commit: "commit",
+      dashboard: "dashboard",
+      lens: "lens",
+      thread_note: "note",
+      comment: "comment",
+      work_item: "work item",
+      wiki: "wiki page",
+    };
+    for (const [kind, word] of Object.entries(words)) {
+      expect(pageKindIconComponent(kind), kind).not.toBeNull();
+      expect(pageKindLabel(kind), kind).toBe(word);
+    }
+  });
+});

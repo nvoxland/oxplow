@@ -2609,6 +2609,41 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Dashboard id."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Title."
+        },
+        {
+          "name": "sort_index",
+          "type": "INTEGER",
+          "doc": "Order in the dashboards list."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`dashboard:dsh<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
+        }
+      ],
+      "key": []
     }
   },
   "dashboard_item": {
@@ -4742,6 +4777,36 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "The comment's canonical ref (`comment:cmt<n>`): what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The quote it's anchored to."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "The quote, then every message, a line each."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Its stream (`str1`)."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "Changes whenever the row's text does; a recompute reads the text of rows whose version moved only. (v2: the newer of the comment's change and its last message)"
+        }
+      ],
+      "key": []
     }
   },
   "search_note": {
@@ -4845,6 +4910,36 @@
           "name": "stream_id",
           "type": "TEXT",
           "doc": "Always NULL: wiki pages are project-global."
+        }
+      ],
+      "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`wiki:<slug>`."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The page's title."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "The page's full markdown."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Always NULL: wiki pages are project-global."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "Changes whenever the row's text does; a recompute reads the text of rows whose version moved only. (v2: the page's `updated_at`)"
         }
       ],
       "key": []
@@ -9636,6 +9731,31 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "The item's canonical ref (`work_item:<provider>:<id>`): what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The item's title."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Its own id (so typing `tsk42` finds it), then its body."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Its thread's stream (`str1`); NULL for a backlog item."
+        }
+      ],
+      "key": []
     }
   },
   "commit_work_item": {
@@ -10064,6 +10184,96 @@
           "name": "ref",
           "type": "TEXT",
           "doc": "`agent_session:ses<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v4)"
+        }
+      ],
+      "key": []
+    },
+    "5": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Session id (its ref is `agent_session:ses<id>`)."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread it's on (v_thread.id)."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`terminal` (a harness in a PTY), `chat` (an ACP agent) or `action` (a one-shot session)."
+        },
+        {
+          "name": "harness",
+          "type": "TEXT",
+          "doc": "What runs in it: `claude`, `codex`, `opencode`, or `acp` (an Agent Client Protocol agent)."
+        },
+        {
+          "name": "acp_agent",
+          "type": "TEXT",
+          "doc": "For an `acp` session, which ACP agent it runs (`claude`, `gemini`, a project `acpAgents` name); NULL otherwise."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "What the person called it; empty until renamed."
+        },
+        {
+          "name": "resume_session_id",
+          "type": "TEXT",
+          "doc": "The harness's own session id, to resume it; empty when unknown."
+        },
+        {
+          "name": "host",
+          "type": "TEXT",
+          "doc": "The host it runs on; NULL is the local machine."
+        },
+        {
+          "name": "opened_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "closed_at",
+          "type": "TEXT",
+          "doc": "When its slot was closed; NULL while open."
+        },
+        {
+          "name": "closed_reason",
+          "type": "TEXT",
+          "doc": "`closed` (closed itself), `thread_closed` or `stream_archived`; NULL while open."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "pid",
+          "type": "INTEGER",
+          "doc": "OS pid of the process the daemon spawned for it, rewritten on every spawn; NULL for a session with no process of its own (a chat) or not yet spawned. May be dead or reused: read it with last_seen_at. (v2)"
+        },
+        {
+          "name": "last_seen_at",
+          "type": "TEXT",
+          "doc": "The newest hook seen from it, to the 30 s (RFC 3339); NULL before the first. A live agent has a recent one and a pid that exists. (v2)"
+        },
+        {
+          "name": "stopped_by_user_at",
+          "type": "TEXT",
+          "doc": "When the person deliberately stopped it; NULL once started again, and after a crash or backend restart (which resume when the tab is shown). A stopped session is not spawned until a person starts it. (v3)"
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`agent_session:ses<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v4)"
+        },
+        {
+          "name": "display_name",
+          "type": "TEXT",
+          "doc": "What a person calls it: `title`, else the harness and the day it was opened (`claude 2026-10-09`). Where a session needs a name, read this. (v5)"
         }
       ],
       "key": []
@@ -12171,6 +12381,282 @@
           "name": "stream_id",
           "type": "TEXT",
           "doc": "Its thread's stream (`str1`)."
+        }
+      ],
+      "key": []
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "The note's canonical ref (`thread_note:not<n>`): what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Empty: a note has no title."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "The note's markdown."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Its thread's stream (`str1`)."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "Changes whenever the row's text does; a recompute reads the text of rows whose version moved only. (v4: when it was written; a note is not edited)"
+        }
+      ],
+      "key": []
+    }
+  },
+  "search_agent_session": {
+    "1": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`agent_session:ses<n>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "`v_agent_session.display_name`."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "The harness, the titles of its thread's efforts that overlapped it, and what it touched: the distinct paths of its tool calls and the commands of its shell calls (up to 300 of each)."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Its thread's stream (`str1`)."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "The newer of the session's change and its last tool call."
+        }
+      ],
+      "key": []
+    }
+  },
+  "search_commit": {
+    "1": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`commit:<sha>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The subject."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "The message body, the author, and the paths it changed (up to 300)."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Always NULL: commits belong to the project."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "The sha: a commit never changes."
+        }
+      ],
+      "key": []
+    }
+  },
+  "search_dashboard": {
+    "1": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`dashboard:dsh<n>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The dashboard's title."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "The text of its text tiles and the titles of its query tiles, a line each, in order."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Always NULL: dashboards belong to the project."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "The newer of the dashboard's change and its tiles'."
+        }
+      ],
+      "key": []
+    }
+  },
+  "search_decision": {
+    "1": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`decision:<n>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The question."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "The choice, why, and the alternatives, a line each."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Its thread's stream (`str1`)."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "When it was made: a decision never changes."
+        }
+      ],
+      "key": []
+    }
+  },
+  "search_effort": {
+    "1": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`effort:eff<n>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The effort's title."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Its summary, then the work item it was on (the ref, so its id finds it)."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Its thread's stream (`str1`)."
+        }
+      ],
+      "key": []
+    }
+  },
+  "search_lens": {
+    "1": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`lens:<extension>/<slug>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The lens's title."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Its description."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Always NULL: lenses belong to the project."
+        }
+      ],
+      "key": []
+    }
+  },
+  "search_thread": {
+    "1": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`thread:thr<n>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The thread's title."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Its efforts' titles and summaries, then its sessions' names."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Its stream (`str1`)."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "The newest of the thread's change, its efforts' starts and ends, its sessions' changes and its last turn."
+        }
+      ],
+      "key": []
+    }
+  },
+  "search_turn": {
+    "1": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`turn:trn<n>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The session's name and when the turn started."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "The prompt, then the answer."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Its thread's stream (`str1`)."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "When the turn ended, else when it started."
         }
       ],
       "key": []

@@ -7,7 +7,10 @@ SELECT c.ref AS ref,
             FROM (SELECT body FROM source('comment_message')
                    WHERE comment_id = c.id ORDER BY id) m),
          '') AS TEXT) AS body,
-       CAST('str' || c.stream_id AS TEXT) AS stream_id
+       CAST('str' || c.stream_id AS TEXT) AS stream_id,
+       -- It changes when a message is added (which bumps `last_activity_at`)
+       -- or the comment itself is edited.
+       CAST(max(c.updated_at, c.last_activity_at) AS TEXT) AS version
 FROM ref('comment') c
 LEFT JOIN source('streams') s ON s.id = c.stream_id
 WHERE s.archived_at IS NULL

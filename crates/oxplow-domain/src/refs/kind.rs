@@ -219,6 +219,8 @@ pub const CONFIG: &str = "config";
 pub const FINDING: &str = "finding";
 pub const THREAD_NOTE: &str = "thread_note";
 pub const AGENT_SESSION: &str = "agent_session";
+/// A user-created dashboard (`dashboard.id`).
+pub const DASHBOARD: &str = "dashboard";
 pub const RUN: &str = "run";
 pub const PROPOSAL: &str = "proposal";
 pub const CLAIM: &str = "claim";
@@ -272,6 +274,8 @@ pub fn core_kinds() -> KindRegistry {
         KindSpec::new(THREAD_NOTE, &prefixed("not")),
         // An agent slot opened on a thread (`agent_session.id`).
         KindSpec::new(AGENT_SESSION, &prefixed("ses")),
+        // A user-created dashboard (`dashboard.id`).
+        KindSpec::new(DASHBOARD, &prefixed("dsh")),
         KindSpec::new(RUN, r"^\d+$"),
         // A command waiting for a person's decision (`command_proposal.id`, P6b).
         KindSpec::new(PROPOSAL, r"^[0-9]+$"),

@@ -275,6 +275,11 @@ pub fn agent_session_ref(id: AgentSessionId) -> String {
     of(k::AGENT_SESSION, &id.to_string())
 }
 
+/// A user-created dashboard (`dashboard.id`).
+pub fn dashboard_ref(id: crate::DashboardId) -> String {
+    of(k::DASHBOARD, &id.to_string())
+}
+
 /// A test or analysis run (`metric_capture.id`).
 pub fn run_ref(id: i64) -> String {
     of(k::RUN, &id.to_string())
@@ -446,6 +451,7 @@ mod tests {
             finding_ref("clippy:1"),
             thread_note_ref(NoteId::new(5)),
             agent_session_ref(AgentSessionId::new(2)),
+            dashboard_ref(crate::DashboardId::new(3)),
             run_ref(9),
             claim_ref(1),
             decision_ref(2),
@@ -504,6 +510,7 @@ mod tests {
             finding_ref("f"),
             thread_note_ref(NoteId::new(1)),
             agent_session_ref(AgentSessionId::new(1)),
+            dashboard_ref(crate::DashboardId::new(1)),
             run_ref(1),
             proposal_ref(1),
             claim_ref(1),

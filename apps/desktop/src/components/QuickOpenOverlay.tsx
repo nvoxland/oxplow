@@ -2,7 +2,7 @@ import type { CommandEntry } from "./quickOpenResults.js";
 import { pageRef, refOf } from "../refs/ref.js";
 import { SEARCH_TRIGGER_TESTID } from "./TitleBar.js";
 import type { CSSProperties } from "react";
-import { refKindInfo, useRefKinds } from "../refKinds.js";
+import { useRefKinds } from "../refKinds.js";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useExtensions } from "../extensionsStore.js";
 import {
@@ -26,7 +26,7 @@ import {
   type LauncherSection,
   type QuickOpenResult,
 } from "./quickOpenResults.js";
-import { PageKindIcon } from "../pageKinds.js";
+import { PageKindIcon, pageKindLabel } from "../pageKinds.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { RAIL_HISTORY_EXCLUDE_KINDS } from "./RailHud/history.js";
 import type { PageCategory, PageDirectoryEntry } from "./RailHud/sections.js";
@@ -561,7 +561,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
                     <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--muted)", fontSize: 11 }}>
                       {result.hit.snippet}
                     </span>
-                    <span style={{ color: "var(--muted)", fontSize: 11 }}>{refKindInfo(result.hit.kind)?.label ?? result.hit.kind}</span>
+                    <span style={{ color: "var(--muted)", fontSize: 11 }}>{pageKindLabel(result.hit.kind)}</span>
                   </button>
                 );
               }

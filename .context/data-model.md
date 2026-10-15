@@ -2321,7 +2321,9 @@ or removed in place (a `UNIQUE` index over `(kind, ref_id, COALESCE(stream_id,''
 enforces identity, treating global rows' `NULL` stream as `''`).
 
 - `kind` is a ref kind `v_ref_kind` lists as `searchable` (core's
-  `work_item`, `comment`, `thread_note`, `wiki`; an extension's, P9.D3), or
+  `work_item`, `comment`, `thread_note`, `wiki`, `thread`, `agent_session`,
+  `turn`, `effort`, `decision`, `commit`, `lens`, `dashboard`; an
+  extension's, P9.D3), or
   `file`; `ref_id` is the ref's id after `<kind>:`, and a hit is the ref.
   Every kind but `file` is derived from a model by an asset per kind
   (`kind_search.rs`: `plan_restate_tx` decides from each entry's `version`
@@ -2329,7 +2331,9 @@ enforces identity, treating global rows' `NULL` stream as `''`).
   renamed V164's `content_hash` — and `apply_restate_tx` writes only
   entries added, changed or gone; tsk896); core's read `v_search_work_item`
   (the active work list's items, through the interface) / `_comment` /
-  `_thread_note` / `_wiki` (tsk864). Files are upserted by the `search.index` pump consumer from
+  `_thread_note` / `_wiki` and the feeds for the other kinds named above
+  (`models/search_<kind>.sql`; `.context/refs.md` "Searchable kinds" says
+  what each indexes and whether archived work is included). Files are upserted by the `search.index` pump consumer from
   `snapshot.taken` (`indexer.rs`).
 - `stream_id` is `NULL` for project-global rows (wiki, a backlog task) and
   the owning stream otherwise. Search filters `stream_id = ?  OR stream_id

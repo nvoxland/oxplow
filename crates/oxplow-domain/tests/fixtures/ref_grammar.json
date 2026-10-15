@@ -1,8 +1,9 @@
 {
   "$comment": "Golden cases for the canonical ref grammar `<kind>:<id>[@<rev>][#<frag>]` (.context/refs.md). Asserted by crates/oxplow-domain/tests/ref_grammar.rs and by apps/desktop/src/refs/ref.test.ts, so the Rust and TS parsers can't drift. `id` is the DECODED id; `text` is the canonical string form (`format(parse(text)) == text`).",
-  "kinds": ["advisory", "agent_session", "ai_call", "ai_model", "ai_profile", "answer", "branch", "claim", "collector", "command", "comment", "commit", "config", "consumer", "custom_component", "decision", "decorator", "dimension", "dir", "effect", "effort", "event", "event_type", "extension", "file", "finding", "implementation", "job", "job_run", "lens", "measure", "metric", "model", "page", "panel", "project", "proposal", "provider", "ref_kind", "replacement", "run", "skill", "slot", "snapshot", "stream", "symbol", "thread", "thread_note", "turn", "wiki", "work_item"],
+  "kinds": ["advisory", "agent_session", "ai_call", "ai_model", "ai_profile", "answer", "branch", "claim", "collector", "command", "comment", "commit", "config", "consumer", "custom_component", "dashboard", "decision", "decorator", "dimension", "dir", "effect", "effort", "event", "event_type", "extension", "file", "finding", "implementation", "job", "job_run", "lens", "measure", "metric", "model", "page", "panel", "project", "proposal", "provider", "ref_kind", "replacement", "run", "skill", "slot", "snapshot", "stream", "symbol", "thread", "thread_note", "turn", "wiki", "work_item"],
   "valid": [
     { "text": "effort:eff362", "kind": "effort", "id": "eff362", "rev": null, "frag": null },
+    { "text": "dashboard:dsh3", "kind": "dashboard", "id": "dsh3", "rev": null, "frag": null },
     { "text": "thread:thr1", "kind": "thread", "id": "thr1", "rev": null, "frag": null },
     { "text": "commit:4c44d495", "kind": "commit", "id": "4c44d495", "rev": null, "frag": null },
     { "text": "dir:src/components", "kind": "dir", "id": "src/components", "rev": null, "frag": null },

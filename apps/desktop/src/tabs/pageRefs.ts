@@ -583,6 +583,8 @@ export function refFromTabId(id: string): TabRef | null {
       return symbolRef(id);
     case "agent_session":
       return agentSessionRef(canonical.id);
+    case "dashboard":
+      return customDashboardRef(canonical.id);
     case "lens":
       return lensRefFromTail(rawAfterKind(id, "lens") ?? "");
     case "page": {

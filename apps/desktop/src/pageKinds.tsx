@@ -42,8 +42,12 @@ import {
   LayoutDashboard,
   Library,
   type LucideIcon,
+  MessageSquareText,
+  MessagesSquare,
   Plus,
+  Scale,
   Settings,
+  StickyNote,
   Terminal,
 } from "lucide-react";
 import type { ComponentProps, ReactElement } from "react";
@@ -122,6 +126,14 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
 
     case "agent_session":
       return Bot;
+    case "thread":
+      return MessagesSquare;
+    case "thread_note":
+      return StickyNote;
+    case "comment":
+      return MessageSquareText;
+    case "decision":
+      return Scale;
     case "new-session":
       return Plus;
 
@@ -215,6 +227,8 @@ export function pageKindLabel(kind: string): string {
       return "new stream";
     case "agent_session":
       return "agent session";
+    case "thread_note":
+      return "note";
     case "new-session":
       return "new session";
     case "closed-threads":

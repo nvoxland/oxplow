@@ -1,11 +1,14 @@
 -- What site search indexes for each of the active list's items, through
 -- the interface. Archived work leaves search, as its files do (tsk921):
 -- an item on an archived thread or stream isn't indexed; the backlog
--- (no thread) is.
+-- (no thread) is. Its comments follow its own text in the body.
 SELECT CAST(w.ref AS TEXT) AS ref,
        CAST(w.title AS TEXT) AS title,
        -- Its own id first (`tsk42`, `ENG-12`), so typing it finds it.
        CAST(w.native_id || char(10) || w.body
+            || coalesce((SELECT group_concat(char(10) || c.body, '')
+                           FROM (SELECT body FROM ref('work_item_comment')
+                                  WHERE ref = w.ref ORDER BY created_at, id) c), '')
             AS TEXT) AS body,
        CAST(CASE WHEN th.stream_id IS NULL THEN NULL ELSE 'str' || th.stream_id END AS TEXT)
          AS stream_id

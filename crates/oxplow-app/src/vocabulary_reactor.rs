@@ -595,7 +595,7 @@ mod tests {
                     text("decision"),
                     text("v_decision"),
                     text("{effort_ref|thread_ref}"),
-                    SqlCell::Null(())
+                    text("v_search_decision")
                 ],
                 vec![
                     text("event"),

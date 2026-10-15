@@ -127,6 +127,10 @@ edges). Only
 `issues:ENG-12`); `wiki`, `commit` and `symbol` keep bare ids and use the
 capability's active provider.
 
+`dashboard` (`dashboard:dsh3`, `build::dashboard_ref`) is a user-created
+dashboard, owned by `v_dashboard.ref`, opening as itself (the desktop maps
+it to its dashboard page) and searched through `v_search_dashboard`.
+
 `agent_session` (an agent slot on a thread, `agent_session:ses3`,
 `build::agent_session_ref`) is registered with the `ses` id. It isn't
 `agent:` — that name is kept for the harness registry.
@@ -276,9 +280,31 @@ same page. Before the registry is read, a ref opens as itself.
 an asset per kind (`kind_search.rs`), registered from `ref_kind` alone.
 A hit carries the `ref` it found (`work_item:oxplow:tsk7`,
 `file:src/a.rs`) and nothing about opening it: the caller opens it like
-any ref. Core's feeds (`v_search_work_item`, `_comment`, `_thread_note`,
-`_wiki`; tsk864) carry their stream and aren't bounded; an extension's
-are project-global and bounded. The search kind is the ref kind
+any ref. Core's feeds carry their stream (a project-wide kind, none) and
+aren't bounded; an extension's are project-global and bounded. Core
+searches `work_item` (its comments follow its body), `comment`,
+`thread_note`, `wiki`, `thread`, `agent_session`, `turn`, `effort`,
+`decision`, `commit`, `lens` and `dashboard`. **The newer feeds include
+archived work** — closed and archived threads, their sessions, turns,
+efforts and decisions are found, since finding last month's work is the
+point; the older four still skip an archived stream (below). What each
+indexes: a thread's title, then its efforts' titles and summaries and its
+sessions' names; a session's name (`v_agent_session.display_name`: its
+title, else harness and the day it opened — the one place that is
+spelled), its harness, its thread's overlapping efforts and the distinct
+paths and shell commands of its tool calls (300 of each); a turn's
+session name and start, then prompt and answer; an effort's title, summary
+and work item; a decision's question, choice, why and alternatives; a
+commit's subject, then body, author and changed paths (the last 500 per
+head, project-wide); a lens's title and description; a dashboard's title,
+its text tiles' text and its query tiles' titles. A feed's `version`:
+a thread's is the newest of its own change, its efforts', its sessions'
+and its last turn; a session's, its change or last tool call; a turn's,
+when it ended; a decision's, when it was made; a commit's, its sha; a
+comment's, its change or last message; a wiki page's, `updated_at`; a
+thread note's, `created_at`. Effort, lens and work item feeds have none
+(an open effort's summary follows its turns, and a work item's text comes
+through its provider), so their rows are compared by text. The search kind is the ref kind
 (`thread_note`, not `note`). Like every
 published model, a feed's `ref` is the canonical ref a hit opens
 (`work_item:oxplow:tsk7`, `thread_note:not5`, `comment:cmt3`,
