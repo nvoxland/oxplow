@@ -213,7 +213,7 @@ pub enum SqlCell {
     Null(()),
     Bool(bool),
     Int(#[specta(type = oxplow_domain::JsNumber)] i64),
-    Real(f64),
+    Real(#[specta(type = oxplow_domain::JsNumber)] f64),
     Text(String),
 }
 

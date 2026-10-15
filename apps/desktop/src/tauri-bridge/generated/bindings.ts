@@ -6176,7 +6176,7 @@ export type SourceCoverage = {
  *  number or string) so the TS binding is `null | boolean | number |
  *  string` rather than serde_json's tagged-enum shape.
  */
-export type SqlCell = null | boolean | number | number | null | string;
+export type SqlCell = null | boolean | number | string;
 
 /**
  *  Result of a read-only SQL query. `rows` are positional, aligned with
