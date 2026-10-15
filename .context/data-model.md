@@ -384,16 +384,6 @@ Each stream owns:
 - per-pane / per-thread agent resume session ids (so reconnecting picks up
   history for the assigned agent)
 - a `runtime_state.current_stream_id` pointer (singleton row, id=1)
-- a `sort_index` column (migration v14) — streams are listed ordered by
-  `sort_index, rowid`. `reorderStreams(orderedStreamIds)` reassigns
-  sequential indexes and emits a `stream.changed` event (kind:
-  "reordered"). **No UI reaches it today** (tsk272): the drag-to-reorder
-  lived in `StreamRail`, which the `Navigator` superseded without
-  carrying the gesture over; `App.handleReorderStreams` is still defined
-  but is passed to nothing. The store, IPC, and handler all work — only
-  the gesture is missing. Any replacement must keep **primary-first**
-  regardless of sort_index (the primary stream can't be dragged and
-  nothing may drop before it).
 - a `custom_prompt` column (migration V6, nullable TEXT) — per-stream
   standing instructions appended to the agent's system prompt after the
   global `agentPromptAppend` section. Set via the `oxplow.stream.set_prompt`

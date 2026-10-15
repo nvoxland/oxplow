@@ -39,7 +39,6 @@ pub const PROMOTE: &str = "oxplow.thread.promote";
 pub const DEMOTE: &str = "oxplow.thread.demote";
 pub const CLOSE: &str = "oxplow.thread.close";
 pub const REOPEN: &str = "oxplow.thread.reopen";
-pub const REORDER: &str = "oxplow.thread.reorder";
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -76,15 +75,6 @@ pub struct SetPromptInput {
 pub struct ThreadInput {
     /// The thread (`thread:thr12`).
     pub thread: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct ReorderInput {
-    /// The stream (`stream:str1`).
-    pub stream: String,
-    /// Its threads in their new order (`thread:thr12`, …).
-    pub order: Vec<String>,
 }
 
 fn load(ctx: &TxCtx<'_>, id: ThreadId, field: &str) -> Result<Thread, CommandError> {
@@ -491,74 +481,6 @@ pub fn reopen_op() -> Op {
     )
 }
 
-/// `thread.reorder { stream, order }`: the stream's threads take the
-/// positions `order` lists them in — every one of them, once. Undone by
-/// their previous order.
-pub fn reorder_op() -> Op {
-    Op::new(
-        "threads.write",
-        "reorder",
-        schema::<ReorderInput>(),
-        true,
-        Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
-            let input: ReorderInput = parse(input)?;
-            let stream: StreamId = ref_id(&input.stream, "stream", "/stream")?;
-            let mut threads = Vec::with_capacity(input.order.len());
-            for (i, r) in input.order.iter().enumerate() {
-                let field = format!("/order/{i}");
-                let thread = load(ctx, ref_id(r, "thread", &field)?, &field)?;
-                if thread.stream_id != stream {
-                    return Err(invalid(
-                        &field,
-                        format!("`{r}` isn't on `{}`", input.stream),
-                    ));
-                }
-                if threads.iter().any(|t: &Thread| t.id == thread.id) {
-                    return Err(invalid(
-                        "/order",
-                        format!("`order` names `{r}` twice; it names each thread once"),
-                    ));
-                }
-                threads.push(thread);
-            }
-            // The stream's whole order, so every thread has its place and
-            // the undo puts each back where it was.
-            let listed = list_for_stream_tx(ctx.conn, stream).map_err(sql)?;
-            let missing: Vec<String> = listed
-                .iter()
-                .filter(|t| !threads.iter().any(|n| n.id == t.id))
-                .map(|t| format!("`{}`", thread_ref(t.id)))
-                .collect();
-            if !missing.is_empty() {
-                return Err(invalid(
-                    "/order",
-                    format!(
-                        "`order` leaves out {}: it names every thread of `{}` once",
-                        missing.join(", "),
-                        input.stream
-                    ),
-                ));
-            }
-            let previous: Vec<String> = listed.iter().map(|t| thread_ref(t.id)).collect();
-            let now = Timestamp::now();
-            for (i, mut thread) in threads.clone().into_iter().enumerate() {
-                thread.sort_index = i as i64;
-                thread.updated_at = now;
-                save(ctx, &thread)?;
-            }
-            Ok(HandlerOutput {
-                result: json!({ "stream": input.stream, "order": input.order }),
-                inverse: call(
-                    REORDER,
-                    json!({ "stream": input.stream, "order": previous }),
-                ),
-                ..HandlerOutput::default()
-            })
-        })),
-    )
-    .open_to(Invokers::NO_AGENT)
-}
-
 /// The thread commands, for the bus.
 pub fn ops(processes: crate::agent_sessions::SessionProcesses) -> Vec<Op> {
     vec![
@@ -569,7 +491,6 @@ pub fn ops(processes: crate::agent_sessions::SessionProcesses) -> Vec<Op> {
         demote_op(),
         close_op(processes),
         reopen_op(),
-        reorder_op(),
     ]
 }
 
@@ -889,89 +810,5 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(thread(&fx, fx.thread).await.custom_prompt, None);
-    }
-
-    /// Reorder rewrites the named threads' positions and undoes to the old
-    /// order; a thread of another stream is refused at its position.
-    #[tokio::test]
-    async fn reorder_rewrites_positions_and_undoes() {
-        let fx = services_with_effort().await;
-        let b = create(&fx, "b").await;
-        let c = create(&fx, "c").await;
-        let stream = stream_ref(thread(&fx, fx.thread).await.stream_id);
-        let order = [c, b, fx.thread].map(thread_ref);
-        let out = run(
-            &fx,
-            &Actor::Human,
-            REORDER,
-            json!({ "stream": stream, "order": order }),
-        )
-        .await
-        .unwrap();
-        let listed: Vec<ThreadId> = fx
-            .svc
-            .threads
-            .list_for_stream(&thread(&fx, fx.thread).await.stream_id)
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|t| t.id)
-            .collect();
-        assert_eq!(listed, [c, b, fx.thread]);
-        fx.svc
-            .commands
-            .undo(&Actor::Human, out.audit_id.unwrap(), false)
-            .await
-            .unwrap();
-        let listed: Vec<ThreadId> = fx
-            .svc
-            .threads
-            .list_for_stream(&thread(&fx, fx.thread).await.stream_id)
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|t| t.id)
-            .collect();
-        assert_eq!(listed, [fx.thread, b, c]);
-        let err = run(
-            &fx,
-            &Actor::Human,
-            REORDER,
-            json!({ "stream": "stream:str99", "order": [thread_ref(b)] }),
-        )
-        .await
-        .unwrap_err();
-        assert!(
-            matches!(&err, CommandError::Invalid { field: Some(f), .. } if f == "/order/0"),
-            "{err:?}"
-        );
-        // The order is the stream's whole order: each of its threads once,
-        // so the undo puts every one back where it was.
-        for (order, says) in [
-            (vec![thread_ref(c), thread_ref(b)], "leaves out"),
-            (
-                vec![
-                    thread_ref(c),
-                    thread_ref(c),
-                    thread_ref(b),
-                    thread_ref(fx.thread),
-                ],
-                "names `thread:thr",
-            ),
-        ] {
-            let err = run(
-                &fx,
-                &Actor::Human,
-                REORDER,
-                json!({ "stream": stream, "order": order }),
-            )
-            .await
-            .unwrap_err();
-            assert!(
-                matches!(&err, CommandError::Invalid { field: Some(f), message }
-                    if f == "/order" && message.contains(says)),
-                "{err:?}"
-            );
-        }
     }
 }

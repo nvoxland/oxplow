@@ -547,16 +547,11 @@ the colored-dot working/waiting/idle state.
 
 ## Thread and stream order
 
-- `oxplow.thread.reorder { stream, order }` (P8.A3) gives the named threads
-  sequential `sort_index` values (each must be on `stream`); undo restores
-  the previous order. The desktop's `reorderThreads` runs it. **No UI
-  reaches it today** (tsk272) — the drag-to-reorder lived in the
-  since-deleted thread rail, and the `Navigator` didn't carry it over.
+- Threads list by `sort_index`, then `created_at`; the index is the stable
+  ordering key, not something a person sets (there is no drag-to-reorder
+  and no reorder command).
 - Streams have no order of their own: they list primary first, then by
-  `created_at`. The old `reorder_streams` IPC rewrote `created_at`
-  through an upsert that never updates it, so it never persisted, and
-  nothing called it; P8.A4 removed it. Rebuilding it needs a
-  `streams.sort_index` column (tsk272).
+  `created_at`.
 
 ## Generic usage tracking
 

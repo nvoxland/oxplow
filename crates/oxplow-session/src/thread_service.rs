@@ -1,5 +1,5 @@
 //! Thread reads and the per-stream selection pointer. A thread's
-//! lifecycle — create, rename, prompt, promote, close, reopen, reorder —
+//! lifecycle — create, rename, prompt, promote, close, reopen —
 //! is the `thread.*` commands (`oxplow-app/src/commands/thread.rs`), so
 //! every surface goes through the command bus.
 

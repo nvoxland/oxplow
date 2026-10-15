@@ -875,11 +875,6 @@ commands:
     op: reopen
     invokers: { human: true, agent: true, lens: true }
     example: {"thread": "thread:thr12"}
-  - name: thread.reorder
-    summary: "Reorder a stream's threads (`order`: thread refs in their new order)."
-    scope: threads.write
-    op: reorder
-    invokers: { human: true, agent: false, lens: true }
   - name: thread.set_prompt
     summary: "Set (or clear) the text appended to a thread's agent prompt. A person's: it steers the agent."
     scope: threads.write
