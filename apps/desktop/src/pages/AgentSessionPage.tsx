@@ -81,7 +81,7 @@ export function AgentSessionPage({
   return (
     <Page testId="page-agent" showNavBar={false} showHeader={false}>
       <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-        {/* What the agent showed with `show_lens` (P6.C2); an ACP thread
+        {/* What the agent showed with `oxplow_show_lens` (P6.C2); an ACP thread
           *  renders each answer inline in its transcript instead. */}
         <AnswersStrip key={thread.id} threadId={thread.id} onOpenPage={onOpenPage} />
         {/* A flex column all the way down: a percentage height under a flex

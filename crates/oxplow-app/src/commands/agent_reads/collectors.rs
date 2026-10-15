@@ -33,7 +33,11 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
         "preview",
         services,
         |svc, actor, p: PreviewCollectorParams| async move {
-            check_optional_stream("preview_collector", "/stream_id", p.stream_id.as_deref())?;
+            check_optional_stream(
+                "oxplow_preview_collector",
+                "/stream_id",
+                p.stream_id.as_deref(),
+            )?;
             // Omitted: the caller's own stream.
             let stream = stream_or_actors(&svc, &actor, p.stream_id.clone()).await?;
             let root = svc

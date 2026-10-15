@@ -514,11 +514,11 @@ turn's prompt (`turn_kind`).
 - `v_ai_provider` (with `key_set`, never keys) and `v_ai_role` (every role's
   binding, what a call would use now, and whether its provider has a key),
   read live: `ai.yaml`, `project.yaml` and the keychain change with no hook.
-- `ai_decide`: typed questions (`noul` / `choice` / `score`) about some
+- `oxplow_ai_decide`: typed questions (`noul` / `choice` / `score`) about some
   text, on the `decide` role (an agent can't pick a costlier one) — a
   recorded computation (`AiCompute::decide`), returning `{ answers,
   cached }`.
-- `ai_summarize`: text through the `summarize` role, with an optional focus
+- `oxplow_ai_summarize`: text through the `summarize` role, with an optional focus
   — a recorded computation (`AiCompute::summarize`), so the same text and
   focus is one call.
 - What a call was asked or answered is `read` of its `ai_call` ref (the

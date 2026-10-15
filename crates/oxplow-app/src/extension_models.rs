@@ -160,7 +160,7 @@ mod tests {
     }
 
     /// An author's lens over a model nobody published yet answers through
-    /// the overlay — what MCP `run_lens` reads through — where a plain run
+    /// the overlay — what MCP `oxplow_run_lens` reads through — where a plain run
     /// says the view isn't there.
     #[tokio::test]
     async fn a_lens_over_an_unpublished_model_answers_through_its_overlay() {
@@ -210,7 +210,7 @@ mod tests {
         assert_eq!(answered.result.rows.len(), 1);
     }
 
-    /// P4.9 (tsk494): `validate_extension` (what `oxplow extension check`
+    /// P4.9 (tsk494): `oxplow_validate_extension` (what `oxplow extension check`
     /// runs) catches a breaking change at a published version before it
     /// is published, and an extension's `source()` of a core table.
     #[tokio::test]

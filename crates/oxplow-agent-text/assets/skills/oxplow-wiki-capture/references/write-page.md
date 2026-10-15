@@ -2,7 +2,7 @@
 
 1. For an existing page, read `.oxplow/wiki/<slug>.md` and merge your
    addition into its body. Refs that drifted since they were pinned are
-   `v_knowledge_ref` rows with `stale = 1`; `wiki_ref_drift` shows what
+   `v_knowledge_ref` rows with `stale = 1`; `oxplow_wiki_ref_drift` shows what
    changed in one.
 2. Write the whole page with `run_command`:
    `oxplow.knowledge.write_page { slug, body, verified_refs, removed_refs }`
@@ -40,7 +40,7 @@ Settings → Capabilities keeps pages.
 
 If this turn dispatched Explore subagents that wrote findings into thread
 notes (`oxplow.knowledge.update_note`), read `v_thread_note` with
-`query_sql` and fold their findings into the wiki page rather than
+`oxplow_query_sql` and fold their findings into the wiki page rather than
 discarding them. Subagent notes are otherwise invisible; the wiki is where
 they become durable.
 

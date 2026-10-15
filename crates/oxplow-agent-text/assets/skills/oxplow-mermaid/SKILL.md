@@ -36,7 +36,7 @@ There is no downside to quoting, so quote unconditionally.
   `&gt;` inside a quoted label shows up literally. `<br>` is the line
   break.
 
-`references/syntax.md` (get_skill reference `syntax`) has the characters
+`references/syntax.md` (oxplow_get_skill reference `syntax`) has the characters
 that break bare labels, the `>`/`<` trap, edge labels, sequence-diagram
 messages, subgraph titles and node ids, with examples. Open it when a
 diagram uses punctuation, a sequence diagram, or fails to render.

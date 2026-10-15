@@ -340,7 +340,7 @@ advisories' queries — reads its own configuration with
   not a SQL function: where the SQL is compiled or run, each call is
   replaced by the literal of its value (a number as is, a string quoted, a
   boolean 1 or 0). Nothing registers a global function, so there is no `v_*`
-  view or `query_sql` call that reads configuration, and no way to name
+  view or `oxplow_query_sql` call that reads configuration, and no way to name
   another extension's: the owner is fixed by where the SQL is declared
   (`ExtensionModels.config` for a model, the lens's or advisory's own
   extension for those). Core SQL reads none. Settings are non-secret by
@@ -504,7 +504,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
 - **Reading.** What the app shows is read from the **main worktree**
   (the daemon's project dir), whichever stream is open: listings, lens
   pages, slots and panels, custom components, prompts, advisories,
-  `oxplow.lens.show` / thread answers and `get_open_page`. A stream's `stream_id`
+  `oxplow.lens.show` / thread answers and `oxplow_get_open_page`. A stream's `stream_id`
   only scopes the data a lens reads (`:stream_id` / `:thread_id`). See
   "Per stream" below. Reads go through
   `Services.extension_catalog` (`crates/oxplow-app/src/extension_catalog.rs`):
@@ -512,8 +512,8 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   (every file in the folder — a custom component's bundle too, so its
   file cap keeps that walk small) and `.oxplow/project.yaml`, so a hit costs ~60 µs instead of the ~3 ms
   parse and an edit still shows up on the very next call (see
-  [performance.md](./performance.md)). `find_lens`, `run_lens`,
-  `validate_extension`, `list_data_entities` and the advisory/metric/source
+  [performance.md](./performance.md)). `find_lens`, `oxplow_run_lens`,
+  `oxplow_validate_extension`, `list_data_entities` and the advisory/metric/source
   readers all take the catalog; `load_extensions` itself is the cache's
   loader and the write paths' direct read. Hidden folders directly under
   `oxplow/extensions/` are excluded from both loading and fingerprinting, so
@@ -533,24 +533,24 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   name mismatch, marks that extension's `errors` and skips its lenses. A
   bad lens file is listed in `errors` and skipped; the other lenses still
   load.
-- **`validate_extension`** also dry-runs every lens with its defaults. It
+- **`oxplow_validate_extension`** also dry-runs every lens with its defaults. It
   reports SQL errors, and `columns` / `link.from` keys that the query
   doesn't return.
 - **Surfaces.**
   - IPC and MCP: `run_lens`, `validate_extension`; `get_lens` is IPC
-    only, an agent reads a definition with `read` (`lens:<ext>/<slug>`).
+    only, an agent reads a definition with `oxplow_read` (`lens:<ext>/<slug>`).
   - An agent lists lenses, extensions and what each contributes with
     models, not tools: `v_lens`, `v_extension` and `v_contribution`
     (restated with each extension generation from the active catalog, the
     main worktree's; an extension that fails to load holds its generation
-    back, so it is not a row — `validate_extension` says why). The UI's
+    back, so it is not a row — `oxplow_validate_extension` says why). The UI's
     `list_extensions` stays IPC.
   - **Over MCP these are the authoring tools** and read the caller's
     **working copy**: an omitted `stream_id` is the caller's own stream
     (its header, else its thread's; the primary only for an anonymous
     caller), so an agent in a worktree can check the extension it just
-    wrote before it's merged — the same for `preview_collector`, `review_extension`, `oxplow.extension.install`,
-    `oxplow.extension.update`, `run_lens_action` and `ensure_change`.
+    wrote before it's merged — the same for `oxplow_preview_collector`, `oxplow_review_extension`, `oxplow.extension.install`,
+    `oxplow.extension.update`, `oxplow_run_lens_action` and `oxplow_ensure_change`.
     `site_search` is the exception by design: omitted, it searches every
     stream.
   - **Over IPC (the UI)** they show the main worktree's extensions:
@@ -560,8 +560,8 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     `run_component_query` and `run_lens_action` take one only for the
     lens's data context. `validate_extension` and `review_extension` are
     authoring calls and check the named stream's working copy.
-  - `get_open_page` (MCP) plus `report_open_page` (UI) are current; see
-    "Agents: the MCP surface".
+  - `oxplow_get_open_page` (an agent's) plus `report_open_page` (UI) are
+    current; see "Agents: the MCP surface".
     Agents write lens files with their normal Edit tool, under the filing
     guard, taught by the `oxplow-extension` skill.
 - **UI.**
@@ -638,13 +638,13 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       load-time validation and run-time binding alike, so the two can't
       disagree.
       At load, a `{{param.x}}` must name a declared param and `{{row.x}}`
-      needs `row: true`; `validate_extension` checks `{{row.x}}` against
+      needs `row: true`; `oxplow_validate_extension` checks `{{row.x}}` against
       the result's columns; the command name must be well-formed. Any
       other shape is a field error.
     - **A lens grants no power.** `lens_actions::run_lens_action` runs the
       command through the bus as `Actor::Lens { lens_id, on_behalf_of }`
       — `Human` from the UI (`run_lens_action` RPC), the calling agent from
-      MCP `run_lens_action` (which never confirms). The bus applies the
+      MCP `oxplow_run_lens_action` (which never confirms). The bus applies the
       command's `invokers.lens`, and the agent policy through
       `on_behalf_of`, so an agent can't reach a human-only command or
       confirm one through a lens. The audit records `lens:<id>`.
@@ -690,7 +690,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     (an agent runs the command itself). Only a form and a grid (which renders its children, never rows of its own) omit `query`. The loader drops a
     lens missing the column roles its viz needs, naming the block
     (`chart`, `tree`, `timeline`, `steps`, `hunks`), and
-    `validate_extension` checks every named column exists in the result
+    `oxplow_validate_extension` checks every named column exists in the result
     (`Lens::role_columns`). Pure data shaping lives in `lensModel.ts`
     (`barRows`, `lineSeries`, `treemapItems`, `treeNodes`,
     `timelineEntries`, `stepItems`, `hunkRows`, `childParams`).
@@ -700,13 +700,13 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   - **Your team.** Extensions are committed files under
     `oxplow/extensions/`.
   - **The world.** Publish an extension as a git repo with
-    `extension.yaml` at its root. Others run `review_extension(git_url,
+    `extension.yaml` at its root. Others run `oxplow_review_extension(git_url,
     git_ref?)` then the `oxplow.extension.install { git_url, git_ref?,
     reviewed_sha, stream? }` command (`commands/extension_install.rs`,
     P8.A9: `External`, `Confirm::Always` — an agent's run becomes a
     proposal a person approves; Settings → Extensions' install box runs it
     confirmed, the review being the confirmation).
-    - **Review first (tsk378).** `review_extension` (or `(name)` for an
+    - **Review first (tsk378).** `oxplow_review_extension` (or `(name)` for an
       update) clones into `.oxplow/tmp/` and returns `ExtensionReview`:
       the extension as it would load (`errors` = load errors), its commit
       `sha`, and `problems` from a dry run of its lenses/advisories
@@ -796,7 +796,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       overwrite a lens, and refuses git-installed extensions.
   - **Thread answers** (P6.C1, `commands/lens.rs`,
     `oxplow-db/src/thread_answer_store.rs`). An agent answers with a lens
-    rather than pasting rows: MCP **`show_lens { lens | spec, params? }`**
+    rather than pasting rows: MCP **`oxplow_show_lens { lens | spec, params? }`**
     runs `oxplow.lens.show`, which stores a `thread_answer` (V124, model
     `v_thread_answer`, ref `answer:<id>`) and returns the text rendering.
     - **One lens shape, `LensSpec`**: what a lens file holds, what an
@@ -830,7 +830,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       `useThreadAnswers`), newest first, hidden while there are none,
       collapsible (Escape inside it collapses; remembered per thread in
       `oxplow.answers.collapsed`). An ACP thread renders each answer
-      inline under the `show_lens` call that made it (`answerOfTool`
+      inline under the `oxplow_show_lens` call that made it (`answerOfTool`
       finds `answer:<id>` in the call's result). Each `ThreadAnswer`
       re-runs through `run_answer` with `useRerunOnChange`, and offers
       **Keep This** (an inline name — empty takes it from the title —
@@ -861,7 +861,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   Settings → Extensions keeps each extension's source credentials.
 - **Settings shows what `extension check` finds** (tsk1039). Loading can't
   catch a lens whose SQL fails (it never runs the SQL), so Settings →
-  Extensions runs `validate_extension` — the same dry run `oxplow extension
+  Extensions runs `oxplow_validate_extension` — the same dry run `oxplow extension
   check` prints — for each enabled project extension, on open and on
   `extensionsChanged`, and lists its errors with the load errors, once
   each. Bundled extensions are checked where they're built.
@@ -912,7 +912,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     stream) clear the old results first, so thread A's rows never show
     under thread B.
   - `change_id` comes from `src/lens/useChange.ts`: it calls
-    `ensure_change` on mount and again whenever `v_change` changes
+    `oxplow_ensure_change` on mount and again whenever `v_change` changes
     (`shouldReensure`): the analysis landed, or the `change.analyze`
     consumer recomputed a working tree or open effort.
 - **Change links.** `diff-at` (`from` path, optional `line`, `base` and
@@ -930,7 +930,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   reads the list with `oxplow_config::disabled_extensions` (just that key,
   from the worktree being read) and returns a disabled extension with
   `enabled: false` and no lenses, slots or sources, so every consumer
-  ignores it; `find_lens` and `run_lens` say it's disabled. Settings →
+  ignores it; `find_lens` and `oxplow_run_lens` say it's disabled. Settings →
   Extensions toggles it through the UI-only `set_extension_enabled`.
 - **A page of sections leads with what matters** (tsk1036). Slot sections
   (`LensSlots`) and a `grid`'s children with no rows (no error, not a grid)
@@ -1028,7 +1028,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   (`OXPLOW_SKILLS` and `CORE_COMMANDS` in
   `crates/oxplow-agent-text/src/lib.rs`) plus what
   extensions offer now ("Skills"). ACP agents get the same set as an
-  index in their system prompt plus the MCP `get_skill` tool (see
+  index in their system prompt plus the MCP `oxplow_get_skill` tool (see
   agent-model.md → ACP).
 
 - **P6b (epic tsk592, 2026-10-01).** An extension can also *act* and
@@ -1119,7 +1119,7 @@ out of the main checkout), and `oxplow.lens.keep` / `oxplow.lens.share` /
 `oxplow.extension.install` / `oxplow.extension.update` write to the named stream's
 worktree. The app shows that work once it's merged into the main
 worktree, like any other code change. Until then the MCP authoring tools
-(`validate_extension`, `run_lens`, `read` of a lens, …) read the agent's own
+(`oxplow_validate_extension`, `oxplow_run_lens`, `oxplow_read` of a lens, …) read the agent's own
 working copy so it can check what it wrote — its files, under the main
 worktree's config: the daemon's catalog is
 `ExtensionCatalog::for_project(main)`, so every load (`load_extensions_in`,
@@ -1331,7 +1331,7 @@ and one calling MCP read identical `file:line: what — fix` lines.
   its own unpublished model. It returns a `CheckReport { ok, errors,
   warnings, dry_run, extension }`; `render_findings` prints it as text
   (`error: <file:line …>` lines then a one-line summary) or JSON.
-  `validate_extension` also warns about a `fixtures/*.yaml` no intent
+  `oxplow_validate_extension` also warns about a `fixtures/*.yaml` no intent
   example names (`check_fixture_pairing`; `model-*` / `provider-*` belong
   to a model or a provider); `extension test` warns about the reverse, an
   example with no fixture (a fresh scaffold has some). Each names the file
@@ -1364,7 +1364,7 @@ and one calling MCP read identical `file:line: what — fix` lines.
   Then a stub `bin/provider` that exits 1 and `fixtures/provider-<id>.yaml`
   (`config: {}`).
 - **`extension_test::test_extension(root, name, bless)`** (`extension
-  test <name> [--bless] [--json]`, P5.D5; MCP `preview_extension`, which
+  test <name> [--bless] [--json]`, P5.D5; MCP `oxplow_preview_extension`, which
   runs it for an agent with an empty environment) runs on **a throwaway
   oxplow** (`throwaway::Host`) that is a real one: a temp project with a
   copy of the project's `oxplow/extensions/` and of which it turned off
@@ -1486,7 +1486,7 @@ job and component forms are in "The SDK"):
   must match;
 - `input: { collector: <id>, rows?, event? }`, `expect: { entities: { <name>:
   n | $any } }` — a derived collector runs over `rows` (standing in for
-  its `input` query, `preview_collector(…, event, rows)`) and `event`
+  its `input` query, `oxplow_preview_collector(…, event, rows)`) and `event`
   (the event an `on:` collector reacts to, as the envelope), storing nothing, its
   rows typed against the declaration; a collector that calls a model
   (`ai.compute`) is approved in the throwaway and runs against the fixture
@@ -1591,8 +1591,8 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   stream (else the thread's, else the primary) and the given thread (else
   the stream's selected-or-active one). IPC `run_lens` / `run_lens_action`
   resolve it from their `stream_id`, so the UI needs no plumbing; MCP
-  `run_lens` / `run_lens_action` also take the agent's `thread_id`;
-  `get_open_page` uses the viewer's thread. Validation dry-runs use no
+  `oxplow_run_lens` / `oxplow_run_lens_action` also take the agent's `thread_id`;
+  `oxplow_get_open_page` uses the viewer's thread. Validation dry-runs use no
   context (defaults only).
 - `query`: SQL over `v_*` and the extension's entities, with `:param`
   binding.
@@ -1646,7 +1646,7 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   - `depth` (`list` / `table`): a whole number (0–8) indents the row, for
     children under a parent in a flat list.
   - `group.by`, `emphasis` and `depth` are never shown as cells. The
-    loader refuses them on other vizes; `validate_extension` checks the
+    loader refuses them on other vizes; `oxplow_validate_extension` checks the
     columns they name (and `icon` / `tone`) are in the result
     (`Lens::role_columns`); at render a missing one is ignored.
   - Copy (`lens_text`) renders a grouped lens as a section per group.
@@ -1666,7 +1666,7 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   for whoever pressed, so they grant no power. `form: true` opens the
   command's form instead of running (a slideover: `lens_action_form`
   gives the command and the bound `input` as starting values); what the
-  person fills in runs (`run_lens_action`'s `input`, taken only by a form
+  person fills in runs (`oxplow_run_lens_action`'s `input`, taken only by a form
   action), its `fixed` fields put back to the bound values (an `Edit…`
   row action keeps the row's `ref`). A refusal naming a field (`INVALID`
   with `field`, carried over IPC on `IpcError.field`) shows under that
@@ -1927,7 +1927,7 @@ that fails the same way on both sides is `unchanged`. Each
 model's `downstream` is its direct readers from `v_model_lineage`
 (`downstream_of`) other than this extension's own views, by exact name;
 a provider's declarations are read from each version's files.
-`review_extension` fills `ExtensionReview.impact`, with the installed
+`oxplow_review_extension` fills `ExtensionReview.impact`, with the installed
 version as `before` when it replaces one (`review_update`), else none
 (everything is `added`); a candidate that doesn't load gets **no**
 report (`impact: None` — its errors say why, and it can't be
@@ -2182,7 +2182,7 @@ the honest extent of a "this reimplements the kit" lint.
 only through the host): `run_component_query { id, asset, params,
 stream_id }` runs `asset` — a lens id, a bare slug meaning the
 component's extension — when it's one of the component's `assets`
-(`Invalid` naming them otherwise), through `run_lens`: the lens's own
+(`Invalid` naming them otherwise), through `oxplow_run_lens`: the lens's own
 read-only, parameterised query, never SQL from the frame.
 `invoke_component_command { id, command, input, stream_id, confirmed }`
 runs `command` when it's one of the component's `commands` and a person
@@ -2530,7 +2530,7 @@ uses):
   titles (`list_services`, one rpc over `SERVICES`; the surface-parity
   manifest has it as a UI read, with `v_scope` for the agent), a service its script uses without naming it
   in `needs` flagged "(not in its needs)". The row's lines come from the
-  extension's check (`validate_extension` → `CheckReport.services`); the
+  extension's check (`oxplow_validate_extension` → `CheckReport.services`); the
   install and update review (`ExtensionReview.services`, listed under what
   it declares and before the impact report) computes them from the
   candidate's own files (`of_extension` reads through the review's
@@ -3804,7 +3804,7 @@ implementations:
   already on disk (`refresh_agent_text` → each harness's `refresh_text`). A skill folder oxplow wrote
   carries a `.oxplow` marker, so one no longer offered is removed and a
   person's own stay; the Claude `commands/` folder is oxplow's whole.
-  ACP agents get the offered set's index and `get_skill`.
+  ACP agents get the offered set's index and `oxplow_get_skill`.
 - `oxplow-bundled` gives the `work-items` skill (any work list) and the
   `work-next` command (oxplow's tasks' ready queue).
 
@@ -3875,7 +3875,7 @@ advisories:
 - `for_thread(svc, thread, on, cause)` runs them for a thread, reading
   the main worktree's extensions (whatever the thread's stream) and
   binding the thread's stream into the scope.
-- `validate_extension` dry-runs each advisory with every param NULL and
+- `oxplow_validate_extension` dry-runs each advisory with every param NULL and
   checks it returns `message` (and `key` for `once_per: row`).
 - oxplow-bundled ships hints on outcomes: `large-uncommitted` (turn-end,
   once per effort: an open effort holding 15 or more files — a commit
@@ -3909,12 +3909,50 @@ advisories:
 Everything a human can see or build, an agent can see or build too, over
 MCP. That includes whatever **extensions** add: an extension's sources,
 entities, dimensions, metrics and lenses show up in the same generic tools
-as core's. Extensions never add their own MCP tools. That keeps the agent's
-tool list stable no matter how many extensions are installed.
+as core's, and its commands through `run_command`.
+
+**Tools are declarations.** Core builds only the command bus's two tools,
+`list_commands` and `run_command`. Every other tool is a command or a lens
+that asks to be one with `tool: <name>` on its `commands:` entry or its
+lens file, offered as `<namespace>_<name>` (the extension's `namespace:`):
+
+```yaml
+commands:
+  - name: sql.query
+    summary: Run ONE read-only SQL statement over the published `v_*` models. …
+    scope: sql.read
+    op: query
+    invokers: { human: true, agent: true, lens: true }
+    tool: query_sql          # offered as oxplow_query_sql
+# lenses/open-work.yaml
+tool: open_work              # offered as <namespace>_open_work
+```
+
+- oxplow's own tools are `oxplow-foundation`'s declarations over core's
+  read operations (`oxplow_read`, `oxplow_query_sql`, `oxplow_show_lens`,
+  `oxplow_vcs_log`, …); no tool is special to core.
+- A **command tool**'s description, schema and example are its command's,
+  and a call runs it as the caller through the bus (validation, policy,
+  proposals, audit). It's offered while its extension is enabled and the
+  command is offered to the caller (`invokers.agent`, `needs`), so the
+  list follows the active implementations as commands do. Its read-only
+  hint is its command's access (`View`/`Read`).
+- A **lens tool**'s input is one property per param (its label, choices
+  and default) plus `format`; a call runs `oxplow.lens.run` and returns the
+  lens's text rendering (`format: "json"`: its rows). Always read-only.
+- A name is `[a-z][a-z0-9_]*`, at most 48 characters; two entries offering
+  one name — in one extension, or two under one namespace (oxplow's own
+  share `oxplow`) — are refused at load, on each.
+- Every agent-invokable command stays reachable through `run_command`
+  whether or not it's a tool: a tool is a named entry for the ones an
+  agent reaches for often, kept few so the list stays readable for weaker
+  models.
+- Listing and dispatch: `oxplow_app::agent_tools` (`offered`, `tools_of`);
+  the MCP server (`crates/oxplow-mcp`) lists and resolves them per caller.
 
 **Understanding the semantic layer**
 
-- `query_sql`: read-only SQL over the published models. `v_model` /
+- `oxplow_query_sql`: read-only SQL over the published models. `v_model` /
   `v_model_column` / `v_model_lineage` describe every view (core `v_*` and
   extension `v_<ext>_<entity>`) with its column docs and inputs;
   `v_dimension`, `v_metric_spec` and `v_measure` list the dimensions,
@@ -3929,9 +3967,9 @@ tool list stable no matter how many extensions are installed.
 - `v_lens`: every lens (`ref`, `extension`, `title`, `description`, `viz`,
   `params`, `hidden`); `v_extension` and `v_contribution` for the
   extensions and what they contribute.
-- `read { ref: "lens:<id>" }`: the lens definition (in `content`): query, params with defaults, viz,
+- `oxplow_read { ref: "lens:<id>" }`: the lens definition (in `content`): query, params with defaults, viz,
   columns/links and the file it lives in.
-- `run_lens(id, params?, format?)`: **what the UI shows** for those
+- `oxplow_run_lens(id, params?, format?)`: **what the UI shows** for those
   params, as its text rendering by default — `LensText { lens, title,
   params, columns, rowCount, truncated, reads, alert, text }`, no rows
   (the text carries them) — or, with `format: "json"`, the full
@@ -3950,9 +3988,9 @@ tool list stable no matter how many extensions are installed.
   What a component needs beyond its rows — a grid's child runs, the
   hunks' diffs — is `lens_text::resolve`d first (`text_of`). Tables
   stop at 50 rows and say how many more; an empty result says the
-  lens's `empty` text. It's what `run_lens`, `get_open_page` and `copy`
+  lens's `empty` text. It's what `oxplow_run_lens`, `oxplow_get_open_page` and `copy`
   return, so an agent reads a lens the way the person sees it.
-- `get_open_page(thread_id)` **(current)**: what the human has open in
+- `oxplow_get_open_page(thread_id)` **(current)**: what the human has open in
   that thread, for any page kind (`task:42`, `file:…`, `lens:…`). For a
   lens it adds `lens`, the lens re-run with the human's *current*
   params as its text rendering, so "look at what I'm looking at" works.
@@ -3993,7 +4031,7 @@ tool list stable no matter how many extensions are installed.
   (`commandOffers`). The launcher (`components/extensionLauncher.ts`
   `launcherPages`) lists lenses and `pages:`.
 - **Lens actions (current, P6.B1):** `actions:` are commands, run by an
-  agent with `run_lens_action` as the lens acting for it (see "Actions
+  agent with `oxplow_run_lens_action` as the lens acting for it (see "Actions
   are commands").
 
 **Building**
@@ -4006,7 +4044,7 @@ tool list stable no matter how many extensions are installed.
   Save as Lens in Explore Data. The same rule holds for metrics:
   the `oxplow.metric.scaffold` command returns the metric extension's files for
   the agent to write itself.
-- `validate_extension(name)` returns load errors, schema errors and a dry
+- `oxplow_validate_extension(name)` returns load errors, schema errors and a dry
   run of every lens query, so the agent can check its work without the UI.
 - `v_extension`, `v_collector_state` (approval), `v_collector_credential`
   (set or not, never the value), the `oxplow.collector.sync` command (never approves).
@@ -4015,7 +4053,7 @@ tool list stable no matter how many extensions are installed.
   `oxplow.collector.sync` command over `CollectorRunner::sync`, from any caller)
   always runs the **primary** worktree's copy. An agent
   writing a collector in a worktree stream checks it with MCP
-  `preview_collector(owner, id, stream_id)`: `collector_runner::
+  `oxplow_preview_collector(owner, id, stream_id)`: `collector_runner::
   preview_collector` runs that worktree's version through the same
   `produce` step (same consent: an exec collector needs a person's
   approval of that exact hash, and so does a Starlark one that calls a
@@ -4032,7 +4070,7 @@ tool list stable no matter how many extensions are installed.
 
 An `oxplow-extension` skill (shipped in `crates/oxplow-agent-text/assets`)
 teaches the format, the `v_*` contract and the loop "read `v_model` →
-query_sql → write files → validate_extension → run_lens". "Improve with Agent" on a lens pastes
+oxplow_query_sql → write files → oxplow_validate_extension → oxplow_run_lens". "Improve with Agent" on a lens pastes
 `[oxplow lens <ext>/<slug>]` plus its params into the agent's context.
 
 **Getting newcomers there (tsk373).** "New Lens with Your Agent…"
@@ -4454,7 +4492,7 @@ commands:
   its local name with `.` as `_` (`evidence_lookup`: model APIs allow no
   dots); its description is the command's `summary`, its parameters the
   schema. `query_sql` is reserved: with `sql.read` the model gets it, a
-  read-only query over the published models (as MCP `query_sql`; 200
+  read-only query over the published models (as MCP `oxplow_query_sql`; 200
   rows). Core's commands admit no job, so a model reads oxplow through
   `query_sql` and never writes: a job's writes come from an effect on
   its end.

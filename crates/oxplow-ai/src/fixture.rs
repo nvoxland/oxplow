@@ -1,5 +1,5 @@
 //! A model that answers from a list, in-process: what a preview of an
-//! extension (`oxplow extension test`, `preview_extension`) and the tests
+//! extension (`oxplow extension test`, `oxplow_preview_extension`) and the tests
 //! run their model calls against, so nothing is sent and nothing is spent.
 //! Registered as a host kind (`ModelProviders::register_host`), never
 //! declared by an extension.

@@ -109,7 +109,7 @@ harness only delivers them.
 | Session context | Stream, worktree, branch, thread, access, the writer's agent, a role change | Prompt-time context |
 | Decisions | The open effort's recorded ones | Prompt-time context |
 | Nudges | Advisory hints, the collection nudge | Prompt- or tool-time context ("Nudge persistence") |
-| Server instructions | What oxplow knows, writes are commands, answer with `show_lens` | MCP `get_info` ("The agent's tools") |
+| Server instructions | What oxplow knows, writes are commands, answer with `oxplow_show_lens` | MCP `get_info` ("The agent's tools") |
 
 **A project's instruction files are the harness's own business.** oxplow
 never reads or forwards `AGENTS.md`, `CLAUDE.md` or any other: each agent
@@ -121,10 +121,10 @@ tells an agent goes through them (`the_prompt_carries_no_project_instruction_fil
 `assets/skills/<name>/references/<ref>.md`, which `SKILL.md` routes to
 (what each holds, when to open it). A harness that ships skill files
 writes the references beside `SKILL.md` (`shared::write_skills`); one that
-doesn't gets the index and reads a body with `get_skill { name,
+doesn't gets the index and reads a body with `oxplow_get_skill { name,
 reference? }`. Each rule has one home skill (wikilinks:
 `oxplow-wiki-capture`; waiting on the person: `oxplow-runtime`;
-foreground tests: `oxplow-collection`; `v_model`/`query_sql`:
+foreground tests: `oxplow-collection`; `v_model`/`oxplow_query_sql`:
 `oxplow-extension`); the others point to it by name. No skill text names
 a task id or `.context/` (tests).
 
@@ -176,7 +176,7 @@ approval, since no prompt comes between; nudges wait for the next call.
 | | Claude Code | Codex | opencode | ACP agent |
 |---|---|---|---|---|
 | Launch prompt | `--append-system-prompt` | `--config developer_instructions="…"` (a TOML string, `shared::toml_string`), which Codex puts at the head of its developer message | A per-session instructions file (`.oxplow/runtime/opencode-plugin/prompts/<ses>.md`) named by `OPENCODE_CONFIG_CONTENT`'s `instructions` | `_meta.systemPrompt.append` for an adapter with `systemPrompt: meta` (the Claude adapter), else a block ahead of a new session's first prompt |
-| Skills | Plugin dir `.oxplow/runtime/claude-plugin/skills/` (`--plugin-dir`) | The worktree's `.agents/skills/<name>/` | `.oxplow/runtime/opencode-plugin/skills/`, named by the config's `skills.paths` | The index in the prompt + `get_skill` |
+| Skills | Plugin dir `.oxplow/runtime/claude-plugin/skills/` (`--plugin-dir`) | The worktree's `.agents/skills/<name>/` | `.oxplow/runtime/opencode-plugin/skills/`, named by the config's `skills.paths` | The index in the prompt + `oxplow_get_skill` |
 | Slash commands | Plugin `commands/`, run as `/oxplow:<name>` | A skill per command, `oxplow-<name>`, run as `$oxplow-<name>` | Inline config `command` key, run as `/oxplow-<name>` | Not delivered |
 | Hooks | HTTP hooks (`hooks.json`) | Command hooks (`<oxplow> hook <event>`) via `--config` | A JS bridge plugin posting Claude-shaped bodies | In-process (`ServicesAcpHost`), no hook route |
 | Context channels | Both, as `additionalContext` | Both, as `additionalContext` | Prompt: a `synthetic` text part on the user's message; tool: appended to the tool's result | Prompt only: a visible leading block on the person's next prompt |
@@ -211,39 +211,40 @@ plugin namespacing, hence `oxplow-` instead of Claude's `/oxplow:`.
 
 ## The agent's tools
 
-`crates/oxplow-mcp/src/lib.rs` registers the tool surface under plain
-names (`run_command`); with the harness's namespace on top the agent calls
-`mcp__oxplow__run_command`. No other spelling is accepted. Extensions
-never add MCP tools.
+Core (`crates/oxplow-mcp/src/lib.rs`) builds two tools, `list_commands`
+and `run_command`. Every other tool is a foundation command or lens that
+declares `tool:` and is offered as `oxplow_<name>`; any extension declares
+its own the same way, under its namespace ([extensions.md](./extensions.md)
+"Agents: the MCP surface"). With the harness's namespace on top the agent
+calls `mcp__oxplow__run_command`, `mcp__oxplow__oxplow_query_sql`. No other
+spelling is accepted.
 
 | Purpose | Tools |
 |---|---|
-| Read oxplow's data | `query_sql` (one read-only statement over the `v_*` models, live models included — [semantic-layer.md](./semantic-layer.md) "Live models"), `read { ref }`, `search` (BM25 over tasks, comments, notes, wiki and file contents) |
-| Code and revisions | `diff` (versions `working`, `snap:<id>`, `git:<rev>`; `since_fork`), `vcs_blame` (through the `Vcs` provider; `working`, `snap:<id>` or `git:<rev>`), `code_definition`, `code_references`, `code_hover`, `code_call_hierarchy`, `code_symbols` (a file's symbols from its language server, else oxplow's tree-sitter reading of the live file, saying which), `code_workspace_symbols` (the editor's language servers, [lsp.md](./lsp.md)), `ensure_change` (a change's analysis, then `v_change_*` through `query_sql`) |
+| Read oxplow's data | `oxplow_query_sql` (one read-only statement over the `v_*` models, live models included — [semantic-layer.md](./semantic-layer.md) "Live models"), `oxplow_read { ref }`, `oxplow_search` (BM25 over tasks, comments, notes, wiki and file contents) |
+| Code and revisions | `oxplow_vcs_log` (a stream's history from any revision, paged, past the index), `oxplow_vcs_status`, `oxplow_vcs_branches`, `oxplow_diff` (versions `working`, `snap:<id>`, `git:<rev>`; `since_fork`), `oxplow_vcs_blame` (through the `Vcs` provider; `working`, `snap:<id>` or `git:<rev>`), `oxplow_code_definition`, `oxplow_code_references`, `oxplow_code_hover`, `oxplow_code_call_hierarchy`, `oxplow_code_symbols` (a file's symbols from its language server, else oxplow's tree-sitter reading of the live file, saying which), `oxplow_code_workspace_symbols` (the editor's language servers, [lsp.md](./lsp.md)), `oxplow_ensure_change` (a change's analysis, then `v_change_*` through `oxplow_query_sql`) |
 | Write | `run_command`, after `list_commands` |
-| Ask a model | `ai_decide` (typed questions about some text, on the `decide` role), `ai_summarize` (on `summarize`): recorded computations paid with the person's key, as the asking thread ([ai-providers.md](./ai-providers.md)) |
-| Show the person | `show_lens`, `run_lens`, `run_lens_action` |
-| What the person has | `get_open_page` (the page open in a thread, a lens re-run with their params), `list_comments` (their anchored comments, hydrated) |
-| Wiki | `wiki_ref_drift` (one stale ref's diff against its pin) |
-| Extension authoring | `validate_extension`, `preview_extension`, `preview_collector`, `review_extension` |
-| oxplow's guidance | `get_skill { name, reference? }` |
+| Ask a model | `oxplow_ai_decide` (typed questions about some text, on the `decide` role), `oxplow_ai_summarize` (on `summarize`): recorded computations paid with the person's key, as the asking thread ([ai-providers.md](./ai-providers.md)) |
+| Show the person | `oxplow_show_lens`, `oxplow_run_lens`, `oxplow_run_lens_action` |
+| What the person has | `oxplow_get_open_page` (the page open in a thread, a lens re-run with their params), `oxplow_list_comments` (their anchored comments, hydrated) |
+| Wiki | `oxplow_wiki_ref_drift` (one stale ref's diff against its pin) |
+| Extension authoring | `oxplow_validate_extension`, `oxplow_preview_extension`, `oxplow_preview_collector`, `oxplow_review_extension` |
+| oxplow's guidance | `oxplow_get_skill { name, reference? }` |
 
-`READ_ONLY_TOOLS` stamps `read_only_hint` so a client can auto-approve;
-`WRITE_TOOLS` (test-only) lists the rest with why each isn't read-only
-(`run_command`, `run_lens_action`, `show_lens`, `ensure_change`,
-`preview_collector`, `review_extension`, `ai_decide`, `ai_summarize`), and
-`read_write_split_covers_every_tool` fails on a tool in neither list.
-Each tool below except `list_commands` and `run_command` is a thin call to a
-foundation command over a read scope (`oxplow.records.read`,
-`oxplow.sql.query`, …; [commands.md](./commands.md) "Scopes"), so an agent
-reaches it through `run_command` too; `v_scope` lists the scopes.
+A tool's `read_only_hint` (so a client can auto-approve) is its
+command's access: `View` and `Read` commands are hinted, `oxplow_show_lens`
+(it records the answer) and `oxplow_run_lens_action` are not. Each tool
+but `list_commands` and `run_command` is a foundation command over a read
+scope (`oxplow.records.read`, `oxplow.sql.query`, …; [commands.md](./commands.md)
+"Scopes"), so an agent reaches it through `run_command` too; `v_scope`
+lists the scopes. An anonymous connection may call the read-only ones.
 Almost every read is a published model: an agent's thread, efforts,
 work items, commits, snapshots, dashboards, diagnostics and errors are
 `v_*` rows. A tool stays a tool only where a model can't be one: file and
 revision content, live language-server answers, site search, a lens's
 rendering, a dry run.
 
-**`read { ref }`** (`oxplow_app::ref_read`) reads anything a ref names and
+**`oxplow_read { ref }`** (`oxplow_app::ref_read`) reads anything a ref names and
 returns `{ ref, kind, row, related, content, truncated }`: the owning
 model's row, `related` lists (a work item's links and comments, a
 commit's or an effort's files), and `content` for the kinds whose body no
@@ -277,28 +278,28 @@ connection may read and list but not run. Which commands an agent may run
 is each spec's (`check_command`, "Agent policy").
 
 **Lenses.** When the person asks to see, list, compare or track
-something, the agent answers with `show_lens` (the `oxplow.lens.show`
+something, the agent answers with `oxplow_show_lens` (the `oxplow.lens.show`
 command): an existing lens with params, or its own `spec` (table, chart,
 tree). It renders beside the conversation, live, with "Keep this", and
-the tool returns its ref and its text rendering. `run_lens` reads what a
-lens shows (text by default, `format: "json"` for rows); `run_lens_action`
+the tool returns its ref and its text rendering. `oxplow_run_lens` reads what a
+lens shows (text by default, `format: "json"` for rows); `oxplow_run_lens_action`
 runs a lens's declared action as the lens acting for the caller, under
 the same rules as running the command directly.
 
 **Server instructions** (`get_info`) are the one text every harness
-shows its agent: what oxplow knows (`query_sql` over `v_*`), that every
-write is a command, and to answer "show me" with `show_lens` rather than
+shows its agent: what oxplow knows (`oxplow_query_sql` over `v_*`), that every
+write is a command, and to answer "show me" with `oxplow_show_lens` rather than
 printing a table. They ship to users' projects, so they never name this
 repo's docs.
 
 **Tools read the interface.** No tool belongs to one implementation:
-work-item reads (`query_sql` over `v_work_item`, `read` of a `work_item:`
+work-item reads (`oxplow_query_sql` over `v_work_item`, `oxplow_read` of a `work_item:`
 ref, the work-next lens) go through whichever list is active (empty with
 none), so the tool list never changes with a switch. What an
 implementation owns is commands, offered only while it's active
 (`capabilities::Active::refusal`).
 
-**Comments.** `list_comments({ id, scope?, status? })`: `id` is a thread
+**Comments.** `oxplow_list_comments({ id, scope?, status? })`: `id` is a thread
 (`thr…`) or a stream (`str…`); `scope` is inferred from the prefix
 (`resolve_comment_scope`; pass it only to assert the kind); `status` is
 `all`, `open` or `needs_response`. Each row is an `EnrichedCommentThread
@@ -317,10 +318,10 @@ proposal: which binaries oxplow downloads and runs is the person's call)
 or an `lsp.servers` entry in `.oxplow/project.yaml`. `v_lsp_server` says
 what's configured, installed and running.
 
-**The wiki and links.** Wiki reads are `query_sql` over
+**The wiki and links.** Wiki reads are `oxplow_query_sql` over
 `v_knowledge_page` / `v_knowledge_ref` (stale pins) and `v_page_ref` (the
-backlinks graph, both directions), plus `search` with `kinds: ["wiki"]`;
-`wiki_ref_drift({ slug, path })` returns one stale ref's unified diff
+backlinks graph, both directions), plus `oxplow_search` with `kinds: ["wiki"]`;
+`oxplow_wiki_ref_drift({ slug, path })` returns one stale ref's unified diff
 (`status` drifted, unchanged, not_a_ref, no_pin, binary or no_contents).
 Writes are the `knowledge.*` commands ([knowledge.md](./knowledge.md)).
 `oxplow.effort.report`, `oxplow.knowledge.add_note` / `update_note` and
@@ -349,7 +350,7 @@ copy of any camelCase or kebab key, recursively, never removing the
 original, and a genuinely missing field is a clear `McpError`
 (`lenient_from_object`, `to_snake_case`). Every tool gets it. Inferable
 fields are optional and inferred in the handler where safe
-(`list_comments`' `scope`).
+(`oxplow_list_comments`' `scope`).
 
 ### The ServerHandler is hand-rolled — re-diff it on every rmcp bump
 
@@ -372,7 +373,7 @@ classifies every op as `Both`, `AgentOnly`, `UiOnly { why }` (a person's
 consent or setting, their selection or input, live status pushed to the
 UI, runtime infra, an ancestry walk the VCS answers, file I/O the agent
 does with its own tools) or `Model { models }` (a UI read an agent makes
-through those published models with `query_sql`). `tests/parity.rs`
+through those published models with `oxplow_query_sql`). `tests/parity.rs`
 enumerates the registered names on each side
 (`oxplow_mcp::registered_tool_names()`, a capturing
 `tauri_specta::LanguageExt`) and fails on anything unclassified,
@@ -899,7 +900,7 @@ stays thread-scoped (the thread's own open effort), because that says
 more than the stream would even when it's sometimes wrong.
 
 - **Prompt** → `agent.prompt.submitted` (`reprompt: true` inside an open
-  turn), its text in `event_content` (`read` on `event:<id>#prompt`); with
+  turn), its text in `event_content` (`oxplow_read` on `event:<id>#prompt`); with
   no turn open it opens one (`agent.turn.started`). A subagent's hand-back
   logs no prompt, opens a turn with none if needed and finishes the
   subagent.
@@ -1069,7 +1070,7 @@ a thread note (`oxplow.knowledge.add_note`, read back from
 `v_thread_note`).
 
 **What to pick up next** is the bundled lens `oxplow-bundled/work-next`
-(`run_lens` with `thread: "thread:thr3"`) over `v_work_item`, whichever
+(`oxplow_run_lens` with `thread: "thread:thr3"`) over `v_work_item`, whichever
 list is active: an epic with its ready descendants, or every ready
 non-epic item, open `blocks` links holding an item back; empty with
 nothing ready or no list. The bundled `work-next` command runs it and

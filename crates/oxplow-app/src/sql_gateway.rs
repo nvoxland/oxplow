@@ -1,5 +1,5 @@
 //! The SQL gateway (P4.1, `.context/semantic-layer.md`): the one way a
-//! query reaches the semantic layer — MCP and IPC `query_sql`, lenses,
+//! query reaches the semantic layer — MCP `oxplow_query_sql` and IPC `query_sql`, lenses,
 //! advisories, entity metrics, extension checks and source inputs all go
 //! through it. The database crate's `SemanticLayer` owns the mechanics
 //! (the single-read check, the recording authorizer, `query_only`, the

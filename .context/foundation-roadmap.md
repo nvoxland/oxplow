@@ -216,7 +216,7 @@ event an extension sees: every field (`id, type, v, seq, at, source,
 subject, anchors, payload, cause`), `null` where absent, at the type's
 newest version. Collectors (derived, fact, and exec on stdin), effects,
 the effort policy, a provider's `react`, paced runs, review dry runs,
-`extension test` examples and `preview_collector` all build it the same
+`extension test` examples and `oxplow_preview_collector` all build it the same
 way; fixtures go through `EventView::fixture`, which refuses an event
 that couldn't happen and carries an older `v` forward. There is no
 legacy adapter: the envelope is a superset of every earlier shape, so
@@ -241,7 +241,7 @@ effects, effort policies and provider host calls, and pages on request
 collector's `input` is complete or declares its `limit` and reads
 `input.complete`. Every gateway result carries `generation` and the
 observed `coverage` of the collected models it read, which MCP/RPC
-`query_sql` and lens runs return and the lens view shows
+`oxplow_query_sql` and lens runs return and the lens view shows
 (semantic-layer.md "Completeness and coverage").
 
 Scope: First stop sql.read from returning an apparently complete result when its 1000-row limit truncates data. Then define a compatible result contract for completeness, limits/pagination, generation and available collection freshness. Keep SQL read-only and distinguish complete query results from complete collection coverage.

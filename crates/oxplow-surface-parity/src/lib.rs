@@ -4,12 +4,14 @@
 //! wrappers over `oxplow_app::Services`:
 //!   - **Tauri IPC** (`oxplow-tauri-ipc`) — `#[tauri::command]` fns the React
 //!     UI calls.
-//!   - **MCP** (`oxplow-mcp`) — rmcp `#[tool]`s the agent calls.
+//!   - **MCP** (`oxplow-mcp`) — the tools the agent calls: core's
+//!     `list_commands` / `run_command` and the ones oxplow's extensions
+//!     declare (`tool:` on a command or a lens, `oxplow_app::agent_tools`).
 //!
 //! These drifted silently: many user-meaningful ops lived on IPC but not MCP.
 //! This manifest is the single source of truth for *which* surface each
 //! capability should live on, and `tests/parity.rs` enforces that the real
-//! registrations match it. Adding a `#[tauri::command]` or `#[tool]` without a
+//! registrations match it. Adding a `#[tauri::command]` or a `tool:` without a
 //! matching row fails the test, forcing an explicit classification.
 //!
 //! ## The four exposures
@@ -115,12 +117,12 @@ pub const MANIFEST: &[Capability] = &[
         "the version the About box shows",
     ),
     // Skills for agents that can't load skill files (ACP); the UI has no use for them.
-    agent("get_skill"),
+    agent("oxplow_get_skill"),
     // A dry run for an agent writing a source in its worktree.
-    agent("preview_collector"),
+    agent("oxplow_preview_collector"),
     // A whole extension in a throwaway oxplow, for an agent authoring it;
     // a person runs `oxplow extension test`.
-    agent("preview_extension"),
+    agent("oxplow_preview_extension"),
     model("list_streams", &["v_stream"]),
     // The work-item interface, read for the agent; the UI reads the
     // models (`v_work_item`).
@@ -194,8 +196,8 @@ pub const MANIFEST: &[Capability] = &[
         "discard_dead_letter",
         "a dead letter's fate is a person's (V93); an agent lists them",
     ),
-    both("search"),
-    both("query_sql"),
+    both_named("search", "search", "oxplow_search"),
+    both_named("query_sql", "query_sql", "oxplow_query_sql"),
     // Settings → Data: the models, and entities not yet synced.
     ui(
         "list_data_entities",
@@ -213,15 +215,15 @@ pub const MANIFEST: &[Capability] = &[
     ui("set_panel_layout", "the person's left-nav layout (P6.G1)"),
     model("list_extensions", &["v_extension", "v_contribution"]),
     ui("get_lens", "the lens page's definition; an agent reads the lens's ref with `read`"),
-    both("run_lens"),
+    both_named("run_lens", "run_lens", "oxplow_run_lens"),
     // A lens's actions: commands run as the lens, for whoever pressed.
-    both("run_lens_action"),
+    both_named("run_lens_action", "run_lens_action", "oxplow_run_lens_action"),
     ui(
         "lens_text",
         "Copy's text on every lens; an agent reads the same text through `run_lens`",
     ),
     // An agent's answers: it shows one (the `oxplow.lens.show` command).
-    agent("show_lens"),
+    agent("oxplow_show_lens"),
     ui(
         "run_answer",
         "runs an answer for the Answers strip; `show_lens` gives the agent its text",
@@ -250,8 +252,8 @@ pub const MANIFEST: &[Capability] = &[
         "invoke_component_command",
         "a custom component's bridged command, from its sandboxed frame through the host (P6b.D2)",
     ),
-    both("validate_extension"),
-    both("review_extension"),
+    both_named("validate_extension", "validate_extension", "oxplow_validate_extension"),
+    both_named("review_extension", "review_extension", "oxplow_review_extension"),
     ui(
         "report_open_page",
         "the person's open page, which an agent reads with `get_open_page`",
@@ -366,7 +368,7 @@ pub const MANIFEST: &[Capability] = &[
         "stop_oauth_redirect",
         "the desktop shell's loopback listener for a person's sign-in (P10)",
     ),
-    both("ensure_change"),
+    both_named("ensure_change", "ensure_change", "oxplow_ensure_change"),
     model("ai_settings", &["v_ai_role", "v_ai_provider"]),
     ui(
         "save_ai_provider",
@@ -382,45 +384,38 @@ pub const MANIFEST: &[Capability] = &[
         "checks a person's AI provider settings before they save them",
     ),
     ui("read_ai_call", "a person's look at a recorded model call; an agent reads its own with `read`"),
-    agent("ai_decide"),
-    agent("ai_summarize"),
-    agent("get_open_page"),
+    agent("oxplow_ai_decide"),
+    agent("oxplow_ai_summarize"),
+    agent("oxplow_get_open_page"),
     // ---- both (names diverge across surfaces) ----
     model("list_threads", &["v_thread"]),
-    both_named("comment.list", "list_comments_for_stream", "list_comments"),
+    both_named("comment.list", "list_comments_for_stream", "oxplow_list_comments"),
     // ---- agent-only (orchestration / agent affordances) ----
     // One reader for anything a ref names.
-    agent("read"),
-    agent("wiki_ref_drift"),
+    agent("oxplow_read"),
+    agent("oxplow_wiki_ref_drift"),
     // ---- collection (effort-scoped observations) ----
-    agent("code_definition"),
-    agent("code_hover"),
-    agent("code_references"),
-    agent("code_symbols"),
-    agent("code_workspace_symbols"),
-    agent("code_call_hierarchy"),
+    agent("oxplow_code_definition"),
+    agent("oxplow_code_hover"),
+    agent("oxplow_code_references"),
+    agent("oxplow_code_symbols"),
+    agent("oxplow_code_workspace_symbols"),
+    agent("oxplow_code_call_hierarchy"),
     // ---- git ----
-    Capability {
-        capability: "git.status",
-        exposure: UiOnly {
-            why: "the UI's working-tree status; an agent runs `git status` in its worktree",
-        },
-        ipc: Some("git_change_scopes"),
-        mcp: None,
-    },
-    both("diff"),
+    both_named("git.status", "git_change_scopes", "oxplow_vcs_status"),
+    both_named("diff", "diff", "oxplow_diff"),
     ui(
         "changed_paths",
         "an agent reads the same paths, with line counts, through `diff`",
     ),
-    model("vcs_log", &["v_commit", "v_commit_file"]),
-    both("vcs_blame"),
+    both_named("vcs_log", "vcs_log", "oxplow_vcs_log"),
+    both_named("vcs_blame", "vcs_blame", "oxplow_vcs_blame"),
     ui("read_at", "the editor's file at a revision; an agent reads a file ref at that revision with `read`"),
     ui(
         "resolve_symbol",
         "opening a symbol link; an agent reads v_symbol, and `read` for a pinned version",
     ),
-    model("vcs_branches", &["v_branch"]),
+    both_named("vcs_branches", "vcs_branches", "oxplow_vcs_branches"),
     ui(
         "search_workspace_text",
         "an agent searches its worktree with its own Grep tool",

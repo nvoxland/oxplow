@@ -680,7 +680,7 @@ capture pad, written by `oxplow.knowledge.add_note` / `oxplow.knowledge.update_n
 (P8.A6). An orchestrator handing a question to an Explore subagent
 allocates an empty note first and the subagent fills in its body with
 `oxplow.knowledge.update_note`. The orchestrator reads them
-back via `query_sql` over `v_thread_note` or `listThreadNotes(threadId)` (UI).
+back via `oxplow_query_sql` over `v_thread_note` or `listThreadNotes(threadId)` (UI).
 
 ### `effort` — `EffortStore` (`crates/oxplow-db/src/effort_store.rs`)
 
@@ -1311,7 +1311,7 @@ limit)` and `list_outbound(source_kind, source_id, limit)`. Both
 are exposed as Tauri commands (`list_backlinks` / `list_outbound`,
 which decorate each row with a best-effort `source_label` from
 the source store). An agent reads the same edges as the `v_page_ref` model
-(`source_ref`, `target_ref`, `ref_type`) with `query_sql`; there is no MCP tool.
+(`source_ref`, `target_ref`, `ref_type`) with `oxplow_query_sql`; there is no MCP tool.
 
 Boot-time restate: `oxplow_app::page_ref_backfill::run(...)` re-
 projects every work item (`work_item_refs::all_refs_tx`, deleted ones
@@ -1443,7 +1443,7 @@ hash whatever order their keys arrived in) and cut to 256 KiB on a
 character boundary — `size` is the whole body's, `truncated` says only the
 first part was kept. It is read through `oxplow_app::event_bodies::read`,
 by **event id and body** (`input` / `output`), never by bare hash: the
-person's IPC read sees any stream, the MCP `read` of `event:<id>#…` only the
+person's IPC read sees any stream, the MCP `oxplow_read` of `event:<id>#…` only the
 caller's own stream's events, and both return at most 64 KiB of text with
 `truncated`. `list_agent_events` returns at most 1,000 rows. The retention
 sweep deletes a body after its namespace's window and the event stays. It is separate from the snapshot blob store because the
@@ -1810,7 +1810,7 @@ The `effort_evidence` asset rebuilds each effort's rows from its own run
 captures (`metric_capture.effort_id`, trigger `on-report`;
 `CollectionService::effort_observations_from_metrics`) and stores them
 in `effort_observation_row` (V80, read as `v_effort_observation`); the panel and
-an agent (`query_sql`) read those. `effort_evidence_state` records the
+an agent (`oxplow_query_sql`) read those. `effort_evidence_state` records the
 signature each effort's rows were computed from — the count and newest id of
 its run captures and its file count (`effort_evidence_store.rs` `SIG`; V7
 restamped stored ones) — so a closed effort whose runs or files move is
@@ -2257,7 +2257,7 @@ status, last_activity_at DESC)`, `(thread_id, last_activity_at DESC)`,
   `thread_id` is the origin agent thread and is nullable (SET NULL) so
   content comments survive the thread being archived/deleted. Reads
   support per-target, per-stream, and per-thread queries; the agent's
-  MCP `list_comments` queries by thread or stream (never cross-stream).
+  MCP `oxplow_list_comments` queries by thread or stream (never cross-stream).
 - **Anchoring is resilient, not positional.** `quote` (the selected
   text) is the durable anchor + the context handed to the agent;
   `selectors_json` (renamed from `anchor_json` in V24) is an opaque,
@@ -2301,7 +2301,7 @@ status, last_activity_at DESC)`, `(thread_id, last_activity_at DESC)`,
   (in `oxplow-domain`) returns true for an `open` `followup` whose
   latest message author isn't `"agent"`. Messages are stored
   oldest-first, so a user reply after an agent response re-opens the
-  follow-up. The MCP `list_comments(status:"needs_response")` filters on
+  follow-up. The MCP `oxplow_list_comments(status:"needs_response")` filters on
   this.
 
 `comment_message` columns: `id, comment_id (FK comment ON DELETE
@@ -2347,7 +2347,7 @@ through the interface; kind `work_item`, its id `<provider>:<id>`) /
   is archived.
 - `sanitize_query` turns arbitrary user input into a safe MATCH expression
   (each token double-quoted + `*` prefix), so junk input can't throw FTS5
-  syntax errors. Exposed as the `search` IPC command + MCP tool.
+  syntax errors. Exposed as the `search` IPC command + MCP `oxplow_search` tool.
 
 ## The `sort_index` queue
 

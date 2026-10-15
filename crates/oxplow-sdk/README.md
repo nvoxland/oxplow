@@ -4,7 +4,7 @@ Scaffold, check and test oxplow extensions, and the provider
 conformance kit. It's the library behind:
 
 - `oxplow extension new | check | test` (the CLI in the desktop binary),
-- the `validate_extension` RPC and MCP tool,
+- the `oxplow_validate_extension` RPC and MCP tool,
 - `save_lens` (Keep This).
 
 All three print problems the same way, `file:line: what — fix`, so a

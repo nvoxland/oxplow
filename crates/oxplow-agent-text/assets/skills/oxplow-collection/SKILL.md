@@ -68,4 +68,4 @@ configured and automatic, or you run oxplow's `configure` slash command now.
 
 A report collector can name its own parser (a `jaq`, `starlark` or `exec`
 script) with no recompile: `references/custom-parsers.md` (or
-`get_skill { name: "oxplow-collection", reference: "custom-parsers" }`).
+`oxplow_get_skill { name: "oxplow-collection", reference: "custom-parsers" }`).

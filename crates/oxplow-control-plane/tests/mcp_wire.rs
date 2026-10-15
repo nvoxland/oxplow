@@ -81,7 +81,7 @@ async fn mcp_session_initializes_lists_and_calls_tools_over_http() {
     assert!(init["result"]["instructions"]
         .as_str()
         .unwrap()
-        .contains("show_lens"));
+        .contains("oxplow_show_lens"));
     let session = session.expect("server assigns an Mcp-Session-Id");
 
     post(
@@ -110,7 +110,10 @@ async fn mcp_session_initializes_lists_and_calls_tools_over_http() {
             .unwrap_or_else(|| panic!("{name} missing from tools/list"))
     };
     // Our hand-rolled list_tools stamps read-only hints (tsk203) …
-    assert_eq!(tool("get_skill")["annotations"]["readOnlyHint"], true);
+    assert_eq!(
+        tool("oxplow_get_skill")["annotations"]["readOnlyHint"],
+        true
+    );
     // … and leaves mutating tools gated.
     assert_ne!(tool("run_command")["annotations"]["readOnlyHint"], true);
 
@@ -121,7 +124,7 @@ async fn mcp_session_initializes_lists_and_calls_tools_over_http() {
         Some(&session),
         json!({
             "jsonrpc": "2.0", "id": 3, "method": "tools/call",
-            "params": {"name": "get_skill", "arguments": {"name": "oxplow-extension"}}
+            "params": {"name": "oxplow_get_skill", "arguments": {"name": "oxplow-extension"}}
         }),
     )
     .await;

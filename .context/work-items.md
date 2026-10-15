@@ -195,10 +195,10 @@ list's editable fields and — with `hierarchy` — a parent.
 ## Reading them for the agent
 
 The agent reads work items through the interface too, with no tool of
-its own: `query_sql` over `v_work_item` for a list in order (`WHERE
-thread_id = … ORDER BY rank IS NULL, rank, created_at`), `read` on a
+its own: `oxplow_query_sql` over `v_work_item` for a list in order (`WHERE
+thread_id = … ORDER BY rank IS NULL, rank, created_at`), `oxplow_read` on a
 `work_item:` ref for one item with its `links` and `comments`, and the
-bundled lens `oxplow-bundled/work-next` (`run_lens`, param `thread:
+bundled lens `oxplow-bundled/work-next` (`oxplow_run_lens`, param `thread:
 "thread:thr3"`) for what to pick up next (an epic with its ready
 descendants, or every ready non-epic item; open `blocks` links hold an
 item). None of them belongs to an implementation, so the tool list never

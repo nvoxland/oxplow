@@ -33,13 +33,13 @@ in `v_contribution_health` (`extension`, `contribution`, `kind`, `state` = `ok` 
   `oxplow/extensions/`. Commit them and the team has them.
 - **World:** to publish, put an extension in its own git repo with
   `extension.yaml` at the root. To use someone else's, **only when the
-  user asks**: call `review_extension(git_url, git_ref?, stream_id)`, show
+  user asks**: call `oxplow_review_extension(git_url, git_ref?, stream_id)`, show
   the user what it declares (the programs its collectors run, the hosts they
   reach, the credentials they read, advisories) and any `errors` /
   `problems`, and when they say go, run `oxplow.extension.install { git_url,
   git_ref?, reviewed_sha: <its sha> }` (`run_command`) — it
   comes back as a proposal the user approves. It records the source in
-  `source.yaml`. Updating is the same: `review_extension(name)`, then
+  `source.yaml`. Updating is the same: `oxplow_review_extension(name)`, then
   `oxplow.extension.update { name, reviewed_sha }`. Never
   hand-edit an installed extension's files; they're overwritten on update.
   Copy it into a new extension instead.

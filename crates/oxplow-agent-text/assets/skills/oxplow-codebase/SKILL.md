@@ -1,12 +1,12 @@
 ---
 name: oxplow-codebase
-description: Answering questions about the project's history and code from oxplow's own data — who changed what and when, which branches exist, where a symbol is defined, what a file declares, which files have errors, and the errors the person saw in the app. Loads on v_op_error, v_commit, v_commit_file, v_branch, v_tag, v_symbol, v_diagnostic, code_definition, code_references, code_symbols, and when the user asks "who changed X", "when did X change", "history of X", "what branches", "where is X defined", "what's in this file", "what calls X", "what's broken", or "can you see that error" / "the red error toast".
+description: Answering questions about the project's history and code from oxplow's own data — who changed what and when, which branches exist, where a symbol is defined, what a file declares, which files have errors, and the errors the person saw in the app. Loads on v_op_error, v_commit, v_commit_file, v_branch, v_tag, v_symbol, v_diagnostic, oxplow_code_definition, oxplow_code_references, oxplow_code_symbols, and when the user asks "who changed X", "when did X change", "history of X", "what branches", "where is X defined", "what's in this file", "what calls X", "what's broken", or "can you see that error" / "the red error toast".
 ---
 
 # The project's history and code
 
 oxplow keeps the repository's history and the language servers' view of
-the code as SQL models. Read them with `query_sql` before shelling out to
+the code as SQL models. Read them with `oxplow_query_sql` before shelling out to
 `git log` or grepping: they're indexed, shared with lenses, and cover
 every stream. `v_model_column` documents each column.
 
@@ -25,7 +25,7 @@ every stream. `v_model_column` documents each column.
   ```
 
   Who changes a file most: the same join, `GROUP BY c.author`. Who last
-  changed each line: the `vcs_blame { path, revision? }` tool (`working`,
+  changed each line: the `oxplow_vcs_blame { path, revision? }` tool (`working`,
   `snap:<id>` or `git:<rev>`; an uncommitted line names no commit).
   History past the index (any revision, one path, paged) is the
   `oxplow.vcs.log` command; `v_commit` is for joins.
@@ -39,7 +39,7 @@ terminal.
 
 ## Code (`v_symbol`, `v_diagnostic`, `v_lsp_server`, the `code_*` tools)
 
-`references/code.md` (get_skill reference `code`) has the columns, symbol
+`references/code.md` (oxplow_get_skill reference `code`) has the columns, symbol
 kinds, example queries and the live-server tools. In short: `v_symbol` is
 where something is defined and what a file declares (from oxplow's own
 parsing, no language server needed); `v_diagnostic` is what the language
@@ -62,7 +62,7 @@ without a screenshot:
   `SELECT event_id, at, label, command, message FROM v_op_error ORDER BY
   at DESC LIMIT 5`.
 - **The output itself** is the event's `output` body: call
-  `read` with `event:<event_id>#output`. A row with
+  `oxplow_read` with `event:<event_id>#output`. A row with
   `output_size` NULL had nothing captured; its `message` is all there is.
 - Rows are kept 30 days and their output 14; an older row keeps its label
   with the details NULL.

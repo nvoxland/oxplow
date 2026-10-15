@@ -229,7 +229,7 @@ work. It writes
 to turn it off for your team.
 
 Problems show under Settings → Extensions. Agents check their work with
-`validate_extension`.
+`oxplow_validate_extension`.
 
 ## On the page
 
@@ -237,7 +237,7 @@ Problems show under Settings → Extensions. Agents check their work with
 - **Improve with Agent** puts `[oxplow lens <id>]` in the agent's input so you
   can ask for changes.
 - **Pin to Dashboard** adds it as a [dashboard](dashboards.md) tile.
-- The agent can see what you're looking at: `get_open_page` returns the lens
+- The agent can see what you're looking at: `oxplow_get_open_page` returns the lens
   with the exact rows on your screen.
 
 ## Custom components

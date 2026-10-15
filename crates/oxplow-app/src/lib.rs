@@ -16,6 +16,7 @@ pub mod agent_prompt;
 pub mod agent_sessions;
 pub mod agent_stall_watch;
 pub mod agent_status_derive;
+pub mod agent_tools;
 pub mod ai_calls;
 pub mod ai_compute;
 pub mod ai_service;
@@ -1729,11 +1730,13 @@ impl Services {
         commands
             .add_op(collector_runner::sync_op(collector_runner.clone()))
             .expect("collector.sync's op registers");
+        let services_slot = commands::util::ServicesSlot::default();
         for command in commands::lens::ops(commands::lens::LensTarget {
             project_dir: layout.project_dir.clone(),
             catalog: extension_catalog.clone(),
             db: db.clone(),
             sql: sql.clone(),
+            services: services_slot.clone(),
         }) {
             commands.add_op(command).expect("lens ops register");
         }
@@ -1791,7 +1794,6 @@ impl Services {
         {
             commands.add_op(command).expect("core ops register");
         }
-        let services_slot = commands::util::ServicesSlot::default();
         let client_host = Arc::new(client_host::ClientHost::new(event_bus.clone()));
         // oxplow's own commands are declared in its required extensions
         // over these operations (`commands/ops.rs`).
@@ -2317,6 +2319,8 @@ mod tests {
                 "oxplow.lens.run",
                 "oxplow.lens.run_action",
                 "oxplow.lens.share",
+                // It returns the answer's text, rendered once it's stored.
+                "oxplow.lens.show",
                 // A download into .oxplow/lsp/, a person's call (P8.A9).
                 "oxplow.lsp.install_server",
                 "oxplow.lsp.remove_server",

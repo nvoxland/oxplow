@@ -354,7 +354,7 @@ the user has open and selected when they start a turn.
 ## Related
 
 - [agent-model.md](./agent-model.md) "The agent's tools" — how the agent
-  reads the page the person has open (`get_open_page`), and the MCP LSP
+  reads the page the person has open (`oxplow_get_open_page`), and the MCP LSP
   tools.
 - [git-integration.md](./git-integration.md) — `gitBlame` + history
   panel that the blame overlay reveals into.

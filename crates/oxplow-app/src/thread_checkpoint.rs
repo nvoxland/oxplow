@@ -271,7 +271,7 @@ pub(crate) mod tests {
             ("read", "Read"),
             ("search", "Grep"),
             ("fetch", "WebFetch"),
-            ("mcp", "mcp__oxplow__query_sql"),
+            ("mcp", "mcp__oxplow__oxplow_query_sql"),
             ("other", "TodoWrite"),
             ("nonsense", "Edit"),
         ] {

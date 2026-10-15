@@ -1,6 +1,6 @@
 /**
  * A thread's answers (P6.C2, `.context/extensions.md` → "Thread answers"):
- * the lenses an agent showed with `show_lens`, read from `v_thread_answer`.
+ * the lenses an agent showed with `oxplow_show_lens`, read from `v_thread_answer`.
  * A read returns what it read (`reads`) so the strip re-runs with
  * `useRerunOnChange`; each answer re-runs itself through `runAnswer`.
  */
@@ -46,13 +46,13 @@ export async function keepAnswer(answer: string, slug: string): Promise<KeptLens
   return keptLens(outcome.result);
 }
 
-/** The answer a finished `show_lens` call showed, so an ACP transcript
+/** The answer a finished `oxplow_show_lens` call showed, so an ACP transcript
  *  renders it where the call is. Its result is `{ answer, title, text }`,
  *  wherever the agent's client puts it (text blocks or raw output). */
 export function answerOfTool(call: AcpToolCall): string | null {
   if (call.status !== "completed") return null;
   const names = [call.name, call.title].filter((n): n is string => n !== null);
-  if (!names.some((n) => /^mcp__\S*__show_lens\b/.test(n))) return null;
+  if (!names.some((n) => /^mcp__\S*__oxplow_show_lens\b/.test(n))) return null;
   const output = [...call.text, call.rawOutput === null ? "" : JSON.stringify(call.rawOutput)].join("\n");
   return /\\?"answer\\?"\s*:\s*\\?"(answer:[0-9]+)\\?"/.exec(output)?.[1] ?? null;
 }

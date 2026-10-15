@@ -41,7 +41,7 @@ export function targetLabel(kind: string, id: string): string {
 /// reply, set intent, resolve, delete) so the whole backlog can be
 /// triaged from one place; clicking a group header jumps to the target
 /// page where the anchored highlight lives. The agent reaches the same
-/// data via the `list_comments` MCP tool.
+/// data via the `oxplow_list_comments` MCP tool.
 export function CommentsInboxPage({
   stream,
   onOpenPage,

@@ -233,7 +233,7 @@ describe("AcpAgentView", () => {
     expect(view.queryByTestId("acp-proposal-99-decided")).toBeNull();
   });
 
-  test("an agent's show_lens answer renders inline where the call is (P6.C2)", async () => {
+  test("an agent's oxplow_show_lens answer renders inline where the call is (P6.C2)", async () => {
     const out = JSON.stringify({ answer: "answer:7", title: "Churn", text: "| path |" });
     snapshot = {
       ...snapshot,
@@ -246,8 +246,8 @@ describe("AcpAgentView", () => {
           type: "tool",
           call: {
             id: "t9",
-            title: "mcp__oxplow__show_lens",
-            name: "mcp__oxplow__show_lens",
+            title: "mcp__oxplow__oxplow_show_lens",
+            name: "mcp__oxplow__oxplow_show_lens",
             kind: "other",
             status: "completed",
             locations: [],

@@ -29,7 +29,7 @@ A metric no longer *computes* anything — it names a `sourceMeasure` + an
 ## Step 1 — is there already a metric? (`use:`)
 
 **Always prefer `use:`** when a bundled metric covers the ask — list them with
-`query_sql`:
+`oxplow_query_sql`:
 
 ```sql
 SELECT key, title, language, enabled FROM v_metric_catalog WHERE scope = 'extension:oxplow-foundation'
@@ -53,7 +53,7 @@ metrics:
 ## Where the detail is
 
 Open a reference when you reach its step: `references/<name>.md` in a
-harness with skill files, or `get_skill { name: "oxplow-metrics", reference:
+harness with skill files, or `oxplow_get_skill { name: "oxplow-metrics", reference:
 "<name>" }` without.
 
 - `references/declaring.md` (`declaring`) — **writing the metric.**

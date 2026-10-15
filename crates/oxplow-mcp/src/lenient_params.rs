@@ -79,6 +79,29 @@ pub fn lenient_from_object<P: DeserializeOwned>(arguments: JsonObject) -> Result
     })
 }
 
+/// A declared tool's input, its top-level camelCase/kebab keys renamed to
+/// the snake_case property of `schema` they stand for. Renamed, not
+/// aliased: a command's input refuses keys its schema doesn't name. A key
+/// the schema names, or whose snake form it doesn't, is left as given.
+pub fn fold_to_schema(input: &mut Value, schema: &Value) {
+    let (Value::Object(map), Some(properties)) =
+        (input, schema.get("properties").and_then(Value::as_object))
+    else {
+        return;
+    };
+    let renames: Vec<(String, String)> = map
+        .keys()
+        .filter(|k| !properties.contains_key(*k))
+        .map(|k| (k.clone(), to_snake_case(k)))
+        .filter(|(_, snake)| properties.contains_key(snake) && !map.contains_key(snake))
+        .collect();
+    for (from, to) in renames {
+        if let Some(v) = map.remove(&from) {
+            map.insert(to, v);
+        }
+    }
+}
+
 /// Recursively walk a JSON value and, for every object key whose
 /// snake_case form differs and isn't already present, insert a
 /// snake_case copy of the entry (without removing the original).
@@ -230,6 +253,21 @@ mod tests {
         assert!(
             msg.contains("snake_case") && msg.contains("camelCase"),
             "should explain accepted casing: {msg}",
+        );
+    }
+
+    /// A declared tool's camelCase key becomes the property its schema
+    /// names; a key the schema names, or one it has no form of, is kept.
+    #[test]
+    fn a_declared_tools_input_is_folded_to_its_schema() {
+        let schema =
+            serde_json::json!({ "properties": { "stream_id": {}, "path": {}, "fooBar": {} } });
+        let mut input =
+            serde_json::json!({ "streamId": "str1", "path": "a", "fooBar": 1, "other": 2 });
+        fold_to_schema(&mut input, &schema);
+        assert_eq!(
+            input,
+            serde_json::json!({ "stream_id": "str1", "path": "a", "fooBar": 1, "other": 2 })
         );
     }
 }

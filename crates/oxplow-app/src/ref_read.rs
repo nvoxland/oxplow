@@ -1,4 +1,4 @@
-//! `read`: one reader for anything a ref names (`.context/refs.md`,
+//! `oxplow_read`: one reader for anything a ref names (`.context/refs.md`,
 //! `.context/agent-model.md` "The agent's tools"). The agent's single way to look at
 //! a thing it was pointed at or found in a model's `ref` column:
 //!
@@ -35,7 +35,7 @@ pub const MAX_CONTENT: usize = 64 * 1024;
 /// Rows of one related list a read returns at most.
 const MAX_RELATED: usize = 200;
 
-/// What a ref names, as `read` answers it.
+/// What a ref names, as `oxplow_read` answers it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RefRead {
     /// The ref as read, canonical.
@@ -273,7 +273,7 @@ async fn owned_row(
                 });
             resolve.ok_or_else(|| {
                 ReadError::Invalid(format!(
-                    "no model holds `{kind}` refs; `query_sql` over `v_ref_kind` lists the kinds"
+                    "no model holds `{kind}` refs; `oxplow_query_sql` over `v_ref_kind` lists the kinds"
                 ))
             })?
         }

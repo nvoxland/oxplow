@@ -13,5 +13,5 @@
 
 Allocate its note first (`oxplow.knowledge.add_note {}` returns `note.id`)
 and have it write its finding once, at the end, with
-`oxplow.knowledge.update_note { note, body }`. Read it back with `query_sql`
+`oxplow.knowledge.update_note { note, body }`. Read it back with `oxplow_query_sql`
 over `v_thread_note`.

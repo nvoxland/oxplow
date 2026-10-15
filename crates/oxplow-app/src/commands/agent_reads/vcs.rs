@@ -167,7 +167,7 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                 Box::pin(async move {
                     let mut p: DiffParams = parse(input)?;
                     let svc = services.get()?;
-                    check_optional_stream("diff", "/stream_id", p.stream_id.as_deref())?;
+                    check_optional_stream("oxplow_diff", "/stream_id", p.stream_id.as_deref())?;
                     let sid =
                         stream_or_actors(&svc, invocation.actor(), p.stream_id.take()).await?;
                     let to = parse_revision("/to", &p.to)?;
@@ -201,7 +201,11 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                 Box::pin(async move {
                     let p: BlameParams = parse(input)?;
                     let svc = services.get()?;
-                    check_optional_stream("vcs_blame", "/stream_id", p.stream_id.as_deref())?;
+                    check_optional_stream(
+                        "oxplow_vcs_blame",
+                        "/stream_id",
+                        p.stream_id.as_deref(),
+                    )?;
                     let sid = stream_or_actors(&svc, invocation.actor(), p.stream_id).await?;
                     let revision =
                         parse_revision("/revision", p.revision.as_deref().unwrap_or("working"))?;

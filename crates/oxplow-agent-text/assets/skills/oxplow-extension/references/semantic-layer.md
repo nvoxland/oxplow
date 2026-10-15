@@ -10,7 +10,7 @@
 - Work items are `v_work_item` (with `v_work_item_link` and
   `v_work_item_comment`): the active work list's, whichever it is — never
   a particular list's own tables.
-- `query_sql` runs one read-only `SELECT`/`WITH`. Iterate on the query
+- `oxplow_query_sql` runs one read-only `SELECT`/`WITH`. Iterate on the query
   here until the rows are what the user wants, before writing any files.
 - The project's architectural zones are `v_zone` (each rule of the `zones:` table
   in `.oxplow/project.yaml`, in order, with the files it claims in the worktree,

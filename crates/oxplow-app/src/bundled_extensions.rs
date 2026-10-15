@@ -939,8 +939,8 @@ mod tests {
                     ("mcp__oxplow__run_command", "mcp", Some(11), 1, 1),
                     ("mcp__oxplow__run_command", "mcp", Some(11), 0, 2),
                     ("mcp__oxplow__run_command", "mcp", Some(12), 1, 2),
-                    ("mcp__oxplow__query_sql", "mcp", None, 1, 3),
-                    ("mcp__oxplow__query_sql", "mcp", Some(11), 1, 40), // out of the window
+                    ("mcp__oxplow__oxplow_query_sql", "mcp", None, 1, 3),
+                    ("mcp__oxplow__oxplow_query_sql", "mcp", Some(11), 1, 40), // out of the window
                     ("Bash", "shell", Some(11), 1, 1),                  // not an oxplow tool
                     ("mcp__other__thing", "mcp", Some(12), 1, 1),
                 ];
@@ -1003,7 +1003,7 @@ mod tests {
             tools,
             serde_json::json!([
                 ["run_command", "claude", 2, 1],
-                ["query_sql", "unknown", 1, 0],
+                ["oxplow_query_sql", "unknown", 1, 0],
                 ["run_command", "codex", 1, 0],
             ])
         );

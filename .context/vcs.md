@@ -158,7 +158,7 @@ only), and, for an agent, MCP `read` of `file:<path>@<revision>`. A view that do
 result in the UI doesn't cancel the work), so a view that refreshes on
 workspace events routes those refreshes through `coalescedRefresh`
 (debounced, single-flight) rather than starting a diff per event. The MCP VCS
-reads (`diff`, `vcs_blame` and `read` of a file at a revision) default
+reads (`oxplow_diff`, `oxplow_vcs_blame` and `oxplow_read` of a file at a revision) default
 a missing `stream_id` to the caller's own stream — its header, else its
 thread's — and to the primary only for an anonymous caller (tsk555; the
 extension, lens and change tools do the same, tsk574); they replaced
@@ -231,7 +231,7 @@ checks out and shows `name` as is (`pickedBranch`, tsk567). What is computed sta
 `vcs_revisions_between`, `vcs_file_history` (the index keeps 500
 commits per head; a file's full history can be older),
 `vcs_list_adoptable_workspaces`, and for agents `v_commit`,
-`v_commit_file` and `v_branch` through `query_sql`. Git-native reads keep `git_` names:
+`v_commit_file` and `v_branch` through `oxplow_query_sql`. Git-native reads keep `git_` names:
 `git_change_scopes`, `git_resolve_commit_ref_labels`,
 `git_list_recent_remote_branches`. Deleted: `get_git_log`,
 `get_commits_ahead_of`, `list_file_commits`, `list_branches`,
@@ -336,7 +336,7 @@ isolated workspaces sharing history.
 **Names never become options** (tsk550): `Revision::from_str` refuses
 a revision starting with `-`, and the git provider refuses any rev,
 branch or remote name starting with `-` (`not_an_option`) before it
-reaches git's command line — `vcs_blame { rev: "git:--contents=…" }`
+reaches git's command line — `oxplow_vcs_blame { rev: "git:--contents=…" }`
 or a remote `--upload-pack=…` are errors, not flags.
 
 **`only_the_git_provider_touches_git`** (`vcs/mod.rs`) scans the

@@ -12,7 +12,7 @@ use oxplow_domain::{ThreadId, Timestamp};
 struct ThreadRuntime {
     /// The page the human currently has open in this thread, as the UI
     /// last reported it. Ephemeral: what an agent reads via
-    /// `get_open_page` to "look at what I'm looking at".
+    /// `oxplow_get_open_page` to "look at what I'm looking at".
     open_page: Option<OpenPage>,
 }
 

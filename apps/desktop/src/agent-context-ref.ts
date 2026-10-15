@@ -44,7 +44,7 @@ export function formatContextMention(ref: ContextRef): string {
   }
   if (ref.kind === "lens") {
     // `[oxplow lens <id> k=v …]` — the agent reads it with `get_lens` /
-    // `run_lens`. Params sorted so the mention is stable.
+    // `oxplow_run_lens`. Params sorted so the mention is stable.
     const params = Object.keys(ref.params)
       .sort()
       .map((k) => ` ${k}=${JSON.stringify(ref.params[k])}`)

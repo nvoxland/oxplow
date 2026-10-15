@@ -1,5 +1,5 @@
 //! The models that restate what the catalog and the page-ref graph hold, so
-//! an agent reads them with `query_sql` instead of a tool: `v_lens`,
+//! an agent reads them with `oxplow_query_sql` instead of a tool: `v_lens`,
 //! `v_extension` and `v_page_ref`.
 
 use serde_json::{json, Value};
@@ -108,7 +108,7 @@ async fn lenses_and_extensions_are_models_that_follow_the_catalog() {
 }
 
 /// What a loaded extension warns about is on its row; one that fails to
-/// load blocks the generation, so it is not a row (`validate_extension`
+/// load blocks the generation, so it is not a row (`oxplow_validate_extension`
 /// says why).
 #[tokio::test]
 async fn an_extensions_warnings_are_on_its_row() {

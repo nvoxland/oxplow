@@ -5,7 +5,7 @@
 end: after each file you write or change. It is cheap, and the message
 names the file and line and says what to change.
 
-1. `validate_extension(name, stream_id)` (MCP), or `oxplow extension check
+1. `oxplow_validate_extension(name, stream_id)` (MCP), or `oxplow extension check
    <name>` from the worktree, is the same check and the same report:
    - manifest errors (YAML, unknown keys, a name/folder mismatch, a
      missing `intent`, a `shared` extension without `engine` or `version`, a
@@ -27,7 +27,7 @@ names the file and line and says what to change.
    (The CLI uses the project's database when it has one, else an empty
    one.) `ok: true` (exit 0) means it works. Fix every `error`; fix a
    `warning` unless you can say why not.
-2. `run_lens(id, params?, stream_id, thread_id?)` returns exactly the
+2. `oxplow_run_lens(id, params?, stream_id, thread_id?)` returns exactly the
    rows the user will see. Check that they answer the question. It reads
    your extension's models as your worktree has them, published or not.
 3. Pass **your own `stream_id`** to both when you're in a worktree

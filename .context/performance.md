@@ -389,7 +389,7 @@ and the restriction is invisible — a dev-mode test of this proves nothing.
 `extensions::load_extensions(root)` parses every bundled lens file (about
 forty embedded YAML documents) plus the project's on each call, and it ran
 on every advisory check (each agent tool call and prompt), every
-`list_extensions` (IPC) / `read` of a lens / `run_lens`, the schema listing and metric
+`list_extensions` (IPC) / `oxplow_read` of a lens / `oxplow_run_lens`, the schema listing and metric
 catalog seed. Measured on the dev machine (release-less test build, 20
 calls averaged):
 

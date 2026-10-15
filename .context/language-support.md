@@ -188,12 +188,12 @@ language":
   function-like, class-like and module definitions, with the definition's
   container as `container_path`. The **package** is path-derived and only
   emitted when the language declares `UnitKind::Package` (Go, Java). Exposed
-  to the agent as the fallback of the **`code_symbols`** MCP tool (a file no
+  to the agent as the fallback of the **`oxplow_code_symbols`** MCP tool (a file no
   language server serves is read live, uncommitted edits included, and the
   answer says `source: tree_sitter`); `v_symbol` holds the captured ones. Works
   for the 11 bundled languages.
-- **LSP (any server-backed language)** — the `code_symbols` (a file, preferred
-  over the tree-sitter fallback when a server runs) and `code_workspace_symbols`
+- **LSP (any server-backed language)** — the `oxplow_code_symbols` (a file, preferred
+  over the tree-sitter fallback when a server runs) and `oxplow_code_workspace_symbols`
   MCP tools, and definition, references, hover and call hierarchy, answer for
   *any* configured LSP language, not just the tree-sitter set. See
   `.context/lsp.md`.
@@ -234,7 +234,7 @@ per-language view is lens or agent work.
 ## Status
 
 Live: the single `Language` enum, the registry bundle, the LSP symbol surface,
-generic unit listing (`list_units`, behind `code_symbols`' fallback), and tree-sitter
+generic unit listing (`list_units`, behind `oxplow_code_symbols`' fallback), and tree-sitter
 symbols with their index. **Still open:** exercising `unit_kinds` against the
 `metric_subject` roll-up hierarchy so metrics can be grouped by package/module
 in the Metrics Explorer; and grammars from extensions (WASM).

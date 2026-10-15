@@ -31,7 +31,7 @@ command):
 | terminal / ACP session open and close, LSP restart and requests | process control and protocol passthrough: an agent session's *process*. Its slot — opening, renaming, closing an `agent_session` — is a command (`oxplow.agent_session.*`), and closing it stops the process |
 | the left-nav panel layout (`set_panel_layout`) | a UI layout pointer, like the selection pointers |
 | workspace file write / create / rename / delete, applying an LSP edit | the person's own hands on their worktree, like their terminal; snapshots record it |
-| a change's analysis (`ensure_change`) | a derived cache, recomputed from the VCS on demand like a materialized model — not an intent |
+| a change's analysis (`oxplow_ensure_change`) | a derived cache, recomputed from the VCS on demand like a materialized model — not an intent |
 | a model call's record (`ai_call`, `ai_result`) | the computation as it happened (`AiCompute`), like a test run's capture — the run that asked for it is what's audited |
 | AI providers and roles, credentials, approving a program or source | secrets and consent: unreachable from `run_command`, so no invoker list can ever open them to an agent, and no audit row holds a secret |
 | a person's global external provider instances (`instances.yaml`, P9.B2: `add_provider_instance` / `set_provider_instance` / `remove_provider_instance` on a global one) | the person's own machine-level settings, like `ai.yaml`: what runs in every project of theirs is theirs alone to say — the registry writes the file only for `Actor::Human` (a project's instances still go through `oxplow.config.set`) |
@@ -149,7 +149,7 @@ Complete reader coverage and failure-injection validation remain unfinished.
 **Then: is it a read of data a model can publish?** Reads are SQL
 (P4): a new read of project data is a **model** (a `models/<name>.sql`
 file with its `models.yaml` entry — [semantic-layer.md](./semantic-layer.md)
-"Models") that the UI and agents query through `query_sql`, not a
+"Models") that the UI (`query_sql`) and agents (`oxplow_query_sql`) query, not a
 bespoke IPC/MCP read. The result says what it read (`reads`), and the
 view refreshes through `useRerunOnChange` when `ModelsChanged` names a
 model it read — no per-feature event to add. A bespoke read stays for
@@ -664,7 +664,7 @@ The collection subsystem (`.context/collection.md`) follows the same
 
 - **Stored once, read as a model.** The `effort_evidence` asset computes
   each effort's observations and stores them (`v_effort_observation`); the
-  panel and an agent's `query_sql` read the model
+  panel and an agent's `oxplow_query_sql` read the model
   (`SqliteEffortEvidenceStore::list_observations`). Mutations are the
   `oxplow.test.record_run` command and `oxplow.collector.sync` on a report collector
   (agents run them; P8.A8, tsk863) since the UI never writes observations. A view of them re-runs on
@@ -794,7 +794,7 @@ desktop's `createComment` / `addCommentMessage` / `setComment*` /
 (`deleteComment` confirmed — the popover's `InlineConfirm` is the
 person's confirmation). The author is whoever runs the command, so no
 surface passes one. The reads stay RPCs (`list_comments_for_target`,
-`list_comments_for_stream`; MCP `list_comments`).
+`list_comments_for_stream`; MCP `oxplow_list_comments`).
 
 Views re-read on `ModelsChanged` naming `v_comment` (comments and their
 messages) — `subscribeCommentEvents` in `api.ts`. The renderer's
@@ -820,7 +820,7 @@ pump consumer indexes them on `snapshot.taken` (durable, redelivered after
 a crash). Nothing reaches the index on the in-memory bus. Archiving a
 stream purges its file rows (`purge_stream_files`). See
 [refs.md](./refs.md) "Searchable kinds". Exposed identically on IPC
-(`search`) and MCP (`search`) — see the parity manifest
+(`search`) and MCP (`oxplow_search`) — see the parity manifest
 (`crates/oxplow-surface-parity`).
 
 ## Related
@@ -830,7 +830,7 @@ stream purges its file rows (`purge_stream_files`). See
   `recent-projects.json` / `instance.lock` state.
 - [agent-model.md](./agent-model.md) — how the agent calls into MCP
   tools that wrap these stores; the page-ref graph is read with
-  `query_sql` over `v_page_ref`.
+  `oxplow_query_sql` over `v_page_ref`.
 
 ## Component query version
 

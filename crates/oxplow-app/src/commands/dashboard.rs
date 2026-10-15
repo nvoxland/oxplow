@@ -65,7 +65,7 @@ pub struct AddItemInput {
     /// `query` (pinned SQL), `lens` or `text`.
     pub kind: String,
     /// A `query` tile's SQL — read-only, over published models, checked
-    /// like `query_sql`.
+    /// like `oxplow_query_sql`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sql: Option<String>,
     /// A `query` tile's display: a lens viz, or `metric` (the metric card,

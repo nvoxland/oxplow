@@ -348,7 +348,7 @@ const Item = memo(function Item({
   threadId: string;
   /** The ACP agent session the item is in. */
   sessionId: string;
-  /** The thread's answers by ref: a `show_lens` call renders its own. */
+  /** The thread's answers by ref: a `oxplow_show_lens` call renders its own. */
   answers: ReadonlyMap<string, AnswerRow>;
   /** The thread's proposals by ref: the call that made one shows it. */
   proposals: ReadonlyMap<string, Proposal>;

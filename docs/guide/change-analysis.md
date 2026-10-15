@@ -52,7 +52,7 @@ scan. Commits and closed efforts are computed once. The working tree
 and open efforts recompute when files change.
 
 The results live in the `v_change*` views, so you and your agent can
-query them directly (`ensure_change`, then `query_sql`), or build your
+query them directly (`oxplow_ensure_change`, then `oxplow_query_sql`), or build your
 own lens on them.
 
 ## When to use it

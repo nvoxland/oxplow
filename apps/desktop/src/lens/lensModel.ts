@@ -291,7 +291,7 @@ export function parseParamInput(text: string): SqlCell {
 }
 
 /** The subset of `values` that differs from the lens's defaults — what
- *  `run_lens` needs as overrides and what an agent mention should carry. */
+ *  `oxplow_run_lens` needs as overrides and what an agent mention should carry. */
 export function changedParams(lens: Lens, values: Record<string, SqlCell>): Record<string, SqlCell> {
   const out: Record<string, SqlCell> = {};
   for (const p of lens.params) {
@@ -353,6 +353,7 @@ export function adHocLens(query: string, viz: LensViz, chart: LensChart | null =
     alert: null,
     needs: [],
     path: "",
+    tool: null,
   };
 }
 
@@ -383,7 +384,7 @@ export function rowAsk(lens: Lens, columns: string[], row: SqlCell[]): string {
 
 /** What a slot runs: each mounted lens with the slot params it declares
  *  (a slot offers several, e.g. `effort.review.details`'s `effort_id`, `effort` and
- *  `change_id`; `run_lens` rejects undeclared ones). */
+ *  `change_id`; `oxplow_run_lens` rejects undeclared ones). */
 export function slotRuns(
   extensions: Extension[],
   slot: string,
