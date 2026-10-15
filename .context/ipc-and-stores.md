@@ -467,10 +467,9 @@ UI subscribe helper: `subscribeSnapshotEvents(streamId, fn)` filters
 ## Transient agent follow-ups
 
 `FollowupStore` (`crates/oxplow-app/src/followup.rs`) is a pure in-memory
-map keyed by `threadId`. It backs three orchestrator-only MCP tools —
-`oxplow__add_followup`, `oxplow__remove_followup`,
-`oxplow__list_followups` — and lets the agent stash a "I'll get back to
-that next" reminder mid-turn without filing a durable task. No
+map keyed by `threadId`. It backs the plan pane's follow-up reminders
+(IPC `add_followup`, `remove_followup`, `list_followups`); an agent has no
+tool for them (a follow-up is a work item or a thread note). No
 SQLite involvement, no migration, lost on runtime restart.
 
 Surfaces:
@@ -481,11 +480,12 @@ Surfaces:
   EventBus.
 - `workItems.readWorkList(threadId)` (the Plan's read) buckets the
   thread's `v_work_item` rows and adds its current followups
-  (`list_followups`) in the `followups` field, so PlanPane /
+  (the `list_followups` IPC op) in the `followups` field, so PlanPane /
   TaskGroupList see them alongside the list's items.
 - IPC: only one new method — `removeFollowup(threadId, id)` — used by
   the ✕ dismiss button on each follow-up row. Adds happen
-  exclusively via the MCP tool surface; the UI never adds.
+  only through the `add_followup` IPC op, which no agent tool mirrors any more
+  (an agent's follow-up is a work item or a thread note); the UI never adds.
 - `useBackendSubscriptions` re-reads the affected thread's work on
   `followup.changed`, and every loaded thread's (and the backlog's) when
   a model its reads read changes (`readsChanged` over the lists' `reads`:
@@ -703,9 +703,8 @@ The collection subsystem (`.context/collection.md`) follows the same
 
 - **Stored once, read as a model.** The `effort_evidence` asset computes
   each effort's observations and stores them (`v_effort_observation`); the
-  panel reads the model, and MCP `list_effort_observations` (agent-only in
-  the surface-parity manifest) reads the same stored rows
-  (`SqliteEffortEvidenceStore::list_observations`, tsk862). Mutations are the
+  panel and an agent's `query_sql` read the model
+  (`SqliteEffortEvidenceStore::list_observations`). Mutations are the
   `oxplow.test.record_run` command and `oxplow.collector.sync` on a report collector
   (agents run them; P8.A8, tsk863) since the UI never writes observations. A view of them re-runs on
   `ModelsChanged` (P8.A2: the bespoke `EffortObservationsChanged` had no

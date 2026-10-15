@@ -142,7 +142,6 @@ fn to_snake_case(key: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::FileSnapshotIdParams;
 
     /// A tool's params with multi-word fields.
     #[derive(Debug, serde::Deserialize)]
@@ -216,9 +215,13 @@ mod tests {
 
     #[test]
     fn truly_missing_field_yields_clear_error() {
-        // `file_snapshot_id` is required and absent under any casing.
-        let err =
-            lenient_from_object::<FileSnapshotIdParams>(obj(serde_json::json!({}))).unwrap_err();
+        // A required field absent under any casing.
+        #[derive(Debug, serde::Deserialize)]
+        struct Required {
+            #[allow(dead_code, reason = "only its absence is tested")]
+            file_snapshot_id: i64,
+        }
+        let err = lenient_from_object::<Required>(obj(serde_json::json!({}))).unwrap_err();
         let msg = err.to_string();
         assert!(
             msg.contains("file_snapshot_id"),

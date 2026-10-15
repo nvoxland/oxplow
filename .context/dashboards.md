@@ -94,8 +94,8 @@ correctly; frontend field access is snake_case.
 An agent builds a dashboard on request ("make me a dashboard of the
 coverage metrics") with `run_command oxplow.dashboard.create` then
 `oxplow.dashboard.add_item` (P8.A5: the `create_dashboard` / `add_dashboard_item`
-MCP tools are gone). It reads with the `list_dashboards` / `get_dashboard`
-MCP tools. A query tile's `sql` is checked before it is stored, so a tile
+MCP tools are gone). It reads with `query_sql` over `v_dashboard` and
+`v_dashboard_item`. A query tile's `sql` is checked before it is stored, so a tile
 that saves runs; deleting a dashboard is a person's.
 
 ## UI (tsk141 — Phase 3)

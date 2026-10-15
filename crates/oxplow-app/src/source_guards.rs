@@ -804,6 +804,7 @@ const WORKTREE_PATH_USERS: &[(&str, &str)] = &[
     ("crates/oxplow-app/src/commit_links.rs", "asks git whether a commit holds an effort"),
     ("crates/oxplow-app/src/effort_landing.rs", "asks git where an effort landed"),
     ("crates/oxplow-app/src/commands/extension_install.rs", "installs an extension into the worktree"),
+    ("crates/oxplow-app/src/ref_read.rs", "`read` reads a file at a revision and a lens in the caller's worktree"),
     ("crates/oxplow-mcp/src/lib.rs", "the MCP tools' file and VCS reads"),
     ("crates/oxplow-rpc/src/commands/collectors.rs", "the collector RPCs"),
     ("crates/oxplow-rpc/src/commands/extensions.rs", "the extension RPCs"),
@@ -942,8 +943,8 @@ fn nothing_in_core_drives_an_agent() {
 /// Where oxplow's own task list — one implementation of the work-item
 /// interface (`.context/work-items.md`) — may be named in production
 /// code: its crate (`crates/oxplow-tasks`, all of it) and the files listed
-/// here. Everything else reads the interface (`v_work_item` and its views,
-/// `work_item_reads`) and writes through the `work_item.*` commands,
+/// here. Everything else reads the interface (`v_work_item` and its views)
+/// and writes through the `work_item.*` commands,
 /// whichever list is active. Each file still here says why.
 #[rustfmt::skip]
 const TASK_IMPLEMENTATION: &[(&str, &str)] = &[

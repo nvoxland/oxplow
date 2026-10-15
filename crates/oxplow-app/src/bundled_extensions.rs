@@ -167,6 +167,7 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-bundled", "lenses/planning.yaml"),
             ext_file!("oxplow-bundled", "lenses/quality.yaml"),
             ext_file!("oxplow-bundled", "lenses/ready-tasks.yaml"),
+            ext_file!("oxplow-bundled", "lenses/work-next.yaml"),
             ext_file!("oxplow-bundled", "lenses/recent-decisions.yaml"),
             ext_file!("oxplow-bundled", "lenses/recent-notes.yaml"),
             ext_file!("oxplow-bundled", "lenses/recent-snapshots.yaml"),
@@ -1768,6 +1769,125 @@ mod tests {
             1,
         );
         assert!(!waiting.contains(&"Stuck".to_string()), "{waiting:?}");
+    }
+
+    /// What to pick up next on a thread's list: ready items in list order,
+    /// an open blocker holding one until it closes, and a ready epic first
+    /// coming with its ready descendants as one unit.
+    #[tokio::test]
+    async fn work_next_offers_the_ready_items_or_the_first_epic_with_its_children() {
+        use oxplow_domain::Actor;
+        let f = crate::test_fixtures::services_with_effort().await;
+        let thread = f.thread.to_string();
+        let run = |id: &'static str, input: serde_json::Value| {
+            let svc = f.svc.clone();
+            async move {
+                svc.commands
+                    .run(&Actor::Human, id, input, false)
+                    .await
+                    .unwrap()
+                    .result
+            }
+        };
+        let file = |title: &'static str, extra: serde_json::Value| {
+            let mut input = serde_json::json!({ "title": title, "thread": thread });
+            input
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            async move {
+                run("oxplow.work_item.create", input).await["ref"]
+                    .as_str()
+                    .unwrap()
+                    .to_string()
+            }
+        };
+        let next = || async {
+            let rows = run_bundled_lens_with(
+                &f,
+                "oxplow-bundled/work-next",
+                &[(
+                    "thread",
+                    oxplow_db::SqlCell::Text(format!("thread:{}", f.thread)),
+                )],
+            )
+            .await;
+            rows.as_array()
+                .unwrap()
+                .iter()
+                .map(|r| format!("{} {}", r[1].as_str().unwrap(), r[2].as_str().unwrap()))
+                .collect::<Vec<_>>()
+        };
+        assert!(next().await.is_empty(), "nothing filed, nothing ready");
+
+        let a = file("a", serde_json::json!({})).await;
+        file("b", serde_json::json!({ "state": "blocked" })).await;
+        file("c", serde_json::json!({})).await;
+        assert_eq!(next().await, ["a ready", "c ready"]);
+
+        let z = run(
+            "oxplow.work_item.create",
+            serde_json::json!({ "title": "z" }),
+        )
+        .await["ref"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        run(
+            "oxplow.work_item.link",
+            serde_json::json!({ "ref": z, "target": a, "link_type": "blocks" }),
+        )
+        .await;
+        assert_eq!(next().await, ["c ready"], "an open blocker holds a");
+        run(
+            "oxplow.work_item.transition",
+            serde_json::json!({ "ref": z, "to": "done" }),
+        )
+        .await;
+        assert_eq!(next().await, ["a ready", "c ready"], "a closed one doesn't");
+
+        run(
+            "oxplow.work_item.transition",
+            serde_json::json!({ "ref": a, "to": "done" }),
+        )
+        .await;
+        run(
+            "oxplow.work_item.transition",
+            serde_json::json!({ "ref": file("x", serde_json::json!({})).await, "to": "in_progress" }),
+        )
+        .await;
+        // c is next, and becomes an epic once it has children.
+        let c1 = file(
+            "c1",
+            serde_json::json!({ "parent_ref": next_ref(&f, "c").await }),
+        )
+        .await;
+        file(
+            "c2",
+            serde_json::json!({ "parent_ref": next_ref(&f, "c").await, "state": "done" }),
+        )
+        .await;
+        file("g", serde_json::json!({ "parent_ref": c1 })).await;
+        file("y", serde_json::json!({})).await;
+        assert_eq!(next().await, ["c epic", "c1 child", "g child"]);
+    }
+
+    /// The ref of the item titled `title` on `f`'s thread.
+    async fn next_ref(f: &crate::test_fixtures::EffortFixture, title: &str) -> String {
+        let out = f
+            .svc
+            .sql
+            .query_sql(
+                "SELECT ref FROM v_work_item WHERE title = ?1",
+                vec![oxplow_db::SqlCell::Text(title.into())],
+                None,
+            )
+            .await
+            .unwrap();
+        match &out.rows[0][0] {
+            oxplow_db::SqlCell::Text(r) => r.clone(),
+            other => panic!("{other:?}"),
+        }
     }
 
     /// Thread activity: each turn under the effort it fell in, the turns

@@ -37,7 +37,7 @@ item is about (`collector:triage/hot`, `effort:eff12`). A link's target
 needn't resolve; it may name something deleted or an extension's kind
 since uninstalled (refs.md "Using refs"),
 `v_work_item_comment` its comments. Core reads work items only through
-these: `get_thread_context`'s items, a work item's ref summary
+these: a thread's items (`v_work_item`), a work item's ref summary
 (`ref_resolver`), a `[[…]]` link's check (`link_check`) and search
 (`v_search_work_item`).
 
@@ -194,13 +194,15 @@ list's editable fields and — with `hierarchy` — a parent.
 
 ## Reading them for the agent
 
-The agent's work-item tools read the interface too
-(`crates/oxplow-app/src/work_item_reads.rs`, MCP `list_work_items`,
-`get_work_item`, `next_work_item`): a list's items in order, one item
-with its links and comments, and what to pick up next (an epic with its
-ready descendants, or every ready non-epic item; open `blocks` links
-hold an item). None of them belongs to an implementation, so the tool
-list never changes with a switch; with none they read empty. A source
+The agent reads work items through the interface too, with no tool of
+its own: `query_sql` over `v_work_item` for a list in order (`WHERE
+thread_id = … ORDER BY rank IS NULL, rank, created_at`), `read` on a
+`work_item:` ref for one item with its `links` and `comments`, and the
+bundled lens `oxplow-bundled/work-next` (`run_lens`, param `thread:
+"thread:thr3"`) for what to pick up next (an epic with its ready
+descendants, or every ready non-epic item; open `blocks` links hold an
+item). None of them belongs to an implementation, so the tool list never
+changes with a switch; with none they read empty. A source
 guard (`source_guards::only_oxplows_implementation_names_its_task_list`)
 pins the few production files that may name oxplow's task store,
 service or models.

@@ -164,6 +164,7 @@ pub mod providers;
 pub mod reasoning;
 pub mod recovery;
 pub mod ref_moves;
+pub mod ref_read;
 pub mod ref_resolver;
 pub mod run_context;
 #[cfg(test)]
@@ -207,7 +208,6 @@ pub mod vocabulary_reactor;
 pub mod wiki_drift;
 pub mod wiki_pages;
 pub mod wiki_pages_watch;
-pub mod work_item_reads;
 pub mod work_items;
 pub mod work_items_conformance;
 pub mod workspace_files;

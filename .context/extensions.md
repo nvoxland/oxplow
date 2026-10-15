@@ -535,8 +535,9 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   reports SQL errors, and `columns` / `link.from` keys that the query
   doesn't return.
 - **Surfaces.**
-  - IPC and MCP: `list_extensions`, `get_lens`, `run_lens`,
-    `validate_extension`.
+  - IPC and MCP: `list_extensions`, `run_lens`, `validate_extension`;
+    `get_lens` is IPC only, an agent reads a definition with `read`
+    (`lens:<ext>/<slug>`).
   - MCP only: `list_lenses`. MCP's `list_extensions` is a summary
     (each extension's own fields, errors and warnings, and a count of
     each list it contributes); `name` gives one extension's whole
@@ -1110,7 +1111,7 @@ out of the main checkout), and `oxplow.lens.keep` / `oxplow.lens.share` /
 `oxplow.extension.install` / `oxplow.extension.update` write to the named stream's
 worktree. The app shows that work once it's merged into the main
 worktree, like any other code change. Until then the MCP authoring tools
-(`validate_extension`, `run_lens`, `get_lens`, …) read the agent's own
+(`validate_extension`, `run_lens`, `read` of a lens, …) read the agent's own
 working copy so it can check what it wrote — its files, under the main
 worktree's config: the daemon's catalog is
 `ExtensionCatalog::for_project(main)`, so every load (`load_extensions_in`,
@@ -3919,7 +3920,7 @@ tool list stable no matter how many extensions are installed.
 
 - `list_lenses`: every lens (`<ext>/<slug>` id, title, description, viz,
   params).
-- `get_lens(id)`: the lens definition: query, params with defaults, viz,
+- `read { ref: "lens:<id>" }`: the lens definition (in `content`): query, params with defaults, viz,
   columns/links and the file it lives in.
 - `run_lens(id, params?, format?)`: **what the UI shows** for those
   params, as its text rendering by default — `LensText { lens, title,

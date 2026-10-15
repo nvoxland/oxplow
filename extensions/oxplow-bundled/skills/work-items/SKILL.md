@@ -1,6 +1,6 @@
 ---
 name: work-items
-description: The project's work list — when filing a work item is worth it, the work_item.* commands (create, transition, update, link, comment), states, epics and link types, and reading items (list_work_items, get_work_item, next_work_item, v_work_item). Loads on the oxplow `run_command` tool with work_item.*, on the work-item tools, and on v_work_item.
+description: The project's work list — when filing a work item is worth it, the work_item.* commands (create, transition, update, link, comment), states, epics and link types, and reading items (read, the work-next lens, v_work_item). Loads on the oxplow `run_command` tool with work_item.*, and on v_work_item.
 ---
 
 # Work items
@@ -71,15 +71,15 @@ Link types:
 
 ## Reading items
 
-- `list_work_items { list: "thr3" | "backlog", states? }` — a list's
-  items in order (open ones unless `states` says).
-- `get_work_item { ref }` — one item with its links and comments.
-- `next_work_item { thread_id }` — what to pick up next (an epic with its
-  ready children, or the ready items).
+- `read { ref }` — one item: its row, its links and its comments.
+- `run_lens { id: "oxplow-bundled/work-next", params: { thread:
+  "thread:thr3" } }` — what to pick up next on a thread's list (an epic
+  with its ready descendants, or the ready items).
+- `query_sql` over `v_work_item` (`ref`, `title`, `body`, `state`,
+  `native_state`, `native`, `parent_ref`, `thread_id` — NULL on the
+  backlog — `rank`, `closed_at`), `v_work_item_link` and
+  `v_work_item_comment` for anything else: a list's items in order are
+  `WHERE thread_id = … ORDER BY rank IS NULL, rank, created_at`.
 
-For anything else, `query_sql` over `v_work_item` (`ref`, `title`,
-`body`, `state`, `native_state`, `native`, `parent_ref`, `thread_id` —
-NULL on the backlog — `rank`, `closed_at`), `v_work_item_link` and
-`v_work_item_comment`. What's been done on an item is its efforts:
-`v_effort` where `work_item` is the item's ref (`started_at`,
-`ended_at`, `summary`).
+What's been done on an item is its efforts: `v_effort` where `work_item`
+is the item's ref (`started_at`, `ended_at`, `summary`).

@@ -33,8 +33,8 @@ section for the column.
 > `*-detail` findings). The `effort_evidence` asset computes each effort's
 > observation rows from there (`CollectionService::effort_observations_from_metrics`)
 > and stores them (`effort_observation_row`, read as `v_effort_observation`);
-> the panel and MCP `list_effort_observations` read those stored rows
-> (`SqliteEffortEvidenceStore::list_observations`, tsk862) — the evidence is
+> the panel and an agent (`query_sql` over `v_effort_observation`) read those
+> stored rows (`SqliteEffortEvidenceStore::list_observations`) — the evidence is
 > computed once. `EffortObservation` is that row. Everything below about the **report collectors**, the
 > **hybrid ingestion** seam, and the **nudges** is unchanged — only the storage
 > moved. (One micro-change: a *report-less* run — analyzer/tests ran but produced

@@ -106,8 +106,14 @@ const fn agent(name: &'static str) -> Capability {
 /// Every domain operation on either surface, classified. See module docs.
 pub const MANIFEST: &[Capability] = &[
     // ---- both (identical names) ----
-    both("ping"),
-    both("app_version"),
+    ui(
+        "ping",
+        "the UI's health check of its backend; an agent's connection is its own liveness",
+    ),
+    ui(
+        "app_version",
+        "the version the About box shows",
+    ),
     // Skills for agents that can't load skill files (ACP); the UI has no use for them.
     agent("get_skill"),
     // A dry run for an agent writing a source in its worktree.
@@ -115,12 +121,10 @@ pub const MANIFEST: &[Capability] = &[
     // A whole extension in a throwaway oxplow, for an agent authoring it;
     // a person runs `oxplow extension test`.
     agent("preview_extension"),
-    both("list_streams"),
+    model("list_streams", &["v_stream"]),
     // The work-item interface, read for the agent; the UI reads the
     // models (`v_work_item`).
-    agent("get_work_item"),
-    both("list_thread_notes"),
-    agent("list_effort_observations"),
+    model("list_thread_notes", &["v_thread_note"]),
     // Per-effort metric roll-up for the task-page panel (tsk250): the
     // agent gets the same numbers as prompt text via oxplow-bundled's
     // `metric-deltas` advisory (over `v_effort_metric_delta`).
@@ -136,9 +140,20 @@ pub const MANIFEST: &[Capability] = &[
     // here and writes it with `oxplow.config.set` (tsk411); the renderer only reads
     // it (it rides on `get_config`), so there is no IPC counterpart.
     agent("list_zones"),
-    both("add_followup"),
-    both("list_followups"),
-    both("remove_followup"),
+    // The plan pane's in-memory reminders; an agent files a work item or
+    // a thread note instead.
+    ui(
+        "add_followup",
+        "a person's reminder in the plan pane; an agent files a work item or a thread note",
+    ),
+    ui(
+        "list_followups",
+        "a person's reminders in the plan pane; an agent reads work items and `v_thread_note`",
+    ),
+    ui(
+        "remove_followup",
+        "a person's reminder in the plan pane; an agent files a work item or a thread note",
+    ),
     both("list_backlinks"),
     both("list_outbound"),
     // ---- the command bus (agent side; the UI reaches commands through
@@ -185,7 +200,7 @@ pub const MANIFEST: &[Capability] = &[
         "approving or declining an agent's proposal is a person's (P6b)",
     ),
     // ---- the event log's dead-letter queue ----
-    both("list_dead_letters"),
+    model("list_dead_letters", &["v_event_dead_letter"]),
     ui(
         "retry_dead_letter",
         "a dead letter's fate is a person's (V93); an agent lists them",
@@ -212,7 +227,7 @@ pub const MANIFEST: &[Capability] = &[
     ui("get_panel_layout", "the person's left-nav layout (P6.G1)"),
     ui("set_panel_layout", "the person's left-nav layout (P6.G1)"),
     both("list_extensions"),
-    both("get_lens"),
+    ui("get_lens", "the lens page's definition; an agent reads the lens's ref with `read`"),
     both("run_lens"),
     // A lens's actions: commands run as the lens, for whoever pressed.
     both("run_lens_action"),
@@ -379,66 +394,62 @@ pub const MANIFEST: &[Capability] = &[
         "test_ai_provider",
         "checks a person's AI provider settings before they save them",
     ),
-    agent("ai_decide"),
-    agent("ai_summarize"),
-    both("read_ai_call"),
+    ui("read_ai_call", "a person's look at a recorded model call; an agent asks no model through oxplow"),
     agent("get_open_page"),
     agent("list_lenses"),
     // ---- both (names diverge across surfaces) ----
-    both_named("thread.list", "list_threads", "list_thread_work"),
-    agent("list_work_items"),
+    model("list_threads", &["v_thread"]),
     both_named("comment.list", "list_comments_for_stream", "list_comments"),
     // ---- agent-only (orchestration / agent affordances) ----
-    agent("next_work_item"),
-    agent("get_thread_context"),
+    // One reader for anything a ref names.
+    agent("read"),
     agent("wiki_ref_drift"),
     // ---- collection (effort-scoped observations) ----
-    agent("get_open_effort"),
     agent("code_definition"),
     agent("code_hover"),
     agent("code_references"),
     agent("code_symbols"),
     agent("code_workspace_symbols"),
     agent("code_call_hierarchy"),
-    agent("code_diagnostics"),
     agent("lsp_list_servers"),
     // ---- code analysis: generic per-language unit listing (tree-sitter) ----
     agent("list_code_units"),
-    // ---- git: read tools mirrored to MCP ----
+    // ---- git ----
     both_named("git.status", "git_change_scopes", "git_status"),
     both("diff"),
     ui(
         "changed_paths",
         "an agent reads the same paths, with line counts, through `diff`",
     ),
-    both("vcs_log"),
+    model("vcs_log", &["v_commit", "v_commit_file"]),
     both("vcs_blame"),
-    both("read_at"),
+    ui("read_at", "the editor's file at a revision; an agent reads a file ref at that revision with `read`"),
     ui(
         "resolve_symbol",
-        "opening a symbol link; an agent reads v_symbol, and read_file_at_snapshot for a pinned version",
+        "opening a symbol link; an agent reads v_symbol, and `read` for a pinned version",
     ),
-    both("vcs_branches"),
+    model("vcs_branches", &["v_branch"]),
     ui(
         "search_workspace_text",
         "an agent searches its worktree with its own Grep tool",
     ),
-    // ---- snapshots / local history: reads + restore mirrored to MCP ----
-    both("list_snapshots_for_stream"),
-    both("list_snapshot_ops"),
-    both("list_files_for_snapshot"),
-    both("get_file_snapshot"),
-    both("get_snapshot_stats"),
-    agent("list_snapshot_change_entries"),
-    agent("read_file_snapshot"),
-    agent("read_file_at_snapshot"),
-    both("read_event_content"),
+    // ---- snapshots / local history ----
+    model("list_snapshots_for_stream", &["v_snapshot"]),
+    model("list_snapshot_ops", &["v_snapshot_op"]),
+    model("list_files_for_snapshot", &["v_snapshot_file"]),
+    model("get_file_snapshot", &["v_snapshot_file"]),
+    model("get_snapshot_stats", &["v_snapshot_file"]),
+    ui("read_event_content", "the event page's stored body; an agent reads the event's ref with `read`"),
     model("list_file_snapshots", &["v_snapshot_file"]),
-    // ---- code quality: duplication findings mirrored to MCP ----
-    agent("list_code_quality_findings"),
-    // ---- UI selection mirrored to MCP ----
-    both("select_thread"),
-    both("switch_stream"),
+    // ---- UI selection ----
+    ui(
+        "select_thread",
+        "the person's selection; an agent's thread is its session's",
+    ),
+    ui(
+        "switch_stream",
+        "the person's selection; an agent's stream is its thread's",
+    ),
     // ---- app / misc ----
     ui(
         "log_ui",
@@ -494,9 +505,9 @@ pub const MANIFEST: &[Capability] = &[
         "get_thread_state",
         "the person's selected and active thread; an agent reads threads in `v_thread` and has no selection",
     ),
-    // ---- dashboards: reads + create/add-tile are agent-authorable ----
-    both("list_dashboards"),
-    both("get_dashboard"),
+    // ---- dashboards: agents read the models; writes are `dashboard.*` commands ----
+    model("list_dashboards", &["v_dashboard"]),
+    model("get_dashboard", &["v_dashboard", "v_dashboard_item"]),
     // ---- comments (writes are knowledge.*) ----
     model("list_comments_for_target", &["v_comment"]),
     // ---- page visits ----
@@ -535,7 +546,7 @@ pub const MANIFEST: &[Capability] = &[
     ),
     ui(
         "vcs_revisions_between",
-        "an ancestry walk the VCS answers; an agent has `vcs_log`",
+        "an ancestry walk the VCS answers; an agent reads `v_commit`",
     ),
     model("vcs_file_history", &["v_commit_file"]),
     // ---- hooks / agent lifecycle ----
@@ -591,7 +602,7 @@ pub const MANIFEST: &[Capability] = &[
     ),
     ui(
         "files_at",
-        "a revision's file list, for the editor; an agent reads a revision with `read_at`",
+        "a revision's file list, for the editor; an agent reads a revision's file with `read`",
     ),
     ui(
         "extension_impact_between",
@@ -607,7 +618,7 @@ pub const MANIFEST: &[Capability] = &[
     ),
     ui(
         "vcs_revision",
-        "one revision's detail for the history view; an agent has `vcs_log`",
+        "one revision's detail for the history view; an agent reads `v_commit`",
     ),
     ui(
         "vcs_merge_base",
