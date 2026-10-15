@@ -44,6 +44,7 @@ pub const REF_MODELS: &[RefModel] = &[
     owner(k::DECISION, "v_decision", "question"),
     owner(k::COLLECTOR, "v_collector_run", "id"),
     owner(k::JOB_RUN, "v_job_run", "intent_key"),
+    owner(k::AI_CALL, "v_ai_call", "role"),
     owner(k::LENS, "v_lens", "title"),
     owner(k::EXTENSION, "v_extension", "name"),
 ];

@@ -676,7 +676,7 @@ and `v_model_test` are the catalog of all of them:
 | `v_tool_call` | every agent tool call: the `tool_call.project` pump consumer's projection of `agent.tool.finished` (one row per event; the call as its harness mapped it, `oxplow-app/src/tool_calls.rs`; paths worktree-relative; a shell call's `ok` is NULL when its harness reports no exit code). `tool` is the harness's own name, `kind` oxplow's (V42; v3) (V77; `turn_id`, `event_id` since V102) |
 | `v_context_read` | reads (`kind = 'read'`) of `.context/*.md` (V77) |
 | `v_oxplow_bundled_struggle` | oxplow-bundled's model (review policy, not core): per effort, a file edited 5+ times, or 3+ failed shell commands, by kind (`subject` `shell`), over `v_tool_call` |
-| `v_ai_call` | oxplow's own model calls: role, provider, model, caller, tokens, latency, ok/error, and a recorded computation's `input_hash` (V78, V118; see [ai-providers.md](./ai-providers.md)) |
+| `v_ai_call` | oxplow's own model calls: role, provider, model, caller, tokens, latency, ok/error, a recorded computation's `input_hash`, and its `ref` (`ai_call:<id>`, whose bodies `read` gives) (V78, V118; see [ai-providers.md](./ai-providers.md)) |
 | `v_ai_result` | recorded AI computations (`classify` / `score` / `summarize` / `extract`), keyed by input hash, model and prompt version, with the output, tokens and the computing call (V118; [ai-providers.md](./ai-providers.md) "Recorded computations") |
 | `v_metric_spec` | metric definitions: aggregation, direction, target / warn / fail (enabled lives in project.yaml) (V80) |
 | `v_agent_nudge` | guidance oxplow sent the agent mid-effort (V80; `turn_id`, `delivered_at` since V102) |

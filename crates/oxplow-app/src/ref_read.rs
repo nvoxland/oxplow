@@ -9,8 +9,11 @@
 //!   links and comments, a commit's files, an effort's files;
 //! - its **content**, for the kinds whose body no model holds: a file at a
 //!   revision (`file:src/a.rs@git:HEAD#L10-40`; the working tree when it
-//!   names none), an event's stored body (`event:<id>#input`, `#output` or
-//!   `#prompt`; the caller's own stream's only), a lens's definition.
+//!   names none, in the stream asked for else the caller's), an event's
+//!   stored body (`event:<id>#input`, `#output` or `#prompt`; the caller's
+//!   own stream's only), a model call's (`ai_call:<id>#request` or
+//!   `#response`; not one another agent's thread asked for), a lens's
+//!   definition.
 //!
 //! Content is cut at [`MAX_CONTENT`] bytes, saying so.
 
@@ -19,7 +22,7 @@ use std::collections::BTreeMap;
 use oxplow_db::SqlCell;
 use oxplow_domain::refs::grammar::CanonicalRef;
 use oxplow_domain::refs::kind;
-use oxplow_domain::StreamId;
+use oxplow_domain::{StreamId, ThreadId};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
@@ -88,14 +91,25 @@ const RELATED: &[(&str, &str, &str)] = &[
     ),
 ];
 
-/// Read what `raw` names, for a caller working in `stream` (its worktree
-/// is where a file is read; its events are the ones whose bodies it may
-/// read).
+/// Who is reading: an agent's session's thread and stream, or a person
+/// (both `None`).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Reader {
+    pub thread: Option<ThreadId>,
+    pub stream: Option<StreamId>,
+}
+
+/// Read what `raw` names for `reader`. A file or lens is read in `at`'s
+/// worktree, else the reader's stream's; an event's body only in the
+/// reader's own stream; a model call's body unless another agent's thread
+/// asked for it.
 pub async fn read(
     svc: &Services,
     raw: &str,
-    stream: Option<StreamId>,
+    reader: &Reader,
+    at: Option<StreamId>,
 ) -> Result<RefRead, ReadError> {
+    let stream = at.or(reader.stream);
     let parsed = CanonicalRef::parse(raw.trim()).map_err(|e| ReadError::Invalid(e.to_string()))?;
     let reference = CanonicalRef {
         frag: None,
@@ -149,10 +163,14 @@ pub async fn read(
             for (_, name, sql) in RELATED.iter().filter(|(k, _, _)| *k == parsed.kind) {
                 out.related.insert(name, rows(svc, sql, &reference).await?);
             }
-            if parsed.kind == kind::EVENT {
-                if let Some(frag) = parsed.frag.as_deref() {
-                    out.set_content(event_body(svc, &parsed.id, frag, stream).await?);
+            match (parsed.kind.as_str(), parsed.frag.as_deref()) {
+                (kind::EVENT, Some(frag)) => {
+                    out.set_content(event_body(svc, &parsed.id, frag, reader.stream).await?);
                 }
+                (kind::AI_CALL, Some(frag)) => {
+                    out.set_content(ai_call_body(svc, &parsed.id, frag, reader.thread).await?);
+                }
+                _ => {}
             }
         }
     }
@@ -343,6 +361,40 @@ async fn event_body(
     serde_json::to_string_pretty(&body).map_err(|e| ReadError::Invalid(e.to_string()))
 }
 
+/// A model call's stored body (`request` or `response`). An agent reads
+/// any call but one another agent's thread asked for.
+async fn ai_call_body(
+    svc: &Services,
+    id: &str,
+    part: &str,
+    thread: Option<ThreadId>,
+) -> Result<String, ReadError> {
+    use crate::ai_calls::{read, AiCallBody, AiCallBodyError};
+    let body = match part {
+        "request" => AiCallBody::Request,
+        "response" => AiCallBody::Response,
+        other => {
+            return Err(ReadError::Invalid(format!(
+                "a model call's body is `#request` or `#response`; not `#{other}`"
+            )))
+        }
+    };
+    let id: i64 = id
+        .parse()
+        .map_err(|_| ReadError::Invalid(format!("`{id}` isn't a model call id")))?;
+    let reader = thread.map(oxplow_domain::refs::build::thread_ref);
+    let body = read(svc, id, body, reader.as_deref())
+        .await
+        .map_err(|e| match e {
+            AiCallBodyError::Storage(e) => ReadError::Storage(e),
+            other => ReadError::Invalid(other.to_string()),
+        })?
+        .ok_or_else(|| {
+            ReadError::NotFound(format!("the call's {part} (none recorded, or it expired)"))
+        })?;
+    Ok(body.text)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -374,19 +426,25 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_file_reads_at_its_revision_and_lines() {
         let (_dir, svc) = project().await;
-        let working = read(&svc, "file:src/a.txt", None).await.unwrap();
+        let working = read(&svc, "file:src/a.txt", &Reader::default(), None)
+            .await
+            .unwrap();
         assert_eq!(working.content.as_deref(), Some("one\nTWO\nthree\n"));
         assert_eq!(working.row, None);
-        let head = read(&svc, "file:src/a.txt@git:HEAD", None).await.unwrap();
+        let head = read(&svc, "file:src/a.txt@git:HEAD", &Reader::default(), None)
+            .await
+            .unwrap();
         assert_eq!(head.content.as_deref(), Some("one\ntwo\nthree\n"));
-        let two = read(&svc, "file:src/a.txt#L2-3", None).await.unwrap();
+        let two = read(&svc, "file:src/a.txt#L2-3", &Reader::default(), None)
+            .await
+            .unwrap();
         assert_eq!(two.content.as_deref(), Some("TWO\nthree"));
         assert!(matches!(
-            read(&svc, "file:src/a.txt#middle", None).await,
+            read(&svc, "file:src/a.txt#middle", &Reader::default(), None).await,
             Err(ReadError::Invalid(m)) if m.contains("#L10-20")
         ));
         assert!(matches!(
-            read(&svc, "file:src/gone.txt", None).await,
+            read(&svc, "file:src/gone.txt", &Reader::default(), None).await,
             Err(ReadError::NotFound(_))
         ));
     }
@@ -431,7 +489,7 @@ mod tests {
                 .await
                 .unwrap();
         }
-        let read = read(&svc, &item, None).await.unwrap();
+        let read = read(&svc, &item, &Reader::default(), None).await.unwrap();
         let row = read.row.unwrap();
         assert_eq!(row["title"], "Fix the login loop");
         assert_eq!(read.related["links"][0]["to_ref"], json!(other));
@@ -444,20 +502,105 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn an_owned_kind_is_its_models_row() {
         let (_dir, svc) = project().await;
-        let stream = read(&svc, "stream:str1", None).await.unwrap();
+        let stream = read(&svc, "stream:str1", &Reader::default(), None)
+            .await
+            .unwrap();
         assert_eq!(stream.row.unwrap()["ref"], "stream:str1");
         assert!(matches!(
-            read(&svc, "stream:str99", None).await,
+            read(&svc, "stream:str99", &Reader::default(), None).await,
             Err(ReadError::NotFound(_))
         ));
         assert!(matches!(
-            read(&svc, "nonsense_kind:x", None).await,
+            read(&svc, "nonsense_kind:x", &Reader::default(), None).await,
             Err(ReadError::Invalid(m)) if m.contains("v_ref_kind")
         ));
         assert!(matches!(
-            read(&svc, "stream:str1@git:HEAD", None).await,
+            read(&svc, "stream:str1@git:HEAD", &Reader::default(), None).await,
             Err(ReadError::Invalid(m)) if m.contains("no revisions")
         ));
+    }
+
+    /// A recorded model call reads as its row, and `#request` / `#response`
+    /// as its bodies: an agent reads a collector's or job's call, and its
+    /// own thread's, never another thread's.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_model_calls_bodies_read_unless_another_agent_asked() {
+        let (_dir, svc) = project().await;
+        let call = |caller: &'static str| {
+            let svc = svc.clone();
+            async move {
+                svc.db
+                    .transaction(move |tx| {
+                        let request = oxplow_db::event_content_store::put_text_tx(tx, "ai", "Is it risky?")?;
+                        let response = oxplow_db::event_content_store::put_text_tx(tx, "ai", "no")?;
+                        tx.execute(
+                            "INSERT INTO ai_call (role, provider, model, caller, ok, at, request_hash, response_hash)
+                             VALUES ('decide', 'p', 'm', ?1, 1, '2026-01-01', ?2, ?3)",
+                            rusqlite::params![caller, request.hash, response.hash],
+                        )
+                        .map_err(oxplow_db::map_sql_err)?;
+                        Ok(tx.last_insert_rowid())
+                    })
+                    .await
+                    .unwrap()
+            }
+        };
+        let collectors = call("collector:acme/triage").await;
+        let mine = call("thread:thr1").await;
+        let theirs = call("thread:thr9").await;
+        let me = Reader {
+            thread: Some(oxplow_domain::ThreadId::new(1)),
+            stream: None,
+        };
+        let row = read(&svc, &format!("ai_call:{collectors}"), &me, None)
+            .await
+            .unwrap();
+        assert_eq!(row.row.unwrap()["role"], "decide");
+        let asked = read(&svc, &format!("ai_call:{collectors}#request"), &me, None)
+            .await
+            .unwrap();
+        assert!(asked.content.unwrap().contains("Is it risky?"));
+        let own = read(&svc, &format!("ai_call:{mine}#response"), &me, None)
+            .await
+            .unwrap();
+        assert!(own.content.unwrap().contains("no"));
+        assert!(matches!(
+            read(&svc, &format!("ai_call:{theirs}#response"), &me, None).await,
+            Err(ReadError::Invalid(m)) if m.contains("another")
+        ));
+        assert!(matches!(
+            read(&svc, &format!("ai_call:{mine}#middle"), &me, None).await,
+            Err(ReadError::Invalid(m)) if m.contains("#request")
+        ));
+    }
+
+    /// A file or lens can be read in another stream's worktree by naming the
+    /// stream; without one, the caller's.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_file_reads_in_the_stream_named() {
+        use oxplow_domain::stores::StreamStore as _;
+        let (_dir, svc) = project().await;
+        let primary = svc.stream_store.list().await.unwrap().pop().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(elsewhere.path().join("src")).unwrap();
+        std::fs::write(elsewhere.path().join("src/a.txt"), "theirs").unwrap();
+        let mut other = primary.clone();
+        other.id = StreamId::placeholder();
+        other.title = "other".into();
+        other.branch = "other".into();
+        other.kind = oxplow_domain::StreamKind::Worktree;
+        other.worktree_path = elsewhere.path().to_string_lossy().into_owned();
+        let other_id = svc.stream_store.upsert(&other).await.unwrap();
+        let me = Reader {
+            thread: None,
+            stream: Some(primary.id),
+        };
+        let mine = read(&svc, "file:src/a.txt", &me, None).await.unwrap();
+        assert_eq!(mine.content.as_deref(), Some("one\nTWO\nthree\n"));
+        let theirs = read(&svc, "file:src/a.txt", &me, Some(other_id))
+            .await
+            .unwrap();
+        assert_eq!(theirs.content.as_deref(), Some("theirs"));
     }
 
     /// Content past the cap is cut, and the read says so.

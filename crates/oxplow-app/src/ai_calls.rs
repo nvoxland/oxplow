@@ -34,9 +34,10 @@ pub enum AiCallBodyError {
 }
 
 /// The `body` of model call `id`; `None` when it has none (a failed
-/// call's response) or retention removed it. `scope` limits a reader to
-/// the calls recorded as that caller (an agent's thread ref); a person
-/// reads any.
+/// call's response) or retention removed it. `scope` is an agent's thread
+/// ref: it reads any call but one another agent's thread asked for (an
+/// extension's, a collector's or a job's are the project's); a person
+/// (`None`) reads any.
 pub async fn read(
     svc: &Services,
     id: i64,
@@ -62,7 +63,10 @@ pub async fn read(
         })
         .await?;
     let (caller, request, response) = row.ok_or(AiCallBodyError::UnknownCall(id))?;
-    if scope.is_some_and(|s| s != caller) {
+    // An agent reads any call but one another agent's thread asked for.
+    let another_agents =
+        oxplow_domain::refs::build::parse_kind(&caller, oxplow_domain::refs::kind::THREAD).is_ok();
+    if scope.is_some_and(|s| another_agents && s != caller) {
         return Err(AiCallBodyError::OtherCaller(id));
     }
     let hash = match body {

@@ -407,9 +407,9 @@ an id, a description, a required `fallback` built-in role and optional
   (`request_hash`, `response_hash`). `ai` is one of core's namespaces with
   no events; its bodies keep 30 days (`CORE_WINDOWS`) and the rows stay.
   A person reads one with RPC `read_ai_call { id, body: request |
-  response }` (a person's only: an agent asks no models through oxplow,
-  and has no tool for it; `oxplow_app::ai_calls::read`, capped at 64 KiB
-  like an event body). What a provider adapter wraps around a request
+  response }`, an agent with `read` on `ai_call:<id>#request` or
+  `#response` — any call but one another agent's thread asked for
+  (`oxplow_app::ai_calls::read`, capped at 64 KiB like an event body). What a provider adapter wraps around a request
   (`decide_via_chat`'s JSON instructions, an API's own envelope) is the
   adapter's, not part of it.
 - Tests use `oxplow_ai_fake::mock` and `mock_sse` (a reply as timed
