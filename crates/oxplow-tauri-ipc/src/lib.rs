@@ -282,10 +282,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::complete_background_task,
             commands::generated::fail_background_task,
             commands::generated::update_background_task,
-            // followups
-            commands::generated::list_followups,
-            commands::generated::add_followup,
-            commands::generated::remove_followup,
             // webview
             commands::webview::open_external_url,
             commands::webview::clipboard_read_text,

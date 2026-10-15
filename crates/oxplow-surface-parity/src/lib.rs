@@ -139,20 +139,6 @@ pub const MANIFEST: &[Capability] = &[
     // Architectural zones (tsk251) — agent-only: the agent reads the table
     // here and writes it with `oxplow.config.set` (tsk411); the renderer only reads
     // it (it rides on `get_config`), so there is no IPC counterpart.
-    // The plan pane's in-memory reminders; an agent files a work item or
-    // a thread note instead.
-    ui(
-        "add_followup",
-        "a person's reminder in the plan pane; an agent files a work item or a thread note",
-    ),
-    ui(
-        "list_followups",
-        "a person's reminders in the plan pane; an agent reads work items and `v_thread_note`",
-    ),
-    ui(
-        "remove_followup",
-        "a person's reminder in the plan pane; an agent files a work item or a thread note",
-    ),
     model("list_backlinks", &["v_page_ref"]),
     model("list_outbound", &["v_page_ref"]),
     // ---- the command bus (agent side; the UI reaches commands through

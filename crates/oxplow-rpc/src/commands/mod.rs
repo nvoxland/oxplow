@@ -29,7 +29,6 @@ pub mod dashboards;
 pub mod effort;
 pub mod events;
 pub mod extensions;
-pub mod followup;
 pub mod git;
 pub mod hooks;
 pub mod lsp;

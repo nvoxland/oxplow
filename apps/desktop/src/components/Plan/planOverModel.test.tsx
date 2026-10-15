@@ -23,7 +23,7 @@ test("the list renders a thread's work read from v_work_item", () => {
     reads: { models: ["v_work_item"], tables: [], measures: [] },
     freshness: {},
   } as unknown as SqlQueryResult;
-  const list = bucketWorkList("thr1", itemsFromResult(result), [], result.reads);
+  const list = bucketWorkList("thr1", itemsFromResult(result), result.reads);
   const groups = buildGroups(list);
   const NOOP = async () => {};
   const view = render(

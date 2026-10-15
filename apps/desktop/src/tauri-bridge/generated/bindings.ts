@@ -1006,21 +1006,6 @@ export const commands = {
 	 */
 	updateBackgroundTask: (id: string, label: string | null, detail: string | null, progress: number | null) => typedError<null, IpcError>(__TAURI_INVOKE("update_background_task", { id, label, detail, progress })),
 	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	listFollowups: (threadId: ThreadId) => typedError<Followup[], IpcError>(__TAURI_INVOKE("list_followups", { threadId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	addFollowup: (threadId: ThreadId, body: string) => typedError<Followup, IpcError>(__TAURI_INVOKE("add_followup", { threadId, body })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	removeFollowup: (id: string) => typedError<null, IpcError>(__TAURI_INVOKE("remove_followup", { id })),
-	/**
 	 *  Open an external URL in a sandboxed `WebviewWindow`.
 	 * 
 	 *  The new window inherits
@@ -3510,13 +3495,6 @@ export type FilterConfig = {
 	dimEq?: string[] | null,
 };
 
-export type Followup = {
-	id: string,
-	thread_id: ThreadId,
-	body: string,
-	created_at: number,
-};
-
 /**
  *  An effect's or collector's `on:` naming an event type of another
  *  extension's namespace (P9.D1). The type's name is the dependency —
@@ -5146,8 +5124,6 @@ export type OxplowConfig = {
  *  reconcile diffs from the payload.
  */
 export type OxplowEvent = 
-// Followups for a thread.
-{ kind: "followupsChanged"; threadId: ThreadId } | 
 // Background task progress.
 { kind: "backgroundTasksChanged" } | 
 /**

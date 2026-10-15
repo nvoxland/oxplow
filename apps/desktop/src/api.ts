@@ -358,9 +358,6 @@ export interface EffortDetail {
   counts: { created: number; updated: number; deleted: number };
 }
 
-import type { Followup as ThreadFollowup } from "./tauri-bridge/index.js";
-export type { ThreadFollowup };
-
 export const BACKLOG_SCOPE = "__backlog__";
 
 
@@ -1748,10 +1745,6 @@ function onModelsChanged(models: readonly string[], onChange: () => void): () =>
 /** Re-read usage whenever a use is recorded (`v_usage_event`). */
 export function subscribeUsageEvents(onChange: () => void): () => void {
   return onModelsChanged(["v_usage_event"], onChange);
-}
-
-export async function removeFollowup(_threadId: string, id: string): Promise<void> {
-  unwrap(await commands.removeFollowup(id));
 }
 
 export async function listBackgroundTasks(): Promise<BackgroundTask[]> {

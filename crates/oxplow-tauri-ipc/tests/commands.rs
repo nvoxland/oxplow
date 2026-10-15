@@ -16,7 +16,7 @@
 mod harness;
 
 use harness::TestApp;
-use oxplow_domain::{StreamId, ThreadId};
+use oxplow_domain::StreamId;
 use oxplow_tauri_ipc::commands;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -130,15 +130,6 @@ async fn list_agent_events_empty_for_fresh_project() {
 async fn list_agent_statuses_empty_for_fresh_project() {
     let app = TestApp::build().await;
     let v = commands::generated::list_agent_statuses(app.state())
-        .await
-        .unwrap();
-    assert!(v.is_empty());
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn list_followups_empty_for_unknown_thread() {
-    let app = TestApp::build().await;
-    let v = commands::generated::list_followups(app.state(), ThreadId::new(999999))
         .await
         .unwrap();
     assert!(v.is_empty());

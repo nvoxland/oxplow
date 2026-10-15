@@ -12,7 +12,7 @@ import { NO_READS } from "./lens/lensRerun.js";
 import { threadIdOf, threadRowId } from "./modelIds.js";
 import { workItemRef } from "./refs/ref.js";
 import { personCommands } from "./personCommands.js";
-import type { CommandOutcome, FieldDecl, Followup, Reads, SqlQueryResult, WorkItemsFeatures } from "./tauri-bridge/generated/bindings.js";
+import type { CommandOutcome, FieldDecl, Reads, SqlQueryResult, WorkItemsFeatures } from "./tauri-bridge/generated/bindings.js";
 import { commands } from "./tauri-bridge/index.js";
 
 /** The state every provider maps to. */
@@ -45,8 +45,7 @@ export interface WorkItem {
 
 /** A list — a thread's, or the backlog's (`threadId` null) — in list
  *  order, and by state: an item with a child on the list is an epic;
- *  `done` holds done and canceled. Followups are a thread's in-memory
- *  notes. */
+ *  `done` holds done and canceled. */
 export interface WorkList {
   threadId: string | null;
   /** Every item, in list order. */
@@ -58,7 +57,6 @@ export interface WorkList {
   /** Blocked. */
   waiting: WorkItem[];
   done: WorkItem[];
-  followups: Followup[];
   /** What the read read: a change to one of these models re-reads it. */
   reads: Reads;
 }
@@ -154,9 +152,9 @@ export async function readWorkItems(opts: {
 
 /** Bucket a list's items (in list order) by state; an item with a child
  *  on the list is an epic. */
-export function bucketWorkList(threadId: string | null, all: WorkItem[], followups: Followup[], reads: Reads): WorkList {
+export function bucketWorkList(threadId: string | null, all: WorkItem[], reads: Reads): WorkList {
   const parents = new Set(all.map((i) => i.parentRef).filter((p): p is string => p !== null));
-  const list: WorkList = { threadId, all, epics: [], items: [], inProgress: [], waiting: [], done: [], followups, reads };
+  const list: WorkList = { threadId, all, epics: [], items: [], inProgress: [], waiting: [], done: [], reads };
   for (const i of all) {
     if (parents.has(i.ref)) list.epics.push(i);
     else if (i.state === "blocked") list.waiting.push(i);
@@ -167,19 +165,15 @@ export function bucketWorkList(threadId: string | null, all: WorkItem[], followu
   return list;
 }
 
-/** A thread's list (or the backlog's, `null`), with the thread's
- *  followups. */
+/** A thread's list (or the backlog's, `null`). */
 export async function readWorkList(threadId: string | null): Promise<WorkList> {
-  const [{ items, reads }, followups] = await Promise.all([
-    readWorkItems({ scope: threadId ? { thread: threadId } : "backlog" }),
-    threadId ? commands.listFollowups(threadId).then((r) => (r.status === "ok" ? r.data : [])) : Promise.resolve([]),
-  ]);
-  return bucketWorkList(threadId, items, followups, reads);
+  const { items, reads } = await readWorkItems({ scope: threadId ? { thread: threadId } : "backlog" });
+  return bucketWorkList(threadId, items, reads);
 }
 
 /** An empty list (before the first read). */
 export function emptyWorkList(threadId: string | null): WorkList {
-  return bucketWorkList(threadId, [], [], NO_READS);
+  return bucketWorkList(threadId, [], NO_READS);
 }
 
 export interface BoardColumn {

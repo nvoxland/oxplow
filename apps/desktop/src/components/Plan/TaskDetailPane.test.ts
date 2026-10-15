@@ -21,7 +21,6 @@ function workState(partial: Partial<WorkList>): WorkList {
     done: [],
     epics: [],
     items: [],
-    followups: [],
     ...partial,
   } as unknown as WorkList;
 }

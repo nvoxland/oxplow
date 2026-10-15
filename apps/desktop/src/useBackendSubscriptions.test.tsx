@@ -96,7 +96,7 @@ afterEach(cleanup);
 
 test("subscribes to the oxplow event bus on mount", () => {
   render(<Harness workStates={{}} />);
-  // tasks (models + followups), threads (v_thread), streams (v_stream),
+  // tasks (models), threads (v_thread), streams (v_stream),
   // streamOrphaned, configChanged, agent sessions (v_agent_session) = 6
   // subscriptions.
   expect(oxplowHandlers.length).toBe(6);
@@ -167,7 +167,7 @@ test("re-hydrates core stores on a remote reconnect", async () => {
   expect(listAgentStatuses).toHaveBeenCalledTimes(2);
 });
 
-test("a change to a model the reads read re-reads the backlog and every loaded thread; followups re-read their thread", async () => {
+test("a change to a model the reads read re-reads the backlog and every loaded thread", async () => {
   render(<Harness workStates={{ thr1: taskReads, thr2: taskReads }} />);
   // Let the mount's reads land, so the hook knows what they read.
   await act(async () => {
@@ -188,11 +188,10 @@ test("a change to a model the reads read re-reads the backlog and every loaded t
     // list of task models).
     for (const handler of oxplowHandlers) handler({ kind: "modelsChanged", models: ["v_commit"] });
     for (const handler of oxplowHandlers) handler({ kind: "modelsChanged", models: ["v_effort_file"] });
-    for (const handler of oxplowHandlers) handler({ kind: "followupsChanged", threadId: "thr3" });
     await Promise.resolve();
   });
   expect(backlogReads()).toBe(0);
-  expect(threadReads()).toEqual(["thr3"]);
+  expect(threadReads()).toEqual([]);
 });
 
 test("a change to v_thread re-reads every loaded stream's thread state, and nothing else does", async () => {

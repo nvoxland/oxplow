@@ -165,7 +165,6 @@ const EMITTERS: &[(&str, &str)] = &[
     // A call to the window (`client_host.rs`): not a change to re-read but
     // a request it answers.
     ("ClientCall", "crates/oxplow-app/src/client_host.rs"),
-    ("FollowupsChanged", "crates/oxplow-app/src/lib.rs"),
     ("ConfigChanged", "crates/oxplow-app/src/commands/config_commands.rs"),
     ("ConfigChanged", "crates/oxplow-app/src/lib.rs"),
     ("ConfigChanged", "crates/oxplow-rpc/src/commands/ai.rs"),

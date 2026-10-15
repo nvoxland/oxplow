@@ -1,7 +1,7 @@
 import { idOf } from "../../refs/ref.js";
 import type { CSSProperties } from "react";
 import { Fragment, useEffect, useMemo, useState } from "react";
-import type { AgentStatus, OpenAgentTurn, ThreadFollowup } from "../../api.js";
+import type { AgentStatus, OpenAgentTurn } from "../../api.js";
 import { decodeWorkItemDrag, dragHasWorkItems, setWorkItemDrag } from "../../agent-context-dnd.js";
 import { WORK_ITEM_DRAG_MIME } from "../../dragMimes.js";
 import { CANONICAL_STATES, type CanonicalState, type FieldDecl, type WorkItem } from "../../workItems.js";
@@ -71,8 +71,6 @@ export function TaskGroupList({
   isSectionCollapsed,
   onToggleSectionCollapsed,
   openTurns,
-  followups,
-  onDismissFollowup,
   visibleSections,
   sectionItemLimit,
   fields,
@@ -113,13 +111,6 @@ export function TaskGroupList({
    *  closes the turn. Observational only: no status, no drag, no menu.
    *  Only the root group renders them. */
   openTurns?: OpenAgentTurn[];
-  /** Transient agent follow-ups for this thread (in-memory on the
-   *  runtime, lost on restart). Rendered at the very top of the Ready
-   *  section as italic muted "↳ follow-up: …" lines with a single ✕
-   *  dismiss button. Only the root group renders them — children of
-   *  epics inherit nothing. */
-  followups?: ThreadFollowup[];
-  onDismissFollowup?: (id: string) => void;
   /** When provided, only sections in this list render. Used by the
    *  page split (Plan Work / Done Work / Archived) to restrict the
    *  panel to a subset of the five buckets. Default = all. */
@@ -550,15 +541,6 @@ export function TaskGroupList({
                 {!isCollapsed && section.kind === "inProgress" && openTurns && openTurns.length > 0
                   ? openTurns.map((turn) => <LiveTurnRow key={turn.id} turn={turn} />)
                   : null}
-                {!isCollapsed && section.kind === "ready" && followups && followups.length > 0
-                  ? followups.map((fu) => (
-                      <FollowupRow
-                        key={fu.id}
-                        followup={fu}
-                        onDismiss={onDismissFollowup}
-                      />
-                    ))
-                  : null}
                 {!isCollapsed ? renderedRows.map(renderRow) : null}
                 {empty
                 && !draggedTask
@@ -628,62 +610,6 @@ function LiveTurnRow({ turn }: { turn: OpenAgentTurn }) {
     >
       <BrailleSpinner />
       <span style={{ overflow: "hidden", textOverflow: "ellipsis", fontStyle: "italic" }}>{prompt}</span>
-    </div>
-  );
-}
-
-/** Transient follow-up line inside the Ready section. Italic muted prefix
- *  ↳ follow-up: + the note, plus a single ✕ dismiss button. No status
- *  icon, no drag, no context menu — these aren't durable rows.
- *  See followup-store.ts for the lifecycle. */
-function FollowupRow({
-  followup,
-  onDismiss,
-}: {
-  followup: ThreadFollowup;
-  onDismiss?: (id: string) => void;
-}) {
-  return (
-    <div
-      data-testid={`followup-row-${followup.id}`}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 6,
-        padding: "3px 10px 3px 22px",
-        fontSize: 11,
-        fontStyle: "italic",
-        color: "var(--muted)",
-        userSelect: "none",
-      }}
-      title={`Follow-up reminder (transient): ${followup.body}`}
-    >
-      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        ↳ follow-up: {followup.body}
-      </span>
-      {onDismiss ? (
-        <button
-          type="button"
-          aria-label="Dismiss follow-up"
-          title="Dismiss follow-up"
-          onClick={(event) => {
-            event.stopPropagation();
-            onDismiss(followup.id);
-          }}
-          data-testid={`followup-dismiss-${followup.id}`}
-          style={{
-            background: "transparent",
-            border: "none",
-            color: "var(--muted)",
-            cursor: "pointer",
-            fontSize: "var(--text-xs)",
-            lineHeight: 1,
-            padding: "0 4px",
-          }}
-        >
-          ×
-        </button>
-      ) : null}
     </div>
   );
 }
