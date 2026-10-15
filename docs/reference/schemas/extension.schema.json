@@ -1788,6 +1788,10 @@
           "items": {
             "$ref": "#/definitions/ExampleFile"
           }
+        },
+        "example": {
+          "description": "An input that fits its schema: what an agent is shown beside the\nschema and a refused input quotes. A script's defaults to its\nfirst example that runs.",
+          "default": null
         }
       },
       "additionalProperties": false,

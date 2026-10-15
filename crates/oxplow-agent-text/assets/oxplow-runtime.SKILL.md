@@ -78,10 +78,12 @@ Read it back with `list_thread_notes`.
 
 # Commands (the one write path)
 
-State changes are **commands**: `list_commands` shows what you may run,
-with input schemas, and `run_command { id, input }` runs one. Every
-run is validated, policy-checked and audited; undoable runs return an
-`inverse`.
+State changes are **commands**: `list_commands` lists what you may run
+(ids and summaries); `list_commands { id }` (or `{ prefix:
+"oxplow.effort." }`) shows a command's input schema and an example
+input. Read it before a command's first run, and copy the example's
+shape. `run_command { id, input }` runs one. Every run is validated,
+policy-checked and audited; undoable runs return an `inverse`.
 
 - `.oxplow/project.yaml` keys: `oxplow.config.list_keys`, `oxplow.config.get { key }`,
   `oxplow.config.set { key, value }`, `oxplow.config.unset { key }`. Keys that run a
@@ -92,7 +94,8 @@ run is validated, policy-checked and audited; undoable runs return an
   `oxplow.test.record_run`, `oxplow.collector.sync`; notes and comments
   `oxplow.knowledge.add_note`, `oxplow.knowledge.reply_comment`, ….
 
-Invalid input names the failing field; a denial says why. A run that
+Invalid input names the failing field, what it accepts and the example
+input; a denial says why. A run that
 needs the person's confirmation returns `{ kind: "proposed", proposal,
 message }` and waits in their Alerts. Tell them what you proposed and
 why; don't run it again or look for another way to make the change.

@@ -78,6 +78,11 @@ pub struct ExtensionCommand {
     /// experimental.
     pub stable: bool,
     pub examples: Vec<CommandExample>,
+    /// Its example input (`example:`, else a script's first example that
+    /// runs): JSON Schema's `examples` on the input schema it registers
+    /// with — what `list_commands` shows an agent and a refusal quotes.
+    #[specta(type = Option<oxplow_domain::Json>)]
+    pub example: Option<Value>,
 }
 
 /// What runs an extension's command.
@@ -166,6 +171,11 @@ pub(crate) struct CommandFile {
     lifecycle: Option<String>,
     #[serde(default)]
     examples: Vec<ExampleFile>,
+    /// An input that fits its schema: what an agent is shown beside the
+    /// schema and a refused input quotes. A script's defaults to its
+    /// first example that runs.
+    #[serde(default)]
+    example: Option<Value>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -461,7 +471,16 @@ fn command_of(
             )))
         }
     };
+    // Its example input: the declared one, else a script's first example
+    // that runs (not one expecting a refusal).
+    let example = f.example.or_else(|| {
+        f.examples
+            .iter()
+            .find(|e| e.refuses.is_none())
+            .map(|e| e.input.clone())
+    });
     Ok(ExtensionCommand {
+        example,
         name,
         summary: f.summary,
         input_schema,
@@ -820,10 +839,15 @@ pub fn extension_command(
     } else {
         format!("{} (extension `{extension}`)", decl.summary)
     };
+    // A scope's operation supplies the schema and keeps this example.
+    let mut input_schema = decl.input_schema.clone().unwrap_or_else(|| json!({}));
+    if let (Some(example), Some(schema)) = (&decl.example, input_schema.as_object_mut()) {
+        schema.insert("examples".into(), json!([example]));
+    }
     let spec = CommandSpec {
         id: decl.name.clone(),
         summary,
-        input_schema: decl.input_schema.clone().unwrap_or(Value::Null),
+        input_schema,
         invokers: decl.invokers,
         confirm: decl.confirm,
         undoable: true,
@@ -1614,6 +1638,12 @@ mod tests {
         assert_eq!(
             c.input_schema.as_ref().unwrap()["required"],
             serde_json::json!(["ref"])
+        );
+        // Its first example that runs (not one expecting a refusal) is
+        // the example input an agent is shown and a refusal quotes.
+        assert_eq!(
+            c.example,
+            Some(serde_json::json!({ "ref": "work_item:oxplow:tsk1" }))
         );
         assert!(c.needs.is_empty());
         assert_eq!(c.confirm, Confirm::Never);

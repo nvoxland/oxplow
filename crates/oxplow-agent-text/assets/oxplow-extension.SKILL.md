@@ -270,7 +270,9 @@ empty: Nothing is waiting on you.
   and `examples` (at most 10) are dry-run by `check`: give each
   `answers: { sql.read: [[rows of the 1st read], …] }` so it doesn't
   depend on the project's data, and `expect_commands: [...]` or `refuses:
-  <part of the reason>`. `access: read` makes a command that only reads
+  <part of the reason>`. An agent is shown an `example:` input beside the
+  schema (a script's first example that runs, unless it declares one;
+  give one to a command over a `scope:` op). `access: read` makes a command that only reads
   and returns a `result` (it composes nothing). A command on a ref's menu (`ui.about`) gets `{ ref }` unless its
   `ui.input` says otherwise, so name its input field `ref`. `extensions/oxplow-bundled/` (bundled) is a
   working example.
