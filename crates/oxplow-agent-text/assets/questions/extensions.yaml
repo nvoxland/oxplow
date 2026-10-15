@@ -68,3 +68,15 @@
       SELECT collector, name FROM v_collector_credential WHERE is_set = 0
       ORDER BY collector, name
   shape: { columns: [collector, name] }
+- question: Which zone rules does this project have, and how many files does each claim?
+  skill: oxplow-extension
+  reaches:
+    sql: >-
+      SELECT position, zone, patterns, files FROM v_zone
+      ORDER BY position IS NULL, position
+  shape: { columns: [position, zone, patterns, files] }
+- question: Which files fall outside every zone rule?
+  skill: oxplow-extension
+  reaches:
+    sql: SELECT path FROM v_zone_unmatched ORDER BY path
+  shape: { columns: [path] }

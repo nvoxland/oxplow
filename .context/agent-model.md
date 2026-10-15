@@ -219,8 +219,9 @@ never add MCP tools.
 | Purpose | Tools |
 |---|---|
 | Read oxplow's data | `query_sql` (one read-only statement over the `v_*` models, live models included — [semantic-layer.md](./semantic-layer.md) "Live models"), `read { ref }`, `search` (BM25 over tasks, comments, notes, wiki and file contents) |
-| Code and revisions | `diff` (versions `working`, `snap:<id>`, `git:<rev>`; `since_fork`), `code_definition`, `code_references`, `code_hover`, `code_call_hierarchy` (the editor's language servers, [lsp.md](./lsp.md)), `ensure_change` (a change's analysis, then `v_change_*` through `query_sql`) |
+| Code and revisions | `diff` (versions `working`, `snap:<id>`, `git:<rev>`; `since_fork`), `vcs_blame` (through the `Vcs` provider; `working`, `snap:<id>` or `git:<rev>`), `code_definition`, `code_references`, `code_hover`, `code_call_hierarchy`, `code_symbols` (a file's symbols from its language server, else oxplow's tree-sitter reading of the live file, saying which), `code_workspace_symbols` (the editor's language servers, [lsp.md](./lsp.md)), `ensure_change` (a change's analysis, then `v_change_*` through `query_sql`) |
 | Write | `run_command`, after `list_commands` |
+| Ask a model | `ai_decide` (typed questions about some text, on the `decide` role), `ai_summarize` (on `summarize`): recorded computations paid with the person's key, as the asking thread ([ai-providers.md](./ai-providers.md)) |
 | Show the person | `show_lens`, `run_lens`, `run_lens_action` |
 | What the person has | `get_open_page` (the page open in a thread, a lens re-run with their params), `list_comments` (their anchored comments, hydrated) |
 | Wiki | `wiki_ref_drift` (one stale ref's diff against its pin) |
@@ -230,7 +231,7 @@ never add MCP tools.
 `READ_ONLY_TOOLS` stamps `read_only_hint` so a client can auto-approve;
 `WRITE_TOOLS` (test-only) lists the rest with why each isn't read-only
 (`run_command`, `run_lens_action`, `show_lens`, `ensure_change`,
-`preview_collector`, `review_extension`), and
+`preview_collector`, `review_extension`, `ai_decide`, `ai_summarize`), and
 `read_write_split_covers_every_tool` fails on a tool in neither list.
 Almost every read is a published model: an agent's thread, efforts,
 work items, commits, snapshots, dashboards, diagnostics and errors are

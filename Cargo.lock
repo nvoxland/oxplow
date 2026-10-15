@@ -4828,6 +4828,7 @@ dependencies = [
  "http",
  "oxplow-ai-fake",
  "oxplow-app",
+ "oxplow-code-metrics",
  "oxplow-config",
  "oxplow-db",
  "oxplow-domain",

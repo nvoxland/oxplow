@@ -135,7 +135,7 @@ registrations). Install/remove emit `OxplowEvent::LspServersChanged`.
   to) and `extent` (the whole symbol: `range`). Subscribing to diagnostics is
   the event log's `code.diagnostics.changed`.
 - **MCP**: `code_definition`, `code_references`, `code_hover`,
-  `code_call_hierarchy`
+  `code_symbols`, `code_workspace_symbols`, `code_call_hierarchy`
   — thin calls into `Services.code_intel`, taking
   `{ stream_id, path, line, col }` (1-based) and answering typed JSON.
   They replaced the seven `lsp_*` tools that each built raw LSP requests.

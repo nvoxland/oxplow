@@ -1231,6 +1231,20 @@
   tests:
     - { accepted_values: { column: outcome, values: [ok, invalid, denied, error] } }
     - { accepted_values: { column: actor_kind, values: [human, agent, lens, system, effect, job] } }
+- name: zone
+  version: 1
+  description: "The project's architectural zone table (`zones:` in `.oxplow/project.yaml`) with the effect it has on the primary worktree's files: one row per rule in evaluation order (the first matching rule claims a file), each with how many files it claims, then a closing `other` row for the files no rule matched. Read live when a query names it. Change the table with `oxplow.config.set { key: \"zones\" }`; a large `other` count or a `v_zone_unmatched` full of real source means the table has gone stale as the repo grew."
+  columns:
+    - { name: "position", type: "INT", doc: "The rule's place in the table, from 1; NULL on the closing `other` row." }
+    - { name: "zone", type: "TEXT", doc: "The zone label the rule gives (`other` on the closing row)." }
+    - { name: "patterns", type: "TEXT", doc: "The rule's globs, as a JSON array; `[]` on the `other` row." }
+    - { name: "color", type: "TEXT", doc: "The rule's display colour, if it gave one." }
+    - { name: "files", type: "INT", doc: "Files in the worktree this rule claims (none of its earlier siblings did); on `other`, the files no rule matched." }
+- name: zone_unmatched
+  version: 1
+  description: "Up to 20 paths in the primary worktree that no zone rule matched (they read zone `other`), read live when a query names it: the sign that the table needs a rule, or that the repo grew a new area."
+  columns:
+    - { name: "path", type: "TEXT", doc: "Repo-relative file path." }
 - name: command_proposal
   version: 2
   description: "Commands an agent ran that need a person's confirmation: each kept with its preview and what it would have done, until a person approves (the command then runs as them) or declines it. A newer proposal with the same `key` supersedes a pending one. The Alerts panel shows the pending ones."

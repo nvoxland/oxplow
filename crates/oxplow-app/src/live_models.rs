@@ -29,6 +29,8 @@ pub const NAMES: &[&str] = &[
     "lsp_server",
     "collector_state",
     "collector_credential",
+    "zone",
+    "zone_unmatched",
 ];
 
 /// The columns a live model's rows have, in order.
@@ -72,6 +74,8 @@ pub fn columns(name: &str) -> &'static [&'static str] {
             "disabled",
         ],
         "collector_credential" => &["collector", "name", "is_set"],
+        "zone" => &["position", "zone", "patterns", "color", "files"],
+        "zone_unmatched" => &["path"],
         _ => &[],
     }
 }
@@ -88,7 +92,13 @@ pub struct LiveSources {
     pub vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
     pub secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
     pub catalog: Arc<crate::extension_catalog::ExtensionCatalog>,
+    pub config: Arc<std::sync::RwLock<oxplow_config::OxplowConfig>>,
+    pub workspace_files: Arc<crate::workspace_files::WorkspaceFiles>,
 }
+
+/// How many unmatched paths `v_zone_unmatched` lists: enough to see the
+/// shape of what's missing, few enough to read.
+const UNMATCHED_SAMPLE: usize = 20;
 
 /// The gateway's handle on the live models: shared by every clone of it,
 /// bound once.
@@ -187,6 +197,8 @@ impl LiveModels {
             "lsp_server" => Ok(sources.lsp_servers().await),
             "collector_state" => sources.collector_state().await,
             "collector_credential" => sources.collector_credentials().await,
+            "zone" => Ok(sources.zones().await?.0),
+            "zone_unmatched" => Ok(sources.zones().await?.1),
             other => Err(DomainError::Invalid(format!(
                 "`v_{other}` isn't a live model"
             ))),
@@ -327,5 +339,64 @@ impl LiveSources {
                     .map(move |c| vec![text(collector.clone()), text(c.name.clone()), flag(c.set)])
             })
             .collect())
+    }
+
+    /// The zone table's rows and the unmatched sample, from one pass over
+    /// the primary worktree's files. Each rule is compiled alone, so a
+    /// file is claimed by the first rule that matches it, as
+    /// `ZoneRules::classify` decides.
+    async fn zones(&self) -> Result<(Vec<Vec<SqlCell>>, Vec<Vec<SqlCell>>), DomainError> {
+        let (rules, generated) = {
+            let config = self.config.read().unwrap_or_else(|e| e.into_inner());
+            (config.zones.clone(), config.generated.clone())
+        };
+        let files = self
+            .workspace_files
+            .list_files(None, &generated)
+            .await
+            .map_err(|e| DomainError::Invalid(e.to_string()))?;
+        let singles: Vec<oxplow_code_deps::ZoneRules> = rules
+            .iter()
+            .map(|r| oxplow_code_deps::ZoneRules::from_config(std::slice::from_ref(r)))
+            .collect();
+        let mut claimed = vec![0_i64; rules.len()];
+        let mut unmatched = Vec::new();
+        let mut other = 0_i64;
+        for file in &files {
+            let hit = singles
+                .iter()
+                .position(|r| r.classify(&file.path) != oxplow_code_deps::ZONE_OTHER);
+            match hit {
+                Some(i) => claimed[i] += 1,
+                None => {
+                    other += 1;
+                    if unmatched.len() < UNMATCHED_SAMPLE {
+                        unmatched.push(vec![text(file.path.clone())]);
+                    }
+                }
+            }
+        }
+        let mut table: Vec<Vec<SqlCell>> = rules
+            .iter()
+            .zip(&claimed)
+            .enumerate()
+            .map(|(i, (rule, files))| {
+                vec![
+                    SqlCell::Int(i as i64 + 1),
+                    text(rule.zone.clone()),
+                    json(&rule.patterns),
+                    opt(rule.color.clone()),
+                    SqlCell::Int(*files),
+                ]
+            })
+            .collect();
+        table.push(vec![
+            SqlCell::Null(()),
+            text(oxplow_code_deps::ZONE_OTHER),
+            text("[]"),
+            SqlCell::Null(()),
+            SqlCell::Int(other),
+        ]);
+        Ok((table, unmatched))
     }
 }

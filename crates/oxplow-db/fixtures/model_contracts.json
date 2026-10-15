@@ -11630,5 +11630,49 @@
         "name"
       ]
     }
+  },
+  "zone": {
+    "1": {
+      "columns": [
+        {
+          "name": "position",
+          "type": "INT",
+          "doc": "The rule's place in the table, from 1; NULL on the closing `other` row."
+        },
+        {
+          "name": "zone",
+          "type": "TEXT",
+          "doc": "The zone label the rule gives (`other` on the closing row)."
+        },
+        {
+          "name": "patterns",
+          "type": "TEXT",
+          "doc": "The rule's globs, as a JSON array; `[]` on the `other` row."
+        },
+        {
+          "name": "color",
+          "type": "TEXT",
+          "doc": "The rule's display colour, if it gave one."
+        },
+        {
+          "name": "files",
+          "type": "INT",
+          "doc": "Files in the worktree this rule claims (none of its earlier siblings did); on `other`, the files no rule matched."
+        }
+      ],
+      "key": []
+    }
+  },
+  "zone_unmatched": {
+    "1": {
+      "columns": [
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "Repo-relative file path."
+        }
+      ],
+      "key": []
+    }
   }
 }

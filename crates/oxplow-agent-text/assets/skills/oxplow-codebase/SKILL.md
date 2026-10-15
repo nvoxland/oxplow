@@ -24,7 +24,9 @@ every stream. `v_model_column` documents each column.
   WHERE f.path = 'src/lib.rs' ORDER BY c.committed_at DESC LIMIT 20
   ```
 
-  Who changes a file most: the same join, `GROUP BY c.author`.
+  Who changes a file most: the same join, `GROUP BY c.author`. Who last
+  changed each line: the `vcs_blame { path, revision? }` tool (`working`,
+  `snap:<id>` or `git:<rev>`; an uncommitted line names no commit).
 - **`v_branch`** — local and remote-tracking branches (`name`, `kind`,
   `head_sha`, `is_default`, and the `stream_id` that has it checked
   out); **`v_tag`** — tags and their commits.
@@ -33,7 +35,7 @@ Changing history (commit, merge, rebase, push, checkout) is the
 `oxplow.vcs.*` commands (`list_commands` shows them) or `git` in your
 terminal.
 
-## Code (`v_symbol`, `v_diagnostic`, `v_lsp_server`, the `code_*` navigation tools)
+## Code (`v_symbol`, `v_diagnostic`, `v_lsp_server`, the `code_*` tools)
 
 `references/code.md` (get_skill reference `code`) has the columns, symbol
 kinds, example queries and the live-server tools. In short: `v_symbol` is

@@ -381,7 +381,9 @@ pub const MANIFEST: &[Capability] = &[
         "test_ai_provider",
         "checks a person's AI provider settings before they save them",
     ),
-    ui("read_ai_call", "a person's look at a recorded model call; an agent asks no model through oxplow"),
+    ui("read_ai_call", "a person's look at a recorded model call; an agent reads its own with `read`"),
+    agent("ai_decide"),
+    agent("ai_summarize"),
     agent("get_open_page"),
     // ---- both (names diverge across surfaces) ----
     model("list_threads", &["v_thread"]),
@@ -394,6 +396,8 @@ pub const MANIFEST: &[Capability] = &[
     agent("code_definition"),
     agent("code_hover"),
     agent("code_references"),
+    agent("code_symbols"),
+    agent("code_workspace_symbols"),
     agent("code_call_hierarchy"),
     // ---- git ----
     Capability {
@@ -410,7 +414,7 @@ pub const MANIFEST: &[Capability] = &[
         "an agent reads the same paths, with line counts, through `diff`",
     ),
     model("vcs_log", &["v_commit", "v_commit_file"]),
-    ui("vcs_blame", "the editor's blame gutter; an agent runs `git blame` in its worktree"),
+    both("vcs_blame"),
     ui("read_at", "the editor's file at a revision; an agent reads a file ref at that revision with `read`"),
     ui(
         "resolve_symbol",

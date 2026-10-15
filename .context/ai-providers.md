@@ -407,8 +407,8 @@ an id, a description, a required `fallback` built-in role and optional
   (`request_hash`, `response_hash`). `ai` is one of core's namespaces with
   no events; its bodies keep 30 days (`CORE_WINDOWS`) and the rows stay.
   A person reads one with RPC `read_ai_call { id, body: request |
-  response }` (a person's only: an agent asks no models through oxplow,
-  and has no tool for it; `oxplow_app::ai_calls::read`, capped at 64 KiB
+  response }` (an agent reads its own calls with `read`;
+  `oxplow_app::ai_calls::read`, capped at 64 KiB
   like an event body). What a provider adapter wraps around a request
   (`decide_via_chat`'s JSON instructions, an API's own envelope) is the
   adapter's, not part of it.
@@ -514,10 +514,17 @@ turn's prompt (`turn_kind`).
 - `v_ai_provider` (with `key_set`, never keys) and `v_ai_role` (every role's
   binding, what a call would use now, and whether its provider has a key),
   read live: `ai.yaml`, `project.yaml` and the keychain change with no hook.
-- Asking a model is not an agent tool (an agent is a model); collectors
-  keep their `ai_*` builtins.
+- `ai_decide`: typed questions (`noul` / `choice` / `score`) about some
+  text, on the `decide` role (an agent can't pick a costlier one) — a
+  recorded computation (`AiCompute::decide`), returning `{ answers,
+  cached }`.
+- `ai_summarize`: text through the `summarize` role, with an optional focus
+  — a recorded computation (`AiCompute::summarize`), so the same text and
+  focus is one call.
+- What a call was asked or answered is `read` of its `ai_call` ref (the
+  caller's own calls).
 
-Asking a model is paid with the person's key, so it is not a read-only tool (no
+Each is paid with the person's key, so neither is a read-only tool (no
 `read_only_hint`: a harness doesn't auto-approve it), each takes at most
 `AI_TEXT_MAX` (100,000) characters of text, and each records as the
 asking thread (caller `thread:<id>`, from the session's bearer); a

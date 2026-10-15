@@ -23,5 +23,8 @@
 - **Live questions** go to the language server itself through the MCP
   tools: `code_definition`, `code_references`, `code_hover`,
   `code_call_hierarchy` (who calls / what it calls). Use them for "what calls X" and anything the
-  stored snapshot view can't know. A file's or the workspace's symbols are `v_symbol` (a
-  file never captured, such as one not yet committed, is not in it).
+  stored snapshot view can't know. `code_symbols { path }` lists a file's symbols from its server
+  and, when none runs, from oxplow's own tree-sitter reading of the file as it is now (it says
+  which: `source`); `code_workspace_symbols { language, query }` finds symbols by name across the
+  workspace and needs a running server (`v_lsp_server`). `v_symbol` holds the stored symbols of
+  files a snapshot captured (not a new uncommitted file).

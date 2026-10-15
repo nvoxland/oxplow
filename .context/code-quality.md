@@ -339,9 +339,12 @@ worked example.
 ### Reading and writing the table
 
 The agent owns this table. It reads the rules with `oxplow.config.get
-{ key: "zones" }` and a changed file's zone from `v_change_file.zone` (a
-large `other` share is the signal that the table has gone stale as the repo
-grew). Writing it is the `oxplow.config.set { key:
+{ key: "zones" }`, what they do to the worktree from `v_zone` (a live
+model: one row per rule in order with the files it claims, then an `other`
+row) and `v_zone_unmatched` (up to 20 paths no rule matched), and a changed
+file's zone from `v_change_file.zone`. A large `other` share, or real source
+in `v_zone_unmatched`, is the signal that the table has gone stale as the
+repo grew. Writing it is the `oxplow.config.set { key:
 "zones", value: [rules] }` command ([commands.md](./commands.md)) — the
 WHOLE ordered table, validated by the loader's rules (reserved labels,
 glob shapes), written to `.oxplow/project.yaml` (committed, so a team

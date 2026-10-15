@@ -486,7 +486,8 @@ from: whether a key is in the keychain (`v_ai_provider.key_set`,
 hand), which language servers run and whose binary is on disk
 (`v_lsp_server`), and a machine's collector approvals and credentials
 (`v_collector_state`, `v_collector_credential`; per machine, outside the
-repo). A restated table (as `v_lens` and `v_extension` are, in the
+repo), and what the zone table does to the worktree (`v_zone`,
+`v_zone_unmatched`: `project.yaml` edited by hand, and the files on disk). A restated table (as `v_lens` and `v_extension` are, in the
 extension-generation transaction) would be wrong between the change and the
 next restatement, and nothing says when that is. So these are **live
 models** (`crates/oxplow-app/src/live_models.rs`, `LiveModels::NAMES`): the
@@ -496,7 +497,7 @@ rows are read when a query names the model.
   takes a connection, `SqlGateway::materialize` finds each live model the SQL
   names (`v_<name>`, bare or quoted), reads its rows from the registry the app
   bound (`LiveSources`: the AI service, the LSP session manager, the
-  collector listing), and hands them to the query as a temp table
+  collector listing, the config and the worktree's file list), and hands them to the query as a temp table
   `live_<name>` with a temp view `v_<name>` over it. The temp view shadows
   the core view of the same name for that query alone, and both are dropped
   with it.

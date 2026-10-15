@@ -12,6 +12,11 @@
   a particular list's own tables.
 - `query_sql` runs one read-only `SELECT`/`WITH`. Iterate on the query
   here until the rows are what the user wants, before writing any files.
+- The project's architectural zones are `v_zone` (each rule of the `zones:` table
+  in `.oxplow/project.yaml`, in order, with the files it claims in the worktree,
+  then a closing `other` row) and `v_zone_unmatched` (paths no rule matched);
+  both are read live. Read the rules with `oxplow.config.get { key: "zones" }`,
+  change them with `oxplow.config.set` (the whole ordered table).
 - Only `v_*` views can be read; a physical table is refused, naming the
   view to read instead. Metrics are read with `metric_grid()` and
   `MEASURE('<key>')` (see the `oxplow-metrics` skill).

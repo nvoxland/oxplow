@@ -187,13 +187,16 @@ language":
   `container_path`, line span). It is a projection of `extract`: the
   function-like, class-like and module definitions, with the definition's
   container as `container_path`. The **package** is path-derived and only
-  emitted when the language declares `UnitKind::Package` (Go, Java). Works for the 11 bundled
-  languages. (The `list_code_units` MCP tool that exposed it is gone: an agent
-  reads `v_symbol`, the captured tree-sitter symbols, which lack a file that
-  was never captured, such as an uncommitted new one.)
-- **LSP (any server-backed language)** — the language server answers
-  definition, references, hover and call hierarchy for *any* configured LSP
-  language, not just the tree-sitter set. See `.context/lsp.md`.
+  emitted when the language declares `UnitKind::Package` (Go, Java). Exposed
+  to the agent as the fallback of the **`code_symbols`** MCP tool (a file no
+  language server serves is read live, uncommitted edits included, and the
+  answer says `source: tree_sitter`); `v_symbol` holds the captured ones. Works
+  for the 11 bundled languages.
+- **LSP (any server-backed language)** — the `code_symbols` (a file, preferred
+  over the tree-sitter fallback when a server runs) and `code_workspace_symbols`
+  MCP tools, and definition, references, hover and call hierarchy, answer for
+  *any* configured LSP language, not just the tree-sitter set. See
+  `.context/lsp.md`.
 
 These are the substrate the Metrics package/dimension roll-up builds on:
 `SqliteMetricStore::dimension_rollup_for_metric` sums a per-file metric's
@@ -231,7 +234,7 @@ per-language view is lens or agent work.
 ## Status
 
 Live: the single `Language` enum, the registry bundle, the LSP symbol surface,
-generic unit listing (`list_units`), and tree-sitter
+generic unit listing (`list_units`, behind `code_symbols`' fallback), and tree-sitter
 symbols with their index. **Still open:** exercising `unit_kinds` against the
 `metric_subject` roll-up hierarchy so metrics can be grouped by package/module
 in the Metrics Explorer; and grammars from extensions (WASM).

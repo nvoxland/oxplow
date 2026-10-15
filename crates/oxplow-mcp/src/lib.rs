@@ -109,6 +109,39 @@ const ANONYMOUS_WRITE: &str = "this MCP connection carries no thread identity (i
     through an agent session's bearer), so it may not run commands; oxplow's own harness \
     configs connect with one — reconnect through one";
 
+/// The most text an agent's model call takes (`ai_decide`'s `state`,
+/// `ai_summarize`'s `text`), in characters: each call is paid with the
+/// person's key.
+const AI_TEXT_MAX: usize = 100_000;
+
+/// What an agent's model call is recorded as: the asking thread's ref. A
+/// connection with no thread identity asks nothing — the call is paid
+/// with the person's key, and someone must have asked for it.
+fn ai_caller(extensions: &rmcp::model::Extensions) -> Result<String, McpError> {
+    caller_of(extensions)
+        .thread_id
+        .map(oxplow_domain::refs::build::thread_ref)
+        .ok_or_else(|| {
+            McpError::invalid_request(
+                "this MCP connection carries no thread identity (it didn't come through an \
+                 agent session's bearer), so it may not call a model; oxplow's own harness \
+                 configs connect with one — reconnect through one",
+                None,
+            )
+        })
+}
+
+fn check_ai_text(field: &str, text: &str) -> Result<(), McpError> {
+    let n = text.chars().count();
+    if n > AI_TEXT_MAX {
+        return Err(McpError::invalid_params(
+            format!("`{field}` is {n} characters; a model call takes at most {AI_TEXT_MAX}"),
+            None,
+        ));
+    }
+    Ok(())
+}
+
 // ---------- request shapes ----------
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -319,6 +352,36 @@ pub struct DiffParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct BlameParams {
+    /// The stream whose workspace to blame in; the caller's when absent.
+    pub stream_id: Option<String>,
+    /// Workspace-relative file path.
+    pub path: String,
+    /// Which version: `working` (default; uncommitted lines name no
+    /// revision) or `git:<rev>`.
+    pub revision: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct CodeSymbolsParams {
+    /// The stream whose workspace to read; the caller's when absent.
+    pub stream_id: Option<String>,
+    /// Workspace-relative path.
+    pub path: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct CodeWorkspaceSymbolsParams {
+    /// The stream whose language server to ask; the caller's when absent.
+    pub stream_id: Option<String>,
+    /// The language server to ask (`rust`, `typescript`, `python`, …).
+    pub language: String,
+    /// Symbol name query (fuzzy, server-defined); empty lists what the
+    /// server returns.
+    pub query: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ReadAtParams {
     /// The stream whose workspace to read; the caller's when absent.
     pub stream_id: Option<String>,
@@ -408,6 +471,35 @@ pub struct EnsureChangeParams {
     pub effort_id: Option<String>,
     /// For `working` and `commit`: the stream id; your own when omitted.
     pub stream_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AiQuestionParam {
+    /// `noul` (yes/no: returns the probability of yes), `choice` (pick one
+    /// of `options`) or `score` (place it on the ordered `levels`).
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// The question, e.g. "Does this change alter public behavior?".
+    pub instructions: String,
+    /// For `choice`: the options.
+    pub options: Option<Vec<String>>,
+    /// For `score`: the levels, lowest first.
+    pub levels: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AiDecideParams {
+    /// What the questions are about: a diff, a description, some text.
+    pub state: String,
+    /// Questions by a short name you choose (e.g. `risky`).
+    pub questions: std::collections::BTreeMap<String, AiQuestionParam>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AiSummarizeParams {
+    pub text: String,
+    /// What to focus on, e.g. "risks" or "what changed for users".
+    pub focus: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -746,6 +838,95 @@ impl OxplowMcp {
             .await
             .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
         json_result(&row)
+    }
+
+    #[tool(
+        description = "Ask a model a typed question about some text, cheaply: yes/no (`noul`, \
+                       returns the probability of yes), `choice` among options, or `score` on \
+                       ordered levels, each with probabilities, on the `decide` role. Good for \
+                       second opinions like \"is this diff risky?\". Recorded: the same \
+                       questions on the same text are answered once (`cached`). Fails if the \
+                       role has no model; the person assigns one in Settings → AI."
+    )]
+    async fn ai_decide(
+        &self,
+        extensions: rmcp::model::Extensions,
+        params: Parameters<AiDecideParams>,
+    ) -> Result<CallToolResult, McpError> {
+        use oxplow_app::ai_service::Question;
+        let caller = ai_caller(&extensions)?;
+        let p = params.0;
+        check_ai_text("state", &p.state)?;
+        let mut questions = std::collections::BTreeMap::new();
+        for (name, q) in p.questions {
+            let bad = |m: &str| McpError::invalid_params(format!("question `{name}`: {m}"), None);
+            let question = match q.kind.as_str() {
+                "noul" => Question::Noul {
+                    instructions: q.instructions,
+                },
+                "choice" => Question::Choice {
+                    instructions: q.instructions,
+                    options: q
+                        .options
+                        .filter(|o| !o.is_empty())
+                        .ok_or_else(|| bad("a choice needs options"))?,
+                },
+                "score" => Question::Score {
+                    instructions: q.instructions,
+                    levels: q
+                        .levels
+                        .filter(|l| !l.is_empty())
+                        .ok_or_else(|| bad("a score needs levels"))?,
+                },
+                other => return Err(bad(&format!("type `{other}` isn't noul, choice or score"))),
+            };
+            questions.insert(name, question);
+        }
+        let decision = self
+            .services
+            .ai_compute
+            .decide(
+                caller.as_str(),
+                &oxplow_app::ai_service::Role::DECIDE,
+                &p.state,
+                &questions,
+            )
+            .await
+            .map_err(compute_error)?;
+        json_result(&serde_json::json!({
+            "answers": decision.value,
+            "cached": decision.cached,
+        }))
+    }
+
+    #[tool(
+        description = "Summarize text with oxplow's `summarize` role (a model the person \
+                       configured in Settings → AI), optionally with a focus. Useful for long \
+                       logs or documents you don't need verbatim. Recorded: the same text and \
+                       focus are summarized once."
+    )]
+    async fn ai_summarize(
+        &self,
+        extensions: rmcp::model::Extensions,
+        params: Parameters<AiSummarizeParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let caller = ai_caller(&extensions)?;
+        let p = params.0;
+        check_ai_text("text", &p.text)?;
+        let summary = self
+            .services
+            .ai_compute
+            .summarize(
+                caller.as_str(),
+                &oxplow_app::ai_service::Role::SUMMARIZE,
+                &p.text,
+                p.focus.as_deref(),
+            )
+            .await
+            .map_err(compute_error)?;
+        Ok(CallToolResult::success(vec![ContentBlock::text(
+            summary.value,
+        )]))
     }
 
     #[tool(
@@ -1178,6 +1359,29 @@ impl OxplowMcp {
     // (`run_command`), not tools.
 
     #[tool(
+        description = "Blame a file: the revision, author and time that last changed each \
+                          line, at `revision` (default `working`; an uncommitted line names no \
+                          revision)."
+    )]
+    async fn vcs_blame(
+        &self,
+        extensions: rmcp::model::Extensions,
+        params: Parameters<BlameParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        check_optional_stream("vcs_blame", p.stream_id.as_deref())?;
+        let sid = self
+            .stream_or_callers(&caller_of(&extensions), p.stream_id)
+            .await;
+        let revision = parse_revision(p.revision.as_deref().unwrap_or("working"))?;
+        let lines =
+            oxplow_app::vcs::reads::blame(&self.services, sid.as_deref(), &p.path, &revision)
+                .await
+                .map_err(domain_err)?;
+        json_result(&lines)
+    }
+
+    #[tool(
         description = "What changed between two versions of the tree, per file with line \
                           counts. Versions are `working`, `snap:<id>` or `git:<rev>`; `from` \
                           absent diffs against the empty tree. `since_fork: true` compares `to` \
@@ -1455,6 +1659,103 @@ impl OxplowMcp {
     }
 
     #[tool(
+        description = "The symbols a file declares (functions, classes, methods, modules, …), \
+                       nested ones naming their container, as `{ source, symbols }`. `source` \
+                       says what answered: `language_server` (any configured language whose \
+                       server runs; `{ name, kind, container, location }`) or `tree_sitter` \
+                       (no server serves the file, so oxplow's own offline analysis reads the \
+                       file's live content, the uncommitted edits included; `{ kind, name, \
+                       containerPath, startLine, endLine }`, empty for an unsupported or \
+                       unparseable file). `v_symbol` holds the stored symbols of captured files."
+    )]
+    async fn code_symbols(
+        &self,
+        extensions: rmcp::model::Extensions,
+        params: Parameters<CodeSymbolsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        check_optional_stream("code_symbols", p.stream_id.as_deref())?;
+        let stream_id = self
+            .stream_or_callers_or_primary(&caller_of(&extensions), p.stream_id)
+            .await?;
+        let stream = code_stream(&stream_id)?;
+        match self
+            .services
+            .code_intel
+            .document_symbols(stream, &p.path)
+            .await
+        {
+            Ok(symbols) => {
+                json_result(&serde_json::json!({ "source": "language_server", "symbols": symbols }))
+            }
+            // No server for the language, or it isn't running: read the
+            // file as it is now.
+            Err(
+                oxplow_domain::code_intel::CodeIntelError::NoProvider(_)
+                | oxplow_domain::code_intel::CodeIntelError::NotRunning(_),
+            ) => {
+                let file = self
+                    .services
+                    .workspace_files
+                    .read(Some(stream_id.as_str()), p.path.clone())
+                    .await
+                    .map_err(|e| internal(e.to_string()))?;
+                let units: Vec<serde_json::Value> =
+                    oxplow_code_metrics::list_units(&p.path, &file.content)
+                        .iter()
+                        .map(|u| {
+                            serde_json::json!({
+                                "kind": u.kind.as_str(),
+                                "name": u.name,
+                                "containerPath": u.container_path,
+                                "startLine": u.start_line,
+                                "endLine": u.end_line,
+                            })
+                        })
+                        .collect();
+                json_result(&serde_json::json!({ "source": "tree_sitter", "symbols": units }))
+            }
+            Err(other) => Err(code_err(other)),
+        }
+    }
+
+    #[tool(
+        description = "Find symbols across the workspace by name (fuzzy, server-defined) from \
+                       one language's running server — typed symbols with their locations. Use \
+                       to find a definition by name without a file/position. Needs a running \
+                       server (`v_lsp_server`); without one, search the stored symbols in \
+                       `v_symbol`."
+    )]
+    async fn code_workspace_symbols(
+        &self,
+        extensions: rmcp::model::Extensions,
+        params: Parameters<CodeWorkspaceSymbolsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        check_optional_stream("code_workspace_symbols", p.stream_id.as_deref())?;
+        let stream_id = self
+            .stream_or_callers_or_primary(&caller_of(&extensions), p.stream_id)
+            .await?;
+        let stream = code_stream(&stream_id)?;
+        match self
+            .services
+            .code_intel
+            .workspace_symbols(stream, &p.language, &p.query)
+            .await
+        {
+            Ok(symbols) => json_result(&symbols),
+            Err(
+                oxplow_domain::code_intel::CodeIntelError::NoProvider(m)
+                | oxplow_domain::code_intel::CodeIntelError::NotRunning(m),
+            ) => Err(McpError::invalid_params(
+                format!("{m} The stored symbols of captured files are in `v_symbol`."),
+                None,
+            )),
+            Err(other) => Err(code_err(other)),
+        }
+    }
+
+    #[tool(
         description = "The symbol at a position's callers (`direction: incoming`) or callees \
                        (`outgoing`): each `{ symbol, at }` — the caller/callee and where the \
                        calls are. [] when the position has no call-hierarchy item."
@@ -1527,6 +1828,7 @@ const READ_ONLY_TOOLS: &[&str] = &[
     "preview_extension",
     "query_sql",
     "search",
+    "vcs_blame",
     "diff",
     "read",
     "list_comments",
@@ -1536,6 +1838,8 @@ const READ_ONLY_TOOLS: &[&str] = &[
     "code_definition",
     "code_hover",
     "code_references",
+    "code_symbols",
+    "code_workspace_symbols",
     "code_call_hierarchy",
 ];
 
@@ -1561,6 +1865,9 @@ const WRITE_TOOLS: &[&str] = &[
     "preview_collector",
     // Clones into .oxplow/tmp; stores nothing.
     "review_extension",
+    // A model call, recorded as the computation it was (`ai_call`).
+    "ai_decide",
+    "ai_summarize",
 ];
 
 /// Stamp `read_only_hint = true` on tools in [`READ_ONLY_TOOLS`], leaving any
@@ -1672,6 +1979,26 @@ pub fn registered_tool_names() -> Vec<String> {
         .into_iter()
         .map(|t| t.name.into_owned())
         .collect()
+}
+
+/// AI failures the agent can act on (no model assigned, bad key, provider
+/// error) are invalid-params with the explanation; keychain trouble is internal.
+fn ai_error(e: oxplow_app::ai_service::AiServiceError) -> McpError {
+    match e {
+        oxplow_app::ai_service::AiServiceError::Secret(_) => internal(e),
+        _ => McpError::invalid_params(e.to_string(), None),
+    }
+}
+
+/// A recorded computation's failure: the model's, as [`ai_error`]; an
+/// unusable answer the agent can retry; storing it is internal.
+fn compute_error(e: oxplow_app::ai_compute::AiComputeError) -> McpError {
+    use oxplow_app::ai_compute::AiComputeError;
+    match e {
+        AiComputeError::Ai(e) => ai_error(e),
+        e @ AiComputeError::BadOutput(_) => McpError::invalid_params(e.to_string(), None),
+        e @ AiComputeError::Storage(_) => internal(e),
+    }
 }
 
 fn internal<E: std::fmt::Display>(e: E) -> McpError {
@@ -1869,6 +2196,27 @@ impl OxplowMcp {
             Some(s) => Some(s),
             None => self.caller_stream(caller).await,
         }
+    }
+
+    /// [`Self::stream_or_callers`], the primary stream for a caller with no
+    /// stream of its own (for a tool that needs a stream id).
+    async fn stream_or_callers_or_primary(
+        &self,
+        caller: &McpCaller,
+        given: Option<String>,
+    ) -> Result<String, McpError> {
+        if let Some(stream) = self.stream_or_callers(caller, given).await {
+            return Ok(stream);
+        }
+        self.services
+            .streams
+            .list_streams()
+            .await
+            .map_err(internal)?
+            .into_iter()
+            .find(|s| s.kind == oxplow_domain::StreamKind::Primary)
+            .map(|s| s.id.to_string())
+            .ok_or_else(|| McpError::invalid_params("this project has no stream", None))
     }
 
     async fn caller_stream(&self, caller: &McpCaller) -> Option<String> {
@@ -3388,6 +3736,307 @@ mod tests {
         assert!(
             msg.contains("\"thread\"") && msg.contains("\"stream\""),
             "lists valid scopes: {msg}"
+        );
+    }
+
+    /// Point the in-memory services' `role` at a mock provider at `base`.
+    fn assign_mock_role(services: &Services, base: String, role: &str) {
+        use oxplow_app::ai_service::{ProviderConfig, Role, RoleBinding};
+        use oxplow_app::exec_consent::{approve_program, list, ProgramKind};
+        // The shipped providers are scripts a person approves first.
+        let project = services.layout.project_dir.clone();
+        let config = services.config.read().unwrap().clone();
+        let extensions = services.extension_catalog.get(&project);
+        for p in list(&services.approvals, &project, &config, &extensions) {
+            if p.kind == ProgramKind::AiProvider {
+                approve_program(
+                    &services.approvals,
+                    &project,
+                    &config,
+                    &extensions,
+                    p.kind,
+                    &p.name,
+                    p.version.as_deref().unwrap(),
+                )
+                .unwrap();
+            }
+        }
+        services
+            .ai
+            .save_provider(
+                ProviderConfig {
+                    id: "mock".into(),
+                    kind: "openai_compatible".into(),
+                    base_url: Some(base),
+                },
+                None,
+            )
+            .unwrap();
+        let role: Role = serde_json::from_value(serde_json::json!(role)).unwrap();
+        services
+            .ai
+            .set_role(&role, Some(RoleBinding::new("mock", "m")))
+            .unwrap();
+    }
+
+    fn risky() -> std::collections::BTreeMap<String, AiQuestionParam> {
+        std::collections::BTreeMap::from([(
+            "risky".to_string(),
+            AiQuestionParam {
+                kind: "choice".into(),
+                instructions: "Is it risky?".into(),
+                options: Some(vec!["yes".into(), "no".into()]),
+                levels: None,
+            },
+        )])
+    }
+
+    /// The model calls an agent asks for are paid with the person's key:
+    /// each is a recorded computation, recorded as the asking thread — the
+    /// same question twice is one call — on its tool's own role, with its
+    /// text capped; a connection with no thread identity asks nothing.
+    #[tokio::test]
+    async fn ai_tools_decide_and_summarize() {
+        let (_proj, services, server) = boot().await;
+        let me = as_writer(&services).await;
+        let thread = oxplow_domain::refs::build::thread_ref(caller_of(&me).thread_id.unwrap());
+        // Unassigned role: a clear error, not a crash.
+        let err = server
+            .ai_summarize(
+                me.clone(),
+                Parameters(AiSummarizeParams {
+                    text: "t".into(),
+                    focus: None,
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("summarize"), "{}", err.message);
+
+        let answer = serde_json::json!({"answers": {"risky": {"type": "choice", "choice": "yes", "probabilities": {"yes": 0.7, "no": 0.3}}}});
+        let (base, seen) = oxplow_ai_fake::mock(
+            "/chat/completions",
+            200,
+            serde_json::json!({"choices": [{"message": {"content": answer.to_string()}}], "usage": {"prompt_tokens": 1, "completion_tokens": 1}}),
+        )
+        .await;
+        assign_mock_role(&services, base.clone(), "decide");
+        for cached in [false, true] {
+            let out: serde_json::Value = serde_json::from_str(&text_payload(
+                server
+                    .ai_decide(
+                        me.clone(),
+                        Parameters(AiDecideParams {
+                            state: "a diff".into(),
+                            questions: risky(),
+                        }),
+                    )
+                    .await
+                    .unwrap(),
+            ))
+            .unwrap();
+            assert_eq!(out["answers"]["risky"]["choice"], "yes");
+            assert_eq!(out["cached"], cached);
+        }
+        assert_eq!(seen.lock().unwrap().len(), 1);
+        assert!(seen.lock().unwrap()[0].2["messages"]
+            .to_string()
+            .contains("Is it risky?"));
+
+        let err = server
+            .ai_decide(
+                me.clone(),
+                Parameters(AiDecideParams {
+                    state: "s".into(),
+                    questions: std::collections::BTreeMap::from([(
+                        "x".to_string(),
+                        AiQuestionParam {
+                            kind: "maybe".into(),
+                            instructions: "?".into(),
+                            options: None,
+                            levels: None,
+                        },
+                    )]),
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("maybe"), "{}", err.message);
+        let err = server
+            .ai_decide(
+                me.clone(),
+                Parameters(AiDecideParams {
+                    state: "x".repeat(AI_TEXT_MAX + 1),
+                    questions: risky(),
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("characters"), "{}", err.message);
+        let err = server
+            .ai_decide(
+                rmcp::model::Extensions::new(),
+                Parameters(AiDecideParams {
+                    state: "a diff".into(),
+                    questions: risky(),
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("thread identity"), "{}", err.message);
+
+        let (base, seen) = oxplow_ai_fake::mock(
+            "/chat/completions",
+            200,
+            serde_json::json!({"choices": [{"message": {"content": " short "}}], "usage": {"prompt_tokens": 1, "completion_tokens": 1}}),
+        )
+        .await;
+        assign_mock_role(&services, base, "summarize");
+        // A recorded computation (tsk571): asking twice calls once.
+        for _ in 0..2 {
+            let out = text_payload(
+                server
+                    .ai_summarize(
+                        me.clone(),
+                        Parameters(AiSummarizeParams {
+                            text: "long".into(),
+                            focus: Some("risks".into()),
+                        }),
+                    )
+                    .await
+                    .unwrap(),
+            );
+            assert_eq!(out, "short");
+        }
+        assert_eq!(seen.lock().unwrap().len(), 1);
+        assert!(seen.lock().unwrap()[0].2["messages"]
+            .to_string()
+            .contains("risks"));
+        let callers = services
+            .sql
+            .query_sql("SELECT DISTINCT caller FROM v_ai_call", vec![], None)
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&callers.rows).unwrap(),
+            serde_json::json!([[thread]])
+        );
+    }
+
+    /// A file's symbols come from its language server when one runs; with
+    /// none, the tool reads the file's live content with oxplow's own
+    /// tree-sitter analysis and says that's what answered.
+    #[tokio::test]
+    async fn code_symbols_fall_back_to_tree_sitter_and_say_so() {
+        let (proj, services, server) = boot().await;
+        std::fs::create_dir_all(proj.path().join("src")).unwrap();
+        std::fs::write(
+            proj.path().join("src/x.rs"),
+            "fn alpha() {}\n\nstruct Beta;\n",
+        )
+        .unwrap();
+        let stream_id = services.streams.list_streams().await.unwrap()[0]
+            .id
+            .to_string();
+        let out: serde_json::Value = serde_json::from_str(&text_payload(
+            server
+                .code_symbols(
+                    rmcp::model::Extensions::new(),
+                    Parameters(CodeSymbolsParams {
+                        stream_id: Some(stream_id),
+                        path: "src/x.rs".into(),
+                    }),
+                )
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(out["source"], "tree_sitter");
+        let names: Vec<_> = out["symbols"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|u| u["name"].as_str().unwrap().to_string())
+            .collect();
+        assert!(names.contains(&"alpha".to_string()), "{out}");
+        assert_eq!(out["symbols"][0]["startLine"], 1);
+        // The caller's own stream when none is named.
+        let again = server
+            .code_symbols(
+                rmcp::model::Extensions::new(),
+                Parameters(CodeSymbolsParams {
+                    stream_id: None,
+                    path: "src/x.rs".into(),
+                }),
+            )
+            .await;
+        assert!(again.is_ok(), "{again:?}");
+    }
+
+    /// A workspace query needs a running language server; without one the
+    /// error says where the stored symbols are instead.
+    #[tokio::test]
+    async fn code_workspace_symbols_need_a_language_server_and_point_at_v_symbol() {
+        let (_proj, services, server) = boot().await;
+        let stream_id = services.streams.list_streams().await.unwrap()[0]
+            .id
+            .to_string();
+        let err = server
+            .code_workspace_symbols(
+                rmcp::model::Extensions::new(),
+                Parameters(CodeWorkspaceSymbolsParams {
+                    stream_id: Some(stream_id),
+                    language: "rust".into(),
+                    query: "alpha".into(),
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("v_symbol"), "{}", err.message);
+    }
+
+    /// Blame reads through the Vcs provider: each line of the working copy
+    /// names the commit that last changed it, an uncommitted line none.
+    #[tokio::test]
+    async fn vcs_blame_names_the_commit_of_each_line() {
+        let (proj, _services, server) = boot().await;
+        std::fs::write(proj.path().join("b.txt"), "one\ntwo\n").unwrap();
+        let repo = git2::Repository::open(proj.path()).unwrap();
+        let mut idx = repo.index().unwrap();
+        idx.add_path(std::path::Path::new("b.txt")).unwrap();
+        idx.write().unwrap();
+        let tree = repo.find_tree(idx.write_tree().unwrap()).unwrap();
+        let sig = repo.signature().unwrap();
+        let parent = repo.head().unwrap().peel_to_commit().unwrap();
+        let commit = repo
+            .commit(Some("HEAD"), &sig, &sig, "add b", &tree, &[&parent])
+            .unwrap();
+        std::fs::write(proj.path().join("b.txt"), "one\ntwo\nthree\n").unwrap();
+        let lines: serde_json::Value = serde_json::from_str(&text_payload(
+            server
+                .vcs_blame(
+                    rmcp::model::Extensions::new(),
+                    Parameters(BlameParams {
+                        stream_id: None,
+                        path: "b.txt".into(),
+                        revision: None,
+                    }),
+                )
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        let lines = lines.as_array().unwrap();
+        assert_eq!(lines.len(), 3, "{lines:?}");
+        assert!(
+            lines[0].to_string().contains(&commit.to_string()),
+            "{}",
+            lines[0]
+        );
+        assert!(
+            !lines[2].to_string().contains(&commit.to_string()),
+            "{}",
+            lines[2]
         );
     }
 
